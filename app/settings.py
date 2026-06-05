@@ -42,6 +42,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
             }
         ],
     },
+    "recording": {
+        "enabled": True,
+        "mode": "event",
+        "pre_event_seconds": 5,
+        "post_event_seconds": 10,
+        "max_clip_seconds": 60,
+        "format": "mp4",
+        "retention_days": 14,
+        "max_storage_gb": 20,
+    },
     "auth": {
         "enabled": True,
         "session_timeout_hours": 12,
@@ -54,6 +64,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "database": "data/daygle_ai_camera.sqlite3",
         "snapshots_dir": "data/snapshots",
         "events_dir": "data/events",
+        "recordings_dir": "data/recordings",
     },
 }
 

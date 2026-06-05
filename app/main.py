@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import logging
+import mimetypes
 import os
 import re
 import secrets
@@ -16,7 +17,7 @@ from typing import Any
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.alerts import AlertEngine
@@ -24,6 +25,7 @@ from app.auth import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, AuthError, AuthSe
 from app.database import EventDatabase
 from app.detector import DetectorUnavailableError, MockDetector, create_detector, load_labels
 from app.mock_camera import MockCamera
+from app.recordings import RecordingService
 from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, load_settings
 from app.storage import Storage
 
@@ -64,6 +66,7 @@ camera = MockCamera(
 
 database = EventDatabase(config['storage']['database'])
 storage = Storage(config)
+recording_service = RecordingService(config)
 auth = AuthService(config['storage']['database'], auth_config)
 SESSION_COOKIE_NAME = str(auth_config.get('cookie_name', SESSION_COOKIE))
 
@@ -269,6 +272,20 @@ def require_session(request: Request) -> dict[str, Any]:
     return request.state.session
 
 
+def require_admin(request: Request) -> dict[str, Any]:
+    user = require_user(request)
+    if user.get('role') != 'admin':
+        raise HTTPException(status_code=403, detail='Admin access required')
+    return user
+
+
+def attach_event_recording(event_id: int, event_time: str, source: str) -> int | None:
+    metadata = recording_service.mock_event_metadata(event_id, event_time, source)
+    if metadata is None:
+        return None
+    return database.add_recording(created_at=utc_now(), **metadata)
+
+
 @app.get('/login')
 def login_page(request: Request, error: str | None = None):
     if auth_enabled and auth.users_exist() and auth.get_session(request.cookies.get(SESSION_COOKIE_NAME)):
@@ -401,6 +418,7 @@ def root():
 @app.get('/events')
 @app.get('/alerts')
 @app.get('/search')
+@app.get('/recordings')
 def dashboard_aliases():
     return root()
 
@@ -459,13 +477,15 @@ def generate_detection(force: bool = True):
     alerts.rules = effective_alert_rules()
     triggered = alerts.process(detections)
 
+    event_time = datetime.now(timezone.utc).isoformat()
     event_id = database.add_event(
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=event_time,
         source='mock-camera',
         snapshot_path=snapshot_path,
         detections=detections,
         alert_triggered=bool(triggered),
     )
+    recording_id = attach_event_recording(event_id, event_time, 'mock-camera')
 
     for alert in triggered:
         database.add_alert(
@@ -480,6 +500,7 @@ def generate_detection(force: bool = True):
     return {
         'created': True,
         'event_id': event_id,
+        'recording_id': recording_id,
         'detections': detections,
         'alerts': triggered,
     }
@@ -508,8 +529,9 @@ async def detect_test_image(request: Request):
     snapshot_path = storage.save_image_snapshot(image_bytes, filename)
     alerts.rules = effective_alert_rules()
     triggered = alerts.process(detections)
+    event_time = datetime.now(timezone.utc).isoformat()
     event_id = database.add_event(
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=event_time,
         source='test-image',
         snapshot_path=snapshot_path,
         detections=detections,
@@ -521,6 +543,8 @@ async def detect_test_image(request: Request):
             'detector_backend': ai_state['active_backend'],
         },
     )
+
+    recording_id = attach_event_recording(event_id, event_time, 'test-image')
 
     for alert in triggered:
         database.add_alert(
@@ -535,6 +559,7 @@ async def detect_test_image(request: Request):
     return {
         'created': True,
         'event_id': event_id,
+        'recording_id': recording_id,
         'detections': detections,
         'alerts': triggered,
         'snapshot_path': snapshot_path,
@@ -598,8 +623,84 @@ def runtime_config():
         'storage': {
             'database': config.get('storage', {}).get('database'),
             'snapshots_dir': config.get('storage', {}).get('snapshots_dir'),
+            'recordings_dir': config.get('storage', {}).get('recordings_dir'),
         },
+        'recording': config.get('recording', {}),
     }
+
+
+@app.get('/api/recordings')
+def recordings(label: str | None = None, limit: int = Query(50, ge=1, le=200)):
+    return database.list_recordings(label=label, limit=limit)
+
+
+@app.get('/api/recordings/{recording_id}')
+def recording_detail(recording_id: int):
+    recording = database.get_recording(recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail='Recording not found')
+    return recording
+
+
+@app.get('/api/recordings/{recording_id}/stream')
+def stream_recording(recording_id: int, request: Request):
+    recording = database.get_recording(recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail='Recording not found')
+    file_path = Path(recording['file_path'])
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail='Recording media file not found')
+
+    file_size = file_path.stat().st_size
+    media_type = mimetypes.guess_type(file_path.name)[0] or 'video/mp4'
+    range_header = request.headers.get('range')
+    if not range_header:
+        return FileResponse(file_path, media_type=media_type)
+
+    match = re.fullmatch(r'bytes=(\d*)-(\d*)', range_header.strip())
+    if not match:
+        return Response(status_code=416, headers={'Content-Range': f'bytes */{file_size}'})
+    start_text, end_text = match.groups()
+    start = int(start_text) if start_text else 0
+    end = int(end_text) if end_text else file_size - 1
+    if start >= file_size or end < start:
+        return Response(status_code=416, headers={'Content-Range': f'bytes */{file_size}'})
+    end = min(end, file_size - 1)
+    chunk_size = end - start + 1
+
+    def iter_file():
+        with file_path.open('rb') as handle:
+            handle.seek(start)
+            remaining = chunk_size
+            while remaining > 0:
+                chunk = handle.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    return StreamingResponse(
+        iter_file(),
+        status_code=206,
+        media_type=media_type,
+        headers={
+            'Content-Range': f'bytes {start}-{end}/{file_size}',
+            'Accept-Ranges': 'bytes',
+            'Content-Length': str(chunk_size),
+        },
+    )
+
+
+@app.delete('/api/recordings/{recording_id}')
+def delete_recording(recording_id: int, request: Request):
+    require_admin(request)
+    recording = database.delete_recording(recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail='Recording not found')
+    file_path = Path(recording['file_path'])
+    if file_path.exists() and file_path.is_file():
+        file_path.unlink(missing_ok=True)
+    return {'ok': True}
 
 
 @app.get('/api/users')

@@ -158,3 +158,19 @@ input[type="file"] { padding: 10px; }
   .hero-actions { justify-content: flex-start; }
   .form-grid, .user-row, .upload-form, .status-panel { grid-template-columns: 1fr; }
 }
+.playback-card video {
+  width: 100%;
+  min-height: 260px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #000;
+}
+.link-button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 800;
+  padding: 6px 0;
+  cursor: pointer;
+  text-decoration: underline;
+}

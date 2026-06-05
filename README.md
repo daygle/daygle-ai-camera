@@ -332,3 +332,64 @@ The installer preserves an existing config file at `/etc/daygle-ai-camera/config
 python -m compileall app tests
 pytest -q
 ```
+
+## Recording and playback
+
+Daygle AI Camera now has a deliberately small recording layer for event-linked clips. It is not a full NVR yet; the current implementation prioritizes metadata and dashboard playback wiring while camera backends are still mock/upload focused.
+
+### Storage paths
+
+Local development stores recording media under:
+
+```text
+data/recordings/
+```
+
+Systemd/Armbian deployments should map the same setting to writable application data, for example:
+
+```text
+/var/lib/daygle-ai-camera/recordings/
+```
+
+Configure the directory in `storage.recordings_dir`. The default is `data/recordings`.
+
+### Recording settings
+
+```yaml
+recording:
+  enabled: true
+  mode: event
+  pre_event_seconds: 5
+  post_event_seconds: 10
+  max_clip_seconds: 60
+  format: mp4
+  retention_days: 14
+  max_storage_gb: 20
+```
+
+Supported modes today are `off` and `event`. `continuous` is reserved for a future NVR-style backend. Retention settings are accepted and documented for deployment planning, but complex cleanup is not implemented yet.
+
+### Event-linked clips
+
+When a detection event is created and recording mode is `event`, the backend creates a row in the `recordings` table linked to the event. Mock camera and test-image uploads create placeholder recording metadata that records the expected clip path, duration, source, and event relationship. The app does not fail if no video encoder or real camera backend is available, so mock placeholders may stream as `404 Recording media file not found` until a future backend writes real media files.
+
+### Playback API
+
+| Method | Route | Role | Notes |
+| --- | --- | --- | --- |
+| `GET` | `/api/recordings` | admin/viewer | Recent recordings; optional `label` filter and `limit` |
+| `GET` | `/api/recordings/{recording_id}` | admin/viewer | Recording detail with linked event/detections |
+| `GET` | `/api/recordings/{recording_id}/stream` | admin/viewer | Browser playback endpoint; supports byte ranges when the file exists |
+| `DELETE` | `/api/recordings/{recording_id}` | admin | Deletes metadata and existing media file |
+
+The dashboard includes a **Recordings / Playback** section with recent clips, object-label filtering, linked detections, duration, source, and an HTML5 video player using:
+
+```html
+<video controls src="/api/recordings/{id}/stream"></video>
+```
+
+### Current limitations
+
+- Mock and uploaded-image events create recording metadata, not guaranteed playable MP4 media.
+- Real clip writing for OV5647, USB cameras, RTSP, and uploaded videos is intentionally left for later backend work.
+- Retention cleanup by age/storage cap is not yet scheduled.

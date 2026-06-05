@@ -85,6 +85,23 @@
         <div id="alerts" class="list"></div>
       </article>
     </section>
+
+    <section class="grid main-grid">
+      <article class="card">
+        <div class="section-header"><h2>Recordings / Playback</h2></div>
+        <div class="search-row">
+          <input id="recordingFilter" placeholder="Filter clips by object label..." />
+          <button id="recordingSearchBtn">Filter</button>
+          <button id="recordingClearBtn">All</button>
+        </div>
+        <div id="recordings" class="list"></div>
+      </article>
+      <article class="card playback-card">
+        <div class="section-header"><h2>Clip Player</h2></div>
+        <video id="clipPlayer" controls></video>
+        <p id="clipPlayerStatus" class="muted">Select a recording to play. Mock clips may only have metadata until a camera backend writes media.</p>
+      </article>
+    </section>
   </main>
   <script src="/static/app.js"></script>
 </body>

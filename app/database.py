@@ -64,6 +64,24 @@ class EventDatabase:
                 CREATE INDEX IF NOT EXISTS idx_detections_label ON detections(label);
                 CREATE INDEX IF NOT EXISTS idx_detections_event ON detections(event_id);
 
+                CREATE TABLE IF NOT EXISTS recordings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id INTEGER,
+                    camera_id TEXT,
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT NOT NULL,
+                    duration_seconds REAL NOT NULL,
+                    file_path TEXT NOT NULL,
+                    thumbnail_path TEXT,
+                    source TEXT NOT NULL CHECK(source IN ('mock', 'camera', 'upload', 'rtsp')),
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE SET NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_recordings_event ON recordings(event_id);
+                CREATE INDEX IF NOT EXISTS idx_recordings_started_at ON recordings(started_at);
+                CREATE INDEX IF NOT EXISTS idx_recordings_source ON recordings(source);
+
                 CREATE TABLE IF NOT EXISTS app_settings (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL,
@@ -125,6 +143,62 @@ class EventDatabase:
                     ),
                 )
             return event_id
+
+
+    def add_recording(
+        self,
+        *,
+        event_id: int | None,
+        camera_id: str | None,
+        started_at: str,
+        ended_at: str,
+        duration_seconds: float,
+        file_path: str,
+        thumbnail_path: str | None,
+        source: str,
+        created_at: str,
+    ) -> int:
+        with self.connect() as db:
+            cursor = db.execute(
+                """
+                INSERT INTO recordings (event_id, camera_id, started_at, ended_at, duration_seconds, file_path, thumbnail_path, source, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (event_id, camera_id, started_at, ended_at, duration_seconds, file_path, thumbnail_path, source, created_at),
+            )
+            if cursor.lastrowid is None:
+                raise RuntimeError("Failed to create recording row")
+            return cursor.lastrowid
+
+    def list_recordings(self, label: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            if label:
+                rows = db.execute(
+                    """
+                    SELECT DISTINCT r.* FROM recordings r
+                    LEFT JOIN detections d ON d.event_id = r.event_id
+                    WHERE d.label = ?
+                    ORDER BY r.started_at DESC
+                    LIMIT ?
+                    """,
+                    (label, limit),
+                ).fetchall()
+            else:
+                rows = db.execute("SELECT * FROM recordings ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
+            return [self._recording_with_event(db, row) for row in rows]
+
+    def get_recording(self, recording_id: int) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM recordings WHERE id = ?", (recording_id,)).fetchone()
+            return self._recording_with_event(db, row) if row else None
+
+    def delete_recording(self, recording_id: int) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM recordings WHERE id = ?", (recording_id,)).fetchone()
+            if row is None:
+                return None
+            db.execute("DELETE FROM recordings WHERE id = ?", (recording_id,))
+            return dict(row)
 
     def add_alert(self, created_at: str, rule_name: str, event_id: int, label: str, confidence: float, message: str) -> None:
         with self.connect() as db:
@@ -291,7 +365,29 @@ class EventDatabase:
 
     def _event_with_detections(self, db: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
         detections = db.execute("SELECT * FROM detections WHERE event_id = ? ORDER BY confidence DESC", (row["id"],)).fetchall()
+        recordings = db.execute("SELECT * FROM recordings WHERE event_id = ? ORDER BY started_at DESC", (row["id"],)).fetchall()
         event = dict(row)
         event["metadata"] = json.loads(event.get("metadata") or "{}")
         event["detections"] = [dict(detection) for detection in detections]
+        event["recordings"] = [self._recording_row(recording) for recording in recordings]
+        event["recording_status"] = "linked" if recordings else "none"
         return event
+
+    def _recording_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        return dict(row)
+
+    def _recording_with_event(self, db: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+        recording = self._recording_row(row)
+        recording["event"] = None
+        recording["detections"] = []
+        if recording.get("event_id") is not None:
+            event_row = db.execute("SELECT * FROM events WHERE id = ?", (recording["event_id"],)).fetchone()
+            detections = db.execute(
+                "SELECT * FROM detections WHERE event_id = ? ORDER BY confidence DESC", (recording["event_id"],)
+            ).fetchall()
+            if event_row:
+                event = dict(event_row)
+                event["metadata"] = json.loads(event.get("metadata") or "{}")
+                recording["event"] = event
+            recording["detections"] = [dict(detection) for detection in detections]
+        return recording

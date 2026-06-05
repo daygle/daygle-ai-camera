@@ -92,3 +92,39 @@ The test suite covers detector selection, missing ONNX errors, model status, set
 - The service reads `/etc/daygle-ai-camera/config.yaml` via `DAYGLE_CONFIG`.
 - SQLite, snapshots, and mutable state should live under writable storage paths from config.
 - Mock mode remains available and should not be removed; it keeps Orange Pi deployments usable while camera/model dependencies are being validated. ONNX mode must fail clearly rather than silently falling back to mock detections when its model/runtime is unavailable.
+
+## Recording architecture
+
+Recording support is intentionally lightweight. `RecordingService` owns recording configuration, the recordings storage directory, and mock event metadata generation. Event creation calls the service after the event row is committed, then inserts a linked `recordings` row when `recording.mode: event` is enabled.
+
+Future camera backends should pass encoded media paths (or frame writer outputs) through the same service/database boundary so OV5647 frames, USB camera frames, RTSP streams, and uploaded videos can create event-linked clips without changing the dashboard API.
+
+### Recording database table
+
+```sql
+recordings(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id INTEGER NULL,
+  camera_id TEXT NULL,
+  started_at TEXT NOT NULL,
+  ended_at TEXT NOT NULL,
+  duration_seconds REAL NOT NULL,
+  file_path TEXT NOT NULL,
+  thumbnail_path TEXT NULL,
+  source TEXT NOT NULL CHECK(source IN ('mock', 'camera', 'upload', 'rtsp')),
+  created_at TEXT NOT NULL
+)
+```
+
+`events` responses include `recordings` and `recording_status` so the dashboard can link detections to playback. Recording list/detail responses include linked event data and detections for filtering/display.
+
+### Playback API during development
+
+| Method | Route | Expected behavior |
+| --- | --- | --- |
+| `GET` | `/api/recordings` | Lists newest recordings; supports `?label=cat` |
+| `GET` | `/api/recordings/{id}` | Returns one recording or `404` |
+| `GET` | `/api/recordings/{id}/stream` | Streams the media file with byte-range support or returns clean `404` if placeholder media is missing |
+| `DELETE` | `/api/recordings/{id}` | Admin-only; removes DB row and media file if present |
+
+To test playback locally, create a detection from the dashboard or with `POST /api/mock/detect`, open the **Recordings / Playback** panel, and click **Play clip**. In mock mode, a clean missing-media message is expected unless you manually place an MP4 at the recording `file_path`.

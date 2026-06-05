@@ -121,6 +121,16 @@ storage:
   database: {database_path}
   snapshots_dir: {tmp_path / 'data' / 'snapshots'}
   events_dir: {tmp_path / 'data' / 'events'}
+  recordings_dir: {tmp_path / 'data' / 'recordings'}
+recording:
+  enabled: true
+  mode: event
+  pre_event_seconds: 5
+  post_event_seconds: 10
+  max_clip_seconds: 60
+  format: mp4
+  retention_days: 14
+  max_storage_gb: 20
 alerts:
   rules:
     - name: Cat alert
@@ -604,6 +614,92 @@ def test_admin_alert_rule_crud_and_alert_engine_uses_db_rules(tmp_path, monkeypa
         status, _headers, deleted = client.request(f"/api/settings/alerts/{rule['id']}", method="DELETE", headers={"X-CSRF-Token": csrf})
         assert status == 200
         assert deleted["ok"] is True
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_recording_table_creation(tmp_path):
+    from app.database import EventDatabase
+
+    database_path = tmp_path / 'recordings.sqlite3'
+    EventDatabase(str(database_path))
+    with sqlite3.connect(database_path) as db:
+        columns = {row[1] for row in db.execute('PRAGMA table_info(recordings)').fetchall()}
+    assert {
+        'id',
+        'event_id',
+        'camera_id',
+        'started_at',
+        'ended_at',
+        'duration_seconds',
+        'file_path',
+        'thumbnail_path',
+        'source',
+        'created_at',
+    } <= columns
+
+
+def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(tmp_path, monkeypatch):
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    admin = LocalClient(base_url)
+    try:
+        _setup_admin(admin)
+        admin_csrf = _login(admin)
+        status, _headers, viewer = admin.request(
+            '/api/users',
+            method='POST',
+            json_body={'username': 'clipviewer', 'password': 'Viewer123!', 'role': 'viewer'},
+            headers={'X-CSRF-Token': admin_csrf},
+        )
+        assert status == 200
+
+        status, _headers, created = admin.request('/api/mock/detect', method='POST', headers={'X-CSRF-Token': admin_csrf})
+        assert status == 200
+        assert created['recording_id'] is not None
+
+        status, _headers, recordings = admin.request('/api/recordings')
+        assert status == 200
+        assert recordings[0]['id'] == created['recording_id']
+        assert recordings[0]['event_id'] == created['event_id']
+        assert recordings[0]['detections']
+        assert recordings[0]['source'] == 'mock'
+
+        label = recordings[0]['detections'][0]['label']
+        status, _headers, filtered = admin.request(f'/api/recordings?label={label}')
+        assert status == 200
+        assert any(recording['id'] == created['recording_id'] for recording in filtered)
+
+        status, _headers, detail = admin.request(f"/api/recordings/{created['recording_id']}")
+        assert status == 200
+        assert detail['event']['id'] == created['event_id']
+        event = admin.request(f"/api/events/{created['event_id']}")[2]
+        assert event['recording_status'] == 'linked'
+        assert event['recordings'][0]['id'] == created['recording_id']
+
+        status, _headers, missing_media = admin.request(f"/api/recordings/{created['recording_id']}/stream")
+        assert status == 404
+        assert missing_media['detail'] == 'Recording media file not found'
+
+        viewer_client = LocalClient(base_url)
+        viewer_csrf = _login(viewer_client, viewer['username'], 'Viewer123!')
+        assert viewer_client.request('/api/recordings')[0] == 200
+        status, _headers, denied = viewer_client.request(
+            f"/api/recordings/{created['recording_id']}", method='DELETE', headers={'X-CSRF-Token': viewer_csrf}
+        )
+        assert status == 403
+        assert denied['detail'] == 'Admin access required'
+
+        status, _headers, deleted = admin.request(
+            f"/api/recordings/{created['recording_id']}", method='DELETE', headers={'X-CSRF-Token': admin_csrf}
+        )
+        assert status == 200
+        assert deleted['ok'] is True
+        assert admin.request(f"/api/recordings/{created['recording_id']}")[0] == 404
+        with sqlite3.connect(database_path) as db:
+            count = db.execute('SELECT COUNT(*) FROM recordings').fetchone()[0]
+        assert count == 0
     finally:
         server.should_exit = True
         thread.join(timeout=5)
