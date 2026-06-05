@@ -4,6 +4,7 @@ import importlib
 import json
 import socket
 import sqlite3
+import subprocess
 import sys
 import threading
 import time
@@ -77,6 +78,18 @@ class NoRedirect(HTTPRedirectHandler):
     http_error_303 = http_error_302
     http_error_307 = http_error_302
     http_error_308 = http_error_302
+
+
+def _multipart_file(field_name: str, filename: str, content: bytes, content_type: str = 'application/octet-stream') -> tuple[bytes, str]:
+    boundary = 'daygle-test-boundary'
+    body = b''.join([
+        f'--{boundary}\r\n'.encode('utf-8'),
+        f'Content-Disposition: form-data; name="{field_name}"; filename="{filename}"\r\n'.encode('utf-8'),
+        f'Content-Type: {content_type}\r\n\r\n'.encode('utf-8'),
+        content,
+        f'\r\n--{boundary}--\r\n'.encode('utf-8'),
+    ])
+    return body, f'multipart/form-data; boundary={boundary}'
 
 
 def _body(response):
@@ -399,6 +412,28 @@ def test_live_snapshot_renderer_can_hide_object_overlay(tmp_path, monkeypatch):
     assert 'Overlay ON' in with_overlay
     assert '<g class="detection-box"' in with_overlay
     assert 'person · 92%' in with_overlay
+def test_export_yolov8n_onnx_uses_ultralytics_export(tmp_path, monkeypatch):
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    main = sys.modules["app.main"]
+    destination = tmp_path / "models" / "yolov8n.onnx"
+
+    def fake_run(command, cwd, capture_output, text, timeout, check):  # noqa: ANN001
+        assert command[0] == sys.executable
+        assert "from ultralytics import YOLO" in command[2]
+        assert "yolov8n.pt" in command[2]
+        assert "export(format='onnx')" in command[2]
+        assert cwd == destination.parent
+        assert capture_output is True
+        assert text is True
+        assert timeout == 600
+        assert check is False
+        destination.write_bytes(b"fake onnx")
+        return subprocess.CompletedProcess(command, 0, stdout="exported", stderr="")
+
+    monkeypatch.setattr(main.subprocess, "run", fake_run)
+
+    assert main.export_yolov8n_onnx(destination) == len(b"fake onnx")
+    assert destination.exists()
 
 
 def test_ai_model_status_and_action_endpoints(tmp_path, monkeypatch):
@@ -638,7 +673,13 @@ def test_admin_alert_rule_crud_and_alert_engine_uses_db_rules(tmp_path, monkeypa
     try:
         _setup_admin(client)
         csrf = _login(client)
+        status, _headers, alert_page = client.request("/alert-settings")
+        assert status == 200
+        assert 'select name="object" id="objectSelect"' in alert_page
+        assert 'Choose from the detector labels currently available to this camera.' in alert_page
+
         initial = client.request("/api/settings/alerts")[2]
+        assert "person" in initial["available_labels"]
         for rule in initial["rules"]:
             client.request(f"/api/settings/alerts/{rule['id']}", method="DELETE", headers={"X-CSRF-Token": csrf})
 
@@ -941,6 +982,58 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
         assert system_settings["anpr"]["min_confidence"] == 0.8
         assert system_settings["recording"]["format"] == "avi"
         assert system_settings["auth"]["lockout_minutes"] == 10
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_admin_can_backup_and_restore_database_from_api(tmp_path, monkeypatch):
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        status, _headers, camera = client.request(
+            '/api/settings/system/camera',
+            method='PUT',
+            json_body={'backend': 'mock', 'width': 640, 'height': 360, 'fps': 12, 'device': 'mock', 'flip': 'none'},
+            headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        assert camera['width'] == 640
+
+        status, headers, backup_bytes = client.request('/api/settings/system/database/backup')
+        assert status == 200
+        assert isinstance(backup_bytes, bytes)
+        assert 'daygle-database-' in (LocalClient.header(headers, 'content-disposition') or '')
+        with sqlite3.connect(database_path) as db:
+            assert db.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetchone()[0] == 1
+
+        status, _headers, camera = client.request(
+            '/api/settings/system/camera',
+            method='PUT',
+            json_body={'backend': 'mock', 'width': 800, 'height': 450, 'fps': 20, 'device': 'mock', 'flip': 'none'},
+            headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        assert camera['width'] == 800
+
+        multipart_body, content_type = _multipart_file('file', 'backup.sqlite3', backup_bytes, 'application/vnd.sqlite3')
+        status, _headers, restored = client.request(
+            '/api/settings/system/database/restore',
+            method='POST',
+            data=multipart_body,
+            headers={'Content-Type': content_type, 'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        assert restored['ok'] is True
+        assert Path(restored['safety_backup']).exists()
+
+        system_settings = client.request('/api/settings/system')[2]
+        assert system_settings['camera']['width'] == 640
+        assert client.request('/api/status')[2]['resolution'] == {'width': 640, 'height': 360}
     finally:
         server.should_exit = True
         thread.join(timeout=5)

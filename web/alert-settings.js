@@ -3,7 +3,8 @@ const emailForm = document.getElementById('emailSettingsForm');
 const ruleForm = document.getElementById('alertRuleForm');
 const messageEl = document.getElementById('settingsMessage');
 const rulesEl = document.getElementById('alertRules');
-const labelOptions = document.getElementById('labelOptions');
+const objectSelect = document.getElementById('objectSelect');
+const objectOptionsHelp = document.getElementById('objectOptionsHelp');
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -23,6 +24,31 @@ function escapeHtml(value) {
 }
 
 function setMessage(text) { messageEl.textContent = text; }
+
+function labelOption(label) {
+  return `<option value="${escapeHtml(label)}">${escapeHtml(label)}</option>`;
+}
+
+function ensureObjectOption(label) {
+  if (!label) return;
+  objectSelect.disabled = false;
+  if (Array.from(objectSelect.options).some((option) => option.value === label)) return;
+  objectSelect.insertAdjacentHTML('beforeend', labelOption(label));
+  objectOptionsHelp.textContent = `Editing an existing rule for ${label}. This label is not in the current detector label list.`;
+}
+
+function renderObjectOptions(labels) {
+  const cleanLabels = [...new Set((labels || []).map((label) => String(label).trim()).filter(Boolean))];
+  if (!cleanLabels.length) {
+    objectSelect.innerHTML = '<option value="">No object labels available</option>';
+    objectSelect.disabled = true;
+    objectOptionsHelp.textContent = 'No detector labels were found. Check the AI labels path in AI settings.';
+    return;
+  }
+  objectSelect.disabled = false;
+  objectSelect.innerHTML = '<option value="">Select an object...</option>' + cleanLabels.map(labelOption).join('');
+  objectOptionsHelp.textContent = `${cleanLabels.length} object labels available. Start with common choices like person, car, cat, or dog.`;
+}
 
 function formPayload(form) {
   const data = Object.fromEntries(new FormData(form).entries());
@@ -63,7 +89,7 @@ async function loadAll() {
   csrfToken = me.csrf_token;
   renderEmail(await api('/api/settings/alert-email'));
   const alerts = await api('/api/settings/alerts');
-  labelOptions.innerHTML = alerts.available_labels.map((label) => `<option value="${escapeHtml(label)}"></option>`).join('');
+  renderObjectOptions(alerts.available_labels);
   renderRules(alerts.rules);
 }
 
@@ -95,6 +121,7 @@ rulesEl.addEventListener('click', async (event) => {
   if (!button) return;
   if (button.dataset.action === 'edit') {
     const rule = JSON.parse(button.dataset.rule);
+    ensureObjectOption(rule.object);
     for (const [key, value] of Object.entries(rule)) {
       if (ruleForm.elements[key]) ruleForm.elements[key].value = Array.isArray(value) ? value.join(', ') : String(value ?? '');
     }

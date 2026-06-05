@@ -7,8 +7,12 @@ import mimetypes
 import os
 import re
 import secrets
+import shutil
+import sqlite3
 import tempfile
 from urllib.request import urlretrieve
+import subprocess
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from html import escape
@@ -16,7 +20,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -33,7 +37,8 @@ from app.storage import Storage
 
 logger = logging.getLogger('daygle.ai')
 
-YOLOV8N_ONNX_URL = 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.onnx'
+YOLOV8N_MODEL = 'yolov8n.pt'
+YOLOV8N_ONNX = 'yolov8n.onnx'
 ONE_PIXEL_PNG = (
     b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
     b'\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc``\x00\x00\x00\x04'
@@ -498,6 +503,61 @@ def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
                 thumbnail.unlink(missing_ok=True)
 
 
+DATABASE_RESTORE_REQUIRED_TABLES = {'events', 'detections', 'app_settings', 'users'}
+
+
+def backup_directory() -> Path:
+    backups_dir = Path(str(effective_storage_config().get('data_dir') or 'data')) / 'backups'
+    backups_dir.mkdir(parents=True, exist_ok=True)
+    return backups_dir
+
+
+def safe_backup_timestamp() -> str:
+    return datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+
+
+def create_database_backup(prefix: str = 'daygle-database') -> Path:
+    backup_path = backup_directory() / f'{prefix}-{safe_backup_timestamp()}-{secrets.token_hex(4)}.sqlite3'
+    source = sqlite3.connect(database.database_path)
+    try:
+        destination = sqlite3.connect(backup_path)
+        try:
+            source.backup(destination)
+        finally:
+            destination.close()
+    finally:
+        source.close()
+    return backup_path
+
+
+def validate_restore_database(path: Path) -> None:
+    try:
+        with sqlite3.connect(path) as db:
+            integrity = db.execute('PRAGMA integrity_check').fetchone()
+            if not integrity or str(integrity[0]).lower() != 'ok':
+                raise HTTPException(status_code=400, detail='Uploaded database failed SQLite integrity check.')
+            tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
+            missing = sorted(DATABASE_RESTORE_REQUIRED_TABLES - tables)
+            if missing:
+                raise HTTPException(status_code=400, detail=f'Uploaded database is missing required table(s): {", ".join(missing)}.')
+            admin_count = db.execute("SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1").fetchone()[0]
+            if int(admin_count) < 1:
+                raise HTTPException(status_code=400, detail='Uploaded database must include at least one active administrator account.')
+    except sqlite3.DatabaseError as exc:
+        raise HTTPException(status_code=400, detail='Uploaded file is not a valid SQLite database.') from exc
+
+
+def refresh_runtime_after_database_restore() -> None:
+    database.init()
+    auth.init()
+    database.seed_alert_rules(config.get('alerts', {}).get('rules', []), utc_now())
+    apply_camera_settings(effective_camera_config())
+    apply_storage_and_recording_settings()
+    apply_anpr_settings()
+    auth.apply_config(effective_auth_config())
+    alerts.rules = effective_alert_rules()
+
+
 def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
     recording_settings = effective_recording_config()
     if not force and not _bool_value(recording_settings.get('auto_purge_enabled', True)):
@@ -674,7 +734,7 @@ def settings_page():
 def alert_settings_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>Alert Settings · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>Alert Settings</h1><p class="muted">Manage detection rules and email delivery through your mail server.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Email delivery</h2><div id="settingsMessage" class="muted"></div><form id="emailSettingsForm" class="form-grid"><label><span>Email alerts</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="host" placeholder="SMTP host" /><input name="port" type="number" min="1" max="65535" placeholder="Port" /><input name="from_address" type="email" placeholder="From address" /><input name="username" placeholder="SMTP username" /><input name="password" type="password" placeholder="SMTP password" autocomplete="new-password" /><label><span>STARTTLS</span><select name="use_tls"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>SSL</span><select name="use_ssl"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><button type="submit">Save mail server</button></form></section><section class="card"><h2>Alert rules</h2><form id="alertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="name" placeholder="Rule name" required /><input name="object" list="labelOptions" placeholder="Object label" required /><datalist id="labelOptions"></datalist><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" value="0.6" /><input name="cooldown_seconds" type="number" min="0" step="1" placeholder="Cooldown seconds" value="60" /><label><span>Rule</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Email</span><select name="email_enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><input name="email_recipients" placeholder="Email recipients, comma separated" /><input name="active_start" type="time" /><input name="active_end" type="time" /><button type="submit">Save alert rule</button><button id="cancelEditRule" class="secondary" type="button">Cancel edit</button></form><div id="alertRules" class="list"></div></section></main><script src="/static/alert-settings.js"></script></body></html>""")
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>Alert Settings</h1><p class="muted">Manage detection rules and email delivery through your mail server.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Email delivery</h2><div id="settingsMessage" class="muted"></div><form id="emailSettingsForm" class="form-grid"><label><span>Email alerts</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="host" placeholder="SMTP host" /><input name="port" type="number" min="1" max="65535" placeholder="Port" /><input name="from_address" type="email" placeholder="From address" /><input name="username" placeholder="SMTP username" /><input name="password" type="password" placeholder="SMTP password" autocomplete="new-password" /><label><span>STARTTLS</span><select name="use_tls"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>SSL</span><select name="use_ssl"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><button type="submit">Save mail server</button></form></section><section class="card"><h2>Alert rules</h2><form id="alertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="name" placeholder="Rule name" required /><label class="object-select-field"><span>Object to detect</span><select name="object" id="objectSelect" required><option value="">Loading object labels...</option></select><small id="objectOptionsHelp" class="field-help">Choose from the detector labels currently available to this camera.</small></label><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" value="0.6" /><input name="cooldown_seconds" type="number" min="0" step="1" placeholder="Cooldown seconds" value="60" /><label><span>Rule</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Email</span><select name="email_enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><input name="email_recipients" placeholder="Email recipients, comma separated" /><input name="active_start" type="time" /><input name="active_end" type="time" /><button type="submit">Save alert rule</button><button id="cancelEditRule" class="secondary" type="button">Cancel edit</button></form><div id="alertRules" class="list"></div></section></main><script src="/static/alert-settings.js"></script></body></html>""")
 
 
 @app.get('/profile')
@@ -1470,32 +1530,65 @@ def check_ai_model():
     return ai_status_payload(effective_ai_config())
 
 
+def export_yolov8n_onnx(destination: Path) -> int:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        sys.executable,
+        '-c',
+        (
+            'from ultralytics import YOLO\n'
+            f"model = YOLO('{YOLOV8N_MODEL}')\n"
+            "model.export(format='onnx')\n"
+        ),
+    ]
+    result = subprocess.run(
+        command,
+        cwd=destination.parent,
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+    if result.returncode != 0:
+        details = (result.stderr or result.stdout or '').strip()
+        raise RuntimeError(details or f'Ultralytics export exited with status {result.returncode}.')
+
+    exported = destination.parent / YOLOV8N_ONNX
+    if exported != destination and exported.exists():
+        exported.replace(destination)
+    if not destination.exists():
+        details = (result.stderr or result.stdout or '').strip()
+        raise RuntimeError(details or f'Ultralytics export did not create {destination.name}.')
+    if destination.stat().st_size <= 0:
+        destination.unlink(missing_ok=True)
+        raise RuntimeError('Exported model file is empty.')
+    return destination.stat().st_size
+
+
 @app.post('/api/settings/ai/download-yolov8n')
 def download_yolov8n_model():
     ai_settings = effective_ai_config()
-    destination = BASE_DIR / 'models' / 'yolov8n.onnx'
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination = BASE_DIR / 'models' / YOLOV8N_ONNX
     try:
-        with tempfile.NamedTemporaryFile(delete=False, dir=destination.parent, suffix='.tmp') as handle:
-            temp_path = Path(handle.name)
-        urlretrieve(YOLOV8N_ONNX_URL, temp_path)  # noqa: S310 - fixed upstream YOLOv8n model URL
-        if temp_path.stat().st_size <= 0:
-            temp_path.unlink(missing_ok=True)
-            raise RuntimeError('Downloaded model file is empty.')
-        temp_path.replace(destination)
-    except Exception as exc:  # pragma: no cover - network and filesystem dependent
-        if 'temp_path' in locals():
-            temp_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=502, detail=f'Failed to download YOLOv8n ONNX model: {exc}') from exc
+        exported_bytes = export_yolov8n_onnx(destination)
+    except (RuntimeError, subprocess.TimeoutExpired) as exc:  # pragma: no cover - environment dependent
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                'Failed to export YOLOv8n ONNX model. Install the export dependencies with '
+                '`pip install ultralytics onnx`, then retry. '
+                f'Details: {exc}'
+            ),
+        ) from exc
 
     updated = validate_ai_settings({**ai_settings, 'model_path': str(destination.relative_to(BASE_DIR))})
     database.set_setting('ai', updated, utc_now())
     reloaded, error = reload_detector(updated)
     return {
         'ok': True,
-        'message': f'Downloaded YOLOv8n ONNX to {destination.relative_to(BASE_DIR)}.',
+        'message': f'Exported YOLOv8n ONNX to {destination.relative_to(BASE_DIR)}.',
         'model_path': str(destination.relative_to(BASE_DIR)),
-        'bytes': destination.stat().st_size,
+        'bytes': exported_bytes,
         'reload_succeeded': reloaded,
         'reload_error': error,
         'status': ai_status_payload(updated),
@@ -1555,6 +1648,47 @@ def get_system_settings():
             'server': config.get('server', {}),
         },
     }
+
+
+@app.get('/api/settings/system/database/backup')
+def backup_database():
+    backup_path = create_database_backup()
+    return FileResponse(
+        backup_path,
+        media_type='application/vnd.sqlite3',
+        filename=backup_path.name,
+        headers={'Cache-Control': 'no-store'},
+    )
+
+
+@app.post('/api/settings/system/database/restore')
+async def restore_database(file: UploadFile = File(...)):
+    filename = Path(file.filename or '').name
+    if not filename:
+        raise HTTPException(status_code=400, detail='Choose a SQLite database backup file to restore.')
+    restore_temp = database.database_path.parent / f'.restore-{secrets.token_hex(8)}.sqlite3'
+    try:
+        with restore_temp.open('wb') as handle:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                handle.write(chunk)
+        if restore_temp.stat().st_size == 0:
+            raise HTTPException(status_code=400, detail='Uploaded database backup is empty.')
+        validate_restore_database(restore_temp)
+        safety_backup = create_database_backup(prefix='pre-restore-daygle-database')
+        shutil.move(str(restore_temp), database.database_path)
+        refresh_runtime_after_database_restore()
+        return {
+            'ok': True,
+            'message': 'Database restored successfully.',
+            'source_filename': filename,
+            'safety_backup': str(safety_backup),
+        }
+    finally:
+        restore_temp.unlink(missing_ok=True)
+        await file.close()
 
 
 @app.put('/api/settings/system/camera')
