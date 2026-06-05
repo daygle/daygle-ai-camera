@@ -23,12 +23,14 @@ Open <http://127.0.0.1:8080/>. A fresh database redirects to `/setup`; create th
 
 ## Runtime settings workflow
 
-`config.yaml` is a bootstrap/default source. Editable runtime settings live in SQLite:
+`config.yaml` is a bootstrap/default source. Normal AI setup happens in the admin-only Setup / AI Settings page at `/settings`; editable runtime settings live in SQLite:
 
 - `app_settings` stores the AI settings document under key `ai`.
 - `alert_rules` stores alert rules created or edited in the dashboard.
-- Database values override config defaults at runtime.
-- Updating AI settings safely constructs a replacement detector first; if an ONNX reload fails, the previous detector remains active.
+- Database AI values override config defaults at runtime.
+- `GET /api/status/ai` reports the active config source as `database`, `config.yaml`, or `default`.
+- Updating AI settings saves to SQLite, attempts a runtime detector reload, and keeps the previous working detector if the reload fails.
+- If `ai.backend` is `onnx` and the model is missing, status reports `MODEL MISSING`, uploads return a clear error, and mock image detections are not generated.
 - Alert processing reloads DB rules before processing generated events and uploaded-image detections.
 
 ## Useful routes during development
@@ -39,7 +41,11 @@ Open <http://127.0.0.1:8080/>. A fresh database redirects to `/setup`; create th
 | `GET/POST` | `/login` | Session login |
 | `GET/POST` | `/logout` | Session logout; POST requires CSRF |
 | `GET` | `/api/auth/me` | Current user and CSRF token |
-| `GET/PUT` | `/api/settings/ai` | Admin AI settings |
+| `GET/PUT` | `/api/settings/ai` | Admin SQLite-backed AI settings |
+| `POST` | `/api/settings/ai/check-model` | Admin model/runtime status action |
+| `POST` | `/api/settings/ai/download-yolov8n` | Admin model download action |
+| `POST` | `/api/settings/ai/reload` | Admin runtime detector reload |
+| `POST` | `/api/settings/ai/test-detector` | Admin detector readiness test |
 | `GET/POST` | `/api/settings/alerts` | Alert rules; viewer can GET, admin can POST |
 | `PUT/DELETE` | `/api/settings/alerts/{rule_id}` | Admin alert rule changes |
 | `GET/POST/PATCH` | `/api/users` and `/api/users/{id}` | Admin user management |
@@ -70,7 +76,7 @@ python -m compileall app tests
 pytest -q
 ```
 
-The test suite covers detector selection, setup, login success/failure, lockout, logout, route protection, viewer/admin permissions, user creation, password reset, AI settings overrides, alert rule CRUD, and DB-backed alert processing.
+The test suite covers detector selection, missing ONNX errors, model status, setup, login success/failure, lockout, logout, route protection, viewer/admin permissions, user creation, password reset, AI settings persistence/overrides, alert rule CRUD, upload backend reporting, and DB-backed alert processing.
 
 ## Security notes
 
@@ -85,4 +91,4 @@ The test suite covers detector selection, setup, login success/failure, lockout,
 - Use `scripts/install_armbian.sh` for systemd deployment.
 - The service reads `/etc/daygle-ai-camera/config.yaml` via `DAYGLE_CONFIG`.
 - SQLite, snapshots, and mutable state should live under writable storage paths from config.
-- Mock mode remains available and should not be removed; it keeps Orange Pi deployments usable while camera/model dependencies are being validated.
+- Mock mode remains available and should not be removed; it keeps Orange Pi deployments usable while camera/model dependencies are being validated. ONNX mode must fail clearly rather than silently falling back to mock detections when its model/runtime is unavailable.

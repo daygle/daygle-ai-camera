@@ -198,7 +198,7 @@ def test_onnx_missing_model_returns_clear_api_error(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
-def test_status_ai_reports_model_failed_for_missing_onnx(tmp_path, monkeypatch):
+def test_status_ai_reports_model_missing_for_missing_onnx(tmp_path, monkeypatch):
     app, _database_path = _load_app(
         tmp_path,
         monkeypatch,
@@ -217,7 +217,10 @@ def test_status_ai_reports_model_failed_for_missing_onnx(tmp_path, monkeypatch):
         assert payload['active_backend'] == 'onnx'
         assert payload['model_loaded'] is False
         assert payload['inference_available'] is False
-        assert payload['mode'] == 'MODEL FAILED'
+        assert payload['mode'] == 'MODEL MISSING'
+        assert payload['model_exists'] is False
+        assert payload['detector_loaded'] is False
+        assert payload['active_config_source'] == 'config.yaml'
         assert str(tmp_path / 'missing.onnx') == payload['model_path']
         assert 'ONNX model not found' in payload['error'] or 'numpy is not installed' in payload['error']
     finally:
@@ -270,6 +273,7 @@ def test_test_image_upload_uses_onnx_backend_not_mock(tmp_path, monkeypatch):
     try:
         _setup_admin(client)
         csrf = _login(client)
+        Path(tmp_path / 'fake.onnx').write_bytes(b'fake')
         status, _headers, ai_status = client.request('/api/status/ai')
         assert status == 200
         assert ai_status['active_backend'] == 'onnx'
@@ -293,6 +297,66 @@ def test_test_image_upload_uses_onnx_backend_not_mock(tmp_path, monkeypatch):
         ]
         event = client.request(f"/api/events/{created['event_id']}")[2]
         assert event['metadata']['ai_backend'] == 'onnx'
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_ai_settings_save_onnx_missing_keeps_previous_detector_and_errors_on_upload(tmp_path, monkeypatch):
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        missing_model = tmp_path / 'missing-from-ui.onnx'
+        status, _headers, settings = client.request(
+            '/api/settings/ai',
+            method='PUT',
+            json_body={'backend': 'onnx', 'model_path': str(missing_model), 'labels_path': 'models/coco.names'},
+            headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        assert settings['configured_backend'] == 'onnx'
+        assert settings['mode'] == 'MODEL MISSING'
+        assert settings['reload_succeeded'] is False
+        assert 'ONNX model not found' in settings['reload_error'] or 'numpy is not installed' in settings['reload_error']
+        with sqlite3.connect(database_path) as db:
+            value = db.execute("SELECT value FROM app_settings WHERE key = 'ai'").fetchone()[0]
+        assert json.loads(value)['backend'] == 'onnx'
+
+        status, _headers, body = client.request(
+            '/api/detect/test-image',
+            method='POST',
+            data=b'not really an image',
+            headers={'Content-Type': 'image/jpeg', 'X-CSRF-Token': csrf},
+        )
+        assert status == 400
+        assert 'ONNX model not found' in body['detail'] or 'numpy is not installed' in body['detail']
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_ai_model_status_and_action_endpoints(tmp_path, monkeypatch):
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        status, _headers, payload = client.request('/api/status/ai')
+        assert status == 200
+        assert {'current_backend', 'model_exists', 'onnx_runtime_installed', 'detector_loaded', 'active_config_source'} <= set(payload)
+        assert payload['active_config_source'] == 'config.yaml'
+
+        status, _headers, checked = client.request('/api/settings/ai/check-model', method='POST', headers={'X-CSRF-Token': csrf})
+        assert status == 200
+        assert checked['current_backend'] == 'mock'
+
+        status, _headers, tested = client.request('/api/settings/ai/test-detector', method='POST', headers={'X-CSRF-Token': csrf})
+        assert status == 200
+        assert tested['backend_used'] == 'mock'
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -473,7 +537,9 @@ def test_admin_ai_settings_viewer_denied_and_db_override(tmp_path, monkeypatch):
         )
         assert status == 200
         assert settings["confidence"] == 0.72
-        assert admin.request("/api/config")[2]["ai"]["confidence"] == 0.72
+        config_payload = admin.request("/api/config")[2]
+        assert config_payload["ai"]["confidence"] == 0.72
+        assert admin.request("/api/status/ai")[2]["active_config_source"] == "database"
         with sqlite3.connect(database_path) as db:
             value = db.execute("SELECT value FROM app_settings WHERE key = 'ai'").fetchone()[0]
         assert json.loads(value)["confidence"] == 0.72

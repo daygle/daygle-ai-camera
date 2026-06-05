@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import copy
+import importlib.util
 import logging
+import os
 import re
 import secrets
+import tempfile
+from urllib.request import urlretrieve
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from html import escape
@@ -20,10 +24,17 @@ from app.auth import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, AuthError, AuthSe
 from app.database import EventDatabase
 from app.detector import DetectorUnavailableError, MockDetector, create_detector, load_labels
 from app.mock_camera import MockCamera
-from app.settings import load_settings
+from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, load_settings
 from app.storage import Storage
 
 logger = logging.getLogger('daygle.ai')
+
+YOLOV8N_ONNX_URL = 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.onnx'
+ONE_PIXEL_PNG = (
+    b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
+    b'\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc``\x00\x00\x00\x04'
+    b'\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82'
+)
 
 config = load_settings()
 
@@ -74,31 +85,78 @@ def effective_alert_rules() -> list[dict[str, Any]]:
 
 database.seed_alert_rules(config.get('alerts', {}).get('rules', []), utc_now())
 detector = create_detector(effective_ai_config())
+last_detector_error: str | None = getattr(detector, 'unavailable_reason', None)
 mock_detector = MockDetector(effective_ai_config().get('categories', []), float(effective_ai_config().get('confidence', 0.45)))
 alerts = AlertEngine(effective_alert_rules())
+
+def config_file_path() -> Path:
+    return Path(os.environ.get(CONFIG_ENV_VAR) or DEFAULT_CONFIG_PATH)
+
+
+def active_ai_config_source() -> str:
+    if database.has_setting('ai'):
+        return 'database'
+    if config_file_path().exists():
+        return 'config.yaml'
+    return 'default'
+
+
+def onnx_runtime_installed() -> bool:
+    return importlib.util.find_spec('onnxruntime') is not None
+
+
+def model_exists(ai_settings: dict[str, Any]) -> bool:
+    model_path = str(ai_settings.get('model_path') or '')
+    return bool(model_path) and Path(model_path).exists()
+
+
+def detector_loaded_for(settings: dict[str, Any]) -> bool:
+    configured_backend = str(settings.get('backend', 'mock')).lower()
+    active_backend = getattr(detector, 'backend', 'unknown')
+    if configured_backend == 'mock':
+        return active_backend == 'mock'
+    if configured_backend == 'onnx':
+        return active_backend == 'onnx' and bool(getattr(detector, 'available', False))
+    return False
+
 
 def ai_status_payload(ai_settings: dict[str, Any] | None = None) -> dict[str, Any]:
     settings = ai_settings or effective_ai_config()
     active_backend = getattr(detector, 'backend', 'unknown')
     configured_backend = str(settings.get('backend', 'mock')).lower()
-    unavailable_reason = getattr(detector, 'unavailable_reason', None)
-    model_loaded = bool(active_backend == 'onnx' and getattr(detector, 'available', False))
-    inference_available = bool(getattr(detector, 'available', True))
-    if configured_backend == 'onnx' and not model_loaded:
+    detector_loaded = detector_loaded_for(settings)
+    model_loaded = bool(configured_backend == 'onnx' and active_backend == 'onnx' and getattr(detector, 'available', False))
+    runtime_installed = onnx_runtime_installed()
+    exists = model_exists(settings)
+    detector_reason = getattr(detector, 'unavailable_reason', None)
+    error = last_detector_error or detector_reason
+    if configured_backend == 'onnx' and not exists:
+        mode = 'MODEL MISSING'
+        error = error or f"ONNX model not found: {settings.get('model_path')}"
+    elif configured_backend == 'onnx' and not model_loaded:
         mode = 'MODEL FAILED'
-    elif active_backend == 'onnx' and model_loaded:
+    elif configured_backend == 'onnx':
         mode = 'ONNX ACTIVE'
+        error = detector_reason
     else:
         mode = 'MOCK MODE'
+        error = detector_reason if active_backend == 'mock' else error
+    inference_available = detector_loaded
     return {
+        'current_backend': configured_backend,
         'active_backend': active_backend,
         'configured_backend': configured_backend,
         'mode': mode,
         'model_loaded': model_loaded,
+        'detector_loaded': detector_loaded,
         'model_path': str(settings.get('model_path') or ''),
         'labels_path': str(settings.get('labels_path') or ''),
+        'model_exists': exists,
+        'onnx_runtime_installed': runtime_installed,
         'inference_available': inference_available,
-        'error': unavailable_reason,
+        'error': error,
+        'last_detector_error': error,
+        'active_config_source': active_ai_config_source(),
     }
 
 
@@ -350,9 +408,8 @@ def dashboard_aliases():
 @app.get('/settings')
 def settings_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Settings · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell"><header class="hero"><div><p class="eyebrow">Administration</p><h1>AI & Alert Settings</h1><p class="muted">Update runtime AI settings and alert rules stored in SQLite.</p></div><a class="button-link" href="/">Dashboard</a></header><section class="card"><h2>AI settings</h2><div id="settingsMessage" class="muted"></div><form id="aiSettingsForm" class="form-grid"><label><span>AI enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Backend</span><select name="backend"><option value="mock">mock</option><option value="onnx">onnx</option></select></label><label><span>Confidence</span><input name="confidence" type="number" min="0" max="1" step="0.01" /></label><label><span>IOU threshold</span><input name="iou_threshold" type="number" min="0" max="1" step="0.01" /></label><label><span>Input size</span><input name="input_size" type="number" min="32" max="2048" step="32" /></label><label><span>Model path</span><input name="model_path" /></label><label><span>Labels path</span><input name="labels_path" /></label><button type="submit">Save AI settings</button></form></section><section class="card"><h2>Alert rules</h2><form id="alertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="name" placeholder="Rule name" required /><input name="object" list="labelOptions" placeholder="Object label" required /><datalist id="labelOptions"></datalist><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" value="0.6" /><input name="cooldown_seconds" type="number" min="0" step="1" placeholder="Cooldown seconds" value="60" /><label><span>Enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="active_start" type="time" /><input name="active_end" type="time" /><button type="submit">Save alert rule</button><button id="cancelEditRule" class="secondary" type="button">Cancel edit</button></form><div id="alertRules" class="list"></div></section></main><script src="/static/settings.js"></script></body></html>""")
-
+<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Setup / AI Settings · Daygle AI Camera</title>
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell"><header class="hero"><div><p class="eyebrow">Administration</p><h1>Setup / AI Settings</h1><p class="muted">Configure AI detection, install models, reload the detector, and manage alert rules from SQLite.</p></div><a class="button-link" href="/">Dashboard</a></header><section class="card"><h2>AI status</h2><div id="settingsMessage" class="muted"></div><div id="aiStatusPanel" class="status-panel"></div><div class="button-row"><button id="checkModelBtn" class="secondary" type="button">Check model</button><button id="downloadModelBtn" type="button">Download YOLOv8n ONNX</button><button id="reloadDetectorBtn" class="secondary" type="button">Reload detector</button><button id="testDetectorBtn" class="secondary" type="button">Test detector</button></div></section><section class="card"><h2>AI settings</h2><form id="aiSettingsForm" class="form-grid"><label><span>AI enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Backend</span><select name="backend"><option value="mock">mock</option><option value="onnx">onnx</option></select></label><label><span>Confidence</span><input name="confidence" type="number" min="0" max="1" step="0.01" /></label><label><span>IOU threshold</span><input name="iou_threshold" type="number" min="0" max="1" step="0.01" /></label><label><span>Input size</span><input name="input_size" type="number" min="32" max="2048" step="32" /></label><label><span>Model path</span><input name="model_path" /></label><label><span>Labels path</span><input name="labels_path" /></label><button type="submit">Save AI settings</button></form></section><section class="card"><h2>Alert rules</h2><form id="alertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="name" placeholder="Rule name" required /><input name="object" list="labelOptions" placeholder="Object label" required /><datalist id="labelOptions"></datalist><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" value="0.6" /><input name="cooldown_seconds" type="number" min="0" step="1" placeholder="Cooldown seconds" value="60" /><label><span>Enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="active_start" type="time" /><input name="active_end" type="time" /><button type="submit">Save alert rule</button><button id="cancelEditRule" class="secondary" type="button">Cancel edit</button></form><div id="alertRules" class="list"></div></section></main><script src="/static/settings.js"></script></body></html>""")
 
 @app.get('/users')
 def users_page():
@@ -434,6 +491,13 @@ async def detect_test_image(request: Request):
     if not image_bytes:
         raise HTTPException(status_code=400, detail='Uploaded image is empty')
 
+    ai_settings = effective_ai_config()
+    ai_state = ai_status_payload(ai_settings)
+    if ai_settings.get('backend') == 'onnx' and not ai_state['detector_loaded']:
+        raise HTTPException(status_code=400, detail=ai_state['last_detector_error'] or 'ONNX detector is not loaded.')
+    if ai_settings.get('backend') == 'mock' and getattr(detector, 'backend', None) != 'mock':
+        raise HTTPException(status_code=400, detail='Mock detector is not loaded. Save AI settings or reload the detector.')
+
     try:
         detections = detector.detect_image(image_bytes)
     except DetectorUnavailableError as exc:
@@ -453,7 +517,8 @@ async def detect_test_image(request: Request):
         metadata={
             'filename': filename,
             'content_type': content_type,
-            'ai_backend': ai_status_payload()['active_backend'],
+            'ai_backend': ai_state['configured_backend'],
+            'detector_backend': ai_state['active_backend'],
         },
     )
 
@@ -473,7 +538,9 @@ async def detect_test_image(request: Request):
         'detections': detections,
         'alerts': triggered,
         'snapshot_path': snapshot_path,
-        'ai_backend': ai_status_payload()['active_backend'],
+        'ai_backend': ai_state['configured_backend'],
+        'backend_used': ai_state['configured_backend'],
+        'detector_backend': ai_state['active_backend'],
     }
 
 
@@ -566,7 +633,11 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     for key, value in payload.items():
         if key in allowed:
             updated[key] = value
-    updated['enabled'] = bool(updated.get('enabled', True))
+    enabled_value = updated.get('enabled', True)
+    if isinstance(enabled_value, str):
+        updated['enabled'] = enabled_value.lower() in {'1', 'true', 'yes', 'on'}
+    else:
+        updated['enabled'] = bool(enabled_value)
     backend = str(updated.get('backend', 'mock')).lower()
     if backend not in {'mock', 'onnx'}:
         raise HTTPException(status_code=400, detail='AI backend must be mock or onnx.')
@@ -594,10 +665,17 @@ def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
     return {
         **ai_settings,
         'active_backend': ai_status['active_backend'],
+        'configured_backend': ai_status['configured_backend'],
+        'current_backend': ai_status['current_backend'],
         'mode': ai_status['mode'],
         'available': ai_status['inference_available'],
         'model_loaded': ai_status['model_loaded'],
+        'detector_loaded': ai_status['detector_loaded'],
+        'model_exists': ai_status['model_exists'],
+        'onnx_runtime_installed': ai_status['onnx_runtime_installed'],
+        'active_config_source': ai_status['active_config_source'],
         'error': ai_status['error'],
+        'last_detector_error': ai_status['last_detector_error'],
         'categories': ai_settings.get('categories', config.get('ai', {}).get('categories', [])),
     }
 
@@ -652,21 +730,102 @@ def get_ai_settings():
     return detector_status(effective_ai_config())
 
 
+def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
+    global detector, mock_detector, last_detector_error
+    previous_detector = detector
+    candidate = create_detector(ai_settings)
+    candidate_error = getattr(candidate, 'unavailable_reason', None)
+    if ai_settings['backend'] == 'onnx' and not getattr(candidate, 'available', False):
+        detector = previous_detector
+        last_detector_error = candidate_error or 'Failed to load ONNX detector.'
+        log_detector_initialization('reload_failed')
+        return False, last_detector_error
+    detector = candidate
+    last_detector_error = candidate_error
+    if ai_settings['backend'] == 'mock':
+        mock_detector = candidate  # type: ignore[assignment]
+    else:
+        mock_detector = MockDetector(ai_settings.get('categories', config.get('ai', {}).get('categories', [])), float(ai_settings.get('confidence', 0.45)))
+    log_detector_initialization('reload')
+    return True, last_detector_error
+
+
 @app.put('/api/settings/ai')
 async def update_ai_settings(request: Request):
-    global detector, mock_detector
     payload = await request.json()
     new_settings = validate_ai_settings(payload)
-    previous_detector = detector
-    candidate = create_detector(new_settings)
-    if new_settings['backend'] == 'onnx' and not getattr(candidate, 'available', False):
-        detector = previous_detector
-        raise HTTPException(status_code=400, detail=getattr(candidate, 'unavailable_reason', 'Failed to load ONNX detector.'))
-    detector = candidate
-    log_detector_initialization('settings_reload')
-    mock_detector = MockDetector(new_settings.get('categories', config.get('ai', {}).get('categories', [])), float(new_settings.get('confidence', 0.45)))
     database.set_setting('ai', new_settings, utc_now())
-    return detector_status(new_settings)
+    reloaded, error = reload_detector(new_settings)
+    response = detector_status(new_settings)
+    response['reload_succeeded'] = reloaded
+    response['reload_error'] = error
+    return response
+
+
+@app.post('/api/settings/ai/reload')
+def reload_ai_detector():
+    ai_settings = effective_ai_config()
+    reloaded, error = reload_detector(ai_settings)
+    response = detector_status(ai_settings)
+    response['reload_succeeded'] = reloaded
+    response['reload_error'] = error
+    if not reloaded:
+        return JSONResponse(response, status_code=400)
+    return response
+
+
+@app.post('/api/settings/ai/check-model')
+def check_ai_model():
+    return ai_status_payload(effective_ai_config())
+
+
+@app.post('/api/settings/ai/download-yolov8n')
+def download_yolov8n_model():
+    ai_settings = effective_ai_config()
+    destination = BASE_DIR / 'models' / 'yolov8n.onnx'
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, dir=destination.parent, suffix='.tmp') as handle:
+            temp_path = Path(handle.name)
+        urlretrieve(YOLOV8N_ONNX_URL, temp_path)  # noqa: S310 - fixed upstream YOLOv8n model URL
+        if temp_path.stat().st_size <= 0:
+            temp_path.unlink(missing_ok=True)
+            raise RuntimeError('Downloaded model file is empty.')
+        temp_path.replace(destination)
+    except Exception as exc:  # pragma: no cover - network and filesystem dependent
+        if 'temp_path' in locals():
+            temp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=502, detail=f'Failed to download YOLOv8n ONNX model: {exc}') from exc
+
+    updated = validate_ai_settings({**ai_settings, 'model_path': str(destination.relative_to(BASE_DIR))})
+    database.set_setting('ai', updated, utc_now())
+    reloaded, error = reload_detector(updated)
+    return {
+        'ok': True,
+        'message': f'Downloaded YOLOv8n ONNX to {destination.relative_to(BASE_DIR)}.',
+        'model_path': str(destination.relative_to(BASE_DIR)),
+        'bytes': destination.stat().st_size,
+        'reload_succeeded': reloaded,
+        'reload_error': error,
+        'status': ai_status_payload(updated),
+    }
+
+
+@app.post('/api/settings/ai/test-detector')
+def test_ai_detector():
+    ai_settings = effective_ai_config()
+    ai_state = ai_status_payload(ai_settings)
+    if ai_settings.get('backend') == 'onnx' and not ai_state['detector_loaded']:
+        raise HTTPException(status_code=400, detail=ai_state['last_detector_error'] or 'ONNX detector is not loaded.')
+    if not hasattr(detector, 'detect_image'):
+        raise HTTPException(status_code=400, detail='Configured detector cannot run image inference.')
+    try:
+        detections = detector.detect_image(ONE_PIXEL_PNG)
+    except DetectorUnavailableError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {'ok': True, 'backend_used': ai_state['configured_backend'], 'detections': detections, 'status': ai_state}
 
 
 @app.get('/api/settings/alerts')

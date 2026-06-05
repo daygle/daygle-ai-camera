@@ -13,6 +13,9 @@ const els = {
   imageInput: document.getElementById('imageInput'),
   uploadBtn: document.getElementById('uploadBtn'),
   uploadResult: document.getElementById('uploadResult'),
+  uploadPreview: document.getElementById('uploadPreview'),
+  previewImage: document.getElementById('previewImage'),
+  selectedFilename: document.getElementById('selectedFilename'),
   searchBtn: document.getElementById('searchBtn'),
   clearBtn: document.getElementById('clearBtn'),
   searchInput: document.getElementById('searchInput'),
@@ -182,6 +185,20 @@ els.generateBtn.addEventListener('click', async () => {
   }
 });
 
+els.imageInput.addEventListener('change', () => {
+  const file = els.imageInput.files[0];
+  if (!file) {
+    els.uploadPreview.hidden = true;
+    els.previewImage.removeAttribute('src');
+    els.selectedFilename.textContent = '';
+    return;
+  }
+  els.selectedFilename.textContent = file.name;
+  els.previewImage.src = URL.createObjectURL(file);
+  els.uploadPreview.hidden = false;
+  els.uploadResult.textContent = `Selected ${file.name}. Ready to run detection.`;
+});
+
 els.uploadForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const file = els.imageInput.files[0];
@@ -197,7 +214,7 @@ els.uploadForm.addEventListener('submit', async (event) => {
   els.uploadResult.textContent = 'Running detector and saving event...';
   try {
     const result = await api('/api/detect/test-image', { method: 'POST', body: formData });
-    els.uploadResult.textContent = `Created event #${result.event_id} with ${result.detections.length} detection(s).`;
+    els.uploadResult.textContent = `Created event #${result.event_id} with ${result.detections.length} detection(s) from ${result.backend_used || result.ai_backend}. ${result.detections.map((d) => `${d.label} ${Math.round(d.confidence * 100)}%`).join(', ') || 'No objects found.'}`;
     await refreshAll();
   } catch (error) {
     els.uploadResult.textContent = error.message;
