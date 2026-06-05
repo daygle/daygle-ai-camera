@@ -22,6 +22,12 @@ const els = {
   events: document.getElementById('events'),
   alerts: document.getElementById('alerts'),
   objectStats: document.getElementById('objectStats'),
+  recordings: document.getElementById('recordings'),
+  recordingFilter: document.getElementById('recordingFilter'),
+  recordingSearchBtn: document.getElementById('recordingSearchBtn'),
+  recordingClearBtn: document.getElementById('recordingClearBtn'),
+  clipPlayer: document.getElementById('clipPlayer'),
+  clipPlayerStatus: document.getElementById('clipPlayerStatus'),
 };
 
 let authState = { user: null, csrfToken: null };
@@ -85,9 +91,15 @@ function renderEvents(events) {
         <span>${formatDate(event.created_at)}</span>
       </div>
       <div>${detectionBadges(event.detections)}</div>
-      <p class="muted">Source: ${escapeHtml(event.source)}</p>
+      <p class="muted">Source: ${escapeHtml(event.source)} · ${escapeHtml(event.recording_status || 'none')}</p>
+      <div>${recordingLink(event.recordings)}</div>
     </div>
   `).join('');
+}
+
+function recordingLink(recordings = []) {
+  if (!recordings.length) return '<span class="muted">Recording: none</span>';
+  return recordings.map((recording) => `<button class="link-button" data-play-recording="${recording.id}">Recording #${recording.id}</button>`).join('');
 }
 
 function renderAlerts(alerts) {
@@ -122,6 +134,42 @@ function renderObjectStats(objects = []) {
     button.addEventListener('click', () => {
       els.searchInput.value = button.dataset.label;
       loadEvents(button.dataset.label);
+      loadRecordings(button.dataset.label);
+    });
+  });
+}
+
+
+function renderRecordings(recordings) {
+  if (!recordings.length) {
+    els.recordings.innerHTML = '<div class="empty">No recordings yet. Event mode creates metadata when detections are saved.</div>';
+    return;
+  }
+
+  els.recordings.innerHTML = recordings.map((recording) => {
+    const eventLabel = recording.event_id ? `Event #${recording.event_id}` : 'No linked event';
+    const fileName = (recording.file_path || '').split('/').pop();
+    return `
+      <div class="item">
+        <div class="item-title">
+          <span>Recording #${recording.id} · ${escapeHtml(eventLabel)}</span>
+          <span>${formatDate(recording.started_at)}</span>
+        </div>
+        <div>${detectionBadges(recording.detections)}</div>
+        <p class="muted">Duration: ${Number(recording.duration_seconds || 0).toFixed(1)}s · Source: ${escapeHtml(recording.source)} · ${escapeHtml(fileName)}</p>
+        <button class="secondary" data-play-recording="${recording.id}">Play clip</button>
+      </div>
+    `;
+  }).join('');
+}
+
+function bindPlaybackButtons() {
+  document.querySelectorAll('[data-play-recording]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = button.dataset.playRecording;
+      els.clipPlayer.src = `/api/recordings/${id}/stream`;
+      els.clipPlayerStatus.textContent = `Playing recording #${id}. If playback shows a 404, only placeholder metadata exists for this mock event.`;
+      els.clipPlayer.load();
     });
   });
 }
@@ -169,8 +217,15 @@ async function loadAlerts() {
   renderAlerts(await api('/api/alerts'));
 }
 
+async function loadRecordings(label = '') {
+  const path = label ? `/api/recordings?label=${encodeURIComponent(label)}` : '/api/recordings';
+  renderRecordings(await api(path));
+  bindPlaybackButtons();
+}
+
 async function refreshAll() {
-  await Promise.all([loadStatus(), loadStats(), loadEvents(), loadAlerts()]);
+  await Promise.all([loadStatus(), loadStats(), loadEvents(), loadAlerts(), loadRecordings()]);
+  bindPlaybackButtons();
 }
 
 els.generateBtn.addEventListener('click', async () => {
@@ -224,13 +279,30 @@ els.uploadForm.addEventListener('submit', async (event) => {
   }
 });
 
-els.searchBtn.addEventListener('click', () => loadEvents(els.searchInput.value.trim()));
+els.searchBtn.addEventListener('click', () => {
+  const label = els.searchInput.value.trim();
+  loadEvents(label);
+  loadRecordings(label);
+});
 els.clearBtn.addEventListener('click', () => {
   els.searchInput.value = '';
   loadEvents();
+  loadRecordings();
+});
+els.recordingSearchBtn.addEventListener('click', () => loadRecordings(els.recordingFilter.value.trim()));
+els.recordingClearBtn.addEventListener('click', () => {
+  els.recordingFilter.value = '';
+  loadRecordings();
 });
 els.searchInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') loadEvents(els.searchInput.value.trim());
+  if (event.key === 'Enter') {
+    const label = els.searchInput.value.trim();
+    loadEvents(label);
+    loadRecordings(label);
+  }
+});
+els.recordingFilter.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') loadRecordings(els.recordingFilter.value.trim());
 });
 
 loadAuth().then(refreshAll);

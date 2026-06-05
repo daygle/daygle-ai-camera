@@ -12,12 +12,14 @@ class Storage:
         self.data_dir = Path(storage_config.get('data_dir', 'data'))
         self.snapshots_dir = Path(storage_config.get('snapshots_dir', 'data/snapshots'))
         self.events_dir = Path(storage_config.get('events_dir', 'data/events'))
+        self.recordings_dir = Path(storage_config.get('recordings_dir', self.data_dir / 'recordings'))
         self.ensure_directories()
 
     def ensure_directories(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.snapshots_dir.mkdir(parents=True, exist_ok=True)
         self.events_dir.mkdir(parents=True, exist_ok=True)
+        self.recordings_dir.mkdir(parents=True, exist_ok=True)
 
     def save_mock_snapshot(self, frame: dict[str, Any], detections: list[dict[str, Any]]) -> str:
         created = datetime.now(timezone.utc)
