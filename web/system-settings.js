@@ -1,5 +1,30 @@
 let csrfToken = null;
 const messageEl = document.getElementById('systemMessage');
+
+function createDatabaseRestoreSection() {
+  const section = document.createElement('section');
+  section.className = 'card';
+  section.innerHTML = `
+    <h2>Database backup & restore</h2>
+    <p class="muted">Download a point-in-time SQLite backup or restore a previous Daygle database. Restores replace events, users, settings, alert rules, and sessions.</p>
+    <div class="button-row"><a class="button-link" href="/api/settings/system/database/backup">Download database backup</a></div>
+    <form id="databaseRestoreForm" class="form-grid">
+      <label><span>Restore backup file</span><input name="file" type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3,application/x-sqlite3" required /></label>
+      <button class="secondary" type="submit">Restore database</button>
+    </form>
+    <p class="muted">A safety backup of the current database is created before every restore.</p>
+  `;
+
+  const authSection = document.getElementById('authSettingsForm')?.closest('section');
+  if (authSection) {
+    authSection.before(section);
+  } else {
+    document.querySelector('main')?.append(section);
+  }
+}
+
+createDatabaseRestoreSection();
+
 const forms = {
   camera: document.getElementById('cameraSettingsForm'),
   anpr: document.getElementById('anprSettingsForm'),
