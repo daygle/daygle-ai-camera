@@ -42,6 +42,12 @@ h2 { margin: 0; font-size: 20px; }
 }
 .card span { color: var(--muted); font-size: 13px; }
 .card strong { display: block; margin-top: 8px; font-size: 28px; }
+
+.ai-status-card small { display: block; margin-top: 6px; line-height: 1.4; }
+.ai-mode { font-size: 24px; letter-spacing: .04em; }
+.ai-mode.mock-mode { color: #fbbf24; }
+.ai-mode.onnx-active { color: var(--success); }
+.ai-mode.model-failed { color: var(--danger); }
 .section-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .primary, button {
   border: 0;
