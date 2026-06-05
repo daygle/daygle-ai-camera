@@ -4,6 +4,9 @@ const els = {
   totalAlerts: document.getElementById('totalAlerts'),
   frameNumber: document.getElementById('frameNumber'),
   generateBtn: document.getElementById('generateBtn'),
+  userMenuBtn: document.getElementById('userMenuBtn'),
+  usersLink: document.getElementById('usersLink'),
+  settingsLink: document.getElementById('settingsLink'),
   uploadForm: document.getElementById('uploadForm'),
   imageInput: document.getElementById('imageInput'),
   uploadBtn: document.getElementById('uploadBtn'),
@@ -16,8 +19,18 @@ const els = {
   objectStats: document.getElementById('objectStats'),
 };
 
+let authState = { user: null, csrfToken: null };
+
 async function api(path, options = {}) {
-  const response = await fetch(path, options);
+  const headers = { ...(options.headers || {}) };
+  if (authState.csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((options.method || 'GET').toUpperCase())) {
+    headers['X-CSRF-Token'] = authState.csrfToken;
+  }
+  const response = await fetch(path, { ...options, headers });
+  if (response.status === 401) {
+    window.location.href = '/login';
+    throw new Error('Authentication required');
+  }
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`);
   }
@@ -101,6 +114,16 @@ function renderObjectStats(objects = []) {
   });
 }
 
+async function loadAuth() {
+  const authInfo = await api('/api/auth/me');
+  authState = { user: authInfo.user, csrfToken: authInfo.csrf_token };
+  els.userMenuBtn.textContent = `${authInfo.user.username} ▼`;
+  if (authInfo.user.role !== 'admin') {
+    els.usersLink.hidden = true;
+    els.settingsLink.hidden = true;
+  }
+}
+
 async function loadStatus() {
   try {
     const status = await api('/api/status');
@@ -178,6 +201,6 @@ els.searchInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') loadEvents(els.searchInput.value.trim());
 });
 
-refreshAll();
+loadAuth().then(refreshAll);
 setInterval(loadStatus, 3000);
 setInterval(loadStats, 10000);

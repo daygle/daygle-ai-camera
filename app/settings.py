@@ -42,6 +42,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
             }
         ],
     },
+    "auth": {
+        "enabled": True,
+        "session_timeout_hours": 12,
+        "max_login_attempts": 5,
+        "lockout_minutes": 15,
+    },
     "storage": {
         "data_dir": "data",
         "database": "data/daygle_ai_camera.sqlite3",
