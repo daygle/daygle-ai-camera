@@ -619,6 +619,107 @@ def test_admin_alert_rule_crud_and_alert_engine_uses_db_rules(tmp_path, monkeypa
         thread.join(timeout=5)
 
 
+def test_profile_update_and_password_change(tmp_path, monkeypatch):
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        status, _headers, profile = client.request(
+            "/api/profile",
+            method="PUT",
+            json_body={"timezone": "UTC", "date_format": "iso", "time_format": "24h"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert profile["timezone"] == "UTC"
+        assert profile["date_format"] == "iso"
+
+        status, _headers, changed = client.request(
+            "/api/profile/password",
+            method="POST",
+            json_body={"current_password": "Admin123!", "new_password": "Admin456!"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert changed["ok"] is True
+
+        client.request("/logout", method="POST", headers={"X-CSRF-Token": csrf})
+        new_client = LocalClient(base_url)
+        _login(new_client, "admin", "Admin456!")
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_email_alert_settings_and_delivery(tmp_path, monkeypatch):
+    sent: list[tuple[dict[str, object], int, list[str]]] = []
+
+    class FakeEmailAlertService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def send_alert(self, alert, *, event_id, recipients):
+            sent.append((alert, event_id, list(recipients)))
+
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        main_module = sys.modules["app.main"]
+        monkeypatch.setattr(main_module, "EmailAlertService", FakeEmailAlertService)
+
+        status, _headers, email_settings = client.request(
+            "/api/settings/alert-email",
+            method="PUT",
+            json_body={
+                "enabled": True,
+                "host": "smtp.example.com",
+                "port": 587,
+                "from_address": "alerts@example.com",
+                "use_tls": True,
+                "use_ssl": False,
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert email_settings["enabled"] is True
+
+        for rule in client.request("/api/settings/alerts")[2]["rules"]:
+            client.request(f"/api/settings/alerts/{rule['id']}", method="DELETE", headers={"X-CSRF-Token": csrf})
+
+        status, _headers, rule = client.request(
+            "/api/settings/alerts",
+            method="POST",
+            json_body={
+                "name": "Cat email",
+                "object": "cat",
+                "min_confidence": 0.1,
+                "cooldown_seconds": 0,
+                "enabled": True,
+                "email_enabled": True,
+                "email_recipients": ["user@example.com"],
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert rule["email_recipients"] == ["user@example.com"]
+
+        status, _headers, created = client.request("/api/mock/detect", method="POST", headers={"X-CSRF-Token": csrf})
+        assert status == 200
+        assert created["created"] is True
+        assert sent
+        assert sent[0][1] == created["event_id"]
+        assert sent[0][2] == ["user@example.com"]
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_recording_table_creation(tmp_path):
     from app.database import EventDatabase
 

@@ -24,6 +24,7 @@ from app.alerts import AlertEngine
 from app.auth import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, AuthError, AuthService
 from app.database import EventDatabase
 from app.detector import DetectorUnavailableError, MockDetector, create_detector, load_labels
+from app.email_alerts import EmailAlertError, EmailAlertService
 from app.mock_camera import MockCamera
 from app.recordings import RecordingService
 from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, load_settings
@@ -84,6 +85,14 @@ def effective_ai_config() -> dict[str, Any]:
 
 def effective_alert_rules() -> list[dict[str, Any]]:
     return database.list_alert_rules()
+
+
+def effective_email_alert_settings() -> dict[str, Any]:
+    settings = copy.deepcopy(config.get('alerts', {}).get('email', {}))
+    override = database.get_setting('alert_email')
+    if isinstance(override, dict):
+        settings.update(override)
+    return settings
 
 
 database.seed_alert_rules(config.get('alerts', {}).get('rules', []), utc_now())
@@ -180,7 +189,7 @@ def log_detector_initialization(context: str = 'startup') -> None:
 
 PUBLIC_PREFIXES = ('/static/',)
 PUBLIC_PATHS = {'/login', '/setup'}
-ADMIN_PATHS = {'/settings', '/users'}
+ADMIN_PATHS = {'/settings', '/alert-settings', '/users'}
 ADMIN_API_PREFIXES = ('/api/users', '/api/settings')
 MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
@@ -210,6 +219,8 @@ async def authentication_middleware(request: Request, call_next):
     request.state.user = session['user']
 
     admin_required = path in ADMIN_PATHS or path.startswith('/api/users') or path.startswith('/api/settings/ai') or (
+        path.startswith('/api/settings/alert-email') and request.method in MUTATING_METHODS
+    ) or (
         path.startswith('/api/settings/alerts') and request.method in MUTATING_METHODS
     )
     if admin_required and session['user']['role'] != 'admin':
@@ -284,6 +295,21 @@ def attach_event_recording(event_id: int, event_time: str, source: str) -> int |
     if metadata is None:
         return None
     return database.add_recording(created_at=utc_now(), **metadata)
+
+
+def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int) -> None:
+    if not triggered:
+        return
+    rules_by_name = {str(rule.get('name')): rule for rule in effective_alert_rules()}
+    mailer = EmailAlertService(effective_email_alert_settings())
+    for alert in triggered:
+        rule = rules_by_name.get(str(alert.get('rule_name')))
+        if not rule or not rule.get('email_enabled'):
+            continue
+        try:
+            mailer.send_alert(alert, event_id=event_id, recipients=rule.get('email_recipients', []))
+        except EmailAlertError as exc:
+            logger.warning('Failed to send email alert for event %s rule %s: %s', event_id, alert.get('rule_name'), exc)
 
 
 @app.get('/login')
@@ -427,7 +453,21 @@ def dashboard_aliases():
 def settings_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>Setup / AI Settings · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell"><header class="hero"><div><p class="eyebrow">Administration</p><h1>Setup / AI Settings</h1><p class="muted">Configure AI detection, install models, reload the detector, and manage alert rules from SQLite.</p></div><a class="button-link" href="/">Dashboard</a></header><section class="card"><h2>AI status</h2><div id="settingsMessage" class="muted"></div><div id="aiStatusPanel" class="status-panel"></div><div class="button-row"><button id="checkModelBtn" class="secondary" type="button">Check model</button><button id="downloadModelBtn" type="button">Download YOLOv8n ONNX</button><button id="reloadDetectorBtn" class="secondary" type="button">Reload detector</button><button id="testDetectorBtn" class="secondary" type="button">Test detector</button></div></section><section class="card"><h2>AI settings</h2><form id="aiSettingsForm" class="form-grid"><label><span>AI enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Backend</span><select name="backend"><option value="mock">mock</option><option value="onnx">onnx</option></select></label><label><span>Confidence</span><input name="confidence" type="number" min="0" max="1" step="0.01" /></label><label><span>IOU threshold</span><input name="iou_threshold" type="number" min="0" max="1" step="0.01" /></label><label><span>Input size</span><input name="input_size" type="number" min="32" max="2048" step="32" /></label><label><span>Model path</span><input name="model_path" /></label><label><span>Labels path</span><input name="labels_path" /></label><button type="submit">Save AI settings</button></form></section><section class="card"><h2>Alert rules</h2><form id="alertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="name" placeholder="Rule name" required /><input name="object" list="labelOptions" placeholder="Object label" required /><datalist id="labelOptions"></datalist><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" value="0.6" /><input name="cooldown_seconds" type="number" min="0" step="1" placeholder="Cooldown seconds" value="60" /><label><span>Enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="active_start" type="time" /><input name="active_end" type="time" /><button type="submit">Save alert rule</button><button id="cancelEditRule" class="secondary" type="button">Cancel edit</button></form><div id="alertRules" class="list"></div></section></main><script src="/static/settings.js"></script></body></html>""")
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>Setup / AI Settings</h1><p class="muted">Configure AI detection, install models, and reload the detector.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/alert-settings">Alert settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>AI status</h2><div id="settingsMessage" class="muted"></div><div id="aiStatusPanel" class="status-panel"></div><div class="button-row"><button id="checkModelBtn" class="secondary" type="button">Check model</button><button id="downloadModelBtn" type="button">Download YOLOv8n ONNX</button><button id="reloadDetectorBtn" class="secondary" type="button">Reload detector</button><button id="testDetectorBtn" class="secondary" type="button">Test detector</button></div></section><section class="card"><h2>AI settings</h2><form id="aiSettingsForm" class="form-grid"><label><span>AI enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Backend</span><select name="backend"><option value="mock">mock</option><option value="onnx">onnx</option></select></label><label><span>Confidence</span><input name="confidence" type="number" min="0" max="1" step="0.01" /></label><label><span>IOU threshold</span><input name="iou_threshold" type="number" min="0" max="1" step="0.01" /></label><label><span>Input size</span><input name="input_size" type="number" min="32" max="2048" step="32" /></label><label><span>Model path</span><input name="model_path" /></label><label><span>Labels path</span><input name="labels_path" /></label><button type="submit">Save AI settings</button></form></section></main><script src="/static/settings.js"></script></body></html>""")
+
+
+@app.get('/alert-settings')
+def alert_settings_page():
+    return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Alert Settings · Daygle AI Camera</title>
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>Alert Settings</h1><p class="muted">Manage detection rules and email delivery through your mail server.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Email delivery</h2><div id="settingsMessage" class="muted"></div><form id="emailSettingsForm" class="form-grid"><label><span>Email alerts</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="host" placeholder="SMTP host" /><input name="port" type="number" min="1" max="65535" placeholder="Port" /><input name="from_address" type="email" placeholder="From address" /><input name="username" placeholder="SMTP username" /><input name="password" type="password" placeholder="SMTP password" autocomplete="new-password" /><label><span>STARTTLS</span><select name="use_tls"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>SSL</span><select name="use_ssl"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><button type="submit">Save mail server</button></form></section><section class="card"><h2>Alert rules</h2><form id="alertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="name" placeholder="Rule name" required /><input name="object" list="labelOptions" placeholder="Object label" required /><datalist id="labelOptions"></datalist><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" value="0.6" /><input name="cooldown_seconds" type="number" min="0" step="1" placeholder="Cooldown seconds" value="60" /><label><span>Rule</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Email</span><select name="email_enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><input name="email_recipients" placeholder="Email recipients, comma separated" /><input name="active_start" type="time" /><input name="active_end" type="time" /><button type="submit">Save alert rule</button><button id="cancelEditRule" class="secondary" type="button">Cancel edit</button></form><div id="alertRules" class="list"></div></section></main><script src="/static/alert-settings.js"></script></body></html>""")
+
+
+@app.get('/profile')
+def profile_page():
+    return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Profile · Daygle AI Camera</title>
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Account</p><h1>Profile</h1><p class="muted">Manage your display preferences and password.</p></div><a class="button-link" href="/">Dashboard</a></header><section class="card"><h2>Profile details</h2><div id="profileMessage" class="muted"></div><div id="profileSummary" class="status-panel"></div><form id="profileForm" class="form-grid"><input name="timezone" placeholder="Timezone" required /><label><span>Date format</span><select name="date_format"><option value="locale">Browser locale</option><option value="iso">YYYY-MM-DD</option><option value="au">DD/MM/YYYY</option><option value="us">MM/DD/YYYY</option></select></label><label><span>Time format</span><select name="time_format"><option value="24h">24 hour</option><option value="12h">12 hour</option></select></label><button type="submit">Save profile</button></form></section><section class="card"><h2>Change password</h2><form id="passwordForm" class="form-grid"><input name="current_password" type="password" placeholder="Current password" autocomplete="current-password" required /><input name="new_password" type="password" placeholder="New password" autocomplete="new-password" required /><input name="confirm_password" type="password" placeholder="Confirm password" autocomplete="new-password" required /><button type="submit">Change password</button></form></section></main><script src="/static/profile.js"></script></body></html>""")
 
 @app.get('/users')
 def users_page():
@@ -440,6 +480,34 @@ def users_page():
 def me(request: Request):
     session = require_session(request)
     return {'user': session['user'], 'csrf_token': session['csrf_token'], 'expires_at': session['expires_at']}
+
+
+@app.put('/api/profile')
+async def update_profile(request: Request):
+    user = require_user(request)
+    payload = await request.json()
+    try:
+        updated = auth.update_profile(
+            int(user['id']),
+            timezone_name=payload.get('timezone'),
+            date_format=payload.get('date_format'),
+            time_format=payload.get('time_format'),
+        )
+    except AuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    request.state.user = updated
+    return updated
+
+
+@app.post('/api/profile/password')
+async def change_profile_password(request: Request):
+    user = require_user(request)
+    payload = await request.json()
+    try:
+        auth.change_password(int(user['id']), str(payload.get('current_password') or ''), str(payload.get('new_password') or ''))
+    except AuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {'ok': True}
 
 
 @app.get('/api/status')
@@ -496,6 +564,7 @@ def generate_detection(force: bool = True):
             confidence=alert['confidence'],
             message=alert['message'],
         )
+    deliver_email_alerts(triggered, event_id)
 
     return {
         'created': True,
@@ -555,6 +624,7 @@ async def detect_test_image(request: Request):
             confidence=alert['confidence'],
             message=alert['message'],
         )
+    deliver_email_alerts(triggered, event_id)
 
     return {
         'created': True,
@@ -817,6 +887,20 @@ def validate_alert_rule(payload: dict[str, Any], *, partial: bool = False) -> di
         rule['cooldown_seconds'] = value
     if 'enabled' in payload or not partial:
         rule['enabled'] = bool(payload.get('enabled', True))
+    if 'email_enabled' in payload or not partial:
+        rule['email_enabled'] = bool(payload.get('email_enabled', False))
+    if 'email_recipients' in payload or not partial:
+        raw_recipients = payload.get('email_recipients', [])
+        if isinstance(raw_recipients, str):
+            recipients = [value.strip() for value in raw_recipients.split(',') if value.strip()]
+        elif isinstance(raw_recipients, list):
+            recipients = [str(value).strip() for value in raw_recipients if str(value).strip()]
+        else:
+            raise HTTPException(status_code=400, detail='email_recipients must be a list or comma-separated string.')
+        for recipient in recipients:
+            if '@' not in recipient:
+                raise HTTPException(status_code=400, detail='Email recipients must be valid email addresses.')
+        rule['email_recipients'] = recipients
     for field in ('active_start', 'active_end'):
         if field in payload:
             value = payload.get(field) or None
@@ -824,6 +908,35 @@ def validate_alert_rule(payload: dict[str, Any], *, partial: bool = False) -> di
                 raise HTTPException(status_code=400, detail=f'{field} must use HH:MM format.')
             rule[field] = value
     return rule
+
+
+def validate_alert_email_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    current = effective_email_alert_settings()
+    allowed = {'enabled', 'host', 'port', 'username', 'password', 'from_address', 'use_tls', 'use_ssl'}
+    updated = {key: current.get(key) for key in allowed if key in current}
+    for key, value in payload.items():
+        if key in allowed:
+            updated[key] = value
+    for key in ('enabled', 'use_tls', 'use_ssl'):
+        value = updated.get(key, False)
+        updated[key] = value.lower() in {'1', 'true', 'yes', 'on'} if isinstance(value, str) else bool(value)
+    try:
+        updated['port'] = int(updated.get('port') or 587)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='SMTP port must be an integer.') from exc
+    if not 1 <= updated['port'] <= 65535:
+        raise HTTPException(status_code=400, detail='SMTP port must be between 1 and 65535.')
+    for key in ('host', 'username', 'password', 'from_address'):
+        updated[key] = str(updated.get(key) or '').strip()
+    if updated['enabled'] and not updated['host']:
+        raise HTTPException(status_code=400, detail='SMTP host is required when email alerts are enabled.')
+    if updated['enabled'] and not updated['from_address']:
+        raise HTTPException(status_code=400, detail='From address is required when email alerts are enabled.')
+    if updated['from_address'] and '@' not in updated['from_address']:
+        raise HTTPException(status_code=400, detail='From address must be a valid email address.')
+    if updated['use_ssl']:
+        updated['use_tls'] = False
+    return updated
 
 
 @app.get('/api/settings/ai')
@@ -932,6 +1045,18 @@ def test_ai_detector():
 @app.get('/api/settings/alerts')
 def get_alert_rules():
     return {'rules': database.list_alert_rules(), 'available_labels': available_labels()}
+
+
+@app.get('/api/settings/alert-email')
+def get_alert_email_settings():
+    return effective_email_alert_settings()
+
+
+@app.put('/api/settings/alert-email')
+async def update_alert_email_settings(request: Request):
+    payload = await request.json()
+    settings = validate_alert_email_settings(payload)
+    return database.set_setting('alert_email', settings, utc_now())
 
 
 @app.post('/api/settings/alerts')

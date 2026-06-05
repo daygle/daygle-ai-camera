@@ -48,6 +48,9 @@ class AuthService:
                     password_hash TEXT NOT NULL,
                     role TEXT NOT NULL CHECK(role IN ('admin', 'viewer')),
                     is_active INTEGER NOT NULL DEFAULT 1,
+                    timezone TEXT NOT NULL DEFAULT 'Australia/Sydney',
+                    date_format TEXT NOT NULL DEFAULT 'locale',
+                    time_format TEXT NOT NULL DEFAULT '24h',
                     failed_attempts INTEGER NOT NULL DEFAULT 0,
                     locked_until TEXT,
                     created_at TEXT NOT NULL,
@@ -83,6 +86,12 @@ class AuthService:
             columns = {row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()}
             if "last_login_at" not in columns:
                 db.execute("ALTER TABLE users ADD COLUMN last_login_at TEXT")
+            if "timezone" not in columns:
+                db.execute("ALTER TABLE users ADD COLUMN timezone TEXT NOT NULL DEFAULT 'Australia/Sydney'")
+            if "date_format" not in columns:
+                db.execute("ALTER TABLE users ADD COLUMN date_format TEXT NOT NULL DEFAULT 'locale'")
+            if "time_format" not in columns:
+                db.execute("ALTER TABLE users ADD COLUMN time_format TEXT NOT NULL DEFAULT '24h'")
             db.execute("DELETE FROM user_sessions WHERE expires_at <= ?", (utc_now(),))
             db.commit()
 
@@ -152,14 +161,14 @@ class AuthService:
     def list_users(self) -> list[dict[str, Any]]:
         with self.connect() as db:
             rows = db.execute(
-                "SELECT id, username, role, is_active, failed_attempts, locked_until, created_at, updated_at, last_login_at FROM users ORDER BY username"
+                "SELECT id, username, role, is_active, timezone, date_format, time_format, failed_attempts, locked_until, created_at, updated_at, last_login_at FROM users ORDER BY username"
             ).fetchall()
             return [dict(row) for row in rows]
 
     def get_user(self, user_id: int) -> dict[str, Any] | None:
         with self.connect() as db:
             row = db.execute(
-                "SELECT id, username, role, is_active, failed_attempts, locked_until, created_at, updated_at, last_login_at FROM users WHERE id = ?",
+                "SELECT id, username, role, is_active, timezone, date_format, time_format, failed_attempts, locked_until, created_at, updated_at, last_login_at FROM users WHERE id = ?",
                 (user_id,),
             ).fetchone()
             return dict(row) if row else None
@@ -199,6 +208,53 @@ class AuthService:
                 db.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
             db.commit()
         return self.get_user(user_id)  # type: ignore[return-value]
+
+    def update_profile(
+        self,
+        user_id: int,
+        *,
+        timezone_name: str | None = None,
+        date_format: str | None = None,
+        time_format: str | None = None,
+    ) -> dict[str, Any]:
+        updates: list[str] = []
+        params: list[Any] = []
+        if timezone_name is not None:
+            timezone_name = timezone_name.strip()
+            if not timezone_name:
+                raise AuthError("Timezone is required.")
+            updates.append("timezone = ?")
+            params.append(timezone_name)
+        if date_format is not None:
+            if date_format not in {"locale", "iso", "us", "au"}:
+                raise AuthError("Date format must be locale, iso, us, or au.")
+            updates.append("date_format = ?")
+            params.append(date_format)
+        if time_format is not None:
+            if time_format not in {"12h", "24h"}:
+                raise AuthError("Time format must be 12h or 24h.")
+            updates.append("time_format = ?")
+            params.append(time_format)
+        if not updates:
+            existing = self.get_user(user_id)
+            if not existing:
+                raise AuthError("User not found.")
+            return existing
+        updates.append("updated_at = ?")
+        params.extend([utc_now(), user_id])
+        with self.connect() as db:
+            cursor = db.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", params)
+            if cursor.rowcount == 0:
+                raise AuthError("User not found.")
+            db.commit()
+        return self.get_user(user_id)  # type: ignore[return-value]
+
+    def change_password(self, user_id: int, current_password: str, new_password: str) -> None:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            if row is None or not self.verify_password(current_password, row["password_hash"]):
+                raise AuthError("Current password is incorrect.")
+        self.update_user(user_id, password=new_password)
 
     def too_many_recent_failures(self, db: sqlite3.Connection, username: str, ip_address: str, now: datetime) -> bool:
         window_start = (now - self.lockout).isoformat()
@@ -300,6 +356,9 @@ class AuthService:
             "username": row["username"],
             "role": row["role"],
             "is_active": bool(row["is_active"]),
+            "timezone": row["timezone"] if "timezone" in row.keys() else "Australia/Sydney",
+            "date_format": row["date_format"] if "date_format" in row.keys() else "locale",
+            "time_format": row["time_format"] if "time_format" in row.keys() else "24h",
         }
 
 

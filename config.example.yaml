@@ -29,12 +29,24 @@ ai:
 
 alerts:
   enabled: true
+  email:
+    enabled: false
+    host: smtp.example.com
+    port: 587
+    username: alerts@example.com
+    password: change-me
+    from_address: alerts@example.com
+    use_tls: true
+    use_ssl: false
   rules:
     - name: Cat alert
       object: cat
       min_confidence: 0.50
       cooldown_seconds: 60
       enabled: true
+      email_enabled: false
+      email_recipients:
+        - user@example.com
 
 recording:
   enabled: true

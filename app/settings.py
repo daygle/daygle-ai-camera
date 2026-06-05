@@ -32,6 +32,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "alerts": {
         "enabled": True,
+        "email": {
+            "enabled": False,
+            "host": "",
+            "port": 587,
+            "username": "",
+            "password": "",
+            "from_address": "",
+            "use_tls": True,
+            "use_ssl": False,
+        },
         "rules": [
             {
                 "name": "Cat alert",
@@ -39,6 +49,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "min_confidence": 0.50,
                 "cooldown_seconds": 60,
                 "enabled": True,
+                "email_enabled": False,
+                "email_recipients": [],
             }
         ],
     },

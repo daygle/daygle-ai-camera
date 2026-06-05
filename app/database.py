@@ -95,6 +95,8 @@ class EventDatabase:
                     min_confidence REAL NOT NULL DEFAULT 0.5,
                     cooldown_seconds INTEGER NOT NULL DEFAULT 60,
                     enabled INTEGER NOT NULL DEFAULT 1,
+                    email_enabled INTEGER NOT NULL DEFAULT 0,
+                    email_recipients TEXT NOT NULL DEFAULT '[]',
                     active_start TEXT,
                     active_end TEXT,
                     created_at TEXT NOT NULL,
@@ -104,6 +106,13 @@ class EventDatabase:
                 CREATE INDEX IF NOT EXISTS idx_alert_rules_object ON alert_rules(object);
                 """
             )
+            self._ensure_column(db, "alert_rules", "email_enabled", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(db, "alert_rules", "email_recipients", "TEXT NOT NULL DEFAULT '[]'")
+
+    def _ensure_column(self, db: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+        columns = {row["name"] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in columns:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def add_event(
         self,
@@ -293,8 +302,8 @@ class EventDatabase:
             for rule in rules:
                 db.execute(
                     """
-                    INSERT INTO alert_rules (name, object, min_confidence, cooldown_seconds, enabled, active_start, active_end, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO alert_rules (name, object, min_confidence, cooldown_seconds, enabled, email_enabled, email_recipients, active_start, active_end, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         str(rule.get("name") or rule.get("object") or "Alert"),
@@ -302,6 +311,8 @@ class EventDatabase:
                         float(rule.get("min_confidence", 0.5)),
                         int(rule.get("cooldown_seconds", 60)),
                         int(bool(rule.get("enabled", True))),
+                        int(bool(rule.get("email_enabled", False))),
+                        json.dumps(rule.get("email_recipients", [])),
                         rule.get("active_start"),
                         rule.get("active_end"),
                         now,
@@ -313,8 +324,8 @@ class EventDatabase:
         with self.connect() as db:
             cursor = db.execute(
                 """
-                INSERT INTO alert_rules (name, object, min_confidence, cooldown_seconds, enabled, active_start, active_end, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO alert_rules (name, object, min_confidence, cooldown_seconds, enabled, email_enabled, email_recipients, active_start, active_end, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     rule["name"],
@@ -322,6 +333,8 @@ class EventDatabase:
                     float(rule["min_confidence"]),
                     int(rule["cooldown_seconds"]),
                     int(bool(rule["enabled"])),
+                    int(bool(rule.get("email_enabled", False))),
+                    json.dumps(rule.get("email_recipients", [])),
                     rule.get("active_start"),
                     rule.get("active_end"),
                     now,
@@ -333,12 +346,14 @@ class EventDatabase:
     def update_alert_rule(self, rule_id: int, rule: dict[str, Any], now: str) -> dict[str, Any] | None:
         updates: list[str] = []
         params: list[Any] = []
-        for key in ("name", "object", "min_confidence", "cooldown_seconds", "enabled", "active_start", "active_end"):
+        for key in ("name", "object", "min_confidence", "cooldown_seconds", "enabled", "email_enabled", "email_recipients", "active_start", "active_end"):
             if key in rule:
                 updates.append(f"{key} = ?")
                 value = rule[key]
-                if key == "enabled":
+                if key in {"enabled", "email_enabled"}:
                     value = int(bool(value))
+                if key == "email_recipients":
+                    value = json.dumps(value)
                 params.append(value)
         if not updates:
             with self.connect() as db:
@@ -361,6 +376,8 @@ class EventDatabase:
     def _alert_rule(self, row: sqlite3.Row) -> dict[str, Any]:
         rule = dict(row)
         rule["enabled"] = bool(rule["enabled"])
+        rule["email_enabled"] = bool(rule.get("email_enabled"))
+        rule["email_recipients"] = json.loads(rule.get("email_recipients") or "[]")
         return rule
 
     def _event_with_detections(self, db: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:

@@ -9,6 +9,7 @@ const els = {
   userMenuBtn: document.getElementById('userMenuBtn'),
   usersLink: document.getElementById('usersLink'),
   settingsLink: document.getElementById('settingsLink'),
+  alertSettingsLink: document.getElementById('alertSettingsLink'),
   uploadForm: document.getElementById('uploadForm'),
   imageInput: document.getElementById('imageInput'),
   uploadBtn: document.getElementById('uploadBtn'),
@@ -181,6 +182,7 @@ async function loadAuth() {
   if (authInfo.user.role !== 'admin') {
     els.usersLink.hidden = true;
     els.settingsLink.hidden = true;
+    els.alertSettingsLink.hidden = true;
   }
 }
 

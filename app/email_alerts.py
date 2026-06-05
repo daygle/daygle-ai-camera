@@ -1,0 +1,62 @@
+from __future__ import annotations
+
+import smtplib
+from email.message import EmailMessage
+from typing import Any
+
+
+class EmailAlertError(Exception):
+    pass
+
+
+class EmailAlertService:
+    def __init__(self, settings: dict[str, Any]) -> None:
+        self.settings = settings
+
+    def configured(self) -> bool:
+        return bool(self.settings.get("enabled") and self.settings.get("host") and self.settings.get("from_address"))
+
+    def send_alert(self, alert: dict[str, Any], *, event_id: int, recipients: list[str]) -> None:
+        recipients = [recipient.strip() for recipient in recipients if recipient and recipient.strip()]
+        if not recipients or not self.configured():
+            return
+
+        message = EmailMessage()
+        message["Subject"] = f"Daygle alert: {alert.get('label', 'object')} detected"
+        message["From"] = str(self.settings.get("from_address"))
+        message["To"] = ", ".join(recipients)
+        message.set_content(
+            "\n".join(
+                [
+                    str(alert.get("message") or "Alert triggered."),
+                    "",
+                    f"Rule: {alert.get('rule_name')}",
+                    f"Object: {alert.get('label')}",
+                    f"Confidence: {float(alert.get('confidence', 0)):.2%}",
+                    f"Event ID: {event_id}",
+                ]
+            )
+        )
+
+        host = str(self.settings.get("host"))
+        port = int(self.settings.get("port") or (465 if self.settings.get("use_ssl") else 587))
+        username = str(self.settings.get("username") or "")
+        password = str(self.settings.get("password") or "")
+
+        try:
+            if self.settings.get("use_ssl"):
+                with smtplib.SMTP_SSL(host, port, timeout=10) as smtp:
+                    self._send(smtp, message, username, password)
+            else:
+                with smtplib.SMTP(host, port, timeout=10) as smtp:
+                    if self.settings.get("use_tls", True):
+                        smtp.starttls()
+                    self._send(smtp, message, username, password)
+        except Exception as exc:  # pragma: no cover - depends on external mail servers
+            raise EmailAlertError(str(exc)) from exc
+
+    @staticmethod
+    def _send(smtp: smtplib.SMTP, message: EmailMessage, username: str, password: str) -> None:
+        if username:
+            smtp.login(username, password)
+        smtp.send_message(message)
