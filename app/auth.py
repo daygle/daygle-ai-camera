@@ -138,7 +138,9 @@ class AuthService:
                     (username, self.hash_password(password), role, now, now),
                 )
                 db.commit()
-                user_id = int(cursor.lastrowid)
+                if cursor.lastrowid is None:
+                    raise AuthError("Failed to create user.")
+                user_id = cursor.lastrowid
         except sqlite3.IntegrityError as exc:
             raise AuthError("Username already exists.") from exc
         return self.get_user(user_id)  # type: ignore[return-value]

@@ -9,7 +9,6 @@ from urllib.parse import parse_qs
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.alerts import AlertEngine

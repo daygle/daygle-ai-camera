@@ -83,7 +83,9 @@ class EventDatabase:
                 """,
                 (created_at, source, snapshot_path, int(alert_triggered), json.dumps(metadata or {})),
             )
-            event_id = int(cursor.lastrowid)
+            if cursor.lastrowid is None:
+                raise RuntimeError("Failed to create event row")
+            event_id = cursor.lastrowid
             for detection in detections:
                 box = detection.get("box", {})
                 db.execute(
