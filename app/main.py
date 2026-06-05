@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import re
 import secrets
 from datetime import datetime, timezone
 from html import escape
@@ -14,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from app.alerts import AlertEngine
 from app.auth import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, AuthError, AuthService
 from app.database import EventDatabase
-from app.detector import DetectorUnavailableError, MockDetector, create_detector
+from app.detector import DetectorUnavailableError, MockDetector, create_detector, load_labels
 from app.mock_camera import MockCamera
 from app.settings import load_settings
 from app.storage import Storage
@@ -39,12 +41,31 @@ camera = MockCamera(
     fps=int(camera_config.get('fps', 15)),
 )
 
-detector = create_detector(config.get('ai', {}))
-mock_detector = MockDetector(config.get('ai', {}).get('categories', []), float(config.get('ai', {}).get('confidence', 0.45)))
-alerts = AlertEngine(config['alerts']['rules'])
 database = EventDatabase(config['storage']['database'])
 storage = Storage(config)
 auth = AuthService(config['storage']['database'], auth_config)
+SESSION_COOKIE_NAME = str(auth_config.get('cookie_name', SESSION_COOKIE))
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def effective_ai_config() -> dict[str, Any]:
+    settings = copy.deepcopy(config.get('ai', {}))
+    override = database.get_setting('ai')
+    if isinstance(override, dict):
+        settings.update(override)
+    return settings
+
+
+def effective_alert_rules() -> list[dict[str, Any]]:
+    return database.list_alert_rules()
+
+
+database.seed_alert_rules(config.get('alerts', {}).get('rules', []), utc_now())
+detector = create_detector(effective_ai_config())
+mock_detector = MockDetector(effective_ai_config().get('categories', []), float(effective_ai_config().get('confidence', 0.45)))
+alerts = AlertEngine(effective_alert_rules())
 
 PUBLIC_PREFIXES = ('/static/',)
 PUBLIC_PATHS = {'/login', '/setup'}
@@ -68,7 +89,7 @@ async def authentication_middleware(request: Request, call_next):
             return JSONResponse({'detail': 'Initial administrator setup is required.'}, status_code=403)
         return RedirectResponse('/setup', status_code=303)
 
-    session = auth.get_session(request.cookies.get(SESSION_COOKIE))
+    session = auth.get_session(request.cookies.get(SESSION_COOKIE_NAME))
     if session is None:
         if path.startswith('/api/'):
             return JSONResponse({'detail': 'Authentication required'}, status_code=401)
@@ -77,10 +98,13 @@ async def authentication_middleware(request: Request, call_next):
     request.state.session = session
     request.state.user = session['user']
 
-    if (path in ADMIN_PATHS or any(path.startswith(prefix) for prefix in ADMIN_API_PREFIXES)) and session['user']['role'] != 'admin':
+    admin_required = path in ADMIN_PATHS or path.startswith('/api/users') or path.startswith('/api/settings/ai') or (
+        path.startswith('/api/settings/alerts') and request.method in MUTATING_METHODS
+    )
+    if admin_required and session['user']['role'] != 'admin':
         return JSONResponse({'detail': 'Admin access required'}, status_code=403)
 
-    if path.startswith('/api/') and request.method in MUTATING_METHODS:
+    if (path.startswith('/api/') or path == '/logout') and request.method in MUTATING_METHODS:
         csrf_header = request.headers.get(CSRF_HEADER)
         if not csrf_header or csrf_header != session['csrf_token']:
             return JSONResponse({'detail': 'CSRF token missing or invalid'}, status_code=403)
@@ -90,7 +114,7 @@ async def authentication_middleware(request: Request, call_next):
 
 def set_session_cookie(response: Response, request: Request, token: str, expires_at: str) -> None:
     response.set_cookie(
-        SESSION_COOKIE,
+        SESSION_COOKIE_NAME,
         token,
         httponly=True,
         secure=request.url.scheme == 'https',
@@ -105,7 +129,7 @@ def set_csrf_cookie(response: Response, token: str, request: Request) -> None:
 
 
 def clear_auth_cookies(response: Response) -> None:
-    response.delete_cookie(SESSION_COOKIE)
+    response.delete_cookie(SESSION_COOKIE_NAME)
     response.delete_cookie(CSRF_COOKIE)
 
 
@@ -139,7 +163,7 @@ def require_session(request: Request) -> dict[str, Any]:
 
 @app.get('/login')
 def login_page(request: Request, error: str | None = None):
-    if auth_enabled and auth.users_exist() and auth.get_session(request.cookies.get(SESSION_COOKIE)):
+    if auth_enabled and auth.users_exist() and auth.get_session(request.cookies.get(SESSION_COOKIE_NAME)):
         return RedirectResponse('/', status_code=303)
     error_html = f'<p class="error">{escape(error)}</p>' if error else ''
     return csrf_token_response(request, 'Login', f"""
@@ -203,7 +227,7 @@ async def setup(request: Request):
 
 @app.get('/logout')
 def logout_get(request: Request):
-    auth.delete_session(request.cookies.get(SESSION_COOKIE))
+    auth.delete_session(request.cookies.get(SESSION_COOKIE_NAME))
     response = RedirectResponse('/login', status_code=303)
     clear_auth_cookies(response)
     return response
@@ -211,7 +235,10 @@ def logout_get(request: Request):
 
 @app.post('/logout')
 def logout_post(request: Request):
-    auth.delete_session(request.cookies.get(SESSION_COOKIE))
+    session = require_session(request)
+    if request.headers.get(CSRF_HEADER) != session['csrf_token']:
+        return JSONResponse({'detail': 'CSRF token missing or invalid'}, status_code=403)
+    auth.delete_session(request.cookies.get(SESSION_COOKIE_NAME))
     response = JSONResponse({'ok': True})
     clear_auth_cookies(response)
     return response
@@ -266,9 +293,15 @@ def root():
 @app.get('/events')
 @app.get('/alerts')
 @app.get('/search')
-@app.get('/settings')
 def dashboard_aliases():
     return root()
+
+
+@app.get('/settings')
+def settings_page():
+    return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Settings · Daygle AI Camera</title>
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell"><header class="hero"><div><p class="eyebrow">Administration</p><h1>AI & Alert Settings</h1><p class="muted">Update runtime AI settings and alert rules stored in SQLite.</p></div><a class="button-link" href="/">Dashboard</a></header><section class="card"><h2>AI settings</h2><div id="settingsMessage" class="muted"></div><form id="aiSettingsForm" class="form-grid"><label><span>AI enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Backend</span><select name="backend"><option value="mock">mock</option><option value="onnx">onnx</option></select></label><label><span>Confidence</span><input name="confidence" type="number" min="0" max="1" step="0.01" /></label><label><span>IOU threshold</span><input name="iou_threshold" type="number" min="0" max="1" step="0.01" /></label><label><span>Input size</span><input name="input_size" type="number" min="32" max="2048" step="32" /></label><label><span>Model path</span><input name="model_path" /></label><label><span>Labels path</span><input name="labels_path" /></label><button type="submit">Save AI settings</button></form></section><section class="card"><h2>Alert rules</h2><form id="alertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="name" placeholder="Rule name" required /><input name="object" list="labelOptions" placeholder="Object label" required /><datalist id="labelOptions"></datalist><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" value="0.6" /><input name="cooldown_seconds" type="number" min="0" step="1" placeholder="Cooldown seconds" value="60" /><label><span>Enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="active_start" type="time" /><input name="active_end" type="time" /><button type="submit">Save alert rule</button><button id="cancelEditRule" class="secondary" type="button">Cancel edit</button></form><div id="alertRules" class="list"></div></section></main><script src="/static/settings.js"></script></body></html>""")
 
 
 @app.get('/users')
@@ -290,7 +323,7 @@ def status():
     return {
         'status': 'online',
         'mode': camera_config.get('backend', 'mock'),
-        'ai_backend': config.get('ai', {}).get('backend', 'mock'),
+        'ai_backend': effective_ai_config().get('backend', 'mock'),
         'ai_available': getattr(detector, 'available', True),
         'ai_error': getattr(detector, 'unavailable_reason', None),
         'frame_number': frame['frame_number'],
@@ -309,6 +342,7 @@ def generate_detection(force: bool = True):
         return {'created': False, 'message': 'No detections generated'}
 
     snapshot_path = storage.save_mock_snapshot(frame, detections)
+    alerts.rules = effective_alert_rules()
     triggered = alerts.process(detections)
 
     event_id = database.add_event(
@@ -351,6 +385,7 @@ async def detect_test_image(request: Request):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     snapshot_path = storage.save_image_snapshot(image_bytes, filename)
+    alerts.rules = effective_alert_rules()
     triggered = alerts.process(detections)
     event_id = database.add_event(
         created_at=datetime.now(timezone.utc).isoformat(),
@@ -361,7 +396,7 @@ async def detect_test_image(request: Request):
         metadata={
             'filename': filename,
             'content_type': content_type,
-            'ai_backend': config.get('ai', {}).get('backend', 'mock'),
+            'ai_backend': effective_ai_config().get('backend', 'mock'),
         },
     )
 
@@ -413,16 +448,16 @@ def runtime_config():
         'server': {'host': config.get('server', {}).get('host'), 'port': config.get('server', {}).get('port')},
         'camera': config.get('camera', {}),
         'ai': {
-            'enabled': config.get('ai', {}).get('enabled'),
-            'backend': config.get('ai', {}).get('backend'),
-            'confidence': config.get('ai', {}).get('confidence'),
-            'iou_threshold': config.get('ai', {}).get('iou_threshold'),
-            'input_size': config.get('ai', {}).get('input_size'),
-            'model_path': config.get('ai', {}).get('model_path'),
-            'labels_path': config.get('ai', {}).get('labels_path'),
+            'enabled': effective_ai_config().get('enabled'),
+            'backend': effective_ai_config().get('backend'),
+            'confidence': effective_ai_config().get('confidence'),
+            'iou_threshold': effective_ai_config().get('iou_threshold'),
+            'input_size': effective_ai_config().get('input_size'),
+            'model_path': effective_ai_config().get('model_path'),
+            'labels_path': effective_ai_config().get('labels_path'),
             'available': getattr(detector, 'available', True),
             'error': getattr(detector, 'unavailable_reason', None),
-            'categories': config.get('ai', {}).get('categories', []),
+            'categories': effective_ai_config().get('categories', []),
         },
         'alerts': config.get('alerts', {}),
         'auth': {
@@ -460,6 +495,142 @@ async def update_user(user_id: int, request: Request):
         return auth.update_user(user_id, role=payload.get('role'), is_active=payload.get('is_active'), password=payload.get('password'))
     except AuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    current = effective_ai_config()
+    allowed = {'enabled', 'backend', 'confidence', 'iou_threshold', 'input_size', 'model_path', 'labels_path'}
+    updated = {key: current.get(key) for key in allowed if key in current}
+    for key, value in payload.items():
+        if key in allowed:
+            updated[key] = value
+    updated['enabled'] = bool(updated.get('enabled', True))
+    backend = str(updated.get('backend', 'mock')).lower()
+    if backend not in {'mock', 'onnx'}:
+        raise HTTPException(status_code=400, detail='AI backend must be mock or onnx.')
+    updated['backend'] = backend
+    for field in ('confidence', 'iou_threshold'):
+        try:
+            updated[field] = float(updated.get(field, 0.45))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f'{field} must be a number.') from exc
+        if not 0 <= updated[field] <= 1:
+            raise HTTPException(status_code=400, detail=f'{field} must be between 0 and 1.')
+    try:
+        updated['input_size'] = int(updated.get('input_size', 640))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='input_size must be an integer.') from exc
+    if updated['input_size'] < 32 or updated['input_size'] > 2048:
+        raise HTTPException(status_code=400, detail='input_size must be between 32 and 2048.')
+    updated['model_path'] = str(updated.get('model_path') or current.get('model_path') or 'models/yolov8n.onnx')
+    updated['labels_path'] = str(updated.get('labels_path') or current.get('labels_path') or 'models/coco.names')
+    return updated
+
+
+def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **ai_settings,
+        'available': getattr(detector, 'available', True),
+        'error': getattr(detector, 'unavailable_reason', None),
+        'categories': ai_settings.get('categories', config.get('ai', {}).get('categories', [])),
+    }
+
+
+def available_labels() -> list[str]:
+    ai_settings = effective_ai_config()
+    labels = load_labels(ai_settings.get('labels_path'), ai_settings.get('categories', []))
+    return labels or list(ai_settings.get('categories', []))
+
+
+def validate_alert_rule(payload: dict[str, Any], *, partial: bool = False) -> dict[str, Any]:
+    rule: dict[str, Any] = {}
+    required = ('name', 'object')
+    for field in required:
+        if not partial and not str(payload.get(field, '')).strip():
+            raise HTTPException(status_code=400, detail=f'{field} is required.')
+    for field in ('name', 'object'):
+        if field in payload:
+            value = str(payload.get(field, '')).strip()
+            if not value:
+                raise HTTPException(status_code=400, detail=f'{field} cannot be blank.')
+            rule[field] = value
+    if 'min_confidence' in payload or not partial:
+        try:
+            value = float(payload.get('min_confidence', 0.5))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail='min_confidence must be a number.') from exc
+        if not 0 <= value <= 1:
+            raise HTTPException(status_code=400, detail='min_confidence must be between 0 and 1.')
+        rule['min_confidence'] = value
+    if 'cooldown_seconds' in payload or not partial:
+        try:
+            value = int(payload.get('cooldown_seconds', 60))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail='cooldown_seconds must be an integer.') from exc
+        if value < 0:
+            raise HTTPException(status_code=400, detail='cooldown_seconds cannot be negative.')
+        rule['cooldown_seconds'] = value
+    if 'enabled' in payload or not partial:
+        rule['enabled'] = bool(payload.get('enabled', True))
+    for field in ('active_start', 'active_end'):
+        if field in payload:
+            value = payload.get(field) or None
+            if value is not None and not re.fullmatch(r'\d{2}:\d{2}', str(value)):
+                raise HTTPException(status_code=400, detail=f'{field} must use HH:MM format.')
+            rule[field] = value
+    return rule
+
+
+@app.get('/api/settings/ai')
+def get_ai_settings():
+    return detector_status(effective_ai_config())
+
+
+@app.put('/api/settings/ai')
+async def update_ai_settings(request: Request):
+    global detector, mock_detector
+    payload = await request.json()
+    new_settings = validate_ai_settings(payload)
+    previous_detector = detector
+    candidate = create_detector(new_settings)
+    if new_settings['backend'] == 'onnx' and not getattr(candidate, 'available', False):
+        detector = previous_detector
+        raise HTTPException(status_code=400, detail=getattr(candidate, 'unavailable_reason', 'Failed to load ONNX detector.'))
+    detector = candidate
+    mock_detector = MockDetector(new_settings.get('categories', config.get('ai', {}).get('categories', [])), float(new_settings.get('confidence', 0.45)))
+    database.set_setting('ai', new_settings, utc_now())
+    return detector_status(new_settings)
+
+
+@app.get('/api/settings/alerts')
+def get_alert_rules():
+    return {'rules': database.list_alert_rules(), 'available_labels': available_labels()}
+
+
+@app.post('/api/settings/alerts')
+async def create_alert_rule(request: Request):
+    payload = await request.json()
+    rule = database.create_alert_rule(validate_alert_rule(payload), utc_now())
+    alerts.rules = effective_alert_rules()
+    return rule
+
+
+@app.put('/api/settings/alerts/{rule_id}')
+async def update_alert_rule(rule_id: int, request: Request):
+    payload = await request.json()
+    rule = database.update_alert_rule(rule_id, validate_alert_rule(payload, partial=True), utc_now())
+    if rule is None:
+        raise HTTPException(status_code=404, detail='Alert rule not found')
+    alerts.rules = effective_alert_rules()
+    return rule
+
+
+@app.delete('/api/settings/alerts/{rule_id}')
+def delete_alert_rule(rule_id: int):
+    if not database.delete_alert_rule(rule_id):
+        raise HTTPException(status_code=404, detail='Alert rule not found')
+    alerts.rules = effective_alert_rules()
+    return {'ok': True}
 
 
 if __name__ == '__main__':

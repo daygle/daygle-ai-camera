@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from typing import Any
 
 
@@ -21,6 +22,9 @@ class AlertEngine:
 
             for rule in self.rules:
                 if not rule.get('enabled', True):
+                    continue
+
+                if not self._is_active_now(rule):
                     continue
 
                 if rule.get('object') != label:
@@ -46,3 +50,15 @@ class AlertEngine:
                 })
 
         return alerts
+
+    def _is_active_now(self, rule: dict[str, Any]) -> bool:
+        start = rule.get('active_start')
+        end = rule.get('active_end')
+        if not start or not end:
+            return True
+        now = datetime.now().strftime('%H:%M')
+        start_text = str(start)
+        end_text = str(end)
+        if start_text <= end_text:
+            return start_text <= now <= end_text
+        return now >= start_text or now <= end_text

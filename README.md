@@ -1,45 +1,49 @@
 # Daygle AI Camera
 
-Daygle AI Camera is an Orange Pi 3B AI camera platform with a FastAPI backend, SQLite event history, alert rules, authentication, and a modern dark-mode dashboard. It runs end-to-end today without camera hardware by using a mock camera backend and synthetic object detector.
+Daygle AI Camera is an Orange Pi 3B / Armbian-friendly AI camera platform with a FastAPI backend, SQLite storage, session authentication, a modern dashboard, mock camera mode, and mock/ONNX YOLO detection.
 
 ## Features
 
-- FastAPI backend with protected status, event, alert, stats, user-management, and runtime-config APIs
-- Session-based authentication with bcrypt password hashing, CSRF protection, lockout, and 12-hour session expiry
-- First-run setup page for creating the initial administrator account
-- Admin/viewer roles and an admin-only user management page
-- SQLite database for users, sessions, login attempts, events, detections, and alert history
-- Mock camera and mock detector so development does not require a physical camera
-- Dark-mode dashboard with searchable object detection history and a top-right user menu
-Daygle AI Camera is an Orange Pi 3B AI camera platform with a FastAPI backend, SQLite event history, alert rules, a modern dark-mode dashboard, and switchable mock/ONNX YOLO detector backends. It still runs end-to-end without camera hardware by using the mock camera and mock detector.
+- FastAPI backend with protected dashboard and APIs.
+- SQLite event database for events, detections, alert history, users, sessions, login attempts, runtime AI settings, and editable alert rules.
+- First-run setup flow for creating the initial administrator.
+- Session-based authentication with HttpOnly SameSite cookies, CSRF protection, configurable expiry, and lockout after repeated failures.
+- Admin/viewer roles with admin-only user and settings management.
+- Mock camera/detector for development and CI without camera hardware.
+- ONNX YOLO test-image detection that preserves the existing upload workflow.
+- Dashboard user menu, logout, user management, and admin-only settings page.
+- Armbian install script and systemd unit for Orange Pi 3B deployment.
 
-## Features
-
-- FastAPI backend with health/status, event, alert, stats, runtime-config, and test-image detection APIs
-- SQLite database for searchable events, object labels, confidences, bounding boxes, and alert history
-- Mock camera and mock detector so development does not require a physical camera or model file
-- ONNX Runtime YOLOv8 detector backend with COCO labels, confidence filtering, and non-max suppression
-- Dashboard with searchable object detection history and uploaded-image detection testing
-- Real uploaded-image snapshots saved under the configured snapshots directory
-- Configurable alert rule example for cat detections
-- Armbian install script and systemd unit for Orange Pi 3B deployment
-
-## Quick start for local development
+## Quick start
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8080
+cp config.example.yaml config.yaml
+DAYGLE_CONFIG=config.yaml uvicorn app.main:app --reload --host 127.0.0.1 --port 8080
 ```
 
-Open <http://127.0.0.1:8080/>. On a new database the app redirects to `/setup`; create the first administrator account, then sign in at `/login`.
+Open <http://127.0.0.1:8080/>. With an empty database, the app redirects to `/setup`; create the first administrator, then sign in at `/login`.
 
-Generate a mock event from the dashboard. API writes require an authenticated session and a CSRF token, so browser actions are the recommended manual test path. For scripted API calls, sign in first, read `csrf_token` from `GET /api/auth/me`, and send it as `X-CSRF-Token` on mutating requests.
+## First setup and users
 
-## Authentication and first-run setup
+1. Start with an empty SQLite database.
+2. Browse to `/setup` or `/`.
+3. Create the first `admin` user with a complex password.
+4. After any user exists, `/setup` is disabled and redirects to `/login`.
+5. Admins can open `/users` from the dashboard menu to create users, disable users, change roles, and reset passwords.
 
-Authentication is enabled by default:
+Roles:
+
+- `admin`: view dashboard, search events, view alerts, manage users, update AI settings, and create/edit/delete alert rules.
+- `viewer`: view dashboard, search events, view alert history, and view current alert rules. Viewers cannot manage users, modify AI settings, change config, or modify alert rules.
+
+Password policy requires at least 8 characters with uppercase, lowercase, numeric, and symbol characters. Passwords are hashed with bcrypt when installed; tests have a PBKDF2 fallback for constrained environments.
+
+## Authentication and sessions
+
+Default auth configuration:
 
 ```yaml
 auth:
@@ -47,77 +51,82 @@ auth:
   session_timeout_hours: 12
   max_login_attempts: 5
   lockout_minutes: 15
+  cookie_name: daygle_session
 ```
 
-First startup flow:
+Security behavior:
 
-1. Start the service with an empty SQLite database.
-2. Browse to `/` and follow the redirect to `/setup`.
-3. Create the first admin user with a complex password.
-4. After the first user exists, `/setup` is disabled and redirects to `/login`.
-5. Sign in and use the top-right user menu for Profile, Users, Settings, and Logout links.
+- `/login`, `/setup`, and `/static/*` are public.
+- `/`, dashboard pages, and `/api/*` are protected once a user exists.
+- Sessions are stored in SQLite and referenced by a Secure-on-HTTPS, HttpOnly, SameSite=Lax cookie.
+- Session expiry defaults to 12 hours.
+- Mutating routes require `X-CSRF-Token`; dashboard JavaScript retrieves it from `GET /api/auth/me`.
+- Failed logins are stored in `login_attempts`; accounts or IPs lock for 15 minutes after 5 recent failures by default.
 
-Password policy requires at least 8 characters with uppercase, lowercase, numeric, and symbol characters. Passwords are never stored in plaintext; installed deployments use bcrypt hashes via the `bcrypt` package.
+## AI and alert settings
 
-## User management
+`config.yaml` remains the bootstrap/default configuration. Runtime edits made on `/settings` are stored in SQLite and override config values without requiring direct config-file edits.
 
-Admins can browse to `/users` or use the dashboard menu to:
+Admins can manage:
 
-- Create `admin` or `viewer` users
-- Disable or re-enable users
-- Reset passwords
-- Change roles
+- AI enabled state.
+- Backend: `mock` or `onnx`.
+- Confidence threshold.
+- IOU threshold.
+- Input size.
+- Model path.
+- Labels path.
+- Alert rules: name, object label, min confidence, cooldown, enabled state, and optional active time window.
 
-Role model:
+If an ONNX detector reload fails, the API returns a clear error and keeps the previous working detector.
 
-- `admin`: dashboard access, user management, settings, and alert configuration endpoints.
-- `viewer`: dashboard access, event search, and alert viewing.
+## Important routes
 
-## Security model
-
-- Protected routes: `/`, `/api/*`, `/settings`, `/events`, `/alerts`, and `/search`.
-- Public routes: `/login`, `/setup` until first user creation, and `/static/*`.
-- Session cookies are HttpOnly, SameSite=Lax, 12-hour expiring cookies. The Secure flag is set automatically when served over HTTPS.
-- Mutating API endpoints require the session CSRF token in `X-CSRF-Token`.
-- Login attempts are recorded in `login_attempts` and recent failures are rate-limited by username or IP address.
-- Accounts lock for `auth.lockout_minutes` after `auth.max_login_attempts` consecutive failures.
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET/POST` | `/setup` | First admin setup, disabled after first user exists |
+| `GET/POST` | `/login` | Login page and login action |
+| `GET/POST` | `/logout` | End the current session |
+| `GET` | `/` | Main dashboard |
+| `GET` | `/users` | Admin user-management page |
+| `GET` | `/settings` | Admin AI and alert settings page |
+| `GET` | `/api/auth/me` | Current user, role, CSRF token, and expiry |
+| `GET` | `/api/status` | Camera and detector status |
+| `POST` | `/api/mock/detect` | Generate a mock detection event |
+| `POST` | `/api/detect/test-image` | Upload an image for active detector inference |
+| `GET` | `/api/events` | Search/list events |
+| `GET` | `/api/events/{event_id}` | Fetch one event with detections |
+| `GET` | `/api/alerts` | Alert history |
+| `GET` | `/api/stats` | Event and object stats |
+| `GET` | `/api/config` | Non-secret runtime summary |
+| `GET/POST` | `/api/users` | Admin list/create users |
+| `PATCH` | `/api/users/{user_id}` | Admin role/status/password updates |
+| `GET/PUT` | `/api/settings/ai` | Admin view/update AI settings |
+| `GET/POST` | `/api/settings/alerts` | View alert rules; admin creates rules |
+| `PUT/DELETE` | `/api/settings/alerts/{rule_id}` | Admin edit/delete alert rules |
 
 ## Database schema
 
-The SQLite database includes the existing event tables plus authentication tables:
+Tables are created automatically at startup:
 
 ```sql
-users(id, username, password_hash, role, is_active, failed_attempts, locked_until, created_at, updated_at)
+users(id, username, password_hash, role, is_active, failed_attempts, locked_until, created_at, updated_at, last_login_at)
 user_sessions(id, session_token, user_id, csrf_token, created_at, expires_at, last_seen_at)
 login_attempts(id, username, ip_address, success, created_at)
+app_settings(key, value, updated_at)
+alert_rules(id, name, object, min_confidence, cooldown_seconds, enabled, active_start, active_end, created_at, updated_at)
 events(id, created_at, source, snapshot_path, thumbnail_path, alert_triggered, metadata)
 detections(id, event_id, label, confidence, x, y, width, height)
 alert_history(id, created_at, rule_name, event_id, label, confidence, message)
 ```
 
-Tables are created automatically at startup by the database/auth initialization code.
-Test uploaded-image detection with the active detector backend:
-
-```bash
-curl -X POST \
-  -H 'Content-Type: image/jpeg' \
-  --data-binary @test.jpg \
-  http://127.0.0.1:8080/api/detect/test-image
-```
-
 ## ONNX YOLO setup
 
-Install dependencies and download the default YOLOv8n ONNX model:
-
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
 python scripts/download_yolov8n_onnx.py --output models/yolov8n.onnx
-cp config.example.yaml config.yaml
 ```
 
-Configure ONNX mode in `config.yaml`:
+Then either edit `config.yaml` before first start or use `/settings` as an admin:
 
 ```yaml
 ai:
@@ -130,74 +139,20 @@ ai:
   labels_path: models/coco.names
 ```
 
-Then start the app:
+Test-image detection stays available at `POST /api/detect/test-image`. The mock camera mode and `POST /api/mock/detect` are intentionally preserved.
+
+## Armbian deployment notes
 
 ```bash
-DAYGLE_CONFIG=config.yaml uvicorn app.main:app --host 127.0.0.1 --port 8080
-```
-
-If `ai.backend: onnx` is selected and the model is missing or dependencies are not installed, startup remains healthy and `/api/status` reports the AI error. Detection requests return HTTP 400 with a clear message instead of crashing the app.
-
-## Armbian 26.x startup on Orange Pi 3B
-
-From a checkout on the Orange Pi:
-
-```bash
-sudo ./scripts/install_armbian.sh
+sudo scripts/install_armbian.sh
 sudo systemctl status daygle-ai-camera
-sudo journalctl -u daygle-ai-camera -f
 ```
 
-Then browse to:
+The installer uses `/etc/daygle-ai-camera/config.yaml` via `DAYGLE_CONFIG`. Keep `auth.enabled: true` on devices exposed to a network. Use a reverse proxy or VPN with HTTPS so cookies receive the Secure flag and credentials are protected in transit.
 
-```text
-http://<orange-pi-ip>:8080/
-```
-
-The installer:
-
-1. Installs Python, venv, pip, SQLite, certificates, and rsync.
-2. Copies the app to `/opt/daygle-ai-camera`.
-3. Creates a virtual environment in `/opt/daygle-ai-camera/.venv`.
-4. Installs `requirements.txt`, including bcrypt support for password hashing.
-5. Creates `/etc/daygle-ai-camera/config.yaml` from `config.example.yaml` if needed.
-6. Stores mutable data under `/var/lib/daygle-ai-camera`.
-7. Installs and enables `daygle-ai-camera.service`.
-
-Override install paths if needed:
+## Tests
 
 ```bash
-sudo DAYGLE_APP_DIR=/opt/daygle-ai-camera \
-  DAYGLE_CONFIG_DIR=/etc/daygle-ai-camera \
-  DAYGLE_DATA_DIR=/var/lib/daygle-ai-camera \
-  DAYGLE_USER=daygle \
-  ./scripts/install_armbian.sh
+python -m compileall app tests
+pytest -q
 ```
-
-## API overview
-
-- `GET /` - protected dashboard
-- `GET /login` / `POST /login` - public login form/action
-- `GET /logout` / `POST /logout` - logout action
-- `GET /setup` / `POST /setup` - first-admin setup, disabled after first user
-- `GET /api/auth/me` - current user and CSRF token
-- `GET /api/status` - runtime status, including AI backend availability
-- `POST /api/mock/detect` - create a mock detection event; requires `X-CSRF-Token`
-- `POST /api/detect/test-image` - upload an image, run the active detector, save a snapshot, and store detections as an event
-- `GET /api/events?label=cat&limit=50` - event search
-- `GET /api/events/{event_id}` - event detail
-- `GET /api/alerts?limit=25` - alert history
-- `GET /api/stats` - aggregate stats
-- `GET /api/config` - non-secret runtime config summary
-- `GET /api/users`, `POST /api/users`, `PATCH /api/users/{id}` - admin user management
-
-## Development documentation
-
-See [DEVELOPMENT.md](DEVELOPMENT.md) for architecture details and future OV5647 CSI / YOLO ONNX / RKNN integration notes.
-
-## Remaining security recommendations
-
-- Serve the application behind HTTPS so browsers receive Secure session cookies.
-- Put the service behind a trusted reverse proxy or VPN for internet-exposed deployments.
-- Add audit-log retention and export before enabling remote access.
-- Consider hardware-backed secrets and WebAuthn/TOTP for higher-risk installations.

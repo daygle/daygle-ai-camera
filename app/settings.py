@@ -47,6 +47,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "session_timeout_hours": 12,
         "max_login_attempts": 5,
         "lockout_minutes": 15,
+        "cookie_name": "daygle_session",
     },
     "storage": {
         "data_dir": "data",
