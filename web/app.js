@@ -4,6 +4,10 @@ const els = {
   totalAlerts: document.getElementById('totalAlerts'),
   frameNumber: document.getElementById('frameNumber'),
   generateBtn: document.getElementById('generateBtn'),
+  uploadForm: document.getElementById('uploadForm'),
+  imageInput: document.getElementById('imageInput'),
+  uploadBtn: document.getElementById('uploadBtn'),
+  uploadResult: document.getElementById('uploadResult'),
   searchBtn: document.getElementById('searchBtn'),
   clearBtn: document.getElementById('clearBtn'),
   searchInput: document.getElementById('searchInput'),
@@ -100,7 +104,8 @@ function renderObjectStats(objects = []) {
 async function loadStatus() {
   try {
     const status = await api('/api/status');
-    els.statusText.textContent = `${status.status} · ${status.mode}`;
+    const aiState = status.ai_available === false ? 'AI unavailable' : status.ai_backend;
+    els.statusText.textContent = `${status.status} · ${status.mode} · ${aiState}`;
     els.frameNumber.textContent = status.frame_number;
   } catch (error) {
     els.statusText.textContent = 'offline';
@@ -136,6 +141,31 @@ els.generateBtn.addEventListener('click', async () => {
   } finally {
     els.generateBtn.disabled = false;
     els.generateBtn.textContent = 'Generate mock detection';
+  }
+});
+
+els.uploadForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const file = els.imageInput.files[0];
+  if (!file) {
+    els.uploadResult.textContent = 'Choose an image file first.';
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+  els.uploadBtn.disabled = true;
+  els.uploadBtn.textContent = 'Detecting...';
+  els.uploadResult.textContent = 'Running detector and saving event...';
+  try {
+    const result = await api('/api/detect/test-image', { method: 'POST', body: formData });
+    els.uploadResult.textContent = `Created event #${result.event_id} with ${result.detections.length} detection(s).`;
+    await refreshAll();
+  } catch (error) {
+    els.uploadResult.textContent = error.message;
+  } finally {
+    els.uploadBtn.disabled = false;
+    els.uploadBtn.textContent = 'Test image detection';
   }
 });
 

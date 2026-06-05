@@ -31,3 +31,13 @@ class Storage:
         }
         path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
         return str(path)
+
+    def save_image_snapshot(self, image_bytes: bytes, original_filename: str | None = None) -> str:
+        created = datetime.now(timezone.utc)
+        suffix = Path(original_filename or '').suffix.lower()
+        if suffix not in {'.jpg', '.jpeg', '.png', '.webp', '.bmp'}:
+            suffix = '.jpg'
+        filename = created.strftime('%Y%m%d_%H%M%S_%f') + suffix
+        path = self.snapshots_dir / filename
+        path.write_bytes(image_bytes)
+        return str(path)

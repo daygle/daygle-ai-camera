@@ -24,7 +24,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": True,
         "backend": "mock",
         "confidence": 0.45,
-        "model_path": "models/model.onnx",
+        "iou_threshold": 0.45,
+        "input_size": 640,
+        "model_path": "models/yolov8n.onnx",
+        "labels_path": "models/coco.names",
         "categories": ["person", "cat", "dog", "car", "bicycle", "bird", "package"],
     },
     "alerts": {
