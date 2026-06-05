@@ -23,6 +23,7 @@
             <a id="settingsLink" href="/settings">Setup / AI Settings</a>
             <a id="alertSettingsLink" href="/alert-settings">Alert Settings</a>
             <a id="systemSettingsLink" href="/system-settings">System Settings</a>
+            <a href="/anpr">ANPR</a>
             <a href="/logout">Logout</a>
           </div>
         </nav>
@@ -102,6 +103,22 @@
         <div class="section-header"><h2>Clip Player</h2></div>
         <video id="clipPlayer" controls></video>
         <p id="clipPlayerStatus" class="muted">Select a recording to play. Mock clips may only have metadata until a camera backend writes media.</p>
+      </article>
+    </section>
+
+    <section class="grid main-grid">
+      <article class="card">
+        <div class="section-header"><h2>ANPR</h2><a class="link-button" href="/anpr">Open ANPR</a></div>
+        <div class="search-row">
+          <input id="plateFilter" placeholder="Search plate..." />
+          <button id="plateSearchBtn">Search</button>
+          <button id="plateClearBtn">Recent</button>
+        </div>
+        <div id="plates" class="list"></div>
+      </article>
+      <article class="card">
+        <div class="section-header"><h2>Plate Sightings</h2></div>
+        <div id="plateSightings" class="list"></div>
       </article>
     </section>
   </main>

@@ -193,6 +193,24 @@ def test_detector_backend_selection(tmp_path):
     )
 
 
+def test_anpr_pipeline_extracts_vehicle_plate(tmp_path):
+    from app.anpr import AnprPipeline
+    from app.storage import Storage
+
+    storage = Storage({'storage': {'data_dir': str(tmp_path), 'plates_dir': str(tmp_path / 'plates')}})
+    pipeline = AnprPipeline({'enabled': True, 'backend': 'mock', 'min_confidence': 0.75, 'vehicle_labels': ['car']})
+    results = pipeline.process_event(
+        event_id=42,
+        detections=[{'label': 'car', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.2}}],
+        image_path=None,
+        storage=storage,
+    )
+    assert len(results) == 1
+    assert results[0]['plate_number'].isalnum()
+    assert results[0]['confidence'] >= 0.75
+    assert Path(results[0]['image_path']).exists()
+
+
 def test_onnx_missing_model_returns_clear_api_error(tmp_path, monkeypatch):
     app, _database_path = _load_app(
         tmp_path,
@@ -458,11 +476,12 @@ def test_setup_login_success_session_validation_and_protected_routes(tmp_path, m
         assert client.request("/api/alerts")[0] == 200
         assert client.request("/api/stats")[2]["total_events"] == 1
         assert client.request("/api/config")[2]["auth"]["enabled"] is True
+        assert client.request("/api/config")[2]["anpr"]["enabled"] is True
         assert client.request("/static/app.js")[0] == 200
 
         with sqlite3.connect(database_path) as db:
             tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-        assert {"users", "user_sessions", "login_attempts", "app_settings", "alert_rules"}.issubset(tables)
+        assert {"users", "user_sessions", "login_attempts", "app_settings", "alert_rules", "vehicle_plates", "plate_events", "plate_alert_rules"}.issubset(tables)
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -734,6 +753,96 @@ def test_email_alert_settings_and_delivery(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+def test_anpr_event_search_alerts_and_plate_status_api(tmp_path, monkeypatch):
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    admin = LocalClient(base_url)
+    try:
+        _setup_admin(admin)
+        admin_csrf = _login(admin)
+        main_module = sys.modules["app.main"]
+        main_module.detector.categories = ["car"]
+        main_module.mock_detector.categories = ["car"]
+
+        status, _headers, created = admin.request('/api/mock/detect', method='POST', headers={'X-CSRF-Token': admin_csrf})
+        assert status == 200
+        assert created['plate_events']
+        plate_number = created['plate_events'][0]['plate_number']
+
+        status, _headers, plates = admin.request('/api/plates')
+        assert status == 200
+        assert plates[0]['plate_number'] == plate_number
+        assert plates[0]['sighting_count'] == 1
+
+        status, _headers, search = admin.request(f'/api/plates/search?q={plate_number}')
+        assert status == 200
+        assert search[0]['event']['id'] == created['event_id']
+        assert search[0]['event']['recordings']
+
+        event = admin.request(f"/api/events/{created['event_id']}")[2]
+        assert event['plate_events'][0]['plate_number'] == plate_number
+
+        status, _headers, whitelisted = admin.request(
+            '/api/plates/whitelist',
+            method='POST',
+            json_body={'plate_number': plate_number, 'notes': 'Family Car'},
+            headers={'X-CSRF-Token': admin_csrf},
+        )
+        assert status == 200
+        assert whitelisted['is_whitelisted'] is True
+        assert whitelisted['notes'] == 'Family Car'
+
+        status, _headers, blacklisted = admin.request(
+            '/api/plates/blacklist',
+            method='POST',
+            json_body={'plate_number': 'BAD001', 'notes': 'Blacklisted'},
+            headers={'X-CSRF-Token': admin_csrf},
+        )
+        assert status == 200
+        assert blacklisted['is_blacklisted'] is True
+
+        status, _headers, rule = admin.request(
+            '/api/plate-alerts',
+            method='POST',
+            json_body={'rule_name': 'Watch plate', 'rule_type': 'plate', 'plate_pattern': plate_number, 'enabled': True, 'cooldown_seconds': 0},
+            headers={'X-CSRF-Token': admin_csrf},
+        )
+        assert status == 200
+        assert rule['plate_pattern'] == plate_number
+        assert any(alert['rule_name'] == 'Watch plate' for alert in main_module.trigger_plate_alerts(created['plate_events']))
+
+        status, _headers, edited = admin.request(
+            f"/api/plate-alerts/{rule['id']}",
+            method='PUT',
+            json_body={'enabled': False},
+            headers={'X-CSRF-Token': admin_csrf},
+        )
+        assert status == 200
+        assert edited['enabled'] is False
+        assert admin.request(f"/api/plate-alerts/{rule['id']}", method='DELETE', headers={'X-CSRF-Token': admin_csrf})[2]['ok'] is True
+
+        status, _headers, viewer = admin.request(
+            '/api/users',
+            method='POST',
+            json_body={'username': 'plateviewer', 'password': 'Viewer123!', 'role': 'viewer'},
+            headers={'X-CSRF-Token': admin_csrf},
+        )
+        assert status == 200
+        viewer_client = LocalClient(base_url)
+        viewer_csrf = _login(viewer_client, viewer['username'], 'Viewer123!')
+        assert viewer_client.request('/api/plates')[0] == 200
+        denied = viewer_client.request(
+            '/api/plates/blacklist',
+            method='POST',
+            json_body={'plate_number': 'NOPE123'},
+            headers={'X-CSRF-Token': viewer_csrf},
+        )
+        assert denied[0] == 403
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
     app, _database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
@@ -751,6 +860,15 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
         assert status == 200
         assert camera["width"] == 640
         assert client.request("/api/status")[2]["resolution"] == {"width": 640, "height": 360}
+
+        status, _headers, anpr = client.request(
+            "/api/settings/anpr",
+            method="PUT",
+            json_body={"enabled": True, "backend": "mock", "min_confidence": 0.8, "vehicle_labels": ["car", "truck"]},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert anpr["vehicle_labels"] == ["car", "truck"]
 
         status, _headers, recording = client.request(
             "/api/settings/system/recording",
@@ -797,6 +915,7 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
 
         system_settings = client.request("/api/settings/system")[2]
         assert system_settings["camera"]["width"] == 640
+        assert system_settings["anpr"]["min_confidence"] == 0.8
         assert system_settings["recording"]["format"] == "avi"
         assert system_settings["auth"]["lockout_minutes"] == 10
     finally:

@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 
 from app.alerts import AlertEngine
+from app.anpr import AnprPipeline, normalize_plate, plate_matches
 from app.auth import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, AuthError, AuthService
 from app.database import EventDatabase
 from app.detector import DetectorUnavailableError, MockDetector, create_detector, load_labels
@@ -78,6 +79,14 @@ def effective_camera_config() -> dict[str, Any]:
     return settings
 
 
+def effective_anpr_config() -> dict[str, Any]:
+    settings = copy.deepcopy(config.get('anpr', {}))
+    override = database.get_setting('anpr')
+    if isinstance(override, dict):
+        settings.update(override)
+    return settings
+
+
 def effective_recording_config() -> dict[str, Any]:
     settings = copy.deepcopy(config.get('recording', {}))
     override = database.get_setting('recording')
@@ -125,6 +134,7 @@ camera = MockCamera(
 )
 storage = Storage({**config, 'storage': effective_storage_config()})
 recording_service = RecordingService({**config, 'storage': effective_storage_config(), 'recording': effective_recording_config()})
+anpr_pipeline = AnprPipeline(effective_anpr_config())
 auth = AuthService(config['storage']['database'], effective_auth_config())
 SESSION_COOKIE_NAME = str(effective_auth_config().get('cookie_name', SESSION_COOKIE))
 
@@ -252,7 +262,7 @@ async def authentication_middleware(request: Request, call_next):
     request.state.session = session
     request.state.user = session['user']
 
-    admin_required = path in ADMIN_PATHS or path.startswith('/api/users') or path.startswith('/api/settings/ai') or path.startswith('/api/settings/system') or (
+    admin_required = path in ADMIN_PATHS or path.startswith('/api/users') or path.startswith('/api/settings/ai') or path.startswith('/api/settings/anpr') or path.startswith('/api/settings/system') or (
         path.startswith('/api/settings/alert-email') and request.method in MUTATING_METHODS
     ) or (
         path.startswith('/api/settings/alerts') and request.method in MUTATING_METHODS
@@ -347,6 +357,55 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int) -> None
             mailer.send_alert(alert, event_id=event_id, recipients=rule.get('email_recipients', []))
         except EmailAlertError as exc:
             logger.warning('Failed to send email alert for event %s rule %s: %s', event_id, alert.get('rule_name'), exc)
+
+
+plate_alert_last_triggered: dict[str, float] = {}
+
+
+def process_anpr_for_event(event_id: int, detections: list[dict[str, Any]], image_path: str | None, created_at: str) -> list[dict[str, Any]]:
+    plate_results = anpr_pipeline.process_event(event_id=event_id, detections=detections, image_path=image_path, storage=storage)
+    stored: list[dict[str, Any]] = []
+    for result in plate_results:
+        plate = database.upsert_plate(result['plate_number'], created_at)
+        plate_event = database.add_plate_event(
+            event_id=event_id,
+            plate_id=plate['id'],
+            plate_number=result['plate_number'],
+            confidence=float(result['confidence']),
+            image_path=result.get('image_path'),
+            created_at=created_at,
+        )
+        stored.append(plate_event)
+    trigger_plate_alerts(stored)
+    return stored
+
+
+def trigger_plate_alerts(plate_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    import time
+
+    triggered: list[dict[str, Any]] = []
+    rules = database.list_plate_alert_rules()
+    for plate_event in plate_events:
+        plate = plate_event.get('plate') or {}
+        for rule in rules:
+            if not rule.get('enabled', True):
+                continue
+            rule_key = f"{rule['id']}:{plate_event['plate_number']}"
+            last = plate_alert_last_triggered.get(rule_key, 0)
+            if time.time() - last < int(rule.get('cooldown_seconds', 60)):
+                continue
+            rule_type = str(rule.get('rule_type'))
+            matched = False
+            if rule_type == 'plate':
+                matched = plate_matches(rule.get('plate_pattern'), plate_event['plate_number'])
+            elif rule_type == 'unknown':
+                matched = not plate.get('is_whitelisted') and not plate.get('is_blacklisted')
+            elif rule_type == 'blacklisted':
+                matched = bool(plate.get('is_blacklisted'))
+            if matched:
+                plate_alert_last_triggered[rule_key] = time.time()
+                triggered.append({'rule_name': rule['rule_name'], 'plate_number': plate_event['plate_number'], 'plate_event_id': plate_event['id']})
+    return triggered
 
 
 def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
@@ -539,11 +598,18 @@ def profile_page():
 <link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Account</p><h1>Profile</h1><p class="muted">Manage your display preferences and password.</p></div><a class="button-link" href="/">Dashboard</a></header><section class="card"><h2>Profile details</h2><div id="profileMessage" class="muted"></div><div id="profileSummary" class="status-panel"></div><form id="profileForm" class="form-grid"><input name="timezone" placeholder="Timezone" required /><label><span>Date format</span><select name="date_format"><option value="locale">Browser locale</option><option value="iso">YYYY-MM-DD</option><option value="au">DD/MM/YYYY</option><option value="us">MM/DD/YYYY</option></select></label><label><span>Time format</span><select name="time_format"><option value="24h">24 hour</option><option value="12h">12 hour</option></select></label><button type="submit">Save profile</button></form></section><section class="card"><h2>Change password</h2><form id="passwordForm" class="form-grid"><input name="current_password" type="password" placeholder="Current password" autocomplete="current-password" required /><input name="new_password" type="password" placeholder="New password" autocomplete="new-password" required /><input name="confirm_password" type="password" placeholder="Confirm password" autocomplete="new-password" required /><button type="submit">Change password</button></form></section></main><script src="/static/profile.js"></script></body></html>""")
 
 
+@app.get('/anpr')
+def anpr_page():
+    return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" /><title>ANPR · Daygle AI Camera</title>
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Recognition</p><h1>ANPR</h1><p class="muted">Search plates, review sightings, and manage plate alerts.</p></div><a class="button-link" href="/">Dashboard</a></header><section class="card"><h2>Plate search</h2><div id="anprMessage" class="muted"></div><div class="search-row"><input id="plateSearchInput" placeholder="ABC123, 1ABC2D, XYZ999..." /><button id="plateSearchBtn">Search</button><button id="plateClearBtn" class="secondary">Recent</button></div><div id="plateResults" class="list"></div></section><section class="grid main-grid"><article class="card"><div class="section-header"><h2>Recent plates</h2></div><div id="recentPlates" class="list"></div></article><article class="card"><div class="section-header"><h2>Plate details</h2></div><div id="plateDetails" class="list"></div></article></section><section class="card"><h2>Plate alert rules</h2><form id="plateAlertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="rule_name" placeholder="Rule name" required /><label><span>Type</span><select name="rule_type"><option value="plate">Specific plate</option><option value="unknown">Unknown plate</option><option value="blacklisted">Blacklisted plate</option></select></label><input name="plate_pattern" placeholder="Plate pattern" /><input name="cooldown_seconds" type="number" min="0" placeholder="Cooldown seconds" value="60" /><label><span>Enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><button type="submit">Save rule</button><button id="cancelPlateRuleEdit" class="secondary" type="button">Cancel edit</button></form><div id="plateAlertRules" class="list"></div></section></main><script src="/static/anpr.js"></script></body></html>""")
+
+
 @app.get('/system-settings')
 def system_settings_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>System Settings · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>System Settings</h1><p class="muted">Move day-to-day camera, recording, storage, and login settings out of YAML.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Camera</h2><div id="systemMessage" class="muted"></div><form id="cameraSettingsForm" class="form-grid"><label><span>Backend</span><select name="backend"><option value="mock">mock</option></select></label><input name="device" placeholder="Device" /><input name="width" type="number" min="160" max="7680" step="1" placeholder="Width" /><input name="height" type="number" min="120" max="4320" step="1" placeholder="Height" /><input name="fps" type="number" min="1" max="120" step="1" placeholder="FPS" /><label><span>Flip</span><select name="flip"><option value="none">none</option><option value="horizontal">horizontal</option><option value="vertical">vertical</option><option value="both">both</option></select></label><button type="submit">Save camera</button></form></section><section class="card"><h2>Recording policy</h2><form id="recordingSettingsForm" class="form-grid"><label><span>Recording</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Primary mode</span><select name="mode"><option value="motion">motion</option><option value="continuous">continuous</option><option value="human">human</option><option value="objects">objects</option><option value="off">off</option></select></label><label><span>Continuous</span><select name="continuous"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><label><span>Record on motion</span><select name="record_on_motion"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Record on human</span><select name="record_on_human"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="record_on_objects" placeholder="Objects: cat, dog, package, parcel" /><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" /><input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" /><input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="Max clip seconds" /><input name="format" placeholder="Format: avi or mp4" /><button type="submit">Save recording</button></form></section><section class="card"><h2>Retention</h2><form id="retentionSettingsForm" class="form-grid"><label><span>Auto purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="retention_days" type="number" min="1" max="3650" placeholder="Retention days" /><input name="max_storage_gb" type="number" min="1" max="100000" placeholder="Max storage GB" /><button type="submit">Save retention</button><button id="purgeRecordingsBtn" class="secondary" type="button">Purge now</button></form></section><section class="card"><h2>Storage</h2><form id="storageSettingsForm" class="form-grid"><input name="data_dir" placeholder="Data directory" /><input name="snapshots_dir" placeholder="Snapshots directory" /><input name="events_dir" placeholder="Events directory" /><input name="recordings_dir" placeholder="Recordings directory" /><button type="submit">Save storage</button></form><p class="muted">Database file location stays in config.yaml because it is needed before the web UI can load.</p></section><section class="card"><h2>Login security</h2><form id="authSettingsForm" class="form-grid"><input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="Session timeout hours" /><input name="max_login_attempts" type="number" min="1" max="100" placeholder="Max login attempts" /><input name="lockout_minutes" type="number" min="1" max="1440" placeholder="Lockout minutes" /><button type="submit">Save login security</button></form><p class="muted">Auth enablement and cookie name remain bootstrap settings.</p></section></main><script src="/static/system-settings.js"></script></body></html>""")
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>System Settings</h1><p class="muted">Move day-to-day camera, recording, storage, and login settings out of YAML.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Camera</h2><div id="systemMessage" class="muted"></div><form id="cameraSettingsForm" class="form-grid"><label><span>Backend</span><select name="backend"><option value="mock">mock</option></select></label><input name="device" placeholder="Device" /><input name="width" type="number" min="160" max="7680" step="1" placeholder="Width" /><input name="height" type="number" min="120" max="4320" step="1" placeholder="Height" /><input name="fps" type="number" min="1" max="120" step="1" placeholder="FPS" /><label><span>Flip</span><select name="flip"><option value="none">none</option><option value="horizontal">horizontal</option><option value="vertical">vertical</option><option value="both">both</option></select></label><button type="submit">Save camera</button></form></section><section class="card"><h2>ANPR</h2><form id="anprSettingsForm" class="form-grid"><label><span>ANPR</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>OCR backend</span><select name="backend"><option value="mock">mock</option><option value="paddleocr">paddleocr</option><option value="easyocr">easyocr</option></select></label><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" /><input name="vehicle_labels" placeholder="Vehicle labels: car, truck, bus, motorcycle" /><button type="submit">Save ANPR</button></form></section><section class="card"><h2>Recording policy</h2><form id="recordingSettingsForm" class="form-grid"><label><span>Recording</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Primary mode</span><select name="mode"><option value="motion">motion</option><option value="continuous">continuous</option><option value="human">human</option><option value="objects">objects</option><option value="off">off</option></select></label><label><span>Continuous</span><select name="continuous"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><label><span>Record on motion</span><select name="record_on_motion"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Record on human</span><select name="record_on_human"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="record_on_objects" placeholder="Objects: cat, dog, package, parcel" /><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" /><input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" /><input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="Max clip seconds" /><input name="format" placeholder="Format: avi or mp4" /><button type="submit">Save recording</button></form></section><section class="card"><h2>Retention</h2><form id="retentionSettingsForm" class="form-grid"><label><span>Auto purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="retention_days" type="number" min="1" max="3650" placeholder="Retention days" /><input name="max_storage_gb" type="number" min="1" max="100000" placeholder="Max storage GB" /><button type="submit">Save retention</button><button id="purgeRecordingsBtn" class="secondary" type="button">Purge now</button></form></section><section class="card"><h2>Storage</h2><form id="storageSettingsForm" class="form-grid"><input name="data_dir" placeholder="Data directory" /><input name="snapshots_dir" placeholder="Snapshots directory" /><input name="events_dir" placeholder="Events directory" /><input name="recordings_dir" placeholder="Recordings directory" /><input name="plates_dir" placeholder="Plate images directory" /><button type="submit">Save storage</button></form><p class="muted">Database file location stays in config.yaml because it is needed before the web UI can load.</p></section><section class="card"><h2>Login security</h2><form id="authSettingsForm" class="form-grid"><input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="Session timeout hours" /><input name="max_login_attempts" type="number" min="1" max="100" placeholder="Max login attempts" /><input name="lockout_minutes" type="number" min="1" max="1440" placeholder="Lockout minutes" /><button type="submit">Save login security</button></form><p class="muted">Auth enablement and cookie name remain bootstrap settings.</p></section></main><script src="/static/system-settings.js"></script></body></html>""")
 
 @app.get('/users')
 def users_page():
@@ -630,6 +696,7 @@ def generate_detection(force: bool = True):
         alert_triggered=bool(triggered),
     )
     recording_id = attach_event_recording(event_id, event_time, 'mock-camera', detections)
+    plate_events = process_anpr_for_event(event_id, detections, snapshot_path, event_time)
 
     for alert in triggered:
         database.add_alert(
@@ -648,6 +715,7 @@ def generate_detection(force: bool = True):
         'recording_id': recording_id,
         'detections': detections,
         'alerts': triggered,
+        'plate_events': plate_events,
     }
 
 
@@ -690,6 +758,7 @@ async def detect_test_image(request: Request):
     )
 
     recording_id = attach_event_recording(event_id, event_time, 'test-image', detections)
+    plate_events = process_anpr_for_event(event_id, detections, snapshot_path, event_time)
 
     for alert in triggered:
         database.add_alert(
@@ -708,6 +777,7 @@ async def detect_test_image(request: Request):
         'recording_id': recording_id,
         'detections': detections,
         'alerts': triggered,
+        'plate_events': plate_events,
         'snapshot_path': snapshot_path,
         'ai_backend': ai_state['configured_backend'],
         'backend_used': ai_state['configured_backend'],
@@ -759,6 +829,7 @@ def runtime_config():
             'error': ai_state['error'],
             'categories': effective_ai_config().get('categories', []),
         },
+        'anpr': effective_anpr_config(),
         'alerts': config.get('alerts', {}),
         'auth': {
             'enabled': auth_enabled,
@@ -770,6 +841,7 @@ def runtime_config():
             'database': effective_storage_config().get('database'),
             'snapshots_dir': effective_storage_config().get('snapshots_dir'),
             'recordings_dir': effective_storage_config().get('recordings_dir'),
+            'plates_dir': effective_storage_config().get('plates_dir'),
         },
         'recording': effective_recording_config(),
     }
@@ -875,6 +947,72 @@ async def update_user(user_id: int, request: Request):
         return auth.update_user(user_id, role=payload.get('role'), is_active=payload.get('is_active'), password=payload.get('password'))
     except AuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get('/api/plates')
+def list_plates(limit: int = Query(50, ge=1, le=200)):
+    return database.list_plates(limit=limit)
+
+
+@app.get('/api/plates/search')
+def search_plates(q: str = '', limit: int = Query(50, ge=1, le=200)):
+    return database.search_plates(normalize_plate(q), limit=limit)
+
+
+@app.post('/api/plates/whitelist')
+async def whitelist_plate(request: Request):
+    require_admin(request)
+    payload = await request.json()
+    plate_number = normalize_plate(payload.get('plate_number') or '')
+    if not plate_number:
+        raise HTTPException(status_code=400, detail='plate_number is required.')
+    return database.update_plate_status(plate_number, notes=payload.get('notes'), is_whitelisted=True, is_blacklisted=False)
+
+
+@app.post('/api/plates/blacklist')
+async def blacklist_plate(request: Request):
+    require_admin(request)
+    payload = await request.json()
+    plate_number = normalize_plate(payload.get('plate_number') or '')
+    if not plate_number:
+        raise HTTPException(status_code=400, detail='plate_number is required.')
+    return database.update_plate_status(plate_number, notes=payload.get('notes'), is_whitelisted=False, is_blacklisted=True)
+
+
+@app.get('/api/plates/{plate_id}')
+def get_plate(plate_id: int):
+    plate = database.get_plate(plate_id)
+    if plate is None:
+        raise HTTPException(status_code=404, detail='Plate not found')
+    return plate
+
+
+@app.get('/api/plate-alerts')
+def list_plate_alerts():
+    return database.list_plate_alert_rules()
+
+
+@app.post('/api/plate-alerts')
+async def create_plate_alert(request: Request):
+    require_admin(request)
+    return database.create_plate_alert_rule(validate_plate_alert_rule(await request.json()), utc_now())
+
+
+@app.put('/api/plate-alerts/{rule_id}')
+async def update_plate_alert(rule_id: int, request: Request):
+    require_admin(request)
+    rule = database.update_plate_alert_rule(rule_id, validate_plate_alert_rule(await request.json(), partial=True), utc_now())
+    if rule is None:
+        raise HTTPException(status_code=404, detail='Plate alert rule not found')
+    return rule
+
+
+@app.delete('/api/plate-alerts/{rule_id}')
+def delete_plate_alert(rule_id: int, request: Request):
+    require_admin(request)
+    if not database.delete_plate_alert_rule(rule_id):
+        raise HTTPException(status_code=404, detail='Plate alert rule not found')
+    return {'ok': True}
 
 
 def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1019,6 +1157,32 @@ def validate_alert_email_settings(payload: dict[str, Any]) -> dict[str, Any]:
     return updated
 
 
+def validate_plate_alert_rule(payload: dict[str, Any], *, partial: bool = False) -> dict[str, Any]:
+    rule: dict[str, Any] = {}
+    if not partial and not str(payload.get('rule_name', '')).strip():
+        raise HTTPException(status_code=400, detail='rule_name is required.')
+    if 'rule_name' in payload:
+        value = str(payload.get('rule_name') or '').strip()
+        if not value:
+            raise HTTPException(status_code=400, detail='rule_name cannot be blank.')
+        rule['rule_name'] = value
+    if 'rule_type' in payload or not partial:
+        rule_type = str(payload.get('rule_type', 'plate')).lower()
+        if rule_type not in {'plate', 'unknown', 'blacklisted'}:
+            raise HTTPException(status_code=400, detail='rule_type must be plate, unknown, or blacklisted.')
+        rule['rule_type'] = rule_type
+    if 'plate_pattern' in payload or not partial:
+        pattern = normalize_plate(payload.get('plate_pattern') or '')
+        if rule.get('rule_type', payload.get('rule_type')) == 'plate' and not pattern:
+            raise HTTPException(status_code=400, detail='plate_pattern is required for specific plate rules.')
+        rule['plate_pattern'] = pattern or None
+    if 'enabled' in payload or not partial:
+        rule['enabled'] = _bool_value(payload.get('enabled', True))
+    if 'cooldown_seconds' in payload or not partial:
+        rule['cooldown_seconds'] = _int_field(payload, 'cooldown_seconds', 60, 0, 86400)
+    return rule
+
+
 def _bool_value(value: Any) -> bool:
     return value.lower() in {'1', 'true', 'yes', 'on'} if isinstance(value, str) else bool(value)
 
@@ -1050,6 +1214,33 @@ def validate_camera_settings(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail='flip must be none, horizontal, vertical, or both.')
     updated['flip'] = flip
     return updated
+
+
+def validate_anpr_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    current = effective_anpr_config()
+    merged = {**current, **payload}
+    backend = str(merged.get('backend', 'mock')).lower()
+    if backend not in {'mock', 'paddleocr', 'easyocr'}:
+        raise HTTPException(status_code=400, detail='ANPR backend must be mock, paddleocr, or easyocr.')
+    try:
+        min_confidence = float(merged.get('min_confidence', 0.75))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='ANPR min_confidence must be a number.') from exc
+    if not 0 <= min_confidence <= 1:
+        raise HTTPException(status_code=400, detail='ANPR min_confidence must be between 0 and 1.')
+    raw_labels = merged.get('vehicle_labels', [])
+    if isinstance(raw_labels, str):
+        vehicle_labels = [label.strip().lower() for label in raw_labels.split(',') if label.strip()]
+    elif isinstance(raw_labels, list):
+        vehicle_labels = [str(label).strip().lower() for label in raw_labels if str(label).strip()]
+    else:
+        raise HTTPException(status_code=400, detail='vehicle_labels must be a list or comma-separated string.')
+    return {
+        'enabled': _bool_value(merged.get('enabled', True)),
+        'backend': backend,
+        'min_confidence': min_confidence,
+        'vehicle_labels': vehicle_labels or ['car', 'truck', 'bus', 'motorcycle'],
+    }
 
 
 def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1087,8 +1278,8 @@ def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 def validate_storage_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_storage_config()
-    updated = {key: str(current.get(key) or '') for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir', 'database')}
-    for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir'):
+    updated = {key: str(current.get(key) or '') for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir', 'plates_dir', 'database')}
+    for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir', 'plates_dir'):
         if key in payload:
             value = str(payload.get(key) or '').strip()
             if not value:
@@ -1124,6 +1315,11 @@ def apply_storage_and_recording_settings() -> None:
     global storage, recording_service
     storage = Storage({**config, 'storage': effective_storage_config()})
     recording_service = RecordingService({**config, 'storage': effective_storage_config(), 'recording': effective_recording_config()})
+
+
+def apply_anpr_settings() -> None:
+    global anpr_pipeline
+    anpr_pipeline = AnprPipeline(effective_anpr_config())
 
 
 @app.get('/api/settings/ai')
@@ -1250,6 +1446,7 @@ async def update_alert_email_settings(request: Request):
 def get_system_settings():
     return {
         'camera': effective_camera_config(),
+        'anpr': effective_anpr_config(),
         'recording': effective_recording_config(),
         'storage': effective_storage_config(),
         'auth': {
@@ -1272,6 +1469,24 @@ async def update_camera_settings(request: Request):
     database.set_setting('camera', settings, utc_now())
     apply_camera_settings(settings)
     return settings
+
+
+@app.get('/api/settings/anpr')
+def get_anpr_settings():
+    return effective_anpr_config()
+
+
+@app.put('/api/settings/anpr')
+async def update_anpr_settings(request: Request):
+    settings = validate_anpr_settings(await request.json())
+    database.set_setting('anpr', settings, utc_now())
+    apply_anpr_settings()
+    return settings
+
+
+@app.put('/api/settings/system/anpr')
+async def update_system_anpr_settings(request: Request):
+    return await update_anpr_settings(request)
 
 
 @app.put('/api/settings/system/recording')

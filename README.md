@@ -11,6 +11,7 @@ The app is now designed to be configured from the web UI. `config.yaml` is only 
 - Admin/viewer roles with admin-only settings and user management.
 - Profile page for timezone, date/time format, and password changes.
 - Web-managed AI settings for mock or ONNX detection.
+- Modular ANPR/ALPR pipeline for vehicle detections, plate OCR, plate search, and plate alerts.
 - Web-managed alert rules with optional SMTP email delivery.
 - Web-managed system settings for camera, recording policy, retention, storage directories, and login security.
 - SQLite persistence for events, detections, alerts, users, sessions, runtime settings, and alert rules.
@@ -25,6 +26,7 @@ The app is now designed to be configured from the web UI. `config.yaml` is only 
 - `pip` and optionally `python3-venv`.
 - A modern browser.
 - Optional: an ONNX YOLO model file if you want real inference instead of mock detection.
+- Optional: PaddleOCR or EasyOCR if you want OCR beyond the built-in mock ANPR backend.
 
 ### Orange Pi / Armbian Deployment
 
@@ -221,13 +223,55 @@ SMTP settings are stored in SQLite under `app_settings.key = alert_email`. Alert
 Route: `/system-settings`
 
 - Camera: backend, device, width, height, FPS, flip.
+- ANPR: enable/disable, OCR backend, confidence threshold, and vehicle labels.
 - Recording policy: continuous recording, record on motion, record on human, and selected object labels such as `cat`, `dog`, `package`, and `parcel`.
 - Clip settings: pre-event seconds, post-event seconds, max clip seconds, and file format.
 - Retention: auto purge, retention days, max storage GB, and manual purge.
 - Storage: data, snapshots, events, and recordings directories.
 - Login security: session timeout, max login attempts, lockout minutes.
 
-Camera, recording, storage, and login security settings are stored in SQLite and applied at runtime where possible. Database path, auth enablement, cookie name, and server bind settings remain bootstrap YAML.
+Camera, ANPR, recording, storage, and login security settings are stored in SQLite and applied at runtime where possible. Database path, auth enablement, cookie name, and server bind settings remain bootstrap YAML.
+
+### ANPR
+
+Route: `/anpr`
+
+ANPR runs as a separate pipeline after object detection:
+
+```text
+Camera/Image -> YOLO Object Detection -> Vehicle Detection -> Plate Detection -> Plate OCR -> Plate Event -> Search / Alerts
+```
+
+Vehicle labels are configurable and default to `car`, `truck`, `bus`, and `motorcycle`. When one is detected, the ANPR pipeline writes a plate crop artifact, runs OCR, stores a plate event, and links it back to the original event and any recording.
+
+Supported OCR backends:
+
+- `mock`: built-in deterministic OCR for development and tests.
+- `paddleocr`: optional PaddleOCR backend. Falls back to mock if the package is unavailable.
+- `easyocr`: optional EasyOCR backend. Falls back to mock if the package is unavailable.
+
+Optional OCR installs:
+
+```bash
+pip install paddleocr
+pip install easyocr
+```
+
+Search examples:
+
+```text
+ABC123
+1ABC2D
+XYZ999
+```
+
+Plate alert examples:
+
+- Specific plate: `ABC123`
+- Unknown plate: any plate that is not whitelisted or blacklisted.
+- Blacklisted plate: any plate marked blacklisted.
+
+Admins can whitelist or blacklist plates and add notes such as `Family Car`, `Delivery Driver`, or `Blacklisted`.
 
 ## ONNX YOLO Setup
 
@@ -281,6 +325,7 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `GET` | `/settings` | Admin AI settings |
 | `GET` | `/alert-settings` | Admin alert and SMTP settings |
 | `GET` | `/system-settings` | Admin camera, recording, storage, and login settings |
+| `GET` | `/anpr` | Plate search, history, details, and alert rules |
 | `GET` | `/api/auth/me` | Current user, CSRF token, and session expiry |
 | `PUT` | `/api/profile` | Update profile preferences |
 | `POST` | `/api/profile/password` | Change current user's password |
@@ -293,6 +338,13 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `GET` | `/api/recordings` | List recordings |
 | `GET` | `/api/recordings/{id}/stream` | Stream recording media when present |
 | `POST` | `/api/recordings/purge` | Admin purge using retention settings |
+| `GET` | `/api/plates` | Recent vehicle plates |
+| `GET` | `/api/plates/{id}` | Plate details and history |
+| `GET` | `/api/plates/search` | Search plate events |
+| `POST` | `/api/plates/whitelist` | Admin whitelist plate and notes |
+| `POST` | `/api/plates/blacklist` | Admin blacklist plate and notes |
+| `GET/POST` | `/api/plate-alerts` | View/create plate alert rules |
+| `PUT/DELETE` | `/api/plate-alerts/{id}` | Edit/delete plate alert rules |
 | `GET/POST` | `/api/users` | Admin list/create users |
 | `PATCH` | `/api/users/{id}` | Admin role/status/password updates |
 | `GET/PUT` | `/api/settings/ai` | Admin AI settings |
@@ -301,6 +353,7 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `PUT/DELETE` | `/api/settings/alerts/{id}` | Edit/delete alert rules |
 | `GET` | `/api/settings/system` | Admin system settings summary |
 | `PUT` | `/api/settings/system/camera` | Admin camera settings |
+| `GET/PUT` | `/api/settings/anpr` | Admin ANPR settings |
 | `PUT` | `/api/settings/system/recording` | Admin recording settings |
 | `PUT` | `/api/settings/system/storage` | Admin storage settings |
 | `PUT` | `/api/settings/system/auth` | Admin login security settings |
@@ -320,12 +373,16 @@ Core tables:
 - `detections`
 - `alert_history`
 - `recordings`
+- `vehicle_plates`
+- `plate_events`
+- `plate_alert_rules`
 
 Useful `app_settings` keys:
 
 - `ai`
 - `alert_email`
 - `camera`
+- `anpr`
 - `recording`
 - `storage`
 - `auth`
@@ -367,6 +424,13 @@ Current limitations:
 - Mock and uploaded-image events create generated footage, not real camera footage.
 - Real clip writing for camera, RTSP, and uploaded videos is future work.
 - Retention runs when clips are created or when an admin clicks **Purge now**; there is no background scheduler yet.
+
+## ANPR Limitations
+
+- Plate crop extraction is a modular placeholder in mock/upload workflows; future camera backends can replace it with real image crops.
+- The built-in `mock` OCR backend is deterministic and useful for workflow testing, not real OCR.
+- PaddleOCR and EasyOCR are optional dependencies and may require additional platform packages.
+- Plate alerts are stored and matched in-process for cooldown behavior; persistent alert history can be added later if needed.
 
 ## Updating an Existing Install
 

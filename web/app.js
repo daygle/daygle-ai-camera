@@ -30,6 +30,11 @@ const els = {
   recordingClearBtn: document.getElementById('recordingClearBtn'),
   clipPlayer: document.getElementById('clipPlayer'),
   clipPlayerStatus: document.getElementById('clipPlayerStatus'),
+  plateFilter: document.getElementById('plateFilter'),
+  plateSearchBtn: document.getElementById('plateSearchBtn'),
+  plateClearBtn: document.getElementById('plateClearBtn'),
+  plates: document.getElementById('plates'),
+  plateSightings: document.getElementById('plateSightings'),
 };
 
 let authState = { user: null, csrfToken: null };
@@ -93,6 +98,7 @@ function renderEvents(events) {
         <span>${formatDate(event.created_at)}</span>
       </div>
       <div>${detectionBadges(event.detections)}</div>
+      <div>${plateBadges(event.plate_events)}</div>
       <p class="muted">Source: ${escapeHtml(event.source)} · ${escapeHtml(event.recording_status || 'none')}</p>
       <div>${recordingLink(event.recordings)}</div>
     </div>
@@ -158,6 +164,7 @@ function renderRecordings(recordings) {
           <span>${formatDate(recording.started_at)}</span>
         </div>
         <div>${detectionBadges(recording.detections)}</div>
+        <div>${plateBadges(recording.plate_events)}</div>
         <p class="muted">Duration: ${Number(recording.duration_seconds || 0).toFixed(1)}s · Source: ${escapeHtml(recording.source)} · Trigger: ${escapeHtml(recording.trigger_type || 'motion')} ${escapeHtml(recording.trigger_label || '')} · ${escapeHtml(fileName)}</p>
         <button class="secondary" data-play-recording="${recording.id}">Play clip</button>
       </div>
@@ -186,6 +193,39 @@ async function loadAuth() {
     els.alertSettingsLink.hidden = true;
     els.systemSettingsLink.hidden = true;
   }
+}
+
+function plateBadges(plateEvents = []) {
+  if (!plateEvents.length) return '<span class="muted">No plates</span>';
+  return plateEvents.map((p) => `<span class="detection">${escapeHtml(p.plate_number)} ${Math.round((p.confidence || 0) * 100)}%</span>`).join('');
+}
+
+function renderPlates(plates = []) {
+  if (!plates.length) {
+    els.plates.innerHTML = '<div class="empty">No plates seen yet.</div>';
+    return;
+  }
+  els.plates.innerHTML = plates.map((plate) => `
+    <div class="item">
+      <div class="item-title"><span>${escapeHtml(plate.plate_number)}</span><span>${plate.sighting_count} sighting(s)</span></div>
+      <p class="muted">First seen: ${formatDate(plate.first_seen)} · Last seen: ${formatDate(plate.last_seen)}</p>
+      <p class="muted">${plate.is_blacklisted ? 'Blacklisted' : plate.is_whitelisted ? 'Whitelisted' : 'Unknown'} ${plate.notes ? `· ${escapeHtml(plate.notes)}` : ''}</p>
+    </div>
+  `).join('');
+}
+
+function renderPlateSightings(events = []) {
+  if (!events.length) {
+    els.plateSightings.innerHTML = '<div class="empty">No plate sightings match.</div>';
+    return;
+  }
+  els.plateSightings.innerHTML = events.map((event) => `
+    <div class="item">
+      <div class="item-title"><span>${escapeHtml(event.plate_number)}</span><span>${Math.round(event.confidence * 100)}%</span></div>
+      <p class="muted">${formatDate(event.created_at)} · Event #${event.event_id}</p>
+      <div>${recordingLink(event.event?.recordings || [])}</div>
+    </div>
+  `).join('');
 }
 
 async function loadStatus() {
@@ -227,8 +267,18 @@ async function loadRecordings(label = '') {
   bindPlaybackButtons();
 }
 
+async function loadPlates() {
+  renderPlates(await api('/api/plates'));
+}
+
+async function searchPlateSightings(query = '') {
+  const path = query ? `/api/plates/search?q=${encodeURIComponent(query)}` : '/api/plates/search?q=';
+  renderPlateSightings(await api(path));
+  bindPlaybackButtons();
+}
+
 async function refreshAll() {
-  await Promise.all([loadStatus(), loadStats(), loadEvents(), loadAlerts(), loadRecordings()]);
+  await Promise.all([loadStatus(), loadStats(), loadEvents(), loadAlerts(), loadRecordings(), loadPlates(), searchPlateSightings()]);
   bindPlaybackButtons();
 }
 
@@ -297,6 +347,12 @@ els.recordingSearchBtn.addEventListener('click', () => loadRecordings(els.record
 els.recordingClearBtn.addEventListener('click', () => {
   els.recordingFilter.value = '';
   loadRecordings();
+});
+els.plateSearchBtn.addEventListener('click', () => searchPlateSightings(els.plateFilter.value.trim()));
+els.plateClearBtn.addEventListener('click', () => {
+  els.plateFilter.value = '';
+  loadPlates();
+  searchPlateSightings();
 });
 els.searchInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {

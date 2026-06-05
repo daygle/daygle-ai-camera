@@ -2,6 +2,7 @@ let csrfToken = null;
 const messageEl = document.getElementById('systemMessage');
 const forms = {
   camera: document.getElementById('cameraSettingsForm'),
+  anpr: document.getElementById('anprSettingsForm'),
   recording: document.getElementById('recordingSettingsForm'),
   retention: document.getElementById('retentionSettingsForm'),
   storage: document.getElementById('storageSettingsForm'),
@@ -36,6 +37,8 @@ function payloadFor(form) {
     if (key in data && data[key] !== '') data[key] = Number.parseInt(data[key], 10);
   }
   if ('record_on_objects' in data) data.record_on_objects = data.record_on_objects.split(',').map((label) => label.trim()).filter(Boolean);
+  if ('vehicle_labels' in data) data.vehicle_labels = data.vehicle_labels.split(',').map((label) => label.trim()).filter(Boolean);
+  if ('min_confidence' in data && data.min_confidence !== '') data.min_confidence = Number(data.min_confidence);
   if ('session_timeout_hours' in data && data.session_timeout_hours !== '') data.session_timeout_hours = Number(data.session_timeout_hours);
   return data;
 }
@@ -45,6 +48,10 @@ async function loadSettings() {
   csrfToken = me.csrf_token;
   const settings = await api('/api/settings/system');
   fillForm(forms.camera, settings.camera);
+  fillForm(forms.anpr, settings.anpr);
+  if (forms.anpr.elements.vehicle_labels) {
+    forms.anpr.elements.vehicle_labels.value = (settings.anpr.vehicle_labels || []).join(', ');
+  }
   fillForm(forms.recording, settings.recording);
   fillForm(forms.retention, settings.recording);
   if (forms.recording.elements.record_on_objects) {
@@ -69,6 +76,7 @@ function bindForm(name, label, endpointName = name) {
 }
 
 bindForm('camera', 'Camera');
+bindForm('anpr', 'ANPR');
 bindForm('recording', 'Recording');
 bindForm('retention', 'Retention', 'recording');
 bindForm('storage', 'Storage');

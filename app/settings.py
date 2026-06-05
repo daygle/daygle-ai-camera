@@ -28,7 +28,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "input_size": 640,
         "model_path": "models/yolov8n.onnx",
         "labels_path": "models/coco.names",
-        "categories": ["person", "cat", "dog", "car", "bicycle", "bird", "package"],
+        "categories": ["person", "cat", "dog", "car", "truck", "bus", "motorcycle", "bicycle", "bird", "package"],
+    },
+    "anpr": {
+        "enabled": True,
+        "backend": "mock",
+        "min_confidence": 0.75,
+        "vehicle_labels": ["car", "truck", "bus", "motorcycle"],
     },
     "alerts": {
         "enabled": True,
@@ -82,6 +88,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "snapshots_dir": "data/snapshots",
         "events_dir": "data/events",
         "recordings_dir": "data/recordings",
+        "plates_dir": "data/plates",
     },
 }
 
