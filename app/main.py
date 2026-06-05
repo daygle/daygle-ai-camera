@@ -278,6 +278,24 @@ async def authentication_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware('http')
+async def app_navigation_middleware(request: Request, call_next):
+    response = await call_next(request)
+    content_type = response.headers.get('content-type', '')
+    if request.url.path in PUBLIC_PATHS or not content_type.startswith('text/html'):
+        return response
+    body = b''
+    async for chunk in response.body_iterator:
+        body += chunk
+    marker = b'</body>'
+    script = b'<script src="/static/nav.js"></script>'
+    if marker in body and script not in body:
+        body = body.replace(marker, script + marker)
+    headers = dict(response.headers)
+    headers.pop('content-length', None)
+    return Response(content=body, status_code=response.status_code, headers=headers, media_type='text/html')
+
+
 def set_session_cookie(response: Response, request: Request, token: str, expires_at: str) -> None:
     session_hours = float(effective_auth_config().get('session_timeout_hours', 12))
     response.set_cookie(

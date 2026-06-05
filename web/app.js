@@ -38,6 +38,9 @@ const els = {
 };
 
 let authState = { user: null, csrfToken: null };
+['userMenuBtn', 'usersLink', 'settingsLink', 'alertSettingsLink', 'systemSettingsLink'].forEach((key) => {
+  if (!els[key]) els[key] = { hidden: false, textContent: '' };
+});
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
