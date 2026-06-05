@@ -104,11 +104,7 @@ input {
 .item-title { display: flex; justify-content: space-between; gap: 12px; font-weight: 900; }
 .detection { display: inline-flex; margin: 8px 8px 0 0; padding: 6px 9px; border-radius: 999px; background: rgba(139,92,246,.16); color: #c9b8ff; font-weight: 800; font-size: 12px; }
 .empty { color: var(--muted); padding: 12px; }
-@media (max-width: 900px) {
-  .hero { flex-direction: column; align-items: stretch; }
-  .stats-grid, .main-grid { grid-template-columns: 1fr; }
-  .search-row { grid-template-columns: 1fr; }
-}
+
 .hero-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
 .user-menu { position: relative; }
 .user-menu-panel {
@@ -143,12 +139,22 @@ select {
 .error { color: var(--danger); font-weight: 800; }
 .button-link { display: inline-flex; align-items: center; text-decoration: none; border-radius: 14px; padding: 12px 16px; color: #04111c; background: linear-gradient(135deg, var(--accent), var(--success)); font-weight: 800; }
 .user-row { display: grid; grid-template-columns: 1fr 150px auto auto; align-items: center; gap: 10px; }
-@media (max-width: 900px) {
-  .hero-actions { justify-content: flex-start; }
-  .form-grid, .user-row { grid-template-columns: 1fr; }
 .upload-form { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-bottom: 8px; }
 .upload-result { margin: 0 0 14px; }
+.upload-preview { display: flex; align-items: center; gap: 12px; margin: 10px 0 12px; padding: 10px; border: 1px solid var(--border); border-radius: 16px; background: rgba(255,255,255,.04); }
+.upload-preview[hidden] { display: none; }
+.upload-preview img { width: 96px; height: 72px; object-fit: cover; border-radius: 12px; border: 1px solid var(--border); }
 input[type="file"] { padding: 10px; }
+.status-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+.status-panel div { border: 1px solid var(--border); border-radius: 14px; padding: 12px; background: rgba(255,255,255,.04); }
+.status-panel .wide { grid-column: 1 / -1; }
+.status-panel span { display: block; color: var(--muted); font-size: 12px; font-weight: 800; margin-bottom: 5px; }
+.status-panel strong { overflow-wrap: anywhere; }
+.button-row { display: flex; gap: 10px; flex-wrap: wrap; }
 @media (max-width: 900px) {
-  .upload-form { grid-template-columns: 1fr; }
+  .hero { flex-direction: column; align-items: stretch; }
+  .stats-grid, .main-grid { grid-template-columns: 1fr; }
+  .search-row { grid-template-columns: 1fr; }
+  .hero-actions { justify-content: flex-start; }
+  .form-grid, .user-row, .upload-form, .status-panel { grid-template-columns: 1fr; }
 }

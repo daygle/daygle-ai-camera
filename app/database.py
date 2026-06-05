@@ -189,6 +189,11 @@ class EventDatabase:
             row = db.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
             return json.loads(row["value"]) if row else None
 
+    def has_setting(self, key: str) -> bool:
+        with self.connect() as db:
+            row = db.execute("SELECT 1 FROM app_settings WHERE key = ?", (key,)).fetchone()
+            return row is not None
+
     def set_setting(self, key: str, value: Any, updated_at: str) -> Any:
         with self.connect() as db:
             db.execute(

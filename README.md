@@ -173,28 +173,29 @@ Important sections:
 
 `config.yaml` is the bootstrap/default configuration. Runtime edits made on `/settings` are stored in SQLite and override config values without requiring direct config-file edits.
 
-## ONNX YOLO setup
+## Web-based setup and ONNX YOLO setup
 
-The default configuration uses the mock detector, which is enough to verify installation. To enable ONNX inference, download or provide a model file:
+Normal users should not need to edit `config.yaml` after installation. Start the app, create the first administrator, then open **Setup / AI Settings** from the dashboard menu (`/settings`). The page shows the active backend, model and labels paths, whether the model file exists, whether ONNX Runtime is installed, whether the detector is loaded, the last detector error, and whether AI settings are coming from SQLite, `config.yaml`, or defaults.
+
+The default configuration uses the mock detector, which is enough to verify installation. To enable ONNX inference from the web UI:
+
+1. Sign in as an admin.
+2. Open `/settings`.
+3. Click **Download YOLOv8n ONNX** to install `models/yolov8n.onnx`, or enter your own model path.
+4. Set **Backend** to `onnx`.
+5. Adjust confidence, IOU threshold, input size, model path, and labels path.
+6. Click **Save AI settings**. The settings are saved to SQLite and override `config.yaml`.
+7. Use **Check model**, **Reload detector**, and **Test detector** to validate the runtime detector without restarting the app.
+
+The old script remains available for offline/manual installs:
 
 ```bash
 python scripts/download_yolov8n_onnx.py --output models/yolov8n.onnx
 ```
 
-Then either edit `config.yaml` before first start or use `/settings` as an admin:
+`mock` mode is explicit: mock detections are generated only when `ai.backend` is `mock` or when an admin uses the dedicated mock-camera endpoint. If `ai.backend` is `onnx` and the model is missing, the dashboard reports `MODEL MISSING`, upload inference returns a clear API error, and the app does not silently fall back to fake mock detections. If a runtime reload fails, the previous working detector is kept while the saved SQLite settings and status panel show the error.
 
-```yaml
-ai:
-  enabled: true
-  backend: onnx
-  confidence: 0.45
-  iou_threshold: 0.45
-  input_size: 640
-  model_path: models/yolov8n.onnx
-  labels_path: models/coco.names
-```
-
-Test-image detection stays available at `POST /api/detect/test-image`. The mock camera mode and `POST /api/mock/detect` are intentionally preserved.
+Test-image detection stays available at `POST /api/detect/test-image` and returns the backend used in the response. The mock camera mode and `POST /api/mock/detect` are intentionally preserved.
 
 ## First setup and users
 
@@ -235,7 +236,7 @@ Security behavior:
 
 ## AI and alert settings
 
-Admins can manage:
+Admins can manage these settings from `/settings`:
 
 - AI enabled state.
 - Backend: `mock` or `onnx`.
@@ -244,9 +245,10 @@ Admins can manage:
 - Input size.
 - Model path.
 - Labels path.
-- Alert rules: name, object label, min confidence, cooldown, enabled state, and optional active time window.
+- Model actions: check model, download YOLOv8n ONNX, reload detector, and test detector.
+- Alert rules: create, edit, delete, enable/disable, object label, minimum confidence, cooldown, and optional active time window.
 
-If an ONNX detector reload fails, the API returns a clear error and keeps the previous working detector.
+AI settings are stored as a JSON document in SQLite table `app_settings` under key `ai`. Alert rules are stored in `alert_rules`. SQLite settings override `config.yaml`; `config.yaml` remains the bootstrap/default source for new installs.
 
 ## Important routes
 
@@ -260,6 +262,7 @@ If an ONNX detector reload fails, the API returns a clear error and keeps the pr
 | `GET` | `/settings` | Admin AI and alert settings page |
 | `GET` | `/api/auth/me` | Current user, role, CSRF token, and expiry |
 | `GET` | `/api/status` | Camera and detector status |
+| `GET` | `/api/status/ai` | Detailed AI status panel data |
 | `POST` | `/api/mock/detect` | Generate a mock detection event |
 | `POST` | `/api/detect/test-image` | Upload an image for active detector inference |
 | `GET` | `/api/events` | Search/list events |
@@ -269,7 +272,11 @@ If an ONNX detector reload fails, the API returns a clear error and keeps the pr
 | `GET` | `/api/config` | Non-secret runtime summary |
 | `GET/POST` | `/api/users` | Admin list/create users |
 | `PATCH` | `/api/users/{user_id}` | Admin role/status/password updates |
-| `GET/PUT` | `/api/settings/ai` | Admin view/update AI settings |
+| `GET/PUT` | `/api/settings/ai` | Admin view/update SQLite-backed AI settings |
+| `POST` | `/api/settings/ai/check-model` | Admin checks model/runtime/detector status |
+| `POST` | `/api/settings/ai/download-yolov8n` | Admin downloads YOLOv8n ONNX to `models/yolov8n.onnx` |
+| `POST` | `/api/settings/ai/reload` | Admin reloads detector without app restart when possible |
+| `POST` | `/api/settings/ai/test-detector` | Admin validates the configured detector is ready |
 | `GET/POST` | `/api/settings/alerts` | View alert rules; admin creates rules |
 | `PUT/DELETE` | `/api/settings/alerts/{rule_id}` | Admin edit/delete alert rules |
 
@@ -314,7 +321,8 @@ The installer preserves an existing config file at `/etc/daygle-ai-camera/config
 
 - **Cannot log in after first start**: open `/setup` and create the initial admin user if the database is empty.
 - **Setup page redirects to login**: a user already exists; sign in with an existing admin account or reset the database intentionally.
-- **ONNX detector fails to load**: confirm `ai.model_path` and `ai.labels_path` exist and are readable by the running user.
+- **Dashboard shows MODEL MISSING**: open `/settings`, click **Download YOLOv8n ONNX** or set a readable model path, then click **Reload detector**.
+- **ONNX detector fails to load**: confirm the model path and labels path in `/settings` exist and are readable by the running user, and verify ONNX Runtime is installed in the status panel.
 - **Service cannot write data**: check ownership of the configured `storage` paths. The Armbian installer assigns them to the service user.
 - **Need logs on Armbian**: run `sudo journalctl -u daygle-ai-camera -f`.
 

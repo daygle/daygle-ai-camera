@@ -20,7 +20,7 @@
           <div class="user-menu-panel">
             <a href="#profile">Profile</a>
             <a id="usersLink" href="/users">Users</a>
-            <a id="settingsLink" href="/settings">Settings</a>
+            <a id="settingsLink" href="/settings">Setup / AI Settings</a>
             <a href="/logout">Logout</a>
           </div>
         </nav>
@@ -49,6 +49,10 @@
           <input id="imageInput" type="file" accept="image/*" />
           <button id="uploadBtn" type="submit">Test image detection</button>
         </form>
+        <div id="uploadPreview" class="upload-preview" hidden>
+          <img id="previewImage" alt="Selected upload preview" />
+          <span id="selectedFilename" class="muted"></span>
+        </div>
         <p id="uploadResult" class="muted upload-result">Upload an image to create a detection event with the configured AI backend.</p>
         <div class="mock-feed">
           <div class="scanline"></div>
