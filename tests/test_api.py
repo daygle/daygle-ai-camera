@@ -640,7 +640,13 @@ def test_admin_alert_rule_crud_and_alert_engine_uses_db_rules(tmp_path, monkeypa
     try:
         _setup_admin(client)
         csrf = _login(client)
+        status, _headers, alert_page = client.request("/alert-settings")
+        assert status == 200
+        assert 'select name="object" id="objectSelect"' in alert_page
+        assert 'Choose from the detector labels currently available to this camera.' in alert_page
+
         initial = client.request("/api/settings/alerts")[2]
+        assert "person" in initial["available_labels"]
         for rule in initial["rules"]:
             client.request(f"/api/settings/alerts/{rule['id']}", method="DELETE", headers={"X-CSRF-Token": csrf})
 
