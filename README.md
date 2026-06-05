@@ -1,6 +1,6 @@
 # Daygle AI Camera
 
-Daygle AI Camera is an Orange Pi 3B / Armbian-friendly AI camera platform with a FastAPI backend, SQLite storage, session authentication, a modern dashboard, mock camera mode, and mock/ONNX YOLO detection.
+Daygle AI Camera is an Orange Pi 3B / Armbian-friendly AI camera platform. It provides a FastAPI backend, SQLite storage, session authentication, a browser dashboard, mock camera mode for development, and mock or ONNX YOLO object detection.
 
 ## Features
 
@@ -14,17 +14,162 @@ Daygle AI Camera is an Orange Pi 3B / Armbian-friendly AI camera platform with a
 - Dashboard user menu, logout, user management, and admin-only settings page.
 - Armbian install script and systemd unit for Orange Pi 3B deployment.
 
-## Quick start
+## Requirements
+
+### Local development
+
+- Python 3.10 or newer.
+- `python3-venv` and `pip`.
+- A modern browser.
+- Optional: an ONNX YOLO model file if you want real detector inference instead of the mock detector.
+
+### Orange Pi / Armbian deployment
+
+- Orange Pi 3B or another Linux host running Armbian/Debian-like packages.
+- Root or `sudo` access.
+- Network access during installation so `apt` and `pip` can install dependencies.
+- Optional: HTTPS reverse proxy or VPN for devices exposed beyond a private LAN.
+
+## Installation
+
+Choose one of these installation paths:
+
+- **Local install**: best for development, testing, or running the app manually on a workstation.
+- **Armbian service install**: best for Orange Pi deployment with systemd auto-start.
+
+### Option 1: Local install
+
+1. Clone the repository and enter it:
+
+   ```bash
+   git clone <repository-url> daygle-ai-camera
+   cd daygle-ai-camera
+   ```
+
+   If you already have the source code, run the remaining commands from the repository root.
+
+2. Create and activate a Python virtual environment:
+
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+
+3. Install dependencies:
+
+   ```bash
+   pip install --upgrade pip wheel
+   pip install -r requirements-dev.txt
+   ```
+
+   Use `requirements-dev.txt` for local development and tests. It includes the runtime requirements plus `pytest`. For a runtime-only environment, install `requirements.txt` instead.
+
+4. Create a writable configuration file:
+
+   ```bash
+   cp config.example.yaml config.yaml
+   ```
+
+5. Start the web server:
+
+   ```bash
+   DAYGLE_CONFIG=config.yaml uvicorn app.main:app --reload --host 127.0.0.1 --port 8080
+   ```
+
+6. Open the dashboard at <http://127.0.0.1:8080/>.
+
+7. Complete first-run setup:
+   - A fresh database redirects to `/setup`.
+   - Create the first administrator account.
+   - After setup, sign in at `/login`.
+
+### Option 2: Armbian service install
+
+Run the installer from the repository root on the Orange Pi or target Linux host:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements-dev.txt
-cp config.example.yaml config.yaml
-DAYGLE_CONFIG=config.yaml uvicorn app.main:app --reload --host 127.0.0.1 --port 8080
+sudo ./scripts/install_armbian.sh
 ```
 
-Open <http://127.0.0.1:8080/>. With an empty database, the app redirects to `/setup`; create the first administrator, then sign in at `/login`.
+The installer will:
+
+- Install required system packages with `apt`.
+- Create a system user named `daygle` unless `DAYGLE_USER` overrides it.
+- Copy the app to `/opt/daygle-ai-camera` unless `DAYGLE_APP_DIR` overrides it.
+- Create `/etc/daygle-ai-camera/config.yaml` unless `DAYGLE_CONFIG_DIR` overrides it.
+- Store SQLite data and generated files under `/var/lib/daygle-ai-camera` unless `DAYGLE_DATA_DIR` overrides it.
+- Create and start the `daygle-ai-camera.service` systemd service.
+
+Check the service and logs:
+
+```bash
+sudo systemctl status daygle-ai-camera
+sudo journalctl -u daygle-ai-camera -f
+```
+
+Open the dashboard at:
+
+```text
+http://<orange-pi-ip>:8080/
+```
+
+Then complete the same first-run setup flow by creating the first administrator.
+
+### Installer environment overrides
+
+You can override install paths before running the Armbian installer:
+
+```bash
+sudo DAYGLE_USER=daygle \
+  DAYGLE_APP_DIR=/opt/daygle-ai-camera \
+  DAYGLE_CONFIG_DIR=/etc/daygle-ai-camera \
+  DAYGLE_DATA_DIR=/var/lib/daygle-ai-camera \
+  ./scripts/install_armbian.sh
+```
+
+## Configuration
+
+The app reads configuration from the file pointed to by `DAYGLE_CONFIG`. For local installs, this is usually `config.yaml`. For service installs, the default is `/etc/daygle-ai-camera/config.yaml`.
+
+Start from the example file:
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+Important sections:
+
+- `server`: host and port for Uvicorn.
+- `camera`: mock camera settings and future camera backend settings.
+- `ai`: mock or ONNX detector settings.
+- `alerts`: initial alert-rule defaults.
+- `auth`: authentication, session, and lockout settings.
+- `storage`: database, snapshot, and event file locations.
+
+`config.yaml` is the bootstrap/default configuration. Runtime edits made on `/settings` are stored in SQLite and override config values without requiring direct config-file edits.
+
+## ONNX YOLO setup
+
+The default configuration uses the mock detector, which is enough to verify installation. To enable ONNX inference, download or provide a model file:
+
+```bash
+python scripts/download_yolov8n_onnx.py --output models/yolov8n.onnx
+```
+
+Then either edit `config.yaml` before first start or use `/settings` as an admin:
+
+```yaml
+ai:
+  enabled: true
+  backend: onnx
+  confidence: 0.45
+  iou_threshold: 0.45
+  input_size: 640
+  model_path: models/yolov8n.onnx
+  labels_path: models/coco.names
+```
+
+Test-image detection stays available at `POST /api/detect/test-image`. The mock camera mode and `POST /api/mock/detect` are intentionally preserved.
 
 ## First setup and users
 
@@ -64,8 +209,6 @@ Security behavior:
 - Failed logins are stored in `login_attempts`; accounts or IPs lock for 15 minutes after 5 recent failures by default.
 
 ## AI and alert settings
-
-`config.yaml` remains the bootstrap/default configuration. Runtime edits made on `/settings` are stored in SQLite and override config values without requiring direct config-file edits.
 
 Admins can manage:
 
@@ -120,35 +263,35 @@ detections(id, event_id, label, confidence, x, y, width, height)
 alert_history(id, created_at, rule_name, event_id, label, confidence, message)
 ```
 
-## ONNX YOLO setup
+## Updating an existing install
+
+### Local install
 
 ```bash
-python scripts/download_yolov8n_onnx.py --output models/yolov8n.onnx
+git pull
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+DAYGLE_CONFIG=config.yaml uvicorn app.main:app --reload --host 127.0.0.1 --port 8080
 ```
 
-Then either edit `config.yaml` before first start or use `/settings` as an admin:
+### Armbian service install
 
-```yaml
-ai:
-  enabled: true
-  backend: onnx
-  confidence: 0.45
-  iou_threshold: 0.45
-  input_size: 640
-  model_path: models/yolov8n.onnx
-  labels_path: models/coco.names
-```
-
-Test-image detection stays available at `POST /api/detect/test-image`. The mock camera mode and `POST /api/mock/detect` are intentionally preserved.
-
-## Armbian deployment notes
+From the updated repository root:
 
 ```bash
-sudo scripts/install_armbian.sh
-sudo systemctl status daygle-ai-camera
+sudo ./scripts/install_armbian.sh
+sudo systemctl restart daygle-ai-camera
 ```
 
-The installer uses `/etc/daygle-ai-camera/config.yaml` via `DAYGLE_CONFIG`. Keep `auth.enabled: true` on devices exposed to a network. Use a reverse proxy or VPN with HTTPS so cookies receive the Secure flag and credentials are protected in transit.
+The installer preserves an existing config file at `/etc/daygle-ai-camera/config.yaml` unless you remove or replace it manually.
+
+## Troubleshooting
+
+- **Cannot log in after first start**: open `/setup` and create the initial admin user if the database is empty.
+- **Setup page redirects to login**: a user already exists; sign in with an existing admin account or reset the database intentionally.
+- **ONNX detector fails to load**: confirm `ai.model_path` and `ai.labels_path` exist and are readable by the running user.
+- **Service cannot write data**: check ownership of the configured `storage` paths. The Armbian installer assigns them to the service user.
+- **Need logs on Armbian**: run `sudo journalctl -u daygle-ai-camera -f`.
 
 ## Tests
 
