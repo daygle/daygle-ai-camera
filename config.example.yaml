@@ -14,7 +14,10 @@ ai:
   enabled: true
   backend: mock
   confidence: 0.45
-  model_path: models/model.onnx
+  iou_threshold: 0.45
+  input_size: 640
+  model_path: models/yolov8n.onnx
+  labels_path: models/coco.names
   categories:
     - person
     - cat
