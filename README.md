@@ -1,152 +1,82 @@
 # Daygle AI Camera
 
-A modern, self-hosted AI camera project designed for an Orange Pi 3B running Armbian with an OV5647 camera module.
+Daygle AI Camera is an Orange Pi 3B AI camera platform with a FastAPI backend, SQLite event history, alert rules, and a modern dark-mode dashboard. It runs end-to-end today without camera hardware by using a mock camera backend and synthetic object detector.
 
-This first version gives you a clean foundation:
+## Features
 
-- FastAPI backend
-- Modern responsive web dashboard
-- Live MJPEG camera stream
-- Snapshot endpoint
-- Pluggable AI detector layer
-- YAML configuration
-- Local event directory structure
-- systemd service file
-- Armbian install script
+- FastAPI backend with health/status, event, alert, stats, and runtime-config APIs
+- SQLite database for events, detections, and alert history
+- Mock camera and mock detector so development does not require a physical camera
+- Dark-mode dashboard with searchable object detection history
+- Configurable alert rule example for cat detections
+- Armbian install script and systemd unit for Orange Pi 3B deployment
+- Architecture notes for future OV5647 CSI, YOLO ONNX, and RKNN support
 
-The AI detector is intentionally pluggable. Start with camera streaming first, then add ONNX/TFLite/RKNN inference once the OV5647 capture path is confirmed.
-
-## Hardware target
-
-- Orange Pi 3B
-- OV5647 camera module
-- Armbian
-- Python 3.10+
-
-## Project layout
-
-```text
-.
-├── app/
-│   ├── main.py              # FastAPI app
-│   ├── camera.py            # OpenCV/V4L2 camera capture
-│   ├── detector.py          # AI detector abstraction
-│   ├── settings.py          # YAML config loader
-│   └── storage.py           # Snapshot/event storage helpers
-├── web/
-│   └── static/
-│       ├── index.html       # Modern dashboard
-│       ├── styles.css
-│       └── app.js
-├── scripts/
-│   └── install_armbian.sh
-├── systemd/
-│   └── daygle-ai-camera.service
-├── config.example.yaml
-├── requirements.txt
-└── README.md
-```
-
-## Quick start on Armbian
+## Quick start for local development
 
 ```bash
-sudo apt update
-sudo apt install -y python3 python3-venv python3-pip python3-opencv v4l-utils ffmpeg
-
-git clone https://github.com/daygle/daygle-ai-camera.git
-cd daygle-ai-camera
-
 python3 -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-
-cp config.example.yaml config.yaml
-python -m app.main
+pip install -r requirements-dev.txt
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8080
 ```
 
-Open:
+Open <http://127.0.0.1:8080/>.
 
-```text
-http://<orange-pi-ip>:8080
-```
-
-## Check camera detection
-
-Before running the app, confirm Linux can see the camera:
+Generate a mock event from the dashboard or with curl:
 
 ```bash
-v4l2-ctl --list-devices
-ls -l /dev/video*
+curl -X POST http://127.0.0.1:8080/api/mock/detect
+curl http://127.0.0.1:8080/api/events
 ```
 
-If `/dev/video0` exists, the default config should work.
+## Armbian 26.x startup on Orange Pi 3B
 
-If the OV5647 does not appear, the issue is likely kernel/device-tree/CSI support rather than the Python application.
-
-## Running as a service
-
-After testing manually:
+From a checkout on the Orange Pi:
 
 ```bash
 sudo ./scripts/install_armbian.sh
 sudo systemctl status daygle-ai-camera
+sudo journalctl -u daygle-ai-camera -f
 ```
 
-## Configuration
+Then browse to:
 
-Copy the example config:
+```text
+http://<orange-pi-ip>:8080/
+```
+
+The installer:
+
+1. Installs Python, venv, pip, SQLite, certificates, and rsync.
+2. Copies the app to `/opt/daygle-ai-camera`.
+3. Creates a virtual environment in `/opt/daygle-ai-camera/.venv`.
+4. Installs `requirements.txt`.
+5. Creates `/etc/daygle-ai-camera/config.yaml` from `config.example.yaml` if needed.
+6. Stores mutable data under `/var/lib/daygle-ai-camera`.
+7. Installs and enables `daygle-ai-camera.service`.
+
+Override install paths if needed:
 
 ```bash
-cp config.example.yaml config.yaml
+sudo DAYGLE_APP_DIR=/opt/daygle-ai-camera \
+  DAYGLE_CONFIG_DIR=/etc/daygle-ai-camera \
+  DAYGLE_DATA_DIR=/var/lib/daygle-ai-camera \
+  DAYGLE_USER=daygle \
+  ./scripts/install_armbian.sh
 ```
 
-Main settings:
+## API overview
 
-```yaml
-server:
-  host: 0.0.0.0
-  port: 8080
+- `GET /` - dashboard
+- `GET /api/status` - runtime status
+- `POST /api/mock/detect` - create a mock detection event
+- `GET /api/events?label=cat&limit=50` - event search
+- `GET /api/events/{event_id}` - event detail
+- `GET /api/alerts?limit=25` - alert history
+- `GET /api/stats` - aggregate stats
+- `GET /api/config` - non-secret runtime config summary
 
-camera:
-  device: 0
-  width: 1280
-  height: 720
-  fps: 15
-  flip: none
+## Development documentation
 
-ai:
-  enabled: false
-  backend: mock
-  confidence: 0.45
-  model_path: models/model.onnx
-
-storage:
-  data_dir: data
-  snapshots_dir: data/snapshots
-  events_dir: data/events
-```
-
-## AI roadmap
-
-Recommended build order:
-
-1. Confirm OV5647 appears as `/dev/video0`.
-2. Confirm dashboard live stream works.
-3. Add motion detection.
-4. Add ONNX object detection.
-5. Add RKNN/NPU acceleration later if the board/kernel supports it.
-
-## API endpoints
-
-| Endpoint | Purpose |
-|---|---|
-| `/` | Web dashboard |
-| `/api/status` | Camera/app status |
-| `/api/config` | Current safe config |
-| `/api/snapshot` | Capture snapshot |
-| `/stream.mjpg` | Live MJPEG stream |
-
-## Development notes
-
-This project currently uses OpenCV capture because it is easy to test on Armbian. If your OV5647 only works through libcamera, the next step is adding a `libcamera-vid` capture backend.
+See [DEVELOPMENT.md](DEVELOPMENT.md) for architecture details and future OV5647 CSI / YOLO ONNX / RKNN integration notes.

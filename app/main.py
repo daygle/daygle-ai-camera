@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -18,7 +18,8 @@ config = load_settings()
 
 app = FastAPI(title='Daygle AI Camera')
 
-web_dir = Path('web')
+BASE_DIR = Path(__file__).resolve().parent.parent
+web_dir = BASE_DIR / 'web'
 static_dir = web_dir
 if static_dir.exists():
     app.mount('/static', StaticFiles(directory=static_dir), name='static')
@@ -49,16 +50,18 @@ def status():
     frame = camera.get_frame()
     return {
         'status': 'online',
-        'mode': 'mock',
+        'mode': camera_config.get('backend', 'mock'),
+        'ai_backend': config.get('ai', {}).get('backend', 'mock'),
         'frame_number': frame['frame_number'],
         'uptime_seconds': frame['uptime_seconds'],
+        'resolution': {'width': frame['width'], 'height': frame['height']},
     }
 
 
 @app.post('/api/mock/detect')
-def generate_detection():
+def generate_detection(force: bool = True):
     frame = camera.get_frame()
-    detections = detector.detect(frame['frame_number'])
+    detections = detector.detect(frame['frame_number'], force=force)
 
     if not detections:
         return {'created': False, 'message': 'No detections generated'}
@@ -93,18 +96,45 @@ def generate_detection():
 
 
 @app.get('/api/events')
-def events(label: str | None = None):
-    return database.search_events(label=label)
+def events(label: str | None = None, limit: int = Query(50, ge=1, le=200)):
+    return database.search_events(label=label, limit=limit)
+
+
+@app.get('/api/events/{event_id}')
+def event_detail(event_id: int):
+    event = database.get_event(event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail='Event not found')
+    return event
 
 
 @app.get('/api/alerts')
-def alert_history():
-    return database.alerts()
+def alert_history(limit: int = Query(25, ge=1, le=200)):
+    return database.alerts(limit=limit)
 
 
 @app.get('/api/stats')
 def stats():
     return database.stats()
+
+
+@app.get('/api/config')
+def runtime_config():
+    return {
+        'server': {'host': config.get('server', {}).get('host'), 'port': config.get('server', {}).get('port')},
+        'camera': config.get('camera', {}),
+        'ai': {
+            'enabled': config.get('ai', {}).get('enabled'),
+            'backend': config.get('ai', {}).get('backend'),
+            'confidence': config.get('ai', {}).get('confidence'),
+            'categories': config.get('ai', {}).get('categories', []),
+        },
+        'alerts': config.get('alerts', {}),
+        'storage': {
+            'database': config.get('storage', {}).get('database'),
+            'snapshots_dir': config.get('storage', {}).get('snapshots_dir'),
+        },
+    }
 
 
 if __name__ == '__main__':

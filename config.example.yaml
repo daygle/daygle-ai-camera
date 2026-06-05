@@ -3,6 +3,7 @@ server:
   port: 8080
 
 camera:
+  backend: mock
   device: 0
   width: 1280
   height: 720

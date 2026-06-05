@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import copy
+import os
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 DEFAULT_CONFIG_PATH = Path("config.yaml")
+CONFIG_ENV_VAR = "DAYGLE_CONFIG"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "server": {"host": "0.0.0.0", "port": 8080},
@@ -46,21 +49,30 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(base)
+    """Return a recursive merge without mutating either input dictionary."""
+    merged = copy.deepcopy(base)
     for key, value in override.items():
         if isinstance(value, dict) and isinstance(merged.get(key), dict):
             merged[key] = deep_merge(merged[key], value)
         else:
-            merged[key] = value
+            merged[key] = copy.deepcopy(value)
     return merged
 
 
-def load_settings(path: str | Path = DEFAULT_CONFIG_PATH) -> dict[str, Any]:
-    config_path = Path(path)
+def load_settings(path: str | Path | None = None) -> dict[str, Any]:
+    """Load YAML settings, falling back to defaults when no config file exists.
+
+    The DAYGLE_CONFIG environment variable is honored so systemd installations can
+    keep mutable configuration in /etc while the application runs from /opt.
+    """
+    config_path = Path(path or os.environ.get(CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH))
     if not config_path.exists():
-        return DEFAULT_CONFIG
+        return copy.deepcopy(DEFAULT_CONFIG)
 
     with config_path.open("r", encoding="utf-8") as handle:
         loaded = yaml.safe_load(handle) or {}
+
+    if not isinstance(loaded, dict):
+        raise ValueError(f"Configuration file must contain a YAML mapping: {config_path}")
 
     return deep_merge(DEFAULT_CONFIG, loaded)
