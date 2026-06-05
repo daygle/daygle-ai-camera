@@ -200,7 +200,7 @@ Route: `/settings`
 - Model path.
 - Labels path.
 - Check model.
-- Download YOLOv8n ONNX.
+- Download YOLOv8n ONNX (exports locally from `yolov8n.pt`).
 - Reload detector.
 - Test detector.
 
@@ -281,16 +281,17 @@ To enable ONNX inference:
 
 1. Sign in as an admin.
 2. Open `/settings`.
-3. Click **Download YOLOv8n ONNX**, or enter your own model path.
+3. Click **Download YOLOv8n ONNX** to export `yolov8n.pt` to ONNX locally, or enter your own model path.
 4. Set backend to `onnx`.
 5. Save AI settings.
 6. Use **Check model**, **Reload detector**, and **Test detector**.
 
 If `onnx` is selected and the model is missing, the dashboard reports `MODEL MISSING` and upload inference returns a clear API error. The app does not silently fall back to mock detections.
 
-Manual model download remains available:
+Manual model export remains available. Install the export dependencies first if they are not already present:
 
 ```bash
+pip install ultralytics onnx
 python scripts/download_yolov8n_onnx.py --output models/yolov8n.onnx
 ```
 

@@ -4,6 +4,7 @@ import importlib
 import json
 import socket
 import sqlite3
+import subprocess
 import sys
 import threading
 import time
@@ -390,6 +391,30 @@ def test_ai_settings_save_onnx_missing_keeps_previous_detector_and_errors_on_upl
         thread.join(timeout=5)
 
 
+def test_export_yolov8n_onnx_uses_ultralytics_export(tmp_path, monkeypatch):
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    main = sys.modules["app.main"]
+    destination = tmp_path / "models" / "yolov8n.onnx"
+
+    def fake_run(command, cwd, capture_output, text, timeout, check):  # noqa: ANN001
+        assert command[0] == sys.executable
+        assert "from ultralytics import YOLO" in command[2]
+        assert "yolov8n.pt" in command[2]
+        assert "export(format='onnx')" in command[2]
+        assert cwd == destination.parent
+        assert capture_output is True
+        assert text is True
+        assert timeout == 600
+        assert check is False
+        destination.write_bytes(b"fake onnx")
+        return subprocess.CompletedProcess(command, 0, stdout="exported", stderr="")
+
+    monkeypatch.setattr(main.subprocess, "run", fake_run)
+
+    assert main.export_yolov8n_onnx(destination) == len(b"fake onnx")
+    assert destination.exists()
+
+
 def test_ai_model_status_and_action_endpoints(tmp_path, monkeypatch):
     app, _database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
@@ -627,7 +652,13 @@ def test_admin_alert_rule_crud_and_alert_engine_uses_db_rules(tmp_path, monkeypa
     try:
         _setup_admin(client)
         csrf = _login(client)
+        status, _headers, alert_page = client.request("/alert-settings")
+        assert status == 200
+        assert 'select name="object" id="objectSelect"' in alert_page
+        assert 'Choose from the detector labels currently available to this camera.' in alert_page
+
         initial = client.request("/api/settings/alerts")[2]
+        assert "person" in initial["available_labels"]
         for rule in initial["rules"]:
             client.request(f"/api/settings/alerts/{rule['id']}", method="DELETE", headers={"X-CSRF-Token": csrf})
 

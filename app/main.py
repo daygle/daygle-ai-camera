@@ -11,6 +11,8 @@ import shutil
 import sqlite3
 import tempfile
 from urllib.request import urlretrieve
+import subprocess
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from html import escape
@@ -35,7 +37,8 @@ from app.storage import Storage
 
 logger = logging.getLogger('daygle.ai')
 
-YOLOV8N_ONNX_URL = 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.onnx'
+YOLOV8N_MODEL = 'yolov8n.pt'
+YOLOV8N_ONNX = 'yolov8n.onnx'
 ONE_PIXEL_PNG = (
     b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
     b'\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc``\x00\x00\x00\x04'
@@ -663,7 +666,7 @@ def settings_page():
 def alert_settings_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>Alert Settings · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>Alert Settings</h1><p class="muted">Manage detection rules and email delivery through your mail server.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Email delivery</h2><div id="settingsMessage" class="muted"></div><form id="emailSettingsForm" class="form-grid"><label><span>Email alerts</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="host" placeholder="SMTP host" /><input name="port" type="number" min="1" max="65535" placeholder="Port" /><input name="from_address" type="email" placeholder="From address" /><input name="username" placeholder="SMTP username" /><input name="password" type="password" placeholder="SMTP password" autocomplete="new-password" /><label><span>STARTTLS</span><select name="use_tls"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>SSL</span><select name="use_ssl"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><button type="submit">Save mail server</button></form></section><section class="card"><h2>Alert rules</h2><form id="alertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="name" placeholder="Rule name" required /><input name="object" list="labelOptions" placeholder="Object label" required /><datalist id="labelOptions"></datalist><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" value="0.6" /><input name="cooldown_seconds" type="number" min="0" step="1" placeholder="Cooldown seconds" value="60" /><label><span>Rule</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Email</span><select name="email_enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><input name="email_recipients" placeholder="Email recipients, comma separated" /><input name="active_start" type="time" /><input name="active_end" type="time" /><button type="submit">Save alert rule</button><button id="cancelEditRule" class="secondary" type="button">Cancel edit</button></form><div id="alertRules" class="list"></div></section></main><script src="/static/alert-settings.js"></script></body></html>""")
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>Alert Settings</h1><p class="muted">Manage detection rules and email delivery through your mail server.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Email delivery</h2><div id="settingsMessage" class="muted"></div><form id="emailSettingsForm" class="form-grid"><label><span>Email alerts</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="host" placeholder="SMTP host" /><input name="port" type="number" min="1" max="65535" placeholder="Port" /><input name="from_address" type="email" placeholder="From address" /><input name="username" placeholder="SMTP username" /><input name="password" type="password" placeholder="SMTP password" autocomplete="new-password" /><label><span>STARTTLS</span><select name="use_tls"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>SSL</span><select name="use_ssl"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><button type="submit">Save mail server</button></form></section><section class="card"><h2>Alert rules</h2><form id="alertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="name" placeholder="Rule name" required /><label class="object-select-field"><span>Object to detect</span><select name="object" id="objectSelect" required><option value="">Loading object labels...</option></select><small id="objectOptionsHelp" class="field-help">Choose from the detector labels currently available to this camera.</small></label><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" value="0.6" /><input name="cooldown_seconds" type="number" min="0" step="1" placeholder="Cooldown seconds" value="60" /><label><span>Rule</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Email</span><select name="email_enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><input name="email_recipients" placeholder="Email recipients, comma separated" /><input name="active_start" type="time" /><input name="active_end" type="time" /><button type="submit">Save alert rule</button><button id="cancelEditRule" class="secondary" type="button">Cancel edit</button></form><div id="alertRules" class="list"></div></section></main><script src="/static/alert-settings.js"></script></body></html>""")
 
 
 @app.get('/profile')
@@ -1451,32 +1454,65 @@ def check_ai_model():
     return ai_status_payload(effective_ai_config())
 
 
+def export_yolov8n_onnx(destination: Path) -> int:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        sys.executable,
+        '-c',
+        (
+            'from ultralytics import YOLO\n'
+            f"model = YOLO('{YOLOV8N_MODEL}')\n"
+            "model.export(format='onnx')\n"
+        ),
+    ]
+    result = subprocess.run(
+        command,
+        cwd=destination.parent,
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+    if result.returncode != 0:
+        details = (result.stderr or result.stdout or '').strip()
+        raise RuntimeError(details or f'Ultralytics export exited with status {result.returncode}.')
+
+    exported = destination.parent / YOLOV8N_ONNX
+    if exported != destination and exported.exists():
+        exported.replace(destination)
+    if not destination.exists():
+        details = (result.stderr or result.stdout or '').strip()
+        raise RuntimeError(details or f'Ultralytics export did not create {destination.name}.')
+    if destination.stat().st_size <= 0:
+        destination.unlink(missing_ok=True)
+        raise RuntimeError('Exported model file is empty.')
+    return destination.stat().st_size
+
+
 @app.post('/api/settings/ai/download-yolov8n')
 def download_yolov8n_model():
     ai_settings = effective_ai_config()
-    destination = BASE_DIR / 'models' / 'yolov8n.onnx'
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination = BASE_DIR / 'models' / YOLOV8N_ONNX
     try:
-        with tempfile.NamedTemporaryFile(delete=False, dir=destination.parent, suffix='.tmp') as handle:
-            temp_path = Path(handle.name)
-        urlretrieve(YOLOV8N_ONNX_URL, temp_path)  # noqa: S310 - fixed upstream YOLOv8n model URL
-        if temp_path.stat().st_size <= 0:
-            temp_path.unlink(missing_ok=True)
-            raise RuntimeError('Downloaded model file is empty.')
-        temp_path.replace(destination)
-    except Exception as exc:  # pragma: no cover - network and filesystem dependent
-        if 'temp_path' in locals():
-            temp_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=502, detail=f'Failed to download YOLOv8n ONNX model: {exc}') from exc
+        exported_bytes = export_yolov8n_onnx(destination)
+    except (RuntimeError, subprocess.TimeoutExpired) as exc:  # pragma: no cover - environment dependent
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                'Failed to export YOLOv8n ONNX model. Install the export dependencies with '
+                '`pip install ultralytics onnx`, then retry. '
+                f'Details: {exc}'
+            ),
+        ) from exc
 
     updated = validate_ai_settings({**ai_settings, 'model_path': str(destination.relative_to(BASE_DIR))})
     database.set_setting('ai', updated, utc_now())
     reloaded, error = reload_detector(updated)
     return {
         'ok': True,
-        'message': f'Downloaded YOLOv8n ONNX to {destination.relative_to(BASE_DIR)}.',
+        'message': f'Exported YOLOv8n ONNX to {destination.relative_to(BASE_DIR)}.',
         'model_path': str(destination.relative_to(BASE_DIR)),
-        'bytes': destination.stat().st_size,
+        'bytes': exported_bytes,
         'reload_succeeded': reloaded,
         'reload_error': error,
         'status': ai_status_payload(updated),

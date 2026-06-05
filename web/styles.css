@@ -193,6 +193,8 @@ input {
 }
 .form-grid label { display: grid; gap: 8px; color: var(--muted); font-weight: 800; }
 .form-grid input[type="hidden"] { display: none; }
+.form-grid .object-select-field { align-self: stretch; }
+.field-help { color: var(--muted); font-size: 12px; font-weight: 700; line-height: 1.4; }
 .form-grid button { justify-self: start; min-height: 44px; }
 select {
   width: 100%;
