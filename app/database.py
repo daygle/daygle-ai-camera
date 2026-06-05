@@ -131,6 +131,13 @@ class EventDatabase:
 
             return [self._event_with_detections(db, row) for row in rows]
 
+    def get_event(self, event_id: int) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+            if row is None:
+                return None
+            return self._event_with_detections(db, row)
+
     def stats(self) -> dict[str, Any]:
         with self.connect() as db:
             total_events = db.execute("SELECT COUNT(*) AS count FROM events").fetchone()["count"]

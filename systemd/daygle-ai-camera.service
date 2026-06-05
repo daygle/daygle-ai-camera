@@ -1,0 +1,22 @@
+[Unit]
+Description=Daygle AI Camera FastAPI service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=daygle
+Group=daygle
+WorkingDirectory=/opt/daygle-ai-camera
+Environment=DAYGLE_CONFIG=/etc/daygle-ai-camera/config.yaml
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/daygle-ai-camera/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/daygle-ai-camera /etc/daygle-ai-camera /opt/daygle-ai-camera/data
+
+[Install]
+WantedBy=multi-user.target

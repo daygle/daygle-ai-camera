@@ -28,14 +28,14 @@ class MockDetector:
         self.min_confidence = min_confidence
         self._last_detection_at = 0.0
 
-    def detect(self, frame_number: int) -> list[dict[str, Any]]:
+    def detect(self, frame_number: int, force: bool = False) -> list[dict[str, Any]]:
         now = time.time()
 
         # Do not create detections on every frame; this keeps the event stream readable.
-        if now - self._last_detection_at < 3:
+        if not force and now - self._last_detection_at < 3:
             return []
 
-        if random.random() > 0.55:
+        if not force and random.random() > 0.55:
             return []
 
         self._last_detection_at = now

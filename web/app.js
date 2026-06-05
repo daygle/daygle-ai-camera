@@ -20,6 +20,16 @@ async function api(path, options = {}) {
   return response.json();
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&#39;',
+    '"': '&quot;',
+  })[char]);
+}
+
 function formatDate(value) {
   if (!value) return 'Unknown time';
   return new Date(value).toLocaleString();
@@ -29,7 +39,7 @@ function detectionBadges(detections = []) {
   if (!detections.length) return '<span class="muted">No detections</span>';
   return detections.map((d) => {
     const confidence = Math.round((d.confidence || 0) * 100);
-    return `<span class="detection">${d.label} · ${confidence}%</span>`;
+    return `<span class="detection">${escapeHtml(d.label)} · ${confidence}%</span>`;
   }).join('');
 }
 
@@ -46,7 +56,7 @@ function renderEvents(events) {
         <span>${formatDate(event.created_at)}</span>
       </div>
       <div>${detectionBadges(event.detections)}</div>
-      <p class="muted">Source: ${event.source}</p>
+      <p class="muted">Source: ${escapeHtml(event.source)}</p>
     </div>
   `).join('');
 }
@@ -60,11 +70,11 @@ function renderAlerts(alerts) {
   els.alerts.innerHTML = alerts.map((alert) => `
     <div class="item">
       <div class="item-title">
-        <span>${alert.rule_name}</span>
+        <span>${escapeHtml(alert.rule_name)}</span>
         <span>${formatDate(alert.created_at)}</span>
       </div>
-      <p>${alert.message}</p>
-      <span class="detection">${alert.label} · ${Math.round(alert.confidence * 100)}%</span>
+      <p>${escapeHtml(alert.message)}</p>
+      <span class="detection">${escapeHtml(alert.label)} · ${Math.round(alert.confidence * 100)}%</span>
     </div>
   `).join('');
 }
@@ -76,7 +86,7 @@ function renderObjectStats(objects = []) {
   }
 
   els.objectStats.innerHTML = objects.map((obj) => `
-    <button class="chip" data-label="${obj.label}">${obj.label} · ${obj.count}</button>
+    <button class="chip" data-label="${escapeHtml(obj.label)}">${escapeHtml(obj.label)} · ${obj.count}</button>
   `).join('');
 
   document.querySelectorAll('[data-label]').forEach((button) => {
@@ -90,7 +100,7 @@ function renderObjectStats(objects = []) {
 async function loadStatus() {
   try {
     const status = await api('/api/status');
-    els.statusText.textContent = status.status;
+    els.statusText.textContent = `${status.status} · ${status.mode}`;
     els.frameNumber.textContent = status.frame_number;
   } catch (error) {
     els.statusText.textContent = 'offline';
