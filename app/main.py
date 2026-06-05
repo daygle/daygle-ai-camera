@@ -7,6 +7,8 @@ import mimetypes
 import os
 import re
 import secrets
+import shutil
+import sqlite3
 import tempfile
 from urllib.request import urlretrieve
 from contextlib import asynccontextmanager
@@ -16,7 +18,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -438,6 +440,61 @@ def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
                 thumbnail.unlink(missing_ok=True)
 
 
+DATABASE_RESTORE_REQUIRED_TABLES = {'events', 'detections', 'app_settings', 'users'}
+
+
+def backup_directory() -> Path:
+    backups_dir = Path(str(effective_storage_config().get('data_dir') or 'data')) / 'backups'
+    backups_dir.mkdir(parents=True, exist_ok=True)
+    return backups_dir
+
+
+def safe_backup_timestamp() -> str:
+    return datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+
+
+def create_database_backup(prefix: str = 'daygle-database') -> Path:
+    backup_path = backup_directory() / f'{prefix}-{safe_backup_timestamp()}-{secrets.token_hex(4)}.sqlite3'
+    source = sqlite3.connect(database.database_path)
+    try:
+        destination = sqlite3.connect(backup_path)
+        try:
+            source.backup(destination)
+        finally:
+            destination.close()
+    finally:
+        source.close()
+    return backup_path
+
+
+def validate_restore_database(path: Path) -> None:
+    try:
+        with sqlite3.connect(path) as db:
+            integrity = db.execute('PRAGMA integrity_check').fetchone()
+            if not integrity or str(integrity[0]).lower() != 'ok':
+                raise HTTPException(status_code=400, detail='Uploaded database failed SQLite integrity check.')
+            tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
+            missing = sorted(DATABASE_RESTORE_REQUIRED_TABLES - tables)
+            if missing:
+                raise HTTPException(status_code=400, detail=f'Uploaded database is missing required table(s): {", ".join(missing)}.')
+            admin_count = db.execute("SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1").fetchone()[0]
+            if int(admin_count) < 1:
+                raise HTTPException(status_code=400, detail='Uploaded database must include at least one active administrator account.')
+    except sqlite3.DatabaseError as exc:
+        raise HTTPException(status_code=400, detail='Uploaded file is not a valid SQLite database.') from exc
+
+
+def refresh_runtime_after_database_restore() -> None:
+    database.init()
+    auth.init()
+    database.seed_alert_rules(config.get('alerts', {}).get('rules', []), utc_now())
+    apply_camera_settings(effective_camera_config())
+    apply_storage_and_recording_settings()
+    apply_anpr_settings()
+    auth.apply_config(effective_auth_config())
+    alerts.rules = effective_alert_rules()
+
+
 def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
     recording_settings = effective_recording_config()
     if not force and not _bool_value(recording_settings.get('auto_purge_enabled', True)):
@@ -627,7 +684,7 @@ def anpr_page():
 def system_settings_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>System Settings · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>System Settings</h1><p class="muted">Move day-to-day camera, recording, storage, and login settings out of YAML.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Camera</h2><div id="systemMessage" class="muted"></div><form id="cameraSettingsForm" class="form-grid"><label><span>Backend</span><select name="backend"><option value="mock">mock</option></select></label><input name="device" placeholder="Device" /><input name="width" type="number" min="160" max="7680" step="1" placeholder="Width" /><input name="height" type="number" min="120" max="4320" step="1" placeholder="Height" /><input name="fps" type="number" min="1" max="120" step="1" placeholder="FPS" /><label><span>Flip</span><select name="flip"><option value="none">none</option><option value="horizontal">horizontal</option><option value="vertical">vertical</option><option value="both">both</option></select></label><button type="submit">Save camera</button></form></section><section class="card"><h2>ANPR</h2><form id="anprSettingsForm" class="form-grid"><label><span>ANPR</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>OCR backend</span><select name="backend"><option value="mock">mock</option><option value="paddleocr">paddleocr</option><option value="easyocr">easyocr</option></select></label><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" /><input name="vehicle_labels" placeholder="Vehicle labels: car, truck, bus, motorcycle" /><button type="submit">Save ANPR</button></form></section><section class="card"><h2>Recording policy</h2><form id="recordingSettingsForm" class="form-grid"><label><span>Recording</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Primary mode</span><select name="mode"><option value="motion">motion</option><option value="continuous">continuous</option><option value="human">human</option><option value="objects">objects</option><option value="off">off</option></select></label><label><span>Continuous</span><select name="continuous"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><label><span>Record on motion</span><select name="record_on_motion"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Record on human</span><select name="record_on_human"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="record_on_objects" placeholder="Objects: cat, dog, package, parcel" /><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" /><input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" /><input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="Max clip seconds" /><input name="format" placeholder="Format: avi or mp4" /><button type="submit">Save recording</button></form></section><section class="card"><h2>Retention</h2><form id="retentionSettingsForm" class="form-grid"><label><span>Auto purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="retention_days" type="number" min="1" max="3650" placeholder="Retention days" /><input name="max_storage_gb" type="number" min="1" max="100000" placeholder="Max storage GB" /><button type="submit">Save retention</button><button id="purgeRecordingsBtn" class="secondary" type="button">Purge now</button></form></section><section class="card"><h2>Storage</h2><form id="storageSettingsForm" class="form-grid"><input name="data_dir" placeholder="Data directory" /><input name="snapshots_dir" placeholder="Snapshots directory" /><input name="events_dir" placeholder="Events directory" /><input name="recordings_dir" placeholder="Recordings directory" /><input name="plates_dir" placeholder="Plate images directory" /><button type="submit">Save storage</button></form><p class="muted">Database file location stays in config.yaml because it is needed before the web UI can load.</p></section><section class="card"><h2>Login security</h2><form id="authSettingsForm" class="form-grid"><input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="Session timeout hours" /><input name="max_login_attempts" type="number" min="1" max="100" placeholder="Max login attempts" /><input name="lockout_minutes" type="number" min="1" max="1440" placeholder="Lockout minutes" /><button type="submit">Save login security</button></form><p class="muted">Auth enablement and cookie name remain bootstrap settings.</p></section></main><script src="/static/system-settings.js"></script></body></html>""")
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>System Settings</h1><p class="muted">Move day-to-day camera, recording, storage, and login settings out of YAML.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Camera</h2><div id="systemMessage" class="muted"></div><form id="cameraSettingsForm" class="form-grid"><label><span>Backend</span><select name="backend"><option value="mock">mock</option></select></label><input name="device" placeholder="Device" /><input name="width" type="number" min="160" max="7680" step="1" placeholder="Width" /><input name="height" type="number" min="120" max="4320" step="1" placeholder="Height" /><input name="fps" type="number" min="1" max="120" step="1" placeholder="FPS" /><label><span>Flip</span><select name="flip"><option value="none">none</option><option value="horizontal">horizontal</option><option value="vertical">vertical</option><option value="both">both</option></select></label><button type="submit">Save camera</button></form></section><section class="card"><h2>ANPR</h2><form id="anprSettingsForm" class="form-grid"><label><span>ANPR</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>OCR backend</span><select name="backend"><option value="mock">mock</option><option value="paddleocr">paddleocr</option><option value="easyocr">easyocr</option></select></label><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" /><input name="vehicle_labels" placeholder="Vehicle labels: car, truck, bus, motorcycle" /><button type="submit">Save ANPR</button></form></section><section class="card"><h2>Recording policy</h2><form id="recordingSettingsForm" class="form-grid"><label><span>Recording</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Primary mode</span><select name="mode"><option value="motion">motion</option><option value="continuous">continuous</option><option value="human">human</option><option value="objects">objects</option><option value="off">off</option></select></label><label><span>Continuous</span><select name="continuous"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><label><span>Record on motion</span><select name="record_on_motion"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Record on human</span><select name="record_on_human"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="record_on_objects" placeholder="Objects: cat, dog, package, parcel" /><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" /><input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" /><input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="Max clip seconds" /><input name="format" placeholder="Format: avi or mp4" /><button type="submit">Save recording</button></form></section><section class="card"><h2>Retention</h2><form id="retentionSettingsForm" class="form-grid"><label><span>Auto purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="retention_days" type="number" min="1" max="3650" placeholder="Retention days" /><input name="max_storage_gb" type="number" min="1" max="100000" placeholder="Max storage GB" /><button type="submit">Save retention</button><button id="purgeRecordingsBtn" class="secondary" type="button">Purge now</button></form></section><section class="card"><h2>Storage</h2><form id="storageSettingsForm" class="form-grid"><input name="data_dir" placeholder="Data directory" /><input name="snapshots_dir" placeholder="Snapshots directory" /><input name="events_dir" placeholder="Events directory" /><input name="recordings_dir" placeholder="Recordings directory" /><input name="plates_dir" placeholder="Plate images directory" /><button type="submit">Save storage</button></form><p class="muted">Database file location stays in config.yaml because it is needed before the web UI can load.</p></section><section class="card"><h2>Database backup & restore</h2><p class="muted">Download a point-in-time SQLite backup or restore a previous Daygle database. Restores replace events, users, settings, alert rules, and sessions.</p><div class="button-row"><a class="button-link" href="/api/settings/system/database/backup">Download database backup</a></div><form id="databaseRestoreForm" class="form-grid"><label><span>Restore backup file</span><input name="file" type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3,application/x-sqlite3" required /></label><button class="secondary" type="submit">Restore database</button></form><p class="muted">A safety backup of the current database is created before every restore.</p></section><section class="card"><h2>Login security</h2><form id="authSettingsForm" class="form-grid"><input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="Session timeout hours" /><input name="max_login_attempts" type="number" min="1" max="100" placeholder="Max login attempts" /><input name="lockout_minutes" type="number" min="1" max="1440" placeholder="Lockout minutes" /><button type="submit">Save login security</button></form><p class="muted">Auth enablement and cookie name remain bootstrap settings.</p></section></main><script src="/static/system-settings.js"></script></body></html>""")
 
 @app.get('/users')
 def users_page():
@@ -1479,6 +1536,47 @@ def get_system_settings():
             'server': config.get('server', {}),
         },
     }
+
+
+@app.get('/api/settings/system/database/backup')
+def backup_database():
+    backup_path = create_database_backup()
+    return FileResponse(
+        backup_path,
+        media_type='application/vnd.sqlite3',
+        filename=backup_path.name,
+        headers={'Cache-Control': 'no-store'},
+    )
+
+
+@app.post('/api/settings/system/database/restore')
+async def restore_database(file: UploadFile = File(...)):
+    filename = Path(file.filename or '').name
+    if not filename:
+        raise HTTPException(status_code=400, detail='Choose a SQLite database backup file to restore.')
+    restore_temp = database.database_path.parent / f'.restore-{secrets.token_hex(8)}.sqlite3'
+    try:
+        with restore_temp.open('wb') as handle:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                handle.write(chunk)
+        if restore_temp.stat().st_size == 0:
+            raise HTTPException(status_code=400, detail='Uploaded database backup is empty.')
+        validate_restore_database(restore_temp)
+        safety_backup = create_database_backup(prefix='pre-restore-daygle-database')
+        shutil.move(str(restore_temp), database.database_path)
+        refresh_runtime_after_database_restore()
+        return {
+            'ok': True,
+            'message': 'Database restored successfully.',
+            'source_filename': filename,
+            'safety_backup': str(safety_backup),
+        }
+    finally:
+        restore_temp.unlink(missing_ok=True)
+        await file.close()
 
 
 @app.put('/api/settings/system/camera')

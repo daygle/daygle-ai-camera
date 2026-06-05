@@ -7,6 +7,7 @@ const forms = {
   retention: document.getElementById('retentionSettingsForm'),
   storage: document.getElementById('storageSettingsForm'),
   auth: document.getElementById('authSettingsForm'),
+  databaseRestore: document.getElementById('databaseRestoreForm'),
 };
 
 async function api(path, options = {}) {
@@ -14,7 +15,7 @@ async function api(path, options = {}) {
   if (csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((options.method || 'GET').toUpperCase())) {
     headers['X-CSRF-Token'] = csrfToken;
   }
-  if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
   const response = await fetch(path, { ...options, headers });
   if (response.status === 401) window.location.href = '/login';
   const payload = await response.json().catch(() => ({}));
@@ -89,4 +90,19 @@ document.getElementById('purgeRecordingsBtn').addEventListener('click', async ()
     setMessage(error.message);
   }
 });
+
+forms.databaseRestore.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!window.confirm('Restore this database backup? This will replace current events, users, settings, alert rules, and sessions.')) return;
+  try {
+    const formData = new FormData(forms.databaseRestore);
+    const result = await api('/api/settings/system/database/restore', { method: 'POST', body: formData });
+    forms.databaseRestore.reset();
+    await loadSettings();
+    setMessage(`${result.message} Safety backup: ${result.safety_backup}`);
+  } catch (error) {
+    setMessage(error.message);
+  }
+});
+
 loadSettings().catch((error) => setMessage(error.message));
