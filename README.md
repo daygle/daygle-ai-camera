@@ -98,7 +98,7 @@ Choose one of these installation paths:
 5. Start the web server:
 
    ```bash
-   DAYGLE_CONFIG=config.yaml uvicorn app.main:app --reload --host 127.0.0.1 --port 8080
+   DAYGLE_CONFIG=config.yaml uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
    ```
 
 6. Open the dashboard at <http://127.0.0.1:8080/>.
