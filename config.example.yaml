@@ -1,0 +1,39 @@
+server:
+  host: 0.0.0.0
+  port: 8080
+
+camera:
+  device: 0
+  width: 1280
+  height: 720
+  fps: 15
+  flip: none
+
+ai:
+  enabled: true
+  backend: mock
+  confidence: 0.45
+  model_path: models/model.onnx
+  categories:
+    - person
+    - cat
+    - dog
+    - car
+    - bicycle
+    - bird
+    - package
+
+alerts:
+  enabled: true
+  rules:
+    - name: Cat alert
+      object: cat
+      min_confidence: 0.50
+      cooldown_seconds: 60
+      enabled: true
+
+storage:
+  data_dir: data
+  database: data/daygle_ai_camera.sqlite3
+  snapshots_dir: data/snapshots
+  events_dir: data/events
