@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import copy
+import logging
 import re
 import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
@@ -21,12 +23,20 @@ from app.mock_camera import MockCamera
 from app.settings import load_settings
 from app.storage import Storage
 
+logger = logging.getLogger('daygle.ai')
+
 config = load_settings()
 
 auth_config = config.get('auth', {})
 auth_enabled = bool(auth_config.get('enabled', True))
 
-app = FastAPI(title='Daygle AI Camera')
+@asynccontextmanager
+async def app_lifespan(_app: FastAPI):
+    log_detector_initialization()
+    yield
+
+
+app = FastAPI(title='Daygle AI Camera', lifespan=app_lifespan)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 web_dir = BASE_DIR / 'web'
@@ -66,6 +76,46 @@ database.seed_alert_rules(config.get('alerts', {}).get('rules', []), utc_now())
 detector = create_detector(effective_ai_config())
 mock_detector = MockDetector(effective_ai_config().get('categories', []), float(effective_ai_config().get('confidence', 0.45)))
 alerts = AlertEngine(effective_alert_rules())
+
+def ai_status_payload(ai_settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    settings = ai_settings or effective_ai_config()
+    active_backend = getattr(detector, 'backend', 'unknown')
+    configured_backend = str(settings.get('backend', 'mock')).lower()
+    unavailable_reason = getattr(detector, 'unavailable_reason', None)
+    model_loaded = bool(active_backend == 'onnx' and getattr(detector, 'available', False))
+    inference_available = bool(getattr(detector, 'available', True))
+    if configured_backend == 'onnx' and not model_loaded:
+        mode = 'MODEL FAILED'
+    elif active_backend == 'onnx' and model_loaded:
+        mode = 'ONNX ACTIVE'
+    else:
+        mode = 'MOCK MODE'
+    return {
+        'active_backend': active_backend,
+        'configured_backend': configured_backend,
+        'mode': mode,
+        'model_loaded': model_loaded,
+        'model_path': str(settings.get('model_path') or ''),
+        'labels_path': str(settings.get('labels_path') or ''),
+        'inference_available': inference_available,
+        'error': unavailable_reason,
+    }
+
+
+def log_detector_initialization(context: str = 'startup') -> None:
+    ai_status = ai_status_payload()
+    logger.info(
+        'AI detector %s: active_backend=%s configured_backend=%s model_loaded=%s '
+        'inference_available=%s model_path=%s labels_path=%s error=%s',
+        context,
+        ai_status['active_backend'],
+        ai_status['configured_backend'],
+        ai_status['model_loaded'],
+        ai_status['inference_available'],
+        ai_status['model_path'] or '<none>',
+        ai_status['labels_path'] or '<none>',
+        ai_status['error'] or '<none>',
+    )
 
 PUBLIC_PREFIXES = ('/static/',)
 PUBLIC_PATHS = {'/login', '/setup'}
@@ -320,16 +370,23 @@ def me(request: Request):
 @app.get('/api/status')
 def status():
     frame = camera.get_frame()
+    ai_state = ai_status_payload()
     return {
         'status': 'online',
         'mode': camera_config.get('backend', 'mock'),
-        'ai_backend': effective_ai_config().get('backend', 'mock'),
-        'ai_available': getattr(detector, 'available', True),
-        'ai_error': getattr(detector, 'unavailable_reason', None),
+        'ai_backend': ai_state['active_backend'],
+        'ai_available': ai_state['inference_available'],
+        'ai_error': ai_state['error'],
+        'ai_mode': ai_state['mode'],
         'frame_number': frame['frame_number'],
         'uptime_seconds': frame['uptime_seconds'],
         'resolution': {'width': frame['width'], 'height': frame['height']},
     }
+
+
+@app.get('/api/status/ai')
+def ai_status():
+    return ai_status_payload()
 
 
 @app.post('/api/mock/detect')
@@ -396,7 +453,7 @@ async def detect_test_image(request: Request):
         metadata={
             'filename': filename,
             'content_type': content_type,
-            'ai_backend': effective_ai_config().get('backend', 'mock'),
+            'ai_backend': ai_status_payload()['active_backend'],
         },
     )
 
@@ -416,6 +473,7 @@ async def detect_test_image(request: Request):
         'detections': detections,
         'alerts': triggered,
         'snapshot_path': snapshot_path,
+        'ai_backend': ai_status_payload()['active_backend'],
     }
 
 
@@ -444,6 +502,7 @@ def stats():
 
 @app.get('/api/config')
 def runtime_config():
+    ai_state = ai_status_payload()
     return {
         'server': {'host': config.get('server', {}).get('host'), 'port': config.get('server', {}).get('port')},
         'camera': config.get('camera', {}),
@@ -455,8 +514,11 @@ def runtime_config():
             'input_size': effective_ai_config().get('input_size'),
             'model_path': effective_ai_config().get('model_path'),
             'labels_path': effective_ai_config().get('labels_path'),
-            'available': getattr(detector, 'available', True),
-            'error': getattr(detector, 'unavailable_reason', None),
+            'active_backend': ai_state['active_backend'],
+            'mode': ai_state['mode'],
+            'available': ai_state['inference_available'],
+            'model_loaded': ai_state['model_loaded'],
+            'error': ai_state['error'],
             'categories': effective_ai_config().get('categories', []),
         },
         'alerts': config.get('alerts', {}),
@@ -528,10 +590,14 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
+    ai_status = ai_status_payload(ai_settings)
     return {
         **ai_settings,
-        'available': getattr(detector, 'available', True),
-        'error': getattr(detector, 'unavailable_reason', None),
+        'active_backend': ai_status['active_backend'],
+        'mode': ai_status['mode'],
+        'available': ai_status['inference_available'],
+        'model_loaded': ai_status['model_loaded'],
+        'error': ai_status['error'],
         'categories': ai_settings.get('categories', config.get('ai', {}).get('categories', [])),
     }
 
@@ -597,6 +663,7 @@ async def update_ai_settings(request: Request):
         detector = previous_detector
         raise HTTPException(status_code=400, detail=getattr(candidate, 'unavailable_reason', 'Failed to load ONNX detector.'))
     detector = candidate
+    log_detector_initialization('settings_reload')
     mock_detector = MockDetector(new_settings.get('categories', config.get('ai', {}).get('categories', [])), float(new_settings.get('confidence', 0.45)))
     database.set_setting('ai', new_settings, utc_now())
     return detector_status(new_settings)

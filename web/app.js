@@ -1,5 +1,7 @@
 const els = {
   statusText: document.getElementById('statusText'),
+  aiModeText: document.getElementById('aiModeText'),
+  aiStatusDetail: document.getElementById('aiStatusDetail'),
   totalEvents: document.getElementById('totalEvents'),
   totalAlerts: document.getElementById('totalAlerts'),
   frameNumber: document.getElementById('frameNumber'),
@@ -32,7 +34,14 @@ async function api(path, options = {}) {
     throw new Error('Authentication required');
   }
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    let detail = `Request failed: ${response.status}`;
+    try {
+      const errorBody = await response.json();
+      detail = errorBody.detail || detail;
+    } catch {
+      // Keep the generic status message when the response body is not JSON.
+    }
+    throw new Error(detail);
   }
   return response.json();
 }
@@ -126,12 +135,18 @@ async function loadAuth() {
 
 async function loadStatus() {
   try {
-    const status = await api('/api/status');
-    const aiState = status.ai_available === false ? 'AI unavailable' : status.ai_backend;
-    els.statusText.textContent = `${status.status} · ${status.mode} · ${aiState}`;
+    const [status, aiStatus] = await Promise.all([api('/api/status'), api('/api/status/ai')]);
+    els.statusText.textContent = `${status.status} · ${status.mode}`;
     els.frameNumber.textContent = status.frame_number;
+    els.aiModeText.textContent = aiStatus.mode;
+    els.aiModeText.className = `ai-mode ${aiStatus.mode.toLowerCase().replace(/\s+/g, '-')}`;
+    const errorText = aiStatus.error ? ` · ${aiStatus.error}` : '';
+    els.aiStatusDetail.textContent = `${aiStatus.active_backend} · model loaded: ${aiStatus.model_loaded}${errorText}`;
   } catch (error) {
     els.statusText.textContent = 'offline';
+    els.aiModeText.textContent = 'MODEL FAILED';
+    els.aiModeText.className = 'ai-mode model-failed';
+    els.aiStatusDetail.textContent = error.message;
   }
 }
 

@@ -198,6 +198,106 @@ def test_onnx_missing_model_returns_clear_api_error(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+def test_status_ai_reports_model_failed_for_missing_onnx(tmp_path, monkeypatch):
+    app, _database_path = _load_app(
+        tmp_path,
+        monkeypatch,
+        extra_ai=f"""  backend: onnx
+  model_path: {tmp_path / 'missing.onnx'}
+  labels_path: {tmp_path / 'labels.txt'}
+""",
+    )
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        _login(client)
+        status, _headers, payload = client.request('/api/status/ai')
+        assert status == 200
+        assert payload['active_backend'] == 'onnx'
+        assert payload['model_loaded'] is False
+        assert payload['inference_available'] is False
+        assert payload['mode'] == 'MODEL FAILED'
+        assert str(tmp_path / 'missing.onnx') == payload['model_path']
+        assert 'ONNX model not found' in payload['error'] or 'numpy is not installed' in payload['error']
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_test_image_upload_uses_onnx_backend_not_mock(tmp_path, monkeypatch):
+    import app.detector as detector_module
+
+    known_png = (
+        b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
+        b'\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04'
+        b'\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82'
+    )
+
+    class FakeOnnxYoloDetector:
+        backend = 'onnx'
+
+        def __init__(self, model_path, labels_path=None, **_kwargs):
+            self.model_path = Path(model_path)
+            self.labels_path = Path(labels_path or '')
+            self.unavailable_reason = None
+
+        @property
+        def available(self):
+            return True
+
+        def detect_image(self, image_bytes: bytes):
+            assert image_bytes == known_png
+            return [
+                {
+                    'label': 'known_onnx_object',
+                    'confidence': 0.991,
+                    'box': {'x': 1.0, 'y': 2.0, 'width': 3.0, 'height': 4.0},
+                }
+            ]
+
+    monkeypatch.setattr(detector_module, 'OnnxYoloDetector', FakeOnnxYoloDetector)
+    app, _database_path = _load_app(
+        tmp_path,
+        monkeypatch,
+        extra_ai=f"""  backend: onnx
+  model_path: {tmp_path / 'fake.onnx'}
+  labels_path: {tmp_path / 'labels.txt'}
+""",
+    )
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        status, _headers, ai_status = client.request('/api/status/ai')
+        assert status == 200
+        assert ai_status['active_backend'] == 'onnx'
+        assert ai_status['model_loaded'] is True
+        assert ai_status['mode'] == 'ONNX ACTIVE'
+
+        status, _headers, created = client.request(
+            '/api/detect/test-image',
+            method='POST',
+            data=known_png,
+            headers={'Content-Type': 'image/png', 'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        assert created['ai_backend'] == 'onnx'
+        assert created['detections'] == [
+            {
+                'label': 'known_onnx_object',
+                'confidence': 0.991,
+                'box': {'x': 1.0, 'y': 2.0, 'width': 3.0, 'height': 4.0},
+            }
+        ]
+        event = client.request(f"/api/events/{created['event_id']}")[2]
+        assert event['metadata']['ai_backend'] == 'onnx'
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def _setup_admin(client: LocalClient, username: str = "admin", password: str = "Admin123!") -> None:
     status, _headers, body = client.request("/setup")
     assert status == 200
