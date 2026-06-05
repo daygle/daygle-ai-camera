@@ -30,6 +30,31 @@ Daygle AI Camera is an Orange Pi 3B / Armbian-friendly AI camera platform. It pr
 - Network access during installation so `apt` and `pip` can install dependencies.
 - Optional: HTTPS reverse proxy or VPN for devices exposed beyond a private LAN.
 
+### Debian apt packages
+
+On a fresh Debian-like host, install the system software before installing
+Python dependencies:
+
+```bash
+sudo apt update
+sudo apt install -y --no-install-recommends \
+  git \
+  python3 \
+  python3-pip \
+  python3-dev \
+  python3-venv \
+  sqlite3 \
+  ca-certificates \
+  rsync \
+  ffmpeg \
+  v4l-utils \
+  libgl1 \
+  libglib2.0-0
+```
+
+For Debian 13 installs without a virtual environment, see
+`INSTALL_DEBIAN13.md`.
+
 ## Installation
 
 Choose one of these installation paths:

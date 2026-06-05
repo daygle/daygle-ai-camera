@@ -10,9 +10,44 @@ not use a virtual environment, Python packages are installed with
 host or container, but a virtual environment remains safer on a general-purpose
 machine.
 
+## Debian apt software
+
+Install these Debian packages before installing the Python requirements:
+
+```bash
+sudo apt update
+sudo apt install -y --no-install-recommends \
+  git \
+  python3 \
+  python3-pip \
+  python3-dev \
+  sqlite3 \
+  ca-certificates \
+  rsync \
+  ffmpeg \
+  v4l-utils \
+  libgl1 \
+  libglib2.0-0
+```
+
+Package notes:
+
+- `git`: clone or update the project source.
+- `python3`, `python3-pip`, `python3-dev`: run the app and install Python packages.
+- `sqlite3`: inspect or maintain the local SQLite database.
+- `ca-certificates`: allow HTTPS package and model downloads.
+- `rsync`: copy the application into `/opt/daygle-ai-camera`.
+- `ffmpeg`: media tooling for camera/video workflows.
+- `v4l-utils`: inspect Linux camera devices such as `/dev/video0`.
+- `libgl1`, `libglib2.0-0`: runtime libraries commonly needed by OpenCV.
+
+Inside a Proxmox LXC container where you are already root, omit `sudo`.
+
 ## Install on Debian 13
 
 ### 1. Install system packages
+
+Install the Debian apt software listed above:
 
 ```bash
 sudo apt update
@@ -195,7 +230,8 @@ cat /etc/debian_version
 
 ### 3. Install packages inside the container
 
-Run the same package install used for a regular Debian host:
+Run the same Debian apt software install used for a regular Debian host.
+Inside the container you are usually root, so these commands omit `sudo`:
 
 ```bash
 apt update
