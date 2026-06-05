@@ -79,6 +79,7 @@ class AuthService:
                 CREATE INDEX IF NOT EXISTS idx_login_attempts_username_created ON login_attempts(username, created_at);
                 """
             )
+            db.execute("DELETE FROM user_sessions WHERE expires_at <= ?", (utc_now(),))
             db.commit()
 
     def users_exist(self) -> bool:
@@ -193,6 +194,20 @@ class AuthService:
             db.commit()
         return self.get_user(user_id)  # type: ignore[return-value]
 
+    def too_many_recent_failures(self, db: sqlite3.Connection, username: str, ip_address: str, now: datetime) -> bool:
+        window_start = (now - self.lockout).isoformat()
+        row = db.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM login_attempts
+            WHERE success = 0
+              AND created_at >= ?
+              AND (username = ? OR ip_address = ?)
+            """,
+            (window_start, username, ip_address),
+        ).fetchone()
+        return int(row["count"]) >= self.max_login_attempts
+
     def authenticate(self, username: str, password: str, ip_address: str) -> tuple[dict[str, Any], str, str, str]:
         username = username.strip()
         with self.connect() as db:
@@ -202,9 +217,13 @@ class AuthService:
             success = False
             try:
                 if row is None or not row["is_active"]:
+                    if self.too_many_recent_failures(db, username, ip_address, now_dt):
+                        raise AuthError("Too many failed login attempts. Try again later.")
                     raise AuthError("Invalid username or password.")
                 if row["locked_until"] and datetime.fromisoformat(row["locked_until"]) > now_dt:
                     raise AuthError("Account is temporarily locked. Try again later.")
+                if self.too_many_recent_failures(db, username, ip_address, now_dt):
+                    raise AuthError("Too many failed login attempts. Try again later.")
                 if not self.verify_password(password, row["password_hash"]):
                     failures = int(row["failed_attempts"]) + 1
                     locked_until = None

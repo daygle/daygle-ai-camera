@@ -57,7 +57,7 @@ Security behavior:
 - Session lifetime defaults to 12 hours.
 - Cookies are HttpOnly and SameSite=Lax; the Secure flag is enabled automatically on HTTPS requests.
 - Mutating `/api/*` requests must include `X-CSRF-Token` from `GET /api/auth/me`.
-- Five consecutive failed logins lock the account for 15 minutes by default.
+- Recent failed login attempts are rate-limited by username or IP address, and five consecutive failures lock the account for 15 minutes by default.
 - Password complexity requires length, uppercase, lowercase, number, and symbol checks.
 - Admin-only areas are `/users`, `/settings`, `/api/users*`, and future `/api/settings*` handlers.
 

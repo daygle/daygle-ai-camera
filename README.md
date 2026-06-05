@@ -70,7 +70,7 @@ Role model:
 - Public routes: `/login`, `/setup` until first user creation, and `/static/*`.
 - Session cookies are HttpOnly, SameSite=Lax, 12-hour expiring cookies. The Secure flag is set automatically when served over HTTPS.
 - Mutating API endpoints require the session CSRF token in `X-CSRF-Token`.
-- Login attempts are recorded in `login_attempts`.
+- Login attempts are recorded in `login_attempts` and recent failures are rate-limited by username or IP address.
 - Accounts lock for `auth.lockout_minutes` after `auth.max_login_attempts` consecutive failures.
 
 ## Database schema
