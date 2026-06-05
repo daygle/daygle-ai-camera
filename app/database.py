@@ -63,6 +63,27 @@ class EventDatabase:
                 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
                 CREATE INDEX IF NOT EXISTS idx_detections_label ON detections(label);
                 CREATE INDEX IF NOT EXISTS idx_detections_event ON detections(event_id);
+
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS alert_rules (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    object TEXT NOT NULL,
+                    min_confidence REAL NOT NULL DEFAULT 0.5,
+                    cooldown_seconds INTEGER NOT NULL DEFAULT 60,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    active_start TEXT,
+                    active_end TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_alert_rules_object ON alert_rules(object);
                 """
             )
 
@@ -162,6 +183,106 @@ class EventDatabase:
         with self.connect() as db:
             rows = db.execute("SELECT * FROM alert_history ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
             return [dict(row) for row in rows]
+
+    def get_setting(self, key: str) -> Any | None:
+        with self.connect() as db:
+            row = db.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+            return json.loads(row["value"]) if row else None
+
+    def set_setting(self, key: str, value: Any, updated_at: str) -> Any:
+        with self.connect() as db:
+            db.execute(
+                """
+                INSERT INTO app_settings (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                """,
+                (key, json.dumps(value), updated_at),
+            )
+        return value
+
+    def list_alert_rules(self) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute("SELECT * FROM alert_rules ORDER BY name COLLATE NOCASE").fetchall()
+            return [self._alert_rule(row) for row in rows]
+
+    def seed_alert_rules(self, rules: list[dict[str, Any]], now: str) -> None:
+        with self.connect() as db:
+            count = db.execute("SELECT COUNT(*) AS count FROM alert_rules").fetchone()["count"]
+            if count:
+                return
+            for rule in rules:
+                db.execute(
+                    """
+                    INSERT INTO alert_rules (name, object, min_confidence, cooldown_seconds, enabled, active_start, active_end, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(rule.get("name") or rule.get("object") or "Alert"),
+                        str(rule.get("object") or ""),
+                        float(rule.get("min_confidence", 0.5)),
+                        int(rule.get("cooldown_seconds", 60)),
+                        int(bool(rule.get("enabled", True))),
+                        rule.get("active_start"),
+                        rule.get("active_end"),
+                        now,
+                        now,
+                    ),
+                )
+
+    def create_alert_rule(self, rule: dict[str, Any], now: str) -> dict[str, Any]:
+        with self.connect() as db:
+            cursor = db.execute(
+                """
+                INSERT INTO alert_rules (name, object, min_confidence, cooldown_seconds, enabled, active_start, active_end, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    rule["name"],
+                    rule["object"],
+                    float(rule["min_confidence"]),
+                    int(rule["cooldown_seconds"]),
+                    int(bool(rule["enabled"])),
+                    rule.get("active_start"),
+                    rule.get("active_end"),
+                    now,
+                    now,
+                ),
+            )
+            return self._alert_rule(db.execute("SELECT * FROM alert_rules WHERE id = ?", (cursor.lastrowid,)).fetchone())
+
+    def update_alert_rule(self, rule_id: int, rule: dict[str, Any], now: str) -> dict[str, Any] | None:
+        updates: list[str] = []
+        params: list[Any] = []
+        for key in ("name", "object", "min_confidence", "cooldown_seconds", "enabled", "active_start", "active_end"):
+            if key in rule:
+                updates.append(f"{key} = ?")
+                value = rule[key]
+                if key == "enabled":
+                    value = int(bool(value))
+                params.append(value)
+        if not updates:
+            with self.connect() as db:
+                row = db.execute("SELECT * FROM alert_rules WHERE id = ?", (rule_id,)).fetchone()
+                return self._alert_rule(row) if row else None
+        updates.append("updated_at = ?")
+        params.extend([now, rule_id])
+        with self.connect() as db:
+            cursor = db.execute(f"UPDATE alert_rules SET {', '.join(updates)} WHERE id = ?", params)
+            if cursor.rowcount == 0:
+                return None
+            row = db.execute("SELECT * FROM alert_rules WHERE id = ?", (rule_id,)).fetchone()
+            return self._alert_rule(row)
+
+    def delete_alert_rule(self, rule_id: int) -> bool:
+        with self.connect() as db:
+            cursor = db.execute("DELETE FROM alert_rules WHERE id = ?", (rule_id,))
+            return cursor.rowcount > 0
+
+    def _alert_rule(self, row: sqlite3.Row) -> dict[str, Any]:
+        rule = dict(row)
+        rule["enabled"] = bool(rule["enabled"])
+        return rule
 
     def _event_with_detections(self, db: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
         detections = db.execute("SELECT * FROM detections WHERE event_id = ? ORDER BY confidence DESC", (row["id"],)).fetchall()

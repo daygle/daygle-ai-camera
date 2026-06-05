@@ -276,7 +276,7 @@ def test_setup_login_success_session_validation_and_protected_routes(tmp_path, m
 
         with sqlite3.connect(database_path) as db:
             tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-        assert {"users", "user_sessions", "login_attempts"}.issubset(tables)
+        assert {"users", "user_sessions", "login_attempts", "app_settings", "alert_rules"}.issubset(tables)
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -353,6 +353,91 @@ def test_logout_user_creation_and_password_reset(tmp_path, monkeypatch):
         assert events[0]["source"] == "mock-camera"
         assert viewer_client.request(f"/api/events/{created['event_id']}")[2]["id"] == created["event_id"]
         assert viewer_client.request("/api/config")[2]["ai"]["backend"] == "mock"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_admin_ai_settings_viewer_denied_and_db_override(tmp_path, monkeypatch):
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    admin = LocalClient(base_url)
+    try:
+        _setup_admin(admin)
+        csrf = _login(admin)
+        status, _headers, settings = admin.request(
+            "/api/settings/ai",
+            method="PUT",
+            json_body={"backend": "mock", "confidence": 0.72, "iou_threshold": 0.33, "input_size": 320},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert settings["confidence"] == 0.72
+        assert admin.request("/api/config")[2]["ai"]["confidence"] == 0.72
+        with sqlite3.connect(database_path) as db:
+            value = db.execute("SELECT value FROM app_settings WHERE key = 'ai'").fetchone()[0]
+        assert json.loads(value)["confidence"] == 0.72
+
+        status, _headers, viewer = admin.request(
+            "/api/users",
+            method="POST",
+            json_body={"username": "viewer2", "password": "Viewer123!", "role": "viewer"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        viewer_client = LocalClient(base_url)
+        viewer_csrf = _login(viewer_client, viewer["username"], "Viewer123!")
+        assert viewer_client.request("/api/settings/alerts")[0] == 200
+        status, _headers, body = viewer_client.request(
+            "/api/settings/ai",
+            method="PUT",
+            json_body={"confidence": 0.2},
+            headers={"X-CSRF-Token": viewer_csrf},
+        )
+        assert status == 403
+        assert body["detail"] == "Admin access required"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_admin_alert_rule_crud_and_alert_engine_uses_db_rules(tmp_path, monkeypatch):
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        initial = client.request("/api/settings/alerts")[2]
+        for rule in initial["rules"]:
+            client.request(f"/api/settings/alerts/{rule['id']}", method="DELETE", headers={"X-CSRF-Token": csrf})
+
+        status, _headers, rule = client.request(
+            "/api/settings/alerts",
+            method="POST",
+            json_body={"name": "Person DB", "object": "person", "min_confidence": 0.1, "cooldown_seconds": 0, "enabled": True},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert rule["object"] == "person"
+
+        status, _headers, edited = client.request(
+            f"/api/settings/alerts/{rule['id']}",
+            method="PUT",
+            json_body={"min_confidence": 0.2, "enabled": True},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert edited["min_confidence"] == 0.2
+
+        main_module = sys.modules["app.main"]
+        main_module.alerts.rules = main_module.effective_alert_rules()
+        triggered = main_module.alerts.process([{"label": "person", "confidence": 0.9}])
+        assert any(alert["rule_name"] == "Person DB" for alert in triggered)
+
+        status, _headers, deleted = client.request(f"/api/settings/alerts/{rule['id']}", method="DELETE", headers={"X-CSRF-Token": csrf})
+        assert status == 200
+        assert deleted["ok"] is True
     finally:
         server.should_exit = True
         thread.join(timeout=5)

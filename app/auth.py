@@ -51,7 +51,8 @@ class AuthService:
                     failed_attempts INTEGER NOT NULL DEFAULT 0,
                     locked_until TEXT,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    last_login_at TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS user_sessions (
@@ -79,6 +80,9 @@ class AuthService:
                 CREATE INDEX IF NOT EXISTS idx_login_attempts_username_created ON login_attempts(username, created_at);
                 """
             )
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()}
+            if "last_login_at" not in columns:
+                db.execute("ALTER TABLE users ADD COLUMN last_login_at TEXT")
             db.execute("DELETE FROM user_sessions WHERE expires_at <= ?", (utc_now(),))
             db.commit()
 
@@ -148,14 +152,14 @@ class AuthService:
     def list_users(self) -> list[dict[str, Any]]:
         with self.connect() as db:
             rows = db.execute(
-                "SELECT id, username, role, is_active, failed_attempts, locked_until, created_at, updated_at FROM users ORDER BY username"
+                "SELECT id, username, role, is_active, failed_attempts, locked_until, created_at, updated_at, last_login_at FROM users ORDER BY username"
             ).fetchall()
             return [dict(row) for row in rows]
 
     def get_user(self, user_id: int) -> dict[str, Any] | None:
         with self.connect() as db:
             row = db.execute(
-                "SELECT id, username, role, is_active, failed_attempts, locked_until, created_at, updated_at FROM users WHERE id = ?",
+                "SELECT id, username, role, is_active, failed_attempts, locked_until, created_at, updated_at, last_login_at FROM users WHERE id = ?",
                 (user_id,),
             ).fetchone()
             return dict(row) if row else None
@@ -239,7 +243,7 @@ class AuthService:
                 token = secrets.token_urlsafe(48)
                 csrf_token = secrets.token_urlsafe(32)
                 expires_at = (now_dt + self.session_timeout).isoformat()
-                db.execute("UPDATE users SET failed_attempts = 0, locked_until = NULL, updated_at = ? WHERE id = ?", (now, row["id"]))
+                db.execute("UPDATE users SET failed_attempts = 0, locked_until = NULL, updated_at = ?, last_login_at = ? WHERE id = ?", (now, now, row["id"]))
                 db.execute(
                     "INSERT INTO user_sessions (session_token, user_id, csrf_token, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)",
                     (token, row["id"], csrf_token, now, expires_at, now),
