@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Daygle AI Camera</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Daygle Vision Platform</p>
+        <h1>AI Camera Dashboard</h1>
+        <p class="muted">Mock camera mode is active. Generate detections, test alert rules, and search object history before the real camera arrives.</p>
+      </div>
+      <button id="generateBtn" class="primary">Generate mock detection</button>
+    </header>
+
+    <section class="grid stats-grid">
+      <article class="card"><span>Status</span><strong id="statusText">Loading...</strong></article>
+      <article class="card"><span>Total events</span><strong id="totalEvents">0</strong></article>
+      <article class="card"><span>Total alerts</span><strong id="totalAlerts">0</strong></article>
+      <article class="card"><span>Frame</span><strong id="frameNumber">0</strong></article>
+    </section>
+
+    <section class="grid main-grid">
+      <article class="card camera-card">
+        <div class="section-header">
+          <div>
+            <h2>Live Mock Feed</h2>
+            <p class="muted">Synthetic camera surface for UI and pipeline testing.</p>
+          </div>
+          <span class="pill">MOCK</span>
+        </div>
+        <div class="mock-feed">
+          <div class="scanline"></div>
+          <div class="target-box box-one">cat?</div>
+          <div class="target-box box-two">person?</div>
+          <div class="feed-label">Daygle AI Camera</div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="section-header">
+          <h2>Object Search</h2>
+        </div>
+        <div class="search-row">
+          <input id="searchInput" placeholder="cat, person, package..." />
+          <button id="searchBtn">Search</button>
+          <button id="clearBtn">All</button>
+        </div>
+        <div id="objectStats" class="chips"></div>
+      </article>
+    </section>
+
+    <section class="grid main-grid">
+      <article class="card">
+        <div class="section-header"><h2>Recent Events</h2></div>
+        <div id="events" class="list"></div>
+      </article>
+      <article class="card">
+        <div class="section-header"><h2>Alert History</h2></div>
+        <div id="alerts" class="list"></div>
+      </article>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
