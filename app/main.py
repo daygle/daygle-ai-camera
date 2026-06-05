@@ -431,6 +431,66 @@ def trigger_plate_alerts(plate_events: list[dict[str, Any]]) -> list[dict[str, A
     return triggered
 
 
+def render_live_snapshot_svg(frame: dict[str, Any], detections: list[dict[str, Any]], *, overlay: bool) -> str:
+    width = int(frame.get('width') or 1280)
+    height = int(frame.get('height') or 720)
+    frame_number = int(frame.get('frame_number') or 0)
+    timestamp = datetime.fromtimestamp(float(frame.get('timestamp') or 0), timezone.utc).strftime('%H:%M:%S UTC')
+    grid_spacing = 80
+    grid_lines = []
+    for x in range(0, width + grid_spacing, grid_spacing):
+        grid_lines.append(f'<line x1="{x}" y1="0" x2="{x}" y2="{height}" />')
+    for y in range(0, height + grid_spacing, grid_spacing):
+        grid_lines.append(f'<line x1="0" y1="{y}" x2="{width}" y2="{y}" />')
+
+    detection_markup: list[str] = []
+    if overlay:
+        for detection in detections:
+            box = detection.get('box') or {}
+            x = max(0, float(box.get('x') or 0) * width)
+            y = max(0, float(box.get('y') or 0) * height)
+            box_width = max(1, float(box.get('width') or 0) * width)
+            box_height = max(1, float(box.get('height') or 0) * height)
+            label = escape(str(detection.get('label') or 'object'))
+            confidence = round(float(detection.get('confidence') or 0) * 100)
+            label_y = max(28, y - 10)
+            detection_markup.append(
+                f'<g class="detection-box"><rect x="{x:.1f}" y="{y:.1f}" width="{box_width:.1f}" height="{box_height:.1f}" />'
+                f'<text x="{x:.1f}" y="{label_y:.1f}">{label} · {confidence}%</text></g>'
+            )
+
+    overlay_state = 'ON' if overlay else 'OFF'
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
+  <defs>
+    <linearGradient id="camera-bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#101827" />
+      <stop offset="0.52" stop-color="#0b1220" />
+      <stop offset="1" stop-color="#17223a" />
+    </linearGradient>
+    <radialGradient id="lens" cx="50%" cy="45%" r="68%">
+      <stop offset="0" stop-color="#47d6ff" stop-opacity="0.22" />
+      <stop offset="0.5" stop-color="#8b5cf6" stop-opacity="0.1" />
+      <stop offset="1" stop-color="#070b13" stop-opacity="0" />
+    </radialGradient>
+    <style>
+      .grid line {{ stroke: rgba(255,255,255,.08); stroke-width: 1; }}
+      .hud {{ fill: #edf3ff; font: 700 26px Inter, Arial, sans-serif; letter-spacing: .04em; }}
+      .muted {{ fill: #91a1ba; font: 700 20px Inter, Arial, sans-serif; }}
+      .detection-box rect {{ fill: rgba(73,230,163,.08); stroke: #49e6a3; stroke-width: 4; rx: 18; }}
+      .detection-box text {{ fill: #49e6a3; font: 800 24px Inter, Arial, sans-serif; paint-order: stroke; stroke: rgba(7,11,19,.86); stroke-width: 5; stroke-linejoin: round; }}
+    </style>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#camera-bg)" />
+  <rect width="100%" height="100%" fill="url(#lens)" />
+  <g class="grid">{''.join(grid_lines)}</g>
+  <circle cx="{width * .74:.1f}" cy="{height * .34:.1f}" r="{min(width, height) * .16:.1f}" fill="none" stroke="rgba(71,214,255,.16)" stroke-width="3" />
+  <circle cx="{width * .28:.1f}" cy="{height * .62:.1f}" r="{min(width, height) * .12:.1f}" fill="none" stroke="rgba(139,92,246,.16)" stroke-width="3" />
+  {''.join(detection_markup)}
+  <rect x="24" y="24" width="520" height="116" rx="20" fill="rgba(7,11,19,.58)" stroke="rgba(255,255,255,.12)" />
+  <text x="48" y="70" class="hud">DAYGLE LIVE CAMERA</text>
+  <text x="48" y="112" class="muted">Frame #{frame_number} · {timestamp} · Overlay {overlay_state}</text>
+</svg>'''
+
 def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
     for recording in recordings:
         file_path = Path(str(recording.get('file_path') or ''))
@@ -647,6 +707,14 @@ def root():
     return {'application': 'Daygle AI Camera', 'status': 'running'}
 
 
+@app.get('/live')
+def live_page():
+    live_path = web_dir / 'live.html'
+    if live_path.exists():
+        return FileResponse(live_path)
+    return root()
+
+
 @app.get('/events')
 @app.get('/alerts')
 @app.get('/search')
@@ -750,6 +818,14 @@ def status():
 @app.get('/api/status/ai')
 def ai_status():
     return ai_status_payload()
+
+
+@app.get('/api/live/snapshot')
+def live_snapshot(overlay: bool = Query(True)):
+    frame = camera.get_frame()
+    detections = mock_detector.detect(frame['frame_number'], force=True) if overlay else []
+    svg = render_live_snapshot_svg(frame, detections, overlay=overlay)
+    return Response(content=svg, media_type='image/svg+xml')
 
 
 @app.post('/api/mock/detect')
