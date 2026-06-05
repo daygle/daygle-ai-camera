@@ -74,7 +74,8 @@ def load_settings(path: str | Path | None = None) -> dict[str, Any]:
     The DAYGLE_CONFIG environment variable is honored so systemd installations can
     keep mutable configuration in /etc while the application runs from /opt.
     """
-    config_path = Path(path or os.environ.get(CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH))
+    config_source = path if path is not None else os.environ.get(CONFIG_ENV_VAR) or DEFAULT_CONFIG_PATH
+    config_path = Path(config_source)
     if not config_path.exists():
         return copy.deepcopy(DEFAULT_CONFIG)
 

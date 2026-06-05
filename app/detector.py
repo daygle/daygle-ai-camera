@@ -180,7 +180,7 @@ class OnnxYoloDetector:
 
         try:
             import onnxruntime as ort
-        except ImportError as exc:
+        except ImportError:
             self.unavailable_reason = "onnxruntime is not installed. Install requirements.txt or run pip install onnxruntime."
             return
 

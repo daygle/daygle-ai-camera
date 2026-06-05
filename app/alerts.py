@@ -13,7 +13,10 @@ class AlertEngine:
         alerts: list[dict[str, Any]] = []
 
         for detection in detections:
-            label = detection.get('label')
+            label_value = detection.get('label')
+            if not isinstance(label_value, str) or not label_value:
+                continue
+            label = label_value
             confidence = float(detection.get('confidence', 0))
 
             for rule in self.rules:
@@ -26,7 +29,7 @@ class AlertEngine:
                 if confidence < float(rule.get('min_confidence', 0.5)):
                     continue
 
-                rule_name = rule.get('name', label)
+                rule_name = str(rule.get('name') or label)
                 cooldown = int(rule.get('cooldown_seconds', 60))
 
                 last = self.last_triggered.get(rule_name, 0)

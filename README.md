@@ -181,11 +181,8 @@ sudo DAYGLE_APP_DIR=/opt/daygle-ai-camera \
 - `GET /logout` / `POST /logout` - logout action
 - `GET /setup` / `POST /setup` - first-admin setup, disabled after first user
 - `GET /api/auth/me` - current user and CSRF token
-- `GET /api/status` - runtime status
-- `POST /api/mock/detect` - create a mock detection event; requires `X-CSRF-Token`
-- `GET /` - dashboard
 - `GET /api/status` - runtime status, including AI backend availability
-- `POST /api/mock/detect` - create a mock detection event
+- `POST /api/mock/detect` - create a mock detection event; requires `X-CSRF-Token`
 - `POST /api/detect/test-image` - upload an image, run the active detector, save a snapshot, and store detections as an event
 - `GET /api/events?label=cat&limit=50` - event search
 - `GET /api/events/{event_id}` - event detail
@@ -204,4 +201,3 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for architecture details and future OV5647 
 - Put the service behind a trusted reverse proxy or VPN for internet-exposed deployments.
 - Add audit-log retention and export before enabling remote access.
 - Consider hardware-backed secrets and WebAuthn/TOTP for higher-risk installations.
-See [DEVELOPMENT.md](DEVELOPMENT.md) for architecture details and OV5647 CSI / ONNX / RKNN integration notes.

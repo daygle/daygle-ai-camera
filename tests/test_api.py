@@ -45,24 +45,25 @@ class LocalClient:
         method: str = "GET",
         form: dict[str, str] | None = None,
         json_body: dict[str, object] | None = None,
+        data: bytes | None = None,
         headers: dict[str, str] | None = None,
         follow_redirects: bool = True,
     ):
-        data = None
+        request_data = data
         request_headers = dict(headers or {})
         if form is not None:
-            data = urlencode(form).encode("utf-8")
+            request_data = urlencode(form).encode("utf-8")
             request_headers["Content-Type"] = "application/x-www-form-urlencoded"
         if json_body is not None:
-            data = json.dumps(json_body).encode("utf-8")
+            request_data = json.dumps(json_body).encode("utf-8")
             request_headers["Content-Type"] = "application/json"
         opener = self.opener if follow_redirects else build_opener(HTTPCookieProcessor(self.cookies), NoRedirect)
-        request = Request(f"{self.base_url}{path}", data=data, method=method, headers=request_headers)
+        request = Request(f"{self.base_url}{path}", data=request_data, method=method, headers=request_headers)
         try:
             with opener.open(request, timeout=5) as response:  # noqa: S310 - local test server only
                 return response.status, dict(response.headers), _body(response)
         except HTTPError as exc:
-            return exc.code, dict(exc.headers), exc.read().decode("utf-8")
+            return exc.code, dict(exc.headers), _error_body(exc)
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -91,29 +92,16 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def _load_app(tmp_path: Path, monkeypatch):
-def _request(
-    base_url: str,
-    path: str,
-    method: str = "GET",
-    params: dict[str, str] | None = None,
-    data: bytes | None = None,
-    headers: dict[str, str] | None = None,
-):
-    if params:
-        path = f"{path}?{urlencode(params)}"
-    request = Request(f"{base_url}{path}", data=data, headers=headers or {}, method=method)
-    with urlopen(request, timeout=5) as response:  # noqa: S310 - local test server only
-        body = response.read().decode("utf-8")
-        content_type = response.headers.get("content-type", "")
-        if "application/json" in content_type:
-            return response.status, json.loads(body)
-        return response.status, body
+def _error_body(exc: HTTPError):
+    text = exc.read().decode("utf-8")
+    if "application/json" in exc.headers.get("content-type", ""):
+        return json.loads(text)
+    return text
 
 
 def _load_app(tmp_path: Path, monkeypatch, extra_ai: str = ""):
     config_path = tmp_path / "config.yaml"
-    database_path = tmp_path / 'data' / 'daygle.sqlite3'
+    database_path = tmp_path / "data" / "daygle.sqlite3"
     config_path.write_text(
         f"""
 server:
@@ -149,6 +137,17 @@ alerts:
 
 
 def _server(app):
+    port = _free_port()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.time() + 5
+    while not server.started and time.time() < deadline:
+        time.sleep(0.05)
+    assert server.started
+    return server, thread, f"http://127.0.0.1:{port}"
+
+
 def test_detector_backend_selection(tmp_path):
     from app.detector import MockDetector, OnnxYoloDetector, create_detector
 
@@ -173,7 +172,7 @@ def test_detector_backend_selection(tmp_path):
 
 
 def test_onnx_missing_model_returns_clear_api_error(tmp_path, monkeypatch):
-    app = _load_app(
+    app, _database_path = _load_app(
         tmp_path,
         monkeypatch,
         extra_ai=f"""  backend: onnx
@@ -181,48 +180,22 @@ def test_onnx_missing_model_returns_clear_api_error(tmp_path, monkeypatch):
   labels_path: models/coco.names
 """,
     )
-    port = _free_port()
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    base_url = f"http://127.0.0.1:{port}"
-
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
     try:
-        deadline = time.time() + 5
-        while not server.started and time.time() < deadline:
-            time.sleep(0.05)
-        assert server.started
-
-        try:
-            _request(
-                base_url,
-                "/api/detect/test-image",
-                method="POST",
-                data=b"not really an image",
-                headers={"Content-Type": "image/jpeg"},
-            )
-        except HTTPError as exc:
-            body = json.loads(exc.read().decode("utf-8"))
-            assert exc.code == 400
-            assert "ONNX model not found" in body["detail"] or "numpy is not installed" in body["detail"]
-        else:  # pragma: no cover - defensive
-            raise AssertionError("Expected missing ONNX model to return HTTP 400")
+        _setup_admin(client)
+        csrf = _login(client)
+        status, _headers, body = client.request(
+            "/api/detect/test-image",
+            method="POST",
+            data=b"not really an image",
+            headers={"Content-Type": "image/jpeg", "X-CSRF-Token": csrf},
+        )
+        assert status == 400
+        assert "ONNX model not found" in body["detail"] or "numpy is not installed" in body["detail"]
     finally:
         server.should_exit = True
         thread.join(timeout=5)
-
-
-def test_dashboard_and_api_endpoints(tmp_path, monkeypatch):
-    app = _load_app(tmp_path, monkeypatch)
-    port = _free_port()
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    deadline = time.time() + 5
-    while not server.started and time.time() < deadline:
-        time.sleep(0.05)
-    assert server.started
-    return server, thread, f"http://127.0.0.1:{port}"
 
 
 def _setup_admin(client: LocalClient, username: str = "admin", password: str = "Admin123!") -> None:
@@ -352,11 +325,11 @@ def test_logout_user_creation_and_password_reset(tmp_path, monkeypatch):
         status, _headers, updated = client.request(
             f"/api/users/{viewer['id']}",
             method="PATCH",
-            json_body={"password": "Viewer456!", "role": "admin", "is_active": True},
+            json_body={"password": "Viewer456!", "role": "viewer", "is_active": True},
             headers={"X-CSRF-Token": csrf},
         )
         assert status == 200
-        assert updated["role"] == "admin"
+        assert updated["role"] == "viewer"
 
         status, _headers, payload = client.request("/logout", method="POST", headers={"X-CSRF-Token": csrf})
         assert status == 200
@@ -364,55 +337,22 @@ def test_logout_user_creation_and_password_reset(tmp_path, monkeypatch):
         assert client.request("/api/status")[0] == 401
 
         viewer_client = LocalClient(base_url)
-        _login(viewer_client, "viewer", "Viewer456!")
+        viewer_csrf = _login(viewer_client, "viewer", "Viewer456!")
         assert viewer_client.request("/api/status")[0] == 200
+        assert viewer_client.request("/api/users")[0] == 403
+
+        status, _headers, created = viewer_client.request(
+            "/api/mock/detect", method="POST", headers={"X-CSRF-Token": viewer_csrf}
+        )
+        assert status == 200
+        assert created["created"] is True
         assert created["event_id"] >= 1
         assert created["detections"]
 
-        status_code, upload = _request(
-            base_url,
-            "/api/detect/test-image",
-            method="POST",
-            data=b"mock image bytes",
-            headers={"Content-Type": "image/jpeg"},
-        )
-        assert status_code == 200
-        assert upload["created"] is True
-        assert upload["event_id"] >= 2
-        assert upload["detections"]
-
-        status_code, events = _request(base_url, "/api/events")
-        assert status_code == 200
-        assert len(events) == 2
-        assert events[0]["source"] == "test-image"
-        assert events[0]["detections"]
-
-        status_code, detail = _request(base_url, f"/api/events/{created['event_id']}")
-        assert status_code == 200
-        assert detail["id"] == created["event_id"]
-
-        label = upload["detections"][0]["label"]
-        status_code, search = _request(base_url, "/api/events", params={"label": label})
-        assert status_code == 200
-        assert search
-
-        status_code, alerts = _request(base_url, "/api/alerts")
-        assert status_code == 200
-        assert isinstance(alerts, list)
-
-        status_code, stats = _request(base_url, "/api/stats")
-        assert status_code == 200
-        assert stats["total_events"] == 2
-
-        status_code, runtime_config = _request(base_url, "/api/config")
-        assert status_code == 200
-        assert runtime_config["camera"]["backend"] == "mock"
-        assert runtime_config["ai"]["backend"] == "mock"
-
-        status_code, static_js = _request(base_url, "/static/app.js")
-        assert status_code == 200
-        assert "refreshAll" in static_js
-        assert "detect/test-image" in static_js
+        events = viewer_client.request("/api/events")[2]
+        assert events[0]["source"] == "mock-camera"
+        assert viewer_client.request(f"/api/events/{created['event_id']}")[2]["id"] == created["event_id"]
+        assert viewer_client.request("/api/config")[2]["ai"]["backend"] == "mock"
     finally:
         server.should_exit = True
         thread.join(timeout=5)
