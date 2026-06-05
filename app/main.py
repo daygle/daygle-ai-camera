@@ -10,7 +10,7 @@ import secrets
 import tempfile
 from urllib.request import urlretrieve
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -58,19 +58,6 @@ static_dir = web_dir
 if static_dir.exists():
     app.mount('/static', StaticFiles(directory=static_dir), name='static')
 
-camera_config = config.get('camera', {})
-camera = MockCamera(
-    width=int(camera_config.get('width', 1280)),
-    height=int(camera_config.get('height', 720)),
-    fps=int(camera_config.get('fps', 15)),
-)
-
-database = EventDatabase(config['storage']['database'])
-storage = Storage(config)
-recording_service = RecordingService(config)
-auth = AuthService(config['storage']['database'], auth_config)
-SESSION_COOKIE_NAME = str(auth_config.get('cookie_name', SESSION_COOKIE))
-
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -78,6 +65,40 @@ def utc_now() -> str:
 def effective_ai_config() -> dict[str, Any]:
     settings = copy.deepcopy(config.get('ai', {}))
     override = database.get_setting('ai')
+    if isinstance(override, dict):
+        settings.update(override)
+    return settings
+
+
+def effective_camera_config() -> dict[str, Any]:
+    settings = copy.deepcopy(config.get('camera', {}))
+    override = database.get_setting('camera')
+    if isinstance(override, dict):
+        settings.update(override)
+    return settings
+
+
+def effective_recording_config() -> dict[str, Any]:
+    settings = copy.deepcopy(config.get('recording', {}))
+    override = database.get_setting('recording')
+    if isinstance(override, dict):
+        settings.update(override)
+    return settings
+
+
+def effective_storage_config() -> dict[str, Any]:
+    settings = copy.deepcopy(config.get('storage', {}))
+    override = database.get_setting('storage')
+    if isinstance(override, dict):
+        database_path = settings.get('database')
+        settings.update(override)
+        settings['database'] = database_path
+    return settings
+
+
+def effective_auth_config() -> dict[str, Any]:
+    settings = copy.deepcopy(auth_config)
+    override = database.get_setting('auth')
     if isinstance(override, dict):
         settings.update(override)
     return settings
@@ -93,6 +114,19 @@ def effective_email_alert_settings() -> dict[str, Any]:
     if isinstance(override, dict):
         settings.update(override)
     return settings
+
+
+database = EventDatabase(config['storage']['database'])
+camera_config = effective_camera_config()
+camera = MockCamera(
+    width=int(camera_config.get('width', 1280)),
+    height=int(camera_config.get('height', 720)),
+    fps=int(camera_config.get('fps', 15)),
+)
+storage = Storage({**config, 'storage': effective_storage_config()})
+recording_service = RecordingService({**config, 'storage': effective_storage_config(), 'recording': effective_recording_config()})
+auth = AuthService(config['storage']['database'], effective_auth_config())
+SESSION_COOKIE_NAME = str(effective_auth_config().get('cookie_name', SESSION_COOKIE))
 
 
 database.seed_alert_rules(config.get('alerts', {}).get('rules', []), utc_now())
@@ -189,7 +223,7 @@ def log_detector_initialization(context: str = 'startup') -> None:
 
 PUBLIC_PREFIXES = ('/static/',)
 PUBLIC_PATHS = {'/login', '/setup'}
-ADMIN_PATHS = {'/settings', '/alert-settings', '/users'}
+ADMIN_PATHS = {'/settings', '/alert-settings', '/system-settings', '/users'}
 ADMIN_API_PREFIXES = ('/api/users', '/api/settings')
 MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
@@ -218,7 +252,7 @@ async def authentication_middleware(request: Request, call_next):
     request.state.session = session
     request.state.user = session['user']
 
-    admin_required = path in ADMIN_PATHS or path.startswith('/api/users') or path.startswith('/api/settings/ai') or (
+    admin_required = path in ADMIN_PATHS or path.startswith('/api/users') or path.startswith('/api/settings/ai') or path.startswith('/api/settings/system') or (
         path.startswith('/api/settings/alert-email') and request.method in MUTATING_METHODS
     ) or (
         path.startswith('/api/settings/alerts') and request.method in MUTATING_METHODS
@@ -235,6 +269,7 @@ async def authentication_middleware(request: Request, call_next):
 
 
 def set_session_cookie(response: Response, request: Request, token: str, expires_at: str) -> None:
+    session_hours = float(effective_auth_config().get('session_timeout_hours', 12))
     response.set_cookie(
         SESSION_COOKIE_NAME,
         token,
@@ -242,7 +277,7 @@ def set_session_cookie(response: Response, request: Request, token: str, expires
         secure=request.url.scheme == 'https',
         samesite='lax',
         expires=expires_at,
-        max_age=int(float(auth_config.get('session_timeout_hours', 12)) * 3600),
+        max_age=int(session_hours * 3600),
     )
 
 
@@ -290,11 +325,13 @@ def require_admin(request: Request) -> dict[str, Any]:
     return user
 
 
-def attach_event_recording(event_id: int, event_time: str, source: str) -> int | None:
-    metadata = recording_service.mock_event_metadata(event_id, event_time, source)
+def attach_event_recording(event_id: int, event_time: str, source: str, detections: list[dict[str, Any]]) -> int | None:
+    metadata = recording_service.event_recording_metadata(event_id, event_time, source, detections)
     if metadata is None:
         return None
-    return database.add_recording(created_at=utc_now(), **metadata)
+    recording_id = database.add_recording(created_at=utc_now(), **metadata)
+    purge_recordings_by_policy()
+    return recording_id
 
 
 def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int) -> None:
@@ -310,6 +347,38 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int) -> None
             mailer.send_alert(alert, event_id=event_id, recipients=rule.get('email_recipients', []))
         except EmailAlertError as exc:
             logger.warning('Failed to send email alert for event %s rule %s: %s', event_id, alert.get('rule_name'), exc)
+
+
+def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
+    for recording in recordings:
+        file_path = Path(str(recording.get('file_path') or ''))
+        if file_path.exists() and file_path.is_file():
+            file_path.unlink(missing_ok=True)
+        thumbnail_path = recording.get('thumbnail_path')
+        if thumbnail_path:
+            thumbnail = Path(str(thumbnail_path))
+            if thumbnail.exists() and thumbnail.is_file():
+                thumbnail.unlink(missing_ok=True)
+
+
+def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
+    recording_settings = effective_recording_config()
+    if not force and not _bool_value(recording_settings.get('auto_purge_enabled', True)):
+        return {'purged': 0, 'files_deleted': 0, 'bytes_deleted': 0, 'recordings': []}
+    retention_days = int(recording_settings.get('retention_days', 14))
+    max_storage_gb = int(recording_settings.get('max_storage_gb', 20))
+    older_than = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+    max_storage_bytes = max_storage_gb * 1024 * 1024 * 1024
+    purged = database.purge_recordings(older_than=older_than, max_storage_bytes=max_storage_bytes)
+    bytes_deleted = 0
+    files_deleted = 0
+    for recording in purged:
+        file_path = Path(str(recording.get('file_path') or ''))
+        if file_path.exists() and file_path.is_file():
+            bytes_deleted += file_path.stat().st_size
+            files_deleted += 1
+    delete_recording_files(purged)
+    return {'purged': len(purged), 'files_deleted': files_deleted, 'bytes_deleted': bytes_deleted, 'recordings': purged}
 
 
 @app.get('/login')
@@ -453,7 +522,7 @@ def dashboard_aliases():
 def settings_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>Setup / AI Settings · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>Setup / AI Settings</h1><p class="muted">Configure AI detection, install models, and reload the detector.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/alert-settings">Alert settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>AI status</h2><div id="settingsMessage" class="muted"></div><div id="aiStatusPanel" class="status-panel"></div><div class="button-row"><button id="checkModelBtn" class="secondary" type="button">Check model</button><button id="downloadModelBtn" type="button">Download YOLOv8n ONNX</button><button id="reloadDetectorBtn" class="secondary" type="button">Reload detector</button><button id="testDetectorBtn" class="secondary" type="button">Test detector</button></div></section><section class="card"><h2>AI settings</h2><form id="aiSettingsForm" class="form-grid"><label><span>AI enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Backend</span><select name="backend"><option value="mock">mock</option><option value="onnx">onnx</option></select></label><label><span>Confidence</span><input name="confidence" type="number" min="0" max="1" step="0.01" /></label><label><span>IOU threshold</span><input name="iou_threshold" type="number" min="0" max="1" step="0.01" /></label><label><span>Input size</span><input name="input_size" type="number" min="32" max="2048" step="32" /></label><label><span>Model path</span><input name="model_path" /></label><label><span>Labels path</span><input name="labels_path" /></label><button type="submit">Save AI settings</button></form></section></main><script src="/static/settings.js"></script></body></html>""")
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>Setup / AI Settings</h1><p class="muted">Configure AI detection, install models, and reload the detector.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/system-settings">System settings</a><a class="button-link secondary-link" href="/alert-settings">Alert settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>AI status</h2><div id="settingsMessage" class="muted"></div><div id="aiStatusPanel" class="status-panel"></div><div class="button-row"><button id="checkModelBtn" class="secondary" type="button">Check model</button><button id="downloadModelBtn" type="button">Download YOLOv8n ONNX</button><button id="reloadDetectorBtn" class="secondary" type="button">Reload detector</button><button id="testDetectorBtn" class="secondary" type="button">Test detector</button></div></section><section class="card"><h2>AI settings</h2><form id="aiSettingsForm" class="form-grid"><label><span>AI enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Backend</span><select name="backend"><option value="mock">mock</option><option value="onnx">onnx</option></select></label><label><span>Confidence</span><input name="confidence" type="number" min="0" max="1" step="0.01" /></label><label><span>IOU threshold</span><input name="iou_threshold" type="number" min="0" max="1" step="0.01" /></label><label><span>Input size</span><input name="input_size" type="number" min="32" max="2048" step="32" /></label><label><span>Model path</span><input name="model_path" /></label><label><span>Labels path</span><input name="labels_path" /></label><button type="submit">Save AI settings</button></form></section></main><script src="/static/settings.js"></script></body></html>""")
 
 
 @app.get('/alert-settings')
@@ -468,6 +537,13 @@ def profile_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>Profile · Daygle AI Camera</title>
 <link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Account</p><h1>Profile</h1><p class="muted">Manage your display preferences and password.</p></div><a class="button-link" href="/">Dashboard</a></header><section class="card"><h2>Profile details</h2><div id="profileMessage" class="muted"></div><div id="profileSummary" class="status-panel"></div><form id="profileForm" class="form-grid"><input name="timezone" placeholder="Timezone" required /><label><span>Date format</span><select name="date_format"><option value="locale">Browser locale</option><option value="iso">YYYY-MM-DD</option><option value="au">DD/MM/YYYY</option><option value="us">MM/DD/YYYY</option></select></label><label><span>Time format</span><select name="time_format"><option value="24h">24 hour</option><option value="12h">12 hour</option></select></label><button type="submit">Save profile</button></form></section><section class="card"><h2>Change password</h2><form id="passwordForm" class="form-grid"><input name="current_password" type="password" placeholder="Current password" autocomplete="current-password" required /><input name="new_password" type="password" placeholder="New password" autocomplete="new-password" required /><input name="confirm_password" type="password" placeholder="Confirm password" autocomplete="new-password" required /><button type="submit">Change password</button></form></section></main><script src="/static/profile.js"></script></body></html>""")
+
+
+@app.get('/system-settings')
+def system_settings_page():
+    return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" /><title>System Settings · Daygle AI Camera</title>
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>System Settings</h1><p class="muted">Move day-to-day camera, recording, storage, and login settings out of YAML.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Camera</h2><div id="systemMessage" class="muted"></div><form id="cameraSettingsForm" class="form-grid"><label><span>Backend</span><select name="backend"><option value="mock">mock</option></select></label><input name="device" placeholder="Device" /><input name="width" type="number" min="160" max="7680" step="1" placeholder="Width" /><input name="height" type="number" min="120" max="4320" step="1" placeholder="Height" /><input name="fps" type="number" min="1" max="120" step="1" placeholder="FPS" /><label><span>Flip</span><select name="flip"><option value="none">none</option><option value="horizontal">horizontal</option><option value="vertical">vertical</option><option value="both">both</option></select></label><button type="submit">Save camera</button></form></section><section class="card"><h2>Recording policy</h2><form id="recordingSettingsForm" class="form-grid"><label><span>Recording</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Primary mode</span><select name="mode"><option value="motion">motion</option><option value="continuous">continuous</option><option value="human">human</option><option value="objects">objects</option><option value="off">off</option></select></label><label><span>Continuous</span><select name="continuous"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><label><span>Record on motion</span><select name="record_on_motion"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Record on human</span><select name="record_on_human"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="record_on_objects" placeholder="Objects: cat, dog, package, parcel" /><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" /><input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" /><input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="Max clip seconds" /><input name="format" placeholder="Format: avi or mp4" /><button type="submit">Save recording</button></form></section><section class="card"><h2>Retention</h2><form id="retentionSettingsForm" class="form-grid"><label><span>Auto purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="retention_days" type="number" min="1" max="3650" placeholder="Retention days" /><input name="max_storage_gb" type="number" min="1" max="100000" placeholder="Max storage GB" /><button type="submit">Save retention</button><button id="purgeRecordingsBtn" class="secondary" type="button">Purge now</button></form></section><section class="card"><h2>Storage</h2><form id="storageSettingsForm" class="form-grid"><input name="data_dir" placeholder="Data directory" /><input name="snapshots_dir" placeholder="Snapshots directory" /><input name="events_dir" placeholder="Events directory" /><input name="recordings_dir" placeholder="Recordings directory" /><button type="submit">Save storage</button></form><p class="muted">Database file location stays in config.yaml because it is needed before the web UI can load.</p></section><section class="card"><h2>Login security</h2><form id="authSettingsForm" class="form-grid"><input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="Session timeout hours" /><input name="max_login_attempts" type="number" min="1" max="100" placeholder="Max login attempts" /><input name="lockout_minutes" type="number" min="1" max="1440" placeholder="Lockout minutes" /><button type="submit">Save login security</button></form><p class="muted">Auth enablement and cookie name remain bootstrap settings.</p></section></main><script src="/static/system-settings.js"></script></body></html>""")
 
 @app.get('/users')
 def users_page():
@@ -553,7 +629,7 @@ def generate_detection(force: bool = True):
         detections=detections,
         alert_triggered=bool(triggered),
     )
-    recording_id = attach_event_recording(event_id, event_time, 'mock-camera')
+    recording_id = attach_event_recording(event_id, event_time, 'mock-camera', detections)
 
     for alert in triggered:
         database.add_alert(
@@ -613,7 +689,7 @@ async def detect_test_image(request: Request):
         },
     )
 
-    recording_id = attach_event_recording(event_id, event_time, 'test-image')
+    recording_id = attach_event_recording(event_id, event_time, 'test-image', detections)
 
     for alert in triggered:
         database.add_alert(
@@ -667,7 +743,7 @@ def runtime_config():
     ai_state = ai_status_payload()
     return {
         'server': {'host': config.get('server', {}).get('host'), 'port': config.get('server', {}).get('port')},
-        'camera': config.get('camera', {}),
+        'camera': effective_camera_config(),
         'ai': {
             'enabled': effective_ai_config().get('enabled'),
             'backend': effective_ai_config().get('backend'),
@@ -686,22 +762,28 @@ def runtime_config():
         'alerts': config.get('alerts', {}),
         'auth': {
             'enabled': auth_enabled,
-            'session_timeout_hours': auth_config.get('session_timeout_hours'),
-            'max_login_attempts': auth_config.get('max_login_attempts'),
-            'lockout_minutes': auth_config.get('lockout_minutes'),
+            'session_timeout_hours': effective_auth_config().get('session_timeout_hours'),
+            'max_login_attempts': effective_auth_config().get('max_login_attempts'),
+            'lockout_minutes': effective_auth_config().get('lockout_minutes'),
         },
         'storage': {
-            'database': config.get('storage', {}).get('database'),
-            'snapshots_dir': config.get('storage', {}).get('snapshots_dir'),
-            'recordings_dir': config.get('storage', {}).get('recordings_dir'),
+            'database': effective_storage_config().get('database'),
+            'snapshots_dir': effective_storage_config().get('snapshots_dir'),
+            'recordings_dir': effective_storage_config().get('recordings_dir'),
         },
-        'recording': config.get('recording', {}),
+        'recording': effective_recording_config(),
     }
 
 
 @app.get('/api/recordings')
 def recordings(label: str | None = None, limit: int = Query(50, ge=1, le=200)):
     return database.list_recordings(label=label, limit=limit)
+
+
+@app.post('/api/recordings/purge')
+def purge_recordings(request: Request):
+    require_admin(request)
+    return purge_recordings_by_policy(force=True)
 
 
 @app.get('/api/recordings/{recording_id}')
@@ -767,9 +849,7 @@ def delete_recording(recording_id: int, request: Request):
     recording = database.delete_recording(recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail='Recording not found')
-    file_path = Path(recording['file_path'])
-    if file_path.exists() and file_path.is_file():
-        file_path.unlink(missing_ok=True)
+    delete_recording_files([recording])
     return {'ok': True}
 
 
@@ -939,6 +1019,113 @@ def validate_alert_email_settings(payload: dict[str, Any]) -> dict[str, Any]:
     return updated
 
 
+def _bool_value(value: Any) -> bool:
+    return value.lower() in {'1', 'true', 'yes', 'on'} if isinstance(value, str) else bool(value)
+
+
+def _int_field(payload: dict[str, Any], field: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(payload.get(field, default))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f'{field} must be an integer.') from exc
+    if value < minimum or value > maximum:
+        raise HTTPException(status_code=400, detail=f'{field} must be between {minimum} and {maximum}.')
+    return value
+
+
+def validate_camera_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    current = effective_camera_config()
+    updated = {key: current.get(key) for key in ('backend', 'device', 'width', 'height', 'fps', 'flip') if key in current}
+    updated.update({key: payload[key] for key in ('backend', 'device', 'flip') if key in payload})
+    backend = str(updated.get('backend', 'mock')).lower()
+    if backend != 'mock':
+        raise HTTPException(status_code=400, detail='Only the mock camera backend is currently available.')
+    updated['backend'] = backend
+    updated['device'] = payload.get('device', current.get('device', 0))
+    updated['width'] = _int_field({**current, **payload}, 'width', 1280, 160, 7680)
+    updated['height'] = _int_field({**current, **payload}, 'height', 720, 120, 4320)
+    updated['fps'] = _int_field({**current, **payload}, 'fps', 15, 1, 120)
+    flip = str(updated.get('flip', 'none')).lower()
+    if flip not in {'none', 'horizontal', 'vertical', 'both'}:
+        raise HTTPException(status_code=400, detail='flip must be none, horizontal, vertical, or both.')
+    updated['flip'] = flip
+    return updated
+
+
+def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    current = effective_recording_config()
+    merged = {**current, **payload}
+    mode = str(merged.get('mode', 'motion')).lower()
+    if mode not in {'off', 'continuous', 'motion', 'human', 'objects'}:
+        raise HTTPException(status_code=400, detail='Recording mode must be off, continuous, motion, human, or objects.')
+    fmt = str(merged.get('format', 'avi')).strip().lstrip('.').lower() or 'avi'
+    if not re.fullmatch(r'[a-z0-9]{2,8}', fmt):
+        raise HTTPException(status_code=400, detail='Recording format must be a short file extension.')
+    raw_objects = merged.get('record_on_objects', [])
+    if isinstance(raw_objects, str):
+        object_labels = [label.strip().lower() for label in raw_objects.split(',') if label.strip()]
+    elif isinstance(raw_objects, list):
+        object_labels = [str(label).strip().lower() for label in raw_objects if str(label).strip()]
+    else:
+        raise HTTPException(status_code=400, detail='record_on_objects must be a list or comma-separated string.')
+    return {
+        'enabled': _bool_value(merged.get('enabled', True)),
+        'mode': mode,
+        'continuous': _bool_value(merged.get('continuous', mode == 'continuous')),
+        'record_on_motion': _bool_value(merged.get('record_on_motion', True)),
+        'record_on_human': _bool_value(merged.get('record_on_human', True)),
+        'record_on_objects': object_labels,
+        'pre_event_seconds': _int_field(merged, 'pre_event_seconds', 5, 0, 300),
+        'post_event_seconds': _int_field(merged, 'post_event_seconds', 10, 0, 300),
+        'max_clip_seconds': _int_field(merged, 'max_clip_seconds', 60, 1, 3600),
+        'format': fmt,
+        'retention_days': _int_field(merged, 'retention_days', 14, 1, 3650),
+        'max_storage_gb': _int_field(merged, 'max_storage_gb', 20, 1, 100000),
+        'auto_purge_enabled': _bool_value(merged.get('auto_purge_enabled', True)),
+    }
+
+
+def validate_storage_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    current = effective_storage_config()
+    updated = {key: str(current.get(key) or '') for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir', 'database')}
+    for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir'):
+        if key in payload:
+            value = str(payload.get(key) or '').strip()
+            if not value:
+                raise HTTPException(status_code=400, detail=f'{key} cannot be blank.')
+            updated[key] = value
+    updated['database'] = str(config.get('storage', {}).get('database') or updated.get('database') or 'data/daygle_ai_camera.sqlite3')
+    return updated
+
+
+def validate_auth_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    current = effective_auth_config()
+    merged = {**current, **payload}
+    try:
+        session_timeout_hours = float(merged.get('session_timeout_hours', 12))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='session_timeout_hours must be a number.') from exc
+    if session_timeout_hours < 0.25 or session_timeout_hours > 720:
+        raise HTTPException(status_code=400, detail='session_timeout_hours must be between 0.25 and 720.')
+    return {
+        'session_timeout_hours': session_timeout_hours,
+        'max_login_attempts': _int_field(merged, 'max_login_attempts', 5, 1, 100),
+        'lockout_minutes': _int_field(merged, 'lockout_minutes', 15, 1, 1440),
+    }
+
+
+def apply_camera_settings(settings: dict[str, Any]) -> None:
+    global camera, camera_config
+    camera_config = settings
+    camera = MockCamera(width=int(settings['width']), height=int(settings['height']), fps=int(settings['fps']))
+
+
+def apply_storage_and_recording_settings() -> None:
+    global storage, recording_service
+    storage = Storage({**config, 'storage': effective_storage_config()})
+    recording_service = RecordingService({**config, 'storage': effective_storage_config(), 'recording': effective_recording_config()})
+
+
 @app.get('/api/settings/ai')
 def get_ai_settings():
     return detector_status(effective_ai_config())
@@ -1057,6 +1244,58 @@ async def update_alert_email_settings(request: Request):
     payload = await request.json()
     settings = validate_alert_email_settings(payload)
     return database.set_setting('alert_email', settings, utc_now())
+
+
+@app.get('/api/settings/system')
+def get_system_settings():
+    return {
+        'camera': effective_camera_config(),
+        'recording': effective_recording_config(),
+        'storage': effective_storage_config(),
+        'auth': {
+            'session_timeout_hours': effective_auth_config().get('session_timeout_hours'),
+            'max_login_attempts': effective_auth_config().get('max_login_attempts'),
+            'lockout_minutes': effective_auth_config().get('lockout_minutes'),
+        },
+        'bootstrap': {
+            'database': config.get('storage', {}).get('database'),
+            'auth_enabled': auth_enabled,
+            'cookie_name': SESSION_COOKIE_NAME,
+            'server': config.get('server', {}),
+        },
+    }
+
+
+@app.put('/api/settings/system/camera')
+async def update_camera_settings(request: Request):
+    settings = validate_camera_settings(await request.json())
+    database.set_setting('camera', settings, utc_now())
+    apply_camera_settings(settings)
+    return settings
+
+
+@app.put('/api/settings/system/recording')
+async def update_recording_settings(request: Request):
+    settings = validate_recording_settings(await request.json())
+    database.set_setting('recording', settings, utc_now())
+    apply_storage_and_recording_settings()
+    return settings
+
+
+@app.put('/api/settings/system/storage')
+async def update_storage_settings(request: Request):
+    settings = validate_storage_settings(await request.json())
+    database.set_setting('storage', settings, utc_now())
+    apply_storage_and_recording_settings()
+    return settings
+
+
+@app.put('/api/settings/system/auth')
+async def update_auth_settings(request: Request):
+    settings = validate_auth_settings(await request.json())
+    database.set_setting('auth', settings, utc_now())
+    auth.apply_config(settings)
+    return settings
 
 
 @app.post('/api/settings/alerts')

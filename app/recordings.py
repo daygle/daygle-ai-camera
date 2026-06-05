@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 
 class RecordingService:
-    """Small event recording facade, ready for frame-writing backends later."""
+    """Event recording facade with policy selection and generated test footage."""
 
-    VALID_MODES = {'off', 'event', 'continuous'}
+    VALID_MODES = {'off', 'continuous', 'motion', 'human', 'objects'}
     VALID_SOURCES = {'mock', 'camera', 'upload', 'rtsp'}
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -24,19 +25,31 @@ class RecordingService:
 
     @property
     def mode(self) -> str:
-        mode = str(self.recording_config.get('mode', 'event')).lower()
-        return mode if mode in self.VALID_MODES else 'event'
+        mode = str(self.recording_config.get('mode', 'motion')).lower()
+        return mode if mode in self.VALID_MODES else 'motion'
 
-    def event_recording_enabled(self) -> bool:
-        return self.enabled and self.mode == 'event'
+    def should_record(self, detections: list[dict[str, Any]]) -> tuple[bool, str, str | None]:
+        if not self.enabled:
+            return False, 'off', None
+        labels = [str(detection.get('label') or '').lower() for detection in detections]
+        labels = [label for label in labels if label]
+        object_labels = {str(label).lower() for label in self.recording_config.get('record_on_objects', [])}
 
-    def mock_event_metadata(self, event_id: int, event_time: str, source: str) -> dict[str, Any] | None:
-        """Return placeholder metadata for event clips without requiring video tools.
+        if bool(self.recording_config.get('continuous')) or self.mode == 'continuous':
+            return True, 'continuous', labels[0] if labels else None
+        if (self.mode == 'motion' or bool(self.recording_config.get('record_on_motion', True))) and labels:
+            return True, 'motion', labels[0]
+        if (self.mode == 'human' or bool(self.recording_config.get('record_on_human', True))) and 'person' in labels:
+            return True, 'human', 'person'
+        for label in labels:
+            if self.mode == 'objects' or label in object_labels:
+                if label in object_labels:
+                    return True, 'object', label
+        return False, 'none', None
 
-        Future camera, RTSP, and upload backends can replace this with a writer that
-        persists encoded frames and passes the resulting media path to the database.
-        """
-        if not self.event_recording_enabled():
+    def event_recording_metadata(self, event_id: int, event_time: str, source: str, detections: list[dict[str, Any]]) -> dict[str, Any] | None:
+        should_record, trigger_type, trigger_label = self.should_record(detections)
+        if not should_record:
             return None
 
         try:
@@ -49,11 +62,14 @@ class RecordingService:
         pre_seconds = max(0, int(self.recording_config.get('pre_event_seconds', 5)))
         post_seconds = max(0, int(self.recording_config.get('post_event_seconds', 10)))
         max_clip_seconds = max(1, int(self.recording_config.get('max_clip_seconds', 60)))
-        duration_seconds = min(max_clip_seconds, pre_seconds + post_seconds)
+        duration_seconds = min(max_clip_seconds, max(1, pre_seconds + post_seconds))
         started_at = created - timedelta(seconds=min(pre_seconds, duration_seconds))
         ended_at = started_at + timedelta(seconds=duration_seconds)
-        extension = str(self.recording_config.get('format', 'mp4')).lstrip('.') or 'mp4'
+        extension = str(self.recording_config.get('format', 'avi')).strip().lstrip('.') or 'avi'
         filename = f"event_{event_id}_{created.strftime('%Y%m%d_%H%M%S_%f')}.{extension}"
+        file_path = self.recordings_dir / filename
+        self.write_event_clip(file_path, event_id, detections, duration_seconds, trigger_type, trigger_label)
+
         mapped_source = 'upload' if source in {'test-image', 'upload'} else 'mock' if source.startswith('mock') else 'camera'
         if mapped_source not in self.VALID_SOURCES:
             mapped_source = 'mock'
@@ -63,7 +79,76 @@ class RecordingService:
             'started_at': started_at.isoformat(),
             'ended_at': ended_at.isoformat(),
             'duration_seconds': duration_seconds,
-            'file_path': str(self.recordings_dir / filename),
+            'file_path': str(file_path),
             'thumbnail_path': None,
             'source': mapped_source,
+            'trigger_type': trigger_type,
+            'trigger_label': trigger_label,
         }
+
+    def write_event_clip(
+        self,
+        file_path: Path,
+        event_id: int,
+        detections: list[dict[str, Any]],
+        duration_seconds: float,
+        trigger_type: str,
+        trigger_label: str | None,
+    ) -> None:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self._write_opencv_clip(file_path, event_id, detections, duration_seconds, trigger_type, trigger_label)
+        except Exception:
+            payload = {
+                'event_id': event_id,
+                'detections': detections,
+                'duration_seconds': duration_seconds,
+                'trigger_type': trigger_type,
+                'trigger_label': trigger_label,
+                'note': 'Video encoder unavailable; metadata fallback was written.',
+            }
+            file_path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+
+    def _write_opencv_clip(
+        self,
+        file_path: Path,
+        event_id: int,
+        detections: list[dict[str, Any]],
+        duration_seconds: float,
+        trigger_type: str,
+        trigger_label: str | None,
+    ) -> None:
+        import cv2  # type: ignore[import-not-found]
+        import numpy as np  # type: ignore[import-not-found]
+
+        width = 640
+        height = 360
+        fps = 10
+        frame_count = max(10, min(120, int(duration_seconds * fps)))
+        suffix = file_path.suffix.lower()
+        fourcc = cv2.VideoWriter_fourcc(*('mp4v' if suffix == '.mp4' else 'MJPG'))
+        writer = cv2.VideoWriter(str(file_path), fourcc, fps, (width, height))
+        if not writer.isOpened():
+            raise RuntimeError('Video writer could not open output file.')
+        try:
+            labels = ', '.join(str(detection.get('label')) for detection in detections) or 'continuous'
+            for index in range(frame_count):
+                frame = np.zeros((height, width, 3), dtype=np.uint8)
+                frame[:, :] = (22, 30, 44)
+                sweep = int((index / max(1, frame_count - 1)) * width)
+                cv2.rectangle(frame, (0, 0), (sweep, height), (32, 80, 96), -1)
+                cv2.putText(frame, 'Daygle AI Camera', (28, 54), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (237, 243, 255), 2)
+                cv2.putText(frame, f'Event #{event_id}', (28, 98), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (73, 230, 163), 2)
+                cv2.putText(frame, f'Trigger: {trigger_type} {trigger_label or ""}'.strip(), (28, 136), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (71, 214, 255), 2)
+                cv2.putText(frame, f'Detections: {labels}', (28, 174), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (210, 220, 235), 2)
+                for detection in detections:
+                    box = detection.get('box', {})
+                    x = int(float(box.get('x', 0.12)) * width)
+                    y = int(float(box.get('y', 0.2)) * height)
+                    w = int(float(box.get('width', 0.28)) * width)
+                    h = int(float(box.get('height', 0.28)) * height)
+                    cv2.rectangle(frame, (x, y), (min(width - 1, x + w), min(height - 1, y + h)), (73, 230, 163), 2)
+                    cv2.putText(frame, str(detection.get('label', 'object')), (x, max(20, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (73, 230, 163), 1)
+                writer.write(frame)
+        finally:
+            writer.release()

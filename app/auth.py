@@ -33,6 +33,12 @@ class AuthService:
         self.lockout = timedelta(minutes=float(config.get("lockout_minutes", 15)))
         self.init()
 
+    def apply_config(self, config: dict[str, Any]) -> None:
+        self.config.update(config)
+        self.session_timeout = timedelta(hours=float(self.config.get("session_timeout_hours", 12)))
+        self.max_login_attempts = int(self.config.get("max_login_attempts", 5))
+        self.lockout = timedelta(minutes=float(self.config.get("lockout_minutes", 15)))
+
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path)
         connection.row_factory = sqlite3.Row
@@ -83,15 +89,6 @@ class AuthService:
                 CREATE INDEX IF NOT EXISTS idx_login_attempts_username_created ON login_attempts(username, created_at);
                 """
             )
-            columns = {row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()}
-            if "last_login_at" not in columns:
-                db.execute("ALTER TABLE users ADD COLUMN last_login_at TEXT")
-            if "timezone" not in columns:
-                db.execute("ALTER TABLE users ADD COLUMN timezone TEXT NOT NULL DEFAULT 'Australia/Sydney'")
-            if "date_format" not in columns:
-                db.execute("ALTER TABLE users ADD COLUMN date_format TEXT NOT NULL DEFAULT 'locale'")
-            if "time_format" not in columns:
-                db.execute("ALTER TABLE users ADD COLUMN time_format TEXT NOT NULL DEFAULT '24h'")
             db.execute("DELETE FROM user_sessions WHERE expires_at <= ?", (utc_now(),))
             db.commit()
 
@@ -321,7 +318,8 @@ class AuthService:
         with self.connect() as db:
             row = db.execute(
                 """
-                SELECT s.session_token, s.csrf_token, s.expires_at, u.id, u.username, u.role, u.is_active
+                SELECT s.session_token, s.csrf_token, s.expires_at, u.id, u.username, u.role, u.is_active,
+                       u.timezone, u.date_format, u.time_format
                 FROM user_sessions s
                 JOIN users u ON u.id = s.user_id
                 WHERE s.session_token = ?
@@ -356,9 +354,9 @@ class AuthService:
             "username": row["username"],
             "role": row["role"],
             "is_active": bool(row["is_active"]),
-            "timezone": row["timezone"] if "timezone" in row.keys() else "Australia/Sydney",
-            "date_format": row["date_format"] if "date_format" in row.keys() else "locale",
-            "time_format": row["time_format"] if "time_format" in row.keys() else "24h",
+            "timezone": row["timezone"],
+            "date_format": row["date_format"],
+            "time_format": row["time_format"],
         }
 
 

@@ -1,73 +1,11 @@
+# Minimal bootstrap config. Day-to-day settings are managed in the web UI.
 server:
   host: 0.0.0.0
   port: 8080
 
-camera:
-  backend: mock
-  device: 0
-  width: 1280
-  height: 720
-  fps: 15
-  flip: none
-
-ai:
-  enabled: true
-  backend: mock
-  confidence: 0.45
-  iou_threshold: 0.45
-  input_size: 640
-  model_path: models/yolov8n.onnx
-  labels_path: models/coco.names
-  categories:
-    - person
-    - cat
-    - dog
-    - car
-    - bicycle
-    - bird
-    - package
-
-alerts:
-  enabled: true
-  email:
-    enabled: false
-    host: smtp.example.com
-    port: 587
-    username: alerts@example.com
-    password: change-me
-    from_address: alerts@example.com
-    use_tls: true
-    use_ssl: false
-  rules:
-    - name: Cat alert
-      object: cat
-      min_confidence: 0.50
-      cooldown_seconds: 60
-      enabled: true
-      email_enabled: false
-      email_recipients:
-        - user@example.com
-
-recording:
-  enabled: true
-  mode: event
-  pre_event_seconds: 5
-  post_event_seconds: 10
-  max_clip_seconds: 60
-  format: mp4
-  retention_days: 14
-  max_storage_gb: 20
-
 auth:
   enabled: true
-  session_timeout_hours: 12
-  max_login_attempts: 5
-  lockout_minutes: 15
   cookie_name: daygle_session
 
 storage:
-  data_dir: data
   database: data/daygle_ai_camera.sqlite3
-  snapshots_dir: data/snapshots
-  events_dir: data/events
-  recordings_dir: data/recordings

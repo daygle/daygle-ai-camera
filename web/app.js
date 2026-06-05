@@ -10,6 +10,7 @@ const els = {
   usersLink: document.getElementById('usersLink'),
   settingsLink: document.getElementById('settingsLink'),
   alertSettingsLink: document.getElementById('alertSettingsLink'),
+  systemSettingsLink: document.getElementById('systemSettingsLink'),
   uploadForm: document.getElementById('uploadForm'),
   imageInput: document.getElementById('imageInput'),
   uploadBtn: document.getElementById('uploadBtn'),
@@ -157,7 +158,7 @@ function renderRecordings(recordings) {
           <span>${formatDate(recording.started_at)}</span>
         </div>
         <div>${detectionBadges(recording.detections)}</div>
-        <p class="muted">Duration: ${Number(recording.duration_seconds || 0).toFixed(1)}s · Source: ${escapeHtml(recording.source)} · ${escapeHtml(fileName)}</p>
+        <p class="muted">Duration: ${Number(recording.duration_seconds || 0).toFixed(1)}s · Source: ${escapeHtml(recording.source)} · Trigger: ${escapeHtml(recording.trigger_type || 'motion')} ${escapeHtml(recording.trigger_label || '')} · ${escapeHtml(fileName)}</p>
         <button class="secondary" data-play-recording="${recording.id}">Play clip</button>
       </div>
     `;
@@ -183,6 +184,7 @@ async function loadAuth() {
     els.usersLink.hidden = true;
     els.settingsLink.hidden = true;
     els.alertSettingsLink.hidden = true;
+    els.systemSettingsLink.hidden = true;
   }
 }
 

@@ -74,6 +74,8 @@ class EventDatabase:
                     file_path TEXT NOT NULL,
                     thumbnail_path TEXT,
                     source TEXT NOT NULL CHECK(source IN ('mock', 'camera', 'upload', 'rtsp')),
+                    trigger_type TEXT NOT NULL DEFAULT 'motion',
+                    trigger_label TEXT,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE SET NULL
                 );
@@ -106,13 +108,6 @@ class EventDatabase:
                 CREATE INDEX IF NOT EXISTS idx_alert_rules_object ON alert_rules(object);
                 """
             )
-            self._ensure_column(db, "alert_rules", "email_enabled", "INTEGER NOT NULL DEFAULT 0")
-            self._ensure_column(db, "alert_rules", "email_recipients", "TEXT NOT NULL DEFAULT '[]'")
-
-    def _ensure_column(self, db: sqlite3.Connection, table: str, column: str, definition: str) -> None:
-        columns = {row["name"] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
-        if column not in columns:
-            db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def add_event(
         self,
@@ -166,14 +161,16 @@ class EventDatabase:
         thumbnail_path: str | None,
         source: str,
         created_at: str,
+        trigger_type: str = "motion",
+        trigger_label: str | None = None,
     ) -> int:
         with self.connect() as db:
             cursor = db.execute(
                 """
-                INSERT INTO recordings (event_id, camera_id, started_at, ended_at, duration_seconds, file_path, thumbnail_path, source, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO recordings (event_id, camera_id, started_at, ended_at, duration_seconds, file_path, thumbnail_path, source, trigger_type, trigger_label, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (event_id, camera_id, started_at, ended_at, duration_seconds, file_path, thumbnail_path, source, created_at),
+                (event_id, camera_id, started_at, ended_at, duration_seconds, file_path, thumbnail_path, source, trigger_type, trigger_label, created_at),
             )
             if cursor.lastrowid is None:
                 raise RuntimeError("Failed to create recording row")
@@ -208,6 +205,26 @@ class EventDatabase:
                 return None
             db.execute("DELETE FROM recordings WHERE id = ?", (recording_id,))
             return dict(row)
+
+    def purge_recordings(self, *, older_than: str | None = None, max_storage_bytes: int | None = None) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            candidates = [dict(row) for row in db.execute("SELECT * FROM recordings ORDER BY started_at ASC").fetchall()]
+            purge_ids: set[int] = set()
+            if older_than:
+                purge_ids.update(int(row["id"]) for row in candidates if str(row["started_at"]) < older_than)
+            if max_storage_bytes is not None:
+                existing = [row for row in candidates if Path(str(row["file_path"])).is_file()]
+                total = sum(Path(str(row["file_path"])).stat().st_size for row in existing)
+                for row in existing:
+                    if total <= max_storage_bytes:
+                        break
+                    purge_ids.add(int(row["id"]))
+                    total -= Path(str(row["file_path"])).stat().st_size
+            if not purge_ids:
+                return []
+            rows = [row for row in candidates if int(row["id"]) in purge_ids]
+            db.executemany("DELETE FROM recordings WHERE id = ?", [(row["id"],) for row in rows])
+            return rows
 
     def add_alert(self, created_at: str, rule_name: str, event_id: int, label: str, confidence: float, message: str) -> None:
         with self.connect() as db:

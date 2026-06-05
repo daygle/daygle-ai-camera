@@ -1,39 +1,39 @@
 # Daygle AI Camera
 
-Daygle AI Camera is an Orange Pi 3B / Armbian-friendly AI camera platform. It provides a FastAPI backend, SQLite storage, session authentication, a browser dashboard, mock camera mode for development, and mock or ONNX YOLO object detection.
+Daygle AI Camera is an Orange Pi 3B / Armbian-friendly AI camera platform with a FastAPI backend, SQLite storage, session authentication, a browser dashboard, mock camera mode for development, and mock or ONNX YOLO object detection.
+
+The app is now designed to be configured from the web UI. `config.yaml` is only a small bootstrap file for settings the app must know before the database and dashboard can load.
 
 ## Features
 
-- FastAPI backend with protected dashboard and APIs.
-- SQLite event database for events, detections, alert history, users, sessions, login attempts, runtime AI settings, and editable alert rules.
+- Protected browser dashboard with event search, alert history, recordings, playback, and object stats.
 - First-run setup flow for creating the initial administrator.
-- Session-based authentication with HttpOnly SameSite cookies, CSRF protection, configurable expiry, and lockout after repeated failures.
-- Admin/viewer roles with admin-only user and settings management.
+- Admin/viewer roles with admin-only settings and user management.
+- Profile page for timezone, date/time format, and password changes.
+- Web-managed AI settings for mock or ONNX detection.
+- Web-managed alert rules with optional SMTP email delivery.
+- Web-managed system settings for camera, recording policy, retention, storage directories, and login security.
+- SQLite persistence for events, detections, alerts, users, sessions, runtime settings, and alert rules.
 - Mock camera/detector for development and CI without camera hardware.
-- ONNX YOLO test-image detection that preserves the existing upload workflow.
-- Dashboard user menu, logout, user management, and admin-only settings page.
-- Armbian install script and systemd unit for Orange Pi 3B deployment.
+- Armbian install script and systemd unit for Orange Pi deployment.
 
 ## Requirements
 
-### Local development
+### Local Development
 
 - Python 3.10 or newer.
-- `python3-venv` and `pip`.
+- `pip` and optionally `python3-venv`.
 - A modern browser.
-- Optional: an ONNX YOLO model file if you want real detector inference instead of the mock detector.
+- Optional: an ONNX YOLO model file if you want real inference instead of mock detection.
 
-### Orange Pi / Armbian deployment
+### Orange Pi / Armbian Deployment
 
 - Orange Pi 3B or another Linux host running Armbian/Debian-like packages.
 - Root or `sudo` access.
-- Network access during installation so `apt` and `pip` can install dependencies.
+- Network access during installation for `apt` and `pip`.
 - Optional: HTTPS reverse proxy or VPN for devices exposed beyond a private LAN.
 
-### Debian apt packages
-
-On a fresh Debian-like host, install the system software before installing
-Python dependencies:
+On a fresh Debian-like host:
 
 ```bash
 sudo apt update
@@ -52,17 +52,9 @@ sudo apt install -y --no-install-recommends \
   libglib2.0-0
 ```
 
-For Debian 13 installs without a virtual environment, see
-`INSTALL_DEBIAN13.md`.
-
 ## Installation
 
-Choose one of these installation paths:
-
-- **Local install**: best for development, testing, or running the app manually on a workstation.
-- **Armbian service install**: best for Orange Pi deployment with systemd auto-start.
-
-### Option 1: Local install
+### Local Install
 
 1. Clone the repository and enter it:
 
@@ -71,25 +63,30 @@ Choose one of these installation paths:
    cd daygle-ai-camera
    ```
 
-   If you already have the source code, run the remaining commands from the repository root.
-
-2. Create and activate a Python virtual environment:
+2. Create and activate a virtual environment:
 
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
    ```
 
+   On Windows PowerShell:
+
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   ```
+
 3. Install dependencies:
 
    ```bash
    pip install --upgrade pip wheel
-   pip install -r requirements-dev.txt
+   pip install -r requirements.txt pytest
    ```
 
-   Use `requirements-dev.txt` for local development and tests. It includes the runtime requirements plus `pytest`. For a runtime-only environment, install `requirements.txt` instead.
+   `pytest` is only needed for local test runs.
 
-4. Create a writable configuration file:
+4. Create the minimal bootstrap config:
 
    ```bash
    cp config.example.yaml config.yaml
@@ -101,16 +98,25 @@ Choose one of these installation paths:
    DAYGLE_CONFIG=config.yaml uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
    ```
 
-6. Open the dashboard at <http://127.0.0.1:8080/>.
+   On Windows PowerShell:
+
+   ```powershell
+   $env:DAYGLE_CONFIG="config.yaml"
+   python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8080
+   ```
+
+6. Open <http://127.0.0.1:8080/>.
 
 7. Complete first-run setup:
+
    - A fresh database redirects to `/setup`.
    - Create the first administrator account.
-   - After setup, sign in at `/login`.
+   - Sign in at `/login`.
+   - Use the dashboard menu to configure the app from the browser.
 
-### Option 2: Armbian service install
+### Armbian Service Install
 
-Run the installer from the repository root on the Orange Pi or target Linux host:
+Run the installer from the repository root:
 
 ```bash
 sudo ./scripts/install_armbian.sh
@@ -118,125 +124,71 @@ sudo ./scripts/install_armbian.sh
 
 The installer will:
 
-- Install required system packages with `apt`.
-- Create a system user named `daygle` unless `DAYGLE_USER` overrides it.
+- Install required system packages.
+- Create a `daygle` service user unless `DAYGLE_USER` overrides it.
 - Copy the app to `/opt/daygle-ai-camera` unless `DAYGLE_APP_DIR` overrides it.
 - Create `/etc/daygle-ai-camera/config.yaml` unless `DAYGLE_CONFIG_DIR` overrides it.
 - Store SQLite data and generated files under `/var/lib/daygle-ai-camera` unless `DAYGLE_DATA_DIR` overrides it.
-- Create and start the `daygle-ai-camera.service` systemd service.
+- Create and start `daygle-ai-camera.service`.
 
-Check the service and logs:
+Check the service:
 
 ```bash
 sudo systemctl status daygle-ai-camera
 sudo journalctl -u daygle-ai-camera -f
 ```
 
-Open the dashboard at:
+Open:
 
 ```text
 http://<orange-pi-ip>:8080/
 ```
 
-Then complete the same first-run setup flow by creating the first administrator.
+Then create the first admin user and configure the app in the web UI.
 
-### Installer environment overrides
+## Minimal Bootstrap Config
 
-You can override install paths before running the Armbian installer:
-
-```bash
-sudo DAYGLE_USER=daygle \
-  DAYGLE_APP_DIR=/opt/daygle-ai-camera \
-  DAYGLE_CONFIG_DIR=/etc/daygle-ai-camera \
-  DAYGLE_DATA_DIR=/var/lib/daygle-ai-camera \
-  ./scripts/install_armbian.sh
-```
-
-## Configuration
-
-The app reads configuration from the file pointed to by `DAYGLE_CONFIG`. For local installs, this is usually `config.yaml`. For service installs, the default is `/etc/daygle-ai-camera/config.yaml`.
-
-Start from the example file:
-
-```bash
-cp config.example.yaml config.yaml
-```
-
-Important sections:
-
-- `server`: host and port for Uvicorn.
-- `camera`: mock camera settings and future camera backend settings.
-- `ai`: mock or ONNX detector settings.
-- `alerts`: initial alert-rule defaults.
-- `auth`: authentication, session, and lockout settings.
-- `storage`: database, snapshot, and event file locations.
-
-`config.yaml` is the bootstrap/default configuration. Runtime edits made on `/settings` are stored in SQLite and override config values without requiring direct config-file edits.
-
-## Web-based setup and ONNX YOLO setup
-
-Normal users should not need to edit `config.yaml` after installation. Start the app, create the first administrator, then open **Setup / AI Settings** from the dashboard menu (`/settings`). The page shows the active backend, model and labels paths, whether the model file exists, whether ONNX Runtime is installed, whether the detector is loaded, the last detector error, and whether AI settings are coming from SQLite, `config.yaml`, or defaults.
-
-The default configuration uses the mock detector, which is enough to verify installation. To enable ONNX inference from the web UI:
-
-1. Sign in as an admin.
-2. Open `/settings`.
-3. Click **Download YOLOv8n ONNX** to install `models/yolov8n.onnx`, or enter your own model path.
-4. Set **Backend** to `onnx`.
-5. Adjust confidence, IOU threshold, input size, model path, and labels path.
-6. Click **Save AI settings**. The settings are saved to SQLite and override `config.yaml`.
-7. Use **Check model**, **Reload detector**, and **Test detector** to validate the runtime detector without restarting the app.
-
-The old script remains available for offline/manual installs:
-
-```bash
-python scripts/download_yolov8n_onnx.py --output models/yolov8n.onnx
-```
-
-`mock` mode is explicit: mock detections are generated only when `ai.backend` is `mock` or when an admin uses the dedicated mock-camera endpoint. If `ai.backend` is `onnx` and the model is missing, the dashboard reports `MODEL MISSING`, upload inference returns a clear API error, and the app does not silently fall back to fake mock detections. If a runtime reload fails, the previous working detector is kept while the saved SQLite settings and status panel show the error.
-
-Test-image detection stays available at `POST /api/detect/test-image` and returns the backend used in the response. The mock camera mode and `POST /api/mock/detect` are intentionally preserved.
-
-## First setup and users
-
-1. Start with an empty SQLite database.
-2. Browse to `/setup` or `/`.
-3. Create the first `admin` user with a complex password.
-4. After any user exists, `/setup` is disabled and redirects to `/login`.
-5. Admins can open `/users` from the dashboard menu to create users, disable users, change roles, and reset passwords.
-
-Roles:
-
-- `admin`: view dashboard, search events, view alerts, manage users, update AI settings, and create/edit/delete alert rules.
-- `viewer`: view dashboard, search events, view alert history, and view current alert rules. Viewers cannot manage users, modify AI settings, change config, or modify alert rules.
-
-Password policy requires at least 8 characters with uppercase, lowercase, numeric, and symbol characters. Passwords are hashed with bcrypt when installed; tests have a PBKDF2 fallback for constrained environments.
-
-## Authentication and sessions
-
-Default auth configuration:
+`config.yaml` should stay small. Start from:
 
 ```yaml
+server:
+  host: 0.0.0.0
+  port: 8080
+
 auth:
   enabled: true
-  session_timeout_hours: 12
-  max_login_attempts: 5
-  lockout_minutes: 15
   cookie_name: daygle_session
+
+storage:
+  database: data/daygle_ai_camera.sqlite3
 ```
 
-Security behavior:
+These values remain in YAML because they are needed before the web app can fully load:
 
-- `/login`, `/setup`, and `/static/*` are public.
-- `/`, dashboard pages, and `/api/*` are protected once a user exists.
-- Sessions are stored in SQLite and referenced by a Secure-on-HTTPS, HttpOnly, SameSite=Lax cookie.
-- Session expiry defaults to 12 hours.
-- Mutating routes require `X-CSRF-Token`; dashboard JavaScript retrieves it from `GET /api/auth/me`.
-- Failed logins are stored in `login_attempts`; accounts or IPs lock for 15 minutes after 5 recent failures by default.
+- `server.host` and `server.port`: where Uvicorn listens.
+- `auth.enabled`: whether auth middleware is enabled at startup.
+- `auth.cookie_name`: session cookie name.
+- `storage.database`: SQLite database path.
 
-## AI and alert settings
+Most other settings are stored in SQLite through the web UI.
 
-Admins can manage these settings from `/settings`:
+## Web Settings
+
+Admins can access settings from the dashboard user menu.
+
+### Profile
+
+Route: `/profile`
+
+- View username and role.
+- Set timezone.
+- Set date format.
+- Set time format.
+- Change password.
+
+### AI Settings
+
+Route: `/settings`
 
 - AI enabled state.
 - Backend: `mock` or `onnx`.
@@ -245,151 +197,216 @@ Admins can manage these settings from `/settings`:
 - Input size.
 - Model path.
 - Labels path.
-- Model actions: check model, download YOLOv8n ONNX, reload detector, and test detector.
-- Alert rules: create, edit, delete, enable/disable, object label, minimum confidence, cooldown, and optional active time window.
+- Check model.
+- Download YOLOv8n ONNX.
+- Reload detector.
+- Test detector.
 
-AI settings are stored as a JSON document in SQLite table `app_settings` under key `ai`. Alert rules are stored in `alert_rules`. SQLite settings override `config.yaml`; `config.yaml` remains the bootstrap/default source for new installs.
+AI settings are stored in SQLite under `app_settings.key = ai`.
 
-## Important routes
+### Alert Settings
+
+Route: `/alert-settings`
+
+- Configure SMTP host, port, username, password, from address, STARTTLS, and SSL.
+- Create, edit, delete, enable, or disable alert rules.
+- Set object label, minimum confidence, cooldown, and active time window.
+- Enable email delivery per rule.
+- Add email recipients per rule, for example cat detected -> email a user.
+
+SMTP settings are stored in SQLite under `app_settings.key = alert_email`. Alert rules are stored in `alert_rules`.
+
+### System Settings
+
+Route: `/system-settings`
+
+- Camera: backend, device, width, height, FPS, flip.
+- Recording policy: continuous recording, record on motion, record on human, and selected object labels such as `cat`, `dog`, `package`, and `parcel`.
+- Clip settings: pre-event seconds, post-event seconds, max clip seconds, and file format.
+- Retention: auto purge, retention days, max storage GB, and manual purge.
+- Storage: data, snapshots, events, and recordings directories.
+- Login security: session timeout, max login attempts, lockout minutes.
+
+Camera, recording, storage, and login security settings are stored in SQLite and applied at runtime where possible. Database path, auth enablement, cookie name, and server bind settings remain bootstrap YAML.
+
+## ONNX YOLO Setup
+
+The default setup uses mock detection so installation can be verified without a camera or model file.
+
+To enable ONNX inference:
+
+1. Sign in as an admin.
+2. Open `/settings`.
+3. Click **Download YOLOv8n ONNX**, or enter your own model path.
+4. Set backend to `onnx`.
+5. Save AI settings.
+6. Use **Check model**, **Reload detector**, and **Test detector**.
+
+If `onnx` is selected and the model is missing, the dashboard reports `MODEL MISSING` and upload inference returns a clear API error. The app does not silently fall back to mock detections.
+
+Manual model download remains available:
+
+```bash
+python scripts/download_yolov8n_onnx.py --output models/yolov8n.onnx
+```
+
+## Users and Roles
+
+First setup:
+
+1. Start with an empty SQLite database.
+2. Browse to `/setup` or `/`.
+3. Create the first `admin` user.
+4. After any user exists, `/setup` is disabled and redirects to `/login`.
+
+Admins can open `/users` to create users, disable users, change roles, and reset passwords.
+
+Roles:
+
+- `admin`: dashboard, events, alerts, recordings, users, profile, AI settings, alert settings, and system settings.
+- `viewer`: dashboard, events, alert history, recordings, and profile.
+
+Password policy requires at least 8 characters with uppercase, lowercase, numeric, and symbol characters.
+
+## Important Routes
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `GET/POST` | `/setup` | First admin setup, disabled after first user exists |
-| `GET/POST` | `/login` | Login page and login action |
-| `GET/POST` | `/logout` | End the current session |
-| `GET` | `/` | Main dashboard |
-| `GET` | `/users` | Admin user-management page |
-| `GET` | `/settings` | Admin AI and alert settings page |
-| `GET` | `/api/auth/me` | Current user, role, CSRF token, and expiry |
+| `GET/POST` | `/setup` | First admin setup |
+| `GET/POST` | `/login` | Login |
+| `GET/POST` | `/logout` | End session |
+| `GET` | `/` | Dashboard |
+| `GET` | `/profile` | Current user profile |
+| `GET` | `/users` | Admin user management |
+| `GET` | `/settings` | Admin AI settings |
+| `GET` | `/alert-settings` | Admin alert and SMTP settings |
+| `GET` | `/system-settings` | Admin camera, recording, storage, and login settings |
+| `GET` | `/api/auth/me` | Current user, CSRF token, and session expiry |
+| `PUT` | `/api/profile` | Update profile preferences |
+| `POST` | `/api/profile/password` | Change current user's password |
 | `GET` | `/api/status` | Camera and detector status |
-| `GET` | `/api/status/ai` | Detailed AI status panel data |
-| `POST` | `/api/mock/detect` | Generate a mock detection event |
-| `POST` | `/api/detect/test-image` | Upload an image for active detector inference |
-| `GET` | `/api/events` | Search/list events |
-| `GET` | `/api/events/{event_id}` | Fetch one event with detections |
+| `GET` | `/api/status/ai` | Detailed AI status |
+| `POST` | `/api/mock/detect` | Generate mock detection event |
+| `POST` | `/api/detect/test-image` | Upload image for active detector inference |
+| `GET` | `/api/events` | List/search events |
 | `GET` | `/api/alerts` | Alert history |
-| `GET` | `/api/stats` | Event and object stats |
-| `GET` | `/api/config` | Non-secret runtime summary |
+| `GET` | `/api/recordings` | List recordings |
+| `GET` | `/api/recordings/{id}/stream` | Stream recording media when present |
+| `POST` | `/api/recordings/purge` | Admin purge using retention settings |
 | `GET/POST` | `/api/users` | Admin list/create users |
-| `PATCH` | `/api/users/{user_id}` | Admin role/status/password updates |
-| `GET/PUT` | `/api/settings/ai` | Admin view/update SQLite-backed AI settings |
-| `POST` | `/api/settings/ai/check-model` | Admin checks model/runtime/detector status |
-| `POST` | `/api/settings/ai/download-yolov8n` | Admin downloads YOLOv8n ONNX to `models/yolov8n.onnx` |
-| `POST` | `/api/settings/ai/reload` | Admin reloads detector without app restart when possible |
-| `POST` | `/api/settings/ai/test-detector` | Admin validates the configured detector is ready |
-| `GET/POST` | `/api/settings/alerts` | View alert rules; admin creates rules |
-| `PUT/DELETE` | `/api/settings/alerts/{rule_id}` | Admin edit/delete alert rules |
+| `PATCH` | `/api/users/{id}` | Admin role/status/password updates |
+| `GET/PUT` | `/api/settings/ai` | Admin AI settings |
+| `GET/PUT` | `/api/settings/alert-email` | Admin SMTP settings |
+| `GET/POST` | `/api/settings/alerts` | View/create alert rules |
+| `PUT/DELETE` | `/api/settings/alerts/{id}` | Edit/delete alert rules |
+| `GET` | `/api/settings/system` | Admin system settings summary |
+| `PUT` | `/api/settings/system/camera` | Admin camera settings |
+| `PUT` | `/api/settings/system/recording` | Admin recording settings |
+| `PUT` | `/api/settings/system/storage` | Admin storage settings |
+| `PUT` | `/api/settings/system/auth` | Admin login security settings |
 
-## Database schema
+## Database
 
-Tables are created automatically at startup:
+Tables are created automatically at startup. Runtime settings are stored in `app_settings` as JSON values.
 
-```sql
-users(id, username, password_hash, role, is_active, failed_attempts, locked_until, created_at, updated_at, last_login_at)
-user_sessions(id, session_token, user_id, csrf_token, created_at, expires_at, last_seen_at)
-login_attempts(id, username, ip_address, success, created_at)
-app_settings(key, value, updated_at)
-alert_rules(id, name, object, min_confidence, cooldown_seconds, enabled, active_start, active_end, created_at, updated_at)
-events(id, created_at, source, snapshot_path, thumbnail_path, alert_triggered, metadata)
-detections(id, event_id, label, confidence, x, y, width, height)
-alert_history(id, created_at, rule_name, event_id, label, confidence, message)
-```
+Core tables:
 
-## Updating an existing install
+- `users`
+- `user_sessions`
+- `login_attempts`
+- `app_settings`
+- `alert_rules`
+- `events`
+- `detections`
+- `alert_history`
+- `recordings`
 
-### Local install
+Useful `app_settings` keys:
+
+- `ai`
+- `alert_email`
+- `camera`
+- `recording`
+- `storage`
+- `auth`
+
+## Recording and Playback
+
+The recording layer creates event-linked clips and dashboard playback wiring. In the current mock/test-image stage, clips are generated as short playable footage with event and detection overlays. Future camera and RTSP work can replace the generated frames with real camera frames while keeping the same recording policy and retention controls.
+
+Recording policy is managed at `/system-settings`:
+
+- `continuous`: record every detection event.
+- `motion`: record when any detection is present.
+- `human`: record when `person` is detected.
+- `objects`: record selected labels such as `cat`, `dog`, `package`, and `parcel`.
+
+The policy also has independent toggles for continuous, motion, human, and selected object recording. The dashboard recordings list shows the trigger type and trigger label for each clip.
+
+Retention is managed on the same page:
+
+- `auto_purge_enabled`: purge after recording creation.
+- `retention_days`: delete clips older than this age.
+- `max_storage_gb`: delete oldest clips until the recording folder is under the cap.
+- **Purge now**: run retention purge manually.
+
+Fresh installs use the current schema directly. The app does not carry migration code for older local development databases; delete the old SQLite file when schema-breaking changes are made during development.
+
+Playback routes:
+
+| Method | Route | Role |
+| --- | --- | --- |
+| `GET` | `/api/recordings` | admin/viewer |
+| `GET` | `/api/recordings/{recording_id}` | admin/viewer |
+| `GET` | `/api/recordings/{recording_id}/stream` | admin/viewer |
+| `POST` | `/api/recordings/purge` | admin |
+| `DELETE` | `/api/recordings/{recording_id}` | admin |
+
+Current limitations:
+
+- Mock and uploaded-image events create generated footage, not real camera footage.
+- Real clip writing for camera, RTSP, and uploaded videos is future work.
+- Retention runs when clips are created or when an admin clicks **Purge now**; there is no background scheduler yet.
+
+## Updating an Existing Install
+
+### Local
 
 ```bash
 git pull
 source .venv/bin/activate
-pip install -r requirements-dev.txt
-DAYGLE_CONFIG=config.yaml uvicorn app.main:app --reload --host 127.0.0.1 --port 8080
+pip install -r requirements.txt
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8080
 ```
 
-### Armbian service install
+Install `pytest` too if you run tests locally:
 
-From the updated repository root:
+```bash
+pip install pytest
+```
+
+### Armbian Service
 
 ```bash
 sudo ./scripts/install_armbian.sh
 sudo systemctl restart daygle-ai-camera
 ```
 
-The installer preserves an existing config file at `/etc/daygle-ai-camera/config.yaml` unless you remove or replace it manually.
-
-## Troubleshooting
-
-- **Cannot log in after first start**: open `/setup` and create the initial admin user if the database is empty.
-- **Setup page redirects to login**: a user already exists; sign in with an existing admin account or reset the database intentionally.
-- **Dashboard shows MODEL MISSING**: open `/settings`, click **Download YOLOv8n ONNX** or set a readable model path, then click **Reload detector**.
-- **ONNX detector fails to load**: confirm the model path and labels path in `/settings` exist and are readable by the running user, and verify ONNX Runtime is installed in the status panel.
-- **Service cannot write data**: check ownership of the configured `storage` paths. The Armbian installer assigns them to the service user.
-- **Need logs on Armbian**: run `sudo journalctl -u daygle-ai-camera -f`.
+The installer preserves existing config unless you remove or replace it manually.
 
 ## Tests
 
 ```bash
-python -m compileall app tests
-pytest -q
+python -m compileall app
+python -m pytest
 ```
 
-## Recording and playback
+## Troubleshooting
 
-Daygle AI Camera now has a deliberately small recording layer for event-linked clips. It is not a full NVR yet; the current implementation prioritizes metadata and dashboard playback wiring while camera backends are still mock/upload focused.
-
-### Storage paths
-
-Local development stores recording media under:
-
-```text
-data/recordings/
-```
-
-Systemd/Armbian deployments should map the same setting to writable application data, for example:
-
-```text
-/var/lib/daygle-ai-camera/recordings/
-```
-
-Configure the directory in `storage.recordings_dir`. The default is `data/recordings`.
-
-### Recording settings
-
-```yaml
-recording:
-  enabled: true
-  mode: event
-  pre_event_seconds: 5
-  post_event_seconds: 10
-  max_clip_seconds: 60
-  format: mp4
-  retention_days: 14
-  max_storage_gb: 20
-```
-
-Supported modes today are `off` and `event`. `continuous` is reserved for a future NVR-style backend. Retention settings are accepted and documented for deployment planning, but complex cleanup is not implemented yet.
-
-### Event-linked clips
-
-When a detection event is created and recording mode is `event`, the backend creates a row in the `recordings` table linked to the event. Mock camera and test-image uploads create placeholder recording metadata that records the expected clip path, duration, source, and event relationship. The app does not fail if no video encoder or real camera backend is available, so mock placeholders may stream as `404 Recording media file not found` until a future backend writes real media files.
-
-### Playback API
-
-| Method | Route | Role | Notes |
-| --- | --- | --- | --- |
-| `GET` | `/api/recordings` | admin/viewer | Recent recordings; optional `label` filter and `limit` |
-| `GET` | `/api/recordings/{recording_id}` | admin/viewer | Recording detail with linked event/detections |
-| `GET` | `/api/recordings/{recording_id}/stream` | admin/viewer | Browser playback endpoint; supports byte ranges when the file exists |
-| `DELETE` | `/api/recordings/{recording_id}` | admin | Deletes metadata and existing media file |
-
-The dashboard includes a **Recordings / Playback** section with recent clips, object-label filtering, linked detections, duration, source, and an HTML5 video player using:
-
-```html
-<video controls src="/api/recordings/{id}/stream"></video>
-```
-
-### Current limitations
-
-- Mock and uploaded-image events create recording metadata, not guaranteed playable MP4 media.
-- Real clip writing for OV5647, USB cameras, RTSP, and uploaded videos is intentionally left for later backend work.
-- Retention cleanup by age/storage cap is not yet scheduled.
+- **Cannot log in after first start**: open `/setup` and create the initial admin user.
+- **Setup redirects to login**: a user already exists; sign in with an admin account.
+- **Dashboard shows MODEL MISSING**: open `/settings`, download YOLOv8n ONNX or set a readable model path, then reload the detector.
+- **ONNX fails to load**: confirm model and labels paths are readable and ONNX Runtime is installed.
+- **Email alerts do not send**: open `/alert-settings`, check SMTP host/port/auth/from address, and confirm the rule has email enabled and recipients.
+- **Service cannot write data**: open `/system-settings` and check storage paths, then verify OS permissions for the service user.
+- **Need logs on Armbian**: run `sudo journalctl -u daygle-ai-camera -f`.

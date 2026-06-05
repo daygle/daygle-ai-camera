@@ -80,10 +80,13 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 def _body(response):
-    text = response.read().decode("utf-8")
+    data = response.read()
     if "application/json" in response.headers.get("content-type", ""):
-        return json.loads(text)
-    return text
+        return json.loads(data.decode("utf-8"))
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data
 
 
 def _free_port() -> int:
@@ -124,13 +127,22 @@ storage:
   recordings_dir: {tmp_path / 'data' / 'recordings'}
 recording:
   enabled: true
-  mode: event
+  mode: motion
+  continuous: false
+  record_on_motion: true
+  record_on_human: true
+  record_on_objects:
+    - cat
+    - dog
+    - package
+    - parcel
   pre_event_seconds: 5
   post_event_seconds: 10
   max_clip_seconds: 60
-  format: mp4
+  format: avi
   retention_days: 14
   max_storage_gb: 20
+  auto_purge_enabled: true
 alerts:
   rules:
     - name: Cat alert
@@ -709,12 +721,84 @@ def test_email_alert_settings_and_delivery(tmp_path, monkeypatch):
         assert status == 200
         assert rule["email_recipients"] == ["user@example.com"]
 
+        main_module.detector.categories = ["cat"]
+        main_module.mock_detector.categories = ["cat"]
         status, _headers, created = client.request("/api/mock/detect", method="POST", headers={"X-CSRF-Token": csrf})
         assert status == 200
         assert created["created"] is True
         assert sent
         assert sent[0][1] == created["event_id"]
         assert sent[0][2] == ["user@example.com"]
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        status, _headers, camera = client.request(
+            "/api/settings/system/camera",
+            method="PUT",
+            json_body={"backend": "mock", "width": 640, "height": 360, "fps": 12, "device": 0, "flip": "none"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert camera["width"] == 640
+        assert client.request("/api/status")[2]["resolution"] == {"width": 640, "height": 360}
+
+        status, _headers, recording = client.request(
+            "/api/settings/system/recording",
+            method="PUT",
+            json_body={
+                "enabled": True,
+                "mode": "objects",
+                "continuous": False,
+                "record_on_motion": False,
+                "record_on_human": True,
+                "record_on_objects": ["cat", "dog", "package"],
+                "pre_event_seconds": 2,
+                "post_event_seconds": 3,
+                "max_clip_seconds": 10,
+                "format": "avi",
+                "retention_days": 7,
+                "max_storage_gb": 5,
+                "auto_purge_enabled": True,
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert recording["mode"] == "objects"
+        assert recording["record_on_objects"] == ["cat", "dog", "package"]
+
+        status, _headers, storage = client.request(
+            "/api/settings/system/storage",
+            method="PUT",
+            json_body={"data_dir": str(tmp_path / "runtime-data"), "snapshots_dir": str(tmp_path / "runtime-snaps"), "events_dir": str(tmp_path / "runtime-events"), "recordings_dir": str(tmp_path / "runtime-recordings")},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert storage["database"]
+        assert Path(storage["snapshots_dir"]).exists()
+
+        status, _headers, auth_settings = client.request(
+            "/api/settings/system/auth",
+            method="PUT",
+            json_body={"session_timeout_hours": 6, "max_login_attempts": 4, "lockout_minutes": 10},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert auth_settings["max_login_attempts"] == 4
+
+        system_settings = client.request("/api/settings/system")[2]
+        assert system_settings["camera"]["width"] == 640
+        assert system_settings["recording"]["format"] == "avi"
+        assert system_settings["auth"]["lockout_minutes"] == 10
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -737,6 +821,8 @@ def test_recording_table_creation(tmp_path):
         'file_path',
         'thumbnail_path',
         'source',
+        'trigger_type',
+        'trigger_label',
         'created_at',
     } <= columns
 
@@ -766,6 +852,8 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         assert recordings[0]['event_id'] == created['event_id']
         assert recordings[0]['detections']
         assert recordings[0]['source'] == 'mock'
+        assert recordings[0]['trigger_type'] in {'motion', 'human', 'object', 'continuous'}
+        assert Path(recordings[0]['file_path']).exists()
 
         label = recordings[0]['detections'][0]['label']
         status, _headers, filtered = admin.request(f'/api/recordings?label={label}')
@@ -779,9 +867,8 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         assert event['recording_status'] == 'linked'
         assert event['recordings'][0]['id'] == created['recording_id']
 
-        status, _headers, missing_media = admin.request(f"/api/recordings/{created['recording_id']}/stream")
-        assert status == 404
-        assert missing_media['detail'] == 'Recording media file not found'
+        status, _headers, _media = admin.request(f"/api/recordings/{created['recording_id']}/stream")
+        assert status == 200
 
         viewer_client = LocalClient(base_url)
         viewer_csrf = _login(viewer_client, viewer['username'], 'Viewer123!')
@@ -798,9 +885,39 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         assert status == 200
         assert deleted['ok'] is True
         assert admin.request(f"/api/recordings/{created['recording_id']}")[0] == 404
+        assert not Path(recordings[0]['file_path']).exists()
         with sqlite3.connect(database_path) as db:
             count = db.execute('SELECT COUNT(*) FROM recordings').fetchone()[0]
         assert count == 0
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_recording_retention_purge_deletes_metadata_and_files(tmp_path, monkeypatch):
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    admin = LocalClient(base_url)
+    try:
+        _setup_admin(admin)
+        admin_csrf = _login(admin)
+        status, _headers, created = admin.request('/api/mock/detect', method='POST', headers={'X-CSRF-Token': admin_csrf})
+        assert status == 200
+        recording = admin.request(f"/api/recordings/{created['recording_id']}")[2]
+        file_path = Path(recording['file_path'])
+        assert file_path.exists()
+
+        old_started = '2000-01-01T00:00:00+00:00'
+        with sqlite3.connect(database_path) as db:
+            db.execute("UPDATE recordings SET started_at = ?, ended_at = ? WHERE id = ?", (old_started, old_started, created['recording_id']))
+            db.commit()
+
+        status, _headers, purged = admin.request('/api/recordings/purge', method='POST', headers={'X-CSRF-Token': admin_csrf})
+        assert status == 200
+        assert purged['purged'] == 1
+        assert purged['files_deleted'] == 1
+        assert not file_path.exists()
+        assert admin.request(f"/api/recordings/{created['recording_id']}")[0] == 404
     finally:
         server.should_exit = True
         thread.join(timeout=5)
