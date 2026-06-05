@@ -9,8 +9,6 @@ import re
 import secrets
 import shutil
 import sqlite3
-import tempfile
-from urllib.request import urlretrieve
 import subprocess
 import sys
 from contextlib import asynccontextmanager
@@ -239,7 +237,6 @@ def log_detector_initialization(context: str = 'startup') -> None:
 PUBLIC_PREFIXES = ('/static/',)
 PUBLIC_PATHS = {'/login', '/setup'}
 ADMIN_PATHS = {'/settings', '/alert-settings', '/system-settings', '/users'}
-ADMIN_API_PREFIXES = ('/api/users', '/api/settings')
 MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
 
