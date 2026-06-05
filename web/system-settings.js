@@ -1,5 +1,30 @@
 let csrfToken = null;
 const messageEl = document.getElementById('systemMessage');
+
+function createDatabaseRestoreSection() {
+  const section = document.createElement('section');
+  section.className = 'card';
+  section.innerHTML = `
+    <h2>Database backup & restore</h2>
+    <p class="muted">Download a point-in-time SQLite backup or restore a previous Daygle database. Restores replace events, users, settings, alert rules, and sessions.</p>
+    <div class="button-row"><a class="button-link" href="/api/settings/system/database/backup">Download database backup</a></div>
+    <form id="databaseRestoreForm" class="form-grid">
+      <label><span>Restore backup file</span><input name="file" type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3,application/x-sqlite3" required /></label>
+      <button class="secondary" type="submit">Restore database</button>
+    </form>
+    <p class="muted">A safety backup of the current database is created before every restore.</p>
+  `;
+
+  const authSection = document.getElementById('authSettingsForm')?.closest('section');
+  if (authSection) {
+    authSection.before(section);
+  } else {
+    document.querySelector('main')?.append(section);
+  }
+}
+
+createDatabaseRestoreSection();
+
 const forms = {
   camera: document.getElementById('cameraSettingsForm'),
   anpr: document.getElementById('anprSettingsForm'),
@@ -7,6 +32,7 @@ const forms = {
   retention: document.getElementById('retentionSettingsForm'),
   storage: document.getElementById('storageSettingsForm'),
   auth: document.getElementById('authSettingsForm'),
+  databaseRestore: document.getElementById('databaseRestoreForm'),
 };
 
 async function api(path, options = {}) {
@@ -14,7 +40,7 @@ async function api(path, options = {}) {
   if (csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((options.method || 'GET').toUpperCase())) {
     headers['X-CSRF-Token'] = csrfToken;
   }
-  if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
   const response = await fetch(path, { ...options, headers });
   if (response.status === 401) window.location.href = '/login';
   const payload = await response.json().catch(() => ({}));
@@ -89,4 +115,19 @@ document.getElementById('purgeRecordingsBtn').addEventListener('click', async ()
     setMessage(error.message);
   }
 });
+
+forms.databaseRestore.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!window.confirm('Restore this database backup? This will replace current events, users, settings, alert rules, and sessions.')) return;
+  try {
+    const formData = new FormData(forms.databaseRestore);
+    const result = await api('/api/settings/system/database/restore', { method: 'POST', body: formData });
+    forms.databaseRestore.reset();
+    await loadSettings();
+    setMessage(`${result.message} Safety backup: ${result.safety_backup}`);
+  } catch (error) {
+    setMessage(error.message);
+  }
+});
+
 loadSettings().catch((error) => setMessage(error.message));

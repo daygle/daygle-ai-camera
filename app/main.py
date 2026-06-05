@@ -7,6 +7,10 @@ import mimetypes
 import os
 import re
 import secrets
+import shutil
+import sqlite3
+import tempfile
+from urllib.request import urlretrieve
 import subprocess
 import sys
 from contextlib import asynccontextmanager
@@ -16,7 +20,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -437,6 +441,61 @@ def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
             thumbnail = Path(str(thumbnail_path))
             if thumbnail.exists() and thumbnail.is_file():
                 thumbnail.unlink(missing_ok=True)
+
+
+DATABASE_RESTORE_REQUIRED_TABLES = {'events', 'detections', 'app_settings', 'users'}
+
+
+def backup_directory() -> Path:
+    backups_dir = Path(str(effective_storage_config().get('data_dir') or 'data')) / 'backups'
+    backups_dir.mkdir(parents=True, exist_ok=True)
+    return backups_dir
+
+
+def safe_backup_timestamp() -> str:
+    return datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+
+
+def create_database_backup(prefix: str = 'daygle-database') -> Path:
+    backup_path = backup_directory() / f'{prefix}-{safe_backup_timestamp()}-{secrets.token_hex(4)}.sqlite3'
+    source = sqlite3.connect(database.database_path)
+    try:
+        destination = sqlite3.connect(backup_path)
+        try:
+            source.backup(destination)
+        finally:
+            destination.close()
+    finally:
+        source.close()
+    return backup_path
+
+
+def validate_restore_database(path: Path) -> None:
+    try:
+        with sqlite3.connect(path) as db:
+            integrity = db.execute('PRAGMA integrity_check').fetchone()
+            if not integrity or str(integrity[0]).lower() != 'ok':
+                raise HTTPException(status_code=400, detail='Uploaded database failed SQLite integrity check.')
+            tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
+            missing = sorted(DATABASE_RESTORE_REQUIRED_TABLES - tables)
+            if missing:
+                raise HTTPException(status_code=400, detail=f'Uploaded database is missing required table(s): {", ".join(missing)}.')
+            admin_count = db.execute("SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1").fetchone()[0]
+            if int(admin_count) < 1:
+                raise HTTPException(status_code=400, detail='Uploaded database must include at least one active administrator account.')
+    except sqlite3.DatabaseError as exc:
+        raise HTTPException(status_code=400, detail='Uploaded file is not a valid SQLite database.') from exc
+
+
+def refresh_runtime_after_database_restore() -> None:
+    database.init()
+    auth.init()
+    database.seed_alert_rules(config.get('alerts', {}).get('rules', []), utc_now())
+    apply_camera_settings(effective_camera_config())
+    apply_storage_and_recording_settings()
+    apply_anpr_settings()
+    auth.apply_config(effective_auth_config())
+    alerts.rules = effective_alert_rules()
 
 
 def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
@@ -1513,6 +1572,47 @@ def get_system_settings():
             'server': config.get('server', {}),
         },
     }
+
+
+@app.get('/api/settings/system/database/backup')
+def backup_database():
+    backup_path = create_database_backup()
+    return FileResponse(
+        backup_path,
+        media_type='application/vnd.sqlite3',
+        filename=backup_path.name,
+        headers={'Cache-Control': 'no-store'},
+    )
+
+
+@app.post('/api/settings/system/database/restore')
+async def restore_database(file: UploadFile = File(...)):
+    filename = Path(file.filename or '').name
+    if not filename:
+        raise HTTPException(status_code=400, detail='Choose a SQLite database backup file to restore.')
+    restore_temp = database.database_path.parent / f'.restore-{secrets.token_hex(8)}.sqlite3'
+    try:
+        with restore_temp.open('wb') as handle:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                handle.write(chunk)
+        if restore_temp.stat().st_size == 0:
+            raise HTTPException(status_code=400, detail='Uploaded database backup is empty.')
+        validate_restore_database(restore_temp)
+        safety_backup = create_database_backup(prefix='pre-restore-daygle-database')
+        shutil.move(str(restore_temp), database.database_path)
+        refresh_runtime_after_database_restore()
+        return {
+            'ok': True,
+            'message': 'Database restored successfully.',
+            'source_filename': filename,
+            'safety_backup': str(safety_backup),
+        }
+    finally:
+        restore_temp.unlink(missing_ok=True)
+        await file.close()
 
 
 @app.put('/api/settings/system/camera')
