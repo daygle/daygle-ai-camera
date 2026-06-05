@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Live Camera · Daygle AI Camera</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell live-shell">
+    <section class="live-viewer-card">
+      <header class="live-toolbar">
+        <div>
+          <p class="eyebrow">Live Camera</p>
+          <h1>Live Footage</h1>
+        </div>
+        <label class="toggle-control" for="overlayToggle">
+          <input id="overlayToggle" type="checkbox" checked />
+          <span>Object sighting overlay</span>
+        </label>
+      </header>
+      <div class="live-frame-wrap">
+        <img id="liveFrame" class="live-frame" alt="Live camera footage" />
+        <div id="liveStatus" class="live-status">Connecting to camera…</div>
+      </div>
+    </section>
+  </main>
+  <script src="/static/nav.js"></script>
+  <script src="/static/live.js"></script>
+</body>
+</html>
