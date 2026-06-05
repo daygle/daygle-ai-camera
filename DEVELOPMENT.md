@@ -13,7 +13,8 @@ FastAPI app (app/main.py)
         +--> Camera backend (app/mock_camera.py today; OV5647 later)
         +--> Detector backend (app/detector.py mock today; ONNX/RKNN later)
         +--> Alert engine (app/alerts.py)
-        +--> SQLite event store (app/database.py)
+        +--> Auth service (app/auth.py)
+        +--> SQLite event/auth store (app/database.py + app/auth.py)
         +--> Snapshot/event files (app/storage.py)
 ```
 
@@ -24,6 +25,7 @@ FastAPI app (app/main.py)
 - `app/mock_camera.py` provides frame metadata so the rest of the pipeline behaves like a live camera is present.
 - `app/detector.py` produces synthetic detections for dashboard and alert testing.
 - `app/alerts.py` evaluates configured object alert rules with cooldowns.
+- `app/auth.py` creates users, hashes passwords with bcrypt when the runtime dependency is installed, verifies logins, stores sessions, enforces role checks, tracks failures, and performs lockout.
 - `app/database.py` stores events, detections, and alert history in SQLite.
 - `app/storage.py` creates data directories and writes mock snapshot metadata files.
 
@@ -36,12 +38,38 @@ The dashboard is a static dark-mode app in `web/`. It calls the FastAPI API dire
 - Event and alert history
 - Object-label search
 - Object count chips
+- Authenticated user menu with Users, Settings, and Logout navigation
+
+## Authentication
+
+Authentication is on by default and is configured under `auth` in YAML. The first request to a fresh database redirects to `/setup` so an administrator can be created. Once any user exists, `/setup` redirects to `/login` and cannot create additional bootstrap accounts.
+
+The auth service uses these SQLite tables:
+
+| Table | Purpose |
+| --- | --- |
+| `users` | Stores username, bcrypt password hash, role, active flag, failure counter, and lockout timestamp |
+| `user_sessions` | Stores opaque session tokens, user IDs, CSRF tokens, expiry, and last-seen timestamps |
+| `login_attempts` | Records username, IP address, success flag, and timestamp for every login attempt |
+
+Security behavior:
+
+- Session lifetime defaults to 12 hours.
+- Cookies are HttpOnly and SameSite=Lax; the Secure flag is enabled automatically on HTTPS requests.
+- Mutating `/api/*` requests must include `X-CSRF-Token` from `GET /api/auth/me`.
+- Five consecutive failed logins lock the account for 15 minutes by default.
+- Password complexity requires length, uppercase, lowercase, number, and symbol checks.
+- Admin-only areas are `/users`, `/settings`, `/api/users*`, and future `/api/settings*` handlers.
 
 ## API endpoints
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/` | Dashboard HTML, or JSON status if the dashboard is missing |
+| `GET` | `/` | Protected dashboard HTML, or JSON status if the dashboard is missing |
+| `GET/POST` | `/login` | Public login page and login action |
+| `GET/POST` | `/logout` | Logout action |
+| `GET/POST` | `/setup` | First-admin setup, disabled after first user creation |
+| `GET` | `/api/auth/me` | Current user, role, CSRF token, and session expiry |
 | `GET` | `/api/status` | Runtime health, camera mode, frame number, uptime, and resolution |
 | `POST` | `/api/mock/detect` | Generate a mock detection event; `force=true` by default |
 | `GET` | `/api/events?label=&limit=` | List recent events, optionally filtered by object label |
@@ -49,6 +77,9 @@ The dashboard is a static dark-mode app in `web/`. It calls the FastAPI API dire
 | `GET` | `/api/alerts?limit=` | List alert history |
 | `GET` | `/api/stats` | Event, alert, and object-count statistics |
 | `GET` | `/api/config` | Non-secret runtime configuration summary |
+| `GET` | `/api/users` | Admin-only user listing |
+| `POST` | `/api/users` | Admin-only user creation; requires CSRF header |
+| `PATCH` | `/api/users/{user_id}` | Admin-only role, active-state, and password reset updates; requires CSRF header |
 
 ## Local development
 
@@ -84,6 +115,9 @@ Important settings:
 - `camera.backend`: `mock` today; expected future values include `ov5647` or `v4l2`.
 - `ai.backend`: `mock` today; expected future values include `onnx` and `rknn`.
 - `alerts.rules`: object-specific alert rules with minimum confidence and cooldown.
+- `auth.enabled`: turns auth route protection on or off; keep this enabled for real deployments.
+- `auth.session_timeout_hours`: session cookie and database session expiry.
+- `auth.max_login_attempts` / `auth.lockout_minutes`: account lockout threshold and duration.
 - `storage.*`: SQLite and snapshot paths.
 
 ## Future OV5647 CSI camera integration
@@ -118,3 +152,11 @@ Recommended detector output should stay compatible with the current API:
 ```
 
 Coordinates should remain normalized from `0.0` to `1.0` so the dashboard and database schema do not need to change when real images arrive.
+
+
+## Auth development notes
+
+- Prefer browser-driven manual testing for mutating endpoints because the dashboard automatically attaches the CSRF token.
+- For scripted tests, first create the admin at `/setup`, log in at `/login`, call `/api/auth/me`, and send the returned token in `X-CSRF-Token`.
+- The local CI environment used by the repository may not have network access to install bcrypt. The code keeps a PBKDF2 fallback so tests can execute in that constrained environment, but production installs should use `pip install -r requirements.txt` so bcrypt hashes are used for newly created or reset passwords.
+- Do not log session tokens, CSRF tokens, or password reset values.

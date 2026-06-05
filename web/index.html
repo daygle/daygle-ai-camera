@@ -14,7 +14,18 @@
         <h1>AI Camera Dashboard</h1>
         <p class="muted">Mock camera mode is active. Generate detections, test alert rules, and search object history before the real camera arrives.</p>
       </div>
-      <button id="generateBtn" class="primary">Generate mock detection</button>
+      <div class="hero-actions">
+        <nav class="user-menu">
+          <button id="userMenuBtn" class="secondary" type="button">User ▼</button>
+          <div class="user-menu-panel">
+            <a href="#profile">Profile</a>
+            <a id="usersLink" href="/users">Users</a>
+            <a id="settingsLink" href="/settings">Settings</a>
+            <a href="/logout">Logout</a>
+          </div>
+        </nav>
+        <button id="generateBtn" class="primary">Generate mock detection</button>
+      </div>
     </header>
 
     <section class="grid stats-grid">
