@@ -7,8 +7,8 @@ import mimetypes
 import os
 import re
 import secrets
-import tempfile
-from urllib.request import urlretrieve
+import subprocess
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from html import escape
@@ -33,7 +33,8 @@ from app.storage import Storage
 
 logger = logging.getLogger('daygle.ai')
 
-YOLOV8N_ONNX_URL = 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.onnx'
+YOLOV8N_MODEL = 'yolov8n.pt'
+YOLOV8N_ONNX = 'yolov8n.onnx'
 ONE_PIXEL_PNG = (
     b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
     b'\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc``\x00\x00\x00\x04'
@@ -1394,32 +1395,65 @@ def check_ai_model():
     return ai_status_payload(effective_ai_config())
 
 
+def export_yolov8n_onnx(destination: Path) -> int:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        sys.executable,
+        '-c',
+        (
+            'from ultralytics import YOLO\n'
+            f"model = YOLO('{YOLOV8N_MODEL}')\n"
+            "model.export(format='onnx')\n"
+        ),
+    ]
+    result = subprocess.run(
+        command,
+        cwd=destination.parent,
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+    if result.returncode != 0:
+        details = (result.stderr or result.stdout or '').strip()
+        raise RuntimeError(details or f'Ultralytics export exited with status {result.returncode}.')
+
+    exported = destination.parent / YOLOV8N_ONNX
+    if exported != destination and exported.exists():
+        exported.replace(destination)
+    if not destination.exists():
+        details = (result.stderr or result.stdout or '').strip()
+        raise RuntimeError(details or f'Ultralytics export did not create {destination.name}.')
+    if destination.stat().st_size <= 0:
+        destination.unlink(missing_ok=True)
+        raise RuntimeError('Exported model file is empty.')
+    return destination.stat().st_size
+
+
 @app.post('/api/settings/ai/download-yolov8n')
 def download_yolov8n_model():
     ai_settings = effective_ai_config()
-    destination = BASE_DIR / 'models' / 'yolov8n.onnx'
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination = BASE_DIR / 'models' / YOLOV8N_ONNX
     try:
-        with tempfile.NamedTemporaryFile(delete=False, dir=destination.parent, suffix='.tmp') as handle:
-            temp_path = Path(handle.name)
-        urlretrieve(YOLOV8N_ONNX_URL, temp_path)  # noqa: S310 - fixed upstream YOLOv8n model URL
-        if temp_path.stat().st_size <= 0:
-            temp_path.unlink(missing_ok=True)
-            raise RuntimeError('Downloaded model file is empty.')
-        temp_path.replace(destination)
-    except Exception as exc:  # pragma: no cover - network and filesystem dependent
-        if 'temp_path' in locals():
-            temp_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=502, detail=f'Failed to download YOLOv8n ONNX model: {exc}') from exc
+        exported_bytes = export_yolov8n_onnx(destination)
+    except (RuntimeError, subprocess.TimeoutExpired) as exc:  # pragma: no cover - environment dependent
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                'Failed to export YOLOv8n ONNX model. Install the export dependencies with '
+                '`pip install ultralytics onnx`, then retry. '
+                f'Details: {exc}'
+            ),
+        ) from exc
 
     updated = validate_ai_settings({**ai_settings, 'model_path': str(destination.relative_to(BASE_DIR))})
     database.set_setting('ai', updated, utc_now())
     reloaded, error = reload_detector(updated)
     return {
         'ok': True,
-        'message': f'Downloaded YOLOv8n ONNX to {destination.relative_to(BASE_DIR)}.',
+        'message': f'Exported YOLOv8n ONNX to {destination.relative_to(BASE_DIR)}.',
         'model_path': str(destination.relative_to(BASE_DIR)),
-        'bytes': destination.stat().st_size,
+        'bytes': exported_bytes,
         'reload_succeeded': reloaded,
         'reload_error': error,
         'status': ai_status_payload(updated),

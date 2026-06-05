@@ -5,3 +5,5 @@ __pycache__/
 config.yaml
 data/
 .pytest_cache/
+models/*.onnx
+models/*.pt
