@@ -11,9 +11,18 @@ Daygle AI Camera is an Orange Pi 3B AI camera platform with a FastAPI backend, S
 - SQLite database for users, sessions, login attempts, events, detections, and alert history
 - Mock camera and mock detector so development does not require a physical camera
 - Dark-mode dashboard with searchable object detection history and a top-right user menu
+Daygle AI Camera is an Orange Pi 3B AI camera platform with a FastAPI backend, SQLite event history, alert rules, a modern dark-mode dashboard, and switchable mock/ONNX YOLO detector backends. It still runs end-to-end without camera hardware by using the mock camera and mock detector.
+
+## Features
+
+- FastAPI backend with health/status, event, alert, stats, runtime-config, and test-image detection APIs
+- SQLite database for searchable events, object labels, confidences, bounding boxes, and alert history
+- Mock camera and mock detector so development does not require a physical camera or model file
+- ONNX Runtime YOLOv8 detector backend with COCO labels, confidence filtering, and non-max suppression
+- Dashboard with searchable object detection history and uploaded-image detection testing
+- Real uploaded-image snapshots saved under the configured snapshots directory
 - Configurable alert rule example for cat detections
 - Armbian install script and systemd unit for Orange Pi 3B deployment
-- Architecture notes for future OV5647 CSI, YOLO ONNX, and RKNN support
 
 ## Quick start for local development
 
@@ -87,6 +96,47 @@ alert_history(id, created_at, rule_name, event_id, label, confidence, message)
 ```
 
 Tables are created automatically at startup by the database/auth initialization code.
+Test uploaded-image detection with the active detector backend:
+
+```bash
+curl -X POST \
+  -H 'Content-Type: image/jpeg' \
+  --data-binary @test.jpg \
+  http://127.0.0.1:8080/api/detect/test-image
+```
+
+## ONNX YOLO setup
+
+Install dependencies and download the default YOLOv8n ONNX model:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python scripts/download_yolov8n_onnx.py --output models/yolov8n.onnx
+cp config.example.yaml config.yaml
+```
+
+Configure ONNX mode in `config.yaml`:
+
+```yaml
+ai:
+  enabled: true
+  backend: onnx
+  confidence: 0.45
+  iou_threshold: 0.45
+  input_size: 640
+  model_path: models/yolov8n.onnx
+  labels_path: models/coco.names
+```
+
+Then start the app:
+
+```bash
+DAYGLE_CONFIG=config.yaml uvicorn app.main:app --host 127.0.0.1 --port 8080
+```
+
+If `ai.backend: onnx` is selected and the model is missing or dependencies are not installed, startup remains healthy and `/api/status` reports the AI error. Detection requests return HTTP 400 with a clear message instead of crashing the app.
 
 ## Armbian 26.x startup on Orange Pi 3B
 
@@ -133,6 +183,10 @@ sudo DAYGLE_APP_DIR=/opt/daygle-ai-camera \
 - `GET /api/auth/me` - current user and CSRF token
 - `GET /api/status` - runtime status
 - `POST /api/mock/detect` - create a mock detection event; requires `X-CSRF-Token`
+- `GET /` - dashboard
+- `GET /api/status` - runtime status, including AI backend availability
+- `POST /api/mock/detect` - create a mock detection event
+- `POST /api/detect/test-image` - upload an image, run the active detector, save a snapshot, and store detections as an event
 - `GET /api/events?label=cat&limit=50` - event search
 - `GET /api/events/{event_id}` - event detail
 - `GET /api/alerts?limit=25` - alert history
@@ -150,3 +204,4 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for architecture details and future OV5647 
 - Put the service behind a trusted reverse proxy or VPN for internet-exposed deployments.
 - Add audit-log retention and export before enabling remote access.
 - Consider hardware-backed secrets and WebAuthn/TOTP for higher-risk installations.
+See [DEVELOPMENT.md](DEVELOPMENT.md) for architecture details and OV5647 CSI / ONNX / RKNN integration notes.

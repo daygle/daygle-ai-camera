@@ -140,4 +140,9 @@ select {
 @media (max-width: 900px) {
   .hero-actions { justify-content: flex-start; }
   .form-grid, .user-row { grid-template-columns: 1fr; }
+.upload-form { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-bottom: 8px; }
+.upload-result { margin: 0 0 14px; }
+input[type="file"] { padding: 10px; }
+@media (max-width: 900px) {
+  .upload-form { grid-template-columns: 1fr; }
 }
