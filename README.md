@@ -67,7 +67,7 @@ Choose one of these installation paths:
 1. Clone the repository and enter it:
 
    ```bash
-   git clone <repository-url> daygle-ai-camera
+   git clone https://github.com/daygle/daygle-ai-camera.git
    cd daygle-ai-camera
    ```
 
