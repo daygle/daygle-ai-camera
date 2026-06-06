@@ -3,7 +3,6 @@ __pycache__/
 .venv/
 .env
 config.yaml
-data/
 .pytest_cache/
 models/*.onnx
 models/*.pt
