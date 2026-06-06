@@ -149,6 +149,7 @@ mock_detector = MockDetector(effective_ai_config().get('categories', []), float(
 alerts = AlertEngine(effective_alert_rules())
 LIVE_DETECTION_INTERVAL_SECONDS = 1.0
 live_detection_last_checked: dict[str, float] = {}
+live_detection_status: dict[str, dict[str, Any]] = {}
 
 
 def _non_empty_setting(settings: dict[str, Any], key: str) -> str:
@@ -325,14 +326,42 @@ def normalize_detection_boxes_for_frame(detections: list[dict[str, Any]], frame:
     return normalized
 
 
+def update_live_detection_status(camera_id: str, **updates: Any) -> None:
+    live_detection_status[camera_id] = {
+        **live_detection_status.get(camera_id, {}),
+        **updates,
+        'camera_id': camera_id,
+        'updated_at': datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any]:
+    selected_config = get_camera_config(camera_id)
+    camera_key = str(selected_config.get('id') or 'camera')
+    ai_state = ai_status_payload()
+    return {
+        'camera_id': camera_key,
+        'camera_name': selected_config.get('name'),
+        'object_detection_enabled': (selected_config.get('detection') or {}).get('object_detection_enabled', True),
+        'ai_backend': ai_state['active_backend'],
+        'ai_configured_backend': ai_state['configured_backend'],
+        'ai_available': ai_state['inference_available'],
+        'ai_mode': ai_state['mode'],
+        'ai_error': ai_state['error'],
+        **live_detection_status.get(camera_key, {'state': 'waiting', 'reason': 'No live detection has run yet.'}),
+    }
+
+
 def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any]) -> int | None:
+    camera_id = str(settings.get('id') or 'camera')
     detection_settings = settings.get('detection') or {}
     if detection_settings.get('object_detection_enabled') is False:
+        update_live_detection_status(camera_id, state='skipped', reason='Object detection is disabled for this camera.')
         return None
     if getattr(detector, 'backend', 'mock') == 'mock' or not hasattr(detector, 'detect_image'):
+        update_live_detection_status(camera_id, state='skipped', reason='Live stream alerts require ONNX AI mode, not mock mode.')
         return None
 
-    camera_id = str(settings.get('id') or 'camera')
     now = time.time()
     if now - live_detection_last_checked.get(camera_id, 0) < LIVE_DETECTION_INTERVAL_SECONDS:
         return None
@@ -340,21 +369,26 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
 
     ai_state = ai_status_payload()
     if not ai_state['detector_loaded']:
+        update_live_detection_status(camera_id, state='skipped', reason=ai_state['last_detector_error'] or 'ONNX detector is not loaded.', ai=ai_state)
         return None
 
     try:
         detections = detector.detect_image(image_bytes)
     except (DetectorUnavailableError, ValueError) as exc:
         logger.warning('Live detection skipped for camera %s: %s', camera_id, exc)
+        update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state)
         return None
 
     detections = normalize_detection_boxes_for_frame(detections, frame)
+    raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     detections = filter_detections_for_camera(detections, settings)
     if not detections:
+        update_live_detection_status(camera_id, state='checked', reason='No detections matched this camera and its monitoring areas.', detected_labels=raw_labels, matched_labels=[])
         return None
 
     alerts.rules = effective_alert_rules()
     triggered = alerts.process(detections)
+    matched_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
 
     event_time = datetime.now(timezone.utc).isoformat()
     snapshot_path = storage.save_image_snapshot(image_bytes, f'{camera_id}.jpg')
@@ -385,6 +419,23 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             message=alert['message'],
         )
     deliver_email_alerts(triggered, event_id)
+    email_rules = [
+        rule for rule in effective_alert_rules()
+        if rule.get('enabled', True) and rule.get('email_enabled') and str(rule.get('object')) in {alert.get('label') for alert in triggered}
+    ]
+    email_recipients = sorted({recipient for rule in email_rules for recipient in rule.get('email_recipients', [])})
+    update_live_detection_status(
+        camera_id,
+        state='alerted' if triggered else 'checked',
+        reason='Alert matched.' if triggered else 'Detections found, but no alert rule matched or rule is in cooldown.',
+        detected_labels=raw_labels,
+        matched_labels=matched_labels,
+        triggered_alerts=triggered,
+        event_id=event_id,
+        email_enabled_rules=len(email_rules),
+        email_recipients=email_recipients,
+        email_attempted=bool(triggered and email_recipients and effective_email_alert_settings().get('enabled')),
+    )
     return event_id
 
 
@@ -1095,6 +1146,7 @@ def status(camera_id: str | None = None):
         'ai_available': ai_state['inference_available'],
         'ai_error': ai_state['error'],
         'ai_mode': ai_state['mode'],
+        'live_detection': live_detection_status_payload(camera_id),
         'frame_number': frame['frame_number'],
         'uptime_seconds': frame['uptime_seconds'],
         'resolution': {'width': frame['width'], 'height': frame['height']},
@@ -1104,6 +1156,11 @@ def status(camera_id: str | None = None):
 @app.get('/api/status/ai')
 def ai_status():
     return ai_status_payload()
+
+
+@app.get('/api/live/detection-status')
+def live_detection_status_api(camera_id: str | None = None):
+    return live_detection_status_payload(camera_id)
 
 
 @app.get('/api/live/snapshot')

@@ -2,6 +2,7 @@ const liveEls = {
   frame: document.getElementById('liveFrame'),
   frameWrap: document.getElementById('liveFrameWrap'),
   status: document.getElementById('liveStatus'),
+  detectionStatus: document.getElementById('liveDetectionStatus'),
   overlayToggle: document.getElementById('overlayToggle'),
   cameraSelect: document.getElementById('cameraSelect'),
   zoneOverlay: document.getElementById('zoneOverlay'),
@@ -14,6 +15,7 @@ const liveEls = {
 
 const LIVE_REFRESH_MS = 250;
 let refreshTimer;
+let detectionStatusTimer;
 let csrfToken = null;
 let cameras = [];
 let selectedCamera = null;
@@ -100,6 +102,30 @@ function refreshFrame() {
   liveEls.frame.src = snapshotUrl();
 }
 
+function formatDetectionStatus(payload) {
+  if (!payload) return 'Live AI status unavailable.';
+  const labels = (payload.detected_labels || []).join(', ') || 'none';
+  const alerts = (payload.triggered_alerts || []).map((alert) => alert.rule_name).join(', ') || 'none';
+  const email = payload.email_attempted
+    ? `email sent/attempted to ${(payload.email_recipients || []).join(', ')}`
+    : payload.email_enabled_rules
+      ? 'email rule matched but delivery was not attempted'
+      : 'no email-enabled matching rule';
+  if (payload.state === 'alerted') return `Live AI: alert matched (${alerts}); ${email}.`;
+  if (payload.state === 'checked') return `Live AI: checked; labels: ${labels}; ${payload.reason}`;
+  return `Live AI: ${payload.state || 'waiting'} - ${payload.reason || payload.ai_error || 'waiting for frames'}`;
+}
+
+async function refreshDetectionStatus() {
+  if (!selectedCamera || !liveEls.detectionStatus) return;
+  try {
+    const cameraId = encodeURIComponent(selectedCamera.id);
+    liveEls.detectionStatus.textContent = formatDetectionStatus(await api(`/api/live/detection-status?camera_id=${cameraId}`));
+  } catch (error) {
+    liveEls.detectionStatus.textContent = `Live AI status unavailable: ${error.message}`;
+  }
+}
+
 function setSelectedCamera(cameraId) {
   selectedCamera = cameras.find((camera) => camera.id === cameraId) || cameras[0];
   if (!selectedCamera) return;
@@ -109,6 +135,7 @@ function setSelectedCamera(cameraId) {
   liveEls.objectDetectionEnabled.value = String(cameraDetection().object_detection_enabled !== false);
   renderZones();
   refreshFrame();
+  refreshDetectionStatus();
 }
 
 function renderCameraOptions() {
@@ -345,6 +372,7 @@ liveEls.saveZonesBtn.addEventListener('click', async () => {
     cameras = payload.cameras || [];
     setSelectedCamera(cameraId);
     liveEls.status.textContent = 'Monitoring areas saved.';
+    await refreshDetectionStatus();
   } catch (error) {
     liveEls.status.textContent = error.message;
   } finally {
@@ -361,7 +389,11 @@ async function init() {
   cameras = payload.cameras || [];
   renderCameraOptions();
   refreshTimer = setInterval(refreshFrame, LIVE_REFRESH_MS);
+  detectionStatusTimer = setInterval(refreshDetectionStatus, 2000);
 }
 
 init().catch((error) => { liveEls.status.textContent = error.message; });
-window.addEventListener('beforeunload', () => clearInterval(refreshTimer));
+window.addEventListener('beforeunload', () => {
+  clearInterval(refreshTimer);
+  clearInterval(detectionStatusTimer);
+});

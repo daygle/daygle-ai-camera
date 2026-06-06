@@ -1228,7 +1228,7 @@ def test_live_stream_detection_triggers_email_alert(tmp_path, monkeypatch):
     event_id = main.process_live_stream_alerts(
         b'jpeg-frame',
         {'width': 1280, 'height': 720},
-        {'id': 'front-door', 'name': 'Front Door', 'detection': {'object_detection_enabled': True, 'zones': []}},
+        {'id': 'camera-1', 'name': 'Front Door', 'detection': {'object_detection_enabled': True, 'zones': []}},
     )
 
     assert event_id is not None
@@ -1239,6 +1239,10 @@ def test_live_stream_detection_triggers_email_alert(tmp_path, monkeypatch):
     assert sent
     assert sent[0][0]['rule_name'] == 'Person live'
     assert sent[0][2] == ['owner@example.com']
+    status = main.live_detection_status_payload('camera-1')
+    assert status['state'] == 'alerted'
+    assert status['detected_labels'] == ['person']
+    assert status['email_attempted'] is True
 
 
 def test_onvif_camera_settings_require_stream_source(tmp_path, monkeypatch):
