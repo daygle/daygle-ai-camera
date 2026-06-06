@@ -13,10 +13,9 @@ Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/daygle-ai-camera/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8080
 Restart=on-failure
 RestartSec=5
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ReadWritePaths=/var/lib/daygle-ai-camera /etc/daygle-ai-camera /opt/daygle-ai-camera/data
+
+# Minimal sandboxing (safe + compatible)
+ReadWritePaths=/etc/daygle-ai-camera /opt/daygle-ai-camera/data
 
 [Install]
 WantedBy=multi-user.target
