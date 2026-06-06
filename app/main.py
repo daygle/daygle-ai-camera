@@ -251,6 +251,36 @@ def normalize_camera_recording_settings(settings: Any) -> dict[str, Any]:
     return recording
 
 
+def normalize_zone_point(point: Any) -> dict[str, float] | None:
+    if not isinstance(point, dict):
+        return None
+    try:
+        x = max(0.0, min(1.0, float(point.get('x') or 0)))
+        y = max(0.0, min(1.0, float(point.get('y') or 0)))
+    except (TypeError, ValueError):
+        return None
+    return {'x': round(x, 4), 'y': round(y, 4)}
+
+
+def rectangle_zone_points(x: float, y: float, width: float, height: float) -> list[dict[str, float]]:
+    return [
+        {'x': round(x, 4), 'y': round(y, 4)},
+        {'x': round(x + width, 4), 'y': round(y, 4)},
+        {'x': round(x + width, 4), 'y': round(y + height, 4)},
+        {'x': round(x, 4), 'y': round(y + height, 4)},
+    ]
+
+
+def zone_bounds(points: list[dict[str, float]]) -> tuple[float, float, float, float]:
+    xs = [point['x'] for point in points]
+    ys = [point['y'] for point in points]
+    left = min(xs)
+    top = min(ys)
+    right = max(xs)
+    bottom = max(ys)
+    return left, top, max(0.01, right - left), max(0.01, bottom - top)
+
+
 def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     if not isinstance(zones, list):
@@ -262,6 +292,10 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
         y = max(0.0, min(1.0, float(zone.get('y') or 0)))
         width = max(0.01, min(1.0 - x, float(zone.get('width') or 0)))
         height = max(0.01, min(1.0 - y, float(zone.get('height') or 0)))
+        points = [point for point in (normalize_zone_point(point) for point in zone.get('points') or []) if point is not None]
+        if len(points) < 3:
+            points = rectangle_zone_points(x, y, width, height)
+        x, y, width, height = zone_bounds(points)
         normalized.append({
             'id': normalize_camera_id(zone.get('id'), f'zone-{index}'),
             'name': str(zone.get('name') or f'Zone {index}').strip() or f'Zone {index}',
@@ -269,6 +303,7 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
             'y': round(y, 4),
             'width': round(width, 4),
             'height': round(height, 4),
+            'points': points,
             'enabled': bool(zone.get('enabled', True)),
             'monitor_motion': bool(zone.get('monitor_motion', True)),
             'monitor_objects': bool(zone.get('monitor_objects', True)),
@@ -332,10 +367,44 @@ def detection_center_in_zone(detection: dict[str, Any], zone: dict[str, Any]) ->
     box = detection.get('box') or {}
     center_x = float(box.get('x') or 0) + (float(box.get('width') or 0) / 2)
     center_y = float(box.get('y') or 0) + (float(box.get('height') or 0) / 2)
+    points = zone.get('points') or []
+    if isinstance(points, list) and len(points) >= 3:
+        return point_in_polygon(center_x, center_y, points)
     return (
         float(zone['x']) <= center_x <= float(zone['x']) + float(zone['width'])
         and float(zone['y']) <= center_y <= float(zone['y']) + float(zone['height'])
     )
+
+
+def point_in_polygon(x: float, y: float, points: list[dict[str, Any]]) -> bool:
+    inside = False
+    vertex_count = len(points)
+    previous = points[-1]
+    for current in points:
+        try:
+            current_x = float(current.get('x') or 0)
+            current_y = float(current.get('y') or 0)
+            previous_x = float(previous.get('x') or 0)
+            previous_y = float(previous.get('y') or 0)
+        except (TypeError, ValueError):
+            previous = current
+            continue
+        if point_on_segment(x, y, previous_x, previous_y, current_x, current_y):
+            return True
+        intersects = (current_y > y) != (previous_y > y)
+        if intersects:
+            slope_x = (previous_x - current_x) * (y - current_y) / ((previous_y - current_y) or 1e-12) + current_x
+            if x < slope_x:
+                inside = not inside
+        previous = current
+    return inside if vertex_count >= 3 else False
+
+
+def point_on_segment(x: float, y: float, x1: float, y1: float, x2: float, y2: float) -> bool:
+    cross = (y - y1) * (x2 - x1) - (x - x1) * (y2 - y1)
+    if abs(cross) > 1e-9:
+        return False
+    return min(x1, x2) - 1e-9 <= x <= max(x1, x2) + 1e-9 and min(y1, y2) - 1e-9 <= y <= max(y1, y2) + 1e-9
 
 
 def filter_detections_for_camera(detections: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
@@ -909,14 +978,25 @@ def render_live_snapshot_svg(
         for zone in zones or []:
             if not zone.get('enabled', True):
                 continue
-            zx = max(0, float(zone.get('x') or 0) * width)
-            zy = max(0, float(zone.get('y') or 0) * height)
-            zw = max(1, float(zone.get('width') or 0) * width)
-            zh = max(1, float(zone.get('height') or 0) * height)
+            points = zone.get('points') or rectangle_zone_points(
+                max(0.0, min(1.0, float(zone.get('x') or 0))),
+                max(0.0, min(1.0, float(zone.get('y') or 0))),
+                max(0.01, min(1.0, float(zone.get('width') or 0))),
+                max(0.01, min(1.0, float(zone.get('height') or 0))),
+            )
+            svg_points = []
+            for point in points:
+                if not isinstance(point, dict):
+                    continue
+                svg_points.append(f"{max(0, float(point.get('x') or 0) * width):.1f},{max(0, float(point.get('y') or 0) * height):.1f}")
+            if len(svg_points) < 3:
+                continue
+            label_x = max(0, float(points[0].get('x') or 0) * width) + 12
+            label_y = max(30, float(points[0].get('y') or 0) * height + 30)
             zone_name = escape(str(zone.get('name') or 'Monitoring area'))
             zone_markup.append(
-                f'<g class="monitor-zone"><rect x="{zx:.1f}" y="{zy:.1f}" width="{zw:.1f}" height="{zh:.1f}" />'
-                f'<text x="{zx + 12:.1f}" y="{zy + 30:.1f}">{zone_name}</text></g>'
+                f'<g class="monitor-zone"><polygon points="{" ".join(svg_points)}" />'
+                f'<text x="{label_x:.1f}" y="{label_y:.1f}">{zone_name}</text></g>'
             )
 
     detection_markup: list[str] = []
@@ -952,7 +1032,7 @@ def render_live_snapshot_svg(
       .grid line {{ stroke: rgba(255,255,255,.08); stroke-width: 1; }}
       .hud {{ fill: #edf3ff; font: 700 26px Inter, Arial, sans-serif; letter-spacing: .04em; }}
       .muted {{ fill: #91a1ba; font: 700 20px Inter, Arial, sans-serif; }}
-      .monitor-zone rect {{ fill: rgba(71,214,255,.08); stroke: #47d6ff; stroke-width: 3; stroke-dasharray: 12 10; rx: 14; }}
+      .monitor-zone polygon {{ fill: rgba(71,214,255,.08); stroke: #47d6ff; stroke-width: 3; stroke-dasharray: 12 10; }}
       .monitor-zone text {{ fill: #47d6ff; font: 800 20px Inter, Arial, sans-serif; paint-order: stroke; stroke: rgba(7,11,19,.86); stroke-width: 4; stroke-linejoin: round; }}
       .detection-box rect {{ fill: rgba(73,230,163,.08); stroke: #49e6a3; stroke-width: 4; rx: 18; }}
       .detection-box text {{ fill: #49e6a3; font: 800 24px Inter, Arial, sans-serif; paint-order: stroke; stroke: rgba(7,11,19,.86); stroke-width: 5; stroke-linejoin: round; }}

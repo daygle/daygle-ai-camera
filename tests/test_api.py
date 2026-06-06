@@ -1791,3 +1791,38 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+def test_polygon_monitoring_zones_are_normalized_and_filter_by_shape(tmp_path, monkeypatch):
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    main = sys.modules["app.main"]
+    triangle = {
+        'id': 'triangle',
+        'name': 'Triangle',
+        'points': [
+            {'x': 0.1, 'y': 0.1},
+            {'x': 0.8, 'y': 0.1},
+            {'x': 0.1, 'y': 0.8},
+        ],
+        'monitor_motion': True,
+        'monitor_objects': True,
+        'monitor_anpr': True,
+    }
+
+    zones = main.normalize_monitoring_zones([triangle])
+
+    assert zones[0]['x'] == 0.1
+    assert zones[0]['y'] == 0.1
+    assert zones[0]['width'] == 0.7
+    assert zones[0]['height'] == 0.7
+    assert zones[0]['points'] == triangle['points']
+
+    settings = {'detection': {'zones': zones}}
+    detections = [
+        {'label': 'person', 'box': {'x': 0.25, 'y': 0.25, 'width': 0.1, 'height': 0.1}},
+        {'label': 'car', 'box': {'x': 0.7, 'y': 0.7, 'width': 0.1, 'height': 0.1}},
+    ]
+
+    filtered = main.filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects', require_zones=True)
+
+    assert [detection['label'] for detection in filtered] == ['person']

@@ -20,7 +20,7 @@ let cameras = [];
 let selectedCamera = null;
 let selectedZoneIndex = null;
 let drawingMode = false;
-let draftBox = null;
+let draftPolygon = null;
 let zoneDrag = null;
 
 function escapeHtml(value) {
@@ -58,11 +58,48 @@ function clamp(value, min = 0, max = 1) {
   return Math.max(min, Math.min(max, value));
 }
 
+function normalizePoint(point) {
+  return {
+    x: clamp(Number(point?.x) || 0),
+    y: clamp(Number(point?.y) || 0),
+  };
+}
+
+function rectanglePoints(zone) {
+  const x = clamp(Number(zone.x) || 0);
+  const y = clamp(Number(zone.y) || 0);
+  const width = clamp(Number(zone.width) || 0.01, 0.01, 1 - x);
+  const height = clamp(Number(zone.height) || 0.01, 0.01, 1 - y);
+  return [
+    { x, y },
+    { x: x + width, y },
+    { x: x + width, y: y + height },
+    { x, y: y + height },
+  ];
+}
+
+function updateZoneBounds(zone) {
+  const points = zone.points || rectanglePoints(zone);
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const left = Math.min(...xs);
+  const top = Math.min(...ys);
+  const right = Math.max(...xs);
+  const bottom = Math.max(...ys);
+  zone.x = roundCoord(left);
+  zone.y = roundCoord(top);
+  zone.width = roundCoord(Math.max(0.01, right - left));
+  zone.height = roundCoord(Math.max(0.01, bottom - top));
+}
+
+function roundCoord(value) {
+  return Math.round(clamp(value) * 10000) / 10000;
+}
+
 function normalizeZone(zone) {
-  zone.x = clamp(Number(zone.x) || 0);
-  zone.y = clamp(Number(zone.y) || 0);
-  zone.width = clamp(Number(zone.width) || 0.01, 0.01, 1 - zone.x);
-  zone.height = clamp(Number(zone.height) || 0.01, 0.01, 1 - zone.y);
+  const sourcePoints = Array.isArray(zone.points) && zone.points.length >= 3 ? zone.points : rectanglePoints(zone);
+  zone.points = sourcePoints.map(normalizePoint);
+  updateZoneBounds(zone);
   return zone;
 }
 
@@ -154,20 +191,23 @@ function renderCameraOptions() {
 
 function renderZoneBox(zone, index) {
   const selected = index === selectedZoneIndex ? ' selected' : '';
+  const points = zone.points.map((point) => `${point.x * 100},${point.y * 100}`).join(' ');
+  const labelPoint = zone.points[0] || { x: zone.x, y: zone.y };
+  const handles = zone.points.map((point, pointIndex) => (
+    `<i class="zone-handle zone-point-handle" data-zone-index="${index}" data-point-index="${pointIndex}" style="left:${point.x * 100}%;top:${point.y * 100}%"></i>`
+  )).join('');
   return `
-    <div class="monitor-zone-box${selected}" data-zone-index="${index}" style="left:${zone.x * 100}%;top:${zone.y * 100}%;width:${zone.width * 100}%;height:${zone.height * 100}%">
-      <span>${escapeHtml(zone.name || `Zone ${index + 1}`)}</span>
-      <i class="zone-handle zone-handle-nw" data-zone-index="${index}" data-resize-zone="nw"></i>
-      <i class="zone-handle zone-handle-ne" data-zone-index="${index}" data-resize-zone="ne"></i>
-      <i class="zone-handle zone-handle-sw" data-zone-index="${index}" data-resize-zone="sw"></i>
-      <i class="zone-handle zone-handle-se" data-zone-index="${index}" data-resize-zone="se"></i>
-    </div>
+    <svg class="monitor-zone-polygon${selected}" data-zone-index="${index}" viewBox="0 0 100 100" preserveAspectRatio="none">
+      <polygon data-zone-index="${index}" points="${points}"></polygon>
+    </svg>
+    <span class="zone-label${selected}" data-zone-index="${index}" style="left:${labelPoint.x * 100}%;top:${labelPoint.y * 100}%">${escapeHtml(zone.name || `Zone ${index + 1}`)}</span>
+    ${handles}
   `;
 }
 
 function updateSelectionStyles() {
-  liveEls.zoneOverlay.querySelectorAll('[data-zone-index]').forEach((box) => {
-    box.classList.toggle('selected', Number(box.dataset.zoneIndex) === selectedZoneIndex);
+  liveEls.zoneOverlay.querySelectorAll('.monitor-zone-polygon, .zone-label').forEach((element) => {
+    element.classList.toggle('selected', Number(element.dataset.zoneIndex) === selectedZoneIndex);
   });
   liveEls.zoneList.querySelectorAll('[data-select-zone]').forEach((row) => {
     row.classList.toggle('selected', Number(row.dataset.selectZone) === selectedZoneIndex);
@@ -181,7 +221,7 @@ function renderZones() {
   liveEls.zoneOverlay.innerHTML = zones.map((zone, index) => (zone.enabled === false ? '' : renderZoneBox(zone, index))).join('');
 
   if (!zones.length) {
-    liveEls.zoneList.innerHTML = '<div class="empty">No monitoring areas yet. Click "Draw area", then drag on the footage.</div>';
+    liveEls.zoneList.innerHTML = '<div class="empty">No monitoring areas yet. Click "Draw area", place corner dots on the footage, then finish the area.</div>';
     return;
   }
 
@@ -201,7 +241,7 @@ function renderZones() {
     input.addEventListener('input', () => {
       const index = Number(input.dataset.zoneName);
       zones[index].name = input.value;
-      const label = liveEls.zoneOverlay.querySelector(`[data-zone-index="${index}"] span`);
+      const label = liveEls.zoneOverlay.querySelector(`.zone-label[data-zone-index="${index}"]`);
       if (label) label.textContent = input.value || `Zone ${index + 1}`;
     });
   });
@@ -283,8 +323,20 @@ function updateDraggedZone(event) {
   const dy = point.y - zoneDrag.startPoint.y;
 
   if (zoneDrag.mode === 'move') {
-    zone.x = clamp(zoneDrag.startZone.x + dx, 0, 1 - zone.width);
-    zone.y = clamp(zoneDrag.startZone.y + dy, 0, 1 - zone.height);
+    const xs = zoneDrag.startPoints.map((startPoint) => startPoint.x);
+    const ys = zoneDrag.startPoints.map((startPoint) => startPoint.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const safeDx = clamp(dx, -minX, 1 - maxX);
+    const safeDy = clamp(dy, -minY, 1 - maxY);
+    zone.points = zoneDrag.startPoints.map((startPoint) => ({
+      x: roundCoord(startPoint.x + safeDx),
+      y: roundCoord(startPoint.y + safeDy),
+    }));
+  } else if (zoneDrag.mode === 'point') {
+    zone.points[zoneDrag.pointIndex] = normalizePoint(point);
   } else {
     const start = zoneDrag.startZone;
     let left = start.x;
@@ -305,21 +357,64 @@ function updateDraggedZone(event) {
   renderZones();
 }
 
+function draftPolygonMarkup() {
+  if (!draftPolygon?.points.length) return '';
+  const points = [...draftPolygon.points, draftPolygon.preview].filter(Boolean);
+  const pointList = points.map((point) => `${point.x * 100},${point.y * 100}`).join(' ');
+  const handles = draftPolygon.points.map((point) => (
+    `<i class="zone-handle zone-point-handle draft-point" style="left:${point.x * 100}%;top:${point.y * 100}%"></i>`
+  )).join('');
+  return `
+    <svg class="monitor-zone-polygon draft" viewBox="0 0 100 100" preserveAspectRatio="none">
+      <polyline points="${pointList}"></polyline>
+    </svg>
+    ${handles}
+  `;
+}
+
+function renderDraftPolygon() {
+  liveEls.zoneOverlay.querySelectorAll('.draft, .draft-point').forEach((element) => element.remove());
+  liveEls.zoneOverlay.insertAdjacentHTML('beforeend', draftPolygonMarkup());
+}
+
+function finishDraftPolygon() {
+  if (!draftPolygon || draftPolygon.points.length < 3) return;
+  const zones = cameraDetection().zones;
+  zones.push({
+    id: `zone-${Date.now()}`,
+    name: `Zone ${zones.length + 1}`,
+    points: draftPolygon.points.map(normalizePoint),
+    enabled: true,
+    monitor_motion: true,
+    monitor_objects: true,
+    monitor_anpr: true,
+  });
+  selectedZoneIndex = zones.length - 1;
+  normalizeZone(zones[selectedZoneIndex]);
+  draftPolygon = null;
+  drawingMode = false;
+  liveEls.addZoneBtn.textContent = 'Draw area';
+  renderZones();
+  refreshFrame();
+}
+
 liveEls.zoneOverlay.addEventListener('pointerdown', (event) => {
   if (!selectedCamera) return;
-  const resizeHandle = event.target.closest('[data-resize-zone]');
-  const zoneBox = event.target.closest('[data-zone-index]');
+  const pointHandle = event.target.closest('[data-point-index]');
+  const zoneBox = event.target.closest('.monitor-zone-polygon[data-zone-index], .zone-label[data-zone-index], polygon[data-zone-index]');
 
-  if (resizeHandle || zoneBox) {
+  if (pointHandle || zoneBox) {
     event.preventDefault();
-    const index = Number((resizeHandle || zoneBox).dataset.zoneIndex);
+    const index = Number((pointHandle || zoneBox).dataset.zoneIndex);
     const zone = cameraDetection().zones[index];
     selectedZoneIndex = index;
     zoneDrag = {
       index,
-      mode: resizeHandle?.dataset.resizeZone || 'move',
+      mode: pointHandle ? 'point' : 'move',
+      pointIndex: pointHandle ? Number(pointHandle.dataset.pointIndex) : null,
       startPoint: pointFromEvent(event),
       startZone: { ...zone },
+      startPoints: zone.points.map((zonePoint) => ({ ...zonePoint })),
     };
     liveEls.zoneOverlay.setPointerCapture(event.pointerId);
     renderZones();
@@ -327,8 +422,17 @@ liveEls.zoneOverlay.addEventListener('pointerdown', (event) => {
   }
 
   if (!drawingMode) return;
-  const start = pointFromEvent(event);
-  draftBox = { start, end: start };
+  event.preventDefault();
+  const point = pointFromEvent(event);
+  draftPolygon ||= { points: [], preview: point };
+  draftPolygon.points.push(point);
+  draftPolygon.preview = point;
+  liveEls.addZoneBtn.textContent = draftPolygon.points.length >= 3 ? 'Finish area' : 'Cancel drawing';
+  renderDraftPolygon();
+  if (event.detail >= 2 && draftPolygon.points.length >= 3) {
+    finishDraftPolygon();
+    return;
+  }
   liveEls.zoneOverlay.setPointerCapture(event.pointerId);
 });
 
@@ -338,14 +442,9 @@ liveEls.zoneOverlay.addEventListener('pointermove', (event) => {
     return;
   }
 
-  if (!draftBox) return;
-  draftBox.end = pointFromEvent(event);
-  const x = Math.min(draftBox.start.x, draftBox.end.x);
-  const y = Math.min(draftBox.start.y, draftBox.end.y);
-  const width = Math.abs(draftBox.end.x - draftBox.start.x);
-  const height = Math.abs(draftBox.end.y - draftBox.start.y);
-  liveEls.zoneOverlay.querySelector('.draft')?.remove();
-  liveEls.zoneOverlay.insertAdjacentHTML('beforeend', `<div class="monitor-zone-box draft" style="left:${x * 100}%;top:${y * 100}%;width:${width * 100}%;height:${height * 100}%"><span>New area</span></div>`);
+  if (!draftPolygon) return;
+  draftPolygon.preview = pointFromEvent(event);
+  renderDraftPolygon();
 });
 
 liveEls.zoneOverlay.addEventListener('pointerup', (event) => {
@@ -355,29 +454,12 @@ liveEls.zoneOverlay.addEventListener('pointerup', (event) => {
     renderZones();
     return;
   }
-
-  if (!draftBox) return;
-  const end = pointFromEvent(event);
-  const x = Math.min(draftBox.start.x, end.x);
-  const y = Math.min(draftBox.start.y, end.y);
-  const width = Math.abs(end.x - draftBox.start.x);
-  const height = Math.abs(end.y - draftBox.start.y);
-  draftBox = null;
-  drawingMode = false;
-  liveEls.addZoneBtn.textContent = 'Draw area';
-  if (width >= 0.02 && height >= 0.02) {
-    const zones = cameraDetection().zones;
-    zones.push({ id: `zone-${Date.now()}`, name: `Zone ${zones.length + 1}`, x, y, width, height, enabled: true, monitor_motion: true, monitor_objects: true, monitor_anpr: true });
-    selectedZoneIndex = zones.length - 1;
-  }
-  renderZones();
-  refreshFrame();
 });
 
 liveEls.zoneOverlay.addEventListener('pointercancel', () => {
-  draftBox = null;
   zoneDrag = null;
   renderZones();
+  if (draftPolygon) renderDraftPolygon();
 });
 
 liveEls.frame.addEventListener('load', () => {
@@ -397,10 +479,15 @@ liveEls.frame.addEventListener('error', () => {
 liveEls.overlayToggle.addEventListener('change', refreshFrame);
 liveEls.cameraSelect.addEventListener('change', () => setSelectedCamera(liveEls.cameraSelect.value));
 liveEls.addZoneBtn.addEventListener('click', () => {
+  if (drawingMode && draftPolygon?.points.length >= 3) {
+    finishDraftPolygon();
+    return;
+  }
   drawingMode = !drawingMode;
-  draftBox = null;
+  draftPolygon = null;
   zoneDrag = null;
   liveEls.addZoneBtn.textContent = drawingMode ? 'Cancel drawing' : 'Draw area';
+  renderZones();
 });
 liveEls.saveZonesBtn.addEventListener('click', async () => {
   try {
