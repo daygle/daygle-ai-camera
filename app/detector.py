@@ -186,7 +186,10 @@ class OnnxYoloDetector:
 
         try:
             providers = ["CPUExecutionProvider"]
-            self.session = ort.InferenceSession(str(self.model_path), providers=providers)
+            session_options = ort.SessionOptions()
+            session_options.intra_op_num_threads = 1
+            session_options.inter_op_num_threads = 1
+            self.session = ort.InferenceSession(str(self.model_path), sess_options=session_options, providers=providers)
             self.input_name = self.session.get_inputs()[0].name
             self.output_names = [output.name for output in self.session.get_outputs()]
         except Exception as exc:  # pragma: no cover - depends on runtime/model internals
