@@ -7,14 +7,12 @@ const liveEls = {
   cameraSelect: document.getElementById('cameraSelect'),
   zoneOverlay: document.getElementById('zoneOverlay'),
   zoneList: document.getElementById('zoneList'),
+  cameraRecordingControls: document.getElementById('cameraRecordingControls'),
   addZoneBtn: document.getElementById('addZoneBtn'),
   saveZonesBtn: document.getElementById('saveZonesBtn'),
-  motionEnabled: document.getElementById('motionEnabled'),
-  objectDetectionEnabled: document.getElementById('objectDetectionEnabled'),
-  anprEnabled: document.getElementById('anprEnabled'),
 };
 
-const LIVE_REFRESH_MS = 250;
+const LIVE_REFRESH_MS = 500;
 let refreshTimer;
 let detectionStatusTimer;
 let csrfToken = null;
@@ -43,9 +41,17 @@ async function api(path, options = {}) {
 }
 
 function cameraDetection() {
-  selectedCamera.detection ||= { motion_enabled: true, object_detection_enabled: true, anpr_enabled: true, zones: [] };
+  selectedCamera.detection ||= { zones: [] };
   selectedCamera.detection.zones ||= [];
   return selectedCamera.detection;
+}
+
+function cameraRecording() {
+  selectedCamera.recording ||= { enabled: true, record_on_alert: true, continuous: false };
+  selectedCamera.recording.enabled ??= true;
+  selectedCamera.recording.record_on_alert ??= true;
+  selectedCamera.recording.continuous ??= false;
+  return selectedCamera.recording;
 }
 
 function clamp(value, min = 0, max = 1) {
@@ -135,10 +141,8 @@ function setSelectedCamera(cameraId) {
   if (!selectedCamera) return;
   selectedZoneIndex = null;
   liveEls.cameraSelect.value = selectedCamera.id;
-  liveEls.motionEnabled.value = String(cameraDetection().motion_enabled !== false);
-  liveEls.objectDetectionEnabled.value = String(cameraDetection().object_detection_enabled !== false);
-  liveEls.anprEnabled.value = String(cameraDetection().anpr_enabled !== false);
   renderZones();
+  renderCameraRecordingControls();
   refreshFrame();
   refreshDetectionStatus();
 }
@@ -174,7 +178,7 @@ function renderZones() {
   if (!selectedCamera) return;
   syncZoneOverlayToImage();
   const zones = cameraDetection().zones.map(normalizeZone);
-  liveEls.zoneOverlay.innerHTML = zones.map(renderZoneBox).join('');
+  liveEls.zoneOverlay.innerHTML = zones.map((zone, index) => (zone.enabled === false ? '' : renderZoneBox(zone, index))).join('');
 
   if (!zones.length) {
     liveEls.zoneList.innerHTML = '<div class="empty">No monitoring areas yet. Click "Draw area", then drag on the footage.</div>';
@@ -182,8 +186,9 @@ function renderZones() {
   }
 
   liveEls.zoneList.innerHTML = zones.map((zone, index) => `
-    <div class="item zone-row ${index === selectedZoneIndex ? 'selected' : ''}" data-select-zone="${index}">
+    <div class="item zone-row ${index === selectedZoneIndex ? 'selected' : ''}${zone.enabled === false ? ' disabled' : ''}" data-select-zone="${index}">
       <input data-zone-name="${index}" value="${escapeHtml(zone.name || `Zone ${index + 1}`)}" />
+      <label><span>Zone</span><select data-zone-enabled="${index}"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Shown</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
       <label><span>Motion</span><select data-zone-motion="${index}"><option value="true" ${zone.monitor_motion !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_motion === false ? 'selected' : ''}>Off</option></select></label>
       <label><span>Objects</span><select data-zone-objects="${index}"><option value="true" ${zone.monitor_objects !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_objects === false ? 'selected' : ''}>Off</option></select></label>
       <label><span>ANPR</span><select data-zone-anpr="${index}"><option value="true" ${zone.monitor_anpr !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_anpr === false ? 'selected' : ''}>Off</option></select></label>
@@ -198,6 +203,14 @@ function renderZones() {
       zones[index].name = input.value;
       const label = liveEls.zoneOverlay.querySelector(`[data-zone-index="${index}"] span`);
       if (label) label.textContent = input.value || `Zone ${index + 1}`;
+    });
+  });
+  document.querySelectorAll('[data-zone-enabled]').forEach((select) => {
+    select.addEventListener('change', () => {
+      selectedZoneIndex = Number(select.dataset.zoneEnabled);
+      zones[selectedZoneIndex].enabled = select.value === 'true';
+      renderZones();
+      refreshFrame();
     });
   });
   document.querySelectorAll('[data-zone-motion]').forEach((select) => {
@@ -234,6 +247,21 @@ function renderZones() {
       if (event.target.closest('input, select, button')) return;
       selectedZoneIndex = Number(row.dataset.selectZone);
       renderZones();
+    });
+  });
+}
+
+function renderCameraRecordingControls() {
+  if (!selectedCamera || !liveEls.cameraRecordingControls) return;
+  const recording = cameraRecording();
+  liveEls.cameraRecordingControls.innerHTML = `
+    <label><span>Recording</span><select data-camera-recording="enabled"><option value="true" ${recording.enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${recording.enabled === false ? 'selected' : ''}>Disabled</option></select></label>
+    <label><span>Alert clips</span><select data-camera-recording="record_on_alert"><option value="true" ${recording.record_on_alert !== false ? 'selected' : ''}>Enabled</option><option value="false" ${recording.record_on_alert === false ? 'selected' : ''}>Disabled</option></select></label>
+    <label><span>Continuous</span><select data-camera-recording="continuous"><option value="false" ${recording.continuous !== true ? 'selected' : ''}>Disabled</option><option value="true" ${recording.continuous === true ? 'selected' : ''}>Enabled</option></select></label>
+  `;
+  liveEls.cameraRecordingControls.querySelectorAll('[data-camera-recording]').forEach((select) => {
+    select.addEventListener('change', () => {
+      cameraRecording()[select.dataset.cameraRecording] = select.value === 'true';
     });
   });
 }
@@ -374,9 +402,6 @@ liveEls.addZoneBtn.addEventListener('click', () => {
   zoneDrag = null;
   liveEls.addZoneBtn.textContent = drawingMode ? 'Cancel drawing' : 'Draw area';
 });
-liveEls.motionEnabled.addEventListener('change', () => { cameraDetection().motion_enabled = liveEls.motionEnabled.value === 'true'; });
-liveEls.objectDetectionEnabled.addEventListener('change', () => { cameraDetection().object_detection_enabled = liveEls.objectDetectionEnabled.value === 'true'; refreshFrame(); });
-liveEls.anprEnabled.addEventListener('change', () => { cameraDetection().anpr_enabled = liveEls.anprEnabled.value === 'true'; });
 liveEls.saveZonesBtn.addEventListener('click', async () => {
   try {
     liveEls.saveZonesBtn.disabled = true;

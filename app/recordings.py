@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from datetime import datetime, timedelta, timezone
@@ -31,21 +32,42 @@ class RecordingService:
         mode = str(self.recording_config.get('mode', 'motion')).lower()
         return mode if mode in self.VALID_MODES else 'motion'
 
-    def should_record(self, detections: list[dict[str, Any]]) -> tuple[bool, str, str | None]:
-        if not self.enabled:
+    def enabled_for(self, recording_config: dict[str, Any] | None = None) -> bool:
+        config = recording_config or self.recording_config
+        mode = self.mode_for(config)
+        return bool(config.get('enabled', True)) and mode != 'off'
+
+    def mode_for(self, recording_config: dict[str, Any] | None = None) -> str:
+        config = recording_config or self.recording_config
+        mode = str(config.get('mode', 'motion')).lower()
+        return mode if mode in self.VALID_MODES else 'motion'
+
+    def should_record(self, detections: list[dict[str, Any]], recording_config: dict[str, Any] | None = None) -> tuple[bool, str, str | None]:
+        config = recording_config or self.recording_config
+        mode = self.mode_for(config)
+        if not self.enabled_for(config):
             return False, 'off', None
         labels = [str(detection.get('label') or '').lower() for detection in detections]
         labels = [label for label in labels if label]
-        object_labels = {str(label).lower() for label in self.recording_config.get('record_on_objects', [])}
+        object_labels = {str(label).lower() for label in config.get('record_on_objects', [])}
 
-        if bool(self.recording_config.get('continuous')) or self.mode == 'continuous':
+        if bool(config.get('continuous')) or mode == 'continuous':
             return True, 'continuous', labels[0] if labels else None
-        if (self.mode == 'motion' or bool(self.recording_config.get('record_on_motion', True))) and labels:
+        if bool(config.get('record_on_alert', False)):
+            alert_labels = [
+                str(detection.get('label') or '').lower()
+                for detection in detections
+                if detection.get('alert_triggered') and detection.get('label')
+            ]
+            if alert_labels:
+                return True, 'alert', alert_labels[0]
+            return False, 'none', None
+        if (mode == 'motion' or bool(config.get('record_on_motion', True))) and labels:
             return True, 'motion', labels[0]
-        if (self.mode == 'human' or bool(self.recording_config.get('record_on_human', True))) and 'person' in labels:
+        if (mode == 'human' or bool(config.get('record_on_human', True))) and 'person' in labels:
             return True, 'human', 'person'
         for label in labels:
-            if self.mode == 'objects' or label in object_labels:
+            if mode == 'objects' or label in object_labels:
                 if label in object_labels:
                     return True, 'object', label
         return False, 'none', None
@@ -58,10 +80,12 @@ class RecordingService:
         detections: list[dict[str, Any]],
         *,
         write_clip: bool = True,
+        recording_config: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
-        should_record, trigger_type, trigger_label = self.should_record(detections)
+        should_record, trigger_type, trigger_label = self.should_record(detections, recording_config)
         if not should_record:
             return None
+        active_config = recording_config or self.recording_config
 
         try:
             created = datetime.fromisoformat(event_time)
@@ -70,9 +94,9 @@ class RecordingService:
         if created.tzinfo is None:
             created = created.replace(tzinfo=timezone.utc)
 
-        pre_seconds = max(0, int(self.recording_config.get('pre_event_seconds', 5)))
-        post_seconds = max(0, int(self.recording_config.get('post_event_seconds', 10)))
-        max_clip_seconds = max(1, int(self.recording_config.get('max_clip_seconds', 60)))
+        pre_seconds = max(0, int(active_config.get('pre_event_seconds', 5)))
+        post_seconds = max(0, int(active_config.get('post_event_seconds', 10)))
+        max_clip_seconds = max(1, int(active_config.get('max_clip_seconds', 60)))
         duration_seconds = min(max_clip_seconds, max(1, pre_seconds + post_seconds))
         started_at = created - timedelta(seconds=min(pre_seconds, duration_seconds))
         ended_at = started_at + timedelta(seconds=duration_seconds)
@@ -130,10 +154,14 @@ class RecordingService:
         if result.returncode != 0:
             if tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
-            raise RuntimeError(f'ffmpeg failed to record RTSP clip: {result.stderr[-500:]}')
+            raise RuntimeError(f'ffmpeg failed to record RTSP clip: {self.redact_stream_credentials(result.stderr[-500:])}')
         if not tmp_path.exists():
             raise RuntimeError('ffmpeg did not create an RTSP recording file.')
         tmp_path.replace(file_path)
+
+    @staticmethod
+    def redact_stream_credentials(message: str) -> str:
+        return re.sub(r'(rtsps?://[^:\s/@]+):[^@\s/]+@', r'\1:***@', message)
 
     def recording_format(self) -> str:
         configured = str(self.recording_config.get('format', self.PLAYBACK_FORMAT)).strip().lstrip('.').lower()

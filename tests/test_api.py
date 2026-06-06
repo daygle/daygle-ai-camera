@@ -1288,7 +1288,15 @@ def test_live_stream_detection_triggers_email_alert(tmp_path, monkeypatch):
     event_id = main.process_live_stream_alerts(
         b'jpeg-frame',
         {'width': 1280, 'height': 720},
-        {'id': 'camera-1', 'name': 'Front Door', 'detection': {'object_detection_enabled': True, 'zones': []}},
+        {
+            'id': 'camera-1',
+            'name': 'Front Door',
+            'detection': {
+                'zones': [
+                    {'id': 'porch', 'name': 'Porch', 'x': 0, 'y': 0, 'width': 1, 'height': 1, 'monitor_motion': True, 'monitor_objects': True, 'monitor_anpr': True},
+                ],
+            },
+        },
     )
 
     assert event_id is not None
@@ -1309,6 +1317,101 @@ def test_live_stream_detection_triggers_email_alert(tmp_path, monkeypatch):
     assert status['email_attempted'] is True
     assert status['recording_state'] == 'linked'
     assert status['recording_id'] == event['recordings'][0]['id']
+
+
+def test_live_stream_detection_without_alert_rule_does_not_record_by_default(tmp_path, monkeypatch):
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, image_bytes):
+            return [
+                {
+                    'label': 'person',
+                    'confidence': 0.91,
+                    'box': {'x': 64, 'y': 72, 'width': 320, 'height': 360},
+                }
+            ]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    main.live_detection_last_checked.clear()
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
+    for rule in main.database.list_alert_rules():
+        main.database.delete_alert_rule(rule['id'])
+
+    event_id = main.process_live_stream_alerts(
+        b'jpeg-frame',
+        {'width': 1280, 'height': 720},
+        {
+            'id': 'camera-1',
+            'name': 'Front Door',
+            'detection': {
+                'zones': [
+                    {'id': 'porch', 'name': 'Porch', 'x': 0, 'y': 0, 'width': 1, 'height': 1, 'monitor_motion': True, 'monitor_objects': True, 'monitor_anpr': True},
+                ],
+            },
+            'recording': {'enabled': True, 'record_on_alert': True, 'continuous': False},
+        },
+    )
+
+    assert event_id is not None
+    event = main.database.get_event(event_id)
+    assert event['recording_status'] == 'none'
+    status = main.live_detection_status_payload('camera-1')
+    assert status['state'] == 'checked'
+    assert status['recording_state'] == 'skipped'
+    assert 'waiting for an enabled alert rule' in status['recording_reason']
+
+
+def test_live_stream_camera_continuous_recording_records_without_alert_rule(tmp_path, monkeypatch):
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, image_bytes):
+            return [
+                {
+                    'label': 'person',
+                    'confidence': 0.91,
+                    'box': {'x': 64, 'y': 72, 'width': 320, 'height': 360},
+                }
+            ]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    main.live_detection_last_checked.clear()
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
+    for rule in main.database.list_alert_rules():
+        main.database.delete_alert_rule(rule['id'])
+
+    event_id = main.process_live_stream_alerts(
+        b'jpeg-frame',
+        {'width': 1280, 'height': 720},
+        {
+            'id': 'camera-1',
+            'name': 'Front Door',
+            'detection': {
+                'zones': [
+                    {'id': 'porch', 'name': 'Porch', 'x': 0, 'y': 0, 'width': 1, 'height': 1, 'monitor_motion': True, 'monitor_objects': True, 'monitor_anpr': True},
+                ],
+            },
+            'recording': {'enabled': True, 'record_on_alert': True, 'continuous': True},
+        },
+    )
+
+    assert event_id is not None
+    event = main.database.get_event(event_id)
+    assert event['recording_status'] == 'linked'
+    assert event['recordings'][0]['trigger_type'] == 'continuous'
+    status = main.live_detection_status_payload('camera-1')
+    assert status['recording_state'] == 'linked'
 
 
 def test_onvif_camera_settings_require_stream_source(tmp_path, monkeypatch):
@@ -1418,6 +1521,55 @@ def test_rtsp_recording_metadata_can_skip_generated_placeholder(tmp_path):
     assert metadata['source'] == 'rtsp'
     assert metadata['file_path'].endswith('.mp4')
     assert not Path(metadata['file_path']).exists()
+
+
+def test_rtsp_recording_errors_redact_stream_password():
+    from app.recordings import RecordingService
+
+    message = RecordingService.redact_stream_credentials(
+        'Error opening input file rtsp://admin:secret-password@192.168.40.101:554/live/0/MAIN.'
+    )
+
+    assert 'secret-password' not in message
+    assert 'rtsp://admin:***@192.168.40.101:554/live/0/MAIN' in message
+
+
+def test_rtsp_recording_capture_skips_overlapping_stream(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeRecordingService:
+        def __init__(self):
+            self.rtsp_calls = 0
+            self.fallback_calls = 0
+
+        def write_rtsp_clip(self, *_args):
+            self.rtsp_calls += 1
+
+        def write_event_clip(self, file_path, *_args):
+            self.fallback_calls += 1
+            Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(file_path).write_text('fallback', encoding='utf-8')
+
+    service = FakeRecordingService()
+    monkeypatch.setattr(main, 'recording_service', service)
+    stream_url = 'rtsp://admin:secret-password@192.168.40.101:554/live/0/MAIN'
+    main.active_rtsp_recording_streams.clear()
+    main.active_rtsp_recording_streams.add(stream_url)
+
+    file_path = tmp_path / 'recordings' / 'event_1.mp4'
+    main.start_rtsp_recording_capture(
+        stream_url,
+        {'file_path': str(file_path), 'duration_seconds': 10, 'trigger_type': 'motion'},
+        1,
+        [{'label': 'person'}],
+    )
+
+    assert service.rtsp_calls == 0
+    assert service.fallback_calls == 1
+    assert file_path.read_text(encoding='utf-8') == 'fallback'
+    assert stream_url in main.active_rtsp_recording_streams
+    main.active_rtsp_recording_streams.clear()
 
 
 def test_alerted_only_event_and_recording_queries_use_enabled_rules(tmp_path):

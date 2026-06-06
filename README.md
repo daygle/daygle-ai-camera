@@ -38,8 +38,8 @@ The app is now designed to be configured from the web UI. `config.yaml` is only 
 On a fresh Debian-like host:
 
 ```bash
-sudo apt update
-sudo apt install -y --no-install-recommends \
+apt update
+apt install -y --no-install-recommends \
   git \
   python3 \
   python3-pip \

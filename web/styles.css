@@ -308,8 +308,11 @@ input[type="file"] { padding: 10px; }
 .zone-handle-se { right: -8px; bottom: -8px; cursor: nwse-resize; }
 .zone-editor-card { margin-top: 18px; }
 .zone-editor-card .form-grid + .list { margin-top: 18px; }
-.zone-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px 120px 120px auto; gap: 12px; align-items: end; }
+.camera-recording-settings { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
+.camera-recording-settings h3 { margin: 0; }
+.zone-row { display: grid; grid-template-columns: minmax(0, 1fr) 112px 112px 112px 112px auto; gap: 12px; align-items: end; }
 .zone-row.selected { border-color: rgba(73,230,163,.7); background: rgba(73,230,163,.08); }
+.zone-row.disabled { opacity: .62; }
 .zone-row label { display: grid; gap: 6px; color: var(--muted); font-weight: 800; }
 .compact-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
 .camera-manager { display: grid; gap: 12px; }

@@ -69,6 +69,7 @@ function newCameraTemplate() {
     fps: 15,
     flip: 'none',
     detection: { motion_enabled: true, object_detection_enabled: true, zones: [] },
+    recording: { enabled: true, record_on_alert: true, continuous: false },
   };
 }
 
@@ -91,6 +92,11 @@ function renderCameraManager() {
         <input data-camera-field="height" type="number" value="${escapeHtml(camera.height || 720)}" placeholder="Height" />
         <input data-camera-field="fps" type="number" value="${escapeHtml(camera.fps || 15)}" placeholder="FPS" />
       </div>
+      <div class="form-grid compact-grid">
+        <label><span>Recording</span><select data-camera-recording="enabled"><option value="true" ${camera.recording?.enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${camera.recording?.enabled === false ? 'selected' : ''}>Disabled</option></select></label>
+        <label><span>Alert clips</span><select data-camera-recording="record_on_alert"><option value="true" ${camera.recording?.record_on_alert !== false ? 'selected' : ''}>Enabled</option><option value="false" ${camera.recording?.record_on_alert === false ? 'selected' : ''}>Disabled</option></select></label>
+        <label><span>Continuous</span><select data-camera-recording="continuous"><option value="false" ${camera.recording?.continuous !== true ? 'selected' : ''}>Disabled</option><option value="true" ${camera.recording?.continuous === true ? 'selected' : ''}>Enabled</option></select></label>
+      </div>
       <p class="muted">Monitoring areas: ${(camera.detection?.zones || []).length}. Use Live Cameras to configure motion alerts, object alerts, ANPR, and areas visually.</p>
     </div>
   `).join('');
@@ -102,6 +108,14 @@ function renderCameraManager() {
       const field = input.dataset.cameraField;
       camera[field] = ['port', 'width', 'height', 'fps'].includes(field) ? Number.parseInt(input.value || '0', 10) : input.value;
       if (field === 'name') renderCameraManager();
+    });
+  });
+  manager.querySelectorAll('[data-camera-recording]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const card = select.closest('[data-camera-index]');
+      const camera = cameras[Number(card.dataset.cameraIndex)];
+      camera.recording ||= { enabled: true, record_on_alert: true, continuous: false };
+      camera.recording[select.dataset.cameraRecording] = select.value === 'true';
     });
   });
   manager.querySelectorAll('[data-remove-camera]').forEach((button) => {

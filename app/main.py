@@ -104,6 +104,21 @@ def effective_recording_config() -> dict[str, Any]:
     return settings
 
 
+def camera_event_recording_config(settings: dict[str, Any]) -> dict[str, Any]:
+    base = effective_recording_config()
+    camera_recording = normalize_camera_recording_settings(settings.get('recording'))
+    base.update({
+        'enabled': camera_recording['enabled'],
+        'continuous': camera_recording['continuous'],
+        'record_on_alert': camera_recording['record_on_alert'],
+        'mode': 'continuous' if camera_recording['continuous'] else 'motion',
+        'record_on_motion': False,
+        'record_on_human': False,
+        'record_on_objects': [],
+    })
+    return base
+
+
 def effective_storage_config() -> dict[str, Any]:
     settings = copy.deepcopy(config.get('storage', {}))
     override = database.get_setting('storage')
@@ -154,6 +169,8 @@ alerts = AlertEngine(effective_alert_rules())
 LIVE_DETECTION_INTERVAL_SECONDS = 1.0
 live_detection_last_checked: dict[str, float] = {}
 live_detection_status: dict[str, dict[str, Any]] = {}
+rtsp_recording_lock = threading.Lock()
+active_rtsp_recording_streams: set[str] = set()
 
 
 def _non_empty_setting(settings: dict[str, Any], key: str) -> str:
@@ -208,6 +225,32 @@ def default_camera_detection_settings() -> dict[str, Any]:
     }
 
 
+def default_camera_recording_settings() -> dict[str, Any]:
+    return {
+        'enabled': True,
+        'record_on_alert': True,
+        'continuous': False,
+    }
+
+
+def normalize_bool_setting(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {'1', 'true', 'yes', 'on', 'enabled'}
+
+
+def normalize_camera_recording_settings(settings: Any) -> dict[str, Any]:
+    recording = default_camera_recording_settings()
+    if isinstance(settings, dict):
+        recording.update(settings)
+    recording['enabled'] = normalize_bool_setting(recording.get('enabled'), True)
+    recording['record_on_alert'] = normalize_bool_setting(recording.get('record_on_alert'), True)
+    recording['continuous'] = normalize_bool_setting(recording.get('continuous'), False)
+    return recording
+
+
 def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     if not isinstance(zones, list):
@@ -251,6 +294,7 @@ def normalize_camera_settings(settings: dict[str, Any], index: int = 1) -> dict[
         detection[key] = bool(detection.get(key, True))
     detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
     camera_settings['detection'] = detection
+    camera_settings['recording'] = normalize_camera_recording_settings(camera_settings.get('recording'))
     return camera_settings
 
 
@@ -298,18 +342,16 @@ def filter_detections_for_camera(detections: list[dict[str, Any]], settings: dic
     return filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects')
 
 
-def filter_detections_for_camera_zones(detections: list[dict[str, Any]], settings: dict[str, Any], *, zone_monitor_key: str) -> list[dict[str, Any]]:
+def filter_detections_for_camera_zones(detections: list[dict[str, Any]], settings: dict[str, Any], *, zone_monitor_key: str, require_zones: bool = False) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get(zone_monitor_key, True)]
     if not zones:
-        return detections
+        return [] if require_zones else detections
     return [detection for detection in detections if any(detection_center_in_zone(detection, zone) for zone in zones)]
 
 
 def filter_detections_for_camera_anpr(detections: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
-    if detection_settings.get('anpr_enabled', True) is False:
-        return []
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_anpr', True)]
     if not zones:
         return []
@@ -362,8 +404,6 @@ def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any
     return {
         'camera_id': camera_key,
         'camera_name': selected_config.get('name'),
-        'object_detection_enabled': (selected_config.get('detection') or {}).get('object_detection_enabled', True),
-        'anpr_enabled': (selected_config.get('detection') or {}).get('anpr_enabled', True),
         'ai_backend': ai_state['active_backend'],
         'ai_configured_backend': ai_state['configured_backend'],
         'ai_available': ai_state['inference_available'],
@@ -375,13 +415,6 @@ def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any
 
 def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any]) -> int | None:
     camera_id = str(settings.get('id') or 'camera')
-    detection_settings = settings.get('detection') or {}
-    motion_enabled = detection_settings.get('motion_enabled', True) is not False
-    object_detection_enabled = detection_settings.get('object_detection_enabled', True) is not False
-    anpr_enabled = detection_settings.get('anpr_enabled', True) is not False
-    if not motion_enabled and not object_detection_enabled and not anpr_enabled:
-        update_live_detection_status(camera_id, state='skipped', reason='Motion, object detection, and ANPR are disabled for this camera.', detections=[])
-        return None
     if not hasattr(detector, 'detect_image'):
         update_live_detection_status(camera_id, state='skipped', reason='Live stream alerts require ONNX AI mode.', detections=[])
         return None
@@ -405,9 +438,9 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
 
     detections = normalize_detection_boxes_for_frame(detections, frame)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
-    motion_detections = filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_motion') if motion_enabled else []
-    object_detections = filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects') if object_detection_enabled else []
-    anpr_detections = filter_detections_for_camera_anpr(detections, settings) if anpr_enabled else []
+    motion_detections = filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_motion', require_zones=True)
+    object_detections = filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects', require_zones=True)
+    anpr_detections = filter_detections_for_camera_anpr(detections, settings)
     alert_detections = list(object_detections)
     if motion_detections:
         strongest_motion = max(motion_detections, key=lambda detection: float(detection.get('confidence', 0)))
@@ -430,6 +463,14 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
 
     alerts.rules = effective_alert_rules()
     triggered = alerts.process(alert_detections)
+    triggered_labels = {str(alert.get('label') or '').lower() for alert in triggered}
+    recording_detections = [
+        {
+            **detection,
+            'alert_triggered': str(detection.get('label') or '').lower() in triggered_labels,
+        }
+        for detection in alert_detections
+    ]
     matched_labels = [str(detection.get('label')) for detection in alert_detections if detection.get('label')]
 
     event_time = datetime.now(timezone.utc).isoformat()
@@ -448,7 +489,14 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             'source': 'live-stream',
         },
     )
-    recording_id = attach_event_recording(event_id, event_time, 'rtsp', alert_detections, camera_id=camera_id)
+    recording_id = attach_event_recording(
+        event_id,
+        event_time,
+        'rtsp',
+        recording_detections,
+        camera_id=camera_id,
+        recording_config=camera_event_recording_config(settings),
+    )
     process_anpr_for_event(event_id, anpr_detections, snapshot_path, event_time)
 
     for alert in triggered:
@@ -478,7 +526,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         event_id=event_id,
         recording_id=recording_id,
         recording_state='linked' if recording_id is not None else 'skipped',
-        recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(alert_detections),
+        recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(recording_detections, camera_event_recording_config(settings)),
         email_enabled_rules=len(email_rules),
         email_recipients=email_recipients,
         email_attempted=bool(triggered and email_recipients and effective_email_alert_settings().get('enabled')),
@@ -706,11 +754,18 @@ def require_admin(request: Request) -> dict[str, Any]:
     return user
 
 
-def attach_event_recording(event_id: int, event_time: str, source: str, detections: list[dict[str, Any]], camera_id: str | None = None) -> int | None:
+def attach_event_recording(
+    event_id: int,
+    event_time: str,
+    source: str,
+    detections: list[dict[str, Any]],
+    camera_id: str | None = None,
+    recording_config: dict[str, Any] | None = None,
+) -> int | None:
     stream_url = ''
     if source == 'rtsp' and camera_id:
         stream_url = build_stream_url(get_camera_config(camera_id))
-    metadata = recording_service.event_recording_metadata(event_id, event_time, source, detections, write_clip=not stream_url)
+    metadata = recording_service.event_recording_metadata(event_id, event_time, source, detections, write_clip=not stream_url, recording_config=recording_config)
     if metadata is None:
         return None
     if camera_id:
@@ -728,24 +783,42 @@ def start_rtsp_recording_capture(stream_url: str, metadata: dict[str, Any], even
     trigger_type = str(metadata.get('trigger_type') or 'motion')
     trigger_label = metadata.get('trigger_label')
 
+    def write_generated_fallback() -> None:
+        recording_service.write_event_clip(file_path, event_id, detections, duration_seconds, trigger_type, str(trigger_label) if trigger_label else None)
+
+    with rtsp_recording_lock:
+        already_recording = stream_url in active_rtsp_recording_streams
+        if not already_recording:
+            active_rtsp_recording_streams.add(stream_url)
+    if already_recording:
+        logger.info('Skipping overlapping RTSP recording capture for event %s; another capture is active for this stream.', event_id)
+        write_generated_fallback()
+        return
+
     def capture() -> None:
         try:
             recording_service.write_rtsp_clip(stream_url, file_path, duration_seconds)
         except Exception as exc:
             logger.warning('RTSP recording capture failed for event %s, writing generated fallback: %s', event_id, exc)
-            recording_service.write_event_clip(file_path, event_id, detections, duration_seconds, trigger_type, str(trigger_label) if trigger_label else None)
+            write_generated_fallback()
+        finally:
+            with rtsp_recording_lock:
+                active_rtsp_recording_streams.discard(stream_url)
 
     threading.Thread(target=capture, name=f'rtsp-recording-{event_id}', daemon=True).start()
 
 
-def recording_skip_reason(detections: list[dict[str, Any]]) -> str:
-    should_record, trigger_type, trigger_label = recording_service.should_record(detections)
+def recording_skip_reason(detections: list[dict[str, Any]], recording_config: dict[str, Any] | None = None) -> str:
+    should_record, trigger_type, trigger_label = recording_service.should_record(detections, recording_config)
     if should_record:
         return f'Recording policy matched {trigger_type}{f" {trigger_label}" if trigger_label else ""}, but no recording was linked.'
-    if not recording_service.enabled:
+    if not recording_service.enabled_for(recording_config):
         return 'Recording is disabled or recording mode is off.'
+    if recording_config and recording_config.get('record_on_alert'):
+        return 'Recording is waiting for an enabled alert rule to trigger for this camera.'
     labels = ', '.join(str(detection.get('label')) for detection in detections if detection.get('label')) or 'none'
-    return f'Recording policy skipped this event. Detected labels: {labels}. Mode: {recording_service.mode}.'
+    mode = recording_service.mode_for(recording_config)
+    return f'Recording policy skipped this event. Detected labels: {labels}. Mode: {mode}.'
 
 
 def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int) -> None:
@@ -1263,7 +1336,7 @@ def anpr_page():
 def system_settings_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>System Settings · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>System Settings</h1><p class="muted">Move day-to-day camera, recording, storage, and login settings out of YAML.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><div id="systemMessage" class="muted"></div><section class="card"><h2>ANPR</h2><form id="anprSettingsForm" class="form-grid"><label><span>OCR backend</span><select name="backend"><option value="paddleocr">paddleocr</option><option value="easyocr">easyocr</option></select></label><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" /><input name="vehicle_labels" placeholder="Vehicle labels: car, truck, bus, motorcycle" /><button type="submit">Save ANPR</button></form><p class="muted">Enable ANPR per camera and per monitoring area from Live Cameras.</p></section><section class="card"><h2>Recording policy</h2><form id="recordingSettingsForm" class="form-grid"><label><span>Recording</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Primary mode</span><select name="mode"><option value="motion">motion</option><option value="continuous">continuous</option><option value="human">human</option><option value="objects">objects</option><option value="off">off</option></select></label><label><span>Continuous</span><select name="continuous"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><label><span>Record on motion</span><select name="record_on_motion"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Record on human</span><select name="record_on_human"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="record_on_objects" placeholder="Objects: cat, dog, package, parcel" /><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" /><input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" /><input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="Max clip seconds" /><input name="format" placeholder="Format: mp4" /><button type="submit">Save recording</button></form></section><section class="card"><h2>Retention</h2><form id="retentionSettingsForm" class="form-grid"><label><span>Auto purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="retention_days" type="number" min="1" max="3650" placeholder="Retention days" /><input name="max_storage_gb" type="number" min="1" max="100000" placeholder="Max storage GB" /><button type="submit">Save retention</button><button id="purgeRecordingsBtn" class="secondary" type="button">Purge now</button></form></section><section class="card"><h2>Storage</h2><form id="storageSettingsForm" class="form-grid"><input name="data_dir" placeholder="Data directory" /><input name="snapshots_dir" placeholder="Snapshots directory" /><input name="events_dir" placeholder="Events directory" /><input name="recordings_dir" placeholder="Recordings directory" /><input name="plates_dir" placeholder="Plate images directory" /><button type="submit">Save storage</button></form><p class="muted">Database file location stays in config.yaml because it is needed before the web UI can load.</p></section><section class="card"><h2>Login security</h2><form id="authSettingsForm" class="form-grid"><input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="Session timeout hours" /><input name="max_login_attempts" type="number" min="1" max="100" placeholder="Max login attempts" /><input name="lockout_minutes" type="number" min="1" max="1440" placeholder="Lockout minutes" /><button type="submit">Save login security</button></form><p class="muted">Auth enablement and cookie name remain bootstrap settings.</p></section></main><script src="/static/system-settings.js"></script></body></html>""")
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>System Settings</h1><p class="muted">Move day-to-day camera, recording, storage, and login settings out of YAML.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><div id="systemMessage" class="muted"></div><section class="card"><h2>ANPR</h2><form id="anprSettingsForm" class="form-grid"><label><span>OCR backend</span><select name="backend"><option value="paddleocr">paddleocr</option><option value="easyocr">easyocr</option></select></label><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" /><input name="vehicle_labels" placeholder="Vehicle labels: car, truck, bus, motorcycle" /><button type="submit">Save ANPR</button></form><p class="muted">Enable ANPR per camera and per monitoring area from Live Cameras.</p></section><section class="card"><h2>Recording clips</h2><form id="recordingSettingsForm" class="form-grid"><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" /><input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" /><input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="Max clip seconds" /><input name="format" placeholder="Format: mp4" /><button type="submit">Save clip settings</button></form><p class="muted">Alert-triggered and continuous recording are configured per camera above or from Live Cameras.</p></section><section class="card"><h2>Retention</h2><form id="retentionSettingsForm" class="form-grid"><label><span>Auto purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="retention_days" type="number" min="1" max="3650" placeholder="Retention days" /><input name="max_storage_gb" type="number" min="1" max="100000" placeholder="Max storage GB" /><button type="submit">Save retention</button><button id="purgeRecordingsBtn" class="secondary" type="button">Purge now</button></form></section><section class="card"><h2>Storage</h2><form id="storageSettingsForm" class="form-grid"><input name="data_dir" placeholder="Data directory" /><input name="snapshots_dir" placeholder="Snapshots directory" /><input name="events_dir" placeholder="Events directory" /><input name="recordings_dir" placeholder="Recordings directory" /><input name="plates_dir" placeholder="Plate images directory" /><button type="submit">Save storage</button></form><p class="muted">Database file location stays in config.yaml because it is needed before the web UI can load.</p></section><section class="card"><h2>Login security</h2><form id="authSettingsForm" class="form-grid"><input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="Session timeout hours" /><input name="max_login_attempts" type="number" min="1" max="100" placeholder="Max login attempts" /><input name="lockout_minutes" type="number" min="1" max="1440" placeholder="Lockout minutes" /><button type="submit">Save login security</button></form><p class="muted">Auth enablement and cookie name remain bootstrap settings.</p></section></main><script src="/static/system-settings.js"></script></body></html>""")
 
 @app.get('/users')
 def users_page():
@@ -1874,6 +1947,10 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     detection['anpr_enabled'] = _bool_value(detection.get('anpr_enabled', True))
     detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
     updated['detection'] = detection
+
+    existing_recording = current.get('recording') if isinstance(current.get('recording'), dict) else {}
+    payload_recording = payload.get('recording') if isinstance(payload.get('recording'), dict) else {}
+    updated['recording'] = normalize_camera_recording_settings({**existing_recording, **payload_recording})
     return updated
 
 
