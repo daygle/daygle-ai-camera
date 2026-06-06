@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote
 
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
@@ -28,7 +28,7 @@ from app.auth import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, AuthError, AuthSe
 from app.database import EventDatabase
 from app.detector import DetectorUnavailableError, MockDetector, create_detector, load_labels
 from app.email_alerts import EmailAlertError, EmailAlertService
-from app.mock_camera import MockCamera
+from app.mock_camera import MockCamera, OpenCvStreamCamera
 from app.recordings import RecordingService
 from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, load_settings
 from app.storage import Storage
@@ -130,11 +130,8 @@ def effective_email_alert_settings() -> dict[str, Any]:
 
 database = EventDatabase(config['storage']['database'])
 camera_config = effective_camera_config()
-camera = MockCamera(
-    width=int(camera_config.get('width', 1280)),
-    height=int(camera_config.get('height', 720)),
-    fps=int(camera_config.get('fps', 15)),
-)
+camera = None
+
 storage = Storage({**config, 'storage': effective_storage_config()})
 recording_service = RecordingService({**config, 'storage': effective_storage_config(), 'recording': effective_recording_config()})
 anpr_pipeline = AnprPipeline(effective_anpr_config())
@@ -147,6 +144,45 @@ detector = create_detector(effective_ai_config())
 last_detector_error: str | None = getattr(detector, 'unavailable_reason', None)
 mock_detector = MockDetector(effective_ai_config().get('categories', []), float(effective_ai_config().get('confidence', 0.45)))
 alerts = AlertEngine(effective_alert_rules())
+
+
+def _non_empty_setting(settings: dict[str, Any], key: str) -> str:
+    return str(settings.get(key) or '').strip()
+
+
+def build_stream_url(settings: dict[str, Any]) -> str:
+    stream_url = _non_empty_setting(settings, 'stream_url')
+    if stream_url:
+        return stream_url
+
+    host = _non_empty_setting(settings, 'host')
+    if not host:
+        return ''
+    username = _non_empty_setting(settings, 'username')
+    password = _non_empty_setting(settings, 'password')
+    port = int(settings.get('port') or 554)
+    path = _non_empty_setting(settings, 'path') or 'stream1'
+    path = path.lstrip('/')
+    credentials = ''
+    if username:
+        credentials = quote(username, safe='')
+        if password:
+            credentials += f":{quote(password, safe='')}"
+        credentials += '@'
+    return f'rtsp://{credentials}{host}:{port}/{path}'
+
+
+def create_camera(settings: dict[str, Any]):
+    backend = str(settings.get('backend', 'mock')).lower()
+    width = int(settings.get('width', 1280))
+    height = int(settings.get('height', 720))
+    fps = int(settings.get('fps', 15))
+    if backend in {'onvif', 'rtsp'}:
+        return OpenCvStreamCamera(build_stream_url(settings), width=width, height=height, fps=fps)
+    return MockCamera(width=width, height=height, fps=fps)
+
+
+camera = create_camera(camera_config)
 
 def config_file_path() -> Path:
     return Path(os.environ.get(CONFIG_ENV_VAR) or DEFAULT_CONFIG_PATH)
@@ -752,7 +788,7 @@ def anpr_page():
 def system_settings_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>System Settings · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>System Settings</h1><p class="muted">Move day-to-day camera, recording, storage, and login settings out of YAML.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Camera</h2><div id="systemMessage" class="muted"></div><form id="cameraSettingsForm" class="form-grid"><label><span>Backend</span><select name="backend"><option value="mock">mock</option></select></label><input name="device" placeholder="Device" /><input name="width" type="number" min="160" max="7680" step="1" placeholder="Width" /><input name="height" type="number" min="120" max="4320" step="1" placeholder="Height" /><input name="fps" type="number" min="1" max="120" step="1" placeholder="FPS" /><label><span>Flip</span><select name="flip"><option value="none">none</option><option value="horizontal">horizontal</option><option value="vertical">vertical</option><option value="both">both</option></select></label><button type="submit">Save camera</button></form></section><section class="card"><h2>ANPR</h2><form id="anprSettingsForm" class="form-grid"><label><span>ANPR</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>OCR backend</span><select name="backend"><option value="mock">mock</option><option value="paddleocr">paddleocr</option><option value="easyocr">easyocr</option></select></label><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" /><input name="vehicle_labels" placeholder="Vehicle labels: car, truck, bus, motorcycle" /><button type="submit">Save ANPR</button></form></section><section class="card"><h2>Recording policy</h2><form id="recordingSettingsForm" class="form-grid"><label><span>Recording</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Primary mode</span><select name="mode"><option value="motion">motion</option><option value="continuous">continuous</option><option value="human">human</option><option value="objects">objects</option><option value="off">off</option></select></label><label><span>Continuous</span><select name="continuous"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><label><span>Record on motion</span><select name="record_on_motion"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Record on human</span><select name="record_on_human"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="record_on_objects" placeholder="Objects: cat, dog, package, parcel" /><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" /><input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" /><input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="Max clip seconds" /><input name="format" placeholder="Format: avi or mp4" /><button type="submit">Save recording</button></form></section><section class="card"><h2>Retention</h2><form id="retentionSettingsForm" class="form-grid"><label><span>Auto purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="retention_days" type="number" min="1" max="3650" placeholder="Retention days" /><input name="max_storage_gb" type="number" min="1" max="100000" placeholder="Max storage GB" /><button type="submit">Save retention</button><button id="purgeRecordingsBtn" class="secondary" type="button">Purge now</button></form></section><section class="card"><h2>Storage</h2><form id="storageSettingsForm" class="form-grid"><input name="data_dir" placeholder="Data directory" /><input name="snapshots_dir" placeholder="Snapshots directory" /><input name="events_dir" placeholder="Events directory" /><input name="recordings_dir" placeholder="Recordings directory" /><input name="plates_dir" placeholder="Plate images directory" /><button type="submit">Save storage</button></form><p class="muted">Database file location stays in config.yaml because it is needed before the web UI can load.</p></section><section class="card"><h2>Login security</h2><form id="authSettingsForm" class="form-grid"><input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="Session timeout hours" /><input name="max_login_attempts" type="number" min="1" max="100" placeholder="Max login attempts" /><input name="lockout_minutes" type="number" min="1" max="1440" placeholder="Lockout minutes" /><button type="submit">Save login security</button></form><p class="muted">Auth enablement and cookie name remain bootstrap settings.</p></section></main><script src="/static/system-settings.js"></script></body></html>""")
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>System Settings</h1><p class="muted">Move day-to-day camera, recording, storage, and login settings out of YAML.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Camera</h2><div id="systemMessage" class="muted"></div><form id="cameraSettingsForm" class="form-grid"><label><span>Backend</span><select name="backend"><option value="mock">mock</option><option value="onvif">onvif / RTSP</option><option value="rtsp">rtsp</option></select></label><input name="device" placeholder="Device label" /><input name="stream_url" placeholder="RTSP stream URL, e.g. rtsp://user:pass@camera:554/stream1" /><input name="host" placeholder="ONVIF camera host/IP (optional)" /><input name="port" type="number" min="1" max="65535" step="1" placeholder="RTSP port, usually 554" /><input name="path" placeholder="Stream path, e.g. stream1 or live/ch0" /><input name="username" placeholder="Camera username" /><input name="password" type="password" placeholder="Camera password" /><input name="width" type="number" min="160" max="7680" step="1" placeholder="Width" /><input name="height" type="number" min="120" max="4320" step="1" placeholder="Height" /><input name="fps" type="number" min="1" max="120" step="1" placeholder="FPS" /><label><span>Flip</span><select name="flip"><option value="none">none</option><option value="horizontal">horizontal</option><option value="vertical">vertical</option><option value="both">both</option></select></label><button type="submit">Save camera</button></form></section><section class="card"><h2>ANPR</h2><form id="anprSettingsForm" class="form-grid"><label><span>ANPR</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>OCR backend</span><select name="backend"><option value="mock">mock</option><option value="paddleocr">paddleocr</option><option value="easyocr">easyocr</option></select></label><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" /><input name="vehicle_labels" placeholder="Vehicle labels: car, truck, bus, motorcycle" /><button type="submit">Save ANPR</button></form></section><section class="card"><h2>Recording policy</h2><form id="recordingSettingsForm" class="form-grid"><label><span>Recording</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Primary mode</span><select name="mode"><option value="motion">motion</option><option value="continuous">continuous</option><option value="human">human</option><option value="objects">objects</option><option value="off">off</option></select></label><label><span>Continuous</span><select name="continuous"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><label><span>Record on motion</span><select name="record_on_motion"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Record on human</span><select name="record_on_human"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="record_on_objects" placeholder="Objects: cat, dog, package, parcel" /><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" /><input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" /><input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="Max clip seconds" /><input name="format" placeholder="Format: avi or mp4" /><button type="submit">Save recording</button></form></section><section class="card"><h2>Retention</h2><form id="retentionSettingsForm" class="form-grid"><label><span>Auto purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="retention_days" type="number" min="1" max="3650" placeholder="Retention days" /><input name="max_storage_gb" type="number" min="1" max="100000" placeholder="Max storage GB" /><button type="submit">Save retention</button><button id="purgeRecordingsBtn" class="secondary" type="button">Purge now</button></form></section><section class="card"><h2>Storage</h2><form id="storageSettingsForm" class="form-grid"><input name="data_dir" placeholder="Data directory" /><input name="snapshots_dir" placeholder="Snapshots directory" /><input name="events_dir" placeholder="Events directory" /><input name="recordings_dir" placeholder="Recordings directory" /><input name="plates_dir" placeholder="Plate images directory" /><button type="submit">Save storage</button></form><p class="muted">Database file location stays in config.yaml because it is needed before the web UI can load.</p></section><section class="card"><h2>Login security</h2><form id="authSettingsForm" class="form-grid"><input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="Session timeout hours" /><input name="max_login_attempts" type="number" min="1" max="100" placeholder="Max login attempts" /><input name="lockout_minutes" type="number" min="1" max="1440" placeholder="Lockout minutes" /><button type="submit">Save login security</button></form><p class="muted">Auth enablement and cookie name remain bootstrap settings.</p></section></main><script src="/static/system-settings.js"></script></body></html>""")
 
 @app.get('/users')
 def users_page():
@@ -819,6 +855,12 @@ def ai_status():
 
 @app.get('/api/live/snapshot')
 def live_snapshot(overlay: bool = Query(True)):
+    if hasattr(camera, 'read_jpeg'):
+        try:
+            image_bytes, _frame = camera.read_jpeg()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return Response(content=image_bytes, media_type='image/jpeg')
     frame = camera.get_frame()
     detections = mock_detector.detect(frame['frame_number'], force=True) if overlay else []
     svg = render_live_snapshot_svg(frame, detections, overlay=overlay)
@@ -1350,16 +1392,27 @@ def _int_field(payload: dict[str, Any], field: str, default: int, minimum: int, 
 
 def validate_camera_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_camera_config()
-    updated = {key: current.get(key) for key in ('backend', 'device', 'width', 'height', 'fps', 'flip') if key in current}
-    updated.update({key: payload[key] for key in ('backend', 'device', 'flip') if key in payload})
+    updated = {
+        key: current.get(key)
+        for key in ('backend', 'device', 'width', 'height', 'fps', 'flip', 'stream_url', 'host', 'port', 'path', 'username', 'password')
+        if key in current
+    }
+    updated.update({key: payload[key] for key in ('backend', 'device', 'flip', 'stream_url', 'host', 'port', 'path', 'username', 'password') if key in payload})
     backend = str(updated.get('backend', 'mock')).lower()
-    if backend != 'mock':
-        raise HTTPException(status_code=400, detail='Only the mock camera backend is currently available.')
+    if backend not in {'mock', 'onvif', 'rtsp'}:
+        raise HTTPException(status_code=400, detail='Camera backend must be mock, onvif, or rtsp.')
     updated['backend'] = backend
     updated['device'] = payload.get('device', current.get('device', 0))
     updated['width'] = _int_field({**current, **payload}, 'width', 1280, 160, 7680)
     updated['height'] = _int_field({**current, **payload}, 'height', 720, 120, 4320)
     updated['fps'] = _int_field({**current, **payload}, 'fps', 15, 1, 120)
+    if 'port' in updated or 'port' in payload:
+        updated['port'] = _int_field({**current, **payload}, 'port', 554, 1, 65535)
+    for key in ('stream_url', 'host', 'path', 'username', 'password'):
+        if key in updated:
+            updated[key] = str(updated.get(key) or '').strip()
+    if backend in {'onvif', 'rtsp'} and not build_stream_url(updated):
+        raise HTTPException(status_code=400, detail='stream_url is required for ONVIF/RTSP cameras, or provide host plus optional username, password, port, and path.')
     flip = str(updated.get('flip', 'none')).lower()
     if flip not in {'none', 'horizontal', 'vertical', 'both'}:
         raise HTTPException(status_code=400, detail='flip must be none, horizontal, vertical, or both.')
@@ -1459,7 +1512,7 @@ def validate_auth_settings(payload: dict[str, Any]) -> dict[str, Any]:
 def apply_camera_settings(settings: dict[str, Any]) -> None:
     global camera, camera_config
     camera_config = settings
-    camera = MockCamera(width=int(settings['width']), height=int(settings['height']), fps=int(settings['fps']))
+    camera = create_camera(settings)
 
 
 def apply_storage_and_recording_settings() -> None:

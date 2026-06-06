@@ -16,6 +16,7 @@ The app is now designed to be configured from the web UI. `config.yaml` is only 
 - Web-managed system settings for camera, recording policy, retention, storage directories, and login security.
 - SQLite persistence for events, detections, alerts, users, sessions, runtime settings, and alert rules.
 - Mock camera/detector for development and CI without camera hardware.
+- ONVIF/RTSP live snapshot support for testing P6S-style IP cameras before CSI camera hardware arrives.
 - Armbian install script and systemd unit for Orange Pi deployment.
 
 ## Requirements
@@ -222,7 +223,7 @@ SMTP settings are stored in SQLite under `app_settings.key = alert_email`. Alert
 
 Route: `/system-settings`
 
-- Camera: backend, device, width, height, FPS, flip.
+- Camera: backend (`mock`, `onvif`, or `rtsp`), device label, stream URL or ONVIF host credentials, width, height, FPS, flip.
 - ANPR: enable/disable, OCR backend, confidence threshold, and vehicle labels.
 - Recording policy: continuous recording, record on motion, record on human, and selected object labels such as `cat`, `dog`, `package`, and `parcel`.
 - Clip settings: pre-event seconds, post-event seconds, max clip seconds, and file format.
@@ -231,6 +232,15 @@ Route: `/system-settings`
 - Login security: session timeout, max login attempts, lockout minutes.
 
 Camera, ANPR, recording, storage, and login security settings are stored in SQLite and applied at runtime where possible. Database path, auth enablement, cookie name, and server bind settings remain bootstrap YAML.
+
+#### P6S / ONVIF stream testing
+
+Most ONVIF-compatible cameras expose the video itself as an RTSP stream. To test a P6S-style camera while waiting for the OV5647, open `/system-settings`, set **Camera backend** to `onvif / RTSP`, and either:
+
+- paste the complete `stream_url`, for example `rtsp://username:password@192.168.1.50:554/stream1`; or
+- enter `host`, `username`, `password`, optional `port` (default `554`), and `path` so Daygle can build the RTSP URL.
+
+Then open `/live`; `/api/live/snapshot` will return a JPEG pulled from the stream. The mock SVG live view remains available when the backend is `mock`.
 
 ### ANPR
 
@@ -332,6 +342,7 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `POST` | `/api/profile/password` | Change current user's password |
 | `GET` | `/api/status` | Camera and detector status |
 | `GET` | `/api/status/ai` | Detailed AI status |
+| `GET` | `/api/live/snapshot` | Live mock SVG or ONVIF/RTSP JPEG snapshot |
 | `POST` | `/api/mock/detect` | Generate mock detection event |
 | `POST` | `/api/detect/test-image` | Upload image for active detector inference |
 | `GET` | `/api/events` | List/search events |
@@ -390,7 +401,7 @@ Useful `app_settings` keys:
 
 ## Recording and Playback
 
-The recording layer creates event-linked clips and dashboard playback wiring. In the current mock/test-image stage, clips are generated as short playable footage with event and detection overlays. Future camera and RTSP work can replace the generated frames with real camera frames while keeping the same recording policy and retention controls.
+The recording layer creates event-linked clips and dashboard playback wiring. In the current mock/test-image stage, clips are generated as short playable footage with event and detection overlays. The live view can display ONVIF/RTSP snapshots, but event clips are still generated placeholders until real stream recording is wired into the recording service.
 
 Recording policy is managed at `/system-settings`:
 
@@ -423,7 +434,7 @@ Playback routes:
 Current limitations:
 
 - Mock and uploaded-image events create generated footage, not real camera footage.
-- Real clip writing for camera, RTSP, and uploaded videos is future work.
+- Real clip writing for camera, RTSP/ONVIF, and uploaded videos is future work; ONVIF/RTSP currently powers live JPEG snapshots only.
 - Retention runs when clips are created or when an admin clicks **Purge now**; there is no background scheduler yet.
 
 ## ANPR Limitations

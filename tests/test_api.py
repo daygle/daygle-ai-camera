@@ -987,6 +987,42 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+
+def test_onvif_camera_settings_build_rtsp_url(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    settings = main.validate_camera_settings({
+        'backend': 'onvif',
+        'host': '192.168.1.50',
+        'port': 554,
+        'path': '/stream1',
+        'username': 'daygle user',
+        'password': 'pa:ss',
+        'width': 1920,
+        'height': 1080,
+        'fps': 15,
+        'flip': 'none',
+    })
+
+    assert settings['backend'] == 'onvif'
+    assert main.build_stream_url(settings) == 'rtsp://daygle%20user:pa%3Ass@192.168.1.50:554/stream1'
+    camera = main.create_camera(settings)
+    assert camera.stream_url == 'rtsp://daygle%20user:pa%3Ass@192.168.1.50:554/stream1'
+
+
+def test_onvif_camera_settings_require_stream_source(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    try:
+        main.validate_camera_settings({'backend': 'onvif', 'width': 640, 'height': 480, 'fps': 10, 'flip': 'none'})
+    except Exception as exc:  # FastAPI raises HTTPException here.
+        assert getattr(exc, 'status_code', None) == 400
+        assert 'stream_url is required' in str(getattr(exc, 'detail', ''))
+    else:
+        raise AssertionError('Expected ONVIF camera validation to require a stream URL or host')
+
 def test_admin_can_backup_and_restore_database_from_api(tmp_path, monkeypatch):
     app, database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)

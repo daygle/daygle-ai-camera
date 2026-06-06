@@ -19,6 +19,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "height": 720,
         "fps": 15,
         "flip": "none",
+        "stream_url": "",
+        "host": "",
+        "port": 554,
+        "path": "stream1",
+        "username": "",
+        "password": "",
     },
     "ai": {
         "enabled": True,
