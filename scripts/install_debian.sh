@@ -5,7 +5,7 @@ APP_NAME="daygle-ai-camera"
 APP_USER="${DAYGLE_USER:-daygle}"
 APP_DIR="${DAYGLE_APP_DIR:-/opt/daygle-ai-camera}"
 CONFIG_DIR="${DAYGLE_CONFIG_DIR:-/etc/daygle-ai-camera}"
-DATA_DIR="${DAYGLE_DATA_DIR:-/var/lib/daygle-ai-camera}"
+DATA_DIR="${DAYGLE_DATA_DIR:-${APP_DIR}/data}"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -39,13 +39,15 @@ fi
 # Create directories
 mkdir -p "${APP_DIR}" "${CONFIG_DIR}" "${DATA_DIR}"
 
-# Sync application files
+# Sync application files (DO NOT EXCLUDE data/)
 rsync -a --delete \
   --exclude '.git' \
   --exclude '.venv' \
   --exclude '__pycache__' \
-  --exclude 'data' \
   "${REPO_DIR}/" "${APP_DIR}/"
+
+# Ensure data directory exists (GitHub + installer safety)
+mkdir -p "${APP_DIR}/data"
 
 # Python virtual environment
 python3 -m venv "${APP_DIR}/.venv"
@@ -63,8 +65,6 @@ rm "${APP_DIR}/requirements.no-torch.txt"
 if [[ ! -f "${CONFIG_DIR}/config.yaml" ]]; then
   cat > "${CONFIG_DIR}/config.yaml" <<EOF
 # Minimal bootstrap config.
-# Keep this file small; operational settings are managed in the web UI
-# and merged with application defaults from app/settings.py.
 server:
   host: 0.0.0.0
   port: 8080
