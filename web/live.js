@@ -12,10 +12,13 @@ const liveEls = {
   saveZonesBtn: document.getElementById('saveZonesBtn'),
 };
 
-const LIVE_REFRESH_MS = 500;
+const DEFAULT_SNAPSHOT_REFRESH_MS = 500;
+const DEFAULT_DETECTION_STATUS_REFRESH_MS = 2000;
 const CLOSE_DRAFT_DISTANCE = 0.035;
 let refreshTimer;
 let detectionStatusTimer;
+let snapshotRefreshMs = DEFAULT_SNAPSHOT_REFRESH_MS;
+let detectionStatusRefreshMs = DEFAULT_DETECTION_STATUS_REFRESH_MS;
 let csrfToken = null;
 let cameras = [];
 let selectedCamera = null;
@@ -550,11 +553,20 @@ window.addEventListener('resize', renderZones);
 async function init() {
   const me = await api('/api/auth/me');
   csrfToken = me.csrf_token;
+  try {
+    const runtime = await api('/api/config');
+    const live = runtime.live || {};
+    snapshotRefreshMs = Number.parseInt(live.snapshot_refresh_ms || DEFAULT_SNAPSHOT_REFRESH_MS, 10);
+    detectionStatusRefreshMs = Number.parseInt(live.detection_status_refresh_ms || DEFAULT_DETECTION_STATUS_REFRESH_MS, 10);
+  } catch {
+    snapshotRefreshMs = DEFAULT_SNAPSHOT_REFRESH_MS;
+    detectionStatusRefreshMs = DEFAULT_DETECTION_STATUS_REFRESH_MS;
+  }
   const payload = await api('/api/cameras');
   cameras = payload.cameras || [];
   renderCameraOptions();
-  refreshTimer = setInterval(refreshFrame, LIVE_REFRESH_MS);
-  detectionStatusTimer = setInterval(refreshDetectionStatus, 2000);
+  refreshTimer = setInterval(refreshFrame, snapshotRefreshMs);
+  detectionStatusTimer = setInterval(refreshDetectionStatus, detectionStatusRefreshMs);
 }
 
 init().catch((error) => { liveEls.status.textContent = error.message; });

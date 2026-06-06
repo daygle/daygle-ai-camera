@@ -30,7 +30,7 @@ from app.auth import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, AuthError, AuthSe
 from app.database import EventDatabase
 from app.detector import DetectorUnavailableError, create_detector, load_labels
 from app.email_alerts import EmailAlertError, EmailAlertService
-from app.mock_camera import OpenCvStreamCamera
+from app.camera_backend import OpenCvStreamCamera
 from app.recordings import RecordingService
 from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, load_settings
 from app.storage import Storage
@@ -73,8 +73,6 @@ def effective_ai_config() -> dict[str, Any]:
     override = database.get_setting('ai')
     if isinstance(override, dict):
         settings.update(override)
-    if str(settings.get('backend', '')).lower() == 'mock':
-        settings['backend'] = 'onnx'
     return settings
 
 
@@ -83,8 +81,6 @@ def effective_camera_config() -> dict[str, Any]:
     override = database.get_setting('camera')
     if isinstance(override, dict):
         settings.update(override)
-    if str(settings.get('backend', '')).lower() == 'mock':
-        settings['backend'] = 'onvif'
     return settings
 
 
@@ -99,6 +95,21 @@ def effective_anpr_config() -> dict[str, Any]:
 def effective_recording_config() -> dict[str, Any]:
     settings = copy.deepcopy(config.get('recording', {}))
     override = database.get_setting('recording')
+    if isinstance(override, dict):
+        settings.update(override)
+    return settings
+
+
+def effective_live_config() -> dict[str, Any]:
+    settings = {
+        'snapshot_refresh_ms': 500,
+        'detection_status_refresh_ms': 2000,
+        'detection_interval_seconds': 1.0,
+    }
+    config_live = config.get('live', {})
+    if isinstance(config_live, dict):
+        settings.update(config_live)
+    override = database.get_setting('live')
     if isinstance(override, dict):
         settings.update(override)
     return settings
@@ -166,7 +177,6 @@ database.seed_alert_rules(config.get('alerts', {}).get('rules', []), utc_now())
 detector = create_detector(effective_ai_config())
 last_detector_error: str | None = getattr(detector, 'unavailable_reason', None)
 alerts = AlertEngine(effective_alert_rules())
-LIVE_DETECTION_INTERVAL_SECONDS = 1.0
 live_detection_last_checked: dict[str, float] = {}
 live_detection_status: dict[str, dict[str, Any]] = {}
 live_detection_worker_lock = threading.Lock()
@@ -337,8 +347,6 @@ def normalize_camera_settings(settings: dict[str, Any], index: int = 1) -> dict[
     camera_settings['id'] = normalize_camera_id(camera_settings.get('id'), f'camera-{index}')
     camera_settings['name'] = camera_default_name(camera_settings, f'Camera {index}')
     camera_settings['backend'] = str(camera_settings.get('backend') or 'onvif').lower()
-    if camera_settings['backend'] == 'mock':
-        camera_settings['backend'] = 'onvif'
     camera_settings['width'] = int(camera_settings.get('width') or 1280)
     camera_settings['height'] = int(camera_settings.get('height') or 720)
     camera_settings['fps'] = int(camera_settings.get('fps') or 15)
@@ -358,9 +366,6 @@ def effective_cameras_config() -> list[dict[str, Any]]:
     override = database.get_setting('cameras')
     if isinstance(override, list) and override:
         return [normalize_camera_settings(camera_settings, index) for index, camera_settings in enumerate(override, start=1)]
-    legacy = effective_camera_config()
-    if isinstance(legacy, dict):
-        return [normalize_camera_settings(legacy, 1)]
     return [normalize_camera_settings({}, 1)]
 
 
@@ -524,11 +529,12 @@ def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any
 
 def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any]) -> None:
     camera_id = str(settings.get('id') or 'camera')
+    detection_interval_seconds = float(effective_live_config().get('detection_interval_seconds', 1.0))
     now = time.time()
     with live_detection_worker_lock:
         if camera_id in active_live_detection_cameras:
             return
-        if now - live_detection_last_checked.get(camera_id, 0) < LIVE_DETECTION_INTERVAL_SECONDS:
+        if now - live_detection_last_checked.get(camera_id, 0) < detection_interval_seconds:
             return
         live_detection_last_checked[camera_id] = now
         active_live_detection_cameras.add(camera_id)
@@ -548,13 +554,14 @@ def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings
 
 def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any], *, enforce_interval: bool = True) -> int | None:
     camera_id = str(settings.get('id') or 'camera')
+    detection_interval_seconds = float(effective_live_config().get('detection_interval_seconds', 1.0))
     if not hasattr(detector, 'detect_image'):
         update_live_detection_status(camera_id, state='skipped', reason='Live stream alerts require ONNX AI mode.', detections=[])
         return None
 
     if enforce_interval:
         now = time.time()
-        if now - live_detection_last_checked.get(camera_id, 0) < LIVE_DETECTION_INTERVAL_SECONDS:
+        if now - live_detection_last_checked.get(camera_id, 0) < detection_interval_seconds:
             return None
         live_detection_last_checked[camera_id] = now
 
@@ -1731,6 +1738,7 @@ def runtime_config():
             'recordings_dir': effective_storage_config().get('recordings_dir'),
             'plates_dir': effective_storage_config().get('plates_dir'),
         },
+        'live': effective_live_config(),
         'recording': effective_recording_config(),
     }
 
@@ -2182,8 +2190,6 @@ def validate_anpr_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_anpr_config()
     merged = {**current, **payload}
     backend = str(merged.get('backend', 'paddleocr')).lower()
-    if backend == 'mock':
-        backend = 'paddleocr'
     if backend not in {'paddleocr', 'easyocr'}:
         raise HTTPException(status_code=400, detail='ANPR backend must be paddleocr or easyocr.')
     try:
@@ -2268,6 +2274,24 @@ def validate_auth_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'session_timeout_hours': session_timeout_hours,
         'max_login_attempts': _int_field(merged, 'max_login_attempts', 5, 1, 100),
         'lockout_minutes': _int_field(merged, 'lockout_minutes', 15, 1, 1440),
+    }
+
+
+def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    current = effective_live_config()
+    merged = {**current, **payload}
+    snapshot_refresh_ms = _int_field(merged, 'snapshot_refresh_ms', 500, 150, 5000)
+    detection_status_refresh_ms = _int_field(merged, 'detection_status_refresh_ms', 2000, 500, 15000)
+    try:
+        detection_interval_seconds = float(merged.get('detection_interval_seconds', 1.0))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='detection_interval_seconds must be a number.') from exc
+    if detection_interval_seconds < 0.2 or detection_interval_seconds > 10:
+        raise HTTPException(status_code=400, detail='detection_interval_seconds must be between 0.2 and 10.')
+    return {
+        'snapshot_refresh_ms': snapshot_refresh_ms,
+        'detection_status_refresh_ms': detection_status_refresh_ms,
+        'detection_interval_seconds': detection_interval_seconds,
     }
 
 
@@ -2463,6 +2487,7 @@ def get_system_settings():
         'camera': get_camera_config(None),
         'cameras': effective_cameras_config(),
         'anpr': effective_anpr_config(),
+        'live': effective_live_config(),
         'recording': effective_recording_config(),
         'storage': effective_storage_config(),
         'auth': {
@@ -2575,6 +2600,13 @@ async def update_anpr_settings(request: Request):
 @app.put('/api/settings/system/anpr')
 async def update_system_anpr_settings(request: Request):
     return await update_anpr_settings(request)
+
+
+@app.put('/api/settings/system/live')
+async def update_live_settings(request: Request):
+    settings = validate_live_settings(await request.json())
+    database.set_setting('live', settings, utc_now())
+    return settings
 
 
 @app.put('/api/settings/system/recording')

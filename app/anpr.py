@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import importlib
 import re
 from typing import Any
@@ -53,13 +52,6 @@ class AnprPipeline:
         return results
 
 
-class MockOcrBackend:
-    def read_plate(self, image_path: str, *, event_id: int, detection: dict[str, Any], index: int) -> tuple[str, float]:
-        seed = f"{event_id}:{index}:{detection.get('label')}:{image_path}"
-        digest = hashlib.sha1(seed.encode("utf-8")).hexdigest().upper()
-        return f"{digest[:3]}{int(digest[3:6], 16) % 1000:03d}", 0.97
-
-
 class PaddleOcrBackend:
     def __init__(self) -> None:
         try:
@@ -95,16 +87,10 @@ class EasyOcrBackend:
 def create_ocr_backend(backend: str) -> Any:
     backend = backend.lower()
     if backend == "paddleocr":
-        try:
-            return PaddleOcrBackend()
-        except AnprUnavailableError:
-            return MockOcrBackend()
+        return PaddleOcrBackend()
     if backend == "easyocr":
-        try:
-            return EasyOcrBackend()
-        except AnprUnavailableError:
-            return MockOcrBackend()
-    return MockOcrBackend()
+        return EasyOcrBackend()
+    raise AnprUnavailableError(f"Unsupported ANPR backend: {backend}")
 
 
 def normalize_plate(value: str) -> str:

@@ -6,30 +6,6 @@ import time
 from typing import Any
 
 
-class MockCamera:
-    def __init__(self, width: int = 1280, height: int = 720, fps: int = 15) -> None:
-        self.width = width
-        self.height = height
-        self.fps = fps
-        self.frame_number = 0
-        self.started_at = time.time()
-
-    def get_frame(self) -> dict[str, Any]:
-        self.frame_number += 1
-        return {
-            'frame_number': self.frame_number,
-            'timestamp': time.time(),
-            'width': self.width,
-            'height': self.height,
-            'uptime_seconds': round(time.time() - self.started_at, 1)
-        }
-
-    def snapshot(self) -> dict[str, Any]:
-        frame = self.get_frame()
-        frame['snapshot'] = True
-        return frame
-
-
 class OpenCvStreamCamera:
     """Camera backend for RTSP/ONVIF-compatible streams read through OpenCV.
 
@@ -51,36 +27,36 @@ class OpenCvStreamCamera:
 
     @property
     def backend(self) -> str:
-        return 'onvif'
+        return "onvif"
 
     def get_frame(self) -> dict[str, Any]:
         return {
-            'frame_number': self.frame_number,
-            'timestamp': time.time(),
-            'width': self.width,
-            'height': self.height,
-            'uptime_seconds': round(time.time() - self.started_at, 1),
-            'stream_url': self.stream_url,
-            'last_error': self.last_error,
+            "frame_number": self.frame_number,
+            "timestamp": time.time(),
+            "width": self.width,
+            "height": self.height,
+            "uptime_seconds": round(time.time() - self.started_at, 1),
+            "stream_url": self.stream_url,
+            "last_error": self.last_error,
         }
 
     def _open_capture(self):
         if not self.stream_url:
-            raise RuntimeError('ONVIF/RTSP stream URL is not configured.')
+            raise RuntimeError("ONVIF/RTSP stream URL is not configured.")
 
         # Prefer TCP for RTSP cameras. UDP packet loss and frequent reconnects
         # can make inexpensive ONVIF cameras fail during session setup.
-        os.environ.setdefault('OPENCV_FFMPEG_CAPTURE_OPTIONS', 'rtsp_transport;tcp|fflags;nobuffer|max_delay;500000|stimeout;5000000')
+        os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|fflags;nobuffer|max_delay;500000|stimeout;5000000")
 
         import cv2
 
         if self._capture is None:
             self._capture = cv2.VideoCapture(self.stream_url)
-            if hasattr(cv2, 'CAP_PROP_BUFFERSIZE'):
+            if hasattr(cv2, "CAP_PROP_BUFFERSIZE"):
                 self._capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         if not self._capture.isOpened():
             self._release_capture()
-            self.last_error = 'Unable to open ONVIF/RTSP stream.'
+            self.last_error = "Unable to open ONVIF/RTSP stream."
             raise RuntimeError(self.last_error)
         return self._capture
 
@@ -102,16 +78,16 @@ class OpenCvStreamCamera:
 
             if not ok or image is None:
                 self._release_capture()
-                self.last_error = 'Unable to read a frame from the ONVIF/RTSP stream.'
+                self.last_error = "Unable to read a frame from the ONVIF/RTSP stream."
                 raise RuntimeError(self.last_error)
 
             height, width = image.shape[:2]
             self.width = int(width)
             self.height = int(height)
             self.frame_number += 1
-            ok, encoded = cv2.imencode('.jpg', image)
+            ok, encoded = cv2.imencode(".jpg", image)
             if not ok:
-                self.last_error = 'Unable to encode ONVIF/RTSP frame as JPEG.'
+                self.last_error = "Unable to encode ONVIF/RTSP frame as JPEG."
                 raise RuntimeError(self.last_error)
             self.last_error = None
             return encoded.tobytes(), self.get_frame()
@@ -121,7 +97,7 @@ class OpenCvStreamCamera:
 
     @staticmethod
     def _read_latest_frame(capture, stale_frame_grabs: int) -> tuple[bool, Any]:
-        if hasattr(capture, 'grab'):
+        if hasattr(capture, "grab"):
             for _ in range(stale_frame_grabs):
                 if not capture.grab():
                     break
@@ -129,7 +105,7 @@ class OpenCvStreamCamera:
 
     def snapshot(self) -> dict[str, Any]:
         _jpeg, frame = self.read_jpeg()
-        frame['snapshot'] = True
+        frame["snapshot"] = True
         return frame
 
     def close(self) -> None:

@@ -13,7 +13,7 @@ class RecordingService:
     """Event recording facade with policy selection and generated test footage."""
 
     VALID_MODES = {'off', 'continuous', 'motion', 'human', 'objects'}
-    VALID_SOURCES = {'mock', 'camera', 'upload', 'rtsp'}
+    VALID_SOURCES = {'camera', 'upload', 'rtsp'}
     PLAYBACK_FORMAT = 'mp4'
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -105,9 +105,9 @@ class RecordingService:
         if write_clip:
             self.write_event_clip(file_path, event_id, detections, duration_seconds, trigger_type, trigger_label)
 
-        mapped_source = 'upload' if source in {'test-image', 'upload'} else 'rtsp' if source == 'rtsp' else 'mock' if source.startswith('mock') else 'camera'
+        mapped_source = 'upload' if source in {'test-image', 'upload'} else 'rtsp' if source == 'rtsp' else 'camera'
         if mapped_source not in self.VALID_SOURCES:
-            mapped_source = 'mock'
+            mapped_source = 'camera'
         return {
             'event_id': event_id,
             'camera_id': None,

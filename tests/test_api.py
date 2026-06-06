@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import importlib
 import json
@@ -94,6 +94,23 @@ def _multipart_file(field_name: str, filename: str, content: bytes, content_type
     return body, f'multipart/form-data; boundary={boundary}'
 
 
+TEST_IMAGE_PNG = (
+    b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
+    b'\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04'
+    b'\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82'
+)
+
+
+def _post_test_image_detection(client: LocalClient, csrf_token: str | None = None, camera_id: str | None = None):
+    path = '/api/detect/test-image'
+    if camera_id:
+        path = f'{path}?camera_id={camera_id}'
+    headers = {'Content-Type': 'image/png'}
+    if csrf_token:
+        headers['X-CSRF-Token'] = csrf_token
+    return client.request(path, method='POST', data=TEST_IMAGE_PNG, headers=headers)
+
+
 def _body(response):
     data = response.read()
     if "application/json" in response.headers.get("content-type", ""):
@@ -131,7 +148,7 @@ auth:
   max_login_attempts: 5
   lockout_minutes: 15
 ai:
-  backend: mock
+  backend: onnx
   confidence: 0.45
 {extra_ai}
 storage:
@@ -186,9 +203,9 @@ def _server(app):
 
 
 def test_detector_backend_selection(tmp_path):
-    from app.detector import MockDetector, OnnxYoloDetector, create_detector
+    from app.detector import OnnxYoloDetector, create_detector
 
-    assert isinstance(create_detector({"backend": "mock", "categories": ["cat"]}), MockDetector)
+    assert isinstance(create_detector({"backend": "onnx", "categories": ["cat"]}), OnnxYoloDetector)
 
     missing_model = tmp_path / "missing.onnx"
     detector = create_detector(
@@ -213,7 +230,7 @@ def test_anpr_pipeline_extracts_vehicle_plate(tmp_path):
     from app.storage import Storage
 
     storage = Storage({'storage': {'data_dir': str(tmp_path), 'plates_dir': str(tmp_path / 'plates')}})
-    pipeline = AnprPipeline({'enabled': True, 'backend': 'mock', 'min_confidence': 0.75, 'vehicle_labels': ['car']})
+    pipeline = AnprPipeline({'enabled': True, 'backend': 'paddleocr', 'min_confidence': 0.75, 'vehicle_labels': ['car']})
     results = pipeline.process_event(
         event_id=42,
         detections=[{'label': 'car', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.2}}],
@@ -413,7 +430,7 @@ def test_live_snapshot_renderer_can_hide_object_overlay(tmp_path, monkeypatch):
     with_overlay = main.render_live_snapshot_svg(frame, detections, overlay=True)
     assert 'Overlay ON' in with_overlay
     assert '<g class="detection-box"' in with_overlay
-    assert 'person · 92%' in with_overlay
+    assert 'person Â· 92%' in with_overlay
 
 
 def test_live_snapshot_jpeg_overlay_changes_frame_when_detections_exist(tmp_path, monkeypatch):
@@ -494,11 +511,11 @@ def test_ai_model_status_and_action_endpoints(tmp_path, monkeypatch):
 
         status, _headers, checked = client.request('/api/settings/ai/check-model', method='POST', headers={'X-CSRF-Token': csrf})
         assert status == 200
-        assert checked['current_backend'] == 'mock'
+        assert checked['current_backend'] == 'onnx'
 
         status, _headers, tested = client.request('/api/settings/ai/test-detector', method='POST', headers={'X-CSRF-Token': csrf})
         assert status == 200
-        assert tested['backend_used'] == 'mock'
+        assert tested['backend_used'] == 'onnx'
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -572,9 +589,9 @@ def test_setup_login_success_session_validation_and_protected_routes(tmp_path, m
         assert status == 200
         assert payload["status"] == "online"
 
-        status, _headers, _payload = client.request("/api/mock/detect", method="POST")
+        status, _headers, _payload = _post_test_image_detection(client)
         assert status == 403
-        status, _headers, created = client.request("/api/mock/detect", method="POST", headers={"X-CSRF-Token": csrf})
+        status, _headers, created = _post_test_image_detection(client, csrf)
         assert status == 200
         assert created["created"] is True
 
@@ -652,18 +669,16 @@ def test_logout_user_creation_and_password_reset(tmp_path, monkeypatch):
         assert viewer_client.request("/api/status")[0] == 200
         assert viewer_client.request("/api/users")[0] == 403
 
-        status, _headers, created = viewer_client.request(
-            "/api/mock/detect", method="POST", headers={"X-CSRF-Token": viewer_csrf}
-        )
+        status, _headers, created = _post_test_image_detection(viewer_client, viewer_csrf)
         assert status == 200
         assert created["created"] is True
         assert created["event_id"] >= 1
         assert created["detections"]
 
         events = viewer_client.request("/api/events")[2]
-        assert events[0]["source"] == "mock-camera"
+        assert events[0]["source"] == "test-image"
         assert viewer_client.request(f"/api/events/{created['event_id']}")[2]["id"] == created["event_id"]
-        assert viewer_client.request("/api/config")[2]["ai"]["backend"] == "mock"
+        assert viewer_client.request("/api/config")[2]["ai"]["backend"] == "onnx"
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -679,7 +694,7 @@ def test_admin_ai_settings_viewer_denied_and_db_override(tmp_path, monkeypatch):
         status, _headers, settings = admin.request(
             "/api/settings/ai",
             method="PUT",
-            json_body={"backend": "mock", "confidence": 0.72, "iou_threshold": 0.33, "input_size": 320},
+            json_body={"backend": "onnx", "confidence": 0.72, "iou_threshold": 0.33, "input_size": 320},
             headers={"X-CSRF-Token": csrf},
         )
         assert status == 200
@@ -887,8 +902,7 @@ def test_email_alert_settings_and_delivery(tmp_path, monkeypatch):
         assert rule["email_recipients"] == ["user@example.com"]
 
         main_module.detector.categories = ["cat"]
-        main_module.mock_detector.categories = ["cat"]
-        status, _headers, created = client.request("/api/mock/detect", method="POST", headers={"X-CSRF-Token": csrf})
+        status, _headers, created = _post_test_image_detection(client, csrf)
         assert status == 200
         assert created["created"] is True
         assert sent
@@ -964,9 +978,8 @@ def test_anpr_event_search_alerts_and_plate_status_api(tmp_path, monkeypatch):
         admin_csrf = _login(admin)
         main_module = sys.modules["app.main"]
         main_module.detector.categories = ["car"]
-        main_module.mock_detector.categories = ["car"]
 
-        status, _headers, created = admin.request('/api/mock/detect', method='POST', headers={'X-CSRF-Token': admin_csrf})
+        status, _headers, created = _post_test_image_detection(admin, admin_csrf)
         assert status == 200
         assert created['plate_events']
         plate_number = created['plate_events'][0]['plate_number']
@@ -1056,7 +1069,7 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
         status, _headers, camera = client.request(
             "/api/settings/system/camera",
             method="PUT",
-            json_body={"backend": "mock", "width": 640, "height": 360, "fps": 12, "device": 0, "flip": "none"},
+            json_body={"backend": "rtsp", "width": 640, "height": 360, "fps": 12, "device": "rtsp", "flip": "none", "stream_url": "rtsp://127.0.0.1:554/stream1"},
             headers={"X-CSRF-Token": csrf},
         )
         assert status == 200
@@ -1066,7 +1079,7 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
         status, _headers, anpr = client.request(
             "/api/settings/anpr",
             method="PUT",
-            json_body={"enabled": True, "backend": "mock", "min_confidence": 0.8, "vehicle_labels": ["car", "truck"]},
+            json_body={"enabled": True, "backend": "paddleocr", "min_confidence": 0.8, "vehicle_labels": ["car", "truck"]},
             headers={"X-CSRF-Token": csrf},
         )
         assert status == 200
@@ -1168,7 +1181,7 @@ def test_onvif_stream_url_uses_form_credentials_when_url_is_bare(tmp_path, monke
 
 
 def test_opencv_stream_camera_reuses_rtsp_capture(monkeypatch):
-    from app.mock_camera import OpenCvStreamCamera
+    from app.camera_backend import OpenCvStreamCamera
 
     class FakeImage:
         shape = (720, 1280, 3)
@@ -1548,7 +1561,7 @@ def test_admin_can_backup_and_restore_database_from_api(tmp_path, monkeypatch):
         status, _headers, camera = client.request(
             '/api/settings/system/camera',
             method='PUT',
-            json_body={'backend': 'mock', 'width': 640, 'height': 360, 'fps': 12, 'device': 'mock', 'flip': 'none'},
+            json_body={'backend': 'rtsp', 'width': 640, 'height': 360, 'fps': 12, 'device': 'rtsp', 'flip': 'none', 'stream_url': 'rtsp://127.0.0.1:554/stream1'},
             headers={'X-CSRF-Token': csrf},
         )
         assert status == 200
@@ -1564,7 +1577,7 @@ def test_admin_can_backup_and_restore_database_from_api(tmp_path, monkeypatch):
         status, _headers, camera = client.request(
             '/api/settings/system/camera',
             method='PUT',
-            json_body={'backend': 'mock', 'width': 800, 'height': 450, 'fps': 20, 'device': 'mock', 'flip': 'none'},
+            json_body={'backend': 'rtsp', 'width': 800, 'height': 450, 'fps': 20, 'device': 'rtsp', 'flip': 'none', 'stream_url': 'rtsp://127.0.0.1:554/stream1'},
             headers={'X-CSRF-Token': csrf},
         )
         assert status == 200
@@ -1746,7 +1759,7 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         )
         assert status == 200
 
-        status, _headers, created = admin.request('/api/mock/detect', method='POST', headers={'X-CSRF-Token': admin_csrf})
+        status, _headers, created = _post_test_image_detection(admin, admin_csrf)
         assert status == 200
         assert created['recording_id'] is not None
 
@@ -1755,7 +1768,7 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         assert recordings[0]['id'] == created['recording_id']
         assert recordings[0]['event_id'] == created['event_id']
         assert recordings[0]['detections']
-        assert recordings[0]['source'] == 'mock'
+        assert recordings[0]['source'] == 'upload'
         assert recordings[0]['trigger_type'] in {'motion', 'human', 'object', 'continuous'}
         assert Path(recordings[0]['file_path']).exists()
 
@@ -1806,7 +1819,7 @@ def test_recording_retention_purge_deletes_metadata_and_files(tmp_path, monkeypa
     try:
         _setup_admin(admin)
         admin_csrf = _login(admin)
-        status, _headers, created = admin.request('/api/mock/detect', method='POST', headers={'X-CSRF-Token': admin_csrf})
+        status, _headers, created = _post_test_image_detection(admin, admin_csrf)
         assert status == 200
         recording = admin.request(f"/api/recordings/{created['recording_id']}")[2]
         file_path = Path(recording['file_path'])
@@ -1839,7 +1852,8 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
             {
                 'id': 'front-door',
                 'name': 'Front Door',
-                'backend': 'mock',
+                'backend': 'onvif',
+                'stream_url': 'rtsp://127.0.0.1:554/front-door',
                 'width': 1280,
                 'height': 720,
                 'fps': 15,
@@ -1856,7 +1870,8 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
             {
                 'id': 'garage',
                 'name': 'Garage',
-                'backend': 'mock',
+                'backend': 'onvif',
+                'stream_url': 'rtsp://127.0.0.1:554/garage',
                 'width': 640,
                 'height': 480,
                 'fps': 10,
@@ -1880,7 +1895,7 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
         assert status_payload['camera_id'] == 'garage'
         assert status_payload['resolution'] == {'width': 640, 'height': 480}
 
-        status, _headers, no_detection = client.request('/api/mock/detect?camera_id=garage', method='POST', headers={'X-CSRF-Token': csrf})
+        status, _headers, no_detection = _post_test_image_detection(client, csrf, camera_id='garage')
         assert status == 200
         assert no_detection['created'] is False
 
@@ -1982,3 +1997,4 @@ def test_camera_object_labels_filter_without_monitoring_zones(tmp_path, monkeypa
     filtered = main.filter_detections_for_camera(detections, settings)
 
     assert [detection['label'] for detection in filtered] == ['person']
+

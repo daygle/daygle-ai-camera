@@ -49,6 +49,29 @@ function createCameraManagerSection() {
 
 createCameraManagerSection();
 
+function createLiveSettingsSection() {
+  const section = document.createElement('section');
+  section.className = 'card';
+  section.innerHTML = `
+    <h2>Live performance</h2>
+    <form id="liveSettingsForm" class="form-grid">
+      <input name="snapshot_refresh_ms" type="number" min="150" max="5000" step="10" placeholder="Snapshot refresh ms (e.g. 500)" />
+      <input name="detection_status_refresh_ms" type="number" min="500" max="15000" step="100" placeholder="Detection status refresh ms (e.g. 2000)" />
+      <input name="detection_interval_seconds" type="number" min="0.2" max="10" step="0.1" placeholder="Detection interval seconds (e.g. 1.0)" />
+      <button type="submit">Save live settings</button>
+    </form>
+    <p class="muted">Lower values can improve responsiveness but increase CPU/network usage.</p>
+  `;
+  const cameraSection = document.getElementById('cameraManager')?.closest('section');
+  if (cameraSection) {
+    cameraSection.after(section);
+  } else {
+    document.querySelector('main')?.append(section);
+  }
+}
+
+createLiveSettingsSection();
+
 let cameras = [];
 
 function newCameraTemplate() {
@@ -132,6 +155,7 @@ function escapeHtml(value) {
 
 const forms = {
   anpr: document.getElementById('anprSettingsForm'),
+  live: document.getElementById('liveSettingsForm'),
   recording: document.getElementById('recordingSettingsForm'),
   retention: document.getElementById('retentionSettingsForm'),
   storage: document.getElementById('storageSettingsForm'),
@@ -166,6 +190,10 @@ function payloadFor(form) {
   for (const key of ['width', 'height', 'fps', 'port', 'pre_event_seconds', 'post_event_seconds', 'max_clip_seconds', 'retention_days', 'max_storage_gb', 'max_login_attempts', 'lockout_minutes']) {
     if (key in data && data[key] !== '') data[key] = Number.parseInt(data[key], 10);
   }
+  for (const key of ['snapshot_refresh_ms', 'detection_status_refresh_ms']) {
+    if (key in data && data[key] !== '') data[key] = Number.parseInt(data[key], 10);
+  }
+  if ('detection_interval_seconds' in data && data.detection_interval_seconds !== '') data.detection_interval_seconds = Number(data.detection_interval_seconds);
   if ('record_on_objects' in data) data.record_on_objects = data.record_on_objects.split(',').map((label) => label.trim()).filter(Boolean);
   if ('vehicle_labels' in data) data.vehicle_labels = data.vehicle_labels.split(',').map((label) => label.trim()).filter(Boolean);
   if ('min_confidence' in data && data.min_confidence !== '') data.min_confidence = Number(data.min_confidence);
@@ -180,6 +208,7 @@ async function loadSettings() {
   cameras = settings.cameras || [settings.camera];
   renderCameraManager();
   fillForm(forms.anpr, settings.anpr);
+  fillForm(forms.live, settings.live);
   if (forms.anpr.elements.vehicle_labels) {
     forms.anpr.elements.vehicle_labels.value = (settings.anpr.vehicle_labels || []).join(', ');
   }
@@ -207,6 +236,7 @@ function bindForm(name, label, endpointName = name) {
 }
 
 bindForm('anpr', 'ANPR');
+bindForm('live', 'Live');
 bindForm('recording', 'Recording');
 bindForm('retention', 'Retention', 'recording');
 bindForm('storage', 'Storage');

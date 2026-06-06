@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import random
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,58 +26,6 @@ class Detection:
 
 class DetectorUnavailableError(RuntimeError):
     """Raised when a configured detector backend cannot run inference."""
-
-
-class MockDetector:
-    """A deterministic-enough fake detector for dashboard and alert testing."""
-
-    backend = "mock"
-
-    def __init__(self, categories: list[str], min_confidence: float = 0.45) -> None:
-        self.categories = categories or ["person", "cat", "dog", "car", "package"]
-        self.min_confidence = min_confidence
-        self._last_detection_at = 0.0
-
-    def detect(self, frame_number: int, force: bool = False) -> list[dict[str, Any]]:
-        now = time.time()
-
-        # Do not create detections on every frame; this keeps the event stream readable.
-        if not force and now - self._last_detection_at < 3:
-            return []
-
-        if not force and random.random() > 0.55:
-            return []
-
-        self._last_detection_at = now
-        count = random.randint(1, 3)
-        detections: list[Detection] = []
-
-        for _ in range(count):
-            label = random.choice(self.categories)
-            confidence = random.uniform(max(self.min_confidence, 0.45), 0.98)
-            x = random.uniform(0.05, 0.65)
-            y = random.uniform(0.08, 0.65)
-            width = random.uniform(0.12, 0.30)
-            height = random.uniform(0.12, 0.35)
-            detections.append(
-                Detection(
-                    label=label,
-                    confidence=confidence,
-                    box={
-                        "x": round(x, 3),
-                        "y": round(y, 3),
-                        "width": round(width, 3),
-                        "height": round(height, 3),
-                    },
-                )
-            )
-
-        return [detection.to_dict() for detection in detections]
-
-    def detect_image(self, image_bytes: bytes) -> list[dict[str, Any]]:
-        # Mock mode remains useful for end-to-end upload/event testing without a model file.
-        frame_number = max(1, len(image_bytes))
-        return self.detect(frame_number=frame_number, force=True)
 
 
 def parse_input_size(value: Any) -> tuple[int, int]:
@@ -321,17 +267,15 @@ class OnnxYoloDetector:
         return [detection.to_dict() for detection in detections]
 
 
-def create_detector(ai_config: dict[str, Any]) -> MockDetector | OnnxYoloDetector:
+def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
     backend = str(ai_config.get("backend", "onnx")).lower()
-    if backend == "onnx":
-        return OnnxYoloDetector(
-            model_path=ai_config.get("model_path", "models/model.onnx"),
-            labels_path=ai_config.get("labels_path", "models/coco.names"),
-            input_size=ai_config.get("input_size", 640),
-            confidence=float(ai_config.get("confidence", 0.45)),
-            iou_threshold=float(ai_config.get("iou_threshold", 0.45)),
-            categories=ai_config.get("categories", []),
-        )
-    if backend != "mock":
-        raise ValueError(f"Unsupported ai.backend '{backend}'. Expected 'mock' or 'onnx'.")
-    return MockDetector(ai_config.get("categories", []), float(ai_config.get("confidence", 0.45)))
+    if backend != "onnx":
+        raise ValueError(f"Unsupported ai.backend '{backend}'. Expected 'onnx'.")
+    return OnnxYoloDetector(
+        model_path=ai_config.get("model_path", "models/model.onnx"),
+        labels_path=ai_config.get("labels_path", "models/coco.names"),
+        input_size=ai_config.get("input_size", 640),
+        confidence=float(ai_config.get("confidence", 0.45)),
+        iou_threshold=float(ai_config.get("iou_threshold", 0.45)),
+        categories=ai_config.get("categories", []),
+    )

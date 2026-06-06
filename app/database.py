@@ -74,7 +74,7 @@ class EventDatabase:
                     duration_seconds REAL NOT NULL,
                     file_path TEXT NOT NULL,
                     thumbnail_path TEXT,
-                    source TEXT NOT NULL CHECK(source IN ('mock', 'camera', 'upload', 'rtsp')),
+                    source TEXT NOT NULL CHECK(source IN ('camera', 'upload', 'rtsp')),
                     trigger_type TEXT NOT NULL DEFAULT 'motion',
                     trigger_label TEXT,
                     created_at TEXT NOT NULL,
