@@ -1407,6 +1407,77 @@ def test_live_stream_detection_without_alert_rule_does_not_record_by_default(tmp
     assert 'waiting for an enabled alert rule' in status['recording_reason']
 
 
+def test_live_stream_detection_saves_only_allowed_zone_object_labels(tmp_path, monkeypatch):
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, image_bytes):
+            return [
+                {
+                    'label': 'person',
+                    'confidence': 0.91,
+                    'box': {'x': 64, 'y': 72, 'width': 320, 'height': 360},
+                },
+                {
+                    'label': 'suitcase',
+                    'confidence': 0.88,
+                    'box': {'x': 500, 'y': 120, 'width': 180, 'height': 220},
+                },
+            ]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    main.live_detection_last_checked.clear()
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
+    for rule in main.database.list_alert_rules():
+        main.database.delete_alert_rule(rule['id'])
+    main.database.create_alert_rule(
+        main.validate_alert_rule({
+            'name': 'Person live',
+            'object': 'person',
+            'min_confidence': 0.5,
+            'cooldown_seconds': 0,
+            'enabled': True,
+        }),
+        main.utc_now(),
+    )
+
+    event_id = main.process_live_stream_alerts(
+        b'jpeg-frame',
+        {'width': 1280, 'height': 720},
+        {
+            'id': 'camera-1',
+            'name': 'Front Door',
+            'detection': {
+                'zones': [
+                    {
+                        'id': 'porch',
+                        'name': 'Porch',
+                        'x': 0,
+                        'y': 0,
+                        'width': 1,
+                        'height': 1,
+                        'monitor_motion': False,
+                        'monitor_objects': True,
+                        'object_labels': ['person', 'cat'],
+                        'monitor_anpr': False,
+                    },
+                ],
+            },
+        },
+    )
+
+    assert event_id is not None
+    event = main.database.get_event(event_id)
+    assert [detection['label'] for detection in event['detections']] == ['person']
+    status = main.live_detection_status_payload('camera-1')
+    assert [detection['label'] for detection in status['detections']] == ['person']
+
+
 def test_live_stream_camera_continuous_recording_records_without_alert_rule(tmp_path, monkeypatch):
     _app, _database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
@@ -1776,8 +1847,9 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
                     'motion_enabled': True,
                     'object_detection_enabled': True,
                     'anpr_enabled': True,
+                    'object_labels': ['person', 'cat'],
                     'zones': [
-                        {'id': 'porch', 'name': 'Porch', 'x': 0.0, 'y': 0.0, 'width': 0.5, 'height': 0.5, 'monitor_motion': True, 'monitor_objects': True, 'monitor_anpr': True}
+                        {'id': 'porch', 'name': 'Porch', 'x': 0.0, 'y': 0.0, 'width': 0.5, 'height': 0.5, 'monitor_motion': True, 'monitor_objects': True, 'object_labels': ['person'], 'monitor_anpr': True}
                     ],
                 },
             },
@@ -1794,7 +1866,9 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
         status, _headers, payload = client.request('/api/cameras', method='PUT', json_body={'cameras': cameras}, headers={'X-CSRF-Token': csrf})
         assert status == 200
         assert [camera['id'] for camera in payload['cameras']] == ['front-door', 'garage']
+        assert payload['cameras'][0]['detection']['object_labels'] == ['person', 'cat']
         assert payload['cameras'][0]['detection']['zones'][0]['name'] == 'Porch'
+        assert payload['cameras'][0]['detection']['zones'][0]['object_labels'] == ['person']
 
         status, _headers, listed = client.request('/api/cameras')
         assert status == 200
@@ -1818,7 +1892,7 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
                 'detection': {
                     **listed['cameras'][0]['detection'],
                     'zones': [
-                        {'id': 'driveway', 'name': 'Driveway', 'x': 0.25, 'y': 0.25, 'width': 0.5, 'height': 0.5, 'monitor_motion': True, 'monitor_objects': False, 'monitor_anpr': False}
+                        {'id': 'driveway', 'name': 'Driveway', 'x': 0.25, 'y': 0.25, 'width': 0.5, 'height': 0.5, 'monitor_motion': True, 'monitor_objects': False, 'object_labels': 'cat, person, cat', 'monitor_anpr': False}
                     ],
                 },
             },
@@ -1827,6 +1901,7 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
         assert status == 200
         assert updated['detection']['zones'][0]['id'] == 'driveway'
         assert updated['detection']['zones'][0]['monitor_objects'] is False
+        assert updated['detection']['zones'][0]['object_labels'] == ['cat', 'person']
         assert updated['detection']['zones'][0]['monitor_anpr'] is False
     finally:
         server.should_exit = True
@@ -1864,5 +1939,46 @@ def test_polygon_monitoring_zones_are_normalized_and_filter_by_shape(tmp_path, m
     ]
 
     filtered = main.filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects', require_zones=True)
+
+    assert [detection['label'] for detection in filtered] == ['person']
+
+
+def test_monitoring_zones_filter_object_detections_by_label(tmp_path, monkeypatch):
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    main = sys.modules["app.main"]
+    zones = main.normalize_monitoring_zones([
+        {
+            'id': 'porch',
+            'name': 'Porch',
+            'x': 0,
+            'y': 0,
+            'width': 1,
+            'height': 1,
+            'monitor_objects': True,
+            'object_labels': ['person', 'cat'],
+        }
+    ])
+    settings = {'detection': {'zones': zones}}
+    detections = [
+        {'label': 'person', 'box': {'x': 0.1, 'y': 0.1, 'width': 0.1, 'height': 0.1}},
+        {'label': 'suitcase', 'box': {'x': 0.2, 'y': 0.2, 'width': 0.1, 'height': 0.1}},
+        {'label': 'cat', 'box': {'x': 0.3, 'y': 0.3, 'width': 0.1, 'height': 0.1}},
+    ]
+
+    filtered = main.filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects', require_zones=True)
+
+    assert [detection['label'] for detection in filtered] == ['person', 'cat']
+
+
+def test_camera_object_labels_filter_without_monitoring_zones(tmp_path, monkeypatch):
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    main = sys.modules["app.main"]
+    settings = {'detection': {'object_labels': ['person', 'cat'], 'zones': []}}
+    detections = [
+        {'label': 'person', 'box': {'x': 0.1, 'y': 0.1, 'width': 0.1, 'height': 0.1}},
+        {'label': 'suitcase', 'box': {'x': 0.2, 'y': 0.2, 'width': 0.1, 'height': 0.1}},
+    ]
+
+    filtered = main.filter_detections_for_camera(detections, settings)
 
     assert [detection['label'] for detection in filtered] == ['person']

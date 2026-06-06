@@ -243,6 +243,23 @@ def normalize_bool_setting(value: Any, default: bool = False) -> bool:
     return str(value).strip().lower() in {'1', 'true', 'yes', 'on', 'enabled'}
 
 
+def normalize_label_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        raw_labels = value.split(',')
+    elif isinstance(value, list):
+        raw_labels = value
+    else:
+        return []
+    labels: list[str] = []
+    seen: set[str] = set()
+    for raw_label in raw_labels:
+        label = str(raw_label).strip().lower()
+        if label and label not in seen:
+            labels.append(label)
+            seen.add(label)
+    return labels
+
+
 def normalize_camera_recording_settings(settings: Any) -> dict[str, Any]:
     recording = default_camera_recording_settings()
     if isinstance(settings, dict):
@@ -309,6 +326,7 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
             'enabled': bool(zone.get('enabled', True)),
             'monitor_motion': bool(zone.get('monitor_motion', True)),
             'monitor_objects': bool(zone.get('monitor_objects', True)),
+            'object_labels': normalize_label_list(zone.get('object_labels', [])),
             'monitor_anpr': bool(zone.get('monitor_anpr', True)),
         })
     return normalized
@@ -329,6 +347,7 @@ def normalize_camera_settings(settings: dict[str, Any], index: int = 1) -> dict[
         detection.update(camera_settings['detection'])
     for key in ('motion_enabled', 'object_detection_enabled', 'anpr_enabled'):
         detection[key] = bool(detection.get(key, True))
+    detection['object_labels'] = normalize_label_list(detection.get('object_labels', []))
     detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
     camera_settings['detection'] = detection
     camera_settings['recording'] = normalize_camera_recording_settings(camera_settings.get('recording'))
@@ -413,12 +432,31 @@ def filter_detections_for_camera(detections: list[dict[str, Any]], settings: dic
     return filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects')
 
 
+def detection_label_allowed_for_zone(detection: dict[str, Any], zone: dict[str, Any], camera_labels: set[str]) -> bool:
+    zone_labels = set(normalize_label_list(zone.get('object_labels', [])))
+    allowed_labels = zone_labels or camera_labels
+    if not allowed_labels:
+        return True
+    return str(detection.get('label') or '').strip().lower() in allowed_labels
+
+
 def filter_detections_for_camera_zones(detections: list[dict[str, Any]], settings: dict[str, Any], *, zone_monitor_key: str, require_zones: bool = False) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get(zone_monitor_key, True)]
+    camera_labels = set(normalize_label_list(detection_settings.get('object_labels', [])))
     if not zones:
+        if zone_monitor_key == 'monitor_objects' and camera_labels and not require_zones:
+            return [detection for detection in detections if str(detection.get('label') or '').strip().lower() in camera_labels]
         return [] if require_zones else detections
-    return [detection for detection in detections if any(detection_center_in_zone(detection, zone) for zone in zones)]
+    return [
+        detection
+        for detection in detections
+        if any(
+            detection_center_in_zone(detection, zone)
+            and (zone_monitor_key != 'monitor_objects' or detection_label_allowed_for_zone(detection, zone, camera_labels))
+            for zone in zones
+        )
+    ]
 
 
 def filter_detections_for_camera_anpr(detections: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2052,6 +2090,7 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     detection['motion_enabled'] = _bool_value(detection.get('motion_enabled', True))
     detection['object_detection_enabled'] = _bool_value(detection.get('object_detection_enabled', True))
     detection['anpr_enabled'] = _bool_value(detection.get('anpr_enabled', True))
+    detection['object_labels'] = normalize_label_list(detection.get('object_labels', []))
     detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
     updated['detection'] = detection
 

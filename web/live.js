@@ -100,8 +100,23 @@ function roundCoord(value) {
 function normalizeZone(zone) {
   const sourcePoints = Array.isArray(zone.points) && zone.points.length >= 3 ? zone.points : rectanglePoints(zone);
   zone.points = sourcePoints.map(normalizePoint);
+  zone.object_labels = normalizeLabelList(zone.object_labels);
   updateZoneBounds(zone);
   return zone;
+}
+
+function normalizeLabelList(value) {
+  const source = Array.isArray(value) ? value : String(value || '').split(',');
+  const seen = new Set();
+  return source.map((label) => String(label).trim().toLowerCase()).filter((label) => {
+    if (!label || seen.has(label)) return false;
+    seen.add(label);
+    return true;
+  });
+}
+
+function labelListValue(value) {
+  return normalizeLabelList(value).join(', ');
 }
 
 function visibleImageRect() {
@@ -233,6 +248,7 @@ function renderZones() {
       <label><span>Zone</span><select data-zone-enabled="${index}"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Shown</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
       <label><span>Motion</span><select data-zone-motion="${index}"><option value="true" ${zone.monitor_motion !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_motion === false ? 'selected' : ''}>Off</option></select></label>
       <label><span>Objects</span><select data-zone-objects="${index}"><option value="true" ${zone.monitor_objects !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_objects === false ? 'selected' : ''}>Off</option></select></label>
+      <label class="zone-object-labels"><span>Object labels</span><input data-zone-object-labels="${index}" value="${escapeHtml(labelListValue(zone.object_labels))}" placeholder="person, cat" /></label>
       <label><span>ANPR</span><select data-zone-anpr="${index}"><option value="true" ${zone.monitor_anpr !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_anpr === false ? 'selected' : ''}>Off</option></select></label>
       <button class="secondary" type="button" data-delete-zone="${index}">Remove</button>
     </div>
@@ -267,6 +283,13 @@ function renderZones() {
       selectedZoneIndex = Number(select.dataset.zoneObjects);
       zones[selectedZoneIndex].monitor_objects = select.value === 'true';
       renderZones();
+    });
+  });
+  document.querySelectorAll('[data-zone-object-labels]').forEach((input) => {
+    input.addEventListener('focus', () => { selectedZoneIndex = Number(input.dataset.zoneObjectLabels); updateSelectionStyles(); });
+    input.addEventListener('input', () => {
+      const index = Number(input.dataset.zoneObjectLabels);
+      zones[index].object_labels = normalizeLabelList(input.value);
     });
   });
   document.querySelectorAll('[data-zone-anpr]').forEach((select) => {
@@ -398,6 +421,7 @@ function finishDraftPolygon() {
     enabled: true,
     monitor_motion: true,
     monitor_objects: true,
+    object_labels: [],
     monitor_anpr: true,
   });
   selectedZoneIndex = zones.length - 1;
