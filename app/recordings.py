@@ -181,16 +181,63 @@ class RecordingService:
         file_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             self._write_opencv_clip(file_path, event_id, detections, duration_seconds, trigger_type, trigger_label)
-        except Exception:
-            payload = {
-                'event_id': event_id,
-                'detections': detections,
-                'duration_seconds': duration_seconds,
-                'trigger_type': trigger_type,
-                'trigger_label': trigger_label,
-                'note': 'Video encoder unavailable; metadata fallback was written.',
-            }
-            file_path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+            return
+        except Exception as exc:
+            logger.warning('OpenCV clip generation failed for %s: %s', file_path.name, exc)
+        try:
+            self._write_ffmpeg_placeholder_clip(file_path, duration_seconds)
+            return
+        except Exception as exc:
+            logger.warning('FFmpeg placeholder clip generation failed for %s: %s', file_path.name, exc)
+
+        # Final fallback: persist metadata beside the target path, but never as .mp4 content.
+        file_path.unlink(missing_ok=True)
+        metadata_path = file_path.with_name(f'{file_path.name}.meta.json')
+        payload = {
+            'event_id': event_id,
+            'detections': detections,
+            'duration_seconds': duration_seconds,
+            'trigger_type': trigger_type,
+            'trigger_label': trigger_label,
+            'note': 'Video encoder unavailable; metadata fallback was written.',
+        }
+        metadata_path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+
+    def _write_ffmpeg_placeholder_clip(self, file_path: Path, duration_seconds: float) -> None:
+        ffmpeg = shutil.which('ffmpeg')
+        if not ffmpeg:
+            raise RuntimeError('ffmpeg is not installed.')
+        tmp_path = file_path.with_name(f'{file_path.stem}.tmp{file_path.suffix}')
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        command = [
+            ffmpeg,
+            '-y',
+            '-f',
+            'lavfi',
+            '-i',
+            'color=c=0x16202c:s=640x360:r=10',
+            '-t',
+            f'{float(max(1.0, duration_seconds)):.3f}',
+            '-an',
+            '-c:v',
+            'libx264',
+            '-profile:v',
+            'main',
+            '-level',
+            '4.0',
+            '-pix_fmt',
+            'yuv420p',
+            '-movflags',
+            '+faststart',
+            str(tmp_path),
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=60, check=False)
+        if result.returncode != 0 or not tmp_path.exists() or tmp_path.stat().st_size <= 0:
+            if tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
+            raise RuntimeError('ffmpeg failed to generate placeholder clip.')
+        tmp_path.replace(file_path)
 
     def _write_opencv_clip(
         self,

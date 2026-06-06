@@ -1235,14 +1235,36 @@ def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
         str(tmp_path),
     ]
     result = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
-    if result.returncode != 0:
-        if tmp_path.exists():
-            tmp_path.unlink(missing_ok=True)
-        error_detail = f'{result.stderr[:500]}\n...\n{result.stderr[-1000:]}'
-        raise RuntimeError(f'ffmpeg failed to convert recording for browser playback: {error_detail}')
     if not tmp_path.exists():
         raise RuntimeError('MP4 conversion did not create an output file.')
+    if result.returncode != 0 and not mp4_has_video_stream(tmp_path):
+        tmp_path.unlink(missing_ok=True)
+        error_detail = f'{result.stderr[:500]}\n...\n{result.stderr[-1000:]}'
+        raise RuntimeError(f'ffmpeg failed to convert recording for browser playback: {error_detail}')
+    if not mp4_has_video_stream(tmp_path):
+        tmp_path.unlink(missing_ok=True)
+        raise RuntimeError('Converted MP4 does not contain a video stream.')
     tmp_path.replace(output_path)
+
+
+def mp4_has_video_stream(file_path: Path) -> bool:
+    ffprobe = shutil.which('ffprobe')
+    if not ffprobe:
+        return file_path.exists() and file_path.stat().st_size > 0
+    command = [
+        ffprobe,
+        '-v',
+        'error',
+        '-select_streams',
+        'v:0',
+        '-show_entries',
+        'stream=codec_name',
+        '-of',
+        'default=noprint_wrappers=1:nokey=1',
+        str(file_path),
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+    return result.returncode == 0 and bool((result.stdout or '').strip())
 
 
 DATABASE_RESTORE_REQUIRED_TABLES = {'events', 'detections', 'app_settings', 'users'}
@@ -1787,6 +1809,11 @@ def stream_recording(recording_id: int, request: Request):
     file_path = Path(recording['file_path'])
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail='Recording media file not found')
+    if not mp4_has_video_stream(file_path):
+        raise HTTPException(
+            status_code=415,
+            detail='Recording file is not a playable video stream. Generate a new recording to rebuild media.',
+        )
 
     stream_path = recording_stream_path(file_path)
     file_size = stream_path.stat().st_size
