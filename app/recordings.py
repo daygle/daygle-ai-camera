@@ -11,6 +11,7 @@ class RecordingService:
 
     VALID_MODES = {'off', 'continuous', 'motion', 'human', 'objects'}
     VALID_SOURCES = {'mock', 'camera', 'upload', 'rtsp'}
+    PLAYBACK_FORMAT = 'mp4'
 
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
@@ -65,7 +66,7 @@ class RecordingService:
         duration_seconds = min(max_clip_seconds, max(1, pre_seconds + post_seconds))
         started_at = created - timedelta(seconds=min(pre_seconds, duration_seconds))
         ended_at = started_at + timedelta(seconds=duration_seconds)
-        extension = str(self.recording_config.get('format', 'avi')).strip().lstrip('.') or 'avi'
+        extension = self.recording_format()
         filename = f"event_{event_id}_{created.strftime('%Y%m%d_%H%M%S_%f')}.{extension}"
         file_path = self.recordings_dir / filename
         self.write_event_clip(file_path, event_id, detections, duration_seconds, trigger_type, trigger_label)
@@ -85,6 +86,10 @@ class RecordingService:
             'trigger_type': trigger_type,
             'trigger_label': trigger_label,
         }
+
+    def recording_format(self) -> str:
+        configured = str(self.recording_config.get('format', self.PLAYBACK_FORMAT)).strip().lstrip('.').lower()
+        return self.PLAYBACK_FORMAT if configured in {'', 'avi'} else configured
 
     def write_event_clip(
         self,

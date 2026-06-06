@@ -153,7 +153,7 @@ recording:
   pre_event_seconds: 5
   post_event_seconds: 10
   max_clip_seconds: 60
-  format: avi
+  format: mp4
   retention_days: 14
   max_storage_gb: 20
   auto_purge_enabled: true
@@ -677,12 +677,13 @@ def test_admin_alert_rule_crud_and_alert_engine_uses_db_rules(tmp_path, monkeypa
         status, _headers, alert_page = client.request("/alert-settings")
         assert status == 200
         assert 'select name="object" id="objectSelect"' in alert_page
-        assert 'Choose from the detector labels currently available to this camera.' in alert_page
+        assert 'Choose Motion or a detector object label.' in alert_page
         assert 'id="testEmailRecipient"' in alert_page
         assert 'id="testEmailBtn"' in alert_page
         assert 'id="newAlertRuleBtn"' in alert_page
         assert 'Add alert rule' in alert_page
         assert 'class="list alert-rules-list"' in alert_page
+        assert 'Alert trigger' in alert_page
 
         initial = client.request("/api/settings/alerts")[2]
         assert "person" in initial["available_labels"]
@@ -707,8 +708,17 @@ def test_admin_alert_rule_crud_and_alert_engine_uses_db_rules(tmp_path, monkeypa
         assert status == 200
         assert second_rule["id"] != rule["id"]
 
+        status, _headers, motion_rule = client.request(
+            "/api/settings/alerts",
+            method="POST",
+            json_body={"name": "Motion DB", "object": "motion", "min_confidence": 0.1, "cooldown_seconds": 0, "enabled": True},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert motion_rule["object"] == "motion"
+
         rules = client.request("/api/settings/alerts")[2]["rules"]
-        assert {rule["name"] for rule in rules} == {"Person DB", "Car DB"}
+        assert {rule["name"] for rule in rules} == {"Person DB", "Car DB", "Motion DB"}
 
         status, _headers, edited = client.request(
             f"/api/settings/alerts/{rule['id']}",
@@ -721,13 +731,17 @@ def test_admin_alert_rule_crud_and_alert_engine_uses_db_rules(tmp_path, monkeypa
 
         main_module = sys.modules["app.main"]
         main_module.alerts.rules = main_module.effective_alert_rules()
-        triggered = main_module.alerts.process([{"label": "person", "confidence": 0.9}])
+        triggered = main_module.alerts.process([{"label": "person", "confidence": 0.9}, {"label": "motion", "confidence": 0.8, "motion_event": True}])
         assert any(alert["rule_name"] == "Person DB" for alert in triggered)
+        assert any(alert["rule_name"] == "Motion DB" for alert in triggered)
 
         status, _headers, deleted = client.request(f"/api/settings/alerts/{rule['id']}", method="DELETE", headers={"X-CSRF-Token": csrf})
         assert status == 200
         assert deleted["ok"] is True
         status, _headers, deleted = client.request(f"/api/settings/alerts/{second_rule['id']}", method="DELETE", headers={"X-CSRF-Token": csrf})
+        assert status == 200
+        assert deleted["ok"] is True
+        status, _headers, deleted = client.request(f"/api/settings/alerts/{motion_rule['id']}", method="DELETE", headers={"X-CSRF-Token": csrf})
         assert status == 200
         assert deleted["ok"] is True
     finally:
@@ -1024,7 +1038,7 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
                 "pre_event_seconds": 2,
                 "post_event_seconds": 3,
                 "max_clip_seconds": 10,
-                "format": "avi",
+                "format": "mp4",
                 "retention_days": 7,
                 "max_storage_gb": 5,
                 "auto_purge_enabled": True,
@@ -1057,7 +1071,7 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
         system_settings = client.request("/api/settings/system")[2]
         assert system_settings["camera"]["width"] == 640
         assert system_settings["anpr"]["min_confidence"] == 0.8
-        assert system_settings["recording"]["format"] == "avi"
+        assert system_settings["recording"]["format"] == "mp4"
         assert system_settings["auth"]["lockout_minutes"] == 10
     finally:
         server.should_exit = True
@@ -1377,8 +1391,9 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         assert event['recording_status'] == 'linked'
         assert event['recordings'][0]['id'] == created['recording_id']
 
-        status, _headers, _media = admin.request(f"/api/recordings/{created['recording_id']}/stream")
+        status, headers, _media = admin.request(f"/api/recordings/{created['recording_id']}/stream")
         assert status == 200
+        assert headers['content-type'].startswith('video/mp4')
 
         viewer_client = LocalClient(base_url)
         viewer_csrf = _login(viewer_client, viewer['username'], 'Viewer123!')

@@ -31,7 +31,7 @@ class EmailAlertService:
                     str(alert.get("message") or "Alert triggered."),
                     "",
                     f"Rule: {alert.get('rule_name')}",
-                    f"Object: {alert.get('label')}",
+                    f"Trigger: {alert.get('label')}",
                     f"Confidence: {float(alert.get('confidence', 0)):.2%}",
                     f"Event ID: {event_id}",
                 ]

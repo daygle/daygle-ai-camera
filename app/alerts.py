@@ -12,6 +12,10 @@ class AlertEngine:
 
     def process(self, detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
         alerts: list[dict[str, Any]] = []
+        motion_detections = [detection for detection in detections if detection.get('motion_event')]
+        if motion_detections:
+            strongest_motion = max(motion_detections, key=lambda detection: float(detection.get('confidence', 0)))
+            self._append_motion_alerts(alerts, strongest_motion)
 
         for detection in detections:
             label_value = detection.get('label')
@@ -22,6 +26,9 @@ class AlertEngine:
 
             for rule in self.rules:
                 if not rule.get('enabled', True):
+                    continue
+
+                if self._is_motion_rule(rule):
                     continue
 
                 if not self._is_active_now(rule):
@@ -50,6 +57,34 @@ class AlertEngine:
                 })
 
         return alerts
+
+    def _append_motion_alerts(self, alerts: list[dict[str, Any]], detection: dict[str, Any]) -> None:
+        confidence = float(detection.get('confidence', 0))
+        for rule in self.rules:
+            if not rule.get('enabled', True) or not self._is_motion_rule(rule):
+                continue
+            if not self._is_active_now(rule):
+                continue
+            if confidence < float(rule.get('min_confidence', 0.0)):
+                continue
+
+            rule_name = str(rule.get('name') or 'Motion')
+            cooldown = int(rule.get('cooldown_seconds', 60))
+            last = self.last_triggered.get(rule_name, 0)
+            if time.time() - last < cooldown:
+                continue
+
+            self.last_triggered[rule_name] = time.time()
+            alerts.append({
+                'rule_name': rule_name,
+                'label': 'motion',
+                'confidence': confidence,
+                'message': f'Alert triggered: motion detected ({confidence:.2%})',
+            })
+
+    @staticmethod
+    def _is_motion_rule(rule: dict[str, Any]) -> bool:
+        return str(rule.get('object') or '').strip().lower() == 'motion'
 
     def _is_active_now(self, rule: dict[str, Any]) -> bool:
         start = rule.get('active_start')

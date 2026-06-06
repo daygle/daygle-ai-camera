@@ -76,7 +76,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "pre_event_seconds": 5,
         "post_event_seconds": 10,
         "max_clip_seconds": 60,
-        "format": "avi",
+        "format": "mp4",
         "retention_days": 14,
         "max_storage_gb": 20,
         "auto_purge_enabled": True,

@@ -292,10 +292,12 @@ def detection_center_in_zone(detection: dict[str, Any], zone: dict[str, Any]) ->
 
 
 def filter_detections_for_camera(detections: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
+    return filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects')
+
+
+def filter_detections_for_camera_zones(detections: list[dict[str, Any]], settings: dict[str, Any], *, zone_monitor_key: str) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
-    if not detection_settings.get('object_detection_enabled', True):
-        return []
-    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
+    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get(zone_monitor_key, True)]
     if not zones:
         return detections
     return [detection for detection in detections if any(detection_center_in_zone(detection, zone) for zone in zones)]
@@ -360,8 +362,10 @@ def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any
 def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any]) -> int | None:
     camera_id = str(settings.get('id') or 'camera')
     detection_settings = settings.get('detection') or {}
-    if detection_settings.get('object_detection_enabled') is False:
-        update_live_detection_status(camera_id, state='skipped', reason='Object detection is disabled for this camera.')
+    motion_enabled = detection_settings.get('motion_enabled', True) is not False
+    object_detection_enabled = detection_settings.get('object_detection_enabled', True) is not False
+    if not motion_enabled and not object_detection_enabled:
+        update_live_detection_status(camera_id, state='skipped', reason='Motion and object detection are disabled for this camera.')
         return None
     if not hasattr(detector, 'detect_image'):
         update_live_detection_status(camera_id, state='skipped', reason='Live stream alerts require ONNX AI mode.')
@@ -386,14 +390,23 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
 
     detections = normalize_detection_boxes_for_frame(detections, frame)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
-    detections = filter_detections_for_camera(detections, settings)
-    if not detections:
+    motion_detections = filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_motion') if motion_enabled else []
+    object_detections = filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects') if object_detection_enabled else []
+    alert_detections = list(object_detections)
+    if motion_detections:
+        strongest_motion = max(motion_detections, key=lambda detection: float(detection.get('confidence', 0)))
+        alert_detections.append({
+            **strongest_motion,
+            'label': 'motion',
+            'motion_event': True,
+        })
+    if not alert_detections:
         update_live_detection_status(camera_id, state='checked', reason='No detections matched this camera and its monitoring areas.', detected_labels=raw_labels, matched_labels=[])
         return None
 
     alerts.rules = effective_alert_rules()
-    triggered = alerts.process(detections)
-    matched_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
+    triggered = alerts.process(alert_detections)
+    matched_labels = [str(detection.get('label')) for detection in alert_detections if detection.get('label')]
 
     event_time = datetime.now(timezone.utc).isoformat()
     snapshot_path = storage.save_image_snapshot(image_bytes, f'{camera_id}.jpg')
@@ -401,7 +414,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         created_at=event_time,
         source='rtsp',
         snapshot_path=snapshot_path,
-        detections=detections,
+        detections=alert_detections,
         alert_triggered=bool(triggered),
         metadata={
             'camera_id': settings.get('id'),
@@ -411,8 +424,8 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             'source': 'live-stream',
         },
     )
-    recording_id = attach_event_recording(event_id, event_time, 'rtsp', detections, camera_id=camera_id)
-    process_anpr_for_event(event_id, detections, snapshot_path, event_time)
+    recording_id = attach_event_recording(event_id, event_time, 'rtsp', alert_detections, camera_id=camera_id)
+    process_anpr_for_event(event_id, object_detections, snapshot_path, event_time)
 
     for alert in triggered:
         database.add_alert(
@@ -426,7 +439,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
     deliver_email_alerts(triggered, event_id)
     email_rules = [
         rule for rule in effective_alert_rules()
-        if rule.get('enabled', True) and rule.get('email_enabled') and str(rule.get('object')) in {alert.get('label') for alert in triggered}
+        if rule.get('enabled', True) and rule.get('email_enabled') and str(rule.get('object')).lower() in {str(alert.get('label')).lower() for alert in triggered}
     ]
     email_recipients = sorted({recipient for rule in email_rules for recipient in rule.get('email_recipients', [])})
     update_live_detection_status(
@@ -439,7 +452,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         event_id=event_id,
         recording_id=recording_id,
         recording_state='linked' if recording_id is not None else 'skipped',
-        recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(detections),
+        recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(alert_detections),
         email_enabled_rules=len(email_rules),
         email_recipients=email_recipients,
         email_attempted=bool(triggered and email_recipients and effective_email_alert_settings().get('enabled')),
@@ -839,14 +852,74 @@ def render_live_snapshot_svg(
 
 def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
     for recording in recordings:
-        file_path = Path(str(recording.get('file_path') or ''))
+        raw_file_path = str(recording.get('file_path') or '')
+        file_path = Path(raw_file_path)
         if file_path.exists() and file_path.is_file():
             file_path.unlink(missing_ok=True)
+        if raw_file_path:
+            playback_path = recording_playback_sidecar_path(file_path)
+            if playback_path.exists() and playback_path.is_file():
+                playback_path.unlink(missing_ok=True)
         thumbnail_path = recording.get('thumbnail_path')
         if thumbnail_path:
             thumbnail = Path(str(thumbnail_path))
             if thumbnail.exists() and thumbnail.is_file():
                 thumbnail.unlink(missing_ok=True)
+
+
+def recording_playback_sidecar_path(file_path: Path) -> Path:
+    return file_path.with_name(f'{file_path.stem}.playback.mp4')
+
+
+def recording_stream_path(file_path: Path) -> Path:
+    if file_path.suffix.lower() != '.avi':
+        return file_path
+    playback_path = recording_playback_sidecar_path(file_path)
+    if playback_path.exists() and playback_path.stat().st_mtime >= file_path.stat().st_mtime:
+        return playback_path
+    try:
+        transcode_recording_to_mp4(file_path, playback_path)
+    except Exception:
+        return file_path
+    return playback_path if playback_path.exists() else file_path
+
+
+def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
+    import cv2  # type: ignore[import-not-found]
+
+    capture = cv2.VideoCapture(str(source_path))
+    if not capture.isOpened():
+        raise RuntimeError('Recording could not be opened for playback conversion.')
+    tmp_path = output_path.with_name(f'{output_path.stem}.tmp{output_path.suffix}')
+    writer = None
+    error: Exception | None = None
+    try:
+        fps = capture.get(cv2.CAP_PROP_FPS) or 10
+        width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        if width <= 0 or height <= 0:
+            raise RuntimeError('Recording dimensions could not be read.')
+        writer = cv2.VideoWriter(str(tmp_path), cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
+        if not writer.isOpened():
+            raise RuntimeError('MP4 writer could not open output file.')
+        while True:
+            ok, frame = capture.read()
+            if not ok:
+                break
+            writer.write(frame)
+    except Exception as exc:
+        error = exc
+    finally:
+        capture.release()
+        if writer is not None:
+            writer.release()
+    if error is not None:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        raise error
+    if not tmp_path.exists():
+        raise RuntimeError('MP4 conversion did not create an output file.')
+    tmp_path.replace(output_path)
 
 
 DATABASE_RESTORE_REQUIRED_TABLES = {'events', 'detections', 'app_settings', 'users'}
@@ -1080,7 +1153,7 @@ def settings_page():
 def alert_settings_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>Alert Settings · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>Alert Settings</h1><p class="muted">Manage detection rules and email delivery through your mail server.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Email delivery</h2><div id="settingsMessage" class="muted"></div><form id="emailSettingsForm" class="form-grid"><label><span>Email alerts</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="host" placeholder="SMTP host" /><input name="port" type="number" min="1" max="65535" placeholder="Port" /><input name="from_address" type="email" placeholder="From address" /><input name="username" placeholder="SMTP username" /><input name="password" type="password" placeholder="SMTP password" autocomplete="new-password" /><label><span>STARTTLS</span><select name="use_tls"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>SSL</span><select name="use_ssl"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><button type="submit">Save mail server</button><input id="testEmailRecipient" type="email" placeholder="Test recipient email" /><button id="testEmailBtn" class="secondary" type="button">Send test email</button></form></section><section class="card"><div class="section-header"><h2>Alert rules</h2><button id="newAlertRuleBtn" class="secondary" type="button">New rule</button></div><form id="alertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="name" placeholder="Rule name" required /><label class="object-select-field"><span>Object to detect</span><select name="object" id="objectSelect" required><option value="">Loading object labels...</option></select><small id="objectOptionsHelp" class="field-help">Choose from the detector labels currently available to this camera.</small></label><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" value="0.6" /><input name="cooldown_seconds" type="number" min="0" step="1" placeholder="Cooldown seconds" value="60" /><label><span>Rule</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Email</span><select name="email_enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><input name="email_recipients" placeholder="Email recipients, comma separated" /><input name="active_start" type="time" /><input name="active_end" type="time" /><button type="submit">Add alert rule</button><button id="cancelEditRule" class="secondary" type="button">Cancel edit</button></form><div id="alertRules" class="list alert-rules-list"></div></section></main><script src="/static/alert-settings.js"></script></body></html>""")
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>Alert Settings</h1><p class="muted">Manage detection rules and email delivery through your mail server.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Email delivery</h2><div id="settingsMessage" class="muted"></div><form id="emailSettingsForm" class="form-grid"><label><span>Email alerts</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="host" placeholder="SMTP host" /><input name="port" type="number" min="1" max="65535" placeholder="Port" /><input name="from_address" type="email" placeholder="From address" /><input name="username" placeholder="SMTP username" /><input name="password" type="password" placeholder="SMTP password" autocomplete="new-password" /><label><span>STARTTLS</span><select name="use_tls"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>SSL</span><select name="use_ssl"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><button type="submit">Save mail server</button><input id="testEmailRecipient" type="email" placeholder="Test recipient email" /><button id="testEmailBtn" class="secondary" type="button">Send test email</button></form></section><section class="card"><div class="section-header"><h2>Alert rules</h2><button id="newAlertRuleBtn" class="secondary" type="button">New rule</button></div><form id="alertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="name" placeholder="Rule name" required /><label class="object-select-field"><span>Alert trigger</span><select name="object" id="objectSelect" required><option value="">Loading alert triggers...</option></select><small id="objectOptionsHelp" class="field-help">Choose Motion or a detector object label.</small></label><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" value="0.6" /><input name="cooldown_seconds" type="number" min="0" step="1" placeholder="Cooldown seconds" value="60" /><label><span>Rule</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Email</span><select name="email_enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><input name="email_recipients" placeholder="Email recipients, comma separated" /><input name="active_start" type="time" /><input name="active_end" type="time" /><button type="submit">Add alert rule</button><button id="cancelEditRule" class="secondary" type="button">Cancel edit</button></form><div id="alertRules" class="list alert-rules-list"></div></section></main><script src="/static/alert-settings.js"></script></body></html>""")
 
 
 @app.get('/profile')
@@ -1101,7 +1174,7 @@ def anpr_page():
 def system_settings_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>System Settings · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>System Settings</h1><p class="muted">Move day-to-day camera, recording, storage, and login settings out of YAML.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Camera</h2><div id="systemMessage" class="muted"></div><form id="cameraSettingsForm" class="form-grid"><label><span>Backend</span><select name="backend"><option value="onvif">onvif / RTSP</option><option value="rtsp">rtsp</option></select></label><input name="device" placeholder="Device label" /><input name="stream_url" placeholder="RTSP stream URL, e.g. rtsp://user:pass@camera:554/stream1" /><input name="host" placeholder="ONVIF camera host/IP (optional)" /><input name="port" type="number" min="1" max="65535" step="1" placeholder="RTSP port, usually 554" /><input name="path" placeholder="Stream path, e.g. stream1 or live/ch0" /><input name="username" placeholder="Camera username" /><input name="password" type="password" placeholder="Camera password" /><input name="width" type="number" min="160" max="7680" step="1" placeholder="Width" /><input name="height" type="number" min="120" max="4320" step="1" placeholder="Height" /><input name="fps" type="number" min="1" max="120" step="1" placeholder="FPS" /><label><span>Flip</span><select name="flip"><option value="none">none</option><option value="horizontal">horizontal</option><option value="vertical">vertical</option><option value="both">both</option></select></label><button type="submit">Save camera</button></form></section><section class="card"><h2>ANPR</h2><form id="anprSettingsForm" class="form-grid"><label><span>ANPR</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>OCR backend</span><select name="backend"><option value="paddleocr">paddleocr</option><option value="easyocr">easyocr</option></select></label><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" /><input name="vehicle_labels" placeholder="Vehicle labels: car, truck, bus, motorcycle" /><button type="submit">Save ANPR</button></form></section><section class="card"><h2>Recording policy</h2><form id="recordingSettingsForm" class="form-grid"><label><span>Recording</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Primary mode</span><select name="mode"><option value="motion">motion</option><option value="continuous">continuous</option><option value="human">human</option><option value="objects">objects</option><option value="off">off</option></select></label><label><span>Continuous</span><select name="continuous"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><label><span>Record on motion</span><select name="record_on_motion"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Record on human</span><select name="record_on_human"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="record_on_objects" placeholder="Objects: cat, dog, package, parcel" /><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" /><input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" /><input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="Max clip seconds" /><input name="format" placeholder="Format: avi or mp4" /><button type="submit">Save recording</button></form></section><section class="card"><h2>Retention</h2><form id="retentionSettingsForm" class="form-grid"><label><span>Auto purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="retention_days" type="number" min="1" max="3650" placeholder="Retention days" /><input name="max_storage_gb" type="number" min="1" max="100000" placeholder="Max storage GB" /><button type="submit">Save retention</button><button id="purgeRecordingsBtn" class="secondary" type="button">Purge now</button></form></section><section class="card"><h2>Storage</h2><form id="storageSettingsForm" class="form-grid"><input name="data_dir" placeholder="Data directory" /><input name="snapshots_dir" placeholder="Snapshots directory" /><input name="events_dir" placeholder="Events directory" /><input name="recordings_dir" placeholder="Recordings directory" /><input name="plates_dir" placeholder="Plate images directory" /><button type="submit">Save storage</button></form><p class="muted">Database file location stays in config.yaml because it is needed before the web UI can load.</p></section><section class="card"><h2>Login security</h2><form id="authSettingsForm" class="form-grid"><input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="Session timeout hours" /><input name="max_login_attempts" type="number" min="1" max="100" placeholder="Max login attempts" /><input name="lockout_minutes" type="number" min="1" max="1440" placeholder="Lockout minutes" /><button type="submit">Save login security</button></form><p class="muted">Auth enablement and cookie name remain bootstrap settings.</p></section></main><script src="/static/system-settings.js"></script></body></html>""")
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>System Settings</h1><p class="muted">Move day-to-day camera, recording, storage, and login settings out of YAML.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Camera</h2><div id="systemMessage" class="muted"></div><form id="cameraSettingsForm" class="form-grid"><label><span>Backend</span><select name="backend"><option value="onvif">onvif / RTSP</option><option value="rtsp">rtsp</option></select></label><input name="device" placeholder="Device label" /><input name="stream_url" placeholder="RTSP stream URL, e.g. rtsp://user:pass@camera:554/stream1" /><input name="host" placeholder="ONVIF camera host/IP (optional)" /><input name="port" type="number" min="1" max="65535" step="1" placeholder="RTSP port, usually 554" /><input name="path" placeholder="Stream path, e.g. stream1 or live/ch0" /><input name="username" placeholder="Camera username" /><input name="password" type="password" placeholder="Camera password" /><input name="width" type="number" min="160" max="7680" step="1" placeholder="Width" /><input name="height" type="number" min="120" max="4320" step="1" placeholder="Height" /><input name="fps" type="number" min="1" max="120" step="1" placeholder="FPS" /><label><span>Flip</span><select name="flip"><option value="none">none</option><option value="horizontal">horizontal</option><option value="vertical">vertical</option><option value="both">both</option></select></label><button type="submit">Save camera</button></form></section><section class="card"><h2>ANPR</h2><form id="anprSettingsForm" class="form-grid"><label><span>ANPR</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>OCR backend</span><select name="backend"><option value="paddleocr">paddleocr</option><option value="easyocr">easyocr</option></select></label><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" /><input name="vehicle_labels" placeholder="Vehicle labels: car, truck, bus, motorcycle" /><button type="submit">Save ANPR</button></form></section><section class="card"><h2>Recording policy</h2><form id="recordingSettingsForm" class="form-grid"><label><span>Recording</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Primary mode</span><select name="mode"><option value="motion">motion</option><option value="continuous">continuous</option><option value="human">human</option><option value="objects">objects</option><option value="off">off</option></select></label><label><span>Continuous</span><select name="continuous"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><label><span>Record on motion</span><select name="record_on_motion"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Record on human</span><select name="record_on_human"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="record_on_objects" placeholder="Objects: cat, dog, package, parcel" /><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" /><input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" /><input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="Max clip seconds" /><input name="format" placeholder="Format: mp4" /><button type="submit">Save recording</button></form></section><section class="card"><h2>Retention</h2><form id="retentionSettingsForm" class="form-grid"><label><span>Auto purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="retention_days" type="number" min="1" max="3650" placeholder="Retention days" /><input name="max_storage_gb" type="number" min="1" max="100000" placeholder="Max storage GB" /><button type="submit">Save retention</button><button id="purgeRecordingsBtn" class="secondary" type="button">Purge now</button></form></section><section class="card"><h2>Storage</h2><form id="storageSettingsForm" class="form-grid"><input name="data_dir" placeholder="Data directory" /><input name="snapshots_dir" placeholder="Snapshots directory" /><input name="events_dir" placeholder="Events directory" /><input name="recordings_dir" placeholder="Recordings directory" /><input name="plates_dir" placeholder="Plate images directory" /><button type="submit">Save storage</button></form><p class="muted">Database file location stays in config.yaml because it is needed before the web UI can load.</p></section><section class="card"><h2>Login security</h2><form id="authSettingsForm" class="form-grid"><input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="Session timeout hours" /><input name="max_login_attempts" type="number" min="1" max="100" placeholder="Max login attempts" /><input name="lockout_minutes" type="number" min="1" max="1440" placeholder="Lockout minutes" /><button type="submit">Save login security</button></form><p class="muted">Auth enablement and cookie name remain bootstrap settings.</p></section></main><script src="/static/system-settings.js"></script></body></html>""")
 
 @app.get('/users')
 def users_page():
@@ -1345,11 +1418,12 @@ def stream_recording(recording_id: int, request: Request):
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail='Recording media file not found')
 
-    file_size = file_path.stat().st_size
-    media_type = mimetypes.guess_type(file_path.name)[0] or 'video/mp4'
+    stream_path = recording_stream_path(file_path)
+    file_size = stream_path.stat().st_size
+    media_type = mimetypes.guess_type(stream_path.name)[0] or 'video/mp4'
     range_header = request.headers.get('range')
     if not range_header:
-        return FileResponse(file_path, media_type=media_type)
+        return FileResponse(stream_path, media_type=media_type)
 
     match = re.fullmatch(r'bytes=(\d*)-(\d*)', range_header.strip())
     if not match:
@@ -1363,7 +1437,7 @@ def stream_recording(recording_id: int, request: Request):
     chunk_size = end - start + 1
 
     def iter_file():
-        with file_path.open('rb') as handle:
+        with stream_path.open('rb') as handle:
             handle.seek(start)
             remaining = chunk_size
             while remaining > 0:
@@ -1764,9 +1838,11 @@ def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
     mode = str(merged.get('mode', 'motion')).lower()
     if mode not in {'off', 'continuous', 'motion', 'human', 'objects'}:
         raise HTTPException(status_code=400, detail='Recording mode must be off, continuous, motion, human, or objects.')
-    fmt = str(merged.get('format', 'avi')).strip().lstrip('.').lower() or 'avi'
-    if not re.fullmatch(r'[a-z0-9]{2,8}', fmt):
-        raise HTTPException(status_code=400, detail='Recording format must be a short file extension.')
+    fmt = str(merged.get('format', 'mp4')).strip().lstrip('.').lower() or 'mp4'
+    if fmt == 'avi':
+        fmt = 'mp4'
+    if fmt != 'mp4':
+        raise HTTPException(status_code=400, detail='Recording format must be mp4 for browser playback.')
     raw_objects = merged.get('record_on_objects', [])
     if isinstance(raw_objects, str):
         object_labels = [label.strip().lower() for label in raw_objects.split(',') if label.strip()]
@@ -2186,3 +2262,4 @@ if __name__ == '__main__':
         port=int(server_config.get('port', 8080)),
         reload=False,
     )
+

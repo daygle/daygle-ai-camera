@@ -52,6 +52,10 @@ function labelOption(label) {
   return `<option value="${escapeHtml(label)}">${escapeHtml(label)}</option>`;
 }
 
+function triggerLabel(value) {
+  return String(value || '').toLowerCase() === 'motion' ? 'Motion' : String(value || '');
+}
+
 function ensureObjectOption(label) {
   if (!label) return;
   objectSelect.disabled = false;
@@ -62,15 +66,11 @@ function ensureObjectOption(label) {
 
 function renderObjectOptions(labels) {
   const cleanLabels = [...new Set((labels || []).map((label) => String(label).trim()).filter(Boolean))];
-  if (!cleanLabels.length) {
-    objectSelect.innerHTML = '<option value="">No object labels available</option>';
-    objectSelect.disabled = true;
-    objectOptionsHelp.textContent = 'No detector labels were found. Check the AI labels path in AI settings.';
-    return;
-  }
   objectSelect.disabled = false;
-  objectSelect.innerHTML = '<option value="">Select an object...</option>' + cleanLabels.map(labelOption).join('');
-  objectOptionsHelp.textContent = `${cleanLabels.length} object labels available. Start with common choices like person, car, cat, or dog.`;
+  objectSelect.innerHTML = '<option value="">Select a trigger...</option><option value="motion">Motion</option>' + cleanLabels.map(labelOption).join('');
+  objectOptionsHelp.textContent = cleanLabels.length
+    ? `${cleanLabels.length} object labels available. Choose Motion for any matching live-frame movement, or choose an object such as person, car, cat, or dog.`
+    : 'Choose Motion, or check the AI labels path in AI settings to add object label choices.';
 }
 
 function formPayload(form) {
@@ -98,7 +98,7 @@ function renderRules(rules) {
   rulesEl.innerHTML = rules.length ? rules.map((rule) => `
     <div class="item">
       <div class="item-title"><span>${escapeHtml(rule.name)}</span><span>${rule.enabled ? 'Enabled' : 'Disabled'}</span></div>
-      <p>${escapeHtml(rule.object)} - ${Math.round(rule.min_confidence * 100)}% - cooldown ${rule.cooldown_seconds}s</p>
+      <p>${escapeHtml(triggerLabel(rule.object))} - ${Math.round(rule.min_confidence * 100)}% - cooldown ${rule.cooldown_seconds}s</p>
       <p class="muted">Window: ${rule.active_start || 'any'} - ${rule.active_end || 'any'}</p>
       <p class="muted">Email: ${rule.email_enabled ? escapeHtml((rule.email_recipients || []).join(', ') || 'no recipients') : 'disabled'}</p>
       <button class="secondary" data-action="edit" data-rule='${JSON.stringify(rule).replace(/'/g, '&#39;')}'>Edit</button>
