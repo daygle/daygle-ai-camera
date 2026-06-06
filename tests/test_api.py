@@ -1172,6 +1172,75 @@ def test_opencv_stream_camera_reuses_rtsp_capture(monkeypatch):
     assert 'fflags;nobuffer' in os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS']
 
 
+def test_live_stream_detection_triggers_email_alert(tmp_path, monkeypatch):
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    sent: list[tuple[dict[str, object], int, list[str]]] = []
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, image_bytes):
+            assert image_bytes == b'jpeg-frame'
+            return [
+                {
+                    'label': 'person',
+                    'confidence': 0.91,
+                    'box': {'x': 64, 'y': 72, 'width': 320, 'height': 360},
+                }
+            ]
+
+    class FakeEmailAlertService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def send_alert(self, alert, *, event_id, recipients):
+            sent.append((alert, event_id, list(recipients)))
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main, 'EmailAlertService', FakeEmailAlertService)
+    monkeypatch.setattr(main, 'attach_event_recording', lambda *_args, **_kwargs: None)
+    main.live_detection_last_checked.clear()
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
+    main.database.set_setting(
+        'alert_email',
+        {'enabled': True, 'host': 'smtp.example.com', 'port': 587, 'from_address': 'alerts@example.com', 'use_tls': True, 'use_ssl': False},
+        main.utc_now(),
+    )
+    for rule in main.database.list_alert_rules():
+        main.database.delete_alert_rule(rule['id'])
+    main.database.create_alert_rule(
+        main.validate_alert_rule({
+            'name': 'Person live',
+            'object': 'person',
+            'min_confidence': 0.5,
+            'cooldown_seconds': 0,
+            'enabled': True,
+            'email_enabled': True,
+            'email_recipients': ['owner@example.com'],
+        }),
+        main.utc_now(),
+    )
+
+    event_id = main.process_live_stream_alerts(
+        b'jpeg-frame',
+        {'width': 1280, 'height': 720},
+        {'id': 'front-door', 'name': 'Front Door', 'detection': {'object_detection_enabled': True, 'zones': []}},
+    )
+
+    assert event_id is not None
+    event = main.database.get_event(event_id)
+    assert event['source'] == 'rtsp'
+    assert event['detections'][0]['label'] == 'person'
+    assert event['detections'][0]['x'] == 0.05
+    assert sent
+    assert sent[0][0]['rule_name'] == 'Person live'
+    assert sent[0][2] == ['owner@example.com']
+
+
 def test_onvif_camera_settings_require_stream_source(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main

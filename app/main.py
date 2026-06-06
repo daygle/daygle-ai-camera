@@ -11,6 +11,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from html import escape
@@ -146,6 +147,8 @@ detector = create_detector(effective_ai_config())
 last_detector_error: str | None = getattr(detector, 'unavailable_reason', None)
 mock_detector = MockDetector(effective_ai_config().get('categories', []), float(effective_ai_config().get('confidence', 0.45)))
 alerts = AlertEngine(effective_alert_rules())
+LIVE_DETECTION_INTERVAL_SECONDS = 1.0
+live_detection_last_checked: dict[str, float] = {}
 
 
 def _non_empty_setting(settings: dict[str, Any], key: str) -> str:
@@ -290,6 +293,99 @@ def filter_detections_for_camera(detections: list[dict[str, Any]], settings: dic
     if not zones:
         return detections
     return [detection for detection in detections if any(detection_center_in_zone(detection, zone) for zone in zones)]
+
+
+def normalize_detection_boxes_for_frame(detections: list[dict[str, Any]], frame: dict[str, Any]) -> list[dict[str, Any]]:
+    width = float(frame.get('width') or 0)
+    height = float(frame.get('height') or 0)
+    if width <= 0 or height <= 0:
+        return detections
+    normalized: list[dict[str, Any]] = []
+    for detection in detections:
+        box = detection.get('box') or {}
+        if not isinstance(box, dict):
+            normalized.append(detection)
+            continue
+        box_x = float(box.get('x') or 0)
+        box_y = float(box.get('y') or 0)
+        box_width = float(box.get('width') or 0)
+        box_height = float(box.get('height') or 0)
+        if max(box_x, box_y, box_width, box_height) <= 1:
+            normalized.append(detection)
+            continue
+        normalized.append({
+            **detection,
+            'box': {
+                'x': round(box_x / width, 4),
+                'y': round(box_y / height, 4),
+                'width': round(box_width / width, 4),
+                'height': round(box_height / height, 4),
+            },
+        })
+    return normalized
+
+
+def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any]) -> int | None:
+    detection_settings = settings.get('detection') or {}
+    if detection_settings.get('object_detection_enabled') is False:
+        return None
+    if getattr(detector, 'backend', 'mock') == 'mock' or not hasattr(detector, 'detect_image'):
+        return None
+
+    camera_id = str(settings.get('id') or 'camera')
+    now = time.time()
+    if now - live_detection_last_checked.get(camera_id, 0) < LIVE_DETECTION_INTERVAL_SECONDS:
+        return None
+    live_detection_last_checked[camera_id] = now
+
+    ai_state = ai_status_payload()
+    if not ai_state['detector_loaded']:
+        return None
+
+    try:
+        detections = detector.detect_image(image_bytes)
+    except (DetectorUnavailableError, ValueError) as exc:
+        logger.warning('Live detection skipped for camera %s: %s', camera_id, exc)
+        return None
+
+    detections = normalize_detection_boxes_for_frame(detections, frame)
+    detections = filter_detections_for_camera(detections, settings)
+    if not detections:
+        return None
+
+    alerts.rules = effective_alert_rules()
+    triggered = alerts.process(detections)
+
+    event_time = datetime.now(timezone.utc).isoformat()
+    snapshot_path = storage.save_image_snapshot(image_bytes, f'{camera_id}.jpg')
+    event_id = database.add_event(
+        created_at=event_time,
+        source='rtsp',
+        snapshot_path=snapshot_path,
+        detections=detections,
+        alert_triggered=bool(triggered),
+        metadata={
+            'camera_id': settings.get('id'),
+            'camera_name': settings.get('name'),
+            'ai_backend': ai_state['configured_backend'],
+            'detector_backend': ai_state['active_backend'],
+            'source': 'live-stream',
+        },
+    )
+    attach_event_recording(event_id, event_time, 'rtsp', detections)
+    process_anpr_for_event(event_id, detections, snapshot_path, event_time)
+
+    for alert in triggered:
+        database.add_alert(
+            created_at=datetime.now(timezone.utc).isoformat(),
+            rule_name=alert['rule_name'],
+            event_id=event_id,
+            label=alert['label'],
+            confidence=alert['confidence'],
+            message=alert['message'],
+        )
+    deliver_email_alerts(triggered, event_id)
+    return event_id
 
 
 def create_camera(settings: dict[str, Any]):
@@ -1016,9 +1112,10 @@ def live_snapshot(overlay: bool = Query(True), camera_id: str | None = None):
     selected_config = get_camera_config(camera_id)
     if hasattr(selected_camera, 'read_jpeg'):
         try:
-            image_bytes, _frame = selected_camera.read_jpeg()
+            image_bytes, frame = selected_camera.read_jpeg()
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        process_live_stream_alerts(image_bytes, frame, selected_config)
         return Response(content=image_bytes, media_type='image/jpeg')
     frame = selected_camera.get_frame()
     detections = filter_detections_for_camera(mock_detector.detect(frame['frame_number'], force=True), selected_config) if overlay else []
