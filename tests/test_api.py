@@ -1227,7 +1227,8 @@ def test_opencv_stream_camera_reuses_rtsp_capture(monkeypatch):
     assert second_frame['frame_number'] == 2
     assert len(FakeCapture.instances) == 1
     assert FakeCapture.instances[0].buffer_size == (FakeCv2.CAP_PROP_BUFFERSIZE, 1)
-    assert FakeCapture.instances[0].grab_count == 4
+    assert camera._stale_frame_grabs() == 7
+    assert FakeCapture.instances[0].grab_count == 14
     assert FakeCapture.instances[0].release_count == 0
     assert 'rtsp_transport;tcp' in os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS']
     assert 'fflags;nobuffer' in os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS']
@@ -1317,6 +1318,45 @@ def test_live_stream_detection_triggers_email_alert(tmp_path, monkeypatch):
     assert status['email_attempted'] is True
     assert status['recording_state'] == 'linked'
     assert status['recording_id'] == event['recordings'][0]['id']
+
+
+def test_live_stream_detection_queue_runs_in_background_and_deduplicates(tmp_path, monkeypatch):
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    started = threading.Event()
+    release = threading.Event()
+
+    class SlowDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+        calls = 0
+
+        def detect_image(self, _image_bytes):
+            self.calls += 1
+            started.set()
+            release.wait(timeout=2)
+            return []
+
+    detector = SlowDetector()
+    monkeypatch.setattr(main, 'detector', detector)
+    main.live_detection_last_checked.clear()
+    main.active_live_detection_cameras.clear()
+    settings = {'id': 'camera-1', 'name': 'Front Door', 'detection': {'zones': []}}
+
+    main.queue_live_stream_alerts(b'jpeg-frame-1', {'width': 1280, 'height': 720}, settings)
+    assert started.wait(timeout=2)
+    main.queue_live_stream_alerts(b'jpeg-frame-2', {'width': 1280, 'height': 720}, settings)
+
+    assert detector.calls == 1
+    assert 'camera-1' in main.active_live_detection_cameras
+
+    release.set()
+    deadline = time.time() + 2
+    while 'camera-1' in main.active_live_detection_cameras and time.time() < deadline:
+        time.sleep(0.01)
+    assert 'camera-1' not in main.active_live_detection_cameras
 
 
 def test_live_stream_detection_without_alert_rule_does_not_record_by_default(tmp_path, monkeypatch):

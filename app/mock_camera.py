@@ -94,11 +94,11 @@ class OpenCvStreamCamera:
             capture = self._open_capture()
             import cv2
 
-            ok, image = self._read_latest_frame(capture)
+            ok, image = self._read_latest_frame(capture, self._stale_frame_grabs())
             if not ok or image is None:
                 self._release_capture()
                 capture = self._open_capture()
-                ok, image = self._read_latest_frame(capture)
+                ok, image = self._read_latest_frame(capture, self._stale_frame_grabs())
 
             if not ok or image is None:
                 self._release_capture()
@@ -116,10 +116,13 @@ class OpenCvStreamCamera:
             self.last_error = None
             return encoded.tobytes(), self.get_frame()
 
+    def _stale_frame_grabs(self) -> int:
+        return max(2, min(12, int(self.fps / 2)))
+
     @staticmethod
-    def _read_latest_frame(capture) -> tuple[bool, Any]:
+    def _read_latest_frame(capture, stale_frame_grabs: int) -> tuple[bool, Any]:
         if hasattr(capture, 'grab'):
-            for _ in range(2):
+            for _ in range(stale_frame_grabs):
                 if not capture.grab():
                     break
         return capture.read()

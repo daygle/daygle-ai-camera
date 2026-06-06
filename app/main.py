@@ -169,6 +169,8 @@ alerts = AlertEngine(effective_alert_rules())
 LIVE_DETECTION_INTERVAL_SECONDS = 1.0
 live_detection_last_checked: dict[str, float] = {}
 live_detection_status: dict[str, dict[str, Any]] = {}
+live_detection_worker_lock = threading.Lock()
+active_live_detection_cameras: set[str] = set()
 rtsp_recording_lock = threading.Lock()
 active_rtsp_recording_streams: set[str] = set()
 
@@ -482,16 +484,41 @@ def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any
     }
 
 
-def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any]) -> int | None:
+def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any]) -> None:
+    camera_id = str(settings.get('id') or 'camera')
+    now = time.time()
+    with live_detection_worker_lock:
+        if camera_id in active_live_detection_cameras:
+            return
+        if now - live_detection_last_checked.get(camera_id, 0) < LIVE_DETECTION_INTERVAL_SECONDS:
+            return
+        live_detection_last_checked[camera_id] = now
+        active_live_detection_cameras.add(camera_id)
+
+    def detect() -> None:
+        try:
+            process_live_stream_alerts(image_bytes, frame, settings, enforce_interval=False)
+        except Exception as exc:
+            logger.warning('Live detection failed for camera %s: %s', camera_id, exc)
+            update_live_detection_status(camera_id, state='error', reason=str(exc), detections=[])
+        finally:
+            with live_detection_worker_lock:
+                active_live_detection_cameras.discard(camera_id)
+
+    threading.Thread(target=detect, name=f'live-detection-{camera_id}', daemon=True).start()
+
+
+def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any], *, enforce_interval: bool = True) -> int | None:
     camera_id = str(settings.get('id') or 'camera')
     if not hasattr(detector, 'detect_image'):
         update_live_detection_status(camera_id, state='skipped', reason='Live stream alerts require ONNX AI mode.', detections=[])
         return None
 
-    now = time.time()
-    if now - live_detection_last_checked.get(camera_id, 0) < LIVE_DETECTION_INTERVAL_SECONDS:
-        return None
-    live_detection_last_checked[camera_id] = now
+    if enforce_interval:
+        now = time.time()
+        if now - live_detection_last_checked.get(camera_id, 0) < LIVE_DETECTION_INTERVAL_SECONDS:
+            return None
+        live_detection_last_checked[camera_id] = now
 
     ai_state = ai_status_payload()
     if not ai_state['detector_loaded']:
@@ -1501,7 +1528,7 @@ def live_snapshot(overlay: bool = Query(True), camera_id: str | None = None):
             image_bytes, frame = selected_camera.read_jpeg()
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        process_live_stream_alerts(image_bytes, frame, selected_config)
+        queue_live_stream_alerts(image_bytes, frame, copy.deepcopy(selected_config))
         if overlay:
             camera_key = str(selected_config.get('id') or 'camera')
             detections = live_detection_status.get(camera_key, {}).get('detections') or []
