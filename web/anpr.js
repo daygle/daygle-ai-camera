@@ -85,8 +85,11 @@ async function loadAll() {
   const me = await api('/api/auth/me');
   csrfToken = me.csrf_token;
   currentUser = me.user;
-  renderPlateCards(recentPlatesEl, await api('/api/plates'));
+  const plates = await api('/api/plates');
+  renderPlateCards(recentPlatesEl, plates);
   renderAlertRules(await api('/api/plate-alerts'));
+  const deleteAllBtn = document.getElementById('deleteAllPlatesBtn');
+  if (deleteAllBtn) deleteAllBtn.hidden = currentUser?.role !== 'admin' || plates.length === 0;
 }
 
 async function searchPlates() {
@@ -122,6 +125,18 @@ document.addEventListener('click', async (event) => {
     await api(`/api/plate-alerts/${button.dataset.id}`, { method: 'DELETE' });
     renderAlertRules(await api('/api/plate-alerts'));
     setMessage('Plate alert rule deleted.');
+  }
+  if (button.id === 'deleteAllPlatesBtn') {
+    if (!confirm('Delete ALL plates and sightings? This cannot be undone.')) return;
+    try {
+      const result = await api('/api/plates', { method: 'DELETE' });
+      plateResultsEl.innerHTML = '';
+      plateDetailsEl.innerHTML = '';
+      await loadAll();
+      setMessage(`Deleted ${result.deleted} plate(s).`);
+    } catch (error) {
+      setMessage(`Failed: ${error.message}`);
+    }
   }
 });
 

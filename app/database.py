@@ -275,6 +275,12 @@ class EventDatabase:
             db.execute("DELETE FROM events WHERE id = ?", (event_id,))
             return event
 
+    def delete_all_events(self) -> int:
+        with self.connect() as db:
+            count = db.execute("SELECT COUNT(*) AS count FROM events").fetchone()["count"]
+            db.execute("DELETE FROM events")
+            return int(count)
+
     def delete_plate(self, plate_id: int) -> dict[str, Any] | None:
         with self.connect() as db:
             row = db.execute("SELECT * FROM vehicle_plates WHERE id = ?", (plate_id,)).fetchone()
@@ -284,6 +290,19 @@ class EventDatabase:
             db.execute("DELETE FROM plate_events WHERE plate_id = ?", (plate_id,))
             db.execute("DELETE FROM vehicle_plates WHERE id = ?", (plate_id,))
             return plate
+
+    def delete_all_plates(self) -> int:
+        with self.connect() as db:
+            count = db.execute("SELECT COUNT(*) AS count FROM vehicle_plates").fetchone()["count"]
+            db.execute("DELETE FROM plate_events")
+            db.execute("DELETE FROM vehicle_plates")
+            return int(count)
+
+    def delete_all_recordings(self) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute("SELECT * FROM recordings").fetchall()
+            db.execute("DELETE FROM recordings")
+            return [dict(row) for row in rows]
 
     def delete_recording(self, recording_id: int) -> dict[str, Any] | None:
         with self.connect() as db:

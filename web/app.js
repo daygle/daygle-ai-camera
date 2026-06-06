@@ -27,6 +27,8 @@ const els = {
   plateClearBtn: document.getElementById('plateClearBtn'),
   plates: document.getElementById('plates'),
   plateSightings: document.getElementById('plateSightings'),
+  deleteAllEventsBtn: document.getElementById('deleteAllEventsBtn'),
+  deleteAllRecordingsBtn: document.getElementById('deleteAllRecordingsBtn'),
 };
 
 let authState = { user: null, csrfToken: null };
@@ -215,7 +217,7 @@ function bindDeleteButtons() {
   });
   document.querySelectorAll('[data-delete-plate]').forEach((button) => {
     button.addEventListener('click', async () => {
-      if (!confirm(`Delete plate #${button.dataset.deleteplate}? This cannot be undone.`)) return;
+      if (!confirm(`Delete plate #${button.dataset.deletePlate}? This cannot be undone.`)) return;
       try {
         await api(`/api/plates/${button.dataset.deletePlate}`, { method: 'DELETE' });
         await Promise.all([loadPlates(), searchPlateSightings(els.plateFilter.value.trim())]);
@@ -275,6 +277,37 @@ async function loadAuth() {
     els.settingsLink.hidden = true;
     els.alertSettingsLink.hidden = true;
     els.systemSettingsLink.hidden = true;
+    if (els.deleteAllEventsBtn) els.deleteAllEventsBtn.hidden = true;
+    if (els.deleteAllRecordingsBtn) els.deleteAllRecordingsBtn.hidden = true;
+  } else {
+    if (els.deleteAllEventsBtn) {
+      els.deleteAllEventsBtn.hidden = false;
+      els.deleteAllEventsBtn.addEventListener('click', async () => {
+        if (!confirm('Delete ALL events? This cannot be undone.')) return;
+        try {
+          const result = await api('/api/events', { method: 'DELETE' });
+          await Promise.all([loadStats(), loadEvents(), loadRecordings()]);
+          bindPlaybackButtons();
+          bindDeleteButtons();
+        } catch (error) {
+          alert(`Failed to delete events: ${error.message}`);
+        }
+      });
+    }
+    if (els.deleteAllRecordingsBtn) {
+      els.deleteAllRecordingsBtn.hidden = false;
+      els.deleteAllRecordingsBtn.addEventListener('click', async () => {
+        if (!confirm('Delete ALL recordings? This will remove the media files too. Cannot be undone.')) return;
+        try {
+          const result = await api('/api/recordings', { method: 'DELETE' });
+          await loadRecordings();
+          bindPlaybackButtons();
+          bindDeleteButtons();
+        } catch (error) {
+          alert(`Failed to delete recordings: ${error.message}`);
+        }
+      });
+    }
   }
 }
 

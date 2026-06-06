@@ -1473,7 +1473,7 @@ def profile_page():
 def anpr_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>ANPR · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Recognition</p><h1>ANPR</h1><p class="muted">Search plates, review sightings, and manage plate alerts.</p></div><a class="button-link" href="/">Dashboard</a></header><section class="card"><h2>Plate search</h2><div id="anprMessage" class="muted"></div><div class="search-row"><input id="plateSearchInput" placeholder="ABC123, 1ABC2D, XYZ999..." /><button id="plateSearchBtn">Search</button><button id="plateClearBtn" class="secondary">Recent</button></div><div id="plateResults" class="list"></div></section><section class="grid main-grid"><article class="card"><div class="section-header"><h2>Recent plates</h2></div><div id="recentPlates" class="list"></div></article><article class="card"><div class="section-header"><h2>Plate details</h2></div><div id="plateDetails" class="list"></div></article></section><section class="card"><h2>Plate alert rules</h2><form id="plateAlertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="rule_name" placeholder="Rule name" required /><label><span>Type</span><select name="rule_type"><option value="plate">Specific plate</option><option value="unknown">Unknown plate</option><option value="blacklisted">Blacklisted plate</option></select></label><input name="plate_pattern" placeholder="Plate pattern" /><input name="cooldown_seconds" type="number" min="0" placeholder="Cooldown seconds" value="60" /><label><span>Enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><button type="submit">Save rule</button><button id="cancelPlateRuleEdit" class="secondary" type="button">Cancel edit</button></form><div id="plateAlertRules" class="list"></div></section></main><script src="/static/anpr.js"></script></body></html>""")
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Recognition</p><h1>ANPR</h1><p class="muted">Search plates, review sightings, and manage plate alerts.</p></div><a class="button-link" href="/">Dashboard</a></header><section class="card"><h2>Plate search</h2><div id="anprMessage" class="muted"></div><div class="search-row"><input id="plateSearchInput" placeholder="ABC123, 1ABC2D, XYZ999..." /><button id="plateSearchBtn">Search</button><button id="plateClearBtn" class="secondary">Recent</button></div><div id="plateResults" class="list"></div></section><section class="grid main-grid"><article class="card"><div class="section-header"><h2>Recent plates</h2><button id="deleteAllPlatesBtn" class="secondary delete-btn" type="button" hidden>Delete all</button></div><div id="recentPlates" class="list"></div></article><article class="card"><div class="section-header"><h2>Plate details</h2></div><div id="plateDetails" class="list"></div></article></section><section class="card"><h2>Plate alert rules</h2><form id="plateAlertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="rule_name" placeholder="Rule name" required /><label><span>Type</span><select name="rule_type"><option value="plate">Specific plate</option><option value="unknown">Unknown plate</option><option value="blacklisted">Blacklisted plate</option></select></label><input name="plate_pattern" placeholder="Plate pattern" /><input name="cooldown_seconds" type="number" min="0" placeholder="Cooldown seconds" value="60" /><label><span>Enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><button type="submit">Save rule</button><button id="cancelPlateRuleEdit" class="secondary" type="button">Cancel edit</button></form><div id="plateAlertRules" class="list"></div></section></main><script src="/static/anpr.js"></script></body></html>""")
 
 
 @app.get('/system-settings')
@@ -1664,6 +1664,13 @@ def delete_event(event_id: int, request: Request):
     return {'ok': True}
 
 
+@app.delete('/api/events')
+def delete_all_events(request: Request):
+    require_admin(request)
+    deleted = database.delete_all_events()
+    return {'ok': True, 'deleted': deleted}
+
+
 @app.get('/api/alerts')
 def alert_history(limit: int = Query(25, ge=1, le=200)):
     return database.alerts(limit=limit)
@@ -1793,6 +1800,14 @@ def delete_recording(recording_id: int, request: Request):
     return {'ok': True}
 
 
+@app.delete('/api/recordings')
+def delete_all_recordings(request: Request):
+    require_admin(request)
+    recordings = database.delete_all_recordings()
+    delete_recording_files(recordings)
+    return {'ok': True, 'deleted': len(recordings)}
+
+
 @app.get('/api/users')
 def list_users(request: Request):
     require_user(request)
@@ -1864,7 +1879,11 @@ def delete_plate(plate_id: int, request: Request):
     return {'ok': True}
 
 
-@app.get('/api/plate-alerts')
+@app.delete('/api/plates')
+def delete_all_plates(request: Request):
+    require_admin(request)
+    deleted = database.delete_all_plates()
+    return {'ok': True, 'deleted': deleted}
 def list_plate_alerts():
     return database.list_plate_alert_rules()
 
