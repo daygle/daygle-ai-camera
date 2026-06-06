@@ -32,7 +32,7 @@ class AnprPipeline:
         except AnprUnavailableError as exc:
             # ANPR is optional. Keep the app running and report why OCR is disabled.
             self.unavailable_reason = str(exc)
-            logger.warning("ANPR disabled: %s", self.unavailable_reason)
+            logger.info("ANPR disabled: %s", self.unavailable_reason)
 
     def process_event(
         self,
