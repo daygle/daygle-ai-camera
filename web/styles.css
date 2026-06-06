@@ -297,7 +297,7 @@ input[type="file"] { padding: 10px; }
 .live-controls { display: flex; align-items: end; gap: 16px; flex-wrap: wrap; }
 .live-controls label:not(.toggle-control) { display: grid; gap: 8px; min-width: 220px; color: var(--muted); font-weight: 800; }
 .zone-overlay { position: absolute; pointer-events: auto; z-index: 2; touch-action: none; }
-.monitor-zone-polygon { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.monitor-zone-polygon { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .monitor-zone-polygon polygon,
 .monitor-zone-polygon polyline {
   fill: rgba(71,214,255,.08);
@@ -314,8 +314,13 @@ input[type="file"] { padding: 10px; }
   stroke-dasharray: none;
 }
 .monitor-zone-polygon.draft polyline {
-  fill: rgba(73,230,163,.1);
+  fill: none;
   stroke: var(--success);
+}
+.monitor-zone-polygon.draft .draft-fill {
+  fill: rgba(73,230,163,.1);
+  stroke: none;
+  pointer-events: none;
 }
 .zone-label {
   position: absolute;

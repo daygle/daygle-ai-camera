@@ -13,6 +13,7 @@ const liveEls = {
 };
 
 const LIVE_REFRESH_MS = 500;
+const CLOSE_DRAFT_DISTANCE = 0.035;
 let refreshTimer;
 let detectionStatusTimer;
 let csrfToken = null;
@@ -315,6 +316,12 @@ function pointFromEvent(event) {
   };
 }
 
+function pointDistance(first, second) {
+  const dx = first.x - second.x;
+  const dy = first.y - second.y;
+  return Math.sqrt((dx * dx) + (dy * dy));
+}
+
 function updateDraggedZone(event) {
   if (!zoneDrag) return;
   const point = pointFromEvent(event);
@@ -362,12 +369,14 @@ function draftPolygonMarkup() {
   if (!draftPolygon?.points.length) return '';
   const points = [...draftPolygon.points, draftPolygon.preview].filter(Boolean);
   const pointList = points.map((point) => `${point.x * 100},${point.y * 100}`).join(' ');
+  const completedPointList = draftPolygon.points.map((point) => `${point.x * 100},${point.y * 100}`).join(' ');
   const handles = draftPolygon.points.map((point, index) => {
     const closesShape = index === 0 && draftPolygon.points.length >= 3;
     return `<i class="zone-handle zone-point-handle draft-point${closesShape ? ' close-draft-point' : ''}" ${closesShape ? 'data-close-draft="true" title="Close area"' : ''} style="left:${point.x * 100}%;top:${point.y * 100}%"></i>`;
   }).join('');
   return `
     <svg class="monitor-zone-polygon draft" viewBox="0 0 100 100" preserveAspectRatio="none">
+      ${draftPolygon.points.length >= 3 ? `<polygon class="draft-fill" points="${completedPointList}"></polygon>` : ''}
       <polyline points="${pointList}"></polyline>
     </svg>
     ${handles}
@@ -405,15 +414,17 @@ liveEls.zoneOverlay.addEventListener('pointerdown', (event) => {
 
   if (drawingMode) {
     event.preventDefault();
-    if (event.target.closest('[data-close-draft]')) {
+    const point = pointFromEvent(event);
+    const firstPoint = draftPolygon?.points[0];
+    const closeToFirstPoint = firstPoint && draftPolygon.points.length >= 3 && pointDistance(point, firstPoint) <= CLOSE_DRAFT_DISTANCE;
+    if (event.target.closest('[data-close-draft]') || closeToFirstPoint) {
       finishDraftPolygon();
       return;
     }
-    const point = pointFromEvent(event);
     draftPolygon ||= { points: [], preview: point };
     draftPolygon.points.push(point);
     draftPolygon.preview = point;
-    liveEls.addZoneBtn.textContent = 'Cancel drawing';
+    liveEls.addZoneBtn.textContent = draftPolygon.points.length >= 3 ? 'Finish area' : 'Cancel drawing';
     renderDraftPolygon();
     liveEls.zoneOverlay.setPointerCapture(event.pointerId);
     return;
@@ -484,6 +495,10 @@ liveEls.frame.addEventListener('error', () => {
 liveEls.overlayToggle.addEventListener('change', refreshFrame);
 liveEls.cameraSelect.addEventListener('change', () => setSelectedCamera(liveEls.cameraSelect.value));
 liveEls.addZoneBtn.addEventListener('click', () => {
+  if (drawingMode && draftPolygon?.points.length >= 3) {
+    finishDraftPolygon();
+    return;
+  }
   drawingMode = !drawingMode;
   draftPolygon = null;
   zoneDrag = null;
