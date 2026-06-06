@@ -61,6 +61,11 @@ grep -v '^torch' "${APP_DIR}/requirements.txt" > "${APP_DIR}/requirements.no-tor
 "${APP_DIR}/.venv/bin/python" -m pip install -r "${APP_DIR}/requirements.no-torch.txt"
 rm "${APP_DIR}/requirements.no-torch.txt"
 
+# --- NEW: ONNX dependencies only ---
+echo "Installing ONNX dependencies..."
+"${APP_DIR}/.venv/bin/pip" install onnx onnxruntime onnxsim
+# --- END NEW BLOCK ---
+
 # Minimal bootstrap config
 if [[ ! -f "${CONFIG_DIR}/config.yaml" ]]; then
   cat > "${CONFIG_DIR}/config.yaml" <<EOF
