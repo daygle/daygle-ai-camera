@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import re
 from typing import Any
 
 
 VEHICLE_LABELS = {"car", "truck", "bus", "motorcycle"}
+logger = logging.getLogger(__name__)
 
 
 class AnprUnavailableError(RuntimeError):
@@ -21,7 +23,16 @@ class AnprPipeline:
         self.backend = str(config.get("backend", "paddleocr")).lower()
         self.min_confidence = float(config.get("min_confidence", 0.75))
         self.vehicle_labels = {str(label).lower() for label in config.get("vehicle_labels", VEHICLE_LABELS)}
-        self.ocr = create_ocr_backend(self.backend)
+        self.unavailable_reason: str | None = None
+        self.ocr = None
+        if not self.enabled:
+            return
+        try:
+            self.ocr = create_ocr_backend(self.backend)
+        except AnprUnavailableError as exc:
+            # ANPR is optional. Keep the app running and report why OCR is disabled.
+            self.unavailable_reason = str(exc)
+            logger.warning("ANPR disabled: %s", self.unavailable_reason)
 
     def process_event(
         self,
@@ -31,7 +42,7 @@ class AnprPipeline:
         image_path: str | None,
         storage: Any,
     ) -> list[dict[str, Any]]:
-        if not self.enabled:
+        if not self.enabled or self.ocr is None:
             return []
         vehicle_detections = [detection for detection in detections if str(detection.get("label", "")).lower() in self.vehicle_labels]
         results: list[dict[str, Any]] = []
