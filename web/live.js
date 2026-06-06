@@ -505,7 +505,6 @@ liveEls.zoneOverlay.addEventListener('pointercancel', () => {
 liveEls.frame.addEventListener('load', () => {
   liveEls.frame.dataset.loading = 'false';
   syncZoneOverlayToImage();
-  renderZones();
   liveEls.status.textContent = liveEls.overlayToggle.checked
     ? `${selectedCamera?.name || 'Camera'} - object overlay on`
     : `${selectedCamera?.name || 'Camera'} - object overlay off`;

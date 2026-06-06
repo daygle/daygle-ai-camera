@@ -107,7 +107,10 @@ function renderCameraManager() {
       const camera = cameras[Number(card.dataset.cameraIndex)];
       const field = input.dataset.cameraField;
       camera[field] = ['port', 'width', 'height', 'fps'].includes(field) ? Number.parseInt(input.value || '0', 10) : input.value;
-      if (field === 'name') renderCameraManager();
+      if (field === 'name') {
+        const heading = card.querySelector('.section-header h3');
+        if (heading) heading.textContent = camera.name || camera.id || `Camera ${Number(card.dataset.cameraIndex) + 1}`;
+      }
     });
   });
   manager.querySelectorAll('[data-camera-recording]').forEach((select) => {
