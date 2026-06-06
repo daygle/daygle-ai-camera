@@ -50,7 +50,14 @@ rsync -a --delete \
 # Python virtual environment
 python3 -m venv "${APP_DIR}/.venv"
 "${APP_DIR}/.venv/bin/python" -m pip install --upgrade pip wheel
-"${APP_DIR}/.venv/bin/python" -m pip install -r "${APP_DIR}/requirements.txt"
+
+# Install CPU-only PyTorch FIRST to avoid CUDA wheels
+"${APP_DIR}/.venv/bin/python" -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+# Install remaining dependencies (pytest intentionally excluded)
+grep -v '^torch' "${APP_DIR}/requirements.txt" > "${APP_DIR}/requirements.no-torch.txt"
+"${APP_DIR}/.venv/bin/python" -m pip install -r "${APP_DIR}/requirements.no-torch.txt"
+rm "${APP_DIR}/requirements.no-torch.txt"
 
 # Minimal bootstrap config
 if [[ ! -f "${CONFIG_DIR}/config.yaml" ]]; then
