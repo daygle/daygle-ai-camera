@@ -146,15 +146,14 @@ class RecordingService:
             'veryfast',
             '-pix_fmt',
             'yuv420p',
-            '-movflags',
-            '+faststart',
             str(tmp_path),
         ]
         result = subprocess.run(command, capture_output=True, text=True, timeout=max(30, int(duration_seconds) + 20), check=False)
         if result.returncode != 0:
             if tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
-            raise RuntimeError(f'ffmpeg failed to record RTSP clip: {self.redact_stream_credentials(result.stderr[-500:])}')
+            error_detail = self.redact_stream_credentials(f'{result.stderr[:500]}\n...\n{result.stderr[-1000:]}')
+            raise RuntimeError(f'ffmpeg failed to record RTSP clip: {error_detail}')
         if not tmp_path.exists():
             raise RuntimeError('ffmpeg did not create an RTSP recording file.')
         tmp_path.replace(file_path)

@@ -1093,6 +1093,7 @@ def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
         if raw_file_path:
             playback_paths = [
                 recording_playback_sidecar_path(file_path),
+                file_path.with_name(f'{file_path.stem}.browser.mp4'),
                 file_path.with_name(f'{file_path.stem}.playback.mp4'),
             ]
             for playback_path in playback_paths:
@@ -1106,7 +1107,7 @@ def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
 
 
 def recording_playback_sidecar_path(file_path: Path) -> Path:
-    return file_path.with_name(f'{file_path.stem}.browser.mp4')
+    return file_path.with_name(f'{file_path.stem}.h264.mp4')
 
 
 def recording_stream_path(file_path: Path) -> Path:
@@ -1142,15 +1143,14 @@ def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
         'veryfast',
         '-pix_fmt',
         'yuv420p',
-        '-movflags',
-        '+faststart',
         str(tmp_path),
     ]
     result = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
     if result.returncode != 0:
         if tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
-        raise RuntimeError(f'ffmpeg failed to convert recording for browser playback: {result.stderr[-500:]}')
+        error_detail = f'{result.stderr[:500]}\n...\n{result.stderr[-1000:]}'
+        raise RuntimeError(f'ffmpeg failed to convert recording for browser playback: {error_detail}')
     if not tmp_path.exists():
         raise RuntimeError('MP4 conversion did not create an output file.')
     tmp_path.replace(output_path)
