@@ -98,5 +98,5 @@ systemctl enable --now "${APP_NAME}.service"
 
 echo "Daygle AI Camera is installed."
 echo "Service status: sudo systemctl status ${APP_NAME}"
-echo "Logs: sudo journalctl -u ${APP_NAME} -f"
+echo "Logs: journalctl -u ${APP_NAME} -f"
 echo "Dashboard: http://<server-ip>:8080/"
