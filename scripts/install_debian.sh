@@ -31,7 +31,7 @@ apt-get install -y --no-install-recommends \
   libgl1 \
   libglib2.0-0
 
-# Create system user if missing
+# Create system user (still created, but not used for service)
 if ! id -u "${APP_USER}" >/dev/null 2>&1; then
   useradd --system --create-home --home-dir "/var/lib/${APP_USER}" --shell /usr/sbin/nologin "${APP_USER}"
 fi
@@ -39,37 +39,34 @@ fi
 # Create directories
 mkdir -p "${APP_DIR}" "${CONFIG_DIR}" "${DATA_DIR}"
 
-# Sync application files (DO NOT EXCLUDE data/)
+# Sync application files
 rsync -a --delete \
   --exclude '.git' \
   --exclude '.venv' \
   --exclude '__pycache__' \
   "${REPO_DIR}/" "${APP_DIR}/"
 
-# Ensure data directory exists
 mkdir -p "${APP_DIR}/data"
 
 # Python virtual environment
 python3 -m venv "${APP_DIR}/.venv"
 "${APP_DIR}/.venv/bin/python" -m pip install --upgrade pip wheel
 
-# Install CPU-only PyTorch FIRST to avoid CUDA wheels
+# Install CPU-only PyTorch
 "${APP_DIR}/.venv/bin/python" -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-# Install remaining dependencies (pytest intentionally excluded)
+# Install remaining dependencies
 grep -v '^torch' "${APP_DIR}/requirements.txt" > "${APP_DIR}/requirements.no-torch.txt"
 "${APP_DIR}/.venv/bin/python" -m pip install -r "${APP_DIR}/requirements.no-torch.txt"
 rm "${APP_DIR}/requirements.no-torch.txt"
 
-# --- NEW: ONNX dependencies only ---
+# Install ONNX dependencies
 echo "Installing ONNX dependencies..."
 "${APP_DIR}/.venv/bin/pip" install onnx onnxruntime onnxsim
-# --- END NEW BLOCK ---
 
 # Minimal bootstrap config
 if [[ ! -f "${CONFIG_DIR}/config.yaml" ]]; then
   cat > "${CONFIG_DIR}/config.yaml" <<EOF
-# Minimal bootstrap config.
 server:
   host: 0.0.0.0
   port: 8080
@@ -85,23 +82,22 @@ fi
 # Install systemd service
 install -m 0644 "${APP_DIR}/systemd/${APP_NAME}.service" "${SERVICE_FILE}"
 
-# Patch service file with correct paths
+# Patch service file to run as root
 sed -i \
   -e "s#WorkingDirectory=/opt/daygle-ai-camera#WorkingDirectory=${APP_DIR}#" \
   -e "s#Environment=DAYGLE_CONFIG=/etc/daygle-ai-camera/config.yaml#Environment=DAYGLE_CONFIG=${CONFIG_DIR}/config.yaml#" \
   -e "s#ExecStart=/opt/daygle-ai-camera/.venv/bin/python#ExecStart=${APP_DIR}/.venv/bin/python#" \
-  -e "s#User=daygle#User=${APP_USER}#" \
-  -e "s#Group=daygle#Group=${APP_USER}#" \
+  -e "s#User=.*##" \
+  -e "s#Group=.*##" \
   "${SERVICE_FILE}"
 
 # Permissions
-chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}" "${CONFIG_DIR}" "${DATA_DIR}"
+chown -R root:root "${APP_DIR}" "${CONFIG_DIR}" "${DATA_DIR}"
 
-# Enable service
 systemctl daemon-reload
 systemctl enable --now "${APP_NAME}.service"
 
-echo "Daygle AI Camera is installed."
+echo "Daygle AI Camera is installed and running as ROOT."
 echo "Service status: sudo systemctl status ${APP_NAME}"
 echo "Logs: journalctl -u ${APP_NAME} -f"
 echo "Dashboard: http://<server-ip>:8080/"
