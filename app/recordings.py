@@ -70,7 +70,7 @@ class RecordingService:
         file_path = self.recordings_dir / filename
         self.write_event_clip(file_path, event_id, detections, duration_seconds, trigger_type, trigger_label)
 
-        mapped_source = 'upload' if source in {'test-image', 'upload'} else 'mock' if source.startswith('mock') else 'camera'
+        mapped_source = 'upload' if source in {'test-image', 'upload'} else 'rtsp' if source == 'rtsp' else 'mock' if source.startswith('mock') else 'camera'
         if mapped_source not in self.VALID_SOURCES:
             mapped_source = 'mock'
         return {

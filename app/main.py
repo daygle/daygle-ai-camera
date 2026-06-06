@@ -406,7 +406,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             'source': 'live-stream',
         },
     )
-    attach_event_recording(event_id, event_time, 'rtsp', detections)
+    recording_id = attach_event_recording(event_id, event_time, 'rtsp', detections, camera_id=camera_id)
     process_anpr_for_event(event_id, detections, snapshot_path, event_time)
 
     for alert in triggered:
@@ -432,6 +432,9 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         matched_labels=matched_labels,
         triggered_alerts=triggered,
         event_id=event_id,
+        recording_id=recording_id,
+        recording_state='linked' if recording_id is not None else 'skipped',
+        recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(detections),
         email_enabled_rules=len(email_rules),
         email_recipients=email_recipients,
         email_attempted=bool(triggered and email_recipients and effective_email_alert_settings().get('enabled')),
@@ -665,13 +668,25 @@ def require_admin(request: Request) -> dict[str, Any]:
     return user
 
 
-def attach_event_recording(event_id: int, event_time: str, source: str, detections: list[dict[str, Any]]) -> int | None:
+def attach_event_recording(event_id: int, event_time: str, source: str, detections: list[dict[str, Any]], camera_id: str | None = None) -> int | None:
     metadata = recording_service.event_recording_metadata(event_id, event_time, source, detections)
     if metadata is None:
         return None
+    if camera_id:
+        metadata['camera_id'] = camera_id
     recording_id = database.add_recording(created_at=utc_now(), **metadata)
     purge_recordings_by_policy()
     return recording_id
+
+
+def recording_skip_reason(detections: list[dict[str, Any]]) -> str:
+    should_record, trigger_type, trigger_label = recording_service.should_record(detections)
+    if should_record:
+        return f'Recording policy matched {trigger_type}{f" {trigger_label}" if trigger_label else ""}, but no recording was linked.'
+    if not recording_service.enabled:
+        return 'Recording is disabled or recording mode is off.'
+    labels = ', '.join(str(detection.get('label')) for detection in detections if detection.get('label')) or 'none'
+    return f'Recording policy skipped this event. Detected labels: {labels}. Mode: {recording_service.mode}.'
 
 
 def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int) -> None:

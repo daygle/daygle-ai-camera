@@ -106,12 +106,15 @@ function formatDetectionStatus(payload) {
   if (!payload) return 'Live AI status unavailable.';
   const labels = (payload.detected_labels || []).join(', ') || 'none';
   const alerts = (payload.triggered_alerts || []).map((alert) => alert.rule_name).join(', ') || 'none';
+  const recording = payload.recording_state
+    ? `recording ${payload.recording_state}${payload.recording_id ? ` #${payload.recording_id}` : ''}`
+    : 'recording pending';
   const email = payload.email_attempted
     ? `email sent/attempted to ${(payload.email_recipients || []).join(', ')}`
     : payload.email_enabled_rules
       ? 'email rule matched but delivery was not attempted'
       : 'no email-enabled matching rule';
-  if (payload.state === 'alerted') return `Live AI: alert matched (${alerts}); ${email}.`;
+  if (payload.state === 'alerted') return `Live AI: alert matched (${alerts}); ${email}; ${recording}.`;
   if (payload.state === 'checked') return `Live AI: checked; labels: ${labels}; ${payload.reason}`;
   return `Live AI: ${payload.state || 'waiting'} - ${payload.reason || payload.ai_error || 'waiting for frames'}`;
 }

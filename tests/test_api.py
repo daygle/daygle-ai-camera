@@ -1202,7 +1202,6 @@ def test_live_stream_detection_triggers_email_alert(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main, 'detector', FakeDetector())
     monkeypatch.setattr(main, 'EmailAlertService', FakeEmailAlertService)
-    monkeypatch.setattr(main, 'attach_event_recording', lambda *_args, **_kwargs: None)
     main.live_detection_last_checked.clear()
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
     main.database.set_setting(
@@ -1236,6 +1235,10 @@ def test_live_stream_detection_triggers_email_alert(tmp_path, monkeypatch):
     assert event['source'] == 'rtsp'
     assert event['detections'][0]['label'] == 'person'
     assert event['detections'][0]['x'] == 0.05
+    assert event['recording_status'] == 'linked'
+    assert event['recordings'][0]['source'] == 'rtsp'
+    assert event['recordings'][0]['camera_id'] == 'camera-1'
+    assert Path(event['recordings'][0]['file_path']).exists()
     assert sent
     assert sent[0][0]['rule_name'] == 'Person live'
     assert sent[0][2] == ['owner@example.com']
@@ -1243,6 +1246,8 @@ def test_live_stream_detection_triggers_email_alert(tmp_path, monkeypatch):
     assert status['state'] == 'alerted'
     assert status['detected_labels'] == ['person']
     assert status['email_attempted'] is True
+    assert status['recording_state'] == 'linked'
+    assert status['recording_id'] == event['recordings'][0]['id']
 
 
 def test_onvif_camera_settings_require_stream_source(tmp_path, monkeypatch):
