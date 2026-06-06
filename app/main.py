@@ -130,6 +130,8 @@ def effective_email_alert_settings() -> dict[str, Any]:
 
 database = EventDatabase(config['storage']['database'])
 camera_config = effective_camera_config()
+cameras_config: list[dict[str, Any]] = []
+camera_instances: dict[str, Any] = {}
 camera = None
 
 storage = Storage({**config, 'storage': effective_storage_config()})
@@ -172,6 +174,116 @@ def build_stream_url(settings: dict[str, Any]) -> str:
     return f'rtsp://{credentials}{host}:{port}/{path}'
 
 
+def camera_default_name(settings: dict[str, Any], fallback: str = 'Primary Camera') -> str:
+    return str(settings.get('name') or settings.get('device') or fallback).strip() or fallback
+
+
+def normalize_camera_id(value: Any, fallback: str = 'camera-1') -> str:
+    camera_id = re.sub(r'[^a-zA-Z0-9_-]+', '-', str(value or '').strip().lower()).strip('-')
+    return camera_id or fallback
+
+
+def default_camera_detection_settings() -> dict[str, Any]:
+    return {
+        'motion_enabled': True,
+        'object_detection_enabled': True,
+        'zones': [],
+    }
+
+
+def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    if not isinstance(zones, list):
+        return normalized
+    for index, zone in enumerate(zones, start=1):
+        if not isinstance(zone, dict):
+            continue
+        x = max(0.0, min(1.0, float(zone.get('x') or 0)))
+        y = max(0.0, min(1.0, float(zone.get('y') or 0)))
+        width = max(0.01, min(1.0 - x, float(zone.get('width') or 0)))
+        height = max(0.01, min(1.0 - y, float(zone.get('height') or 0)))
+        normalized.append({
+            'id': normalize_camera_id(zone.get('id'), f'zone-{index}'),
+            'name': str(zone.get('name') or f'Zone {index}').strip() or f'Zone {index}',
+            'x': round(x, 4),
+            'y': round(y, 4),
+            'width': round(width, 4),
+            'height': round(height, 4),
+            'enabled': bool(zone.get('enabled', True)),
+            'monitor_motion': bool(zone.get('monitor_motion', True)),
+            'monitor_objects': bool(zone.get('monitor_objects', True)),
+        })
+    return normalized
+
+
+def normalize_camera_settings(settings: dict[str, Any], index: int = 1) -> dict[str, Any]:
+    camera_settings = dict(settings or {})
+    camera_settings['id'] = normalize_camera_id(camera_settings.get('id'), f'camera-{index}')
+    camera_settings['name'] = camera_default_name(camera_settings, f'Camera {index}')
+    camera_settings['backend'] = str(camera_settings.get('backend') or 'mock').lower()
+    camera_settings['width'] = int(camera_settings.get('width') or 1280)
+    camera_settings['height'] = int(camera_settings.get('height') or 720)
+    camera_settings['fps'] = int(camera_settings.get('fps') or 15)
+    detection = default_camera_detection_settings()
+    if isinstance(camera_settings.get('detection'), dict):
+        detection.update(camera_settings['detection'])
+    for key in ('motion_enabled', 'object_detection_enabled'):
+        detection[key] = bool(detection.get(key, True))
+    detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
+    camera_settings['detection'] = detection
+    return camera_settings
+
+
+def effective_cameras_config() -> list[dict[str, Any]]:
+    override = database.get_setting('cameras')
+    if isinstance(override, list) and override:
+        return [normalize_camera_settings(camera_settings, index) for index, camera_settings in enumerate(override, start=1)]
+    legacy = effective_camera_config()
+    if isinstance(legacy, dict):
+        return [normalize_camera_settings(legacy, 1)]
+    return [normalize_camera_settings({}, 1)]
+
+
+def get_camera_config(camera_id: str | None = None) -> dict[str, Any]:
+    if not cameras_config:
+        return camera_config
+    if camera_id:
+        normalized = normalize_camera_id(camera_id)
+        for configured in cameras_config:
+            if configured.get('id') == normalized:
+                return configured
+        raise HTTPException(status_code=404, detail='Camera not found')
+    return cameras_config[0]
+
+
+def get_camera_instance(camera_id: str | None = None):
+    configured = get_camera_config(camera_id)
+    instance = camera_instances.get(str(configured['id']))
+    if instance is None:
+        raise HTTPException(status_code=404, detail='Camera not found')
+    return instance
+
+
+def detection_center_in_zone(detection: dict[str, Any], zone: dict[str, Any]) -> bool:
+    box = detection.get('box') or {}
+    center_x = float(box.get('x') or 0) + (float(box.get('width') or 0) / 2)
+    center_y = float(box.get('y') or 0) + (float(box.get('height') or 0) / 2)
+    return (
+        float(zone['x']) <= center_x <= float(zone['x']) + float(zone['width'])
+        and float(zone['y']) <= center_y <= float(zone['y']) + float(zone['height'])
+    )
+
+
+def filter_detections_for_camera(detections: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
+    detection_settings = settings.get('detection') or {}
+    if not detection_settings.get('object_detection_enabled', True):
+        return []
+    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
+    if not zones:
+        return detections
+    return [detection for detection in detections if any(detection_center_in_zone(detection, zone) for zone in zones)]
+
+
 def create_camera(settings: dict[str, Any]):
     backend = str(settings.get('backend', 'mock')).lower()
     width = int(settings.get('width', 1280))
@@ -182,7 +294,14 @@ def create_camera(settings: dict[str, Any]):
     return MockCamera(width=width, height=height, fps=fps)
 
 
-camera = create_camera(camera_config)
+def create_camera_instances(settings_list: list[dict[str, Any]]) -> dict[str, Any]:
+    return {str(settings['id']): create_camera(settings) for settings in settings_list}
+
+
+cameras_config = effective_cameras_config()
+camera_config = cameras_config[0]
+camera_instances = create_camera_instances(cameras_config)
+camera = camera_instances[camera_config['id']]
 
 def config_file_path() -> Path:
     return Path(os.environ.get(CONFIG_ENV_VAR) or DEFAULT_CONFIG_PATH)
@@ -300,7 +419,7 @@ async def authentication_middleware(request: Request, call_next):
     request.state.session = session
     request.state.user = session['user']
 
-    admin_required = path in ADMIN_PATHS or path.startswith('/api/users') or path.startswith('/api/settings/ai') or path.startswith('/api/settings/anpr') or path.startswith('/api/settings/system') or (
+    admin_required = path in ADMIN_PATHS or path.startswith('/api/users') or path.startswith('/api/settings/ai') or path.startswith('/api/settings/anpr') or path.startswith('/api/settings/system') or (path.startswith('/api/cameras') and request.method in MUTATING_METHODS) or (
         path.startswith('/api/settings/alert-email') and request.method in MUTATING_METHODS
     ) or (
         path.startswith('/api/settings/alerts') and request.method in MUTATING_METHODS
@@ -464,7 +583,14 @@ def trigger_plate_alerts(plate_events: list[dict[str, Any]]) -> list[dict[str, A
     return triggered
 
 
-def render_live_snapshot_svg(frame: dict[str, Any], detections: list[dict[str, Any]], *, overlay: bool) -> str:
+def render_live_snapshot_svg(
+    frame: dict[str, Any],
+    detections: list[dict[str, Any]],
+    *,
+    overlay: bool,
+    camera_name: str = 'Camera',
+    zones: list[dict[str, Any]] | None = None,
+) -> str:
     width = int(frame.get('width') or 1280)
     height = int(frame.get('height') or 720)
     frame_number = int(frame.get('frame_number') or 0)
@@ -475,6 +601,21 @@ def render_live_snapshot_svg(frame: dict[str, Any], detections: list[dict[str, A
         grid_lines.append(f'<line x1="{x}" y1="0" x2="{x}" y2="{height}" />')
     for y in range(0, height + grid_spacing, grid_spacing):
         grid_lines.append(f'<line x1="0" y1="{y}" x2="{width}" y2="{y}" />')
+
+    zone_markup: list[str] = []
+    if overlay:
+        for zone in zones or []:
+            if not zone.get('enabled', True):
+                continue
+            zx = max(0, float(zone.get('x') or 0) * width)
+            zy = max(0, float(zone.get('y') or 0) * height)
+            zw = max(1, float(zone.get('width') or 0) * width)
+            zh = max(1, float(zone.get('height') or 0) * height)
+            zone_name = escape(str(zone.get('name') or 'Monitoring area'))
+            zone_markup.append(
+                f'<g class="monitor-zone"><rect x="{zx:.1f}" y="{zy:.1f}" width="{zw:.1f}" height="{zh:.1f}" />'
+                f'<text x="{zx + 12:.1f}" y="{zy + 30:.1f}">{zone_name}</text></g>'
+            )
 
     detection_markup: list[str] = []
     if overlay:
@@ -509,6 +650,8 @@ def render_live_snapshot_svg(frame: dict[str, Any], detections: list[dict[str, A
       .grid line {{ stroke: rgba(255,255,255,.08); stroke-width: 1; }}
       .hud {{ fill: #edf3ff; font: 700 26px Inter, Arial, sans-serif; letter-spacing: .04em; }}
       .muted {{ fill: #91a1ba; font: 700 20px Inter, Arial, sans-serif; }}
+      .monitor-zone rect {{ fill: rgba(71,214,255,.08); stroke: #47d6ff; stroke-width: 3; stroke-dasharray: 12 10; rx: 14; }}
+      .monitor-zone text {{ fill: #47d6ff; font: 800 20px Inter, Arial, sans-serif; paint-order: stroke; stroke: rgba(7,11,19,.86); stroke-width: 4; stroke-linejoin: round; }}
       .detection-box rect {{ fill: rgba(73,230,163,.08); stroke: #49e6a3; stroke-width: 4; rx: 18; }}
       .detection-box text {{ fill: #49e6a3; font: 800 24px Inter, Arial, sans-serif; paint-order: stroke; stroke: rgba(7,11,19,.86); stroke-width: 5; stroke-linejoin: round; }}
     </style>
@@ -518,9 +661,10 @@ def render_live_snapshot_svg(frame: dict[str, Any], detections: list[dict[str, A
   <g class="grid">{''.join(grid_lines)}</g>
   <circle cx="{width * .74:.1f}" cy="{height * .34:.1f}" r="{min(width, height) * .16:.1f}" fill="none" stroke="rgba(71,214,255,.16)" stroke-width="3" />
   <circle cx="{width * .28:.1f}" cy="{height * .62:.1f}" r="{min(width, height) * .12:.1f}" fill="none" stroke="rgba(139,92,246,.16)" stroke-width="3" />
+  {''.join(zone_markup)}
   {''.join(detection_markup)}
   <rect x="24" y="24" width="520" height="116" rx="20" fill="rgba(7,11,19,.58)" stroke="rgba(255,255,255,.12)" />
-  <text x="48" y="70" class="hud">DAYGLE LIVE CAMERA</text>
+  <text x="48" y="70" class="hud">{escape(camera_name).upper()}</text>
   <text x="48" y="112" class="muted">Frame #{frame_number} · {timestamp} · Overlay {overlay_state}</text>
 </svg>'''
 
@@ -584,7 +728,7 @@ def refresh_runtime_after_database_restore() -> None:
     database.init()
     auth.init()
     database.seed_alert_rules(config.get('alerts', {}).get('rules', []), utc_now())
-    apply_camera_settings(effective_camera_config())
+    apply_cameras_settings(effective_cameras_config())
     apply_storage_and_recording_settings()
     apply_anpr_settings()
     auth.apply_config(effective_auth_config())
@@ -832,12 +976,17 @@ async def change_profile_password(request: Request):
 
 
 @app.get('/api/status')
-def status():
-    frame = camera.get_frame()
+def status(camera_id: str | None = None):
+    selected_camera = get_camera_instance(camera_id)
+    selected_config = get_camera_config(camera_id)
+    frame = selected_camera.get_frame()
     ai_state = ai_status_payload()
     return {
         'status': 'online',
-        'mode': camera_config.get('backend', 'mock'),
+        'mode': selected_config.get('backend', 'mock'),
+        'camera_id': selected_config.get('id'),
+        'camera_name': selected_config.get('name'),
+        'camera_detection': selected_config.get('detection', {}),
         'ai_backend': ai_state['active_backend'],
         'ai_available': ai_state['inference_available'],
         'ai_error': ai_state['error'],
@@ -854,24 +1003,28 @@ def ai_status():
 
 
 @app.get('/api/live/snapshot')
-def live_snapshot(overlay: bool = Query(True)):
-    if hasattr(camera, 'read_jpeg'):
+def live_snapshot(overlay: bool = Query(True), camera_id: str | None = None):
+    selected_camera = get_camera_instance(camera_id)
+    selected_config = get_camera_config(camera_id)
+    if hasattr(selected_camera, 'read_jpeg'):
         try:
-            image_bytes, _frame = camera.read_jpeg()
+            image_bytes, _frame = selected_camera.read_jpeg()
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return Response(content=image_bytes, media_type='image/jpeg')
-    frame = camera.get_frame()
-    detections = mock_detector.detect(frame['frame_number'], force=True) if overlay else []
-    svg = render_live_snapshot_svg(frame, detections, overlay=overlay)
+    frame = selected_camera.get_frame()
+    detections = filter_detections_for_camera(mock_detector.detect(frame['frame_number'], force=True), selected_config) if overlay else []
+    svg = render_live_snapshot_svg(frame, detections, overlay=overlay, camera_name=str(selected_config.get('name') or 'Camera'), zones=selected_config.get('detection', {}).get('zones', []))
     return Response(content=svg, media_type='image/svg+xml')
 
 
 @app.post('/api/mock/detect')
-def generate_detection(force: bool = True):
-    frame = camera.get_frame()
+def generate_detection(force: bool = True, camera_id: str | None = None):
+    selected_camera = get_camera_instance(camera_id)
+    selected_config = get_camera_config(camera_id)
+    frame = selected_camera.get_frame()
     active_mock_detector = detector if hasattr(detector, 'detect') else mock_detector
-    detections = active_mock_detector.detect(frame['frame_number'], force=force)
+    detections = filter_detections_for_camera(active_mock_detector.detect(frame['frame_number'], force=force), selected_config)
 
     if not detections:
         return {'created': False, 'message': 'No detections generated'}
@@ -887,6 +1040,7 @@ def generate_detection(force: bool = True):
         snapshot_path=snapshot_path,
         detections=detections,
         alert_triggered=bool(triggered),
+        metadata={'camera_id': selected_config.get('id'), 'camera_name': selected_config.get('name')},
     )
     recording_id = attach_event_recording(event_id, event_time, 'mock-camera', detections)
     plate_events = process_anpr_for_event(event_id, detections, snapshot_path, event_time)
@@ -905,6 +1059,7 @@ def generate_detection(force: bool = True):
     return {
         'created': True,
         'event_id': event_id,
+        'camera_id': selected_config.get('id'),
         'recording_id': recording_id,
         'detections': detections,
         'alerts': triggered,
@@ -1006,7 +1161,8 @@ def runtime_config():
     ai_state = ai_status_payload()
     return {
         'server': {'host': config.get('server', {}).get('host'), 'port': config.get('server', {}).get('port')},
-        'camera': effective_camera_config(),
+        'camera': get_camera_config(None),
+        'cameras': effective_cameras_config(),
         'ai': {
             'enabled': effective_ai_config().get('enabled'),
             'backend': effective_ai_config().get('backend'),
@@ -1390,18 +1546,20 @@ def _int_field(payload: dict[str, Any], field: str, default: int, minimum: int, 
     return value
 
 
-def validate_camera_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    current = effective_camera_config()
+def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | None = None, index: int = 1) -> dict[str, Any]:
+    current = current or effective_camera_config()
     updated = {
         key: current.get(key)
-        for key in ('backend', 'device', 'width', 'height', 'fps', 'flip', 'stream_url', 'host', 'port', 'path', 'username', 'password')
+        for key in ('id', 'name', 'backend', 'device', 'width', 'height', 'fps', 'flip', 'stream_url', 'host', 'port', 'path', 'username', 'password')
         if key in current
     }
-    updated.update({key: payload[key] for key in ('backend', 'device', 'flip', 'stream_url', 'host', 'port', 'path', 'username', 'password') if key in payload})
+    updated.update({key: payload[key] for key in ('id', 'name', 'backend', 'device', 'flip', 'stream_url', 'host', 'port', 'path', 'username', 'password') if key in payload})
     backend = str(updated.get('backend', 'mock')).lower()
     if backend not in {'mock', 'onvif', 'rtsp'}:
         raise HTTPException(status_code=400, detail='Camera backend must be mock, onvif, or rtsp.')
     updated['backend'] = backend
+    updated['id'] = normalize_camera_id(updated.get('id'), f'camera-{index}')
+    updated['name'] = camera_default_name(updated, f'Camera {index}')
     updated['device'] = payload.get('device', current.get('device', 0))
     updated['width'] = _int_field({**current, **payload}, 'width', 1280, 160, 7680)
     updated['height'] = _int_field({**current, **payload}, 'height', 720, 120, 4320)
@@ -1417,8 +1575,38 @@ def validate_camera_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if flip not in {'none', 'horizontal', 'vertical', 'both'}:
         raise HTTPException(status_code=400, detail='flip must be none, horizontal, vertical, or both.')
     updated['flip'] = flip
+
+    detection = default_camera_detection_settings()
+    existing_detection = current.get('detection') if isinstance(current.get('detection'), dict) else {}
+    payload_detection = payload.get('detection') if isinstance(payload.get('detection'), dict) else {}
+    detection.update(existing_detection)
+    detection.update(payload_detection)
+    detection['motion_enabled'] = _bool_value(detection.get('motion_enabled', True))
+    detection['object_detection_enabled'] = _bool_value(detection.get('object_detection_enabled', True))
+    detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
+    updated['detection'] = detection
     return updated
 
+
+def validate_cameras_settings(payload: Any) -> list[dict[str, Any]]:
+    raw_cameras = payload.get('cameras') if isinstance(payload, dict) else payload
+    if not isinstance(raw_cameras, list):
+        raise HTTPException(status_code=400, detail='cameras must be a list.')
+    if not raw_cameras:
+        raise HTTPException(status_code=400, detail='At least one camera is required.')
+    validated: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    current_by_id = {str(camera_settings.get('id')): camera_settings for camera_settings in cameras_config}
+    for index, raw_camera in enumerate(raw_cameras, start=1):
+        if not isinstance(raw_camera, dict):
+            raise HTTPException(status_code=400, detail='Each camera must be an object.')
+        current = current_by_id.get(str(raw_camera.get('id'))) or (cameras_config[index - 1] if index <= len(cameras_config) else {})
+        camera_settings = validate_camera_settings(raw_camera, current=current, index=index)
+        if camera_settings['id'] in seen:
+            raise HTTPException(status_code=400, detail=f"Duplicate camera id: {camera_settings['id']}.")
+        seen.add(camera_settings['id'])
+        validated.append(camera_settings)
+    return validated
 
 def validate_anpr_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_anpr_config()
@@ -1509,10 +1697,16 @@ def validate_auth_settings(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
+    global camera, camera_config, cameras_config, camera_instances
+    cameras_config = settings_list
+    camera_config = settings_list[0]
+    camera_instances = create_camera_instances(settings_list)
+    camera = camera_instances[camera_config['id']]
+
+
 def apply_camera_settings(settings: dict[str, Any]) -> None:
-    global camera, camera_config
-    camera_config = settings
-    camera = create_camera(settings)
+    apply_cameras_settings([settings])
 
 
 def apply_storage_and_recording_settings() -> None:
@@ -1682,7 +1876,8 @@ async def update_alert_email_settings(request: Request):
 @app.get('/api/settings/system')
 def get_system_settings():
     return {
-        'camera': effective_camera_config(),
+        'camera': get_camera_config(None),
+        'cameras': effective_cameras_config(),
         'anpr': effective_anpr_config(),
         'recording': effective_recording_config(),
         'storage': effective_storage_config(),
@@ -1745,8 +1940,39 @@ async def restore_database(file: UploadFile = File(...)):
 async def update_camera_settings(request: Request):
     settings = validate_camera_settings(await request.json())
     database.set_setting('camera', settings, utc_now())
+    database.set_setting('cameras', [settings], utc_now())
     apply_camera_settings(settings)
     return settings
+
+
+@app.get('/api/cameras')
+def list_cameras():
+    return {'cameras': effective_cameras_config()}
+
+
+@app.put('/api/cameras')
+async def update_cameras(request: Request):
+    settings = validate_cameras_settings(await request.json())
+    database.set_setting('cameras', settings, utc_now())
+    database.set_setting('camera', settings[0], utc_now())
+    apply_cameras_settings(settings)
+    return {'cameras': settings}
+
+
+@app.put('/api/cameras/{camera_id}')
+async def update_camera(camera_id: str, request: Request):
+    normalized = normalize_camera_id(camera_id)
+    payload = await request.json()
+    settings_list = list(effective_cameras_config())
+    for index, current in enumerate(settings_list):
+        if current.get('id') == normalized:
+            settings_list[index] = validate_camera_settings({**payload, 'id': normalized}, current=current, index=index + 1)
+            database.set_setting('cameras', settings_list, utc_now())
+            if index == 0:
+                database.set_setting('camera', settings_list[0], utc_now())
+            apply_cameras_settings(settings_list)
+            return settings_list[index]
+    raise HTTPException(status_code=404, detail='Camera not found')
 
 
 @app.get('/api/settings/anpr')

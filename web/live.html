@@ -11,18 +11,44 @@
     <section class="live-viewer-card">
       <header class="live-toolbar">
         <div>
-          <p class="eyebrow">Live Camera</p>
+          <p class="eyebrow">Live Cameras</p>
           <h1>Live Footage</h1>
+          <p class="muted">Choose a camera, toggle object overlays, and draw monitoring areas for motion or object detection.</p>
         </div>
-        <label class="toggle-control" for="overlayToggle">
-          <input id="overlayToggle" type="checkbox" checked />
-          <span>Object sighting overlay</span>
-        </label>
+        <div class="live-controls">
+          <label>
+            <span>Camera</span>
+            <select id="cameraSelect"></select>
+          </label>
+          <label class="toggle-control" for="overlayToggle">
+            <input id="overlayToggle" type="checkbox" checked />
+            <span>Object sighting overlay</span>
+          </label>
+        </div>
       </header>
-      <div class="live-frame-wrap">
+      <div class="live-frame-wrap" id="liveFrameWrap">
         <img id="liveFrame" class="live-frame" alt="Live camera footage" />
+        <div id="zoneOverlay" class="zone-overlay" aria-label="Monitoring areas"></div>
         <div id="liveStatus" class="live-status">Connecting to camera…</div>
       </div>
+    </section>
+
+    <section class="card zone-editor-card">
+      <div class="section-header">
+        <div>
+          <h2>Monitoring areas</h2>
+          <p class="muted">Click and drag on the live footage to add a normalized area. Areas can monitor motion, objects, or both.</p>
+        </div>
+        <div class="button-row">
+          <button id="addZoneBtn" type="button">Draw area</button>
+          <button id="saveZonesBtn" class="secondary" type="button">Save areas</button>
+        </div>
+      </div>
+      <div class="form-grid compact-grid">
+        <label><span>Motion detection</span><select id="motionEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+        <label><span>Object detection</span><select id="objectDetectionEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+      </div>
+      <div id="zoneList" class="list"></div>
     </section>
   </main>
   <script src="/static/nav.js"></script>

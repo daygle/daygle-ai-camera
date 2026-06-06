@@ -1192,3 +1192,77 @@ def test_recording_retention_purge_deletes_metadata_and_files(tmp_path, monkeypa
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path, monkeypatch):
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        cameras = [
+            {
+                'id': 'front-door',
+                'name': 'Front Door',
+                'backend': 'mock',
+                'width': 1280,
+                'height': 720,
+                'fps': 15,
+                'detection': {
+                    'motion_enabled': True,
+                    'object_detection_enabled': True,
+                    'zones': [
+                        {'id': 'porch', 'name': 'Porch', 'x': 0.0, 'y': 0.0, 'width': 0.5, 'height': 0.5, 'monitor_motion': True, 'monitor_objects': True}
+                    ],
+                },
+            },
+            {
+                'id': 'garage',
+                'name': 'Garage',
+                'backend': 'mock',
+                'width': 640,
+                'height': 480,
+                'fps': 10,
+                'detection': {'motion_enabled': False, 'object_detection_enabled': False, 'zones': []},
+            },
+        ]
+        status, _headers, payload = client.request('/api/cameras', method='PUT', json_body={'cameras': cameras}, headers={'X-CSRF-Token': csrf})
+        assert status == 200
+        assert [camera['id'] for camera in payload['cameras']] == ['front-door', 'garage']
+        assert payload['cameras'][0]['detection']['zones'][0]['name'] == 'Porch'
+
+        status, _headers, listed = client.request('/api/cameras')
+        assert status == 200
+        assert len(listed['cameras']) == 2
+        assert listed['cameras'][1]['detection']['object_detection_enabled'] is False
+
+        status, _headers, status_payload = client.request('/api/status?camera_id=garage')
+        assert status == 200
+        assert status_payload['camera_id'] == 'garage'
+        assert status_payload['resolution'] == {'width': 640, 'height': 480}
+
+        status, _headers, no_detection = client.request('/api/mock/detect?camera_id=garage', method='POST', headers={'X-CSRF-Token': csrf})
+        assert status == 200
+        assert no_detection['created'] is False
+
+        status, _headers, updated = client.request(
+            '/api/cameras/front-door',
+            method='PUT',
+            json_body={
+                **listed['cameras'][0],
+                'detection': {
+                    **listed['cameras'][0]['detection'],
+                    'zones': [
+                        {'id': 'driveway', 'name': 'Driveway', 'x': 0.25, 'y': 0.25, 'width': 0.5, 'height': 0.5, 'monitor_motion': True, 'monitor_objects': False}
+                    ],
+                },
+            },
+            headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        assert updated['detection']['zones'][0]['id'] == 'driveway'
+        assert updated['detection']['zones'][0]['monitor_objects'] is False
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
