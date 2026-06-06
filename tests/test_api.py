@@ -1121,10 +1121,19 @@ def test_opencv_stream_camera_reuses_rtsp_capture(monkeypatch):
 
         def __init__(self, stream_url):
             self.stream_url = stream_url
+            self.buffer_size = None
+            self.grab_count = 0
             self.release_count = 0
             FakeCapture.instances.append(self)
 
+        def set(self, prop, value):
+            self.buffer_size = (prop, value)
+
         def isOpened(self):
+            return True
+
+        def grab(self):
+            self.grab_count += 1
             return True
 
         def read(self):
@@ -1134,6 +1143,8 @@ def test_opencv_stream_camera_reuses_rtsp_capture(monkeypatch):
             self.release_count += 1
 
     class FakeCv2:
+        CAP_PROP_BUFFERSIZE = 38
+
         @staticmethod
         def VideoCapture(stream_url):
             return FakeCapture(stream_url)
@@ -1154,8 +1165,11 @@ def test_opencv_stream_camera_reuses_rtsp_capture(monkeypatch):
     assert first_frame['frame_number'] == 1
     assert second_frame['frame_number'] == 2
     assert len(FakeCapture.instances) == 1
+    assert FakeCapture.instances[0].buffer_size == (FakeCv2.CAP_PROP_BUFFERSIZE, 1)
+    assert FakeCapture.instances[0].grab_count == 4
     assert FakeCapture.instances[0].release_count == 0
     assert 'rtsp_transport;tcp' in os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS']
+    assert 'fflags;nobuffer' in os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS']
 
 
 def test_onvif_camera_settings_require_stream_source(tmp_path, monkeypatch):

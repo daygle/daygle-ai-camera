@@ -12,6 +12,7 @@ const liveEls = {
   objectDetectionEnabled: document.getElementById('objectDetectionEnabled'),
 };
 
+const LIVE_REFRESH_MS = 250;
 let refreshTimer;
 let csrfToken = null;
 let cameras = [];
@@ -94,6 +95,8 @@ function snapshotUrl() {
 
 function refreshFrame() {
   if (!selectedCamera) return;
+  if (document.hidden || liveEls.frame.dataset.loading === 'true') return;
+  liveEls.frame.dataset.loading = 'true';
   liveEls.frame.src = snapshotUrl();
 }
 
@@ -310,6 +313,7 @@ liveEls.zoneOverlay.addEventListener('pointercancel', () => {
 });
 
 liveEls.frame.addEventListener('load', () => {
+  liveEls.frame.dataset.loading = 'false';
   syncZoneOverlayToImage();
   renderZones();
   liveEls.status.textContent = liveEls.overlayToggle.checked
@@ -318,6 +322,7 @@ liveEls.frame.addEventListener('load', () => {
 });
 
 liveEls.frame.addEventListener('error', () => {
+  liveEls.frame.dataset.loading = 'false';
   liveEls.status.textContent = 'Unable to load live footage. Retrying...';
 });
 
@@ -355,7 +360,7 @@ async function init() {
   const payload = await api('/api/cameras');
   cameras = payload.cameras || [];
   renderCameraOptions();
-  refreshTimer = setInterval(refreshFrame, 750);
+  refreshTimer = setInterval(refreshFrame, LIVE_REFRESH_MS);
 }
 
 init().catch((error) => { liveEls.status.textContent = error.message; });

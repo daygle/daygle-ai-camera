@@ -70,12 +70,14 @@ class OpenCvStreamCamera:
 
         # Prefer TCP for RTSP cameras. UDP packet loss and frequent reconnects
         # can make inexpensive ONVIF cameras fail during session setup.
-        os.environ.setdefault('OPENCV_FFMPEG_CAPTURE_OPTIONS', 'rtsp_transport;tcp|stimeout;5000000')
+        os.environ.setdefault('OPENCV_FFMPEG_CAPTURE_OPTIONS', 'rtsp_transport;tcp|fflags;nobuffer|max_delay;500000|stimeout;5000000')
 
         import cv2
 
         if self._capture is None:
             self._capture = cv2.VideoCapture(self.stream_url)
+            if hasattr(cv2, 'CAP_PROP_BUFFERSIZE'):
+                self._capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         if not self._capture.isOpened():
             self._release_capture()
             self.last_error = 'Unable to open ONVIF/RTSP stream.'
@@ -92,11 +94,11 @@ class OpenCvStreamCamera:
             capture = self._open_capture()
             import cv2
 
-            ok, image = capture.read()
+            ok, image = self._read_latest_frame(capture)
             if not ok or image is None:
                 self._release_capture()
                 capture = self._open_capture()
-                ok, image = capture.read()
+                ok, image = self._read_latest_frame(capture)
 
             if not ok or image is None:
                 self._release_capture()
@@ -113,6 +115,14 @@ class OpenCvStreamCamera:
                 raise RuntimeError(self.last_error)
             self.last_error = None
             return encoded.tobytes(), self.get_frame()
+
+    @staticmethod
+    def _read_latest_frame(capture) -> tuple[bool, Any]:
+        if hasattr(capture, 'grab'):
+            for _ in range(2):
+                if not capture.grab():
+                    break
+        return capture.read()
 
     def snapshot(self) -> dict[str, Any]:
         _jpeg, frame = self.read_jpeg()
