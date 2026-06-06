@@ -217,7 +217,8 @@ function updateSelectionStyles() {
 function renderZones() {
   if (!selectedCamera) return;
   syncZoneOverlayToImage();
-  const zones = cameraDetection().zones.map(normalizeZone);
+  const zones = cameraDetection().zones;
+  zones.forEach(normalizeZone);
   liveEls.zoneOverlay.innerHTML = zones.map((zone, index) => (zone.enabled === false ? '' : renderZoneBox(zone, index))).join('');
 
   if (!zones.length) {
