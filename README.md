@@ -17,7 +17,7 @@ The app is now designed to be configured from the web UI. `config.yaml` is only 
 - SQLite persistence for events, detections, alerts, users, sessions, runtime settings, and alert rules.
 - ONVIF/RTSP live snapshot support for testing P6S-style IP cameras before CSI camera hardware arrives.
 - Background live AI alert checks continue polling configured RTSP/ONVIF cameras even when no Live Cameras page is open.
-- Armbian install script and systemd unit for Orange Pi deployment.
+- Debian and Armbian install scripts plus a systemd unit for Linux/Orange Pi deployment.
 
 ## Requirements
 
@@ -29,10 +29,10 @@ The app is now designed to be configured from the web UI. `config.yaml` is only 
 - Optional: an ONNX YOLO model file for object detection.
 - Optional: PaddleOCR or EasyOCR for ANPR OCR.
 
-### Orange Pi / Armbian Deployment
+### Debian / Orange Pi / Armbian Deployment
 
-- Orange Pi 3B or another Linux host running Armbian/Debian-like packages.
-- Root or `sudo` access.
+- Orange Pi 3B or another Linux host running Debian/Armbian-like packages.
+- Root or `sudo` access. Both service installers must be run with `sudo` because they install packages, write under `/opt` and `/etc`, and register a systemd service.
 - Network access during installation for `apt` and `pip`.
 - Optional: HTTPS reverse proxy or VPN for devices exposed beyond a private LAN.
 
@@ -105,21 +105,28 @@ apt update && apt install -y --no-install-recommends git python3 python3-pip pyt
    - Sign in at `/login`.
    - Use the dashboard menu to configure the app from the browser.
 
-### Armbian Service Install
+### Service Install
 
-Run the installer from the repository root:
+Run the appropriate installer from the repository root. Both installers must be run as root via `sudo`:
 
 ```bash
+# Debian 13 / generic Debian host
+sudo ./scripts/install_debian.sh
+
+# Armbian / Orange Pi host
 sudo ./scripts/install_armbian.sh
 ```
 
-The installer will:
+The installers will:
 
 - Install required system packages.
-- Create a `daygle` service user unless `DAYGLE_USER` overrides it.
+- Create a `daygle` maintenance user unless `DAYGLE_USER` overrides it.
 - Copy the app to `/opt/daygle-ai-camera` unless `DAYGLE_APP_DIR` overrides it.
 - Create `/etc/daygle-ai-camera/config.yaml` unless `DAYGLE_CONFIG_DIR` overrides it.
-- Store SQLite data and generated files under `/var/lib/daygle-ai-camera` unless `DAYGLE_DATA_DIR` overrides it.
+- Store SQLite data and generated files under the configured data directory: `/opt/daygle-ai-camera/data` for Debian unless `DAYGLE_DATA_DIR` overrides it, and `/var/lib/daygle-ai-camera` for Armbian unless `DAYGLE_DATA_DIR` overrides it.
+- Create `/opt/daygle-ai-camera/models` for downloaded/exported ONNX/PT models and preserve existing `*.onnx`/`*.pt` files during reinstall.
+- Install `daygle-ai-camera.service` as a root-running service for camera hardware/device access, with systemd write access to the config, data, and models directories.
+- Keep app code/config root-owned while granting the `daygle` maintenance group write access to the data and models directories.
 - Create and start `daygle-ai-camera.service`.
 
 Check the service:
@@ -284,12 +291,14 @@ To enable ONNX inference:
 
 If the model is missing, the dashboard reports `MODEL MISSING` and upload inference returns a clear API error.
 
-Manual model export remains available. Install the export dependencies first if they are not already present:
+Manual model export remains available. For local development, install the export dependencies first if they are not already present:
 
 ```bash
 pip install ultralytics onnx
 python scripts/download_yolov8n_onnx.py --output models/yolov8n.onnx
 ```
+
+For service installs, the dashboard download/export writes to `/opt/daygle-ai-camera/models/yolov8n.onnx`. The Debian and Armbian installers create that directory, preserve existing `*.onnx` and `*.pt` files during reinstall, and allow the root-running service to write there.
 
 ## Users and Roles
 
@@ -445,14 +454,19 @@ Install `pytest` too if you run tests locally:
 pip install pytest
 ```
 
-### Armbian Service
+### Service Install
 
 ```bash
+# Debian 13 / generic Debian host
+sudo ./scripts/install_debian.sh
+sudo systemctl restart daygle-ai-camera
+
+# Armbian / Orange Pi host
 sudo ./scripts/install_armbian.sh
 sudo systemctl restart daygle-ai-camera
 ```
 
-The installer preserves existing config unless you remove or replace it manually.
+The installers preserve existing config and downloaded/exported `models/*.onnx` and `models/*.pt` files unless you remove or replace them manually.
 
 ## Tests
 
@@ -468,5 +482,5 @@ python -m pytest
 - **Dashboard shows MODEL MISSING**: open `/settings`, download YOLOv8n ONNX or set a readable model path, then reload the detector.
 - **ONNX fails to load**: confirm model and labels paths are readable and ONNX Runtime is installed.
 - **Email alerts do not send**: open `/alert-settings`, check SMTP host/port/auth/from address, and confirm the rule has email enabled and recipients. Open `/system-settings` and confirm Live performance -> Background alerts is enabled so cat/person/object rules continue checking when the Live Cameras page is closed.
-- **Service cannot write data**: open `/system-settings` and check storage paths, then verify OS permissions for the service user.
-- **Need logs on Armbian**: run `sudo journalctl -u daygle-ai-camera -f`.
+- **Service cannot write data or models**: open `/system-settings` and check storage paths, then verify `/opt/daygle-ai-camera/models` and the configured data directory exist. The Debian and Armbian installers run the systemd service as root and grant write access to config, data, and models paths.
+- **Need service logs**: run `sudo journalctl -u daygle-ai-camera -f`.
