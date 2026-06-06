@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs, quote, urlsplit, urlunsplit
 
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
@@ -155,6 +155,14 @@ def _non_empty_setting(settings: dict[str, Any], key: str) -> str:
 def build_stream_url(settings: dict[str, Any]) -> str:
     stream_url = _non_empty_setting(settings, 'stream_url')
     if stream_url:
+        username = _non_empty_setting(settings, 'username')
+        password = _non_empty_setting(settings, 'password')
+        parsed = urlsplit(stream_url)
+        if username and parsed.scheme in {'rtsp', 'rtsps'} and parsed.netloc and '@' not in parsed.netloc:
+            credentials = quote(username, safe='')
+            if password:
+                credentials += f":{quote(password, safe='')}"
+            return urlunsplit((parsed.scheme, f'{credentials}@{parsed.netloc}', parsed.path, parsed.query, parsed.fragment))
         return stream_url
 
     host = _non_empty_setting(settings, 'host')

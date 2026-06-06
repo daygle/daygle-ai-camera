@@ -1011,6 +1011,24 @@ def test_onvif_camera_settings_build_rtsp_url(tmp_path, monkeypatch):
     assert camera.stream_url == 'rtsp://daygle%20user:pa%3Ass@192.168.1.50:554/stream1'
 
 
+def test_onvif_stream_url_uses_form_credentials_when_url_is_bare(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    settings = main.validate_camera_settings({
+        'backend': 'onvif',
+        'stream_url': 'rtsp://192.168.40.103:554/live/0/MAIN',
+        'username': 'admin',
+        'password': 'pa:ss',
+        'width': 1280,
+        'height': 720,
+        'fps': 15,
+        'flip': 'none',
+    })
+
+    assert main.build_stream_url(settings) == 'rtsp://admin:pa%3Ass@192.168.40.103:554/live/0/MAIN'
+
+
 def test_onvif_camera_settings_require_stream_source(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
