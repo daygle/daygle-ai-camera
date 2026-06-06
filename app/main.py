@@ -402,6 +402,45 @@ def detection_center_in_zone(detection: dict[str, Any], zone: dict[str, Any]) ->
     )
 
 
+def detection_overlap_ratio_with_zone_rect(detection: dict[str, Any], zone: dict[str, Any]) -> float:
+    box = detection.get('box') or {}
+    x = float(box.get('x') or 0)
+    y = float(box.get('y') or 0)
+    width = max(0.0, float(box.get('width') or 0))
+    height = max(0.0, float(box.get('height') or 0))
+    if width <= 0 or height <= 0:
+        return 0.0
+
+    dx1 = x
+    dy1 = y
+    dx2 = x + width
+    dy2 = y + height
+
+    zx1 = float(zone.get('x') or 0)
+    zy1 = float(zone.get('y') or 0)
+    zw = max(0.0, float(zone.get('width') or 0))
+    zh = max(0.0, float(zone.get('height') or 0))
+    zx2 = zx1 + zw
+    zy2 = zy1 + zh
+
+    ix1 = max(dx1, zx1)
+    iy1 = max(dy1, zy1)
+    ix2 = min(dx2, zx2)
+    iy2 = min(dy2, zy2)
+    if ix2 <= ix1 or iy2 <= iy1:
+        return 0.0
+
+    intersection = (ix2 - ix1) * (iy2 - iy1)
+    detection_area = width * height
+    return intersection / detection_area if detection_area > 0 else 0.0
+
+
+def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any], *, min_overlap_ratio: float = 0.2) -> bool:
+    if detection_center_in_zone(detection, zone):
+        return True
+    return detection_overlap_ratio_with_zone_rect(detection, zone) >= min_overlap_ratio
+
+
 def point_in_polygon(x: float, y: float, points: list[dict[str, Any]]) -> bool:
     inside = False
     vertex_count = len(points)
@@ -457,7 +496,7 @@ def filter_detections_for_camera_zones(detections: list[dict[str, Any]], setting
         detection
         for detection in detections
         if any(
-            detection_center_in_zone(detection, zone)
+            detection_matches_zone(detection, zone)
             and (zone_monitor_key != 'monitor_objects' or detection_label_allowed_for_zone(detection, zone, camera_labels))
             for zone in zones
         )
@@ -469,7 +508,7 @@ def filter_detections_for_camera_anpr(detections: list[dict[str, Any]], settings
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_anpr', True)]
     if not zones:
         return []
-    return [detection for detection in detections if any(detection_center_in_zone(detection, zone) for zone in zones)]
+    return [detection for detection in detections if any(detection_matches_zone(detection, zone) for zone in zones)]
 
 
 def normalize_detection_boxes_for_frame(detections: list[dict[str, Any]], frame: dict[str, Any]) -> list[dict[str, Any]]:
