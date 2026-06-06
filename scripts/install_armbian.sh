@@ -6,6 +6,7 @@ APP_USER="${DAYGLE_USER:-daygle}"
 APP_DIR="${DAYGLE_APP_DIR:-/opt/daygle-ai-camera}"
 CONFIG_DIR="${DAYGLE_CONFIG_DIR:-/etc/daygle-ai-camera}"
 DATA_DIR="${DAYGLE_DATA_DIR:-/var/lib/daygle-ai-camera}"
+MODEL_DIR="${APP_DIR}/models"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -29,13 +30,17 @@ if ! id -u "${APP_USER}" >/dev/null 2>&1; then
   useradd --system --create-home --home-dir "/var/lib/${APP_USER}" --shell /usr/sbin/nologin "${APP_USER}"
 fi
 
-mkdir -p "${APP_DIR}" "${CONFIG_DIR}" "${DATA_DIR}/snapshots" "${DATA_DIR}/events"
+mkdir -p "${APP_DIR}" "${CONFIG_DIR}" "${DATA_DIR}" "${MODEL_DIR}"
 rsync -a --delete \
   --exclude '.git' \
   --exclude '.venv' \
   --exclude '__pycache__' \
   --exclude 'data' \
+  --exclude 'models/*.onnx' \
+  --exclude 'models/*.pt' \
   "${REPO_DIR}/" "${APP_DIR}/"
+
+mkdir -p "${DATA_DIR}" "${MODEL_DIR}"
 
 python3 -m venv "${APP_DIR}/.venv"
 "${APP_DIR}/.venv/bin/python" -m pip install --upgrade pip wheel
@@ -62,20 +67,28 @@ EOF
 fi
 
 install -m 0644 "${APP_DIR}/systemd/${APP_NAME}.service" "${SERVICE_FILE}"
+# Armbian installs run the application service as root for hardware/device
+# access, while explicitly allowing ONNX/PT model exports under models.
 sed -i \
   -e "s#WorkingDirectory=/opt/daygle-ai-camera#WorkingDirectory=${APP_DIR}#" \
   -e "s#Environment=DAYGLE_CONFIG=/etc/daygle-ai-camera/config.yaml#Environment=DAYGLE_CONFIG=${CONFIG_DIR}/config.yaml#" \
   -e "s#ExecStart=/opt/daygle-ai-camera/.venv/bin/python#ExecStart=${APP_DIR}/.venv/bin/python#" \
-  -e "s#User=daygle#User=${APP_USER}#" \
-  -e "s#Group=daygle#Group=${APP_USER}#" \
+  -e "s#User=.*#User=root#" \
+  -e "s#Group=.*#Group=root#" \
+  -e "s#ReadWritePaths=/etc/daygle-ai-camera /opt/daygle-ai-camera/data#ReadWritePaths=${CONFIG_DIR} ${DATA_DIR} ${MODEL_DIR}#" \
   "${SERVICE_FILE}"
 
-chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}" "${CONFIG_DIR}" "${DATA_DIR}"
+# Permissions: the Armbian service runs as root, but keep runtime data and
+# downloaded/exported ONNX/PT model assets group-writable for the Daygle user.
+chown -R root:root "${APP_DIR}" "${CONFIG_DIR}"
+chown -R root:"${APP_USER}" "${DATA_DIR}" "${MODEL_DIR}"
+chmod 0755 "${APP_DIR}" "${CONFIG_DIR}"
+chmod 2775 "${DATA_DIR}" "${MODEL_DIR}"
 
 systemctl daemon-reload
 systemctl enable --now "${APP_NAME}.service"
 
-echo "Daygle AI Camera is installed."
+echo "Daygle AI Camera is installed and running as root."
 echo "Service status: sudo systemctl status ${APP_NAME}"
 echo "Logs: sudo journalctl -u ${APP_NAME} -f"
 echo "Dashboard: http://<orange-pi-ip>:8080/"

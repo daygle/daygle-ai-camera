@@ -6,6 +6,7 @@ APP_USER="${DAYGLE_USER:-daygle}"
 APP_DIR="${DAYGLE_APP_DIR:-/opt/daygle-ai-camera}"
 CONFIG_DIR="${DAYGLE_CONFIG_DIR:-/etc/daygle-ai-camera}"
 DATA_DIR="${DAYGLE_DATA_DIR:-${APP_DIR}/data}"
+MODEL_DIR="${APP_DIR}/models"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -31,22 +32,25 @@ apt-get install -y --no-install-recommends \
   libgl1 \
   libglib2.0-0
 
-# Create system user (still created, but not used for service)
+# Create system user for optional maintenance access to writable runtime assets
 if ! id -u "${APP_USER}" >/dev/null 2>&1; then
   useradd --system --create-home --home-dir "/var/lib/${APP_USER}" --shell /usr/sbin/nologin "${APP_USER}"
 fi
 
 # Create directories
-mkdir -p "${APP_DIR}" "${CONFIG_DIR}" "${DATA_DIR}"
+mkdir -p "${APP_DIR}" "${CONFIG_DIR}" "${DATA_DIR}" "${MODEL_DIR}"
 
 # Sync application files
 rsync -a --delete \
   --exclude '.git' \
   --exclude '.venv' \
   --exclude '__pycache__' \
+  --exclude 'data' \
+  --exclude 'models/*.onnx' \
+  --exclude 'models/*.pt' \
   "${REPO_DIR}/" "${APP_DIR}/"
 
-mkdir -p "${APP_DIR}/data"
+mkdir -p "${DATA_DIR}" "${MODEL_DIR}"
 
 # Python virtual environment
 python3 -m venv "${APP_DIR}/.venv"
@@ -60,9 +64,9 @@ grep -v '^torch' "${APP_DIR}/requirements.txt" > "${APP_DIR}/requirements.no-tor
 "${APP_DIR}/.venv/bin/python" -m pip install -r "${APP_DIR}/requirements.no-torch.txt"
 rm "${APP_DIR}/requirements.no-torch.txt"
 
-# Install ONNX dependencies
-echo "Installing ONNX dependencies..."
-"${APP_DIR}/.venv/bin/pip" install onnx onnxruntime onnxsim
+# Install optional ONNX simplifier used by some model export workflows.
+echo "Installing optional ONNX tooling..."
+"${APP_DIR}/.venv/bin/python" -m pip install onnxsim
 
 # Minimal bootstrap config
 if [[ ! -f "${CONFIG_DIR}/config.yaml" ]]; then
@@ -75,29 +79,41 @@ auth:
   enabled: true
 
 storage:
-  database: data/daygle_ai_camera.sqlite3
+  database: ${DATA_DIR}/daygle_ai_camera.sqlite3
+  data_dir: ${DATA_DIR}
+  snapshots_dir: ${DATA_DIR}/snapshots
+  events_dir: ${DATA_DIR}/events
+  recordings_dir: ${DATA_DIR}/recordings
+  plates_dir: ${DATA_DIR}/plates
 EOF
 fi
 
 # Install systemd service
 install -m 0644 "${APP_DIR}/systemd/${APP_NAME}.service" "${SERVICE_FILE}"
 
-# Patch service file to run as root
+# Patch service file for the configured install paths. Debian installs run the
+# application service as root for hardware/device access, while explicitly
+# allowing ONNX/PT model exports under the models directory.
 sed -i \
   -e "s#WorkingDirectory=/opt/daygle-ai-camera#WorkingDirectory=${APP_DIR}#" \
   -e "s#Environment=DAYGLE_CONFIG=/etc/daygle-ai-camera/config.yaml#Environment=DAYGLE_CONFIG=${CONFIG_DIR}/config.yaml#" \
   -e "s#ExecStart=/opt/daygle-ai-camera/.venv/bin/python#ExecStart=${APP_DIR}/.venv/bin/python#" \
-  -e "s#User=.*##" \
-  -e "s#Group=.*##" \
+  -e "s#User=.*#User=root#" \
+  -e "s#Group=.*#Group=root#" \
+  -e "s#ReadWritePaths=/etc/daygle-ai-camera /opt/daygle-ai-camera/data#ReadWritePaths=${CONFIG_DIR} ${DATA_DIR} ${MODEL_DIR}#" \
   "${SERVICE_FILE}"
 
-# Permissions
-chown -R root:root "${APP_DIR}" "${CONFIG_DIR}" "${DATA_DIR}"
+# Permissions: the Debian service runs as root, but keep runtime data and
+# downloaded/exported ONNX/PT model assets group-writable for the Daygle user.
+chown -R root:root "${APP_DIR}" "${CONFIG_DIR}"
+chown -R root:"${APP_USER}" "${DATA_DIR}" "${MODEL_DIR}"
+chmod 0755 "${APP_DIR}" "${CONFIG_DIR}"
+chmod 2775 "${DATA_DIR}" "${MODEL_DIR}"
 
 systemctl daemon-reload
 systemctl enable --now "${APP_NAME}.service"
 
-echo "Daygle AI Camera is installed and running as ROOT."
+echo "Daygle AI Camera is installed and running as root."
 echo "Service status: sudo systemctl status ${APP_NAME}"
-echo "Logs: journalctl -u ${APP_NAME} -f"
+echo "Logs: sudo journalctl -u ${APP_NAME} -f"
 echo "Dashboard: http://<server-ip>:8080/"
