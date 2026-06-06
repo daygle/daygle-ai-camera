@@ -1676,6 +1676,13 @@ def alert_history(limit: int = Query(25, ge=1, le=200)):
     return database.alerts(limit=limit)
 
 
+@app.delete('/api/alerts')
+def delete_all_alert_history(request: Request):
+    require_admin(request)
+    deleted = database.delete_all_alerts()
+    return {'ok': True, 'deleted': deleted}
+
+
 @app.get('/api/stats')
 def stats():
     return database.stats()

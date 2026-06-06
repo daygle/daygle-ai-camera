@@ -535,6 +535,12 @@ class EventDatabase:
             rows = db.execute("SELECT * FROM alert_history ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
             return [dict(row) for row in rows]
 
+    def delete_all_alerts(self) -> int:
+        with self.connect() as db:
+            count = db.execute("SELECT COUNT(*) AS count FROM alert_history").fetchone()["count"]
+            db.execute("DELETE FROM alert_history")
+            return int(count)
+
     def get_setting(self, key: str) -> Any | None:
         with self.connect() as db:
             row = db.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()

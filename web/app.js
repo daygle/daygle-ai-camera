@@ -28,7 +28,9 @@ const els = {
   plates: document.getElementById('plates'),
   plateSightings: document.getElementById('plateSightings'),
   deleteAllEventsBtn: document.getElementById('deleteAllEventsBtn'),
+  deleteAllAlertsBtn: document.getElementById('deleteAllAlertsBtn'),
   deleteAllRecordingsBtn: document.getElementById('deleteAllRecordingsBtn'),
+  deleteAllPlatesBtn: document.getElementById('deleteAllPlatesBtn'),
 };
 
 let authState = { user: null, csrfToken: null };
@@ -278,7 +280,9 @@ async function loadAuth() {
     els.alertSettingsLink.hidden = true;
     els.systemSettingsLink.hidden = true;
     if (els.deleteAllEventsBtn) els.deleteAllEventsBtn.hidden = true;
+    if (els.deleteAllAlertsBtn) els.deleteAllAlertsBtn.hidden = true;
     if (els.deleteAllRecordingsBtn) els.deleteAllRecordingsBtn.hidden = true;
+    if (els.deleteAllPlatesBtn) els.deleteAllPlatesBtn.hidden = true;
   } else {
     if (els.deleteAllEventsBtn) {
       els.deleteAllEventsBtn.hidden = false;
@@ -294,6 +298,18 @@ async function loadAuth() {
         }
       });
     }
+    if (els.deleteAllAlertsBtn) {
+      els.deleteAllAlertsBtn.hidden = false;
+      els.deleteAllAlertsBtn.addEventListener('click', async () => {
+        if (!confirm('Delete ALL alert history? This cannot be undone.')) return;
+        try {
+          await api('/api/alerts', { method: 'DELETE' });
+          await Promise.all([loadAlerts(), loadStats()]);
+        } catch (error) {
+          alert(`Failed to delete alert history: ${error.message}`);
+        }
+      });
+    }
     if (els.deleteAllRecordingsBtn) {
       els.deleteAllRecordingsBtn.hidden = false;
       els.deleteAllRecordingsBtn.addEventListener('click', async () => {
@@ -305,6 +321,19 @@ async function loadAuth() {
           bindDeleteButtons();
         } catch (error) {
           alert(`Failed to delete recordings: ${error.message}`);
+        }
+      });
+    }
+    if (els.deleteAllPlatesBtn) {
+      els.deleteAllPlatesBtn.hidden = false;
+      els.deleteAllPlatesBtn.addEventListener('click', async () => {
+        if (!confirm('Delete ALL plates and sightings? This cannot be undone.')) return;
+        try {
+          await api('/api/plates', { method: 'DELETE' });
+          await Promise.all([loadPlates(), searchPlateSightings(els.plateFilter.value.trim())]);
+          bindDeleteButtons();
+        } catch (error) {
+          alert(`Failed to delete plates: ${error.message}`);
         }
       });
     }
@@ -377,7 +406,11 @@ async function loadEvents(label = '') {
 }
 
 async function loadAlerts() {
-  renderAlerts(await api('/api/alerts'));
+  const alerts = await api('/api/alerts');
+  renderAlerts(alerts);
+  if (els.deleteAllAlertsBtn && authState.user?.role === 'admin') {
+    els.deleteAllAlertsBtn.hidden = alerts.length === 0;
+  }
 }
 
 async function loadRecordings(label = '') {
@@ -389,7 +422,11 @@ async function loadRecordings(label = '') {
 }
 
 async function loadPlates() {
-  renderPlates(await api('/api/plates'));
+  const plates = await api('/api/plates');
+  renderPlates(plates);
+  if (els.deleteAllPlatesBtn && authState.user?.role === 'admin') {
+    els.deleteAllPlatesBtn.hidden = plates.length === 0;
+  }
 }
 
 async function searchPlateSightings(query = '') {
