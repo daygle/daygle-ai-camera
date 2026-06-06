@@ -27,6 +27,7 @@ const els = {
   plateClearBtn: document.getElementById('plateClearBtn'),
   plates: document.getElementById('plates'),
   plateSightings: document.getElementById('plateSightings'),
+  deleteAllObjectsBtn: document.getElementById('deleteAllObjectsBtn'),
   deleteAllEventsBtn: document.getElementById('deleteAllEventsBtn'),
   deleteAllAlertsBtn: document.getElementById('deleteAllAlertsBtn'),
   deleteAllRecordingsBtn: document.getElementById('deleteAllRecordingsBtn'),
@@ -279,11 +280,30 @@ async function loadAuth() {
     els.settingsLink.hidden = true;
     els.alertSettingsLink.hidden = true;
     els.systemSettingsLink.hidden = true;
+    if (els.deleteAllObjectsBtn) els.deleteAllObjectsBtn.hidden = true;
     if (els.deleteAllEventsBtn) els.deleteAllEventsBtn.hidden = true;
     if (els.deleteAllAlertsBtn) els.deleteAllAlertsBtn.hidden = true;
     if (els.deleteAllRecordingsBtn) els.deleteAllRecordingsBtn.hidden = true;
     if (els.deleteAllPlatesBtn) els.deleteAllPlatesBtn.hidden = true;
   } else {
+    if (els.deleteAllObjectsBtn) {
+      els.deleteAllObjectsBtn.hidden = false;
+      els.deleteAllObjectsBtn.addEventListener('click', async () => {
+        if (!confirm('Delete ALL object detections used by Object Search? This cannot be undone.')) return;
+        try {
+          await api('/api/objects', { method: 'DELETE' });
+          await Promise.all([
+            loadStats(),
+            loadEvents(els.searchInput.value.trim()),
+            loadRecordings(els.recordingFilter.value.trim()),
+          ]);
+          bindDeleteButtons();
+          bindPlaybackButtons();
+        } catch (error) {
+          alert(`Failed to delete object detections: ${error.message}`);
+        }
+      });
+    }
     if (els.deleteAllEventsBtn) {
       els.deleteAllEventsBtn.hidden = false;
       els.deleteAllEventsBtn.addEventListener('click', async () => {
@@ -396,6 +416,9 @@ async function loadStats() {
   els.totalEvents.textContent = stats.total_events;
   els.totalAlerts.textContent = stats.total_alerts;
   renderObjectStats(stats.objects);
+  if (els.deleteAllObjectsBtn && authState.user?.role === 'admin') {
+    els.deleteAllObjectsBtn.hidden = !(stats.objects || []).length;
+  }
 }
 
 async function loadEvents(label = '') {

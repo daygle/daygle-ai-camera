@@ -1688,6 +1688,13 @@ def stats():
     return database.stats()
 
 
+@app.delete('/api/objects')
+def delete_all_objects(request: Request):
+    require_admin(request)
+    deleted = database.delete_all_objects()
+    return {'ok': True, 'deleted': deleted}
+
+
 @app.get('/api/config')
 def runtime_config():
     ai_state = ai_status_payload()
