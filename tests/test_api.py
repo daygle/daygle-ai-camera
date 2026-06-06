@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import socket
 import sqlite3
 import subprocess
@@ -1027,6 +1028,58 @@ def test_onvif_stream_url_uses_form_credentials_when_url_is_bare(tmp_path, monke
     })
 
     assert main.build_stream_url(settings) == 'rtsp://admin:pa%3Ass@192.168.40.103:554/live/0/MAIN'
+
+
+def test_opencv_stream_camera_reuses_rtsp_capture(monkeypatch):
+    from app.mock_camera import OpenCvStreamCamera
+
+    class FakeImage:
+        shape = (720, 1280, 3)
+
+    class FakeEncoded:
+        def tobytes(self):
+            return b'jpeg'
+
+    class FakeCapture:
+        instances = []
+
+        def __init__(self, stream_url):
+            self.stream_url = stream_url
+            self.release_count = 0
+            FakeCapture.instances.append(self)
+
+        def isOpened(self):
+            return True
+
+        def read(self):
+            return True, FakeImage()
+
+        def release(self):
+            self.release_count += 1
+
+    class FakeCv2:
+        @staticmethod
+        def VideoCapture(stream_url):
+            return FakeCapture(stream_url)
+
+        @staticmethod
+        def imencode(_extension, _image):
+            return True, FakeEncoded()
+
+    monkeypatch.setitem(sys.modules, 'cv2', FakeCv2)
+    monkeypatch.delenv('OPENCV_FFMPEG_CAPTURE_OPTIONS', raising=False)
+
+    camera = OpenCvStreamCamera('rtsp://admin:password@192.168.40.103:554/live/0/MAIN')
+    first_jpeg, first_frame = camera.read_jpeg()
+    second_jpeg, second_frame = camera.read_jpeg()
+
+    assert first_jpeg == b'jpeg'
+    assert second_jpeg == b'jpeg'
+    assert first_frame['frame_number'] == 1
+    assert second_frame['frame_number'] == 2
+    assert len(FakeCapture.instances) == 1
+    assert FakeCapture.instances[0].release_count == 0
+    assert 'rtsp_transport;tcp' in os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS']
 
 
 def test_onvif_camera_settings_require_stream_source(tmp_path, monkeypatch):
