@@ -38,20 +38,7 @@ The app is now designed to be configured from the web UI. `config.yaml` is only 
 On a fresh Debian-like host:
 
 ```bash
-apt update
-apt install -y --no-install-recommends \
-  git \
-  python3 \
-  python3-pip \
-  python3-dev \
-  python3-venv \
-  sqlite3 \
-  ca-certificates \
-  rsync \
-  ffmpeg \
-  v4l-utils \
-  libgl1 \
-  libglib2.0-0
+apt update && apt install -y --no-install-recommends git python3 python3-pip python3-dev python3-venv sqlite3 ca-certificates rsync ffmpeg v4l-utils libgl1 libglib2.0-0
 ```
 
 ## Installation
