@@ -25,6 +25,100 @@ function createDatabaseRestoreSection() {
 
 createDatabaseRestoreSection();
 
+function createCameraManagerSection() {
+  const section = document.createElement('section');
+  section.className = 'card';
+  section.innerHTML = `
+    <div class="section-header">
+      <div>
+        <h2>Multiple cameras</h2>
+        <p class="muted">Add additional RTSP/ONVIF or mock cameras and configure per-camera motion, object detection, and monitoring areas from Live Cameras.</p>
+      </div>
+      <button id="addCameraBtn" type="button">Add camera</button>
+    </div>
+    <div id="cameraManager" class="camera-manager"></div>
+    <div class="button-row"><button id="saveCamerasBtn" type="button">Save cameras</button></div>
+  `;
+  const cameraSection = document.getElementById('cameraSettingsForm')?.closest('section');
+  if (cameraSection) cameraSection.before(section);
+}
+
+createCameraManagerSection();
+
+let cameras = [];
+
+function newCameraTemplate() {
+  const number = cameras.length + 1;
+  return {
+    id: `camera-${number}`,
+    name: `Camera ${number}`,
+    backend: 'mock',
+    device: 0,
+    stream_url: '',
+    host: '',
+    port: 554,
+    path: 'stream1',
+    username: '',
+    password: '',
+    width: 1280,
+    height: 720,
+    fps: 15,
+    flip: 'none',
+    detection: { motion_enabled: true, object_detection_enabled: true, zones: [] },
+  };
+}
+
+function renderCameraManager() {
+  const manager = document.getElementById('cameraManager');
+  manager.innerHTML = cameras.map((camera, index) => `
+    <div class="item camera-config-card" data-camera-index="${index}">
+      <div class="section-header"><h3>${escapeHtml(camera.name || camera.id || `Camera ${index + 1}`)}</h3><button class="secondary" type="button" data-remove-camera="${index}" ${cameras.length <= 1 ? 'disabled' : ''}>Remove</button></div>
+      <div class="form-grid compact-grid">
+        <input data-camera-field="id" value="${escapeHtml(camera.id || '')}" placeholder="Camera ID" />
+        <input data-camera-field="name" value="${escapeHtml(camera.name || '')}" placeholder="Display name" />
+        <label><span>Backend</span><select data-camera-field="backend"><option value="mock" ${camera.backend === 'mock' ? 'selected' : ''}>mock</option><option value="onvif" ${camera.backend === 'onvif' ? 'selected' : ''}>onvif / RTSP</option><option value="rtsp" ${camera.backend === 'rtsp' ? 'selected' : ''}>rtsp</option></select></label>
+        <input data-camera-field="stream_url" value="${escapeHtml(camera.stream_url || '')}" placeholder="RTSP stream URL" />
+        <input data-camera-field="host" value="${escapeHtml(camera.host || '')}" placeholder="Host/IP" />
+        <input data-camera-field="port" type="number" value="${escapeHtml(camera.port || 554)}" placeholder="Port" />
+        <input data-camera-field="path" value="${escapeHtml(camera.path || '')}" placeholder="Stream path" />
+        <input data-camera-field="username" value="${escapeHtml(camera.username || '')}" placeholder="Username" />
+        <input data-camera-field="password" type="password" value="${escapeHtml(camera.password || '')}" placeholder="Password" />
+        <input data-camera-field="width" type="number" value="${escapeHtml(camera.width || 1280)}" placeholder="Width" />
+        <input data-camera-field="height" type="number" value="${escapeHtml(camera.height || 720)}" placeholder="Height" />
+        <input data-camera-field="fps" type="number" value="${escapeHtml(camera.fps || 15)}" placeholder="FPS" />
+        <label><span>Motion</span><select data-detection-field="motion_enabled"><option value="true" ${camera.detection?.motion_enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${camera.detection?.motion_enabled === false ? 'selected' : ''}>Disabled</option></select></label>
+        <label><span>Objects</span><select data-detection-field="object_detection_enabled"><option value="true" ${camera.detection?.object_detection_enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${camera.detection?.object_detection_enabled === false ? 'selected' : ''}>Disabled</option></select></label>
+      </div>
+      <p class="muted">Monitoring areas: ${(camera.detection?.zones || []).length}. Use the Live Cameras page to draw or edit areas visually.</p>
+    </div>
+  `).join('');
+
+  manager.querySelectorAll('[data-camera-field]').forEach((input) => {
+    input.addEventListener('input', () => {
+      const card = input.closest('[data-camera-index]');
+      const camera = cameras[Number(card.dataset.cameraIndex)];
+      const field = input.dataset.cameraField;
+      camera[field] = ['port', 'width', 'height', 'fps'].includes(field) ? Number.parseInt(input.value || '0', 10) : input.value;
+      if (field === 'name') renderCameraManager();
+    });
+  });
+  manager.querySelectorAll('[data-detection-field]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const card = select.closest('[data-camera-index]');
+      const camera = cameras[Number(card.dataset.cameraIndex)];
+      camera.detection ||= { zones: [] };
+      camera.detection[select.dataset.detectionField] = select.value === 'true';
+    });
+  });
+  manager.querySelectorAll('[data-remove-camera]').forEach((button) => {
+    button.addEventListener('click', () => { cameras.splice(Number(button.dataset.removeCamera), 1); renderCameraManager(); });
+  });
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
+}
+
 const forms = {
   camera: document.getElementById('cameraSettingsForm'),
   anpr: document.getElementById('anprSettingsForm'),
@@ -73,6 +167,8 @@ async function loadSettings() {
   const me = await api('/api/auth/me');
   csrfToken = me.csrf_token;
   const settings = await api('/api/settings/system');
+  cameras = settings.cameras || [settings.camera];
+  renderCameraManager();
   fillForm(forms.camera, settings.camera);
   fillForm(forms.anpr, settings.anpr);
   if (forms.anpr.elements.vehicle_labels) {
@@ -125,6 +221,24 @@ forms.databaseRestore.addEventListener('submit', async (event) => {
     forms.databaseRestore.reset();
     await loadSettings();
     setMessage(`${result.message} Safety backup: ${result.safety_backup}`);
+  } catch (error) {
+    setMessage(error.message);
+  }
+});
+
+
+document.getElementById('addCameraBtn').addEventListener('click', () => {
+  cameras.push(newCameraTemplate());
+  renderCameraManager();
+});
+
+document.getElementById('saveCamerasBtn').addEventListener('click', async () => {
+  try {
+    const result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras }) });
+    cameras = result.cameras || [];
+    renderCameraManager();
+    if (cameras[0]) fillForm(forms.camera, cameras[0]);
+    setMessage('Camera list saved. The first camera remains the default for existing dashboard widgets.');
   } catch (error) {
     setMessage(error.message);
   }
