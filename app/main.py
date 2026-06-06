@@ -573,7 +573,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
     detections = normalize_detection_boxes_for_frame(detections, frame)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     motion_detections = filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_motion', require_zones=True)
-    object_detections = filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects', require_zones=True)
+    object_detections = filter_detections_for_camera(detections, settings)
     anpr_detections = filter_detections_for_camera_anpr(detections, settings)
     alert_detections = list(object_detections)
     if motion_detections:
