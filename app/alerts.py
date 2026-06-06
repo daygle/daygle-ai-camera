@@ -22,6 +22,7 @@ class AlertEngine:
             if not isinstance(label_value, str) or not label_value:
                 continue
             label = label_value
+            label_key = self._normalize_object_label(label)
             confidence = float(detection.get('confidence', 0))
 
             for rule in self.rules:
@@ -34,7 +35,7 @@ class AlertEngine:
                 if not self._is_active_now(rule):
                     continue
 
-                if rule.get('object') != label:
+                if self._normalize_object_label(rule.get('object')) != label_key:
                     continue
 
                 if confidence < float(rule.get('min_confidence', 0.5)):
@@ -84,7 +85,17 @@ class AlertEngine:
 
     @staticmethod
     def _is_motion_rule(rule: dict[str, Any]) -> bool:
-        return str(rule.get('object') or '').strip().lower() == 'motion'
+        return AlertEngine._normalize_object_label(rule.get('object')) == 'motion'
+
+    @staticmethod
+    def _normalize_object_label(value: Any) -> str:
+        label = str(value or '').strip().lower()
+        aliases = {
+            'human': 'person',
+            'people': 'person',
+            'pedestrian': 'person',
+        }
+        return aliases.get(label, label)
 
     def _is_active_now(self, rule: dict[str, Any]) -> bool:
         start = rule.get('active_start')

@@ -16,13 +16,27 @@ class EmailAlertService:
     def configured(self) -> bool:
         return bool(self.settings.get("enabled") and self.settings.get("host") and self.settings.get("from_address"))
 
-    def send_alert(self, alert: dict[str, Any], *, event_id: int, recipients: list[str]) -> None:
+    def send_alert(
+        self,
+        alert: dict[str, Any],
+        *,
+        event_id: int,
+        recipients: list[str],
+        camera_name: str | None = None,
+        camera_id: str | None = None,
+    ) -> None:
         recipients = [recipient.strip() for recipient in recipients if recipient and recipient.strip()]
         if not recipients or not self.configured():
             return
 
+        camera_name = str(camera_name or '').strip() or None
+        camera_id = str(camera_id or '').strip() or None
+        camera_bits = [bit for bit in (camera_name, camera_id) if bit]
+        camera_line = ' / '.join(camera_bits) if camera_bits else 'Unknown camera'
+        subject_suffix = f" ({camera_line})" if camera_bits else ""
+
         message = EmailMessage()
-        message["Subject"] = f"Daygle alert: {alert.get('label', 'object')} detected"
+        message["Subject"] = f"Daygle alert: {alert.get('label', 'object')} detected{subject_suffix}"
         message["From"] = str(self.settings.get("from_address"))
         message["To"] = ", ".join(recipients)
         message.set_content(
@@ -30,6 +44,7 @@ class EmailAlertService:
                 [
                     str(alert.get("message") or "Alert triggered."),
                     "",
+                    f"Camera: {camera_line}",
                     f"Rule: {alert.get('rule_name')}",
                     f"Trigger: {alert.get('label')}",
                     f"Confidence: {float(alert.get('confidence', 0)):.2%}",

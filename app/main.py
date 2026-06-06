@@ -650,9 +650,10 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             message=alert['message'],
         )
     deliver_email_alerts(triggered, event_id)
+    triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     email_rules = [
         rule for rule in effective_alert_rules()
-        if rule.get('enabled', True) and rule.get('email_enabled') and str(rule.get('object')).lower() in {str(alert.get('label')).lower() for alert in triggered}
+        if rule.get('enabled', True) and rule.get('email_enabled') and str(rule.get('name') or '') in triggered_rule_names
     ]
     email_recipients = sorted({recipient for rule in email_rules for recipient in rule.get('email_recipients', [])})
     update_live_detection_status(
@@ -965,6 +966,10 @@ def recording_skip_reason(detections: list[dict[str, Any]], recording_config: di
 def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int) -> None:
     if not triggered:
         return
+    event = database.get_event(event_id) or {}
+    metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
+    camera_name = str(metadata.get('camera_name') or '').strip() or None
+    camera_id = str(metadata.get('camera_id') or '').strip() or None
     rules_by_name = {str(rule.get('name')): rule for rule in effective_alert_rules()}
     mailer = EmailAlertService(effective_email_alert_settings())
     for alert in triggered:
@@ -972,7 +977,13 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int) -> None
         if not rule or not rule.get('email_enabled'):
             continue
         try:
-            mailer.send_alert(alert, event_id=event_id, recipients=rule.get('email_recipients', []))
+            mailer.send_alert(
+                alert,
+                event_id=event_id,
+                recipients=rule.get('email_recipients', []),
+                camera_name=camera_name,
+                camera_id=camera_id,
+            )
         except EmailAlertError as exc:
             logger.warning('Failed to send email alert for event %s rule %s: %s', event_id, alert.get('rule_name'), exc)
 
