@@ -61,6 +61,7 @@ apt install -y --no-install-recommends \
 1. Clone the repository and enter it:
 
    ```bash
+   cd /opt/
    git clone https://github.com/daygle/daygle-ai-camera.git
    cd daygle-ai-camera
    ```
