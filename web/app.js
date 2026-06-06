@@ -10,13 +10,6 @@ const els = {
   settingsLink: document.getElementById('settingsLink'),
   alertSettingsLink: document.getElementById('alertSettingsLink'),
   systemSettingsLink: document.getElementById('systemSettingsLink'),
-  uploadForm: document.getElementById('uploadForm'),
-  imageInput: document.getElementById('imageInput'),
-  uploadBtn: document.getElementById('uploadBtn'),
-  uploadResult: document.getElementById('uploadResult'),
-  uploadPreview: document.getElementById('uploadPreview'),
-  previewImage: document.getElementById('previewImage'),
-  selectedFilename: document.getElementById('selectedFilename'),
   searchBtn: document.getElementById('searchBtn'),
   clearBtn: document.getElementById('clearBtn'),
   searchInput: document.getElementById('searchInput'),
@@ -177,13 +170,44 @@ function renderRecordings(recordings) {
 function bindPlaybackButtons() {
   document.querySelectorAll('[data-play-recording]').forEach((button) => {
     button.addEventListener('click', () => {
-      const id = button.dataset.playRecording;
-      els.clipPlayer.src = `/api/recordings/${id}/stream`;
-      els.clipPlayerStatus.textContent = `Playing recording #${id}.`;
-      els.clipPlayer.load();
+      playRecording(button.dataset.playRecording);
     });
   });
 }
+
+async function playRecording(id) {
+  if (!id) return;
+  const clipUrl = `/api/recordings/${id}/stream?t=${Date.now()}`;
+  els.clipPlayerStatus.textContent = `Loading recording #${id}...`;
+  els.clipPlayer.pause();
+  els.clipPlayer.src = clipUrl;
+  els.clipPlayer.load();
+  try {
+    await els.clipPlayer.play();
+    els.clipPlayerStatus.textContent = `Playing recording #${id}.`;
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      els.clipPlayerStatus.textContent = `Recording #${id} loaded. Press play to start.`;
+      return;
+    }
+    if (error?.name === 'NotAllowedError') {
+      els.clipPlayerStatus.textContent = `Recording #${id} loaded. Press play to start.`;
+      return;
+    }
+    els.clipPlayerStatus.textContent = `Unable to play recording #${id}: ${error?.message || 'media playback failed'}.`;
+  }
+}
+
+els.clipPlayer.addEventListener('error', () => {
+  const error = els.clipPlayer.error;
+  const messages = {
+    1: 'Playback was aborted.',
+    2: 'The recording could not be downloaded.',
+    3: 'The recording could not be decoded by this browser.',
+    4: 'The recording format is not supported by this browser.',
+  };
+  els.clipPlayerStatus.textContent = messages[error?.code] || 'Unable to play this recording.';
+});
 
 async function loadAuth() {
   const authInfo = await api('/api/auth/me');
@@ -283,45 +307,6 @@ async function refreshAll() {
   await Promise.all([loadStatus(), loadStats(), loadEvents(), loadAlerts(), loadRecordings(), loadPlates(), searchPlateSightings()]);
   bindPlaybackButtons();
 }
-
-els.imageInput.addEventListener('change', () => {
-  const file = els.imageInput.files[0];
-  if (!file) {
-    els.uploadPreview.hidden = true;
-    els.previewImage.removeAttribute('src');
-    els.selectedFilename.textContent = '';
-    return;
-  }
-  els.selectedFilename.textContent = file.name;
-  els.previewImage.src = URL.createObjectURL(file);
-  els.uploadPreview.hidden = false;
-  els.uploadResult.textContent = `Selected ${file.name}. Ready to run detection.`;
-});
-
-els.uploadForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const file = els.imageInput.files[0];
-  if (!file) {
-    els.uploadResult.textContent = 'Choose an image file first.';
-    return;
-  }
-
-  const formData = new FormData();
-  formData.append('file', file);
-  els.uploadBtn.disabled = true;
-  els.uploadBtn.textContent = 'Detecting...';
-  els.uploadResult.textContent = 'Running detector and saving event...';
-  try {
-    const result = await api('/api/detect/test-image', { method: 'POST', body: formData });
-    els.uploadResult.textContent = `Created event #${result.event_id} with ${result.detections.length} detection(s) from ${result.backend_used || result.ai_backend}. ${result.detections.map((d) => `${d.label} ${Math.round(d.confidence * 100)}%`).join(', ') || 'No objects found.'}`;
-    await refreshAll();
-  } catch (error) {
-    els.uploadResult.textContent = error.message;
-  } finally {
-    els.uploadBtn.disabled = false;
-    els.uploadBtn.textContent = 'Test image detection';
-  }
-});
 
 els.searchBtn.addEventListener('click', () => {
   const label = els.searchInput.value.trim();

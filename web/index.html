@@ -28,25 +28,6 @@
     </section>
 
     <section class="grid main-grid">
-      <article class="card camera-card">
-        <div class="section-header">
-          <div>
-            <h2>Image Detection Test</h2>
-            <p class="muted">Upload a snapshot when you want to verify the configured ONNX detector outside the live stream.</p>
-          </div>
-          <span class="pill">ONNX</span>
-        </div>
-        <form id="uploadForm" class="upload-form">
-          <input id="imageInput" type="file" accept="image/*" />
-          <button id="uploadBtn" type="submit">Test image detection</button>
-        </form>
-        <div id="uploadPreview" class="upload-preview" hidden>
-          <img id="previewImage" alt="Selected upload preview" />
-          <span id="selectedFilename" class="muted"></span>
-        </div>
-        <p id="uploadResult" class="muted upload-result">Upload an image to create a detection event with the configured AI backend.</p>
-      </article>
-
       <article class="card">
         <div class="section-header"><h2>Object Search</h2></div>
         <div class="search-row">
