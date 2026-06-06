@@ -52,21 +52,15 @@ rsync -a --delete \
 
 mkdir -p "${DATA_DIR}" "${MODEL_DIR}"
 
-# Python virtual environment
+# Python virtual environment. The dependency helper defaults to CPU-only
+# PyTorch and --no-cache-dir to avoid pulling/caching large CUDA wheels during
+# service installs on small disks or container overlays.
 python3 -m venv "${APP_DIR}/.venv"
-"${APP_DIR}/.venv/bin/python" -m pip install --upgrade pip wheel
-
-# Install CPU-only PyTorch
-"${APP_DIR}/.venv/bin/python" -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-
-# Install remaining dependencies
-grep -v '^torch' "${APP_DIR}/requirements.txt" > "${APP_DIR}/requirements.no-torch.txt"
-"${APP_DIR}/.venv/bin/python" -m pip install -r "${APP_DIR}/requirements.no-torch.txt"
-rm "${APP_DIR}/requirements.no-torch.txt"
+"${APP_DIR}/scripts/install_python_deps.sh" "${APP_DIR}/.venv/bin/python" "${APP_DIR}/requirements.txt"
 
 # Install optional ONNX simplifier used by some model export workflows.
 echo "Installing optional ONNX tooling..."
-"${APP_DIR}/.venv/bin/python" -m pip install onnxsim
+"${APP_DIR}/.venv/bin/python" -m pip install --no-cache-dir onnxsim
 
 # Minimal bootstrap config
 if [[ ! -f "${CONFIG_DIR}/config.yaml" ]]; then

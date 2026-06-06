@@ -71,8 +71,22 @@ apt update && apt install -y --no-install-recommends git python3 python3-pip pyt
 3. Install dependencies:
 
    ```bash
-   pip install --upgrade pip wheel
-   pip install -r requirements.txt pytest
+   ./scripts/install_python_deps.sh python requirements.txt
+   pip install --no-cache-dir pytest
+   ```
+
+   The helper defaults to CPU-only PyTorch and disables pip's download cache so local installs do not pull or duplicate large CUDA wheels such as `nvidia-*` packages. If you intentionally want pip's default PyTorch/CUDA resolution, run:
+
+   ```bash
+   DAYGLE_TORCH_VARIANT=default ./scripts/install_python_deps.sh python requirements.txt
+   ```
+
+   On Windows PowerShell, install the same CPU-first dependency set manually:
+
+   ```powershell
+   python -m pip install --no-cache-dir --upgrade pip wheel
+   python -m pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch torchvision
+   python -m pip install --no-cache-dir -r requirements.txt pytest
    ```
 
    `pytest` is only needed for local test runs.
@@ -116,6 +130,8 @@ sudo ./scripts/install_debian.sh
 # Armbian / Orange Pi host
 sudo ./scripts/install_armbian.sh
 ```
+
+By default, the installers use the same Python dependency helper as local installs: it installs CPU-only PyTorch first and passes `--no-cache-dir` to pip to reduce temporary disk pressure. Set `DAYGLE_TORCH_VARIANT=default` before running an installer only if you intentionally want pip to resolve the default PyTorch/CUDA wheels.
 
 The installers will:
 
