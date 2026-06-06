@@ -1650,6 +1650,20 @@ def event_detail(event_id: int):
     return event
 
 
+@app.delete('/api/events/{event_id}')
+def delete_event(event_id: int, request: Request):
+    require_admin(request)
+    event = database.delete_event(event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail='Event not found')
+    snapshot_path = event.get('snapshot_path')
+    if snapshot_path:
+        snapshot = Path(snapshot_path)
+        if snapshot.exists() and snapshot.is_file():
+            snapshot.unlink(missing_ok=True)
+    return {'ok': True}
+
+
 @app.get('/api/alerts')
 def alert_history(limit: int = Query(25, ge=1, le=200)):
     return database.alerts(limit=limit)
@@ -1839,6 +1853,15 @@ def get_plate(plate_id: int):
     if plate is None:
         raise HTTPException(status_code=404, detail='Plate not found')
     return plate
+
+
+@app.delete('/api/plates/{plate_id}')
+def delete_plate(plate_id: int, request: Request):
+    require_admin(request)
+    plate = database.delete_plate(plate_id)
+    if plate is None:
+        raise HTTPException(status_code=404, detail='Plate not found')
+    return {'ok': True}
 
 
 @app.get('/api/plate-alerts')

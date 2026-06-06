@@ -123,6 +123,8 @@ h2 { margin: 0; font-size: 20px; }
   cursor: pointer;
 }
 button.secondary { background: var(--panel-strong); color: var(--text); border: 1px solid var(--border); }
+button.delete-btn { color: #f87171; border-color: rgba(248,113,113,.35); }
+button.delete-btn:hover { background: rgba(248,113,113,.12); border-color: #f87171; }
 input,
 select,
 textarea {

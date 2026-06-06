@@ -265,6 +265,26 @@ class EventDatabase:
             row = db.execute("SELECT * FROM recordings WHERE id = ?", (recording_id,)).fetchone()
             return self._recording_with_event(db, row) if row else None
 
+    def delete_event(self, event_id: int) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+            if row is None:
+                return None
+            event = dict(row)
+            event["metadata"] = json.loads(event.get("metadata") or "{}")
+            db.execute("DELETE FROM events WHERE id = ?", (event_id,))
+            return event
+
+    def delete_plate(self, plate_id: int) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM vehicle_plates WHERE id = ?", (plate_id,)).fetchone()
+            if row is None:
+                return None
+            plate = self._plate_row(row)
+            db.execute("DELETE FROM plate_events WHERE plate_id = ?", (plate_id,))
+            db.execute("DELETE FROM vehicle_plates WHERE id = ?", (plate_id,))
+            return plate
+
     def delete_recording(self, recording_id: int) -> dict[str, Any] | None:
         with self.connect() as db:
             row = db.execute("SELECT * FROM recordings WHERE id = ?", (recording_id,)).fetchone()
