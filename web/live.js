@@ -222,7 +222,7 @@ function renderZones() {
   liveEls.zoneOverlay.innerHTML = zones.map((zone, index) => (zone.enabled === false ? '' : renderZoneBox(zone, index))).join('');
 
   if (!zones.length) {
-    liveEls.zoneList.innerHTML = '<div class="empty">No monitoring areas yet. Click "Draw area", place corner dots on the footage, then finish the area.</div>';
+    liveEls.zoneList.innerHTML = '<div class="empty">No monitoring areas yet. Click "Draw area", place corner dots on the footage, then click the first dot to close the area.</div>';
     return;
   }
 
@@ -362,9 +362,10 @@ function draftPolygonMarkup() {
   if (!draftPolygon?.points.length) return '';
   const points = [...draftPolygon.points, draftPolygon.preview].filter(Boolean);
   const pointList = points.map((point) => `${point.x * 100},${point.y * 100}`).join(' ');
-  const handles = draftPolygon.points.map((point) => (
-    `<i class="zone-handle zone-point-handle draft-point" style="left:${point.x * 100}%;top:${point.y * 100}%"></i>`
-  )).join('');
+  const handles = draftPolygon.points.map((point, index) => {
+    const closesShape = index === 0 && draftPolygon.points.length >= 3;
+    return `<i class="zone-handle zone-point-handle draft-point${closesShape ? ' close-draft-point' : ''}" ${closesShape ? 'data-close-draft="true" title="Close area"' : ''} style="left:${point.x * 100}%;top:${point.y * 100}%"></i>`;
+  }).join('');
   return `
     <svg class="monitor-zone-polygon draft" viewBox="0 0 100 100" preserveAspectRatio="none">
       <polyline points="${pointList}"></polyline>
@@ -401,6 +402,23 @@ function finishDraftPolygon() {
 
 liveEls.zoneOverlay.addEventListener('pointerdown', (event) => {
   if (!selectedCamera) return;
+
+  if (drawingMode) {
+    event.preventDefault();
+    if (event.target.closest('[data-close-draft]')) {
+      finishDraftPolygon();
+      return;
+    }
+    const point = pointFromEvent(event);
+    draftPolygon ||= { points: [], preview: point };
+    draftPolygon.points.push(point);
+    draftPolygon.preview = point;
+    liveEls.addZoneBtn.textContent = 'Cancel drawing';
+    renderDraftPolygon();
+    liveEls.zoneOverlay.setPointerCapture(event.pointerId);
+    return;
+  }
+
   const pointHandle = event.target.closest('[data-point-index]');
   const zoneBox = event.target.closest('.monitor-zone-polygon[data-zone-index], .zone-label[data-zone-index], polygon[data-zone-index]');
 
@@ -421,20 +439,6 @@ liveEls.zoneOverlay.addEventListener('pointerdown', (event) => {
     renderZones();
     return;
   }
-
-  if (!drawingMode) return;
-  event.preventDefault();
-  const point = pointFromEvent(event);
-  draftPolygon ||= { points: [], preview: point };
-  draftPolygon.points.push(point);
-  draftPolygon.preview = point;
-  liveEls.addZoneBtn.textContent = draftPolygon.points.length >= 3 ? 'Finish area' : 'Cancel drawing';
-  renderDraftPolygon();
-  if (event.detail >= 2 && draftPolygon.points.length >= 3) {
-    finishDraftPolygon();
-    return;
-  }
-  liveEls.zoneOverlay.setPointerCapture(event.pointerId);
 });
 
 liveEls.zoneOverlay.addEventListener('pointermove', (event) => {
@@ -480,10 +484,6 @@ liveEls.frame.addEventListener('error', () => {
 liveEls.overlayToggle.addEventListener('change', refreshFrame);
 liveEls.cameraSelect.addEventListener('change', () => setSelectedCamera(liveEls.cameraSelect.value));
 liveEls.addZoneBtn.addEventListener('click', () => {
-  if (drawingMode && draftPolygon?.points.length >= 3) {
-    finishDraftPolygon();
-    return;
-  }
   drawingMode = !drawingMode;
   draftPolygon = null;
   zoneDrag = null;
