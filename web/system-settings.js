@@ -59,7 +59,7 @@ function fillForm(form, values) {
 function payloadFor(form) {
   const data = Object.fromEntries(new FormData(form).entries());
   for (const key of ['enabled', 'continuous', 'record_on_motion', 'record_on_human', 'auto_purge_enabled']) if (key in data) data[key] = data[key] === 'true';
-  for (const key of ['width', 'height', 'fps', 'pre_event_seconds', 'post_event_seconds', 'max_clip_seconds', 'retention_days', 'max_storage_gb', 'max_login_attempts', 'lockout_minutes']) {
+  for (const key of ['width', 'height', 'fps', 'port', 'pre_event_seconds', 'post_event_seconds', 'max_clip_seconds', 'retention_days', 'max_storage_gb', 'max_login_attempts', 'lockout_minutes']) {
     if (key in data && data[key] !== '') data[key] = Number.parseInt(data[key], 10);
   }
   if ('record_on_objects' in data) data.record_on_objects = data.record_on_objects.split(',').map((label) => label.trim()).filter(Boolean);
