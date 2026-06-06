@@ -1333,6 +1333,103 @@ def test_live_stream_detection_triggers_email_alert(tmp_path, monkeypatch):
     assert status['recording_id'] == event['recordings'][0]['id']
 
 
+def test_background_live_alert_monitor_triggers_cat_email_without_live_page(tmp_path, monkeypatch):
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    sent: list[tuple[dict[str, object], int, list[str]]] = []
+
+    class FakeCamera:
+        def read_jpeg(self):
+            return b'jpeg-frame', {'width': 1280, 'height': 720}
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, image_bytes):
+            assert image_bytes == b'jpeg-frame'
+            return [
+                {
+                    'label': 'cat',
+                    'confidence': 0.92,
+                    'box': {'x': 100, 'y': 100, 'width': 200, 'height': 220},
+                }
+            ]
+
+    class FakeEmailAlertService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def send_alert(self, alert, *, event_id, recipients, camera_name=None, camera_id=None):
+            sent.append((alert, event_id, list(recipients)))
+
+    camera_settings = {
+        'id': 'camera-1',
+        'name': 'Front Door',
+        'backend': 'rtsp',
+        'stream_url': 'rtsp://camera.example/stream1',
+        'width': 1280,
+        'height': 720,
+        'fps': 15,
+        'detection': {
+            'zones': [
+                {
+                    'id': 'porch',
+                    'name': 'Porch',
+                    'x': 0,
+                    'y': 0,
+                    'width': 1,
+                    'height': 1,
+                    'monitor_motion': False,
+                    'monitor_objects': True,
+                    'object_labels': ['cat'],
+                    'monitor_anpr': False,
+                },
+            ],
+        },
+    }
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main, 'EmailAlertService', FakeEmailAlertService)
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
+    main.database.set_setting('live', {'detection_interval_seconds': 0.2, 'background_detection_enabled': True}, main.utc_now())
+    main.database.set_setting(
+        'alert_email',
+        {'enabled': True, 'host': 'smtp.example.com', 'port': 587, 'from_address': 'alerts@example.com', 'use_tls': True, 'use_ssl': False},
+        main.utc_now(),
+    )
+    main.database.set_setting('cameras', [camera_settings], main.utc_now())
+    main.apply_cameras_settings([main.normalize_camera_settings(camera_settings)])
+    main.camera_instances['camera-1'] = FakeCamera()
+    main.camera = main.camera_instances['camera-1']
+    main.live_detection_last_checked.clear()
+    for rule in main.database.list_alert_rules():
+        main.database.delete_alert_rule(rule['id'])
+    main.database.create_alert_rule(
+        main.validate_alert_rule({
+            'name': 'Cat live',
+            'object': 'cat',
+            'min_confidence': 0.5,
+            'cooldown_seconds': 0,
+            'enabled': True,
+            'email_enabled': True,
+            'email_recipients': ['owner@example.com'],
+        }),
+        main.utc_now(),
+    )
+
+    assert main.run_live_alert_monitor_once() == 1
+
+    status = main.live_detection_status_payload('camera-1')
+    assert status['state'] == 'alerted'
+    assert status['detected_labels'] == ['cat']
+    assert status['email_attempted'] is True
+    assert sent
+    assert sent[0][0]['rule_name'] == 'Cat live'
+    assert sent[0][2] == ['owner@example.com']
+
 def test_live_stream_detection_queue_runs_in_background_and_deduplicates(tmp_path, monkeypatch):
     _app, _database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main

@@ -58,9 +58,10 @@ function createLiveSettingsSection() {
       <input name="snapshot_refresh_ms" type="number" min="150" max="5000" step="10" placeholder="Snapshot refresh ms (e.g. 500)" />
       <input name="detection_status_refresh_ms" type="number" min="500" max="15000" step="100" placeholder="Detection status refresh ms (e.g. 2000)" />
       <input name="detection_interval_seconds" type="number" min="0.2" max="10" step="0.1" placeholder="Detection interval seconds (e.g. 1.0)" />
+      <label><span>Background alerts</span><select name="background_detection_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
       <button type="submit">Save live settings</button>
     </form>
-    <p class="muted">Lower values can improve responsiveness but increase CPU/network usage.</p>
+    <p class="muted">Lower values can improve responsiveness but increase CPU/network usage. Background alerts keep checking cameras even when no Live Cameras page is open.</p>
   `;
   const cameraSection = document.getElementById('cameraManager')?.closest('section');
   if (cameraSection) {
@@ -186,7 +187,7 @@ function fillForm(form, values) {
 
 function payloadFor(form) {
   const data = Object.fromEntries(new FormData(form).entries());
-  for (const key of ['enabled', 'continuous', 'record_on_motion', 'record_on_human', 'auto_purge_enabled']) if (key in data) data[key] = data[key] === 'true';
+  for (const key of ['enabled', 'continuous', 'record_on_motion', 'record_on_human', 'auto_purge_enabled', 'background_detection_enabled']) if (key in data) data[key] = data[key] === 'true';
   for (const key of ['width', 'height', 'fps', 'port', 'pre_event_seconds', 'post_event_seconds', 'max_clip_seconds', 'retention_days', 'max_storage_gb', 'max_login_attempts', 'lockout_minutes']) {
     if (key in data && data[key] !== '') data[key] = Number.parseInt(data[key], 10);
   }
