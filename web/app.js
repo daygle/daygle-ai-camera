@@ -78,6 +78,31 @@ function formatDate(value) {
   return new Date(value).toLocaleString();
 }
 
+function cameraLabel(cameraName, cameraId) {
+  const name = String(cameraName || '').trim();
+  const id = String(cameraId || '').trim();
+  if (name && id) return `${name} (${id})`;
+  return name || id || '';
+}
+
+function eventSourceLabel(event) {
+  const metadata = event?.metadata || {};
+  const fromMetadata = cameraLabel(metadata.camera_name, metadata.camera_id);
+  if (fromMetadata) return fromMetadata;
+  const fromRecording = cameraLabel('', event?.recordings?.[0]?.camera_id);
+  if (fromRecording) return fromRecording;
+  return String(event?.source || 'unknown');
+}
+
+function recordingSourceLabel(recording) {
+  const metadata = recording?.event?.metadata || {};
+  const fromMetadata = cameraLabel(metadata.camera_name, metadata.camera_id);
+  if (fromMetadata) return fromMetadata;
+  const fromRecording = cameraLabel('', recording?.camera_id);
+  if (fromRecording) return fromRecording;
+  return String(recording?.source || 'unknown');
+}
+
 function detectionBadges(detections = []) {
   if (!detections.length) return '<span class="muted">No detections</span>';
   return detections.map((d) => {
@@ -100,7 +125,7 @@ function renderEvents(events) {
       </div>
       <div>${detectionBadges(event.detections)}</div>
       <div>${plateBadges(event.plate_events)}</div>
-      <p class="muted">Source: ${escapeHtml(event.source)} · ${escapeHtml(event.recording_status || 'none')}</p>
+      <p class="muted">Camera: ${escapeHtml(eventSourceLabel(event))} · ${escapeHtml(event.recording_status || 'none')}</p>
       <div>${recordingLink(event.recordings)}</div>
       <button class="secondary delete-btn" data-delete-event="${event.id}">Delete</button>
     </div>
@@ -168,7 +193,7 @@ function renderRecordings(recordings) {
         </div>
         <div>${detectionBadges(recording.detections)}</div>
         <div>${plateBadges(recording.plate_events)}</div>
-        <p class="muted">Duration: ${Number(recording.duration_seconds || 0).toFixed(1)}s · Source: ${escapeHtml(recording.source)} · Trigger: ${escapeHtml(recording.trigger_type || 'motion')} ${escapeHtml(recording.trigger_label || '')} · ${escapeHtml(fileName)}</p>
+        <p class="muted">Duration: ${Number(recording.duration_seconds || 0).toFixed(1)}s · Camera: ${escapeHtml(recordingSourceLabel(recording))} · Trigger: ${escapeHtml(recording.trigger_type || 'motion')} ${escapeHtml(recording.trigger_label || '')} · ${escapeHtml(fileName)}</p>
         <button class="secondary" data-play-recording="${recording.id}" ${mediaReady ? '' : 'disabled'}>${mediaReady ? 'Play clip' : 'Preparing clip...'}</button>
         <button class="secondary delete-btn" data-delete-recording="${recording.id}">Delete</button>
       </div>
