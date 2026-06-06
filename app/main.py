@@ -1362,10 +1362,9 @@ async def setup(request: Request):
 
 @app.get('/logout')
 def logout_get(request: Request):
-    auth.delete_session(request.cookies.get(SESSION_COOKIE_NAME))
-    response = RedirectResponse('/login', status_code=303)
-    clear_auth_cookies(response)
-    return response
+    # GET logout does not delete the session to avoid CSRF via link tricks.
+    # The nav uses a JS-driven POST with a CSRF token instead.
+    return RedirectResponse('/login', status_code=303)
 
 
 @app.post('/logout')

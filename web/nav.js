@@ -20,7 +20,7 @@
     </div>
     <div class="app-nav-account">
       <a href="/profile" data-match="/profile" id="navUser">Profile</a>
-      <a href="/logout">Logout</a>
+      <button class="nav-logout-btn" id="navLogoutBtn" type="button">Logout</button>
     </div>
   `;
 
@@ -38,11 +38,23 @@
     if (!response.ok) return;
     const payload = await response.json();
     const user = payload.user || {};
+    const csrfToken = payload.csrf_token || '';
     const navUser = document.getElementById('navUser');
     if (navUser && user.username) navUser.textContent = user.username;
     if (user.role !== 'admin') {
       nav.querySelectorAll('[data-admin="true"]').forEach((link) => {
         link.hidden = true;
+      });
+    }
+    const logoutBtn = document.getElementById('navLogoutBtn');
+    if (logoutBtn && csrfToken) {
+      logoutBtn.addEventListener('click', async () => {
+        try {
+          await fetch('/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } });
+        } catch {
+          // Ignore network errors; the redirect below will clear the session server-side.
+        }
+        window.location.href = '/login';
       });
     }
   } catch {

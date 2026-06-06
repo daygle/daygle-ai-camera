@@ -6,9 +6,10 @@ import importlib
 import importlib.util
 import secrets
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 _bcrypt_spec = importlib.util.find_spec("bcrypt")
 bcrypt = importlib.import_module("bcrypt") if _bcrypt_spec else None
@@ -39,10 +40,18 @@ class AuthService:
         self.max_login_attempts = int(self.config.get("max_login_attempts", 5))
         self.lockout = timedelta(minutes=float(self.config.get("lockout_minutes", 15)))
 
-    def connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.database_path)
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def init(self) -> None:
         with self.connect() as db:

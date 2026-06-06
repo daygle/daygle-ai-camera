@@ -67,9 +67,8 @@ class RecordingService:
         if (mode == 'human' or bool(config.get('record_on_human', True))) and 'person' in labels:
             return True, 'human', 'person'
         for label in labels:
-            if mode == 'objects' or label in object_labels:
-                if label in object_labels:
-                    return True, 'object', label
+            if label in object_labels or (mode == 'objects' and not object_labels):
+                return True, 'object', label
         return False, 'none', None
 
     def event_recording_metadata(

@@ -66,7 +66,8 @@ body {
 .app-nav-links { overflow-x: auto; scrollbar-width: thin; }
 .app-nav-account { justify-content: flex-end; }
 .app-nav-links a,
-.app-nav-account a {
+.app-nav-account a,
+.app-nav-account .nav-logout-btn {
   display: inline-flex;
   align-items: center;
   min-height: 38px;
@@ -76,8 +77,14 @@ body {
   color: var(--muted);
   white-space: nowrap;
 }
+.nav-logout-btn {
+  background: none;
+  cursor: pointer;
+  font: inherit;
+}
 .app-nav a.active,
-.app-nav a:hover {
+.app-nav a:hover,
+.app-nav .nav-logout-btn:hover {
   border-color: var(--border);
   color: var(--text);
   background: rgba(255,255,255,.06);
