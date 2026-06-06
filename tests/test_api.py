@@ -678,6 +678,9 @@ def test_admin_alert_rule_crud_and_alert_engine_uses_db_rules(tmp_path, monkeypa
         assert status == 200
         assert 'select name="object" id="objectSelect"' in alert_page
         assert 'Choose from the detector labels currently available to this camera.' in alert_page
+        assert 'id="testEmailRecipient"' in alert_page
+        assert 'id="testEmailBtn"' in alert_page
+        assert 'class="list alert-rules-list"' in alert_page
 
         initial = client.request("/api/settings/alerts")[2]
         assert "person" in initial["available_labels"]
@@ -813,6 +816,62 @@ def test_email_alert_settings_and_delivery(tmp_path, monkeypatch):
         assert sent
         assert sent[0][1] == created["event_id"]
         assert sent[0][2] == ["user@example.com"]
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_admin_can_send_test_alert_email(tmp_path, monkeypatch):
+    sent: list[tuple[dict[str, object], str]] = []
+
+    class FakeEmailAlertService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def send_test(self, recipient):
+            sent.append((self.settings, recipient))
+
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        main_module = sys.modules["app.main"]
+        monkeypatch.setattr(main_module, "EmailAlertService", FakeEmailAlertService)
+
+        status, _headers, payload = client.request(
+            "/api/settings/alert-email/test",
+            method="POST",
+            json_body={
+                "settings": {
+                    "enabled": True,
+                    "host": "smtp.example.com",
+                    "port": 587,
+                    "from_address": "alerts@example.com",
+                    "use_tls": True,
+                    "use_ssl": False,
+                },
+                "recipient": "admin@example.com",
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        assert status == 200
+        assert payload == {"ok": True, "recipient": "admin@example.com"}
+        assert sent == [(
+            {
+                "enabled": True,
+                "host": "smtp.example.com",
+                "port": 587,
+                "username": "",
+                "password": "",
+                "from_address": "alerts@example.com",
+                "use_tls": True,
+                "use_ssl": False,
+            },
+            "admin@example.com",
+        )]
     finally:
         server.should_exit = True
         thread.join(timeout=5)

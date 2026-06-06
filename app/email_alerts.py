@@ -37,7 +37,31 @@ class EmailAlertService:
                 ]
             )
         )
+        self._deliver(message)
 
+    def send_test(self, recipient: str) -> None:
+        recipient = recipient.strip()
+        if not recipient:
+            raise EmailAlertError("Test recipient is required.")
+        if not self.configured():
+            raise EmailAlertError("Email alerts are not configured.")
+
+        message = EmailMessage()
+        message["Subject"] = "Daygle test email"
+        message["From"] = str(self.settings.get("from_address"))
+        message["To"] = recipient
+        message.set_content(
+            "\n".join(
+                [
+                    "This is a test email from Daygle AI Camera.",
+                    "",
+                    "If you received this, your alert email settings can send mail.",
+                ]
+            )
+        )
+        self._deliver(message)
+
+    def _deliver(self, message: EmailMessage) -> None:
         host = str(self.settings.get("host"))
         port = int(self.settings.get("port") or (465 if self.settings.get("use_ssl") else 587))
         username = str(self.settings.get("username") or "")

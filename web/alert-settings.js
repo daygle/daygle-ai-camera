@@ -5,6 +5,8 @@ const messageEl = document.getElementById('settingsMessage');
 const rulesEl = document.getElementById('alertRules');
 const objectSelect = document.getElementById('objectSelect');
 const objectOptionsHelp = document.getElementById('objectOptionsHelp');
+const testEmailRecipient = document.getElementById('testEmailRecipient');
+const testEmailBtn = document.getElementById('testEmailBtn');
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -67,6 +69,7 @@ function renderEmail(settings) {
     if (emailForm.elements[key]) emailForm.elements[key].value = String(value ?? '');
   }
   if (!emailForm.elements.port.value) emailForm.elements.port.value = '587';
+  if (testEmailRecipient && !testEmailRecipient.value) testEmailRecipient.value = settings.from_address || '';
   setMessage(settings.enabled ? 'Email alerts are enabled.' : 'Email alerts are disabled.');
 }
 
@@ -99,6 +102,27 @@ emailForm.addEventListener('submit', async (event) => {
     renderEmail(await api('/api/settings/alert-email', { method: 'PUT', body: JSON.stringify(formPayload(emailForm)) }));
     setMessage('Mail server settings saved.');
   } catch (error) { setMessage(error.message); }
+});
+
+testEmailBtn.addEventListener('click', async () => {
+  const recipient = testEmailRecipient.value.trim() || emailForm.elements.from_address.value.trim();
+  if (!recipient) {
+    setMessage('Enter a test recipient email address.');
+    return;
+  }
+  testEmailBtn.disabled = true;
+  setMessage('Sending test email...');
+  try {
+    await api('/api/settings/alert-email/test', {
+      method: 'POST',
+      body: JSON.stringify({ settings: formPayload(emailForm), recipient }),
+    });
+    setMessage(`Test email sent to ${recipient}.`);
+  } catch (error) {
+    setMessage(error.message);
+  } finally {
+    testEmailBtn.disabled = false;
+  }
 });
 
 ruleForm.addEventListener('submit', async (event) => {
