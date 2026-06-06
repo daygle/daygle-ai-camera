@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+
+logger = logging.getLogger('daygle.ai')
 
 
 class RecordingService:
@@ -205,10 +209,21 @@ class RecordingService:
         fps = 10
         frame_count = max(10, min(120, int(duration_seconds * fps)))
         suffix = file_path.suffix.lower()
-        fourcc = cv2.VideoWriter_fourcc(*('mp4v' if suffix == '.mp4' else 'MJPG'))
-        writer = cv2.VideoWriter(str(file_path), fourcc, fps, (width, height))
-        if not writer.isOpened():
-            raise RuntimeError('Video writer could not open output file.')
+        codec_candidates = ['avc1', 'H264', 'mp4v'] if suffix == '.mp4' else ['MJPG']
+        writer = None
+        selected_codec = None
+        for codec in codec_candidates:
+            fourcc = cv2.VideoWriter_fourcc(*codec)
+            candidate = cv2.VideoWriter(str(file_path), fourcc, fps, (width, height))
+            if candidate.isOpened():
+                writer = candidate
+                selected_codec = codec
+                break
+            candidate.release()
+        if writer is None:
+            raise RuntimeError(f"Video writer could not open output file with codecs: {', '.join(codec_candidates)}")
+        if selected_codec and selected_codec != 'mp4v':
+            logger.info('Recording fallback clip %s encoded with %s', file_path.name, selected_codec)
         try:
             labels = ', '.join(str(detection.get('label')) for detection in detections) or 'continuous'
             for index in range(frame_count):

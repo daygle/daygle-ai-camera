@@ -1224,8 +1224,14 @@ def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
         'libx264',
         '-preset',
         'veryfast',
+        '-profile:v',
+        'main',
+        '-level',
+        '4.0',
         '-pix_fmt',
         'yuv420p',
+        '-movflags',
+        '+faststart',
         str(tmp_path),
     ]
     result = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
