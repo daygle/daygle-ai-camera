@@ -680,6 +680,8 @@ def test_admin_alert_rule_crud_and_alert_engine_uses_db_rules(tmp_path, monkeypa
         assert 'Choose from the detector labels currently available to this camera.' in alert_page
         assert 'id="testEmailRecipient"' in alert_page
         assert 'id="testEmailBtn"' in alert_page
+        assert 'id="newAlertRuleBtn"' in alert_page
+        assert 'Add alert rule' in alert_page
         assert 'class="list alert-rules-list"' in alert_page
 
         initial = client.request("/api/settings/alerts")[2]
@@ -696,6 +698,18 @@ def test_admin_alert_rule_crud_and_alert_engine_uses_db_rules(tmp_path, monkeypa
         assert status == 200
         assert rule["object"] == "person"
 
+        status, _headers, second_rule = client.request(
+            "/api/settings/alerts",
+            method="POST",
+            json_body={"name": "Car DB", "object": "car", "min_confidence": 0.3, "cooldown_seconds": 10, "enabled": True},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert second_rule["id"] != rule["id"]
+
+        rules = client.request("/api/settings/alerts")[2]["rules"]
+        assert {rule["name"] for rule in rules} == {"Person DB", "Car DB"}
+
         status, _headers, edited = client.request(
             f"/api/settings/alerts/{rule['id']}",
             method="PUT",
@@ -711,6 +725,9 @@ def test_admin_alert_rule_crud_and_alert_engine_uses_db_rules(tmp_path, monkeypa
         assert any(alert["rule_name"] == "Person DB" for alert in triggered)
 
         status, _headers, deleted = client.request(f"/api/settings/alerts/{rule['id']}", method="DELETE", headers={"X-CSRF-Token": csrf})
+        assert status == 200
+        assert deleted["ok"] is True
+        status, _headers, deleted = client.request(f"/api/settings/alerts/{second_rule['id']}", method="DELETE", headers={"X-CSRF-Token": csrf})
         assert status == 200
         assert deleted["ok"] is True
     finally:

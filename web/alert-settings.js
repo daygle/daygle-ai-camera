@@ -7,6 +7,9 @@ const objectSelect = document.getElementById('objectSelect');
 const objectOptionsHelp = document.getElementById('objectOptionsHelp');
 const testEmailRecipient = document.getElementById('testEmailRecipient');
 const testEmailBtn = document.getElementById('testEmailBtn');
+const newAlertRuleBtn = document.getElementById('newAlertRuleBtn');
+const cancelEditRuleBtn = document.getElementById('cancelEditRule');
+const ruleSubmitBtn = ruleForm.querySelector('button[type="submit"]');
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -26,6 +29,24 @@ function escapeHtml(value) {
 }
 
 function setMessage(text) { messageEl.textContent = text; }
+
+function resetRuleForm() {
+  ruleForm.reset();
+  ruleForm.elements.id.value = '';
+  if (ruleForm.elements.min_confidence) ruleForm.elements.min_confidence.value = '0.6';
+  if (ruleForm.elements.cooldown_seconds) ruleForm.elements.cooldown_seconds.value = '60';
+  if (ruleForm.elements.enabled) ruleForm.elements.enabled.value = 'true';
+  if (ruleForm.elements.email_enabled) ruleForm.elements.email_enabled.value = 'false';
+  if (ruleSubmitBtn) ruleSubmitBtn.textContent = 'Add alert rule';
+}
+
+function setEditingRule(rule) {
+  ensureObjectOption(rule.object);
+  for (const [key, value] of Object.entries(rule)) {
+    if (ruleForm.elements[key]) ruleForm.elements[key].value = Array.isArray(value) ? value.join(', ') : String(value ?? '');
+  }
+  if (ruleSubmitBtn) ruleSubmitBtn.textContent = 'Update alert rule';
+}
 
 function labelOption(label) {
   return `<option value="${escapeHtml(label)}">${escapeHtml(label)}</option>`;
@@ -94,6 +115,7 @@ async function loadAll() {
   const alerts = await api('/api/settings/alerts');
   renderObjectOptions(alerts.available_labels);
   renderRules(alerts.rules);
+  if (!ruleForm.elements.id.value) resetRuleForm();
 }
 
 emailForm.addEventListener('submit', async (event) => {
@@ -132,23 +154,29 @@ ruleForm.addEventListener('submit', async (event) => {
   delete payload.id;
   try {
     await api(id ? `/api/settings/alerts/${id}` : '/api/settings/alerts', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-    ruleForm.reset();
-    setMessage('Alert rule saved.');
+    resetRuleForm();
+    setMessage(id ? 'Alert rule updated.' : 'Alert rule added. Add another rule when ready.');
     await loadAll();
   } catch (error) { setMessage(error.message); }
 });
 
-document.getElementById('cancelEditRule').addEventListener('click', () => ruleForm.reset());
+newAlertRuleBtn.addEventListener('click', () => {
+  resetRuleForm();
+  setMessage('Ready to add a new alert rule.');
+});
+
+cancelEditRuleBtn.addEventListener('click', () => {
+  resetRuleForm();
+  setMessage('Edit cancelled. Ready to add a new alert rule.');
+});
 
 rulesEl.addEventListener('click', async (event) => {
   const button = event.target.closest('button');
   if (!button) return;
   if (button.dataset.action === 'edit') {
     const rule = JSON.parse(button.dataset.rule);
-    ensureObjectOption(rule.object);
-    for (const [key, value] of Object.entries(rule)) {
-      if (ruleForm.elements[key]) ruleForm.elements[key].value = Array.isArray(value) ? value.join(', ') : String(value ?? '');
-    }
+    setEditingRule(rule);
+    setMessage(`Editing ${rule.name}.`);
   }
   if (button.dataset.action === 'toggle') {
     await api(`/api/settings/alerts/${button.dataset.id}`, { method: 'PUT', body: JSON.stringify({ enabled: button.dataset.enabled !== 'true' }) });
