@@ -1898,6 +1898,9 @@ def delete_all_plates(request: Request):
     require_admin(request)
     deleted = database.delete_all_plates()
     return {'ok': True, 'deleted': deleted}
+
+
+@app.get('/api/plate-alerts')
 def list_plate_alerts():
     return database.list_plate_alert_rules()
 
