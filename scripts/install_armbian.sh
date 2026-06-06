@@ -42,13 +42,23 @@ python3 -m venv "${APP_DIR}/.venv"
 "${APP_DIR}/.venv/bin/python" -m pip install -r "${APP_DIR}/requirements.txt"
 
 if [[ ! -f "${CONFIG_DIR}/config.yaml" ]]; then
-  cp "${APP_DIR}/config.example.yaml" "${CONFIG_DIR}/config.yaml"
-  sed -i \
-    -e "s#database: data/daygle_ai_camera.sqlite3#database: ${DATA_DIR}/daygle_ai_camera.sqlite3#" \
-    -e "s#data_dir: data#data_dir: ${DATA_DIR}#" \
-    -e "s#snapshots_dir: data/snapshots#snapshots_dir: ${DATA_DIR}/snapshots#" \
-    -e "s#events_dir: data/events#events_dir: ${DATA_DIR}/events#" \
-    "${CONFIG_DIR}/config.yaml"
+  cat > "${CONFIG_DIR}/config.yaml" <<EOF
+server:
+  host: 0.0.0.0
+  port: 8080
+
+auth:
+  enabled: true
+  cookie_name: daygle_session
+
+storage:
+  database: ${DATA_DIR}/daygle_ai_camera.sqlite3
+  data_dir: ${DATA_DIR}
+  snapshots_dir: ${DATA_DIR}/snapshots
+  events_dir: ${DATA_DIR}/events
+  recordings_dir: ${DATA_DIR}/recordings
+  plates_dir: ${DATA_DIR}/plates
+EOF
 fi
 
 install -m 0644 "${APP_DIR}/systemd/${APP_NAME}.service" "${SERVICE_FILE}"
