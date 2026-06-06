@@ -15,7 +15,7 @@
         <p class="muted">Monitor detections, alerts, recordings, and plate sightings from one place.</p>
       </div>
       <div class="hero-actions">
-        <button id="generateBtn" class="primary">Generate mock detection</button>
+        <a class="button-link" href="/live">Open live cameras</a>
       </div>
     </header>
 
@@ -31,10 +31,10 @@
       <article class="card camera-card">
         <div class="section-header">
           <div>
-            <h2>Live Mock Feed</h2>
-            <p class="muted">Synthetic camera surface for UI and pipeline testing.</p>
+            <h2>Image Detection Test</h2>
+            <p class="muted">Upload a snapshot when you want to verify the configured ONNX detector outside the live stream.</p>
           </div>
-          <span class="pill">MOCK</span>
+          <span class="pill">ONNX</span>
         </div>
         <form id="uploadForm" class="upload-form">
           <input id="imageInput" type="file" accept="image/*" />
@@ -45,12 +45,6 @@
           <span id="selectedFilename" class="muted"></span>
         </div>
         <p id="uploadResult" class="muted upload-result">Upload an image to create a detection event with the configured AI backend.</p>
-        <div class="mock-feed">
-          <div class="scanline"></div>
-          <div class="target-box box-one">cat?</div>
-          <div class="target-box box-two">person?</div>
-          <div class="feed-label">Daygle AI Camera</div>
-        </div>
       </article>
 
       <article class="card">

@@ -4,14 +4,13 @@ server:
   port: 8080
 
 camera:
-  backend: mock
-  device: 0
+  backend: onvif
+  device: rtsp
   width: 1280
   height: 720
   fps: 15
   flip: none
-  # For P6S / ONVIF-compatible IP camera testing, set backend to onvif
-  # and provide either stream_url or host/user/password/path.
+  # Provide either stream_url or host/user/password/path.
   stream_url: ""
   host: ""
   port: 554

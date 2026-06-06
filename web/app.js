@@ -5,7 +5,6 @@ const els = {
   totalEvents: document.getElementById('totalEvents'),
   totalAlerts: document.getElementById('totalAlerts'),
   frameNumber: document.getElementById('frameNumber'),
-  generateBtn: document.getElementById('generateBtn'),
   userMenuBtn: document.getElementById('userMenuBtn'),
   usersLink: document.getElementById('usersLink'),
   settingsLink: document.getElementById('settingsLink'),
@@ -90,7 +89,7 @@ function detectionBadges(detections = []) {
 
 function renderEvents(events) {
   if (!events.length) {
-    els.events.innerHTML = '<div class="empty">No events yet. Generate a mock detection to start.</div>';
+    els.events.innerHTML = '<div class="empty">No events yet. Live camera detections will appear here.</div>';
     return;
   }
 
@@ -180,7 +179,7 @@ function bindPlaybackButtons() {
     button.addEventListener('click', () => {
       const id = button.dataset.playRecording;
       els.clipPlayer.src = `/api/recordings/${id}/stream`;
-      els.clipPlayerStatus.textContent = `Playing recording #${id}. If playback shows a 404, only placeholder metadata exists for this mock event.`;
+      els.clipPlayerStatus.textContent = `Playing recording #${id}.`;
       els.clipPlayer.load();
     });
   });
@@ -284,18 +283,6 @@ async function refreshAll() {
   await Promise.all([loadStatus(), loadStats(), loadEvents(), loadAlerts(), loadRecordings(), loadPlates(), searchPlateSightings()]);
   bindPlaybackButtons();
 }
-
-els.generateBtn.addEventListener('click', async () => {
-  els.generateBtn.disabled = true;
-  els.generateBtn.textContent = 'Generating...';
-  try {
-    await api('/api/mock/detect', { method: 'POST' });
-    await refreshAll();
-  } finally {
-    els.generateBtn.disabled = false;
-    els.generateBtn.textContent = 'Generate mock detection';
-  }
-});
 
 els.imageInput.addEventListener('change', () => {
   const file = els.imageInput.files[0];

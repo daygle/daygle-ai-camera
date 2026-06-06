@@ -27,9 +27,9 @@ from app.alerts import AlertEngine
 from app.anpr import AnprPipeline, normalize_plate, plate_matches
 from app.auth import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, AuthError, AuthService
 from app.database import EventDatabase
-from app.detector import DetectorUnavailableError, MockDetector, create_detector, load_labels
+from app.detector import DetectorUnavailableError, create_detector, load_labels
 from app.email_alerts import EmailAlertError, EmailAlertService
-from app.mock_camera import MockCamera, OpenCvStreamCamera
+from app.mock_camera import OpenCvStreamCamera
 from app.recordings import RecordingService
 from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, load_settings
 from app.storage import Storage
@@ -72,6 +72,8 @@ def effective_ai_config() -> dict[str, Any]:
     override = database.get_setting('ai')
     if isinstance(override, dict):
         settings.update(override)
+    if str(settings.get('backend', '')).lower() == 'mock':
+        settings['backend'] = 'onnx'
     return settings
 
 
@@ -80,6 +82,8 @@ def effective_camera_config() -> dict[str, Any]:
     override = database.get_setting('camera')
     if isinstance(override, dict):
         settings.update(override)
+    if str(settings.get('backend', '')).lower() == 'mock':
+        settings['backend'] = 'onvif'
     return settings
 
 
@@ -145,7 +149,6 @@ SESSION_COOKIE_NAME = str(effective_auth_config().get('cookie_name', SESSION_COO
 database.seed_alert_rules(config.get('alerts', {}).get('rules', []), utc_now())
 detector = create_detector(effective_ai_config())
 last_detector_error: str | None = getattr(detector, 'unavailable_reason', None)
-mock_detector = MockDetector(effective_ai_config().get('categories', []), float(effective_ai_config().get('confidence', 0.45)))
 alerts = AlertEngine(effective_alert_rules())
 LIVE_DETECTION_INTERVAL_SECONDS = 1.0
 live_detection_last_checked: dict[str, float] = {}
@@ -232,7 +235,9 @@ def normalize_camera_settings(settings: dict[str, Any], index: int = 1) -> dict[
     camera_settings = dict(settings or {})
     camera_settings['id'] = normalize_camera_id(camera_settings.get('id'), f'camera-{index}')
     camera_settings['name'] = camera_default_name(camera_settings, f'Camera {index}')
-    camera_settings['backend'] = str(camera_settings.get('backend') or 'mock').lower()
+    camera_settings['backend'] = str(camera_settings.get('backend') or 'onvif').lower()
+    if camera_settings['backend'] == 'mock':
+        camera_settings['backend'] = 'onvif'
     camera_settings['width'] = int(camera_settings.get('width') or 1280)
     camera_settings['height'] = int(camera_settings.get('height') or 720)
     camera_settings['fps'] = int(camera_settings.get('fps') or 15)
@@ -358,8 +363,8 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
     if detection_settings.get('object_detection_enabled') is False:
         update_live_detection_status(camera_id, state='skipped', reason='Object detection is disabled for this camera.')
         return None
-    if getattr(detector, 'backend', 'mock') == 'mock' or not hasattr(detector, 'detect_image'):
-        update_live_detection_status(camera_id, state='skipped', reason='Live stream alerts require ONNX AI mode, not mock mode.')
+    if not hasattr(detector, 'detect_image'):
+        update_live_detection_status(camera_id, state='skipped', reason='Live stream alerts require ONNX AI mode.')
         return None
 
     now = time.time()
@@ -443,13 +448,10 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
 
 
 def create_camera(settings: dict[str, Any]):
-    backend = str(settings.get('backend', 'mock')).lower()
     width = int(settings.get('width', 1280))
     height = int(settings.get('height', 720))
     fps = int(settings.get('fps', 15))
-    if backend in {'onvif', 'rtsp'}:
-        return OpenCvStreamCamera(build_stream_url(settings), width=width, height=height, fps=fps)
-    return MockCamera(width=width, height=height, fps=fps)
+    return OpenCvStreamCamera(build_stream_url(settings), width=width, height=height, fps=fps)
 
 
 def create_camera_instances(settings_list: list[dict[str, Any]]) -> dict[str, Any]:
@@ -483,10 +485,8 @@ def model_exists(ai_settings: dict[str, Any]) -> bool:
 
 
 def detector_loaded_for(settings: dict[str, Any]) -> bool:
-    configured_backend = str(settings.get('backend', 'mock')).lower()
+    configured_backend = str(settings.get('backend', 'onnx')).lower()
     active_backend = getattr(detector, 'backend', 'unknown')
-    if configured_backend == 'mock':
-        return active_backend == 'mock'
     if configured_backend == 'onnx':
         return active_backend == 'onnx' and bool(getattr(detector, 'available', False))
     return False
@@ -495,7 +495,7 @@ def detector_loaded_for(settings: dict[str, Any]) -> bool:
 def ai_status_payload(ai_settings: dict[str, Any] | None = None) -> dict[str, Any]:
     settings = ai_settings or effective_ai_config()
     active_backend = getattr(detector, 'backend', 'unknown')
-    configured_backend = str(settings.get('backend', 'mock')).lower()
+    configured_backend = str(settings.get('backend', 'onnx')).lower()
     detector_loaded = detector_loaded_for(settings)
     model_loaded = bool(configured_backend == 'onnx' and active_backend == 'onnx' and getattr(detector, 'available', False))
     runtime_installed = onnx_runtime_installed()
@@ -511,8 +511,7 @@ def ai_status_payload(ai_settings: dict[str, Any] | None = None) -> dict[str, An
         mode = 'ONNX ACTIVE'
         error = detector_reason
     else:
-        mode = 'MOCK MODE'
-        error = detector_reason if active_backend == 'mock' else error
+        mode = 'MODEL FAILED'
     inference_available = detector_loaded
     return {
         'current_backend': configured_backend,
@@ -1074,7 +1073,7 @@ def dashboard_aliases():
 def settings_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>Setup / AI Settings · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>Setup / AI Settings</h1><p class="muted">Configure AI detection, install models, and reload the detector.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/system-settings">System settings</a><a class="button-link secondary-link" href="/alert-settings">Alert settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>AI status</h2><div id="settingsMessage" class="muted"></div><div id="aiStatusPanel" class="status-panel"></div><div class="button-row"><button id="checkModelBtn" class="secondary" type="button">Check model</button><button id="downloadModelBtn" type="button">Download YOLOv8n ONNX</button><button id="reloadDetectorBtn" class="secondary" type="button">Reload detector</button><button id="testDetectorBtn" class="secondary" type="button">Test detector</button></div></section><section class="card"><h2>AI settings</h2><form id="aiSettingsForm" class="form-grid"><label><span>AI enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Backend</span><select name="backend"><option value="mock">mock</option><option value="onnx">onnx</option></select></label><label><span>Confidence</span><input name="confidence" type="number" min="0" max="1" step="0.01" /></label><label><span>IOU threshold</span><input name="iou_threshold" type="number" min="0" max="1" step="0.01" /></label><label><span>Input size</span><input name="input_size" type="number" min="32" max="2048" step="32" /></label><label><span>Model path</span><input name="model_path" /></label><label><span>Labels path</span><input name="labels_path" /></label><button type="submit">Save AI settings</button></form></section></main><script src="/static/settings.js"></script></body></html>""")
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>Setup / AI Settings</h1><p class="muted">Configure AI detection, install models, and reload the detector.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/system-settings">System settings</a><a class="button-link secondary-link" href="/alert-settings">Alert settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>AI status</h2><div id="settingsMessage" class="muted"></div><div id="aiStatusPanel" class="status-panel"></div><div class="button-row"><button id="checkModelBtn" class="secondary" type="button">Check model</button><button id="downloadModelBtn" type="button">Download YOLOv8n ONNX</button><button id="reloadDetectorBtn" class="secondary" type="button">Reload detector</button><button id="testDetectorBtn" class="secondary" type="button">Test detector</button></div></section><section class="card"><h2>AI settings</h2><form id="aiSettingsForm" class="form-grid"><label><span>AI enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Backend</span><select name="backend"><option value="onnx">onnx</option></select></label><label><span>Confidence</span><input name="confidence" type="number" min="0" max="1" step="0.01" /></label><label><span>IOU threshold</span><input name="iou_threshold" type="number" min="0" max="1" step="0.01" /></label><label><span>Input size</span><input name="input_size" type="number" min="32" max="2048" step="32" /></label><label><span>Model path</span><input name="model_path" /></label><label><span>Labels path</span><input name="labels_path" /></label><button type="submit">Save AI settings</button></form></section></main><script src="/static/settings.js"></script></body></html>""")
 
 
 @app.get('/alert-settings')
@@ -1102,7 +1101,7 @@ def anpr_page():
 def system_settings_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>System Settings · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>System Settings</h1><p class="muted">Move day-to-day camera, recording, storage, and login settings out of YAML.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Camera</h2><div id="systemMessage" class="muted"></div><form id="cameraSettingsForm" class="form-grid"><label><span>Backend</span><select name="backend"><option value="mock">mock</option><option value="onvif">onvif / RTSP</option><option value="rtsp">rtsp</option></select></label><input name="device" placeholder="Device label" /><input name="stream_url" placeholder="RTSP stream URL, e.g. rtsp://user:pass@camera:554/stream1" /><input name="host" placeholder="ONVIF camera host/IP (optional)" /><input name="port" type="number" min="1" max="65535" step="1" placeholder="RTSP port, usually 554" /><input name="path" placeholder="Stream path, e.g. stream1 or live/ch0" /><input name="username" placeholder="Camera username" /><input name="password" type="password" placeholder="Camera password" /><input name="width" type="number" min="160" max="7680" step="1" placeholder="Width" /><input name="height" type="number" min="120" max="4320" step="1" placeholder="Height" /><input name="fps" type="number" min="1" max="120" step="1" placeholder="FPS" /><label><span>Flip</span><select name="flip"><option value="none">none</option><option value="horizontal">horizontal</option><option value="vertical">vertical</option><option value="both">both</option></select></label><button type="submit">Save camera</button></form></section><section class="card"><h2>ANPR</h2><form id="anprSettingsForm" class="form-grid"><label><span>ANPR</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>OCR backend</span><select name="backend"><option value="mock">mock</option><option value="paddleocr">paddleocr</option><option value="easyocr">easyocr</option></select></label><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" /><input name="vehicle_labels" placeholder="Vehicle labels: car, truck, bus, motorcycle" /><button type="submit">Save ANPR</button></form></section><section class="card"><h2>Recording policy</h2><form id="recordingSettingsForm" class="form-grid"><label><span>Recording</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Primary mode</span><select name="mode"><option value="motion">motion</option><option value="continuous">continuous</option><option value="human">human</option><option value="objects">objects</option><option value="off">off</option></select></label><label><span>Continuous</span><select name="continuous"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><label><span>Record on motion</span><select name="record_on_motion"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Record on human</span><select name="record_on_human"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="record_on_objects" placeholder="Objects: cat, dog, package, parcel" /><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" /><input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" /><input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="Max clip seconds" /><input name="format" placeholder="Format: avi or mp4" /><button type="submit">Save recording</button></form></section><section class="card"><h2>Retention</h2><form id="retentionSettingsForm" class="form-grid"><label><span>Auto purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="retention_days" type="number" min="1" max="3650" placeholder="Retention days" /><input name="max_storage_gb" type="number" min="1" max="100000" placeholder="Max storage GB" /><button type="submit">Save retention</button><button id="purgeRecordingsBtn" class="secondary" type="button">Purge now</button></form></section><section class="card"><h2>Storage</h2><form id="storageSettingsForm" class="form-grid"><input name="data_dir" placeholder="Data directory" /><input name="snapshots_dir" placeholder="Snapshots directory" /><input name="events_dir" placeholder="Events directory" /><input name="recordings_dir" placeholder="Recordings directory" /><input name="plates_dir" placeholder="Plate images directory" /><button type="submit">Save storage</button></form><p class="muted">Database file location stays in config.yaml because it is needed before the web UI can load.</p></section><section class="card"><h2>Login security</h2><form id="authSettingsForm" class="form-grid"><input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="Session timeout hours" /><input name="max_login_attempts" type="number" min="1" max="100" placeholder="Max login attempts" /><input name="lockout_minutes" type="number" min="1" max="1440" placeholder="Lockout minutes" /><button type="submit">Save login security</button></form><p class="muted">Auth enablement and cookie name remain bootstrap settings.</p></section></main><script src="/static/system-settings.js"></script></body></html>""")
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>System Settings</h1><p class="muted">Move day-to-day camera, recording, storage, and login settings out of YAML.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Camera</h2><div id="systemMessage" class="muted"></div><form id="cameraSettingsForm" class="form-grid"><label><span>Backend</span><select name="backend"><option value="onvif">onvif / RTSP</option><option value="rtsp">rtsp</option></select></label><input name="device" placeholder="Device label" /><input name="stream_url" placeholder="RTSP stream URL, e.g. rtsp://user:pass@camera:554/stream1" /><input name="host" placeholder="ONVIF camera host/IP (optional)" /><input name="port" type="number" min="1" max="65535" step="1" placeholder="RTSP port, usually 554" /><input name="path" placeholder="Stream path, e.g. stream1 or live/ch0" /><input name="username" placeholder="Camera username" /><input name="password" type="password" placeholder="Camera password" /><input name="width" type="number" min="160" max="7680" step="1" placeholder="Width" /><input name="height" type="number" min="120" max="4320" step="1" placeholder="Height" /><input name="fps" type="number" min="1" max="120" step="1" placeholder="FPS" /><label><span>Flip</span><select name="flip"><option value="none">none</option><option value="horizontal">horizontal</option><option value="vertical">vertical</option><option value="both">both</option></select></label><button type="submit">Save camera</button></form></section><section class="card"><h2>ANPR</h2><form id="anprSettingsForm" class="form-grid"><label><span>ANPR</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>OCR backend</span><select name="backend"><option value="paddleocr">paddleocr</option><option value="easyocr">easyocr</option></select></label><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" /><input name="vehicle_labels" placeholder="Vehicle labels: car, truck, bus, motorcycle" /><button type="submit">Save ANPR</button></form></section><section class="card"><h2>Recording policy</h2><form id="recordingSettingsForm" class="form-grid"><label><span>Recording</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Primary mode</span><select name="mode"><option value="motion">motion</option><option value="continuous">continuous</option><option value="human">human</option><option value="objects">objects</option><option value="off">off</option></select></label><label><span>Continuous</span><select name="continuous"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><label><span>Record on motion</span><select name="record_on_motion"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Record on human</span><select name="record_on_human"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="record_on_objects" placeholder="Objects: cat, dog, package, parcel" /><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" /><input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" /><input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="Max clip seconds" /><input name="format" placeholder="Format: avi or mp4" /><button type="submit">Save recording</button></form></section><section class="card"><h2>Retention</h2><form id="retentionSettingsForm" class="form-grid"><label><span>Auto purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="retention_days" type="number" min="1" max="3650" placeholder="Retention days" /><input name="max_storage_gb" type="number" min="1" max="100000" placeholder="Max storage GB" /><button type="submit">Save retention</button><button id="purgeRecordingsBtn" class="secondary" type="button">Purge now</button></form></section><section class="card"><h2>Storage</h2><form id="storageSettingsForm" class="form-grid"><input name="data_dir" placeholder="Data directory" /><input name="snapshots_dir" placeholder="Snapshots directory" /><input name="events_dir" placeholder="Events directory" /><input name="recordings_dir" placeholder="Recordings directory" /><input name="plates_dir" placeholder="Plate images directory" /><button type="submit">Save storage</button></form><p class="muted">Database file location stays in config.yaml because it is needed before the web UI can load.</p></section><section class="card"><h2>Login security</h2><form id="authSettingsForm" class="form-grid"><input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="Session timeout hours" /><input name="max_login_attempts" type="number" min="1" max="100" placeholder="Max login attempts" /><input name="lockout_minutes" type="number" min="1" max="1440" placeholder="Lockout minutes" /><button type="submit">Save login security</button></form><p class="muted">Auth enablement and cookie name remain bootstrap settings.</p></section></main><script src="/static/system-settings.js"></script></body></html>""")
 
 @app.get('/users')
 def users_page():
@@ -1153,7 +1152,7 @@ def status(camera_id: str | None = None):
     ai_state = ai_status_payload()
     return {
         'status': 'online',
-        'mode': selected_config.get('backend', 'mock'),
+        'mode': selected_config.get('backend', 'onvif'),
         'camera_id': selected_config.get('id'),
         'camera_name': selected_config.get('name'),
         'camera_detection': selected_config.get('detection', {}),
@@ -1189,59 +1188,7 @@ def live_snapshot(overlay: bool = Query(True), camera_id: str | None = None):
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         process_live_stream_alerts(image_bytes, frame, selected_config)
         return Response(content=image_bytes, media_type='image/jpeg')
-    frame = selected_camera.get_frame()
-    detections = filter_detections_for_camera(mock_detector.detect(frame['frame_number'], force=True), selected_config) if overlay else []
-    svg = render_live_snapshot_svg(frame, detections, overlay=overlay, camera_name=str(selected_config.get('name') or 'Camera'), zones=selected_config.get('detection', {}).get('zones', []))
-    return Response(content=svg, media_type='image/svg+xml')
-
-
-@app.post('/api/mock/detect')
-def generate_detection(force: bool = True, camera_id: str | None = None):
-    selected_camera = get_camera_instance(camera_id)
-    selected_config = get_camera_config(camera_id)
-    frame = selected_camera.get_frame()
-    active_mock_detector = detector if hasattr(detector, 'detect') else mock_detector
-    detections = filter_detections_for_camera(active_mock_detector.detect(frame['frame_number'], force=force), selected_config)
-
-    if not detections:
-        return {'created': False, 'message': 'No detections generated'}
-
-    snapshot_path = storage.save_mock_snapshot(frame, detections)
-    alerts.rules = effective_alert_rules()
-    triggered = alerts.process(detections)
-
-    event_time = datetime.now(timezone.utc).isoformat()
-    event_id = database.add_event(
-        created_at=event_time,
-        source='mock-camera',
-        snapshot_path=snapshot_path,
-        detections=detections,
-        alert_triggered=bool(triggered),
-        metadata={'camera_id': selected_config.get('id'), 'camera_name': selected_config.get('name')},
-    )
-    recording_id = attach_event_recording(event_id, event_time, 'mock-camera', detections)
-    plate_events = process_anpr_for_event(event_id, detections, snapshot_path, event_time)
-
-    for alert in triggered:
-        database.add_alert(
-            created_at=datetime.now(timezone.utc).isoformat(),
-            rule_name=alert['rule_name'],
-            event_id=event_id,
-            label=alert['label'],
-            confidence=alert['confidence'],
-            message=alert['message'],
-        )
-    deliver_email_alerts(triggered, event_id)
-
-    return {
-        'created': True,
-        'event_id': event_id,
-        'camera_id': selected_config.get('id'),
-        'recording_id': recording_id,
-        'detections': detections,
-        'alerts': triggered,
-        'plate_events': plate_events,
-    }
+    raise HTTPException(status_code=503, detail='Live snapshots require an ONVIF/RTSP camera backend.')
 
 
 @app.post('/api/detect/test-image')
@@ -1254,9 +1201,6 @@ async def detect_test_image(request: Request):
     ai_state = ai_status_payload(ai_settings)
     if ai_settings.get('backend') == 'onnx' and not ai_state['detector_loaded']:
         raise HTTPException(status_code=400, detail=ai_state['last_detector_error'] or 'ONNX detector is not loaded.')
-    if ai_settings.get('backend') == 'mock' and getattr(detector, 'backend', None) != 'mock':
-        raise HTTPException(status_code=400, detail='Mock detector is not loaded. Save AI settings or reload the detector.')
-
     try:
         detections = detector.detect_image(image_bytes)
     except DetectorUnavailableError as exc:
@@ -1553,9 +1497,9 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
         updated['enabled'] = enabled_value.lower() in {'1', 'true', 'yes', 'on'}
     else:
         updated['enabled'] = bool(enabled_value)
-    backend = str(updated.get('backend', 'mock')).lower()
-    if backend not in {'mock', 'onnx'}:
-        raise HTTPException(status_code=400, detail='AI backend must be mock or onnx.')
+    backend = str(updated.get('backend', 'onnx')).lower()
+    if backend != 'onnx':
+        raise HTTPException(status_code=400, detail='AI backend must be onnx.')
     updated['backend'] = backend
     for field in ('confidence', 'iou_threshold'):
         try:
@@ -1731,9 +1675,9 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
         if key in current
     }
     updated.update({key: payload[key] for key in ('id', 'name', 'backend', 'device', 'flip', 'stream_url', 'host', 'port', 'path', 'username', 'password') if key in payload})
-    backend = str(updated.get('backend', 'mock')).lower()
-    if backend not in {'mock', 'onvif', 'rtsp'}:
-        raise HTTPException(status_code=400, detail='Camera backend must be mock, onvif, or rtsp.')
+    backend = str(updated.get('backend', 'onvif')).lower()
+    if backend not in {'onvif', 'rtsp'}:
+        raise HTTPException(status_code=400, detail='Camera backend must be onvif or rtsp.')
     updated['backend'] = backend
     updated['id'] = normalize_camera_id(updated.get('id'), f'camera-{index}')
     updated['name'] = camera_default_name(updated, f'Camera {index}')
@@ -1788,9 +1732,11 @@ def validate_cameras_settings(payload: Any) -> list[dict[str, Any]]:
 def validate_anpr_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_anpr_config()
     merged = {**current, **payload}
-    backend = str(merged.get('backend', 'mock')).lower()
-    if backend not in {'mock', 'paddleocr', 'easyocr'}:
-        raise HTTPException(status_code=400, detail='ANPR backend must be mock, paddleocr, or easyocr.')
+    backend = str(merged.get('backend', 'paddleocr')).lower()
+    if backend == 'mock':
+        backend = 'paddleocr'
+    if backend not in {'paddleocr', 'easyocr'}:
+        raise HTTPException(status_code=400, detail='ANPR backend must be paddleocr or easyocr.')
     try:
         min_confidence = float(merged.get('min_confidence', 0.75))
     except (TypeError, ValueError) as exc:
@@ -1903,7 +1849,7 @@ def get_ai_settings():
 
 
 def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
-    global detector, mock_detector, last_detector_error
+    global detector, last_detector_error
     previous_detector = detector
     candidate = create_detector(ai_settings)
     candidate_error = getattr(candidate, 'unavailable_reason', None)
@@ -1914,10 +1860,6 @@ def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
         return False, last_detector_error
     detector = candidate
     last_detector_error = candidate_error
-    if ai_settings['backend'] == 'mock':
-        mock_detector = candidate  # type: ignore[assignment]
-    else:
-        mock_detector = MockDetector(ai_settings.get('categories', config.get('ai', {}).get('categories', [])), float(ai_settings.get('confidence', 0.45)))
     log_detector_initialization('reload')
     return True, last_detector_error
 

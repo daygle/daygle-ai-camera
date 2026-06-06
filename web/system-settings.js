@@ -32,7 +32,7 @@ function createCameraManagerSection() {
     <div class="section-header">
       <div>
         <h2>Multiple cameras</h2>
-        <p class="muted">Add additional RTSP/ONVIF or mock cameras and configure per-camera motion, object detection, and monitoring areas from Live Cameras.</p>
+        <p class="muted">Add additional RTSP/ONVIF cameras and configure per-camera motion, object detection, and monitoring areas from Live Cameras.</p>
       </div>
       <button id="addCameraBtn" type="button">Add camera</button>
     </div>
@@ -52,7 +52,7 @@ function newCameraTemplate() {
   return {
     id: `camera-${number}`,
     name: `Camera ${number}`,
-    backend: 'mock',
+    backend: 'onvif',
     device: 0,
     stream_url: '',
     host: '',
@@ -76,7 +76,7 @@ function renderCameraManager() {
       <div class="form-grid compact-grid">
         <input data-camera-field="id" value="${escapeHtml(camera.id || '')}" placeholder="Camera ID" />
         <input data-camera-field="name" value="${escapeHtml(camera.name || '')}" placeholder="Display name" />
-        <label><span>Backend</span><select data-camera-field="backend"><option value="mock" ${camera.backend === 'mock' ? 'selected' : ''}>mock</option><option value="onvif" ${camera.backend === 'onvif' ? 'selected' : ''}>onvif / RTSP</option><option value="rtsp" ${camera.backend === 'rtsp' ? 'selected' : ''}>rtsp</option></select></label>
+        <label><span>Backend</span><select data-camera-field="backend"><option value="onvif" ${camera.backend === 'onvif' ? 'selected' : ''}>onvif / RTSP</option><option value="rtsp" ${camera.backend === 'rtsp' ? 'selected' : ''}>rtsp</option></select></label>
         <input data-camera-field="stream_url" value="${escapeHtml(camera.stream_url || '')}" placeholder="RTSP stream URL" />
         <input data-camera-field="host" value="${escapeHtml(camera.host || '')}" placeholder="Host/IP" />
         <input data-camera-field="port" type="number" value="${escapeHtml(camera.port || 554)}" placeholder="Port" />

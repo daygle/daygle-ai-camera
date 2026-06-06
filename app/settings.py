@@ -13,8 +13,8 @@ CONFIG_ENV_VAR = "DAYGLE_CONFIG"
 DEFAULT_CONFIG: dict[str, Any] = {
     "server": {"host": "0.0.0.0", "port": 8080},
     "camera": {
-        "backend": "mock",
-        "device": 0,
+        "backend": "onvif",
+        "device": "rtsp",
         "width": 1280,
         "height": 720,
         "fps": 15,
@@ -28,7 +28,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "ai": {
         "enabled": True,
-        "backend": "mock",
+        "backend": "onnx",
         "confidence": 0.45,
         "iou_threshold": 0.45,
         "input_size": 640,
@@ -38,7 +38,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "anpr": {
         "enabled": True,
-        "backend": "mock",
+        "backend": "paddleocr",
         "min_confidence": 0.75,
         "vehicle_labels": ["car", "truck", "bus", "motorcycle"],
     },
@@ -56,8 +56,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         },
         "rules": [
             {
-                "name": "Cat alert",
-                "object": "cat",
+                "name": "Person alert",
+                "object": "person",
                 "min_confidence": 0.50,
                 "cooldown_seconds": 60,
                 "enabled": True,

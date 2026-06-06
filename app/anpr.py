@@ -19,7 +19,7 @@ class AnprPipeline:
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
         self.enabled = bool(config.get("enabled", True))
-        self.backend = str(config.get("backend", "mock")).lower()
+        self.backend = str(config.get("backend", "paddleocr")).lower()
         self.min_confidence = float(config.get("min_confidence", 0.75))
         self.vehicle_labels = {str(label).lower() for label in config.get("vehicle_labels", VEHICLE_LABELS)}
         self.ocr = create_ocr_backend(self.backend)

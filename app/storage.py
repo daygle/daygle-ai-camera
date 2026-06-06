@@ -23,19 +23,6 @@ class Storage:
         self.recordings_dir.mkdir(parents=True, exist_ok=True)
         self.plates_dir.mkdir(parents=True, exist_ok=True)
 
-    def save_mock_snapshot(self, frame: dict[str, Any], detections: list[dict[str, Any]]) -> str:
-        created = datetime.now(timezone.utc)
-        filename = created.strftime('%Y%m%d_%H%M%S_%f') + '.json'
-        path = self.snapshots_dir / filename
-        payload = {
-            'created_at': created.isoformat(),
-            'frame': frame,
-            'detections': detections,
-            'note': 'Mock snapshot metadata. Real image snapshots will be added with the camera backend.'
-        }
-        path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
-        return str(path)
-
     def save_image_snapshot(self, image_bytes: bytes, original_filename: str | None = None) -> str:
         created = datetime.now(timezone.utc)
         suffix = Path(original_filename or '').suffix.lower()
@@ -55,7 +42,7 @@ class Storage:
             'event_id': event_id,
             'source_path': source_path,
             'detection': detection,
-            'note': 'Plate crop placeholder for mock/upload pipeline. Real crop bytes can replace this in camera backends.',
+            'note': 'Plate crop placeholder for uploaded-image workflows. Real crop bytes can replace this in camera backends.',
         }
         path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
         return str(path)

@@ -103,7 +103,6 @@ h2 { margin: 0; font-size: 20px; }
 
 .ai-status-card small { display: block; margin-top: 6px; line-height: 1.4; }
 .ai-mode { font-size: 24px; letter-spacing: .04em; }
-.ai-mode.mock-mode { color: #fbbf24; }
 .ai-mode.onnx-active { color: var(--success); }
 .ai-mode.model-failed { color: var(--danger); }
 .section-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
@@ -144,23 +143,6 @@ textarea {
   font-size: 12px;
 }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.mock-feed {
-  position: relative;
-  min-height: 420px;
-  overflow: hidden;
-  border-radius: 22px;
-  border: 1px solid rgba(71,214,255,.18);
-  background: linear-gradient(135deg, rgba(71,214,255,.08), rgba(139,92,246,.08)),
-              repeating-linear-gradient(0deg, rgba(255,255,255,.035) 0 1px, transparent 1px 42px),
-              repeating-linear-gradient(90deg, rgba(255,255,255,.028) 0 1px, transparent 1px 42px),
-              #0b1220;
-}
-.scanline { position: absolute; inset: 0; background: linear-gradient(180deg, transparent, rgba(71,214,255,.18), transparent); height: 28%; animation: scan 4s linear infinite; }
-@keyframes scan { from { transform: translateY(-100%); } to { transform: translateY(420px); } }
-.target-box { position: absolute; border: 2px solid var(--success); border-radius: 14px; padding: 8px; color: var(--success); font-weight: 800; background: rgba(73,230,163,.08); }
-.box-one { left: 16%; top: 22%; width: 180px; height: 120px; }
-.box-two { right: 14%; bottom: 18%; width: 220px; height: 180px; border-color: var(--accent); color: var(--accent); background: rgba(71,214,255,.08); }
-.feed-label { position: absolute; left: 18px; bottom: 18px; color: var(--muted); font-weight: 800; letter-spacing: .08em; }
 .list { display: grid; gap: 10px; max-height: 420px; overflow: auto; }
 .alert-rules-list { margin-top: 28px; }
 .item { border: 1px solid var(--border); background: rgba(255,255,255,.04); border-radius: 16px; padding: 14px; }

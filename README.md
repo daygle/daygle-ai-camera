@@ -1,6 +1,6 @@
 # Daygle AI Camera
 
-Daygle AI Camera is an Orange Pi 3B / Armbian-friendly AI camera platform with a FastAPI backend, SQLite storage, session authentication, a browser dashboard, mock camera mode for development, and mock or ONNX YOLO object detection.
+Daygle AI Camera is an Orange Pi 3B / Armbian-friendly AI camera platform with a FastAPI backend, SQLite storage, session authentication, a browser dashboard, ONVIF/RTSP camera support, and ONNX YOLO object detection.
 
 The app is now designed to be configured from the web UI. `config.yaml` is only a small bootstrap file for settings the app must know before the database and dashboard can load.
 
@@ -10,12 +10,11 @@ The app is now designed to be configured from the web UI. `config.yaml` is only 
 - First-run setup flow for creating the initial administrator.
 - Admin/viewer roles with admin-only settings and user management.
 - Profile page for timezone, date/time format, and password changes.
-- Web-managed AI settings for mock or ONNX detection.
+- Web-managed AI settings for ONNX detection.
 - Modular ANPR/ALPR pipeline for vehicle detections, plate OCR, plate search, and plate alerts.
 - Web-managed alert rules with optional SMTP email delivery.
 - Web-managed system settings for camera, recording policy, retention, storage directories, and login security.
 - SQLite persistence for events, detections, alerts, users, sessions, runtime settings, and alert rules.
-- Mock camera/detector for development and CI without camera hardware.
 - ONVIF/RTSP live snapshot support for testing P6S-style IP cameras before CSI camera hardware arrives.
 - Armbian install script and systemd unit for Orange Pi deployment.
 
@@ -26,8 +25,8 @@ The app is now designed to be configured from the web UI. `config.yaml` is only 
 - Python 3.10 or newer.
 - `pip` and optionally `python3-venv`.
 - A modern browser.
-- Optional: an ONNX YOLO model file if you want real inference instead of mock detection.
-- Optional: PaddleOCR or EasyOCR if you want OCR beyond the built-in mock ANPR backend.
+- Optional: an ONNX YOLO model file for object detection.
+- Optional: PaddleOCR or EasyOCR for ANPR OCR.
 
 ### Orange Pi / Armbian Deployment
 
@@ -194,7 +193,7 @@ Route: `/profile`
 Route: `/settings`
 
 - AI enabled state.
-- Backend: `mock` or `onnx`.
+- Backend: `onnx`.
 - Confidence threshold.
 - IOU threshold.
 - Input size.
@@ -223,7 +222,7 @@ SMTP settings are stored in SQLite under `app_settings.key = alert_email`. Alert
 
 Route: `/system-settings`
 
-- Camera: backend (`mock`, `onvif`, or `rtsp`), device label, stream URL or ONVIF host credentials, width, height, FPS, flip.
+- Camera: backend (`onvif` or `rtsp`), device label, stream URL or ONVIF host credentials, width, height, FPS, flip.
 - ANPR: enable/disable, OCR backend, confidence threshold, and vehicle labels.
 - Recording policy: continuous recording, record on motion, record on human, and selected object labels such as `cat`, `dog`, `package`, and `parcel`.
 - Clip settings: pre-event seconds, post-event seconds, max clip seconds, and file format.
@@ -240,7 +239,7 @@ Most ONVIF-compatible cameras expose the video itself as an RTSP stream. To test
 - paste the complete `stream_url`, for example `rtsp://username:password@192.168.1.50:554/stream1`; or
 - enter `host`, `username`, `password`, optional `port` (default `554`), and `path` so Daygle can build the RTSP URL.
 
-Then open `/live`; `/api/live/snapshot` will return a JPEG pulled from the stream. The mock SVG live view remains available when the backend is `mock`.
+Then open `/live`; `/api/live/snapshot` will return a JPEG pulled from the stream.
 
 ### ANPR
 
@@ -256,9 +255,8 @@ Vehicle labels are configurable and default to `car`, `truck`, `bus`, and `motor
 
 Supported OCR backends:
 
-- `mock`: built-in deterministic OCR for development and tests.
-- `paddleocr`: optional PaddleOCR backend. Falls back to mock if the package is unavailable.
-- `easyocr`: optional EasyOCR backend. Falls back to mock if the package is unavailable.
+- `paddleocr`: optional PaddleOCR backend.
+- `easyocr`: optional EasyOCR backend.
 
 Optional OCR installs:
 
@@ -285,18 +283,17 @@ Admins can whitelist or blacklist plates and add notes such as `Family Car`, `De
 
 ## ONNX YOLO Setup
 
-The default setup uses mock detection so installation can be verified without a camera or model file.
+The default setup expects ONNX detection and a real ONVIF/RTSP camera.
 
 To enable ONNX inference:
 
 1. Sign in as an admin.
 2. Open `/settings`.
 3. Click **Download YOLOv8n ONNX** to export `yolov8n.pt` to ONNX locally, or enter your own model path.
-4. Set backend to `onnx`.
-5. Save AI settings.
-6. Use **Check model**, **Reload detector**, and **Test detector**.
+4. Save AI settings.
+5. Use **Check model**, **Reload detector**, and **Test detector**.
 
-If `onnx` is selected and the model is missing, the dashboard reports `MODEL MISSING` and upload inference returns a clear API error. The app does not silently fall back to mock detections.
+If the model is missing, the dashboard reports `MODEL MISSING` and upload inference returns a clear API error.
 
 Manual model export remains available. Install the export dependencies first if they are not already present:
 
@@ -342,8 +339,7 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `POST` | `/api/profile/password` | Change current user's password |
 | `GET` | `/api/status` | Camera and detector status |
 | `GET` | `/api/status/ai` | Detailed AI status |
-| `GET` | `/api/live/snapshot` | Live mock SVG or ONVIF/RTSP JPEG snapshot |
-| `POST` | `/api/mock/detect` | Generate mock detection event |
+| `GET` | `/api/live/snapshot` | Live ONVIF/RTSP JPEG snapshot |
 | `POST` | `/api/detect/test-image` | Upload image for active detector inference |
 | `GET` | `/api/events` | List/search events |
 | `GET` | `/api/alerts` | Alert history |
@@ -401,7 +397,7 @@ Useful `app_settings` keys:
 
 ## Recording and Playback
 
-The recording layer creates event-linked clips and dashboard playback wiring. In the current mock/test-image stage, clips are generated as short playable footage with event and detection overlays. The live view can display ONVIF/RTSP snapshots, but event clips are still generated placeholders until real stream recording is wired into the recording service.
+The recording layer creates event-linked clips and dashboard playback wiring for live camera detections and uploaded-image tests.
 
 Recording policy is managed at `/system-settings`:
 
@@ -433,14 +429,13 @@ Playback routes:
 
 Current limitations:
 
-- Mock and uploaded-image events create generated footage, not real camera footage.
-- Real clip writing for camera, RTSP/ONVIF, and uploaded videos is future work; ONVIF/RTSP currently powers live JPEG snapshots only.
+- Uploaded-image events create generated footage, not real camera footage.
+- RTSP/ONVIF camera events create linked recording artifacts from the live event path.
 - Retention runs when clips are created or when an admin clicks **Purge now**; there is no background scheduler yet.
 
 ## ANPR Limitations
 
-- Plate crop extraction is a modular placeholder in mock/upload workflows; future camera backends can replace it with real image crops.
-- The built-in `mock` OCR backend is deterministic and useful for workflow testing, not real OCR.
+- Plate crop extraction is a modular placeholder in uploaded-image workflows; camera backends can replace it with real image crops.
 - PaddleOCR and EasyOCR are optional dependencies and may require additional platform packages.
 - Plate alerts are stored and matched in-process for cooldown behavior; persistent alert history can be added later if needed.
 

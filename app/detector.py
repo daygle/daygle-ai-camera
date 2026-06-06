@@ -319,7 +319,7 @@ class OnnxYoloDetector:
 
 
 def create_detector(ai_config: dict[str, Any]) -> MockDetector | OnnxYoloDetector:
-    backend = str(ai_config.get("backend", "mock")).lower()
+    backend = str(ai_config.get("backend", "onnx")).lower()
     if backend == "onnx":
         return OnnxYoloDetector(
             model_path=ai_config.get("model_path", "models/model.onnx"),
