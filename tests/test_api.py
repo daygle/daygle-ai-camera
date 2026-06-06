@@ -1398,6 +1398,28 @@ def test_recording_table_creation(tmp_path):
     } <= columns
 
 
+def test_rtsp_recording_metadata_can_skip_generated_placeholder(tmp_path):
+    from app.recordings import RecordingService
+
+    service = RecordingService({
+        'storage': {'recordings_dir': str(tmp_path / 'recordings')},
+        'recording': {'enabled': True, 'mode': 'motion', 'format': 'mp4'},
+    })
+
+    metadata = service.event_recording_metadata(
+        42,
+        '2026-06-06T00:00:00+00:00',
+        'rtsp',
+        [{'label': 'car', 'confidence': 0.8}],
+        write_clip=False,
+    )
+
+    assert metadata is not None
+    assert metadata['source'] == 'rtsp'
+    assert metadata['file_path'].endswith('.mp4')
+    assert not Path(metadata['file_path']).exists()
+
+
 def test_alerted_only_event_and_recording_queries_use_enabled_rules(tmp_path):
     from app.database import EventDatabase
 
@@ -1561,8 +1583,9 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
                 'detection': {
                     'motion_enabled': True,
                     'object_detection_enabled': True,
+                    'anpr_enabled': True,
                     'zones': [
-                        {'id': 'porch', 'name': 'Porch', 'x': 0.0, 'y': 0.0, 'width': 0.5, 'height': 0.5, 'monitor_motion': True, 'monitor_objects': True}
+                        {'id': 'porch', 'name': 'Porch', 'x': 0.0, 'y': 0.0, 'width': 0.5, 'height': 0.5, 'monitor_motion': True, 'monitor_objects': True, 'monitor_anpr': True}
                     ],
                 },
             },
@@ -1573,7 +1596,7 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
                 'width': 640,
                 'height': 480,
                 'fps': 10,
-                'detection': {'motion_enabled': False, 'object_detection_enabled': False, 'zones': []},
+                'detection': {'motion_enabled': False, 'object_detection_enabled': False, 'anpr_enabled': False, 'zones': []},
             },
         ]
         status, _headers, payload = client.request('/api/cameras', method='PUT', json_body={'cameras': cameras}, headers={'X-CSRF-Token': csrf})
@@ -1603,7 +1626,7 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
                 'detection': {
                     **listed['cameras'][0]['detection'],
                     'zones': [
-                        {'id': 'driveway', 'name': 'Driveway', 'x': 0.25, 'y': 0.25, 'width': 0.5, 'height': 0.5, 'monitor_motion': True, 'monitor_objects': False}
+                        {'id': 'driveway', 'name': 'Driveway', 'x': 0.25, 'y': 0.25, 'width': 0.5, 'height': 0.5, 'monitor_motion': True, 'monitor_objects': False, 'monitor_anpr': False}
                     ],
                 },
             },
@@ -1612,6 +1635,7 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
         assert status == 200
         assert updated['detection']['zones'][0]['id'] == 'driveway'
         assert updated['detection']['zones'][0]['monitor_objects'] is False
+        assert updated['detection']['zones'][0]['monitor_anpr'] is False
     finally:
         server.should_exit = True
         thread.join(timeout=5)

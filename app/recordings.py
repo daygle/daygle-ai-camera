@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -48,7 +50,15 @@ class RecordingService:
                     return True, 'object', label
         return False, 'none', None
 
-    def event_recording_metadata(self, event_id: int, event_time: str, source: str, detections: list[dict[str, Any]]) -> dict[str, Any] | None:
+    def event_recording_metadata(
+        self,
+        event_id: int,
+        event_time: str,
+        source: str,
+        detections: list[dict[str, Any]],
+        *,
+        write_clip: bool = True,
+    ) -> dict[str, Any] | None:
         should_record, trigger_type, trigger_label = self.should_record(detections)
         if not should_record:
             return None
@@ -69,7 +79,8 @@ class RecordingService:
         extension = self.recording_format()
         filename = f"event_{event_id}_{created.strftime('%Y%m%d_%H%M%S_%f')}.{extension}"
         file_path = self.recordings_dir / filename
-        self.write_event_clip(file_path, event_id, detections, duration_seconds, trigger_type, trigger_label)
+        if write_clip:
+            self.write_event_clip(file_path, event_id, detections, duration_seconds, trigger_type, trigger_label)
 
         mapped_source = 'upload' if source in {'test-image', 'upload'} else 'rtsp' if source == 'rtsp' else 'mock' if source.startswith('mock') else 'camera'
         if mapped_source not in self.VALID_SOURCES:
@@ -86,6 +97,43 @@ class RecordingService:
             'trigger_type': trigger_type,
             'trigger_label': trigger_label,
         }
+
+    def write_rtsp_clip(self, stream_url: str, file_path: Path, duration_seconds: float) -> None:
+        ffmpeg = shutil.which('ffmpeg')
+        if not ffmpeg:
+            raise RuntimeError('ffmpeg is required to record RTSP clips.')
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = file_path.with_name(f'{file_path.stem}.recording.tmp{file_path.suffix}')
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        command = [
+            ffmpeg,
+            '-y',
+            '-rtsp_transport',
+            'tcp',
+            '-i',
+            stream_url,
+            '-t',
+            f'{float(duration_seconds):.3f}',
+            '-an',
+            '-c:v',
+            'libx264',
+            '-preset',
+            'veryfast',
+            '-pix_fmt',
+            'yuv420p',
+            '-movflags',
+            '+faststart',
+            str(tmp_path),
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=max(30, int(duration_seconds) + 20), check=False)
+        if result.returncode != 0:
+            if tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
+            raise RuntimeError(f'ffmpeg failed to record RTSP clip: {result.stderr[-500:]}')
+        if not tmp_path.exists():
+            raise RuntimeError('ffmpeg did not create an RTSP recording file.')
+        tmp_path.replace(file_path)
 
     def recording_format(self) -> str:
         configured = str(self.recording_config.get('format', self.PLAYBACK_FORMAT)).strip().lstrip('.').lower()

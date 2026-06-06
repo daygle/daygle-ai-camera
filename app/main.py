@@ -11,6 +11,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -202,6 +203,7 @@ def default_camera_detection_settings() -> dict[str, Any]:
     return {
         'motion_enabled': True,
         'object_detection_enabled': True,
+        'anpr_enabled': True,
         'zones': [],
     }
 
@@ -227,6 +229,7 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
             'enabled': bool(zone.get('enabled', True)),
             'monitor_motion': bool(zone.get('monitor_motion', True)),
             'monitor_objects': bool(zone.get('monitor_objects', True)),
+            'monitor_anpr': bool(zone.get('monitor_anpr', True)),
         })
     return normalized
 
@@ -244,7 +247,7 @@ def normalize_camera_settings(settings: dict[str, Any], index: int = 1) -> dict[
     detection = default_camera_detection_settings()
     if isinstance(camera_settings.get('detection'), dict):
         detection.update(camera_settings['detection'])
-    for key in ('motion_enabled', 'object_detection_enabled'):
+    for key in ('motion_enabled', 'object_detection_enabled', 'anpr_enabled'):
         detection[key] = bool(detection.get(key, True))
     detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
     camera_settings['detection'] = detection
@@ -303,6 +306,16 @@ def filter_detections_for_camera_zones(detections: list[dict[str, Any]], setting
     return [detection for detection in detections if any(detection_center_in_zone(detection, zone) for zone in zones)]
 
 
+def filter_detections_for_camera_anpr(detections: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
+    detection_settings = settings.get('detection') or {}
+    if detection_settings.get('anpr_enabled', True) is False:
+        return []
+    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_anpr', True)]
+    if not zones:
+        return []
+    return [detection for detection in detections if any(detection_center_in_zone(detection, zone) for zone in zones)]
+
+
 def normalize_detection_boxes_for_frame(detections: list[dict[str, Any]], frame: dict[str, Any]) -> list[dict[str, Any]]:
     width = float(frame.get('width') or 0)
     height = float(frame.get('height') or 0)
@@ -350,6 +363,7 @@ def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any
         'camera_id': camera_key,
         'camera_name': selected_config.get('name'),
         'object_detection_enabled': (selected_config.get('detection') or {}).get('object_detection_enabled', True),
+        'anpr_enabled': (selected_config.get('detection') or {}).get('anpr_enabled', True),
         'ai_backend': ai_state['active_backend'],
         'ai_configured_backend': ai_state['configured_backend'],
         'ai_available': ai_state['inference_available'],
@@ -364,8 +378,9 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
     detection_settings = settings.get('detection') or {}
     motion_enabled = detection_settings.get('motion_enabled', True) is not False
     object_detection_enabled = detection_settings.get('object_detection_enabled', True) is not False
-    if not motion_enabled and not object_detection_enabled:
-        update_live_detection_status(camera_id, state='skipped', reason='Motion and object detection are disabled for this camera.', detections=[])
+    anpr_enabled = detection_settings.get('anpr_enabled', True) is not False
+    if not motion_enabled and not object_detection_enabled and not anpr_enabled:
+        update_live_detection_status(camera_id, state='skipped', reason='Motion, object detection, and ANPR are disabled for this camera.', detections=[])
         return None
     if not hasattr(detector, 'detect_image'):
         update_live_detection_status(camera_id, state='skipped', reason='Live stream alerts require ONNX AI mode.', detections=[])
@@ -392,6 +407,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     motion_detections = filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_motion') if motion_enabled else []
     object_detections = filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects') if object_detection_enabled else []
+    anpr_detections = filter_detections_for_camera_anpr(detections, settings) if anpr_enabled else []
     alert_detections = list(object_detections)
     if motion_detections:
         strongest_motion = max(motion_detections, key=lambda detection: float(detection.get('confidence', 0)))
@@ -400,7 +416,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             'label': 'motion',
             'motion_event': True,
         })
-    if not alert_detections:
+    if not alert_detections and not anpr_detections:
         update_live_detection_status(
             camera_id,
             state='checked',
@@ -408,6 +424,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             detected_labels=raw_labels,
             matched_labels=[],
             detections=object_detections,
+            anpr_detections=[],
         )
         return None
 
@@ -421,7 +438,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         created_at=event_time,
         source='rtsp',
         snapshot_path=snapshot_path,
-        detections=alert_detections,
+        detections=alert_detections or anpr_detections,
         alert_triggered=bool(triggered),
         metadata={
             'camera_id': settings.get('id'),
@@ -432,7 +449,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         },
     )
     recording_id = attach_event_recording(event_id, event_time, 'rtsp', alert_detections, camera_id=camera_id)
-    process_anpr_for_event(event_id, object_detections, snapshot_path, event_time)
+    process_anpr_for_event(event_id, anpr_detections, snapshot_path, event_time)
 
     for alert in triggered:
         database.add_alert(
@@ -456,6 +473,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         detected_labels=raw_labels,
         matched_labels=matched_labels,
         detections=object_detections,
+        anpr_detections=anpr_detections,
         triggered_alerts=triggered,
         event_id=event_id,
         recording_id=recording_id,
@@ -689,14 +707,35 @@ def require_admin(request: Request) -> dict[str, Any]:
 
 
 def attach_event_recording(event_id: int, event_time: str, source: str, detections: list[dict[str, Any]], camera_id: str | None = None) -> int | None:
-    metadata = recording_service.event_recording_metadata(event_id, event_time, source, detections)
+    stream_url = ''
+    if source == 'rtsp' and camera_id:
+        stream_url = build_stream_url(get_camera_config(camera_id))
+    metadata = recording_service.event_recording_metadata(event_id, event_time, source, detections, write_clip=not stream_url)
     if metadata is None:
         return None
     if camera_id:
         metadata['camera_id'] = camera_id
     recording_id = database.add_recording(created_at=utc_now(), **metadata)
+    if stream_url:
+        start_rtsp_recording_capture(stream_url, metadata, event_id, detections)
     purge_recordings_by_policy()
     return recording_id
+
+
+def start_rtsp_recording_capture(stream_url: str, metadata: dict[str, Any], event_id: int, detections: list[dict[str, Any]]) -> None:
+    file_path = Path(str(metadata.get('file_path') or ''))
+    duration_seconds = float(metadata.get('duration_seconds') or 1)
+    trigger_type = str(metadata.get('trigger_type') or 'motion')
+    trigger_label = metadata.get('trigger_label')
+
+    def capture() -> None:
+        try:
+            recording_service.write_rtsp_clip(stream_url, file_path, duration_seconds)
+        except Exception as exc:
+            logger.warning('RTSP recording capture failed for event %s, writing generated fallback: %s', event_id, exc)
+            recording_service.write_event_clip(file_path, event_id, detections, duration_seconds, trigger_type, str(trigger_label) if trigger_label else None)
+
+    threading.Thread(target=capture, name=f'rtsp-recording-{event_id}', daemon=True).start()
 
 
 def recording_skip_reason(detections: list[dict[str, Any]]) -> str:
@@ -1224,7 +1263,7 @@ def anpr_page():
 def system_settings_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>System Settings · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>System Settings</h1><p class="muted">Move day-to-day camera, recording, storage, and login settings out of YAML.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Camera</h2><div id="systemMessage" class="muted"></div><form id="cameraSettingsForm" class="form-grid"><label><span>Backend</span><select name="backend"><option value="onvif">onvif / RTSP</option><option value="rtsp">rtsp</option></select></label><input name="device" placeholder="Device label" /><input name="stream_url" placeholder="RTSP stream URL, e.g. rtsp://user:pass@camera:554/stream1" /><input name="host" placeholder="ONVIF camera host/IP (optional)" /><input name="port" type="number" min="1" max="65535" step="1" placeholder="RTSP port, usually 554" /><input name="path" placeholder="Stream path, e.g. stream1 or live/ch0" /><input name="username" placeholder="Camera username" /><input name="password" type="password" placeholder="Camera password" /><input name="width" type="number" min="160" max="7680" step="1" placeholder="Width" /><input name="height" type="number" min="120" max="4320" step="1" placeholder="Height" /><input name="fps" type="number" min="1" max="120" step="1" placeholder="FPS" /><label><span>Flip</span><select name="flip"><option value="none">none</option><option value="horizontal">horizontal</option><option value="vertical">vertical</option><option value="both">both</option></select></label><button type="submit">Save camera</button></form></section><section class="card"><h2>ANPR</h2><form id="anprSettingsForm" class="form-grid"><label><span>ANPR</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>OCR backend</span><select name="backend"><option value="paddleocr">paddleocr</option><option value="easyocr">easyocr</option></select></label><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" /><input name="vehicle_labels" placeholder="Vehicle labels: car, truck, bus, motorcycle" /><button type="submit">Save ANPR</button></form></section><section class="card"><h2>Recording policy</h2><form id="recordingSettingsForm" class="form-grid"><label><span>Recording</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Primary mode</span><select name="mode"><option value="motion">motion</option><option value="continuous">continuous</option><option value="human">human</option><option value="objects">objects</option><option value="off">off</option></select></label><label><span>Continuous</span><select name="continuous"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><label><span>Record on motion</span><select name="record_on_motion"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Record on human</span><select name="record_on_human"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="record_on_objects" placeholder="Objects: cat, dog, package, parcel" /><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" /><input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" /><input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="Max clip seconds" /><input name="format" placeholder="Format: mp4" /><button type="submit">Save recording</button></form></section><section class="card"><h2>Retention</h2><form id="retentionSettingsForm" class="form-grid"><label><span>Auto purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="retention_days" type="number" min="1" max="3650" placeholder="Retention days" /><input name="max_storage_gb" type="number" min="1" max="100000" placeholder="Max storage GB" /><button type="submit">Save retention</button><button id="purgeRecordingsBtn" class="secondary" type="button">Purge now</button></form></section><section class="card"><h2>Storage</h2><form id="storageSettingsForm" class="form-grid"><input name="data_dir" placeholder="Data directory" /><input name="snapshots_dir" placeholder="Snapshots directory" /><input name="events_dir" placeholder="Events directory" /><input name="recordings_dir" placeholder="Recordings directory" /><input name="plates_dir" placeholder="Plate images directory" /><button type="submit">Save storage</button></form><p class="muted">Database file location stays in config.yaml because it is needed before the web UI can load.</p></section><section class="card"><h2>Login security</h2><form id="authSettingsForm" class="form-grid"><input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="Session timeout hours" /><input name="max_login_attempts" type="number" min="1" max="100" placeholder="Max login attempts" /><input name="lockout_minutes" type="number" min="1" max="1440" placeholder="Lockout minutes" /><button type="submit">Save login security</button></form><p class="muted">Auth enablement and cookie name remain bootstrap settings.</p></section></main><script src="/static/system-settings.js"></script></body></html>""")
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>System Settings</h1><p class="muted">Move day-to-day camera, recording, storage, and login settings out of YAML.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><div id="systemMessage" class="muted"></div><section class="card"><h2>ANPR</h2><form id="anprSettingsForm" class="form-grid"><label><span>OCR backend</span><select name="backend"><option value="paddleocr">paddleocr</option><option value="easyocr">easyocr</option></select></label><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min confidence" /><input name="vehicle_labels" placeholder="Vehicle labels: car, truck, bus, motorcycle" /><button type="submit">Save ANPR</button></form><p class="muted">Enable ANPR per camera and per monitoring area from Live Cameras.</p></section><section class="card"><h2>Recording policy</h2><form id="recordingSettingsForm" class="form-grid"><label><span>Recording</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Primary mode</span><select name="mode"><option value="motion">motion</option><option value="continuous">continuous</option><option value="human">human</option><option value="objects">objects</option><option value="off">off</option></select></label><label><span>Continuous</span><select name="continuous"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><label><span>Record on motion</span><select name="record_on_motion"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Record on human</span><select name="record_on_human"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="record_on_objects" placeholder="Objects: cat, dog, package, parcel" /><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" /><input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" /><input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="Max clip seconds" /><input name="format" placeholder="Format: mp4" /><button type="submit">Save recording</button></form></section><section class="card"><h2>Retention</h2><form id="retentionSettingsForm" class="form-grid"><label><span>Auto purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="retention_days" type="number" min="1" max="3650" placeholder="Retention days" /><input name="max_storage_gb" type="number" min="1" max="100000" placeholder="Max storage GB" /><button type="submit">Save retention</button><button id="purgeRecordingsBtn" class="secondary" type="button">Purge now</button></form></section><section class="card"><h2>Storage</h2><form id="storageSettingsForm" class="form-grid"><input name="data_dir" placeholder="Data directory" /><input name="snapshots_dir" placeholder="Snapshots directory" /><input name="events_dir" placeholder="Events directory" /><input name="recordings_dir" placeholder="Recordings directory" /><input name="plates_dir" placeholder="Plate images directory" /><button type="submit">Save storage</button></form><p class="muted">Database file location stays in config.yaml because it is needed before the web UI can load.</p></section><section class="card"><h2>Login security</h2><form id="authSettingsForm" class="form-grid"><input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="Session timeout hours" /><input name="max_login_attempts" type="number" min="1" max="100" placeholder="Max login attempts" /><input name="lockout_minutes" type="number" min="1" max="1440" placeholder="Lockout minutes" /><button type="submit">Save login security</button></form><p class="muted">Auth enablement and cookie name remain bootstrap settings.</p></section></main><script src="/static/system-settings.js"></script></body></html>""")
 
 @app.get('/users')
 def users_page():
@@ -1832,6 +1871,7 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     detection.update(payload_detection)
     detection['motion_enabled'] = _bool_value(detection.get('motion_enabled', True))
     detection['object_detection_enabled'] = _bool_value(detection.get('object_detection_enabled', True))
+    detection['anpr_enabled'] = _bool_value(detection.get('anpr_enabled', True))
     detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
     updated['detection'] = detection
     return updated

@@ -11,6 +11,7 @@ const liveEls = {
   saveZonesBtn: document.getElementById('saveZonesBtn'),
   motionEnabled: document.getElementById('motionEnabled'),
   objectDetectionEnabled: document.getElementById('objectDetectionEnabled'),
+  anprEnabled: document.getElementById('anprEnabled'),
 };
 
 const LIVE_REFRESH_MS = 250;
@@ -42,7 +43,7 @@ async function api(path, options = {}) {
 }
 
 function cameraDetection() {
-  selectedCamera.detection ||= { motion_enabled: true, object_detection_enabled: true, zones: [] };
+  selectedCamera.detection ||= { motion_enabled: true, object_detection_enabled: true, anpr_enabled: true, zones: [] };
   selectedCamera.detection.zones ||= [];
   return selectedCamera.detection;
 }
@@ -136,6 +137,7 @@ function setSelectedCamera(cameraId) {
   liveEls.cameraSelect.value = selectedCamera.id;
   liveEls.motionEnabled.value = String(cameraDetection().motion_enabled !== false);
   liveEls.objectDetectionEnabled.value = String(cameraDetection().object_detection_enabled !== false);
+  liveEls.anprEnabled.value = String(cameraDetection().anpr_enabled !== false);
   renderZones();
   refreshFrame();
   refreshDetectionStatus();
@@ -184,6 +186,7 @@ function renderZones() {
       <input data-zone-name="${index}" value="${escapeHtml(zone.name || `Zone ${index + 1}`)}" />
       <label><span>Motion</span><select data-zone-motion="${index}"><option value="true" ${zone.monitor_motion !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_motion === false ? 'selected' : ''}>Off</option></select></label>
       <label><span>Objects</span><select data-zone-objects="${index}"><option value="true" ${zone.monitor_objects !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_objects === false ? 'selected' : ''}>Off</option></select></label>
+      <label><span>ANPR</span><select data-zone-anpr="${index}"><option value="true" ${zone.monitor_anpr !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_anpr === false ? 'selected' : ''}>Off</option></select></label>
       <button class="secondary" type="button" data-delete-zone="${index}">Remove</button>
     </div>
   `).join('');
@@ -208,6 +211,13 @@ function renderZones() {
     select.addEventListener('change', () => {
       selectedZoneIndex = Number(select.dataset.zoneObjects);
       zones[selectedZoneIndex].monitor_objects = select.value === 'true';
+      renderZones();
+    });
+  });
+  document.querySelectorAll('[data-zone-anpr]').forEach((select) => {
+    select.addEventListener('change', () => {
+      selectedZoneIndex = Number(select.dataset.zoneAnpr);
+      zones[selectedZoneIndex].monitor_anpr = select.value === 'true';
       renderZones();
     });
   });
@@ -329,7 +339,7 @@ liveEls.zoneOverlay.addEventListener('pointerup', (event) => {
   liveEls.addZoneBtn.textContent = 'Draw area';
   if (width >= 0.02 && height >= 0.02) {
     const zones = cameraDetection().zones;
-    zones.push({ id: `zone-${Date.now()}`, name: `Zone ${zones.length + 1}`, x, y, width, height, enabled: true, monitor_motion: true, monitor_objects: true });
+    zones.push({ id: `zone-${Date.now()}`, name: `Zone ${zones.length + 1}`, x, y, width, height, enabled: true, monitor_motion: true, monitor_objects: true, monitor_anpr: true });
     selectedZoneIndex = zones.length - 1;
   }
   renderZones();
@@ -366,6 +376,7 @@ liveEls.addZoneBtn.addEventListener('click', () => {
 });
 liveEls.motionEnabled.addEventListener('change', () => { cameraDetection().motion_enabled = liveEls.motionEnabled.value === 'true'; });
 liveEls.objectDetectionEnabled.addEventListener('change', () => { cameraDetection().object_detection_enabled = liveEls.objectDetectionEnabled.value === 'true'; refreshFrame(); });
+liveEls.anprEnabled.addEventListener('change', () => { cameraDetection().anpr_enabled = liveEls.anprEnabled.value === 'true'; });
 liveEls.saveZonesBtn.addEventListener('click', async () => {
   try {
     liveEls.saveZonesBtn.disabled = true;

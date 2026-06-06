@@ -31,16 +31,20 @@ function createCameraManagerSection() {
   section.innerHTML = `
     <div class="section-header">
       <div>
-        <h2>Multiple cameras</h2>
-        <p class="muted">Add additional RTSP/ONVIF cameras and configure per-camera motion, object detection, and monitoring areas from Live Cameras.</p>
+        <h2>Cameras</h2>
+        <p class="muted">Manage RTSP/ONVIF camera connections here. Configure motion alerts, object alerts, ANPR, and monitoring areas from Live Cameras.</p>
       </div>
       <button id="addCameraBtn" type="button">Add camera</button>
     </div>
     <div id="cameraManager" class="camera-manager"></div>
     <div class="button-row"><button id="saveCamerasBtn" type="button">Save cameras</button></div>
   `;
-  const cameraSection = document.getElementById('cameraSettingsForm')?.closest('section');
-  if (cameraSection) cameraSection.before(section);
+  const firstSection = document.querySelector('main > section');
+  if (firstSection) {
+    firstSection.before(section);
+  } else {
+    document.querySelector('main')?.append(section);
+  }
 }
 
 createCameraManagerSection();
@@ -86,10 +90,8 @@ function renderCameraManager() {
         <input data-camera-field="width" type="number" value="${escapeHtml(camera.width || 1280)}" placeholder="Width" />
         <input data-camera-field="height" type="number" value="${escapeHtml(camera.height || 720)}" placeholder="Height" />
         <input data-camera-field="fps" type="number" value="${escapeHtml(camera.fps || 15)}" placeholder="FPS" />
-        <label><span>Motion</span><select data-detection-field="motion_enabled"><option value="true" ${camera.detection?.motion_enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${camera.detection?.motion_enabled === false ? 'selected' : ''}>Disabled</option></select></label>
-        <label><span>Objects</span><select data-detection-field="object_detection_enabled"><option value="true" ${camera.detection?.object_detection_enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${camera.detection?.object_detection_enabled === false ? 'selected' : ''}>Disabled</option></select></label>
       </div>
-      <p class="muted">Monitoring areas: ${(camera.detection?.zones || []).length}. Use the Live Cameras page to draw or edit areas visually.</p>
+      <p class="muted">Monitoring areas: ${(camera.detection?.zones || []).length}. Use Live Cameras to configure motion alerts, object alerts, ANPR, and areas visually.</p>
     </div>
   `).join('');
 
@@ -102,14 +104,6 @@ function renderCameraManager() {
       if (field === 'name') renderCameraManager();
     });
   });
-  manager.querySelectorAll('[data-detection-field]').forEach((select) => {
-    select.addEventListener('change', () => {
-      const card = select.closest('[data-camera-index]');
-      const camera = cameras[Number(card.dataset.cameraIndex)];
-      camera.detection ||= { zones: [] };
-      camera.detection[select.dataset.detectionField] = select.value === 'true';
-    });
-  });
   manager.querySelectorAll('[data-remove-camera]').forEach((button) => {
     button.addEventListener('click', () => { cameras.splice(Number(button.dataset.removeCamera), 1); renderCameraManager(); });
   });
@@ -120,7 +114,6 @@ function escapeHtml(value) {
 }
 
 const forms = {
-  camera: document.getElementById('cameraSettingsForm'),
   anpr: document.getElementById('anprSettingsForm'),
   recording: document.getElementById('recordingSettingsForm'),
   retention: document.getElementById('retentionSettingsForm'),
@@ -169,7 +162,6 @@ async function loadSettings() {
   const settings = await api('/api/settings/system');
   cameras = settings.cameras || [settings.camera];
   renderCameraManager();
-  fillForm(forms.camera, settings.camera);
   fillForm(forms.anpr, settings.anpr);
   if (forms.anpr.elements.vehicle_labels) {
     forms.anpr.elements.vehicle_labels.value = (settings.anpr.vehicle_labels || []).join(', ');
@@ -197,7 +189,6 @@ function bindForm(name, label, endpointName = name) {
   });
 }
 
-bindForm('camera', 'Camera');
 bindForm('anpr', 'ANPR');
 bindForm('recording', 'Recording');
 bindForm('retention', 'Retention', 'recording');
@@ -237,8 +228,7 @@ document.getElementById('saveCamerasBtn').addEventListener('click', async () => 
     const result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras }) });
     cameras = result.cameras || [];
     renderCameraManager();
-    if (cameras[0]) fillForm(forms.camera, cameras[0]);
-    setMessage('Camera list saved. The first camera remains the default for existing dashboard widgets.');
+    setMessage('Camera list saved.');
   } catch (error) {
     setMessage(error.message);
   }

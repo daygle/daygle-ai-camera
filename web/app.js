@@ -30,6 +30,7 @@ const els = {
 };
 
 let authState = { user: null, csrfToken: null };
+let recordingRefreshTimer = null;
 ['userMenuBtn', 'usersLink', 'settingsLink', 'alertSettingsLink', 'systemSettingsLink'].forEach((key) => {
   if (!els[key]) els[key] = { hidden: false, textContent: '' };
 });
@@ -152,6 +153,7 @@ function renderRecordings(recordings) {
   els.recordings.innerHTML = recordings.map((recording) => {
     const eventLabel = recording.event_id ? `Event #${recording.event_id}` : 'No linked event';
     const fileName = (recording.file_path || '').split('/').pop();
+    const mediaReady = recording.media_ready !== false;
     return `
       <div class="item">
         <div class="item-title">
@@ -161,10 +163,17 @@ function renderRecordings(recordings) {
         <div>${detectionBadges(recording.detections)}</div>
         <div>${plateBadges(recording.plate_events)}</div>
         <p class="muted">Duration: ${Number(recording.duration_seconds || 0).toFixed(1)}s · Source: ${escapeHtml(recording.source)} · Trigger: ${escapeHtml(recording.trigger_type || 'motion')} ${escapeHtml(recording.trigger_label || '')} · ${escapeHtml(fileName)}</p>
-        <button class="secondary" data-play-recording="${recording.id}">Play clip</button>
+        <button class="secondary" data-play-recording="${recording.id}" ${mediaReady ? '' : 'disabled'}>${mediaReady ? 'Play clip' : 'Preparing clip...'}</button>
       </div>
     `;
   }).join('');
+  if (recordings.some((recording) => recording.media_ready === false)) {
+    clearTimeout(recordingRefreshTimer);
+    recordingRefreshTimer = setTimeout(() => loadRecordings(els.recordingFilter.value.trim()), 3000);
+  } else {
+    clearTimeout(recordingRefreshTimer);
+    recordingRefreshTimer = null;
+  }
 }
 
 function bindPlaybackButtons() {
@@ -177,6 +186,11 @@ function bindPlaybackButtons() {
 
 async function playRecording(id) {
   if (!id) return;
+  const recording = await api(`/api/recordings/${id}`);
+  if (recording.media_ready === false) {
+    els.clipPlayerStatus.textContent = `Recording #${id} is still being prepared. Try again in a few seconds.`;
+    return;
+  }
   const clipUrl = `/api/recordings/${id}/stream?t=${Date.now()}`;
   els.clipPlayerStatus.textContent = `Loading recording #${id}...`;
   els.clipPlayer.pause();

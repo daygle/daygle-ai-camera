@@ -622,7 +622,10 @@ class EventDatabase:
         return event
 
     def _recording_row(self, row: sqlite3.Row) -> dict[str, Any]:
-        return dict(row)
+        recording = dict(row)
+        file_path = Path(str(recording.get("file_path") or ""))
+        recording["media_ready"] = file_path.exists() and file_path.is_file() and file_path.stat().st_size > 0
+        return recording
 
     def _recording_with_event(self, db: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
         recording = self._recording_row(row)

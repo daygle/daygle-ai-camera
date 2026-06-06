@@ -39,7 +39,7 @@
       <div class="section-header">
         <div>
           <h2>Monitoring areas</h2>
-          <p class="muted">Click and drag on the live footage to add a normalized area. Areas can monitor motion, objects, or both.</p>
+          <p class="muted">Click and drag on the live footage to add a normalized area. Areas control motion alerts, object alerts, and ANPR for this camera.</p>
         </div>
         <div class="button-row">
           <button id="addZoneBtn" type="button">Draw area</button>
@@ -49,6 +49,7 @@
       <div class="form-grid compact-grid">
         <label><span>Motion detection</span><select id="motionEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
         <label><span>Object detection</span><select id="objectDetectionEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+        <label><span>ANPR</span><select id="anprEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
       </div>
       <div id="zoneList" class="list"></div>
     </section>
