@@ -42,9 +42,11 @@ rsync -a --delete \
 
 mkdir -p "${DATA_DIR}" "${MODEL_DIR}"
 
+# Python virtual environment. The dependency helper defaults to CPU-only
+# PyTorch and --no-cache-dir to avoid pulling/caching large CUDA wheels during
+# service installs on small disks or container overlays.
 python3 -m venv "${APP_DIR}/.venv"
-"${APP_DIR}/.venv/bin/python" -m pip install --upgrade pip wheel
-"${APP_DIR}/.venv/bin/python" -m pip install -r "${APP_DIR}/requirements.txt"
+"${APP_DIR}/scripts/install_python_deps.sh" "${APP_DIR}/.venv/bin/python" "${APP_DIR}/requirements.txt"
 
 if [[ ! -f "${CONFIG_DIR}/config.yaml" ]]; then
   cat > "${CONFIG_DIR}/config.yaml" <<EOF
