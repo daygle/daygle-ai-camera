@@ -82,7 +82,7 @@ function detectionBadges(detections = []) {
 
 function renderEvents(events) {
   if (!events.length) {
-    els.events.innerHTML = '<div class="empty">No events yet. Live camera detections will appear here.</div>';
+    els.events.innerHTML = '<div class="empty">No enabled alert events yet.</div>';
     return;
   }
 
@@ -145,7 +145,7 @@ function renderObjectStats(objects = []) {
 
 function renderRecordings(recordings) {
   if (!recordings.length) {
-    els.recordings.innerHTML = '<div class="empty">No recordings yet. Event mode creates metadata when detections are saved.</div>';
+    els.recordings.innerHTML = '<div class="empty">No enabled alert recordings yet.</div>';
     return;
   }
 
@@ -279,7 +279,9 @@ async function loadStats() {
 }
 
 async function loadEvents(label = '') {
-  const path = label ? `/api/events?label=${encodeURIComponent(label)}` : '/api/events';
+  const params = new URLSearchParams({ alerted_only: 'true' });
+  if (label) params.set('label', label);
+  const path = `/api/events?${params.toString()}`;
   renderEvents(await api(path));
 }
 
@@ -288,7 +290,9 @@ async function loadAlerts() {
 }
 
 async function loadRecordings(label = '') {
-  const path = label ? `/api/recordings?label=${encodeURIComponent(label)}` : '/api/recordings';
+  const params = new URLSearchParams({ alerted_only: 'true' });
+  if (label) params.set('label', label);
+  const path = `/api/recordings?${params.toString()}`;
   renderRecordings(await api(path));
   bindPlaybackButtons();
 }

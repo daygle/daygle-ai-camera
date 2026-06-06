@@ -15,6 +15,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import HTTPCookieProcessor, HTTPRedirectHandler, Request, build_opener
 
+import pytest
 import uvicorn
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -413,6 +414,34 @@ def test_live_snapshot_renderer_can_hide_object_overlay(tmp_path, monkeypatch):
     assert 'Overlay ON' in with_overlay
     assert '<g class="detection-box"' in with_overlay
     assert 'person · 92%' in with_overlay
+
+
+def test_live_snapshot_jpeg_overlay_changes_frame_when_detections_exist(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    cv2 = pytest.importorskip('cv2')
+    np = pytest.importorskip('numpy')
+    frame = np.zeros((120, 160, 3), dtype=np.uint8)
+    ok, encoded = cv2.imencode('.jpg', frame)
+    assert ok
+    image_bytes = encoded.tobytes()
+    detections = [
+        {
+            'label': 'person',
+            'confidence': 0.92,
+            'box': {'x': 0.1, 'y': 0.2, 'width': 0.3, 'height': 0.4},
+        }
+    ]
+
+    overlaid = main.render_live_snapshot_jpeg_overlay(image_bytes, detections)
+
+    assert overlaid != image_bytes
+    decoded = cv2.imdecode(np.frombuffer(overlaid, dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert decoded is not None
+    assert int(decoded.sum()) > 0
+
+
 def test_export_yolov8n_onnx_uses_ultralytics_export(tmp_path, monkeypatch):
     app, _database_path = _load_app(tmp_path, monkeypatch)
     main = sys.modules["app.main"]
@@ -435,6 +464,20 @@ def test_export_yolov8n_onnx_uses_ultralytics_export(tmp_path, monkeypatch):
 
     assert main.export_yolov8n_onnx(destination) == len(b"fake onnx")
     assert destination.exists()
+
+
+def test_favicon_is_served_publicly(tmp_path, monkeypatch):
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        status, headers, body = client.request("/favicon.ico")
+        assert status == 200
+        assert "image/svg+xml" in (LocalClient.header(headers, "Content-Type") or "")
+        assert "<svg" in body
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
 
 
 def test_ai_model_status_and_action_endpoints(tmp_path, monkeypatch):
@@ -499,6 +542,10 @@ def test_setup_login_success_session_validation_and_protected_routes(tmp_path, m
     server, thread, base_url = _server(app)
     client = LocalClient(base_url)
     try:
+        status, headers, _body = client.request("/favicon.ico")
+        assert status == 200
+        assert "image/svg+xml" in (LocalClient.header(headers, "Content-Type") or "")
+
         status, headers, _body_text = client.request("/", follow_redirects=False)
         assert status == 303
         assert LocalClient.header(headers, "Location") == "/setup"
@@ -1349,6 +1396,54 @@ def test_recording_table_creation(tmp_path):
         'trigger_label',
         'created_at',
     } <= columns
+
+
+def test_alerted_only_event_and_recording_queries_use_enabled_rules(tmp_path):
+    from app.database import EventDatabase
+
+    database = EventDatabase(str(tmp_path / 'events.sqlite3'))
+    now = '2026-06-06T00:00:00+00:00'
+    enabled_rule = database.create_alert_rule(
+        {'name': 'Person alert', 'object': 'person', 'min_confidence': 0.5, 'cooldown_seconds': 0, 'enabled': True},
+        now,
+    )
+    disabled_rule = database.create_alert_rule(
+        {'name': 'Dog alert', 'object': 'dog', 'min_confidence': 0.5, 'cooldown_seconds': 0, 'enabled': False},
+        now,
+    )
+    events = [
+        database.add_event(
+            created_at=f'2026-06-06T00:0{index}:00+00:00',
+            source='camera',
+            snapshot_path=None,
+            detections=[{'label': label, 'confidence': 0.9, 'box': {'x': 0, 'y': 0, 'width': 1, 'height': 1}}],
+            alert_triggered=bool(rule),
+        )
+        for index, (label, rule) in enumerate([('cat', None), ('dog', disabled_rule), ('person', enabled_rule)], start=1)
+    ]
+    for event_id, label, rule in zip(events, ['cat', 'dog', 'person'], [None, disabled_rule, enabled_rule]):
+        database.add_recording(
+            event_id=event_id,
+            camera_id='front',
+            started_at=f'2026-06-06T00:1{event_id}:00+00:00',
+            ended_at=f'2026-06-06T00:1{event_id}:05+00:00',
+            duration_seconds=5,
+            file_path=str(tmp_path / f'{label}.mp4'),
+            thumbnail_path=None,
+            source='camera',
+            created_at=now,
+            trigger_type='object',
+            trigger_label=label,
+        )
+        if rule:
+            database.add_alert(now, rule['name'], event_id, label, 0.9, f'{label} matched')
+
+    assert [event['id'] for event in database.search_events()] == list(reversed(events))
+    assert [event['id'] for event in database.search_events(alerted_only=True)] == [events[2]]
+    assert database.search_events(label='dog', alerted_only=True) == []
+    assert [event['id'] for event in database.search_events(label='person', alerted_only=True)] == [events[2]]
+    assert [recording['event_id'] for recording in database.list_recordings(alerted_only=True)] == [events[2]]
+    assert [recording['event_id'] for recording in database.list_recordings(label='person', alerted_only=True)] == [events[2]]
 
 
 def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(tmp_path, monkeypatch):

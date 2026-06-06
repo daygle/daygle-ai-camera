@@ -365,10 +365,10 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
     motion_enabled = detection_settings.get('motion_enabled', True) is not False
     object_detection_enabled = detection_settings.get('object_detection_enabled', True) is not False
     if not motion_enabled and not object_detection_enabled:
-        update_live_detection_status(camera_id, state='skipped', reason='Motion and object detection are disabled for this camera.')
+        update_live_detection_status(camera_id, state='skipped', reason='Motion and object detection are disabled for this camera.', detections=[])
         return None
     if not hasattr(detector, 'detect_image'):
-        update_live_detection_status(camera_id, state='skipped', reason='Live stream alerts require ONNX AI mode.')
+        update_live_detection_status(camera_id, state='skipped', reason='Live stream alerts require ONNX AI mode.', detections=[])
         return None
 
     now = time.time()
@@ -378,14 +378,14 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
 
     ai_state = ai_status_payload()
     if not ai_state['detector_loaded']:
-        update_live_detection_status(camera_id, state='skipped', reason=ai_state['last_detector_error'] or 'ONNX detector is not loaded.', ai=ai_state)
+        update_live_detection_status(camera_id, state='skipped', reason=ai_state['last_detector_error'] or 'ONNX detector is not loaded.', ai=ai_state, detections=[])
         return None
 
     try:
         detections = detector.detect_image(image_bytes)
     except (DetectorUnavailableError, ValueError) as exc:
         logger.warning('Live detection skipped for camera %s: %s', camera_id, exc)
-        update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state)
+        update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state, detections=[])
         return None
 
     detections = normalize_detection_boxes_for_frame(detections, frame)
@@ -401,7 +401,14 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             'motion_event': True,
         })
     if not alert_detections:
-        update_live_detection_status(camera_id, state='checked', reason='No detections matched this camera and its monitoring areas.', detected_labels=raw_labels, matched_labels=[])
+        update_live_detection_status(
+            camera_id,
+            state='checked',
+            reason='No detections matched this camera and its monitoring areas.',
+            detected_labels=raw_labels,
+            matched_labels=[],
+            detections=object_detections,
+        )
         return None
 
     alerts.rules = effective_alert_rules()
@@ -448,6 +455,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         reason='Alert matched.' if triggered else 'Detections found, but no alert rule matched or rule is in cooldown.',
         detected_labels=raw_labels,
         matched_labels=matched_labels,
+        detections=object_detections,
         triggered_alerts=triggered,
         event_id=event_id,
         recording_id=recording_id,
@@ -560,7 +568,7 @@ def log_detector_initialization(context: str = 'startup') -> None:
     )
 
 PUBLIC_PREFIXES = ('/static/',)
-PUBLIC_PATHS = {'/login', '/setup'}
+PUBLIC_PATHS = {'/favicon.ico', '/login', '/setup'}
 ADMIN_PATHS = {'/settings', '/alert-settings', '/system-settings', '/users'}
 MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
@@ -850,6 +858,40 @@ def render_live_snapshot_svg(
   <text x="48" y="112" class="muted">Frame #{frame_number} · {timestamp} · Overlay {overlay_state}</text>
 </svg>'''
 
+
+def render_live_snapshot_jpeg_overlay(image_bytes: bytes, detections: list[dict[str, Any]]) -> bytes:
+    if not detections:
+        return image_bytes
+    try:
+        import cv2  # type: ignore[import-not-found]
+        import numpy as np  # type: ignore[import-not-found]
+    except ImportError:
+        return image_bytes
+
+    data = np.frombuffer(image_bytes, dtype=np.uint8)
+    image = cv2.imdecode(data, cv2.IMREAD_COLOR)
+    if image is None:
+        return image_bytes
+    height, width = image.shape[:2]
+    for detection in detections:
+        box = detection.get('box') or {}
+        x = int(max(0, min(1, float(box.get('x') or 0))) * width)
+        y = int(max(0, min(1, float(box.get('y') or 0))) * height)
+        box_width = int(max(0.001, min(1, float(box.get('width') or 0))) * width)
+        box_height = int(max(0.001, min(1, float(box.get('height') or 0))) * height)
+        x2 = min(width - 1, x + box_width)
+        y2 = min(height - 1, y + box_height)
+        label = str(detection.get('label') or 'object')
+        confidence = round(float(detection.get('confidence') or 0) * 100)
+        text = f'{label} {confidence}%'
+        cv2.rectangle(image, (x, y), (x2, y2), (73, 230, 163), 2)
+        text_y = max(22, y - 8)
+        (text_width, text_height), _baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.62, 2)
+        cv2.rectangle(image, (x, text_y - text_height - 8), (min(width - 1, x + text_width + 10), text_y + 4), (7, 11, 19), -1)
+        cv2.putText(image, text, (x + 5, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (73, 230, 163), 2, cv2.LINE_AA)
+    ok, encoded = cv2.imencode('.jpg', image, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+    return encoded.tobytes() if ok else image_bytes
+
 def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
     for recording in recordings:
         raw_file_path = str(recording.get('file_path') or '')
@@ -1126,6 +1168,14 @@ def root():
     return {'application': 'Daygle AI Camera', 'status': 'running'}
 
 
+@app.get('/favicon.ico')
+def favicon():
+    favicon_path = web_dir / 'favicon.svg'
+    if favicon_path.exists():
+        return FileResponse(favicon_path, media_type='image/svg+xml')
+    raise HTTPException(status_code=404, detail='Favicon not found')
+
+
 @app.get('/live')
 def live_page():
     live_path = web_dir / 'live.html'
@@ -1260,6 +1310,10 @@ def live_snapshot(overlay: bool = Query(True), camera_id: str | None = None):
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         process_live_stream_alerts(image_bytes, frame, selected_config)
+        if overlay:
+            camera_key = str(selected_config.get('id') or 'camera')
+            detections = live_detection_status.get(camera_key, {}).get('detections') or []
+            image_bytes = render_live_snapshot_jpeg_overlay(image_bytes, detections)
         return Response(content=image_bytes, media_type='image/jpeg')
     raise HTTPException(status_code=503, detail='Live snapshots require an ONVIF/RTSP camera backend.')
 
@@ -1328,8 +1382,8 @@ async def detect_test_image(request: Request):
 
 
 @app.get('/api/events')
-def events(label: str | None = None, limit: int = Query(50, ge=1, le=200)):
-    return database.search_events(label=label, limit=limit)
+def events(label: str | None = None, limit: int = Query(50, ge=1, le=200), alerted_only: bool = False):
+    return database.search_events(label=label, limit=limit, alerted_only=alerted_only)
 
 
 @app.get('/api/events/{event_id}')
@@ -1391,8 +1445,8 @@ def runtime_config():
 
 
 @app.get('/api/recordings')
-def recordings(label: str | None = None, limit: int = Query(50, ge=1, le=200)):
-    return database.list_recordings(label=label, limit=limit)
+def recordings(label: str | None = None, limit: int = Query(50, ge=1, le=200), alerted_only: bool = False):
+    return database.list_recordings(label=label, limit=limit, alerted_only=alerted_only)
 
 
 @app.post('/api/recordings/purge')

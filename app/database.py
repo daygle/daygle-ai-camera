@@ -217,18 +217,44 @@ class EventDatabase:
                 raise RuntimeError("Failed to create recording row")
             return cursor.lastrowid
 
-    def list_recordings(self, label: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    def list_recordings(self, label: str | None = None, limit: int = 50, alerted_only: bool = False) -> list[dict[str, Any]]:
         with self.connect() as db:
+            alert_filter = """
+                AND EXISTS (
+                    SELECT 1
+                    FROM alert_history ah
+                    JOIN alert_rules ar ON ar.name = ah.rule_name
+                    WHERE ah.event_id = r.event_id
+                    AND ar.enabled = 1
+                )
+            """
             if label:
                 rows = db.execute(
-                    """
+                    f"""
                     SELECT DISTINCT r.* FROM recordings r
                     LEFT JOIN detections d ON d.event_id = r.event_id
                     WHERE d.label = ?
+                    {alert_filter if alerted_only else ''}
                     ORDER BY r.started_at DESC
                     LIMIT ?
                     """,
                     (label, limit),
+                ).fetchall()
+            elif alerted_only:
+                rows = db.execute(
+                    f"""
+                    SELECT r.* FROM recordings r
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM alert_history ah
+                        JOIN alert_rules ar ON ar.name = ah.rule_name
+                        WHERE ah.event_id = r.event_id
+                        AND ar.enabled = 1
+                    )
+                    ORDER BY r.started_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
                 ).fetchall()
             else:
                 rows = db.execute("SELECT * FROM recordings ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
@@ -396,18 +422,44 @@ class EventDatabase:
                 (created_at, rule_name, event_id, label, confidence, message),
             )
 
-    def search_events(self, label: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    def search_events(self, label: str | None = None, limit: int = 50, alerted_only: bool = False) -> list[dict[str, Any]]:
         with self.connect() as db:
+            alert_filter = """
+                AND EXISTS (
+                    SELECT 1
+                    FROM alert_history ah
+                    JOIN alert_rules ar ON ar.name = ah.rule_name
+                    WHERE ah.event_id = e.id
+                    AND ar.enabled = 1
+                )
+            """
             if label:
                 rows = db.execute(
-                    """
+                    f"""
                     SELECT DISTINCT e.* FROM events e
                     JOIN detections d ON d.event_id = e.id
                     WHERE d.label = ?
+                    {alert_filter if alerted_only else ''}
                     ORDER BY e.created_at DESC
                     LIMIT ?
                     """,
                     (label, limit),
+                ).fetchall()
+            elif alerted_only:
+                rows = db.execute(
+                    """
+                    SELECT e.* FROM events e
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM alert_history ah
+                        JOIN alert_rules ar ON ar.name = ah.rule_name
+                        WHERE ah.event_id = e.id
+                        AND ar.enabled = 1
+                    )
+                    ORDER BY e.created_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
                 ).fetchall()
             else:
                 rows = db.execute("SELECT * FROM events ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
