@@ -857,9 +857,13 @@ def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
         if file_path.exists() and file_path.is_file():
             file_path.unlink(missing_ok=True)
         if raw_file_path:
-            playback_path = recording_playback_sidecar_path(file_path)
-            if playback_path.exists() and playback_path.is_file():
-                playback_path.unlink(missing_ok=True)
+            playback_paths = [
+                recording_playback_sidecar_path(file_path),
+                file_path.with_name(f'{file_path.stem}.playback.mp4'),
+            ]
+            for playback_path in playback_paths:
+                if playback_path.exists() and playback_path.is_file():
+                    playback_path.unlink(missing_ok=True)
         thumbnail_path = recording.get('thumbnail_path')
         if thumbnail_path:
             thumbnail = Path(str(thumbnail_path))
@@ -868,55 +872,51 @@ def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
 
 
 def recording_playback_sidecar_path(file_path: Path) -> Path:
-    return file_path.with_name(f'{file_path.stem}.playback.mp4')
+    return file_path.with_name(f'{file_path.stem}.browser.mp4')
 
 
 def recording_stream_path(file_path: Path) -> Path:
-    if file_path.suffix.lower() != '.avi':
-        return file_path
     playback_path = recording_playback_sidecar_path(file_path)
     if playback_path.exists() and playback_path.stat().st_mtime >= file_path.stat().st_mtime:
         return playback_path
     try:
         transcode_recording_to_mp4(file_path, playback_path)
-    except Exception:
+    except Exception as exc:
+        logger.warning('Recording playback conversion failed for %s: %s', file_path, exc)
         return file_path
     return playback_path if playback_path.exists() else file_path
 
 
 def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
-    import cv2  # type: ignore[import-not-found]
-
-    capture = cv2.VideoCapture(str(source_path))
-    if not capture.isOpened():
-        raise RuntimeError('Recording could not be opened for playback conversion.')
+    ffmpeg = shutil.which('ffmpeg')
+    if not ffmpeg:
+        raise RuntimeError('ffmpeg is required to convert recordings for browser playback.')
     tmp_path = output_path.with_name(f'{output_path.stem}.tmp{output_path.suffix}')
-    writer = None
-    error: Exception | None = None
-    try:
-        fps = capture.get(cv2.CAP_PROP_FPS) or 10
-        width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
-        height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
-        if width <= 0 or height <= 0:
-            raise RuntimeError('Recording dimensions could not be read.')
-        writer = cv2.VideoWriter(str(tmp_path), cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
-        if not writer.isOpened():
-            raise RuntimeError('MP4 writer could not open output file.')
-        while True:
-            ok, frame = capture.read()
-            if not ok:
-                break
-            writer.write(frame)
-    except Exception as exc:
-        error = exc
-    finally:
-        capture.release()
-        if writer is not None:
-            writer.release()
-    if error is not None:
+    if tmp_path.exists():
+        tmp_path.unlink(missing_ok=True)
+    command = [
+        ffmpeg,
+        '-y',
+        '-i',
+        str(source_path),
+        '-map',
+        '0:v:0',
+        '-an',
+        '-c:v',
+        'libx264',
+        '-preset',
+        'veryfast',
+        '-pix_fmt',
+        'yuv420p',
+        '-movflags',
+        '+faststart',
+        str(tmp_path),
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
+    if result.returncode != 0:
         if tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
-        raise error
+        raise RuntimeError(f'ffmpeg failed to convert recording for browser playback: {result.stderr[-500:]}')
     if not tmp_path.exists():
         raise RuntimeError('MP4 conversion did not create an output file.')
     tmp_path.replace(output_path)
