@@ -53,7 +53,11 @@ auth_enabled = bool(auth_config.get('enabled', True))
 @asynccontextmanager
 async def app_lifespan(_app: FastAPI):
     log_detector_initialization()
-    yield
+    start_live_alert_monitor()
+    try:
+        yield
+    finally:
+        stop_live_alert_monitor()
 
 
 app = FastAPI(title='Daygle AI Camera', lifespan=app_lifespan)
@@ -105,6 +109,7 @@ def effective_live_config() -> dict[str, Any]:
         'snapshot_refresh_ms': 500,
         'detection_status_refresh_ms': 2000,
         'detection_interval_seconds': 1.0,
+        'background_detection_enabled': True,
     }
     config_live = config.get('live', {})
     if isinstance(config_live, dict):
@@ -181,6 +186,8 @@ live_detection_last_checked: dict[str, float] = {}
 live_detection_status: dict[str, dict[str, Any]] = {}
 live_detection_worker_lock = threading.Lock()
 active_live_detection_cameras: set[str] = set()
+live_alert_monitor_stop = threading.Event()
+live_alert_monitor_thread: threading.Thread | None = None
 rtsp_recording_lock = threading.Lock()
 active_rtsp_recording_streams: set[str] = set()
 
@@ -564,6 +571,70 @@ def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any
         'ai_error': ai_state['error'],
         **live_detection_status.get(camera_key, {'state': 'waiting', 'reason': 'No live detection has run yet.'}),
     }
+
+
+def _camera_has_live_alert_stream(settings: dict[str, Any]) -> bool:
+    return bool(build_stream_url(settings))
+
+
+def run_live_alert_monitor_once() -> int:
+    live_settings = effective_live_config()
+    if not normalize_bool_setting(live_settings.get('background_detection_enabled'), True):
+        return 0
+
+    processed = 0
+    for selected_config in list(effective_cameras_config()):
+        camera_id = str(selected_config.get('id') or 'camera')
+        if not _camera_has_live_alert_stream(selected_config):
+            continue
+        now = time.time()
+        detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 1.0))
+        with live_detection_worker_lock:
+            if camera_id in active_live_detection_cameras:
+                continue
+            if now - live_detection_last_checked.get(camera_id, 0) < detection_interval_seconds:
+                continue
+            live_detection_last_checked[camera_id] = now
+            active_live_detection_cameras.add(camera_id)
+        try:
+            selected_camera = get_camera_instance(camera_id)
+            if not hasattr(selected_camera, 'read_jpeg'):
+                update_live_detection_status(camera_id, state='skipped', reason='Background alerts require a camera that can read JPEG frames.', detections=[])
+                continue
+            image_bytes, frame = selected_camera.read_jpeg()
+            process_live_stream_alerts(image_bytes, frame, copy.deepcopy(selected_config), enforce_interval=False)
+            processed += 1
+        except Exception as exc:
+            logger.warning('Background live alert check failed for camera %s: %s', camera_id, exc)
+            update_live_detection_status(camera_id, state='error', reason=str(exc), detections=[])
+        finally:
+            with live_detection_worker_lock:
+                active_live_detection_cameras.discard(camera_id)
+    return processed
+
+
+def live_alert_monitor_loop() -> None:
+    while not live_alert_monitor_stop.is_set():
+        run_live_alert_monitor_once()
+        interval = max(0.2, float(effective_live_config().get('detection_interval_seconds', 1.0)))
+        live_alert_monitor_stop.wait(interval)
+
+
+def start_live_alert_monitor() -> None:
+    global live_alert_monitor_thread
+    if live_alert_monitor_thread and live_alert_monitor_thread.is_alive():
+        return
+    live_alert_monitor_stop.clear()
+    live_alert_monitor_thread = threading.Thread(target=live_alert_monitor_loop, name='live-alert-monitor', daemon=True)
+    live_alert_monitor_thread.start()
+
+
+def stop_live_alert_monitor() -> None:
+    global live_alert_monitor_thread
+    live_alert_monitor_stop.set()
+    if live_alert_monitor_thread and live_alert_monitor_thread.is_alive():
+        live_alert_monitor_thread.join(timeout=5)
+    live_alert_monitor_thread = None
 
 
 def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any]) -> None:
@@ -2365,6 +2436,7 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
     merged = {**current, **payload}
     snapshot_refresh_ms = _int_field(merged, 'snapshot_refresh_ms', 500, 150, 5000)
     detection_status_refresh_ms = _int_field(merged, 'detection_status_refresh_ms', 2000, 500, 15000)
+    background_detection_enabled = normalize_bool_setting(merged.get('background_detection_enabled'), True)
     try:
         detection_interval_seconds = float(merged.get('detection_interval_seconds', 1.0))
     except (TypeError, ValueError) as exc:
@@ -2375,6 +2447,7 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'snapshot_refresh_ms': snapshot_refresh_ms,
         'detection_status_refresh_ms': detection_status_refresh_ms,
         'detection_interval_seconds': detection_interval_seconds,
+        'background_detection_enabled': background_detection_enabled,
     }
 
 

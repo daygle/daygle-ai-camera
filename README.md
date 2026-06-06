@@ -16,6 +16,7 @@ The app is now designed to be configured from the web UI. `config.yaml` is only 
 - Web-managed system settings for camera, recording policy, retention, storage directories, and login security.
 - SQLite persistence for events, detections, alerts, users, sessions, runtime settings, and alert rules.
 - ONVIF/RTSP live snapshot support for testing P6S-style IP cameras before CSI camera hardware arrives.
+- Background live AI alert checks continue polling configured RTSP/ONVIF cameras even when no Live Cameras page is open.
 - Armbian install script and systemd unit for Orange Pi deployment.
 
 ## Requirements
@@ -466,6 +467,6 @@ python -m pytest
 - **Setup redirects to login**: a user already exists; sign in with an admin account.
 - **Dashboard shows MODEL MISSING**: open `/settings`, download YOLOv8n ONNX or set a readable model path, then reload the detector.
 - **ONNX fails to load**: confirm model and labels paths are readable and ONNX Runtime is installed.
-- **Email alerts do not send**: open `/alert-settings`, check SMTP host/port/auth/from address, and confirm the rule has email enabled and recipients.
+- **Email alerts do not send**: open `/alert-settings`, check SMTP host/port/auth/from address, and confirm the rule has email enabled and recipients. Open `/system-settings` and confirm Live performance -> Background alerts is enabled so cat/person/object rules continue checking when the Live Cameras page is closed.
 - **Service cannot write data**: open `/system-settings` and check storage paths, then verify OS permissions for the service user.
 - **Need logs on Armbian**: run `sudo journalctl -u daygle-ai-camera -f`.
