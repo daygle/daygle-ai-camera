@@ -46,7 +46,7 @@ rsync -a --delete \
   --exclude '__pycache__' \
   "${REPO_DIR}/" "${APP_DIR}/"
 
-# Ensure data directory exists (GitHub + installer safety)
+# Ensure data directory exists
 mkdir -p "${APP_DIR}/data"
 
 # Python virtual environment
