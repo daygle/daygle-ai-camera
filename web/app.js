@@ -196,7 +196,7 @@ function renderRecordings(recordings) {
         <div>${detectionBadges(recording.detections)}</div>
         <div>${plateBadges(recording.plate_events)}</div>
         <p class="muted">Duration: ${Number(recording.duration_seconds || 0).toFixed(1)}s · Camera: ${escapeHtml(recordingSourceLabel(recording))} · Trigger: ${escapeHtml(recording.trigger_type || 'motion')} ${escapeHtml(recording.trigger_label || '')} · ${escapeHtml(fileName)}</p>
-        <button class="secondary" data-play-recording="${recording.id}" ${mediaReady ? '' : 'disabled'}>${mediaReady ? 'Play clip' : 'Preparing clip...'}</button>
+        <button class="secondary" data-play-recording="${recording.id}" ${mediaReady ? '' : 'disabled'}>${mediaReady ? 'Play Clip' : 'Preparing Clip...'}</button>
         <button class="secondary delete-btn" data-delete-recording="${recording.id}">Delete</button>
       </div>
     `;

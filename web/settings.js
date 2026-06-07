@@ -81,7 +81,7 @@ function createCameraManagerSection() {
       <button id="addCameraBtn" type="button">Add camera</button>
     </div>
     <div id="cameraManager" class="camera-manager"></div>
-    <div class="button-row"><button id="saveCamerasBtn" type="button">Save cameras</button></div>
+    <div class="button-row"><button id="saveCamerasBtn" type="button">Save Cameras</button></div>
   `;
   const firstSection = document.querySelector('main > section');
   if (firstSection) {
