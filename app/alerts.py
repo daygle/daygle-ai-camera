@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from datetime import datetime
 from typing import Any
@@ -9,6 +10,7 @@ class AlertEngine:
     def __init__(self, rules: list[dict[str, Any]]) -> None:
         self.rules = rules
         self.last_triggered: dict[str, float] = {}
+        self._lock = threading.Lock()
 
     def process(self, detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
         alerts: list[dict[str, Any]] = []
@@ -49,11 +51,12 @@ class AlertEngine:
                 rule_name = str(rule.get('name') or label)
                 cooldown = int(rule.get('cooldown_seconds', 60))
 
-                last = self.last_triggered.get(rule_name, 0)
-                if time.time() - last < cooldown:
-                    continue
-
-                self.last_triggered[rule_name] = time.time()
+                now = time.time()
+                with self._lock:
+                    last = self.last_triggered.get(rule_name, 0)
+                    if now - last < cooldown:
+                        continue
+                    self.last_triggered[rule_name] = now
 
                 alerts.append({
                     'rule_name': rule_name,
@@ -76,11 +79,12 @@ class AlertEngine:
 
             rule_name = str(rule.get('name') or 'Motion')
             cooldown = int(rule.get('cooldown_seconds', 60))
-            last = self.last_triggered.get(rule_name, 0)
-            if time.time() - last < cooldown:
-                continue
-
-            self.last_triggered[rule_name] = time.time()
+            now = time.time()
+            with self._lock:
+                last = self.last_triggered.get(rule_name, 0)
+                if now - last < cooldown:
+                    continue
+                self.last_triggered[rule_name] = now
             alerts.append({
                 'rule_name': rule_name,
                 'label': 'motion',
