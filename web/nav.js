@@ -14,6 +14,7 @@
       <a href="/zones" data-match="/zones" data-admin="true">Zones</a>
       <a href="/anpr" data-match="/anpr">ANPR</a>
       <a href="/recordings" data-match="/recordings">Recordings</a>
+      <a href="/recordings/timeline" data-match="/recordings/timeline">Timeline</a>
       <a href="/ai" data-match="/ai" data-admin="true">AI</a>
       <a href="/settings" data-match="/settings" data-admin="true">Settings</a>
       <a href="/users" data-match="/users" data-admin="true">Users</a>
@@ -26,12 +27,13 @@
 
   document.body.prepend(nav);
 
-  nav.querySelectorAll('[data-match]').forEach((link) => {
-    const match = link.getAttribute('data-match');
-    if ((match === '/' && currentPath === '/') || (match !== '/' && currentPath.startsWith(match))) {
-      link.classList.add('active');
-    }
-  });
+  const activeLink = Array.from(nav.querySelectorAll('[data-match]'))
+    .filter((link) => {
+      const match = String(link.getAttribute('data-match') || '');
+      return (match === '/' && currentPath === '/') || (match !== '/' && currentPath.startsWith(match));
+    })
+    .sort((left, right) => String(right.getAttribute('data-match') || '').length - String(left.getAttribute('data-match') || '').length)[0];
+  if (activeLink) activeLink.classList.add('active');
 
   try {
     const response = await fetch('/api/auth/me');

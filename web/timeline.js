@@ -1,6 +1,7 @@
 const els = {
   cameraSelect: document.getElementById('timelineCameraSelect'),
   timelineDate: document.getElementById('timelineDate'),
+  filterSelect: document.getElementById('timelineFilterSelect'),
   timelineLoadBtn: document.getElementById('timelineLoadBtn'),
   timelineStatus: document.getElementById('timelineStatus'),
   timelineSummary: document.getElementById('timelineSummary'),
@@ -54,6 +55,14 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 }
 
+function titleCase(value) {
+  return String(value || '')
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(' ');
+}
+
 function formatDateTime(value) {
   return value ? new Date(value).toLocaleString() : 'Unknown';
 }
@@ -74,8 +83,60 @@ function formatDuration(seconds) {
   return `${remainder}s`;
 }
 
+function recordingTriggerType(recording) {
+  return String(recording.trigger_type || 'motion').trim().toLowerCase() || 'motion';
+}
+
+function recordingTriggerLabel(recording) {
+  return String(recording.trigger_label || '').trim().toLowerCase() || null;
+}
+
+function recordingDetectionLabels(recording) {
+  return Array.from(new Set((recording.detections || [])
+    .map((detection) => String(detection.label || '').trim().toLowerCase())
+    .filter(Boolean)));
+}
+
 function recordingTypeLabel(recording) {
-  return String(recording.color_label || recording.trigger_label || recording.trigger_type || 'motion');
+  const triggerType = recordingTriggerType(recording);
+  const triggerLabel = recordingTriggerLabel(recording);
+  if (triggerType === 'motion' || triggerType === 'continuous' || triggerType === 'none' || triggerType === 'off') {
+    return triggerType;
+  }
+  if (triggerType === 'human') {
+    return 'person';
+  }
+  return triggerLabel || triggerType;
+}
+
+function recordingColorKey(recording) {
+  return recordingTypeLabel(recording).toLowerCase();
+}
+
+function recordingTriggerSummary(recording) {
+  const triggerType = recordingTriggerType(recording);
+  const triggerLabel = recordingTriggerLabel(recording);
+  if (!triggerLabel || triggerLabel === triggerType || (triggerType === 'human' && triggerLabel === 'person')) {
+    return recordingTypeLabel(recording);
+  }
+  return `${recordingTypeLabel(recording)} · detected ${triggerLabel}`;
+}
+
+function recordingFilterTokens(recording) {
+  const tokens = new Set([recordingTypeLabel(recording).toLowerCase()]);
+  const triggerType = recordingTriggerType(recording);
+  if (triggerType) tokens.add(triggerType);
+  const triggerLabel = recordingTriggerLabel(recording);
+  if (triggerLabel) tokens.add(triggerLabel);
+  recordingDetectionLabels(recording).forEach((label) => tokens.add(label));
+  return tokens;
+}
+
+function matchesRecordingFilter(recording, filterValue) {
+  const normalized = String(filterValue || '').trim().toLowerCase();
+  if (!normalized) return true;
+  if (normalized === 'motion') return recordingTriggerType(recording) === 'motion';
+  return recordingFilterTokens(recording).has(normalized);
 }
 
 function cameraLabel(recording) {
@@ -102,8 +163,10 @@ function timelineParams(overrides = {}) {
 function replaceUrl(recordingId = state.activeRecordingId) {
   const params = new URLSearchParams();
   const { cameraId, day } = timelineParams();
+  const filter = els.filterSelect.value || '';
   if (cameraId) params.set('camera_id', cameraId);
   if (day) params.set('day', day);
+  if (filter) params.set('filter', filter);
   if (recordingId) params.set('recording_id', String(recordingId));
   const query = params.toString();
   window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
@@ -118,14 +181,50 @@ function populateControls(payload) {
   els.timelineDate.value = selectedDay;
 }
 
-function renderSummary(payload) {
+function populateFilterOptions(recordings) {
+  const currentFilter = els.filterSelect.value || new URLSearchParams(window.location.search).get('filter') || '';
+  const options = [{ value: '', label: 'All recordings' }];
+  const seen = new Set(['']);
+  const addOption = (value, label) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    options.push({ value: normalized, label });
+  };
+
+  recordings.forEach((recording) => {
+    const displayLabel = recordingTypeLabel(recording).toLowerCase();
+    addOption(displayLabel, titleCase(displayLabel));
+    recordingDetectionLabels(recording).forEach((label) => addOption(label, titleCase(label)));
+  });
+
+  const ordered = [options[0], ...options.slice(1).sort((left, right) => {
+    if (left.value === 'motion') return -1;
+    if (right.value === 'motion') return 1;
+    return left.label.localeCompare(right.label);
+  })];
+  els.filterSelect.innerHTML = ordered.map((option) => (
+    `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`
+  )).join('');
+
+  const availableValues = new Set(ordered.map((option) => option.value));
+  els.filterSelect.value = availableValues.has(currentFilter) ? currentFilter : '';
+}
+
+function filteredRecordings() {
+  const recordings = state.payload?.recordings || [];
+  return recordings.filter((recording) => matchesRecordingFilter(recording, els.filterSelect.value));
+}
+
+function renderSummary(payload, totalRecordingCount) {
   const recordings = payload.recordings || [];
   const totalSeconds = recordings.reduce((sum, recording) => sum + Number(recording.timeline_duration_seconds || recording.duration_seconds || 0), 0);
   const uniqueTriggers = new Set(recordings.map((recording) => recordingTypeLabel(recording).toLowerCase()));
+  const clipLabel = totalRecordingCount > recordings.length ? `${recordings.length} of ${totalRecordingCount}` : `${recordings.length}`;
   els.timelineSummary.innerHTML = `
     <div><span>Camera</span><strong>${escapeHtml(payload.camera?.name || payload.camera?.id || 'Unknown')}</strong></div>
     <div><span>Day</span><strong>${escapeHtml(payload.day || '')}</strong></div>
-    <div><span>Clips</span><strong>${recordings.length}</strong></div>
+    <div><span>Clips</span><strong>${escapeHtml(clipLabel)}</strong></div>
     <div><span>Coverage</span><strong>${escapeHtml(formatDuration(totalSeconds))}</strong></div>
     <div class="wide"><span>Triggers</span><strong>${recordings.length ? escapeHtml(Array.from(uniqueTriggers).join(', ')) : 'none'}</strong></div>
   `;
@@ -135,13 +234,13 @@ function renderLegend(recordings) {
   const unique = [];
   const seen = new Set();
   recordings.forEach((recording) => {
-    const key = String(recording.color_key || 'motion').toLowerCase();
+    const key = recordingColorKey(recording);
     if (seen.has(key)) return;
     seen.add(key);
     unique.push({ key, label: recordingTypeLabel(recording), color: colorForKey(key) });
   });
   if (!unique.length) {
-    els.timelineLegend.innerHTML = '<p class="muted">No recordings for this day.</p>';
+    els.timelineLegend.innerHTML = '<p class="muted">No recordings match this filter for the selected day.</p>';
     return;
   }
   els.timelineLegend.innerHTML = unique.map((item) => `
@@ -180,7 +279,7 @@ function renderTimeline(payload) {
   els.timelineRows.style.height = `${Math.max(96, rowCount * TIMELINE_ROW_HEIGHT)}px`;
 
   if (!recordings.length) {
-    els.timelineRows.innerHTML = '<div class="empty timeline-empty">No recordings overlap this day for the selected camera.</div>';
+    els.timelineRows.innerHTML = '<div class="empty timeline-empty">No recordings match the selected filter for this camera and day.</div>';
     return;
   }
 
@@ -189,14 +288,14 @@ function renderTimeline(payload) {
     const duration = Math.max(1, Number(recording.timeline_duration_seconds || 1));
     const left = (start / TIMELINE_SECONDS) * 100;
     const width = Math.max((duration / TIMELINE_SECONDS) * 100, 0.45);
-    const color = colorForKey(recording.color_key);
+    const color = colorForKey(recordingColorKey(recording));
     const activeClass = Number(recording.id) === Number(state.activeRecordingId) ? ' active' : '';
     return `
       <button
         class="timeline-segment${activeClass}"
         type="button"
         data-recording-id="${recording.id}"
-        title="${escapeHtml(`${recordingTypeLabel(recording)} · ${formatClock(start)} · ${formatDuration(recording.duration_seconds)}`)}"
+        title="${escapeHtml(`${recordingTriggerSummary(recording)} · ${formatClock(start)} · ${formatDuration(recording.duration_seconds)}`)}"
         style="left:${left}%;width:${width}%;top:${recording.rowIndex * TIMELINE_ROW_HEIGHT + 8}px;--segment-color:${color};"
       >
         <span class="timeline-segment-label">${escapeHtml(recordingTypeLabel(recording))}</span>
@@ -213,7 +312,7 @@ function renderRecordingList(recordings) {
   }
   els.timelineRecordings.innerHTML = recordings.map((recording) => {
     const activeClass = Number(recording.id) === Number(state.activeRecordingId) ? ' active' : '';
-    const color = colorForKey(recording.color_key);
+    const color = colorForKey(recordingColorKey(recording));
     return `
       <button class="timeline-recording-item${activeClass}" type="button" data-recording-id="${recording.id}">
         <span class="timeline-recording-color" style="background:${color}"></span>
@@ -221,7 +320,7 @@ function renderRecordingList(recordings) {
           <strong>${escapeHtml(recordingTypeLabel(recording))}</strong>
           <span>${escapeHtml(formatClock(recording.timeline_start_seconds || 0))} to ${escapeHtml(formatClock(recording.timeline_end_seconds || 0))}</span>
         </span>
-        <span class="timeline-recording-meta">${escapeHtml(formatDuration(recording.duration_seconds))} · ${escapeHtml(cameraLabel(recording))}</span>
+        <span class="timeline-recording-meta">${escapeHtml(formatDuration(recording.duration_seconds))} · ${escapeHtml(recordingTriggerSummary(recording))}</span>
         <span class="timeline-recording-meta muted">Recording #${recording.id}</span>
       </button>
     `;
@@ -232,10 +331,10 @@ function renderRecordingDetails(recording) {
   els.recordingDetails.innerHTML = `
     <div><span>Recording</span><strong>#${recording.id}</strong></div>
     <div><span>Camera</span><strong>${escapeHtml(cameraLabel(recording))}</strong></div>
-    <div><span>Trigger</span><strong>${escapeHtml(recordingTypeLabel(recording))}</strong></div>
+    <div><span>Trigger</span><strong>${escapeHtml(recordingTriggerSummary(recording))}</strong></div>
     <div><span>Started</span><strong>${escapeHtml(formatDateTime(recording.started_at))}</strong></div>
     <div><span>Duration</span><strong>${escapeHtml(formatDuration(recording.duration_seconds))}</strong></div>
-    <div class="wide"><span>Detections</span><strong>${escapeHtml((recording.detections || []).map((detection) => detection.label).join(', ') || 'none')}</strong></div>
+    <div class="wide"><span>Detections</span><strong>${escapeHtml(recordingDetectionLabels(recording).join(', ') || 'none')}</strong></div>
   `;
 }
 
@@ -277,7 +376,7 @@ async function playRecording(recordingId, updateHistory = true) {
   }
 }
 
-function clearPlayback() {
+function clearPlayback(updateHistory = true) {
   state.activeRecordingId = null;
   els.clipPlayer.pause();
   els.clipPlayer.removeAttribute('src');
@@ -285,7 +384,39 @@ function clearPlayback() {
   els.clipPlayerStatus.textContent = 'Select a timeline segment to play a recording.';
   els.recordingDetails.innerHTML = '';
   highlightActiveRecording();
-  replaceUrl(null);
+  if (updateHistory) replaceUrl(null);
+}
+
+async function renderFilteredTimeline({ preserveSelection = true } = {}) {
+  const allRecordings = state.payload?.recordings || [];
+  const recordings = filteredRecordings();
+  const viewPayload = { ...(state.payload || {}), recordings };
+  renderSummary(viewPayload, allRecordings.length);
+  renderLegend(recordings);
+  renderTimeline(viewPayload);
+  renderRecordingList(recordings);
+
+  if (!recordings.length) {
+    els.timelineStatus.textContent = allRecordings.length
+      ? `No recordings match the selected filter for ${state.payload.camera.name} on ${state.payload.day}.`
+      : `No recordings found for ${state.payload.camera.name} on ${state.payload.day}.`;
+    clearPlayback(false);
+    replaceUrl(null);
+    return;
+  }
+
+  const filterLabel = els.filterSelect.value ? ` matching ${titleCase(els.filterSelect.value)}` : '';
+  els.timelineStatus.textContent = `${recordings.length} clip${recordings.length === 1 ? '' : 's'}${filterLabel} for ${state.payload.camera.name} on ${state.payload.day}.`;
+
+  const querySelection = Number(new URLSearchParams(window.location.search).get('recording_id')) || null;
+  const requestedSelection = preserveSelection ? (state.activeRecordingId || querySelection) : null;
+  const selectedRecording = recordings.find((recording) => Number(recording.id) === Number(requestedSelection));
+  if (selectedRecording) {
+    await playRecording(selectedRecording.id, false);
+  } else {
+    clearPlayback(false);
+  }
+  replaceUrl(state.activeRecordingId);
 }
 
 async function loadTimeline({ preserveSelection = true } = {}) {
@@ -294,28 +425,8 @@ async function loadTimeline({ preserveSelection = true } = {}) {
   const payload = await api(`/api/recordings/timeline?camera_id=${encodeURIComponent(cameraId)}&day=${encodeURIComponent(day)}`);
   state.payload = payload;
   populateControls(payload);
-  renderSummary(payload);
-  renderLegend(payload.recordings || []);
-  renderTimeline(payload);
-  renderRecordingList(payload.recordings || []);
-
-  if (!payload.recordings.length) {
-    els.timelineStatus.textContent = `No recordings found for ${payload.camera.name} on ${payload.day}.`;
-    clearPlayback();
-    return;
-  }
-
-  els.timelineStatus.textContent = `${payload.recordings.length} clip${payload.recordings.length === 1 ? '' : 's'} found for ${payload.camera.name} on ${payload.day}.`;
-
-  const querySelection = Number(new URLSearchParams(window.location.search).get('recording_id')) || null;
-  const requestedSelection = preserveSelection ? (state.activeRecordingId || querySelection) : querySelection;
-  const selectedRecording = payload.recordings.find((recording) => Number(recording.id) === Number(requestedSelection));
-  if (selectedRecording) {
-    await playRecording(selectedRecording.id, false);
-  } else {
-    clearPlayback();
-  }
-  replaceUrl(state.activeRecordingId);
+  populateFilterOptions(payload.recordings || []);
+  await renderFilteredTimeline({ preserveSelection });
 }
 
 async function loadAuth() {
@@ -337,6 +448,12 @@ els.cameraSelect.addEventListener('change', () => {
 
 els.timelineDate.addEventListener('change', () => {
   loadTimeline({ preserveSelection: false }).catch((error) => {
+    els.timelineStatus.textContent = error.message;
+  });
+});
+
+els.filterSelect.addEventListener('change', () => {
+  renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
     els.timelineStatus.textContent = error.message;
   });
 });
@@ -372,8 +489,10 @@ loadAuth().then(async () => {
   const params = new URLSearchParams(window.location.search);
   const queryDay = params.get('day');
   const queryCameraId = params.get('camera_id');
+  const queryFilter = params.get('filter');
   if (queryDay) els.timelineDate.value = queryDay;
   if (queryCameraId) els.cameraSelect.innerHTML = `<option value="${escapeHtml(queryCameraId)}" selected>${escapeHtml(queryCameraId)}</option>`;
+  if (queryFilter) els.filterSelect.innerHTML = `<option value="${escapeHtml(queryFilter)}" selected>${escapeHtml(titleCase(queryFilter))}</option>`;
   await loadTimeline({ preserveSelection: true });
 }).catch((error) => {
   els.timelineStatus.textContent = error.message;

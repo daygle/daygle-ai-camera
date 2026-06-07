@@ -473,7 +473,7 @@ input[type="file"] { padding: 10px; }
 }
 .timeline-controls {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px) auto;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 220px) minmax(180px, 220px) auto;
   gap: 12px;
   align-items: end;
 }
