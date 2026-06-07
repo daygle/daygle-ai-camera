@@ -17,6 +17,7 @@ let activeRecording = null;
 let overlayResizeObserver = null;
 const OVERLAY_TOGGLE_KEY = 'daygle.recordings.overlay.enabled';
 let overlayEnabled = true;
+const EVENT_OVERLAY_WINDOW_SECONDS = 2.5;
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -98,6 +99,22 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
+function detectionAnchorSeconds(recording) {
+  const startedAt = Date.parse(recording?.started_at || '');
+  const eventAt = Date.parse(recording?.event?.created_at || '');
+  if (!Number.isFinite(startedAt) || !Number.isFinite(eventAt)) return null;
+  const seconds = (eventAt - startedAt) / 1000;
+  return Number.isFinite(seconds) ? Math.max(0, seconds) : null;
+}
+
+function shouldRenderOverlayForTime(recording, playerTimeSeconds) {
+  const anchorSeconds = detectionAnchorSeconds(recording);
+  if (anchorSeconds === null) return true;
+  const duration = Math.max(0, Number(recording?.duration_seconds || 0));
+  const clampedAnchor = duration > 0 ? clamp(anchorSeconds, 0, duration) : anchorSeconds;
+  return Math.abs(playerTimeSeconds - clampedAnchor) <= EVENT_OVERLAY_WINDOW_SECONDS / 2;
+}
+
 function clearClipOverlay() {
   if (!els.clipOverlay) return;
   const context = els.clipOverlay.getContext('2d');
@@ -134,6 +151,8 @@ function drawClipOverlay() {
 
   const detections = Array.isArray(activeRecording?.detections) ? activeRecording.detections : [];
   if (!detections.length) return;
+  const playerTime = Number(els.clipPlayer.currentTime || 0);
+  if (!shouldRenderOverlayForTime(activeRecording, playerTime)) return;
 
   const videoWidth = Math.max(1, Number(els.clipPlayer.videoWidth || cssWidth));
   const videoHeight = Math.max(1, Number(els.clipPlayer.videoHeight || cssHeight));
