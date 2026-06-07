@@ -295,6 +295,26 @@ function renderCameraManager() {
   enhanceFormFieldLabels(manager);
 
   manager.querySelectorAll('[data-camera-field]').forEach((input) => {
+    input.addEventListener('input', () => {
+      const card = input.closest('[data-camera-index]');
+      const camera = cameras[Number(card.dataset.cameraIndex)];
+      const field = input.dataset.cameraField;
+      camera[field] = ['port', 'width', 'height', 'fps'].includes(field) ? Number.parseInt(input.value || '0', 10) : input.value;
+      if (field === 'name') {
+        const heading = card.querySelector('.section-header h3');
+        if (heading) heading.textContent = camera.name || camera.id || `Camera ${Number(card.dataset.cameraIndex) + 1}`;
+      }
+    });
+  });
+  manager.querySelectorAll('[data-camera-recording]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const card = select.closest('[data-camera-index]');
+      const camera = cameras[Number(card.dataset.cameraIndex)];
+      camera.recording ||= { enabled: true, record_on_alert: true, continuous: false };
+      camera.recording[select.dataset.cameraRecording] = select.value === 'true';
+    });
+  });
+  manager.querySelectorAll('[data-remove-camera]').forEach((button) => {
     button.addEventListener('click', () => { cameras.splice(Number(button.dataset.removeCamera), 1); renderCameraManager(); });
   });
 }
