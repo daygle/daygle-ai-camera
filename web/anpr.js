@@ -7,6 +7,56 @@ const plateDetailsEl = document.getElementById('plateDetails');
 const alertRulesEl = document.getElementById('plateAlertRules');
 const alertForm = document.getElementById('plateAlertRuleForm');
 const searchInput = document.getElementById('plateSearchInput');
+let selectedCameraId = '';
+
+function queryWithCamera(path) {
+  const separator = path.includes('?') ? '&' : '?';
+  return selectedCameraId ? `${path}${separator}camera_id=${encodeURIComponent(selectedCameraId)}` : path;
+}
+
+function getCameraFilterSelect() {
+  return document.getElementById('anprCameraFilter');
+}
+
+function ensureCameraFilterControl() {
+  const searchRow = document.querySelector('.search-row');
+  if (!searchRow || getCameraFilterSelect()) return;
+  searchRow.classList.add('anpr-search-row');
+  const select = document.createElement('select');
+  select.id = 'anprCameraFilter';
+  select.setAttribute('aria-label', 'Filter by camera');
+  select.innerHTML = '<option value="">All cameras</option>';
+  searchRow.prepend(select);
+  select.addEventListener('change', async () => {
+    selectedCameraId = select.value;
+    plateResultsEl.innerHTML = '';
+    plateDetailsEl.innerHTML = '';
+    await loadAll();
+    setMessage(selectedCameraId ? 'Showing ANPR results for selected camera.' : 'Showing ANPR results for all cameras.');
+  });
+}
+
+function renderCameraOptions(cameras) {
+  ensureCameraFilterControl();
+  const select = getCameraFilterSelect();
+  if (!select) return;
+  const previous = selectedCameraId || select.value;
+  const options = ['<option value="">All cameras</option>'];
+  for (const camera of cameras || []) {
+    const id = String(camera.id || '').trim();
+    if (!id) continue;
+    const label = String(camera.name || id).trim();
+    options.push(`<option value="${escapeHtml(id)}">${escapeHtml(label)}</option>`);
+  }
+  select.innerHTML = options.join('');
+  if (previous && Array.from(select.options).some((option) => option.value === previous)) {
+    select.value = previous;
+    selectedCameraId = previous;
+  } else {
+    select.value = '';
+    selectedCameraId = '';
+  }
+}
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -85,7 +135,9 @@ async function loadAll() {
   const me = await api('/api/auth/me');
   csrfToken = me.csrf_token;
   currentUser = me.user;
-  const plates = await api('/api/plates');
+  const camerasPayload = await api('/api/cameras');
+  renderCameraOptions(camerasPayload.cameras || []);
+  const plates = await api(queryWithCamera('/api/plates'));
   renderPlateCards(recentPlatesEl, plates);
   renderAlertRules(await api('/api/plate-alerts'));
   const deleteAllBtn = document.getElementById('deleteAllPlatesBtn');
@@ -93,7 +145,7 @@ async function loadAll() {
 }
 
 async function searchPlates() {
-  renderSightings(await api(`/api/plates/search?q=${encodeURIComponent(searchInput.value.trim())}`));
+  renderSightings(await api(queryWithCamera(`/api/plates/search?q=${encodeURIComponent(searchInput.value.trim())}`)));
 }
 
 async function updatePlateStatus(action, plateNumber) {
@@ -114,7 +166,7 @@ document.getElementById('plateClearBtn').addEventListener('click', async () => {
 document.addEventListener('click', async (event) => {
   const button = event.target.closest('button');
   if (!button) return;
-  if (button.dataset.action === 'details') renderDetails(await api(`/api/plates/${button.dataset.id}`));
+  if (button.dataset.action === 'details') renderDetails(await api(queryWithCamera(`/api/plates/${button.dataset.id}`)));
   if (button.dataset.action === 'whitelist') await updatePlateStatus('whitelist', button.dataset.plate);
   if (button.dataset.action === 'blacklist') await updatePlateStatus('blacklist', button.dataset.plate);
   if (button.dataset.action === 'edit-rule') {

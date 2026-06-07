@@ -139,6 +139,8 @@ textarea {
   outline: none;
 }
 .search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; margin-bottom: 16px; }
+.anpr-search-card h2 { margin-bottom: 12px; }
+.anpr-search-row { grid-template-columns: minmax(180px, 260px) minmax(0, 1fr) auto auto; }
 .pill, .chip {
   display: inline-flex;
   align-items: center;

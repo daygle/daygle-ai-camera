@@ -1812,7 +1812,7 @@ def profile_page():
 def anpr_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>ANPR · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Recognition</p><h1>ANPR</h1><p class="muted">Search plates, review sightings, and manage plate alerts.</p></div></header><section class="card"><h2>Plate search</h2><div id="anprMessage" class="muted"></div><div class="search-row"><input id="plateSearchInput" placeholder="ABC123, 1ABC2D, XYZ999..." /><button id="plateSearchBtn">Search</button><button id="plateClearBtn" class="secondary">Recent</button></div><div id="plateResults" class="list"></div></section><section class="grid main-grid"><article class="card"><div class="section-header"><h2>Recent plates</h2><button id="deleteAllPlatesBtn" class="secondary delete-btn" type="button" hidden>Delete all</button></div><div id="recentPlates" class="list"></div></article><article class="card"><div class="section-header"><h2>Plate details</h2></div><div id="plateDetails" class="list"></div></article></section><section class="card"><h2>Plate alert rules</h2><form id="plateAlertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="rule_name" placeholder="Rule name" required /><label><span>Type</span><select name="rule_type"><option value="plate">Specific plate</option><option value="unknown">Unknown plate</option><option value="blacklisted">Blacklisted plate</option></select></label><input name="plate_pattern" placeholder="Plate pattern" /><input name="cooldown_seconds" type="number" min="0" placeholder="Cooldown seconds" value="60" /><label><span>Enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><button type="submit">Save rule</button><button id="cancelPlateRuleEdit" class="secondary" type="button">Cancel edit</button></form><div id="plateAlertRules" class="list"></div></section></main><script src="/static/anpr.js"></script></body></html>""")
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Recognition</p><h1>ANPR</h1><p class="muted">Search plates, review sightings, and manage plate alerts.</p></div></header><section class="card anpr-search-card"><h2>Plate search</h2><div id="anprMessage" class="muted"></div><div class="search-row"><input id="plateSearchInput" placeholder="ABC123, 1ABC2D, XYZ999..." /><button id="plateSearchBtn">Search</button><button id="plateClearBtn" class="secondary">Recent</button></div><div id="plateResults" class="list"></div></section><section class="grid main-grid"><article class="card"><div class="section-header"><h2>Recent plates</h2><button id="deleteAllPlatesBtn" class="secondary delete-btn" type="button" hidden>Delete all</button></div><div id="recentPlates" class="list"></div></article><article class="card"><div class="section-header"><h2>Plate details</h2></div><div id="plateDetails" class="list"></div></article></section><section class="card"><h2>Plate alert rules</h2><form id="plateAlertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="rule_name" placeholder="Rule name" required /><label><span>Type</span><select name="rule_type"><option value="plate">Specific plate</option><option value="unknown">Unknown plate</option><option value="blacklisted">Blacklisted plate</option></select></label><input name="plate_pattern" placeholder="Plate pattern" /><input name="cooldown_seconds" type="number" min="0" placeholder="Cooldown seconds" value="60" /><label><span>Enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><button type="submit">Save rule</button><button id="cancelPlateRuleEdit" class="secondary" type="button">Cancel edit</button></form><div id="plateAlertRules" class="list"></div></section></main><script src="/static/anpr.js"></script></body></html>""")
 
 
 @app.get('/settings')
@@ -2192,14 +2192,63 @@ async def update_user(user_id: int, request: Request):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _event_camera_id_from_plate_event(plate_event: dict[str, Any]) -> str | None:
+    event = plate_event.get('event') if isinstance(plate_event, dict) else None
+    if not isinstance(event, dict):
+        return None
+    metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
+    raw_camera_id = metadata.get('camera_id') or event.get('camera_id')
+    return normalize_camera_id(raw_camera_id) if raw_camera_id else None
+
+
+def _filter_plate_events_by_camera(events: list[dict[str, Any]], camera_id: str | None) -> list[dict[str, Any]]:
+    if not camera_id:
+        return events
+    target = normalize_camera_id(camera_id)
+    return [event for event in events if _event_camera_id_from_plate_event(event) == target]
+
+
+def _apply_camera_filter_to_plate(plate: dict[str, Any], camera_id: str | None) -> dict[str, Any]:
+    if not camera_id:
+        return plate
+    filtered_events = _filter_plate_events_by_camera(plate.get('events', []), camera_id)
+    filtered = dict(plate)
+    filtered['events'] = filtered_events
+    filtered['sighting_count'] = len(filtered_events)
+    timestamps = [str(event.get('created_at') or '') for event in filtered_events if event.get('created_at')]
+    if timestamps:
+        filtered['first_seen'] = min(timestamps)
+        filtered['last_seen'] = max(timestamps)
+    else:
+        filtered['first_seen'] = None
+        filtered['last_seen'] = None
+    return filtered
+
+
 @app.get('/api/plates')
-def list_plates(limit: int = Query(50, ge=1, le=200)):
-    return database.list_plates(limit=limit)
+def list_plates(limit: int = Query(50, ge=1, le=200), camera_id: str | None = None):
+    if not camera_id:
+        return database.list_plates(limit=limit)
+    plates = database.list_plates(limit=200)
+    filtered: list[dict[str, Any]] = []
+    for plate in plates:
+        detailed = database.get_plate(int(plate['id']))
+        if detailed is None:
+            continue
+        camera_filtered = _apply_camera_filter_to_plate(detailed, camera_id)
+        if camera_filtered.get('sighting_count', 0) <= 0:
+            continue
+        camera_filtered.pop('events', None)
+        filtered.append(camera_filtered)
+        if len(filtered) >= limit:
+            break
+    return filtered
 
 
 @app.get('/api/plates/search')
-def search_plates(q: str = '', limit: int = Query(50, ge=1, le=200)):
-    return database.search_plates(normalize_plate(q), limit=limit)
+def search_plates(q: str = '', limit: int = Query(50, ge=1, le=200), camera_id: str | None = None):
+    events = database.search_plates(normalize_plate(q), limit=limit)
+    return _filter_plate_events_by_camera(events, camera_id)
 
 
 @app.post('/api/plates/whitelist')
@@ -2223,11 +2272,11 @@ async def blacklist_plate(request: Request):
 
 
 @app.get('/api/plates/{plate_id}')
-def get_plate(plate_id: int):
+def get_plate(plate_id: int, camera_id: str | None = None):
     plate = database.get_plate(plate_id)
     if plate is None:
         raise HTTPException(status_code=404, detail='Plate not found')
-    return plate
+    return _apply_camera_filter_to_plate(plate, camera_id)
 
 
 @app.delete('/api/plates/{plate_id}')
