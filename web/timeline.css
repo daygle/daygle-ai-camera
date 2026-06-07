@@ -30,7 +30,7 @@
 }
 .timeline-controls {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(130px, 170px) minmax(120px, 160px) minmax(150px, 200px) auto;
+  grid-template-columns: minmax(180px, 1fr) minmax(130px, 170px) minmax(110px, 140px) minmax(110px, 140px) minmax(150px, 200px) auto;
   gap: 12px;
   align-items: end;
 }

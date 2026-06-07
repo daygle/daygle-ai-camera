@@ -1,7 +1,8 @@
 const els = {
   cameraSelect: document.getElementById('timelineCameraSelect'),
   timelineDate: document.getElementById('timelineDate'),
-  timespanSelect: document.getElementById('timelineSpan'),
+  fromTime: document.getElementById('timelineFromTime'),
+  toTime: document.getElementById('timelineToTime'),
   filterSelect: document.getElementById('timelineFilterSelect'),
   timelineLoadBtn: document.getElementById('timelineLoadBtn'),
   timelineStatus: document.getElementById('timelineStatus'),
@@ -25,8 +26,19 @@ const state = {
 const DAY_SECONDS = 24 * 60 * 60;
 const TIMELINE_ROW_HEIGHT = 42;
 
-function getTimespanConfig() {
-  const totalSeconds = Number(els.timespanSelect.value) || DAY_SECONDS;
+function parseTimeInput(value, fallback) {
+  if (!value) return fallback;
+  const parts = value.split(':');
+  const h = parseInt(parts[0], 10) || 0;
+  const m = parseInt(parts[1], 10) || 0;
+  return h * 3600 + m * 60;
+}
+
+function getTimeRangeConfig() {
+  const fromSeconds = parseTimeInput(els.fromTime.value, 0);
+  const toRaw = parseTimeInput(els.toTime.value, DAY_SECONDS);
+  const toSeconds = toRaw <= fromSeconds ? fromSeconds + 3600 : toRaw;
+  const totalSeconds = toSeconds - fromSeconds;
   const totalHours = totalSeconds / 3600;
   let tickIntervalSeconds;
   if (totalHours <= 1) tickIntervalSeconds = 900;
@@ -34,7 +46,7 @@ function getTimespanConfig() {
   else if (totalHours <= 6) tickIntervalSeconds = 3600;
   else if (totalHours <= 12) tickIntervalSeconds = 7200;
   else tickIntervalSeconds = 10800;
-  return { totalSeconds, tickIntervalSeconds };
+  return { fromSeconds, toSeconds, totalSeconds, tickIntervalSeconds };
 }
 
 const SEGMENT_COLORS = [
@@ -200,10 +212,12 @@ function replaceUrl(recordingId = state.activeRecordingId) {
   const params = new URLSearchParams();
   const { cameraId, day } = timelineParams();
   const filter = els.filterSelect.value || '';
-  const span = els.timespanSelect.value || '';
+  const fromTime = els.fromTime.value || '';
+  const toTime = els.toTime.value || '';
   if (cameraId) params.set('camera_id', cameraId);
   if (day) params.set('day', day);
-  if (span && span !== String(DAY_SECONDS)) params.set('span', span);
+  if (fromTime && fromTime !== '00:00') params.set('from_time', fromTime);
+  if (toTime && toTime !== '23:59') params.set('to_time', toTime);
   if (filter) params.set('filter', filter);
   if (recordingId) params.set('recording_id', String(recordingId));
   const query = params.toString();
@@ -259,7 +273,14 @@ function populateFilterOptions(recordings) {
 
 function filteredRecordings() {
   const recordings = state.payload?.recordings || [];
-  return recordings.filter((recording) => matchesRecordingFilter(recording, els.filterSelect.value));
+  const { fromSeconds, toSeconds } = getTimeRangeConfig();
+  const filterValue = els.filterSelect.value;
+  return recordings.filter((recording) => {
+    if (!matchesRecordingFilter(recording, filterValue)) return false;
+    const start = Number(recording.timeline_start_seconds || 0);
+    const end = Number(recording.timeline_end_seconds || start + 1);
+    return start < toSeconds && end > fromSeconds;
+  });
 }
 
 function renderSummary(payload, totalRecordingCount) {
@@ -314,29 +335,43 @@ function buildTimelineLayout(recordings) {
 }
 
 function renderTimeline(payload) {
-  const { totalSeconds, tickIntervalSeconds } = getTimespanConfig();
+  const { fromSeconds, toSeconds, totalSeconds, tickIntervalSeconds } = getTimeRangeConfig();
 
-  // Clip recordings to the visible window
+  // Clip recordings to the visible window [fromSeconds, toSeconds], rebasing positions to fromSeconds
   const windowRecordings = (payload.recordings || [])
-    .filter((r) => Number(r.timeline_start_seconds || 0) < totalSeconds)
-    .map((r) => {
+    .filter((r) => {
       const start = Number(r.timeline_start_seconds || 0);
-      const end = Math.min(Number(r.timeline_end_seconds || start + 1), totalSeconds);
-      return { ...r, timeline_end_seconds: end, timeline_duration_seconds: Math.max(1, end - start) };
+      const end = Number(r.timeline_end_seconds || start + 1);
+      return start < toSeconds && end > fromSeconds;
+    })
+    .map((r) => {
+      const rawStart = Number(r.timeline_start_seconds || 0);
+      const rawEnd = Number(r.timeline_end_seconds || rawStart + 1);
+      const visStart = Math.max(rawStart, fromSeconds) - fromSeconds;
+      const visEnd = Math.min(rawEnd, toSeconds) - fromSeconds;
+      return {
+        ...r,
+        _orig_start_seconds: rawStart,
+        timeline_start_seconds: visStart,
+        timeline_end_seconds: visEnd,
+        timeline_duration_seconds: Math.max(1, visEnd - visStart),
+      };
     });
 
   const recordings = buildTimelineLayout(windowRecordings);
   const rowCount = Math.max(1, recordings.reduce((max, recording) => Math.max(max, recording.rowIndex + 1), 0));
 
   const ticks = [];
-  for (let s = 0; s <= totalSeconds; s += tickIntervalSeconds) ticks.push(s);
-  if (ticks[ticks.length - 1] < totalSeconds) ticks.push(totalSeconds);
+  for (let s = fromSeconds; s <= toSeconds; s += tickIntervalSeconds) ticks.push(s);
+  if (ticks[ticks.length - 1] < toSeconds) ticks.push(toSeconds);
 
-  els.timelineHours.innerHTML = ticks.map((seconds) => (
-    `<span class="timeline-hour major" style="left:${(seconds / totalSeconds) * 100}%">${formatClock(seconds)}</span>`
+  const tickPos = (s) => ((s - fromSeconds) / totalSeconds) * 100;
+
+  els.timelineHours.innerHTML = ticks.map((s) => (
+    `<span class="timeline-hour major" style="left:${tickPos(s)}%">${formatClock(s)}</span>`
   )).join('');
-  els.timelineGrid.innerHTML = ticks.map((seconds) => `
-    <span class="timeline-grid-line" style="left:${(seconds / totalSeconds) * 100}%"></span>
+  els.timelineGrid.innerHTML = ticks.map((s) => `
+    <span class="timeline-grid-line" style="left:${tickPos(s)}%"></span>
   `).join('');
   els.timelineRows.style.height = `${Math.max(96, rowCount * TIMELINE_ROW_HEIGHT)}px`;
 
@@ -346,9 +381,10 @@ function renderTimeline(payload) {
   }
 
   els.timelineRows.innerHTML = recordings.map((recording) => {
-    const start = Number(recording.timeline_start_seconds || 0);
+    const visStart = Number(recording.timeline_start_seconds || 0);
+    const origStart = Number(recording._orig_start_seconds ?? visStart + fromSeconds);
     const duration = Math.max(1, Number(recording.timeline_duration_seconds || 1));
-    const left = (start / totalSeconds) * 100;
+    const left = (visStart / totalSeconds) * 100;
     const width = Math.max((duration / totalSeconds) * 100, 0.1);
     const color = colorForKey(recordingColorKey(recording));
     const activeClass = Number(recording.id) === Number(state.activeRecordingId) ? ' active' : '';
@@ -359,11 +395,11 @@ function renderTimeline(payload) {
         class="timeline-segment${activeClass}${compactClass}${tinyClass}"
         type="button"
         data-recording-id="${recording.id}"
-        title="${escapeHtml(`${recordingTriggerSummary(recording)} · ${formatClock(start)} · ${formatDuration(recording.duration_seconds)}`)}"
+        title="${escapeHtml(`${recordingTriggerSummary(recording)} · ${formatClock(origStart)} · ${formatDuration(recording.duration_seconds)}`)}"
         style="left:${left}%;width:${width}%;top:${recording.rowIndex * TIMELINE_ROW_HEIGHT + 8}px;--segment-color:${color};"
       >
         <span class="timeline-segment-label">${escapeHtml(recordingTypeLabel(recording))}</span>
-        <span class="timeline-segment-time">${escapeHtml(formatClock(start))}</span>
+        <span class="timeline-segment-time">${escapeHtml(formatClock(origStart))}</span>
       </button>
     `;
   }).join('');
@@ -478,7 +514,11 @@ async function renderFilteredTimeline({ preserveSelection = true } = {}) {
   }
 
   const filterLabel = els.filterSelect.value ? ` matching ${titleCase(els.filterSelect.value)}` : '';
-  els.timelineStatus.textContent = `${recordings.length} clip${recordings.length === 1 ? '' : 's'}${filterLabel} for ${state.payload.camera.name} on ${state.payload.day}.`;
+  const { fromSeconds, toSeconds } = getTimeRangeConfig();
+  const timeRangeLabel = (fromSeconds > 0 || toSeconds < DAY_SECONDS)
+    ? ` from ${formatClock(fromSeconds)} to ${formatClock(toSeconds)}`
+    : '';
+  els.timelineStatus.textContent = `${recordings.length} clip${recordings.length === 1 ? '' : 's'}${filterLabel}${timeRangeLabel} for ${state.payload.camera.name} on ${state.payload.day}.`;
 
   const querySelection = Number(new URLSearchParams(window.location.search).get('recording_id')) || null;
   const requestedSelection = preserveSelection ? (state.activeRecordingId || querySelection) : null;
@@ -533,7 +573,13 @@ els.filterSelect.addEventListener('change', () => {
   });
 });
 
-els.timespanSelect.addEventListener('change', () => {
+els.fromTime.addEventListener('change', () => {
+  renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
+    els.timelineStatus.textContent = error.message;
+  });
+});
+
+els.toTime.addEventListener('change', () => {
   renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
     els.timelineStatus.textContent = error.message;
   });
@@ -571,11 +617,13 @@ loadAuth().then(async () => {
   const queryDay = params.get('day');
   const queryCameraId = params.get('camera_id');
   const queryFilter = params.get('filter');
-  const querySpan = params.get('span');
+  const queryFromTime = params.get('from_time');
+  const queryToTime = params.get('to_time');
   els.timelineDate.value = queryDay || new Date().toISOString().slice(0, 10);
   if (queryCameraId) els.cameraSelect.innerHTML = `<option value="${escapeHtml(queryCameraId)}" selected>${escapeHtml(queryCameraId)}</option>`;
   if (queryFilter) els.filterSelect.innerHTML = `<option value="${escapeHtml(queryFilter)}" selected>${escapeHtml(titleCase(queryFilter))}</option>`;
-  if (querySpan) els.timespanSelect.value = querySpan;
+  if (queryFromTime) els.fromTime.value = queryFromTime;
+  if (queryToTime) els.toTime.value = queryToTime;
   await loadTimeline({ preserveSelection: true });
 }).catch((error) => {
   els.timelineStatus.textContent = error.message;
