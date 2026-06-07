@@ -1346,7 +1346,7 @@ def test_opencv_stream_camera_reuses_rtsp_capture(monkeypatch):
     assert FakeCapture.instances[0].grab_count == 14
     assert FakeCapture.instances[0].release_count == 0
     assert 'rtsp_transport;tcp' in os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS']
-    assert 'fflags;nobuffer' in os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS']
+    assert 'fflags;discardcorrupt' in os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS']
 
 
 def test_live_stream_detection_triggers_email_alert(tmp_path, monkeypatch):
