@@ -1760,6 +1760,9 @@ def test_live_stream_detection_queue_runs_in_background_and_deduplicates(tmp_pat
     monkeypatch.setattr(main, 'detector', detector)
     main.live_detection_last_checked.clear()
     main.active_live_detection_cameras.clear()
+    # queue_live_stream_alerts is the frontend-triggered path and only runs detection
+    # when background_detection_enabled=False (otherwise the background monitor handles it).
+    main.database.set_setting('live', {'background_detection_enabled': False}, main.utc_now())
     settings = {'id': 'camera-1', 'name': 'Front Door', 'detection': {'zones': []}}
 
     main.queue_live_stream_alerts(b'jpeg-frame-1', {'width': 1280, 'height': 720}, settings)
