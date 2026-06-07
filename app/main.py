@@ -109,7 +109,7 @@ def effective_live_config() -> dict[str, Any]:
     settings = {
         'snapshot_refresh_ms': 500,
         'detection_status_refresh_ms': 2000,
-        'detection_interval_seconds': 1.0,
+        'detection_interval_seconds': 0.5,
         'background_detection_enabled': True,
     }
     config_live = config.get('live', {})
@@ -731,6 +731,13 @@ def run_live_alert_monitor_once() -> int:
         camera_id = str(selected_config.get('id') or 'camera')
         if not _camera_has_live_alert_stream(selected_config):
             continue
+        stream_url = build_stream_url(selected_config)
+        if stream_url:
+            recording_service.prime_rtsp_prebuffer(
+                stream_url=stream_url,
+                camera_id=camera_id,
+                recording_config=camera_event_recording_config(selected_config),
+            )
         now = time.time()
         detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 1.0))
         with live_detection_worker_lock:
@@ -783,6 +790,13 @@ def stop_live_alert_monitor() -> None:
 
 def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any]) -> None:
     camera_id = str(settings.get('id') or 'camera')
+    stream_url = build_stream_url(settings)
+    if stream_url:
+        recording_service.prime_rtsp_prebuffer(
+            stream_url=stream_url,
+            camera_id=camera_id,
+            recording_config=camera_event_recording_config(settings),
+        )
     detection_interval_seconds = float(effective_live_config().get('detection_interval_seconds', 1.0))
     now = time.time()
     with live_detection_worker_lock:

@@ -185,6 +185,25 @@ class RecordingService:
             if isinstance(thread, threading.Thread):
                 thread.join(timeout=2)
 
+    def prime_rtsp_prebuffer(
+        self,
+        *,
+        stream_url: str,
+        camera_id: str,
+        recording_config: dict[str, Any] | None = None,
+    ) -> bool:
+        config = recording_config or self.recording_config
+        if not self.enabled_for(config):
+            return False
+        pre_seconds = max(0, int(config.get('pre_event_seconds', 0)))
+        post_seconds = max(0, int(config.get('post_event_seconds', 0)))
+        if pre_seconds <= 0:
+            return False
+        buffer_seconds = max(pre_seconds + post_seconds + 5, pre_seconds + 10, 15)
+        camera_key = self._camera_key(camera_id)
+        self._ensure_prebuffer_worker(camera_key, stream_url, buffer_seconds)
+        return True
+
     def write_rtsp_clip_with_prebuffer(
         self,
         *,
