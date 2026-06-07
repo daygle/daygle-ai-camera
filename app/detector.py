@@ -210,12 +210,12 @@ class OnnxYoloDetector:
         classes: list[int] = []
 
         for row in predictions:
-            if row.shape[0] < 6:
+            if row.shape[0] < 5:
                 continue
 
             class_scores = row[4:]
             objectness = 1.0
-            if row.shape[0] > len(self.labels) + 5:
+            if len(self.labels) > 0 and row.shape[0] >= len(self.labels) + 5:
                 objectness = float(row[4])
                 class_scores = row[5:]
 

@@ -893,7 +893,7 @@ def run_live_alert_monitor_once() -> int:
         return 0
 
     processed = 0
-    for selected_config in list(effective_cameras_config()):
+    for selected_config in list(cameras_config):
         camera_id = str(selected_config.get('id') or 'camera')
         if not _camera_has_live_alert_stream(selected_config):
             continue
@@ -997,7 +997,6 @@ def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings
 def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any], *, enforce_interval: bool = True) -> int | None:
     camera_id = str(settings.get('id') or 'camera')
     live_settings = effective_live_config()
-    recording_settings = effective_recording_config()
     detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 0.25))
     if not hasattr(detector, 'detect_image'):
         update_live_detection_status(camera_id, state='skipped', reason='Live stream alerts require ONNX AI mode.', detections=[])
