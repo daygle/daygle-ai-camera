@@ -37,16 +37,49 @@ def _configure_ffmpeg_log_level() -> None:
         logger.warning('Unknown DAYGLE_FFMPEG_LOGLEVEL=%s; keeping FFmpeg defaults.', level_name)
         return
 
-    library_name = ctypes.util.find_library('avutil')
-    if not library_name:
-        return
+    import glob as _glob
+
+    candidates: list[str] = []
+
+    # opencv-python-headless bundles its own copy of FFmpeg. The system
+    # libavutil is a separate shared-library instance, so calling
+    # av_log_set_level on it has no effect on OpenCV's decoder output.
+    # Search the cv2 package directory for the bundled libavutil first.
     try:
-        avutil = ctypes.CDLL(library_name)
-        avutil.av_log_set_level.argtypes = [ctypes.c_int]
-        avutil.av_log_set_level.restype = None
-        avutil.av_log_set_level(level)
-    except Exception as exc:  # pragma: no cover - depends on system libraries
-        logger.debug('Unable to set FFmpeg log level via libavutil: %s', exc)
+        import importlib.util as _ilu
+        _spec = _ilu.find_spec('cv2')
+        if _spec and _spec.origin:
+            _pkg_dir = os.path.dirname(_spec.origin)
+            for _d in [_pkg_dir, os.path.join(_pkg_dir, '.libs')]:
+                candidates.extend(sorted(_glob.glob(os.path.join(_d, 'libavutil*.so*'))))
+    except Exception:
+        pass
+
+    # Also scan /proc/self/maps for any libavutil already mapped into this
+    # process (populated after `import cv2` loads its bundled FFmpeg libs).
+    try:
+        with open('/proc/self/maps') as _maps:
+            for _line in _maps:
+                if 'libavutil' in _line and '.so' in _line:
+                    _parts = _line.rstrip().split()
+                    if _parts and _parts[-1].startswith('/') and _parts[-1] not in candidates:
+                        candidates.append(_parts[-1])
+    except Exception:
+        pass
+
+    # Fall back to the system-installed library.
+    _system_lib = ctypes.util.find_library('avutil')
+    if _system_lib and _system_lib not in candidates:
+        candidates.append(_system_lib)
+
+    for lib_name in candidates:
+        try:
+            avutil = ctypes.CDLL(lib_name)
+            avutil.av_log_set_level.argtypes = [ctypes.c_int]
+            avutil.av_log_set_level.restype = None
+            avutil.av_log_set_level(level)
+        except Exception as exc:
+            logger.debug('Unable to set FFmpeg log level via %s: %s', lib_name, exc)
 
 
 class OpenCvStreamCamera:
@@ -87,13 +120,15 @@ class OpenCvStreamCamera:
         if not self.stream_url:
             raise RuntimeError("ONVIF/RTSP stream URL is not configured.")
 
-        _configure_ffmpeg_log_level()
-
         # Prefer TCP for RTSP cameras. UDP packet loss and frequent reconnects
         # can make inexpensive ONVIF cameras fail during session setup.
         os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|max_delay;500000|stimeout;5000000|fflags;discardcorrupt")
 
         import cv2
+        # Call after cv2 is imported so its bundled FFmpeg libraries are
+        # already mapped into the process and visible in /proc/self/maps,
+        # ensuring av_log_set_level targets the correct libavutil instance.
+        _configure_ffmpeg_log_level()
 
         if self._capture is None:
             self._capture = cv2.VideoCapture(self.stream_url)
