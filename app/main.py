@@ -642,7 +642,7 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
     for zone in zones:
         if not detection_matches_zone(detection, zone):
             continue
-        for rule in normalize_zone_object_rules(zone):
+        for rule in (zone.get('object_rules') or []):
             if not rule.get('enabled', True):
                 continue
             if action == 'alert' and not rule.get('alert_on_detect', True):
@@ -663,7 +663,7 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
     rules: list[dict[str, Any]] = []
     for zone in zones:
         zone_id = str(zone.get('id') or zone.get('name') or 'zone')
-        for rule in normalize_zone_object_rules(zone):
+        for rule in (zone.get('object_rules') or []):
             if not rule.get('enabled', True) or not rule.get('alert_on_detect', True):
                 continue
             label = str(rule.get('label') or '').strip().lower()
