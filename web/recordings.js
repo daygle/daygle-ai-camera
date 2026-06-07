@@ -10,7 +10,6 @@ const els = {
   clipOverlay: document.getElementById('clipOverlay'),
   clipOverlayToggle: document.getElementById('clipOverlayToggle'),
   clipOverlayTrackToggle: document.getElementById('clipOverlayTrackToggle'),
-  clipOverlayOffset: document.getElementById('clipOverlayOffset'),
 };
 
 let authState = { user: null, csrfToken: null };
@@ -19,13 +18,10 @@ let activeRecording = null;
 let overlayResizeObserver = null;
 const OVERLAY_TOGGLE_KEY = 'daygle.recordings.overlay.enabled';
 const OVERLAY_TRACK_KEY = 'daygle.recordings.overlay.track.enabled';
-const OVERLAY_OFFSET_KEY = 'daygle.recordings.overlay.offset.seconds';
 let overlayEnabled = true;
 let overlayTrackEnabled = false;
-let overlayOffsetSeconds = 0;
-const EVENT_OVERLAY_WINDOW_SECONDS = 2.0;
 const GENERIC_TRIGGER_LABELS = new Set(['motion', 'alert', 'human', 'object', 'none', 'off', 'continuous']);
-const OVERLAY_TRACK_INTERVAL_MS = 420;
+let overlayTrackIntervalMs = 420;
 const OVERLAY_TRACK_MAX_WIDTH = 640;
 const OVERLAY_TRACK_MAX_HEIGHT = 360;
 const overlayTrackCanvas = document.createElement('canvas');
@@ -169,14 +165,11 @@ function detectionAnchorSeconds(recording) {
 }
 
 function shouldRenderOverlayForTime(recording, playerTimeSeconds) {
-  if (els.clipPlayer?.paused) return true;
   const anchorSeconds = detectionAnchorSeconds(recording);
   if (anchorSeconds === null) return true;
-  const duration = Math.max(0, Number(recording?.duration_seconds || 0));
-  const shiftedAnchor = anchorSeconds + overlayOffsetSeconds;
-  const clampedAnchor = duration > 0 ? clamp(shiftedAnchor, 0, duration) : shiftedAnchor;
-  return Math.abs(playerTimeSeconds - clampedAnchor) <= EVENT_OVERLAY_WINDOW_SECONDS / 2;
+  return playerTimeSeconds >= anchorSeconds;
 }
+
 
 function clearClipOverlay() {
   if (!els.clipOverlay) return;
@@ -213,7 +206,7 @@ async function detectOverlayFrameDetections() {
   if (els.clipPlayer.readyState < 2 || els.clipPlayer.videoWidth <= 0 || els.clipPlayer.videoHeight <= 0) return;
 
   const now = performance.now();
-  if (overlayTrackInFlight || now - overlayTrackLastRunMs < OVERLAY_TRACK_INTERVAL_MS) return;
+  if (overlayTrackInFlight || now - overlayTrackLastRunMs < overlayTrackIntervalMs) return;
   overlayTrackLastRunMs = now;
   overlayTrackInFlight = true;
 
@@ -288,7 +281,11 @@ function drawClipOverlay() {
     detectOverlayFrameDetections();
   }
 
-  const eventDetections = Array.isArray(activeRecording?.detections) ? activeRecording.detections : [];
+  const allEventDetections = Array.isArray(activeRecording?.detections) ? activeRecording.detections : [];
+  const hasSpecificEvent = allEventDetections.some((d) => !GENERIC_TRIGGER_LABELS.has(String(d.label || '').toLowerCase()));
+  const eventDetections = hasSpecificEvent
+    ? allEventDetections.filter((d) => !GENERIC_TRIGGER_LABELS.has(String(d.label || '').toLowerCase()))
+    : allEventDetections;
   const detections = overlayTrackEnabled && Array.isArray(overlayTrackDetections) && overlayTrackDetections.length
     ? overlayTrackDetections
     : eventDetections;
@@ -400,6 +397,16 @@ async function loadAuth() {
   }
 }
 
+async function loadLiveSettings() {
+  try {
+    const settings = await api('/api/settings/system');
+    const intervalMs = Number(settings?.live?.overlay_track_interval_ms);
+    if (Number.isFinite(intervalMs) && intervalMs >= 100) overlayTrackIntervalMs = intervalMs;
+  } catch (_error) {
+    // Keep default if settings unavailable.
+  }
+}
+
 async function loadRecordings(label = '') {
   const params = new URLSearchParams();
   if (label) params.set('label', label);
@@ -452,22 +459,6 @@ if (els.clipOverlayTrackToggle) {
   });
 }
 
-if (els.clipOverlayOffset) {
-  const savedOffsetValue = Number(localStorage.getItem(OVERLAY_OFFSET_KEY));
-  overlayOffsetSeconds = Number.isFinite(savedOffsetValue) ? clamp(savedOffsetValue, -10, 10) : 0;
-  els.clipOverlayOffset.value = overlayOffsetSeconds.toFixed(1);
-
-  const updateOffset = () => {
-    const parsed = Number(els.clipOverlayOffset.value);
-    overlayOffsetSeconds = Number.isFinite(parsed) ? clamp(parsed, -10, 10) : 0;
-    els.clipOverlayOffset.value = overlayOffsetSeconds.toFixed(1);
-    localStorage.setItem(OVERLAY_OFFSET_KEY, overlayOffsetSeconds.toFixed(1));
-    drawClipOverlay();
-  };
-
-  els.clipOverlayOffset.addEventListener('change', updateOffset);
-  els.clipOverlayOffset.addEventListener('blur', updateOffset);
-}
 
 els.recordingSearchBtn.addEventListener('click', () => loadRecordings(els.recordingFilter.value.trim()));
 els.recordingClearBtn.addEventListener('click', () => {
@@ -479,7 +470,7 @@ els.recordingFilter.addEventListener('keydown', (event) => {
 });
 
 loadAuth().then(async () => {
-  await loadRecordings();
+  await Promise.all([loadRecordings(), loadLiveSettings()]);
   const selected = new URLSearchParams(window.location.search).get('recording_id');
   if (selected) playRecording(selected).catch((error) => { els.clipPlayerStatus.textContent = error.message; });
 }).catch((error) => { els.clipPlayerStatus.textContent = error.message; });

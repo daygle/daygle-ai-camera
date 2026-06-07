@@ -112,6 +112,7 @@ def effective_live_config() -> dict[str, Any]:
         'detection_interval_seconds': 0.25,
         'event_debounce_seconds': 10.0,
         'background_detection_enabled': True,
+        'overlay_track_interval_ms': 420,
     }
     config_live = config.get('live', {})
     if isinstance(config_live, dict):
@@ -1044,6 +1045,19 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             'alert_matched': 'motion' in triggered_labels,
             'alert_triggered': 'motion' in triggered_labels,
         })
+        _generic_labels = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous'}
+        _orig_label = str(strongest_motion.get('label') or '').strip().lower()
+        if _orig_label and _orig_label not in _generic_labels:
+            _already_in_objects = any(
+                str(d.get('label') or '').strip().lower() == _orig_label
+                for d in object_detections
+            )
+            if not _already_in_objects:
+                recording_detections.append({
+                    **strongest_motion,
+                    'alert_matched': False,
+                    'alert_triggered': False,
+                })
     matched_labels = [str(detection.get('label')) for detection in alert_detections if detection.get('label')]
     camera_recording_config = camera_event_recording_config(settings)
     should_record_event, _trigger_type, _trigger_label = recording_service.should_record(recording_detections, camera_recording_config)
@@ -3205,12 +3219,14 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail='event_debounce_seconds must be a number.') from exc
     if event_debounce_seconds < 0 or event_debounce_seconds > 120:
         raise HTTPException(status_code=400, detail='event_debounce_seconds must be between 0 and 120.')
+    overlay_track_interval_ms = _int_field(merged, 'overlay_track_interval_ms', 420, 100, 5000)
     return {
         'snapshot_refresh_ms': snapshot_refresh_ms,
         'detection_status_refresh_ms': detection_status_refresh_ms,
         'detection_interval_seconds': detection_interval_seconds,
         'event_debounce_seconds': event_debounce_seconds,
         'background_detection_enabled': background_detection_enabled,
+        'overlay_track_interval_ms': overlay_track_interval_ms,
     }
 
 
