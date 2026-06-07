@@ -20,7 +20,41 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 }
 
-function yesNo(value) { return value ? 'yes' : 'no'; }
+function titleCaseWords(value) {
+  return String(value || '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => {
+      const normalized = word.toLowerCase();
+      const acronyms = {
+        ai: 'AI',
+        api: 'API',
+        fps: 'FPS',
+        id: 'ID',
+        iou: 'IoU',
+        ocr: 'OCR',
+        onnx: 'ONNX',
+        onvif: 'ONVIF',
+        rtsp: 'RTSP',
+        ssl: 'SSL',
+        tls: 'TLS',
+        url: 'URL',
+      };
+      if (acronyms[normalized]) return acronyms[normalized];
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(' ');
+}
+
+function displayValue(value, fallback = 'None') {
+  if (value === null || value === undefined || value === '') return fallback;
+  return titleCaseWords(String(value));
+}
+
+function yesNo(value) { return value ? 'Yes' : 'No'; }
 function setMessage(text) { messageEl.textContent = text; }
 
 function formPayload(form) {
@@ -33,15 +67,15 @@ function formPayload(form) {
 
 function renderStatus(status) {
   statusPanel.innerHTML = `
-    <div><span>Current backend</span><strong>${escapeHtml(status.current_backend || status.configured_backend)}</strong></div>
-    <div><span>Model path</span><strong>${escapeHtml(status.model_path || 'not set')}</strong></div>
-    <div><span>Labels path</span><strong>${escapeHtml(status.labels_path || 'not set')}</strong></div>
+    <div><span>Current Backend</span><strong>${escapeHtml(displayValue(status.current_backend || status.configured_backend, 'Not Set'))}</strong></div>
+    <div><span>Model Path</span><strong>${escapeHtml(status.model_path || 'Not Set')}</strong></div>
+    <div><span>Labels Path</span><strong>${escapeHtml(status.labels_path || 'Not Set')}</strong></div>
     <div><span>Model exists</span><strong>${yesNo(status.model_exists)}</strong></div>
-    <div><span>ONNX Runtime installed</span><strong>${yesNo(status.onnx_runtime_installed)}</strong></div>
-    <div><span>Detector loaded</span><strong>${yesNo(status.detector_loaded)}</strong></div>
-    <div><span>Active config source</span><strong>${escapeHtml(status.active_config_source)}</strong></div>
-    <div><span>Mode</span><strong class="ai-mode ${escapeHtml(String(status.mode || '').toLowerCase().replace(/\s+/g, '-'))}">${escapeHtml(status.mode)}</strong></div>
-    <div class="wide"><span>Last detector error</span><strong>${escapeHtml(status.last_detector_error || 'none')}</strong></div>
+    <div><span>ONNX Runtime Installed</span><strong>${yesNo(status.onnx_runtime_installed)}</strong></div>
+    <div><span>Detector Loaded</span><strong>${yesNo(status.detector_loaded)}</strong></div>
+    <div><span>Active Config Source</span><strong>${escapeHtml(displayValue(status.active_config_source, 'None'))}</strong></div>
+    <div><span>Mode</span><strong class="ai-mode ${escapeHtml(String(status.mode || '').toLowerCase().replace(/\s+/g, '-'))}">${escapeHtml(displayValue(status.mode, 'None'))}</strong></div>
+    <div class="wide"><span>Last Detector Error</span><strong>${escapeHtml(displayValue(status.last_detector_error, 'None'))}</strong></div>
   `;
 }
 
