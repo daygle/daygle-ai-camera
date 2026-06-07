@@ -8,14 +8,84 @@ function titleCaseWords(value) {
     .trim()
     .split(' ')
     .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .map((word) => {
+      const normalized = word.toLowerCase();
+      const acronyms = {
+        ai: 'AI',
+        anpr: 'ANPR',
+        api: 'API',
+        fps: 'FPS',
+        id: 'ID',
+        iou: 'IoU',
+        ocr: 'OCR',
+        onnx: 'ONNX',
+        onvif: 'ONVIF',
+        rtsp: 'RTSP',
+        ssl: 'SSL',
+        tls: 'TLS',
+        url: 'URL',
+        ip: 'IP',
+      };
+      if (acronyms[normalized]) return acronyms[normalized];
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
     .join(' ');
 }
 
+const FIELD_LABELS = {
+  snapshot_refresh_ms: 'Snapshot Refresh',
+  detection_status_refresh_ms: 'Detection Status Refresh',
+  detection_interval_seconds: 'Detection Interval',
+  event_debounce_seconds: 'Duplicate Event Debounce',
+  background_detection_enabled: 'Background Alerts',
+  data_dir: 'Data Directory',
+  snapshots_dir: 'Snapshots Directory',
+  events_dir: 'Events Directory',
+  recordings_dir: 'Recordings Directory',
+  plates_dir: 'Plate Images Directory',
+  session_timeout_hours: 'Session Timeout Hours',
+  max_login_attempts: 'Max Login Attempts',
+  lockout_minutes: 'Lockout Minutes',
+  min_confidence: 'Min Confidence',
+  vehicle_labels: 'Vehicle Labels',
+  from_address: 'From Address',
+  use_tls: 'STARTTLS',
+  use_ssl: 'SSL',
+  host: 'SMTP Host',
+  port: 'Port',
+  username: 'Username',
+  password: 'Password',
+  backend: 'Backend',
+  stream_url: 'RTSP Stream URL',
+  device: 'Device',
+  id: 'ID',
+  name: 'Name',
+  width: 'Width',
+  height: 'Height',
+  fps: 'FPS',
+  pre_event_seconds: 'Pre-Event Seconds',
+  post_event_seconds: 'Post-Event Seconds',
+  max_clip_seconds: 'Max Clip Seconds',
+  retention_days: 'Retention Days',
+  max_storage_gb: 'Max Storage GB',
+  auto_purge_enabled: 'Auto Purge',
+  enabled: 'Enabled',
+  continuous: 'Continuous',
+  record_on_alert: 'Alert Clips',
+  record_on_motion: 'Record on Motion',
+  record_on_human: 'Record on Human',
+  record_on_objects: 'Record on Objects',
+  rule_name: 'Rule Name',
+  rule_type: 'Rule Type',
+  plate_pattern: 'Plate Pattern',
+  cooldown_seconds: 'Cooldown Seconds',
+  timezone: 'Timezone',
+};
+
 function labelTextForField(field) {
-  if (field.dataset.cameraField) return titleCaseWords(field.dataset.cameraField);
-  if (field.dataset.cameraRecording) return titleCaseWords(field.dataset.cameraRecording);
-  if (field.name) return titleCaseWords(field.name);
+  if (field.dataset.cameraField) return FIELD_LABELS[field.dataset.cameraField] || titleCaseWords(field.dataset.cameraField);
+  if (field.dataset.cameraRecording) return FIELD_LABELS[field.dataset.cameraRecording] || titleCaseWords(field.dataset.cameraRecording);
+  if (field.name) return FIELD_LABELS[field.name] || titleCaseWords(field.name);
   const placeholder = String(field.getAttribute('placeholder') || '').trim();
   if (placeholder) {
     return placeholder
@@ -54,7 +124,7 @@ function createDatabaseRestoreSection() {
     <div class="button-row"><a class="button-link" href="/api/settings/system/database/backup">Download database backup</a></div>
     <form id="databaseRestoreForm" class="form-grid">
       <label><span>Restore backup file</span><input name="file" type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3,application/x-sqlite3" required /></label>
-      <button class="secondary" type="submit">Restore database</button>
+      <button class="secondary" type="submit">Restore Database</button>
     </form>
     <p class="muted">A safety backup of the current database is created before every restore.</p>
   `;
@@ -78,7 +148,7 @@ function createCameraManagerSection() {
         <h2>Cameras</h2>
         <p class="muted">Manage RTSP/ONVIF camera connections here. Configure motion alerts, object alerts, ANPR, and monitoring areas from Live Cameras.</p>
       </div>
-      <button id="addCameraBtn" type="button">Add camera</button>
+      <button id="addCameraBtn" type="button">Add Camera</button>
     </div>
     <div id="cameraManager" class="camera-manager"></div>
     <div class="button-row"><button id="saveCamerasBtn" type="button">Save Cameras</button></div>
@@ -99,10 +169,10 @@ function createLiveSettingsSection() {
   section.innerHTML = `
     <h2>Live performance</h2>
     <form id="liveSettingsForm" class="form-grid">
-      <input name="snapshot_refresh_ms" type="number" min="150" max="5000" step="10" placeholder="Snapshot refresh ms (e.g. 500)" />
-      <input name="detection_status_refresh_ms" type="number" min="500" max="15000" step="100" placeholder="Detection status refresh ms (e.g. 2000)" />
-      <input name="detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="Detection interval seconds (e.g. 0.25)" />
-      <input name="event_debounce_seconds" type="number" min="0" max="120" step="0.5" placeholder="Duplicate event debounce seconds (e.g. 10)" />
+      <label><span>Snapshot Refresh</span><input name="snapshot_refresh_ms" type="number" min="150" max="5000" step="10" placeholder="500" /><span class="field-help">How often the live camera image updates.</span></label>
+      <label><span>Detection Status Refresh</span><input name="detection_status_refresh_ms" type="number" min="500" max="15000" step="100" placeholder="2000" /><span class="field-help">How often the live detection summary updates.</span></label>
+      <label><span>Detection Interval</span><input name="detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="0.25" /><span class="field-help">How often AI checks each camera for motion and objects.</span></label>
+      <label><span>Duplicate Event Debounce</span><input name="event_debounce_seconds" type="number" min="0" max="120" step="0.5" placeholder="10" /><span class="field-help">Prevents repeated recordings for the same ongoing event.</span></label>
       <label><span>Background Alerts</span><select name="background_detection_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
       <button type="submit">Save Live Settings</button>
     </form>
@@ -134,7 +204,7 @@ function createEmailDeliverySection() {
       <label><span>SSL</span><select name="use_ssl"><option value="false">Disabled</option><option value="true">Enabled</option></select></label>
       <button type="submit">Save Mail Server</button>
       <input id="testEmailRecipient" type="email" placeholder="Test recipient email" />
-      <button id="testEmailBtn" class="secondary" type="button">Send test email</button>
+      <button id="testEmailBtn" class="secondary" type="button">Send Test Email</button>
     </form>
     <p class="muted">Object-specific alert rules are configured on the Zones page.</p>
   `;
