@@ -15,7 +15,7 @@
       <a href="/anpr" data-match="/anpr">ANPR</a>
       <a href="/recordings" data-match="/recordings">Recordings</a>
       <a href="/ai" data-match="/ai" data-admin="true">AI</a>
-      <a href="/settings" data-match="/settings" data-admin="true">System</a>
+      <a href="/settings" data-match="/settings" data-admin="true">Settings</a>
       <a href="/users" data-match="/users" data-admin="true">Users</a>
     </div>
     <div class="app-nav-account">

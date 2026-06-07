@@ -136,6 +136,10 @@ class RecordingService:
         command = [
             ffmpeg,
             '-y',
+            '-fflags',
+            '+discardcorrupt+genpts',
+            '-err_detect',
+            'ignore_err',
             '-rtsp_transport',
             'tcp',
             '-i',
@@ -149,6 +153,8 @@ class RecordingService:
             'veryfast',
             '-pix_fmt',
             'yuv420p',
+            '-movflags',
+            '+faststart',
             str(tmp_path),
         ]
         result = subprocess.run(command, capture_output=True, text=True, timeout=max(30, int(duration_seconds) + 20), check=False)
