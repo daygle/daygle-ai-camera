@@ -30,7 +30,7 @@
 }
 .timeline-controls {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(180px, 220px) minmax(180px, 220px) auto;
+  grid-template-columns: minmax(180px, 1fr) minmax(130px, 170px) minmax(120px, 160px) minmax(150px, 200px) auto;
   gap: 12px;
   align-items: end;
 }
@@ -144,7 +144,7 @@
 .timeline-segment {
   position: absolute;
   height: 30px;
-  min-width: 2px;
+  min-width: 4px;
   box-sizing: border-box;
   border: 1px solid rgba(255,255,255,.08);
   border-radius: 12px;
@@ -182,6 +182,10 @@
   padding-right: 0;
   gap: 0;
   border-radius: 999px;
+  min-width: 6px;
+  background: var(--segment-color);
+  border-color: rgba(255,255,255,.22);
+  box-shadow: 0 0 8px var(--segment-color), 0 10px 24px rgba(0,0,0,.22);
 }
 .timeline-segment.tiny .timeline-segment-label,
 .timeline-segment.compact .timeline-segment-time,
@@ -250,7 +254,7 @@
     grid-template-columns: 1fr;
   }
   .timeline-controls {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
   }
   .timeline-recording-item {
     grid-template-columns: 10px minmax(0, 1fr) auto;
