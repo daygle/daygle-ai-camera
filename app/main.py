@@ -797,6 +797,10 @@ def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings
             camera_id=camera_id,
             recording_config=camera_event_recording_config(settings),
         )
+    # Background monitor already performs periodic detection and event creation.
+    # Skip snapshot-triggered detection in that mode to avoid duplicate alerts/recordings.
+    if normalize_bool_setting(effective_live_config().get('background_detection_enabled'), True):
+        return
     detection_interval_seconds = float(effective_live_config().get('detection_interval_seconds', 1.0))
     now = time.time()
     with live_detection_worker_lock:

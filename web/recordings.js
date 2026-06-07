@@ -20,7 +20,7 @@ const OVERLAY_TOGGLE_KEY = 'daygle.recordings.overlay.enabled';
 const OVERLAY_OFFSET_KEY = 'daygle.recordings.overlay.offset.seconds';
 let overlayEnabled = true;
 let overlayOffsetSeconds = 0;
-const EVENT_OVERLAY_WINDOW_SECONDS = 0.8;
+const EVENT_OVERLAY_WINDOW_SECONDS = 2.0;
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -111,6 +111,7 @@ function detectionAnchorSeconds(recording) {
 }
 
 function shouldRenderOverlayForTime(recording, playerTimeSeconds) {
+  if (els.clipPlayer?.paused) return true;
   const anchorSeconds = detectionAnchorSeconds(recording);
   if (anchorSeconds === null) return true;
   const duration = Math.max(0, Number(recording?.duration_seconds || 0));
