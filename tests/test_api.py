@@ -2102,6 +2102,8 @@ def test_monitoring_zones_normalize_object_rules(tmp_path, monkeypatch):
                     'cooldown_seconds': 5,
                     'email_enabled': True,
                     'email_recipients': 'alerts@example.test, bad-address',
+                    'active_start': '07:00',
+                    'active_end': '18:00',
                 }
             ],
         }
@@ -2115,6 +2117,8 @@ def test_monitoring_zones_normalize_object_rules(tmp_path, monkeypatch):
     assert rule['min_confidence'] == 0.7
     assert rule['cooldown_seconds'] == 5
     assert rule['email_recipients'] == ['alerts@example.test']
+    assert rule['active_start'] == '07:00'
+    assert rule['active_end'] == '18:00'
 
 
 def test_zone_object_alert_rules_are_scoped_to_matching_zone(tmp_path, monkeypatch):

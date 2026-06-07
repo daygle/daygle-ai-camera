@@ -391,7 +391,7 @@ input[type="file"] { padding: 10px; }
   pointer-events: auto;
 }
 .close-draft-point:active { cursor: pointer; }
-.zones-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(420px, .65fr); gap: 18px; align-items: start; }
+.zones-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(520px, 1fr); gap: 18px; align-items: start; }
 .zones-shell .live-frame { height: min(68vh, 720px); }
 .zone-editor-card { margin-top: 18px; }
 .zones-layout .zone-editor-card { margin-top: 0; max-height: calc(100vh - 174px); overflow: auto; }
@@ -412,7 +412,7 @@ input[type="file"] { padding: 10px; }
 .zone-object-rules-header select { max-width: 220px; }
 .zone-object-rule {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) 110px 110px 130px 110px 90px minmax(140px, 1fr) auto;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   align-items: end;
   padding: 10px;
@@ -420,12 +420,14 @@ input[type="file"] { padding: 10px; }
   border-radius: 12px;
   background: rgba(255,255,255,.035);
 }
+.zone-object-rule > input { align-self: end; }
+.zone-object-rule button { align-self: end; justify-self: start; }
 .compact-empty { padding: 6px 0; }
 .compact-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
 .camera-manager { display: grid; gap: 12px; }
 .camera-config-card h3 { margin: 0; }
 .button-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
-@media (max-width: 1180px) {
+@media (max-width: 1280px) {
   .zones-layout { grid-template-columns: 1fr; }
   .zones-layout .zone-editor-card { max-height: none; }
   .zone-object-rule { grid-template-columns: repeat(2, minmax(0, 1fr)); }

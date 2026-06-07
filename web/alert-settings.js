@@ -9,7 +9,7 @@ const testEmailRecipient = document.getElementById('testEmailRecipient');
 const testEmailBtn = document.getElementById('testEmailBtn');
 const newAlertRuleBtn = document.getElementById('newAlertRuleBtn');
 const cancelEditRuleBtn = document.getElementById('cancelEditRule');
-const ruleSubmitBtn = ruleForm.querySelector('button[type="submit"]');
+const ruleSubmitBtn = ruleForm?.querySelector('button[type="submit"]');
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -31,6 +31,7 @@ function escapeHtml(value) {
 function setMessage(text) { messageEl.textContent = text; }
 
 function resetRuleForm() {
+  if (!ruleForm) return;
   ruleForm.reset();
   ruleForm.elements.id.value = '';
   if (ruleForm.elements.min_confidence) ruleForm.elements.min_confidence.value = '0.6';
@@ -41,6 +42,7 @@ function resetRuleForm() {
 }
 
 function setEditingRule(rule) {
+  if (!ruleForm) return;
   ensureObjectOption(rule.object);
   for (const [key, value] of Object.entries(rule)) {
     if (ruleForm.elements[key]) ruleForm.elements[key].value = Array.isArray(value) ? value.join(', ') : String(value ?? '');
@@ -112,13 +114,14 @@ async function loadAll() {
   const me = await api('/api/auth/me');
   csrfToken = me.csrf_token;
   renderEmail(await api('/api/settings/alert-email'));
+  if (!ruleForm) return;
   const alerts = await api('/api/settings/alerts');
   renderObjectOptions(alerts.available_labels);
   renderRules(alerts.rules);
   if (!ruleForm.elements.id.value) resetRuleForm();
 }
 
-emailForm.addEventListener('submit', async (event) => {
+emailForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
     renderEmail(await api('/api/settings/alert-email', { method: 'PUT', body: JSON.stringify(formPayload(emailForm)) }));
@@ -126,7 +129,7 @@ emailForm.addEventListener('submit', async (event) => {
   } catch (error) { setMessage(error.message); }
 });
 
-testEmailBtn.addEventListener('click', async () => {
+testEmailBtn?.addEventListener('click', async () => {
   const recipient = testEmailRecipient.value.trim() || emailForm.elements.from_address.value.trim();
   if (!recipient) {
     setMessage('Enter a test recipient email address.');
@@ -147,7 +150,7 @@ testEmailBtn.addEventListener('click', async () => {
   }
 });
 
-ruleForm.addEventListener('submit', async (event) => {
+ruleForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
   const payload = formPayload(ruleForm);
   const id = payload.id;
@@ -160,17 +163,17 @@ ruleForm.addEventListener('submit', async (event) => {
   } catch (error) { setMessage(error.message); }
 });
 
-newAlertRuleBtn.addEventListener('click', () => {
+newAlertRuleBtn?.addEventListener('click', () => {
   resetRuleForm();
   setMessage('Ready to add a new alert rule.');
 });
 
-cancelEditRuleBtn.addEventListener('click', () => {
+cancelEditRuleBtn?.addEventListener('click', () => {
   resetRuleForm();
   setMessage('Edit cancelled. Ready to add a new alert rule.');
 });
 
-rulesEl.addEventListener('click', async (event) => {
+rulesEl?.addEventListener('click', async (event) => {
   const button = event.target.closest('button');
   if (!button) return;
   if (button.dataset.action === 'edit') {

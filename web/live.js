@@ -122,6 +122,8 @@ function defaultObjectRule(label = '') {
     cooldown_seconds: 60,
     email_enabled: false,
     email_recipients: [],
+    active_start: null,
+    active_end: null,
   };
 }
 
@@ -139,6 +141,8 @@ function normalizeObjectRules(zone) {
         cooldown_seconds: Math.max(0, Number.parseInt(rule.cooldown_seconds ?? 60, 10) || 0),
         email_enabled: rule.email_enabled === true,
         email_recipients: normalizeEmailList(rule.email_recipients),
+        active_start: rule.active_start || null,
+        active_end: rule.active_end || null,
       }))
       .filter((rule) => {
         if (!rule.label || seen.has(rule.label)) return false;
@@ -330,12 +334,15 @@ function renderObjectRules(zone, zoneIndex) {
   return zone.object_rules.map((rule, ruleIndex) => `
     <div class="zone-object-rule" data-zone-rule="${zoneIndex}:${ruleIndex}">
       <label><span>Object</span><select data-zone-rule-label="${zoneIndex}:${ruleIndex}">${objectRuleOptions(rule.label)}</select></label>
+      <label><span>Rule</span><select data-zone-rule-enabled="${zoneIndex}:${ruleIndex}"><option value="true" ${rule.enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${rule.enabled === false ? 'selected' : ''}>Disabled</option></select></label>
       <label><span>Record</span><select data-zone-rule-record="${zoneIndex}:${ruleIndex}"><option value="true" ${rule.record_on_detect !== false ? 'selected' : ''}>On detect</option><option value="false" ${rule.record_on_detect === false ? 'selected' : ''}>Off</option></select></label>
       <label><span>Alert</span><select data-zone-rule-alert="${zoneIndex}:${ruleIndex}"><option value="true" ${rule.alert_on_detect !== false ? 'selected' : ''}>On detect</option><option value="false" ${rule.alert_on_detect === false ? 'selected' : ''}>Off</option></select></label>
       <label><span>Min confidence</span><input data-zone-rule-confidence="${zoneIndex}:${ruleIndex}" type="number" min="0" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" /></label>
       <label><span>Cooldown</span><input data-zone-rule-cooldown="${zoneIndex}:${ruleIndex}" type="number" min="0" step="1" value="${escapeHtml(rule.cooldown_seconds)}" /></label>
       <label><span>Email</span><select data-zone-rule-email="${zoneIndex}:${ruleIndex}"><option value="false" ${rule.email_enabled !== true ? 'selected' : ''}>Off</option><option value="true" ${rule.email_enabled === true ? 'selected' : ''}>On</option></select></label>
       <input data-zone-rule-recipients="${zoneIndex}:${ruleIndex}" value="${escapeHtml(rule.email_recipients.join(', '))}" placeholder="Email recipients" />
+      <label><span>Active start</span><input data-zone-rule-active-start="${zoneIndex}:${ruleIndex}" type="time" value="${escapeHtml(rule.active_start || '')}" /></label>
+      <label><span>Active end</span><input data-zone-rule-active-end="${zoneIndex}:${ruleIndex}" type="time" value="${escapeHtml(rule.active_end || '')}" /></label>
       <button class="secondary" type="button" data-delete-zone-rule="${zoneIndex}:${ruleIndex}">Remove</button>
     </div>
   `).join('');
@@ -443,12 +450,15 @@ function bindZoneControls(zones) {
 function bindRuleFields() {
   const bindings = [
     ['zoneRuleLabel', 'label', (value) => value],
+    ['zoneRuleEnabled', 'enabled', (value) => value === 'true'],
     ['zoneRuleRecord', 'record_on_detect', (value) => value === 'true'],
     ['zoneRuleAlert', 'alert_on_detect', (value) => value === 'true'],
     ['zoneRuleConfidence', 'min_confidence', (value) => clamp(Number(value || 0), 0, 1)],
     ['zoneRuleCooldown', 'cooldown_seconds', (value) => Math.max(0, Number.parseInt(value || 0, 10) || 0)],
     ['zoneRuleEmail', 'email_enabled', (value) => value === 'true'],
     ['zoneRuleRecipients', 'email_recipients', normalizeEmailList],
+    ['zoneRuleActiveStart', 'active_start', (value) => value || null],
+    ['zoneRuleActiveEnd', 'active_end', (value) => value || null],
   ];
   bindings.forEach(([datasetKey, ruleKey, transform]) => {
     document.querySelectorAll(`[data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((field) => {
