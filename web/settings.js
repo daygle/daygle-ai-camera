@@ -65,6 +65,7 @@ const FIELD_LABELS = {
   fps: 'FPS',
   pre_event_seconds: 'Pre-Event Seconds',
   post_event_seconds: 'Post-Event Seconds',
+  extension_step_seconds: 'Extension Step Seconds',
   max_clip_seconds: 'Max Clip Seconds',
   retention_days: 'Retention Days',
   max_storage_gb: 'Max Storage GB',
@@ -188,6 +189,23 @@ function createLiveSettingsSection() {
 
 createLiveSettingsSection();
 
+function ensureRecordingExtensionStepField() {
+  const form = document.getElementById('recordingSettingsForm');
+  if (!form) return;
+  if (form.querySelector('input[name="extension_step_seconds"]')) return;
+
+  const postInput = form.querySelector('input[name="post_event_seconds"]');
+  const label = document.createElement('label');
+  label.innerHTML = '<span>Extension Step Seconds</span><input name="extension_step_seconds" type="number" min="0" max="300" placeholder="10" /><span class="field-help">How many seconds to extend an active clip when new detections continue.</span>';
+  if (postInput?.parentElement?.tagName === 'LABEL') {
+    postInput.parentElement.insertAdjacentElement('afterend', label);
+  } else if (postInput) {
+    postInput.insertAdjacentElement('afterend', label);
+  } else {
+    form.insertBefore(label, form.querySelector('button[type="submit"]'));
+  }
+}
+
 function createEmailDeliverySection() {
   const section = document.createElement('section');
   section.className = 'card';
@@ -218,6 +236,8 @@ function createEmailDeliverySection() {
 }
 
 createEmailDeliverySection();
+enhanceFormFieldLabels();
+ensureRecordingExtensionStepField();
 enhanceFormFieldLabels();
 
 let cameras = [];
@@ -275,26 +295,6 @@ function renderCameraManager() {
   enhanceFormFieldLabels(manager);
 
   manager.querySelectorAll('[data-camera-field]').forEach((input) => {
-    input.addEventListener('input', () => {
-      const card = input.closest('[data-camera-index]');
-      const camera = cameras[Number(card.dataset.cameraIndex)];
-      const field = input.dataset.cameraField;
-      camera[field] = ['port', 'width', 'height', 'fps'].includes(field) ? Number.parseInt(input.value || '0', 10) : input.value;
-      if (field === 'name') {
-        const heading = card.querySelector('.section-header h3');
-        if (heading) heading.textContent = camera.name || camera.id || `Camera ${Number(card.dataset.cameraIndex) + 1}`;
-      }
-    });
-  });
-  manager.querySelectorAll('[data-camera-recording]').forEach((select) => {
-    select.addEventListener('change', () => {
-      const card = select.closest('[data-camera-index]');
-      const camera = cameras[Number(card.dataset.cameraIndex)];
-      camera.recording ||= { enabled: true, record_on_alert: true, continuous: false };
-      camera.recording[select.dataset.cameraRecording] = select.value === 'true';
-    });
-  });
-  manager.querySelectorAll('[data-remove-camera]').forEach((button) => {
     button.addEventListener('click', () => { cameras.splice(Number(button.dataset.removeCamera), 1); renderCameraManager(); });
   });
 }
@@ -341,7 +341,7 @@ function fillForm(form, values) {
 function payloadFor(form) {
   const data = Object.fromEntries(new FormData(form).entries());
   for (const key of ['enabled', 'continuous', 'record_on_motion', 'record_on_human', 'auto_purge_enabled', 'background_detection_enabled']) if (key in data) data[key] = data[key] === 'true';
-  for (const key of ['width', 'height', 'fps', 'port', 'pre_event_seconds', 'post_event_seconds', 'max_clip_seconds', 'retention_days', 'max_storage_gb', 'max_login_attempts', 'lockout_minutes']) {
+  for (const key of ['width', 'height', 'fps', 'port', 'pre_event_seconds', 'post_event_seconds', 'extension_step_seconds', 'max_clip_seconds', 'retention_days', 'max_storage_gb', 'max_login_attempts', 'lockout_minutes']) {
     if (key in data && data[key] !== '') data[key] = Number.parseInt(data[key], 10);
   }
   for (const key of ['snapshot_refresh_ms', 'detection_status_refresh_ms']) {

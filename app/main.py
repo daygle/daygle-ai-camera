@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import copy
 import importlib.util
@@ -189,6 +189,8 @@ live_detection_status: dict[str, dict[str, Any]] = {}
 live_event_last_emitted: dict[str, dict[str, Any]] = {}
 live_detection_retry_after: dict[str, float] = {}
 live_detection_failure_count: dict[str, int] = {}
+active_rtsp_recordings: dict[str, dict[str, Any]] = {}
+active_rtsp_recordings_lock = threading.Lock()
 live_detection_worker_lock = threading.Lock()
 active_live_detection_cameras: set[str] = set()
 live_alert_monitor_stop = threading.Event()
@@ -740,6 +742,41 @@ def clear_live_camera_backoff(camera_id: str) -> None:
     live_detection_failure_count.pop(camera_id, None)
 
 
+def extend_active_rtsp_recording(
+    *,
+    camera_id: str,
+    event_time: str,
+    recording_config: dict[str, Any] | None,
+) -> int | None:
+    try:
+        event_dt = datetime.fromisoformat(str(event_time))
+    except ValueError:
+        event_dt = datetime.now(timezone.utc)
+    if event_dt.tzinfo is None:
+        event_dt = event_dt.replace(tzinfo=timezone.utc)
+    config = recording_config or effective_recording_config()
+    extension_step_seconds = max(0, int(config.get('extension_step_seconds', config.get('post_event_seconds', 10))))
+    extend_until = event_dt.timestamp() + extension_step_seconds
+
+    with active_rtsp_recordings_lock:
+        session = active_rtsp_recordings.get(camera_id)
+        if not session:
+            return None
+        current_deadline = float(session.get('capture_deadline_ts') or 0)
+        max_deadline = float(session.get('max_capture_deadline_ts') or current_deadline)
+        new_deadline = min(max_deadline, max(current_deadline, extend_until))
+        if new_deadline <= current_deadline:
+            return int(session.get('recording_id'))
+        session['capture_deadline_ts'] = new_deadline
+        start_ts = float(session.get('start_capture_ts') or new_deadline)
+        ended_at = datetime.fromtimestamp(new_deadline, tz=timezone.utc).isoformat()
+        duration_seconds = max(1.0, new_deadline - start_ts)
+        recording_id = int(session.get('recording_id'))
+
+    database.update_recording_timing(recording_id, ended_at=ended_at, duration_seconds=duration_seconds)
+    return recording_id
+
+
 def schedule_live_camera_backoff(camera_id: str, message: str) -> float:
     failure_count = live_detection_failure_count.get(camera_id, 0) + 1
     live_detection_failure_count[camera_id] = failure_count
@@ -965,14 +1002,24 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
     if not debounced_labels:
         debounced_labels = detection_label_set(recording_detections)
     if should_record_event and live_event_is_debounced(camera_id, debounced_labels, debounce_seconds):
+        extended_recording_id = extend_active_rtsp_recording(
+            camera_id=camera_id,
+            event_time=datetime.now(timezone.utc).isoformat(),
+            recording_config=camera_recording_config,
+        )
         update_live_detection_status(
             camera_id,
             state='checked',
-            reason=f'Ongoing detection suppressed for {debounce_seconds:.1f}s debounce window.',
+            reason=(
+                f'Ongoing detection extended active recording and suppressed duplicate event for {debounce_seconds:.1f}s debounce window.'
+                if extended_recording_id is not None
+                else f'Ongoing detection suppressed for {debounce_seconds:.1f}s debounce window.'
+            ),
             detected_labels=raw_labels,
             matched_labels=matched_labels,
             detections=recording_detections,
             anpr_detections=anpr_detections,
+            recording_id=extended_recording_id,
         )
         return None
 
@@ -1232,7 +1279,7 @@ async def form_data(request: Request) -> dict[str, str]:
 def auth_page(title: str, body: str) -> HTMLResponse:
     return HTMLResponse(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>{escape(title)} Â· Daygle AI Camera</title><link rel="stylesheet" href="/static/styles.css" /></head>
+<title>{escape(title)} Ã‚Â· Daygle AI Camera</title><link rel="stylesheet" href="/static/styles.css" /></head>
 <body><main class="auth-shell"><section class="card auth-card"><p class="eyebrow">Daygle AI Camera</p>{body}</section></main></body></html>""")
 
 
@@ -1270,6 +1317,13 @@ def attach_event_recording(
     stream_url = ''
     if source == 'rtsp' and camera_id:
         stream_url = build_stream_url(get_camera_config(camera_id))
+        extended_recording_id = extend_active_rtsp_recording(
+            camera_id=camera_id,
+            event_time=event_time,
+            recording_config=recording_config,
+        )
+        if extended_recording_id is not None:
+            return extended_recording_id
     metadata = recording_service.event_recording_metadata(event_id, event_time, source, detections, write_clip=not stream_url, recording_config=recording_config)
     if metadata is None:
         return None
@@ -1282,6 +1336,7 @@ def attach_event_recording(
             metadata,
             event_id,
             detections,
+            recording_id=recording_id,
             camera_id=camera_id,
             event_time=event_time,
             recording_config=recording_config,
@@ -1296,6 +1351,7 @@ def start_rtsp_recording_capture(
     event_id: int,
     detections: list[dict[str, Any]],
     *,
+    recording_id: int,
     camera_id: str | None = None,
     event_time: str | None = None,
     recording_config: dict[str, Any] | None = None,
@@ -1314,11 +1370,41 @@ def start_rtsp_recording_capture(
     if triggered_at.tzinfo is None:
         triggered_at = triggered_at.replace(tzinfo=timezone.utc)
 
+    start_capture_ts = triggered_at.timestamp() - pre_seconds
+    initial_deadline_ts = triggered_at.timestamp() + post_seconds
+    max_deadline_ts = start_capture_ts + duration_seconds
+
+    if camera_id:
+        with active_rtsp_recordings_lock:
+            active_rtsp_recordings[camera_id] = {
+                'recording_id': recording_id,
+                'start_capture_ts': start_capture_ts,
+                'capture_deadline_ts': min(max_deadline_ts, initial_deadline_ts),
+                'max_capture_deadline_ts': max_deadline_ts,
+            }
+
     def write_generated_fallback() -> None:
         recording_service.write_event_clip(file_path, event_id, detections, duration_seconds, trigger_type, str(trigger_label) if trigger_label else None)
 
     def capture() -> None:
         try:
+            final_deadline_ts = min(max_deadline_ts, initial_deadline_ts)
+            if camera_id:
+                while True:
+                    with active_rtsp_recordings_lock:
+                        session = active_rtsp_recordings.get(camera_id)
+                        if not session or int(session.get('recording_id', -1)) != int(recording_id):
+                            break
+                        final_deadline_ts = float(session.get('capture_deadline_ts') or final_deadline_ts)
+                    remaining = final_deadline_ts - time.time()
+                    if remaining <= 0:
+                        break
+                    time.sleep(min(0.5, max(0.05, remaining)))
+
+            final_deadline_ts = min(final_deadline_ts, max_deadline_ts)
+            final_duration_seconds = max(1.0, final_deadline_ts - start_capture_ts)
+            dynamic_post_seconds = max(0, int(round(final_deadline_ts - triggered_at.timestamp())))
+
             if camera_id and pre_seconds > 0:
                 recording_service.write_rtsp_clip_with_prebuffer(
                     stream_url=stream_url,
@@ -1326,14 +1412,27 @@ def start_rtsp_recording_capture(
                     file_path=file_path,
                     triggered_at=triggered_at,
                     pre_seconds=pre_seconds,
-                    post_seconds=post_seconds,
-                    max_duration_seconds=duration_seconds,
+                    post_seconds=dynamic_post_seconds,
+                    max_duration_seconds=final_duration_seconds,
                 )
             else:
-                recording_service.write_rtsp_clip(stream_url, file_path, duration_seconds)
+                recording_service.write_rtsp_clip(stream_url, file_path, final_duration_seconds)
+
+            ended_at = datetime.fromtimestamp(start_capture_ts + final_duration_seconds, tz=timezone.utc).isoformat()
+            database.update_recording_timing(
+                recording_id,
+                ended_at=ended_at,
+                duration_seconds=final_duration_seconds,
+            )
         except Exception as exc:
             logger.warning('RTSP recording capture failed for event %s, writing generated fallback: %s', event_id, exc)
             write_generated_fallback()
+        finally:
+            if camera_id:
+                with active_rtsp_recordings_lock:
+                    session = active_rtsp_recordings.get(camera_id)
+                    if session and int(session.get('recording_id', -1)) == int(recording_id):
+                        active_rtsp_recordings.pop(camera_id, None)
 
     threading.Thread(target=capture, name=f'rtsp-recording-{event_id}', daemon=True).start()
 
@@ -1483,7 +1582,7 @@ def render_live_snapshot_svg(
             label_y = max(28, y - 10)
             detection_markup.append(
                 f'<g class="detection-box"><rect x="{x:.1f}" y="{y:.1f}" width="{box_width:.1f}" height="{box_height:.1f}" />'
-                f'<text x="{x:.1f}" y="{label_y:.1f}">{label} Â· {confidence}%</text></g>'
+                f'<text x="{x:.1f}" y="{label_y:.1f}">{label} Ã‚Â· {confidence}%</text></g>'
             )
 
     overlay_state = 'ON' if overlay else 'OFF'
@@ -1518,7 +1617,7 @@ def render_live_snapshot_svg(
   {''.join(detection_markup)}
   <rect x="24" y="24" width="520" height="116" rx="20" fill="rgba(7,11,19,.58)" stroke="rgba(255,255,255,.12)" />
   <text x="48" y="70" class="hud">{escape(camera_name).upper()}</text>
-  <text x="48" y="112" class="muted">Frame #{frame_number} Â· {timestamp} Â· Overlay {overlay_state}</text>
+  <text x="48" y="112" class="muted">Frame #{frame_number} Ã‚Â· {timestamp} Ã‚Â· Overlay {overlay_state}</text>
 </svg>'''
 
 
@@ -1913,27 +2012,106 @@ def ai_settings_page():
 @app.get('/profile')
 def profile_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Profile Â· Daygle AI Camera</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Profile Ã‚Â· Daygle AI Camera</title>
 <link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Account</p><h1>Profile</h1><p class="muted">Manage your display preferences and password.</p></div></header><section class="card"><h2>Profile Details</h2><div id="profileMessage" class="muted"></div><div id="profileSummary" class="status-panel"></div><form id="profileForm" class="form-grid"><input name="timezone" placeholder="Timezone" required /><label><span>Date Format</span><select name="date_format"><option value="locale">Browser Locale</option><option value="iso">YYYY-MM-DD</option><option value="au">DD/MM/YYYY</option><option value="us">MM/DD/YYYY</option></select></label><label><span>Time Format</span><select name="time_format"><option value="24h">24 Hour</option><option value="12h">12 Hour</option></select></label><button type="submit">Save Profile</button></form></section><section class="card"><h2>Change Password</h2><form id="passwordForm" class="form-grid"><input name="current_password" type="password" placeholder="Current password" autocomplete="current-password" required /><input name="new_password" type="password" placeholder="New password" autocomplete="new-password" required /><input name="confirm_password" type="password" placeholder="Confirm password" autocomplete="new-password" required /><button type="submit">Change Password</button></form></section></main><script src="/static/profile.js"></script></body></html>""")
 
 
 @app.get('/anpr')
 def anpr_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" /><title>ANPR Â· Daygle AI Camera</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" /><title>ANPR Ã‚Â· Daygle AI Camera</title>
 <link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Recognition</p><h1>ANPR</h1><p class="muted">Search plates, review sightings, and manage plate alerts.</p></div></header><section class="card anpr-search-card"><h2>Plate search</h2><div id="anprMessage" class="muted"></div><div class="search-row anpr-search-row"><select id="anprCameraFilter" aria-label="Filter by camera"><option value="">All cameras</option></select><input id="plateSearchInput" placeholder="ABC123, 1ABC2D, XYZ999..." /><button id="plateSearchBtn">Search</button><button id="plateClearBtn" class="secondary">Recent</button></div><div id="plateResults" class="list"></div></section><section class="grid main-grid"><article class="card"><div class="section-header"><h2>Recent plates</h2><button id="deleteAllPlatesBtn" class="secondary delete-btn" type="button" hidden>Delete All</button></div><div id="recentPlates" class="list"></div></article><article class="card"><div class="section-header"><h2>Plate details</h2></div><div id="plateDetails" class="list"></div></article></section><section class="card"><h2>Plate alert rules</h2><form id="plateAlertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="rule_name" placeholder="Rule name" required /><label><span>Type</span><select name="rule_type"><option value="plate">Specific Plate</option><option value="unknown">Unknown Plate</option><option value="blacklisted">Blacklisted Plate</option></select></label><input name="plate_pattern" placeholder="Plate pattern" /><input name="cooldown_seconds" type="number" min="0" placeholder="Cooldown seconds" value="60" /><label><span>Enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><button type="submit">Save Rule</button><button id="cancelPlateRuleEdit" class="secondary" type="button">Cancel Edit</button></form><div id="plateAlertRules" class="list"></div></section></main><script src="/static/anpr.js"></script></body></html>""")
+
+
+def _settings_section_anpr() -> str:
+    return (
+        '<section class="card"><h2>ANPR</h2>'
+        '<form id="anprSettingsForm" class="form-grid">'
+        '<label><span>OCR Backend</span><select name="backend"><option value="paddleocr">PaddleOCR</option><option value="easyocr">EasyOCR</option></select></label>'
+        '<input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min Confidence" />'
+        '<input name="vehicle_labels" placeholder="Vehicle labels: car, truck, bus, motorcycle" />'
+        '<button type="submit">Save ANPR</button>'
+        '</form><p class="muted">Enable ANPR per camera and per monitoring area from Live Cameras.</p></section>'
+    )
+
+
+def _settings_section_recording() -> str:
+    return (
+        '<section class="card"><h2>Recording Clips</h2>'
+        '<form id="recordingSettingsForm" class="form-grid">'
+        '<input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" />'
+        '<input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" />'
+        '<input name="extension_step_seconds" type="number" min="0" max="300" placeholder="Extension step seconds" />'
+        '<input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="Max clip seconds" />'
+        '<input name="format" placeholder="Format: mp4" />'
+        '<button type="submit">Save Clip Settings</button>'
+        '</form><p class="muted">Alert-triggered and continuous recording are configured per camera above or from Live Cameras.</p></section>'
+    )
+
+
+def _settings_section_retention() -> str:
+    return (
+        '<section class="card"><h2>Retention</h2>'
+        '<form id="retentionSettingsForm" class="form-grid">'
+        '<label><span>Auto Purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>'
+        '<input name="retention_days" type="number" min="1" max="3650" placeholder="Retention days" />'
+        '<input name="max_storage_gb" type="number" min="1" max="100000" placeholder="Max storage GB" />'
+        '<button type="submit">Save Retention</button>'
+        '</form><button id="purgeRecordingsBtn" class="secondary" type="button">Run Purge Now</button></section>'
+    )
+
+
+def _settings_section_storage() -> str:
+    return (
+        '<section class="card"><h2>Storage</h2>'
+        '<form id="storageSettingsForm" class="form-grid">'
+        '<input name="data_dir" placeholder="Data directory" />'
+        '<input name="snapshots_dir" placeholder="Snapshots directory" />'
+        '<input name="events_dir" placeholder="Events directory" />'
+        '<input name="recordings_dir" placeholder="Recordings directory" />'
+        '<input name="plates_dir" placeholder="Plate images directory" />'
+        '<button type="submit">Save Storage</button>'
+        '</form></section>'
+    )
+
+
+def _settings_section_auth() -> str:
+    return (
+        '<section class="card"><h2>Login Security</h2>'
+        '<form id="authSettingsForm" class="form-grid">'
+        '<input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="Session timeout hours" />'
+        '<input name="max_login_attempts" type="number" min="1" max="100" placeholder="Max login attempts" />'
+        '<input name="lockout_minutes" type="number" min="1" max="1440" placeholder="Lockout minutes" />'
+        '<button type="submit">Save Login Security</button>'
+        '</form></section>'
+    )
 
 
 @app.get('/settings')
 def system_settings_page():
-    return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Settings Â· Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>Settings</h1><p class="muted">Move day-to-day camera, recording, storage, and login settings out of YAML.</p></div></header><div id="systemMessage" class="muted"></div><section class="card"><h2>ANPR</h2><form id="anprSettingsForm" class="form-grid"><label><span>OCR Backend</span><select name="backend"><option value="paddleocr">PaddleOCR</option><option value="easyocr">EasyOCR</option></select></label><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min Confidence" /><input name="vehicle_labels" placeholder="Vehicle labels: car, truck, bus, motorcycle" /><button type="submit">Save ANPR</button></form><p class="muted">Enable ANPR per camera and per monitoring area from Live Cameras.</p></section><section class="card"><h2>Recording Clips</h2><form id="recordingSettingsForm" class="form-grid"><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" /><input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" /><input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="Max clip seconds" /><input name="format" placeholder="Format: mp4" /><button type="submit">Save Clip Settings</button></form><p class="muted">Alert-triggered and continuous recording are configured per camera above or from Live Cameras.</p></section><section class="card"><h2>Retention</h2><form id="retentionSettingsForm" class="form-grid"><label><span>Auto Purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="retention_days" type="number" min="1" max="3650" placeholder="Retention days" /><input name="max_storage_gb" type="number" min="1" max="100000" placeholder="Max storage GB" /><button type="submit">Save Retention</button><button id="purgeRecordingsBtn" class="secondary" type="button">Purge Now</button></form></section><section class="card"><h2>Storage</h2><form id="storageSettingsForm" class="form-grid"><input name="data_dir" placeholder="Data directory" /><input name="snapshots_dir" placeholder="Snapshots directory" /><input name="events_dir" placeholder="Events directory" /><input name="recordings_dir" placeholder="Recordings directory" /><input name="plates_dir" placeholder="Plate images directory" /><button type="submit">Save Storage</button></form><p class="muted">Database file location stays in config.yaml because it is needed before the web UI can load.</p></section><section class="card"><h2>Login security</h2><form id="authSettingsForm" class="form-grid"><input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="Session timeout hours" /><input name="max_login_attempts" type="number" min="1" max="100" placeholder="Max login attempts" /><input name="lockout_minutes" type="number" min="1" max="1440" placeholder="Lockout minutes" /><button type="submit">Save Login Security</button></form><p class="muted">Auth enablement and cookie name remain bootstrap settings.</p></section></main><script src="/static/settings.js"></script></body></html>""")
+    sections = ''.join([
+        _settings_section_anpr(),
+        _settings_section_recording(),
+        _settings_section_retention(),
+        _settings_section_storage(),
+        _settings_section_auth(),
+    ])
+    html = (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8" />'
+        '<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Settings - Daygle AI Camera</title>'
+        '<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack">'
+        '<header class="hero"><div><p class="eyebrow">Administration</p><h1>Settings</h1>'
+        '<p class="muted">Move day-to-day camera, recording, storage, and login settings out of YAML.</p></div></header>'
+        '<div id="systemMessage" class="muted"></div>'
+        f'{sections}'
+        '</main><script src="/static/nav.js"></script><script src="/static/settings.js"></script></body></html>'
+    )
+    return HTMLResponse(html)
 
 @app.get('/users')
 def users_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Users Â· Daygle AI Camera</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Users Ã‚Â· Daygle AI Camera</title>
 <link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell"><header class="hero"><div><p class="eyebrow">Administration</p><h1>User Management</h1><p class="muted">Create users, change roles, disable accounts, and reset passwords.</p></div></header><section class="card"><div id="userMessage" class="muted"></div><div id="users" class="list"></div></section><section class="card"><h2>Create User</h2><form id="createUserForm" class="form-grid"><input name="username" placeholder="Username" required /><select name="role"><option value="viewer">Viewer</option><option value="admin">Admin</option></select><input name="password" type="password" placeholder="Temporary Password" required /><button>Create</button></form></section></main><script src="/static/users.js"></script></body></html>""")
 
 
@@ -2735,6 +2913,7 @@ def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'record_on_objects': object_labels,
         'pre_event_seconds': _int_field(merged, 'pre_event_seconds', 5, 0, 300),
         'post_event_seconds': _int_field(merged, 'post_event_seconds', 10, 0, 300),
+        'extension_step_seconds': _int_field(merged, 'extension_step_seconds', 10, 0, 300),
         'max_clip_seconds': _int_field(merged, 'max_clip_seconds', 60, 1, 3600),
         'format': fmt,
         'retention_days': _int_field(merged, 'retention_days', 14, 1, 3650),
@@ -3173,5 +3352,6 @@ if __name__ == '__main__':
         port=int(server_config.get('port', 8080)),
         reload=False,
     )
+
 
 

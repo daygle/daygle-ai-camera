@@ -265,6 +265,14 @@ class EventDatabase:
             row = db.execute("SELECT * FROM recordings WHERE id = ?", (recording_id,)).fetchone()
             return self._recording_with_event(db, row) if row else None
 
+    def update_recording_timing(self, recording_id: int, *, ended_at: str, duration_seconds: float) -> bool:
+        with self.connect() as db:
+            cursor = db.execute(
+                "UPDATE recordings SET ended_at = ?, duration_seconds = ? WHERE id = ?",
+                (ended_at, float(duration_seconds), recording_id),
+            )
+            return cursor.rowcount > 0
+
     def delete_event(self, event_id: int) -> dict[str, Any] | None:
         with self.connect() as db:
             row = db.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()

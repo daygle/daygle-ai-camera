@@ -75,6 +75,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "record_on_objects": ["cat", "dog", "package", "parcel"],
         "pre_event_seconds": 5,
         "post_event_seconds": 10,
+        "extension_step_seconds": 10,
         "max_clip_seconds": 60,
         "format": "mp4",
         "retention_days": 14,
