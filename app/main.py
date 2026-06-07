@@ -601,7 +601,7 @@ def zone_motion_detections(detections: list[dict[str, Any]], settings: dict[str,
                 if float(detection.get('confidence', 0)) >= conf_threshold and i not in seen:
                     seen.add(i)
                     result.append(detection)
-                break
+                    break
     return result
 
 
@@ -1600,8 +1600,6 @@ def process_anpr_for_event(event_id: int, detections: list[dict[str, Any]], imag
 
 
 def trigger_plate_alerts(plate_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    import time
-
     triggered: list[dict[str, Any]] = []
     rules = database.list_plate_alert_rules()
     for plate_event in plate_events:
@@ -1807,7 +1805,7 @@ def recording_playback_sidecar_path(file_path: Path) -> Path:
 
 def recording_stream_path(file_path: Path) -> Path:
     playback_path = recording_playback_sidecar_path(file_path)
-    if playback_path.exists() and playback_path.stat().st_mtime >= file_path.stat().st_mtime:
+    if playback_path.exists() and file_path.exists() and playback_path.stat().st_mtime >= file_path.stat().st_mtime:
         return playback_path
     try:
         transcode_recording_to_mp4(file_path, playback_path)

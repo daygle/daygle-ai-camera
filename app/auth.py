@@ -99,7 +99,6 @@ class AuthService:
                 """
             )
             db.execute("DELETE FROM user_sessions WHERE expires_at <= ?", (utc_now(),))
-            db.commit()
 
     def users_exist(self) -> bool:
         with self.connect() as db:
@@ -156,9 +155,6 @@ class AuthService:
                     """,
                     (username, self.hash_password(password), role, now, now),
                 )
-                db.commit()
-                if cursor.lastrowid is None:
-                    raise AuthError("Failed to create user.")
                 user_id = cursor.lastrowid
         except sqlite3.IntegrityError as exc:
             raise AuthError("Username already exists.") from exc
@@ -212,7 +208,6 @@ class AuthService:
                 raise AuthError("User not found.")
             if is_active is False:
                 db.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
-            db.commit()
         return self.get_user(user_id)  # type: ignore[return-value]
 
     def update_profile(
@@ -252,7 +247,6 @@ class AuthService:
             cursor = db.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", params)
             if cursor.rowcount == 0:
                 raise AuthError("User not found.")
-            db.commit()
         return self.get_user(user_id)  # type: ignore[return-value]
 
     def change_password(self, user_id: int, current_password: str, new_password: str) -> None:
@@ -339,10 +333,8 @@ class AuthService:
                 return None
             if not row["is_active"] or datetime.fromisoformat(row["expires_at"]) <= now_dt:
                 db.execute("DELETE FROM user_sessions WHERE session_token = ?", (session_token,))
-                db.commit()
                 return None
             db.execute("UPDATE user_sessions SET last_seen_at = ? WHERE session_token = ?", (now, session_token))
-            db.commit()
             return {"session_token": row["session_token"], "csrf_token": row["csrf_token"], "expires_at": row["expires_at"], "user": self.public_user(row)}
 
     def delete_session(self, session_token: str | None) -> None:
@@ -350,12 +342,10 @@ class AuthService:
             return
         with self.connect() as db:
             db.execute("DELETE FROM user_sessions WHERE session_token = ?", (session_token,))
-            db.commit()
 
     def cleanup_expired_sessions(self) -> None:
         with self.connect() as db:
             db.execute("DELETE FROM user_sessions WHERE expires_at <= ?", (utc_now(),))
-            db.commit()
 
     def public_user(self, row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
         return {
