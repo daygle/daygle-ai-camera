@@ -4,17 +4,9 @@
 
 .recording-timeline-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 3fr) minmax(300px, 1fr);
   gap: 18px;
   align-items: start;
-}
-
-.playback-card {
-  order: 1;
-}
-
-.timeline-card {
-  order: 2;
 }
 .timeline-card {
   display: grid;
