@@ -53,6 +53,7 @@ async function api(path, options = {}) {
 function cameraDetection() {
   selectedCamera.detection ||= { zones: [] };
   selectedCamera.detection.zones ||= [];
+  selectedCamera.detection.motion_email_enabled ??= true;
   return selectedCamera.detection;
 }
 
@@ -248,7 +249,7 @@ function syncViewMode() {
 
 function formatDetectionStatus(payload) {
   if (!payload) return 'Live AI status unavailable.';
-  const labels = (payload.detected_labels || []).join(', ') || 'none';
+  const labels = [...new Set((payload.detected_labels || []).map((label) => String(label || '').trim()).filter(Boolean))].join(', ') || 'none';
   const alerts = (payload.triggered_alerts || []).map((alert) => alert.rule_name).join(', ') || 'none';
   const recording = payload.recording_state
     ? `recording ${payload.recording_state}${payload.recording_id ? ` #${payload.recording_id}` : ''}`
@@ -259,7 +260,7 @@ function formatDetectionStatus(payload) {
       ? 'email rule matched but delivery was not attempted'
       : 'no email-enabled matching rule';
   if (payload.state === 'alerted') return `Live AI: alert matched (${alerts}); ${email}; ${recording}.`;
-  if (payload.state === 'checked') return `Live AI: checked; labels: ${labels}; ${payload.reason}`;
+  if (payload.state === 'checked') return `Live AI: scan complete; detected labels: ${labels}; ${payload.reason}`;
   return `Live AI: ${payload.state || 'waiting'} - ${payload.reason || payload.ai_error || 'waiting for frames'}`;
 }
 
@@ -477,14 +478,21 @@ function bindRuleFields() {
 function renderCameraRecordingControls() {
   if (!selectedCamera || !liveEls.cameraRecordingControls) return;
   const recording = cameraRecording();
+  const detection = cameraDetection();
   liveEls.cameraRecordingControls.innerHTML = `
     <label><span>Recording</span><select data-camera-recording="enabled"><option value="true" ${recording.enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${recording.enabled === false ? 'selected' : ''}>Disabled</option></select></label>
     <label><span>Alert clips</span><select data-camera-recording="record_on_alert"><option value="true" ${recording.record_on_alert !== false ? 'selected' : ''}>Enabled</option><option value="false" ${recording.record_on_alert === false ? 'selected' : ''}>Disabled</option></select></label>
     <label><span>Continuous</span><select data-camera-recording="continuous"><option value="false" ${recording.continuous !== true ? 'selected' : ''}>Disabled</option><option value="true" ${recording.continuous === true ? 'selected' : ''}>Enabled</option></select></label>
+    <label><span>Motion Email Alerts</span><select data-camera-detection="motion_email_enabled"><option value="true" ${detection.motion_email_enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${detection.motion_email_enabled === false ? 'selected' : ''}>Disabled</option></select></label>
   `;
   liveEls.cameraRecordingControls.querySelectorAll('[data-camera-recording]').forEach((select) => {
     select.addEventListener('change', () => {
       cameraRecording()[select.dataset.cameraRecording] = select.value === 'true';
+    });
+  });
+  liveEls.cameraRecordingControls.querySelectorAll('[data-camera-detection]').forEach((select) => {
+    select.addEventListener('change', () => {
+      cameraDetection()[select.dataset.cameraDetection] = select.value === 'true';
     });
   });
 }

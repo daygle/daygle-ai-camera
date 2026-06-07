@@ -243,6 +243,7 @@ def normalize_camera_id(value: Any, fallback: str = 'camera-1') -> str:
 def default_camera_detection_settings() -> dict[str, Any]:
     return {
         'motion_enabled': True,
+        'motion_email_enabled': True,
         'object_detection_enabled': True,
         'anpr_enabled': True,
         'zones': [],
@@ -422,7 +423,7 @@ def normalize_camera_settings(settings: dict[str, Any], index: int = 1) -> dict[
     detection = default_camera_detection_settings()
     if isinstance(camera_settings.get('detection'), dict):
         detection.update(camera_settings['detection'])
-    for key in ('motion_enabled', 'object_detection_enabled', 'anpr_enabled'):
+    for key in ('motion_enabled', 'motion_email_enabled', 'object_detection_enabled', 'anpr_enabled'):
         detection[key] = bool(detection.get(key, True))
     detection['object_labels'] = normalize_label_list(detection.get('object_labels', []))
     detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
@@ -1060,16 +1061,26 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             confidence=alert['confidence'],
             message=alert['message'],
         )
-    deliver_email_alerts(triggered, event_id, rules=zone_rules + effective_alert_rules())
+    motion_email_enabled = normalize_bool_setting((settings.get('detection') or {}).get('motion_email_enabled'), True)
+    email_triggered = [
+        alert for alert in triggered
+        if motion_email_enabled or str(alert.get('label') or '').strip().lower() != 'motion'
+    ]
+    deliver_email_alerts(email_triggered, event_id, rules=zone_rules + effective_alert_rules())
     email_rules = [
         rule for rule in (zone_rules + effective_alert_rules())
-        if rule.get('enabled', True) and rule.get('email_enabled') and str(rule.get('name') or '') in triggered_rule_names
+        if rule.get('enabled', True) and rule.get('email_enabled') and str(rule.get('name') or '') in {
+            str(alert.get('rule_name') or '') for alert in email_triggered
+        }
     ]
     email_recipients = sorted({recipient for rule in email_rules for recipient in rule.get('email_recipients', [])})
     update_live_detection_status(
         camera_id,
         state='alerted' if triggered else 'checked',
-        reason='Alert matched.' if triggered else 'Detections found, but no alert rule matched or rule is in cooldown.',
+        reason=(
+            'Alert matched.' if triggered
+            else 'Detections found. No new alert event was created because no alert rule matched, or a matching rule is still in cooldown.'
+        ),
         detected_labels=raw_labels,
         matched_labels=matched_labels,
         detections=recording_detections,
@@ -1081,7 +1092,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(recording_detections, camera_event_recording_config(settings)),
         email_enabled_rules=len(email_rules),
         email_recipients=email_recipients,
-        email_attempted=bool(triggered and email_recipients and effective_email_alert_settings().get('enabled')),
+        email_attempted=bool(email_triggered and email_recipients and effective_email_alert_settings().get('enabled')),
     )
     return event_id
 
