@@ -186,15 +186,16 @@ class RecordingService:
     ) -> None:
         file_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            self._write_opencv_clip(file_path, event_id, detections, duration_seconds, trigger_type, trigger_label)
-            return
-        except Exception as exc:
-            logger.warning('OpenCV clip generation failed for %s: %s', file_path.name, exc)
-        try:
+            # Prefer FFmpeg so fallback clips are consistently H.264/MP4 for browsers.
             self._write_ffmpeg_placeholder_clip(file_path, duration_seconds)
             return
         except Exception as exc:
             logger.warning('FFmpeg placeholder clip generation failed for %s: %s', file_path.name, exc)
+        try:
+            self._write_opencv_clip(file_path, event_id, detections, duration_seconds, trigger_type, trigger_label)
+            return
+        except Exception as exc:
+            logger.warning('OpenCV clip generation failed for %s: %s', file_path.name, exc)
 
         # Final fallback: persist metadata beside the target path, but never as .mp4 content.
         file_path.unlink(missing_ok=True)
