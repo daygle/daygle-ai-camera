@@ -223,7 +223,7 @@ class RecordingService:
             '-f',
             'lavfi',
             '-i',
-            'color=c=0x16202c:s=640x360:r=10',
+            'testsrc2=s=640x360:r=10',
             '-t',
             f'{float(max(1.0, duration_seconds)):.3f}',
             '-an',

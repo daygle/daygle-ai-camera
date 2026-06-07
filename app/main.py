@@ -188,8 +188,6 @@ live_detection_worker_lock = threading.Lock()
 active_live_detection_cameras: set[str] = set()
 live_alert_monitor_stop = threading.Event()
 live_alert_monitor_thread: threading.Thread | None = None
-rtsp_recording_lock = threading.Lock()
-active_rtsp_recording_streams: set[str] = set()
 
 
 def _non_empty_setting(settings: dict[str, Any], key: str) -> str:
@@ -1196,24 +1194,12 @@ def start_rtsp_recording_capture(stream_url: str, metadata: dict[str, Any], even
     def write_generated_fallback() -> None:
         recording_service.write_event_clip(file_path, event_id, detections, duration_seconds, trigger_type, str(trigger_label) if trigger_label else None)
 
-    with rtsp_recording_lock:
-        already_recording = stream_url in active_rtsp_recording_streams
-        if not already_recording:
-            active_rtsp_recording_streams.add(stream_url)
-    if already_recording:
-        logger.info('Skipping overlapping RTSP recording capture for event %s; another capture is active for this stream.', event_id)
-        write_generated_fallback()
-        return
-
     def capture() -> None:
         try:
             recording_service.write_rtsp_clip(stream_url, file_path, duration_seconds)
         except Exception as exc:
             logger.warning('RTSP recording capture failed for event %s, writing generated fallback: %s', event_id, exc)
             write_generated_fallback()
-        finally:
-            with rtsp_recording_lock:
-                active_rtsp_recording_streams.discard(stream_url)
 
     threading.Thread(target=capture, name=f'rtsp-recording-{event_id}', daemon=True).start()
 
