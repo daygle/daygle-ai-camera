@@ -21,6 +21,7 @@ const OVERLAY_OFFSET_KEY = 'daygle.recordings.overlay.offset.seconds';
 let overlayEnabled = true;
 let overlayOffsetSeconds = 0;
 const EVENT_OVERLAY_WINDOW_SECONDS = 2.0;
+const GENERIC_TRIGGER_LABELS = new Set(['motion', 'alert', 'human', 'object', 'none', 'off', 'continuous']);
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -63,6 +64,40 @@ function cameraLabel(recording) {
   return metadata.camera_name || recording.camera_id || recording.source || 'unknown';
 }
 
+function recordingTriggerType(recording) {
+  return String(recording.trigger_type || 'motion').trim().toLowerCase() || 'motion';
+}
+
+function recordingTriggerLabel(recording) {
+  return String(recording.trigger_label || '').trim().toLowerCase() || null;
+}
+
+function recordingDetectionLabels(recording) {
+  return Array.from(new Set((recording.detections || [])
+    .map((detection) => String(detection.label || '').trim().toLowerCase())
+    .filter(Boolean)));
+}
+
+function recordingDisplayTrigger(recording) {
+  const triggerType = recordingTriggerType(recording);
+  const triggerLabel = recordingTriggerLabel(recording);
+  const detectionLabels = recordingDetectionLabels(recording);
+  const firstSpecificDetection = detectionLabels.find((label) => !GENERIC_TRIGGER_LABELS.has(label));
+
+  if (triggerType === 'motion' || triggerType === 'alert' || triggerType === 'human') {
+    if (firstSpecificDetection) return `motion · ${firstSpecificDetection}`;
+    if (triggerLabel && !GENERIC_TRIGGER_LABELS.has(triggerLabel)) return `motion · ${triggerLabel}`;
+    return 'motion';
+  }
+
+  if (triggerType === 'continuous' || triggerType === 'none' || triggerType === 'off') {
+    return triggerType;
+  }
+
+  if (triggerLabel && triggerLabel !== triggerType) return `${triggerType} · ${triggerLabel}`;
+  return triggerLabel || triggerType;
+}
+
 function renderRecordings(recordings) {
   if (!recordings.length) {
     els.recordings.innerHTML = '<div class="empty">No recordings yet.</div>';
@@ -79,7 +114,7 @@ function renderRecordings(recordings) {
         </div>
         <div class="recording-row-badges">${detectionBadges(recording.detections)}</div>
         <p class="muted recording-row-meta">Event #${recording.event_id || 'none'} · ${Number(recording.duration_seconds || 0).toFixed(1)}s · ${escapeHtml(cameraLabel(recording))}</p>
-        <p class="muted recording-row-meta">${escapeHtml(recording.trigger_type || 'motion')} ${escapeHtml(recording.trigger_label || '')} · ${escapeHtml(fileName)}</p>
+        <p class="muted recording-row-meta">${escapeHtml(recordingDisplayTrigger(recording))} · ${escapeHtml(fileName)}</p>
         <div class="button-row">
           <button class="secondary" data-play-recording="${recording.id}" ${mediaReady ? '' : 'disabled'}>${mediaReady ? 'Play' : 'Preparing...'}</button>
           <button class="secondary delete-btn" data-delete-recording="${recording.id}">Delete</button>
@@ -102,7 +137,7 @@ function renderRecordingDetails(recording) {
     <div><span>Recording</span><strong>#${recording.id}</strong></div>
     <div><span>Event</span><strong>${recording.event_id || 'none'}</strong></div>
     <div><span>Camera</span><strong>${escapeHtml(cameraLabel(recording))}</strong></div>
-    <div><span>Trigger</span><strong>${escapeHtml(recording.trigger_type || 'motion')} ${escapeHtml(recording.trigger_label || '')}</strong></div>
+    <div><span>Trigger</span><strong>${escapeHtml(recordingDisplayTrigger(recording))}</strong></div>
     <div><span>Started</span><strong>${formatDate(recording.started_at)}</strong></div>
     <div><span>Duration</span><strong>${Number(recording.duration_seconds || 0).toFixed(1)}s</strong></div>
     <div class="wide"><span>Detections</span><strong>${(recording.detections || []).map((d) => d.label).join(', ') || 'none'}</strong></div>
