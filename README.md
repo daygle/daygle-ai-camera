@@ -202,7 +202,7 @@ Route: `/profile`
 
 ### AI Settings
 
-Route: `/ai` (legacy `/settings` also works)
+Route: `/ai`
 
 - AI enabled state.
 - Backend: `onnx`.
@@ -218,23 +218,12 @@ Route: `/ai` (legacy `/settings` also works)
 
 AI settings are stored in SQLite under `app_settings.key = ai`.
 
-### Alert Settings
-
-Route: `/alert-settings`
-
-- Configure SMTP host, port, username, password, from address, STARTTLS, and SSL.
-- Create, edit, delete, enable, or disable alert rules.
-- Set object label, minimum confidence, cooldown, and active time window.
-- Enable email delivery per rule.
-- Add email recipients per rule, for example cat detected -> email a user.
-
-SMTP settings are stored in SQLite under `app_settings.key = alert_email`. Alert rules are stored in `alert_rules`.
-
 ### System Settings
 
-Route: `/settings` (legacy `/system-settings` also works)
+Route: `/settings`
 
 - Camera: backend (`onvif` or `rtsp`), device label, stream URL or ONVIF host credentials, width, height, FPS, flip.
+- Email delivery: SMTP host, port, username, password, from address, STARTTLS, and SSL.
 - ANPR: enable/disable, OCR backend, confidence threshold, and vehicle labels.
 - Recording policy: continuous recording, record on motion, record on human, and selected object labels such as `cat`, `dog`, `package`, and `parcel`.
 - Clip settings: pre-event seconds, post-event seconds, max clip seconds, and file format.
@@ -242,7 +231,7 @@ Route: `/settings` (legacy `/system-settings` also works)
 - Storage: data, snapshots, events, and recordings directories.
 - Login security: session timeout, max login attempts, lockout minutes.
 
-Camera, ANPR, recording, storage, and login security settings are stored in SQLite and applied at runtime where possible. Database path, auth enablement, cookie name, and server bind settings remain bootstrap YAML.
+Camera, email delivery, ANPR, recording, storage, and login security settings are stored in SQLite and applied at runtime where possible. Database path, auth enablement, cookie name, and server bind settings remain bootstrap YAML.
 
 #### P6S / ONVIF stream testing
 
@@ -329,7 +318,7 @@ Admins can open `/users` to create users, disable users, change roles, and reset
 
 Roles:
 
-- `admin`: dashboard, events, alerts, recordings, users, profile, AI settings, alert settings, and system settings.
+- `admin`: dashboard, events, alerts, recordings, users, profile, AI settings, and settings.
 - `viewer`: dashboard, events, alert history, recordings, and profile.
 
 Password policy requires at least 8 characters with uppercase, lowercase, numeric, and symbol characters.
@@ -344,9 +333,8 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `GET` | `/` | Dashboard |
 | `GET` | `/profile` | Current user profile |
 | `GET` | `/users` | Admin user management |
-| `GET` | `/settings` | Admin AI settings |
-| `GET` | `/alert-settings` | Admin alert and SMTP settings |
-| `GET` | `/settings` | Admin camera, recording, storage, and login settings |
+| `GET` | `/ai` | Admin AI settings |
+| `GET` | `/settings` | Admin camera, email, recording, storage, and login settings |
 | `GET` | `/anpr` | Plate search, history, details, and alert rules |
 | `GET` | `/api/auth/me` | Current user, CSRF token, and session expiry |
 | `PUT` | `/api/profile` | Update profile preferences |
@@ -497,6 +485,6 @@ python -m pytest
 - **Setup redirects to login**: a user already exists; sign in with an admin account.
 - **Dashboard shows MODEL MISSING**: open `/settings`, download YOLOv8n ONNX or set a readable model path, then reload the detector.
 - **ONNX fails to load**: confirm model and labels paths are readable and ONNX Runtime is installed.
-- **Email alerts do not send**: open `/alert-settings`, check SMTP host/port/auth/from address, and confirm the rule has email enabled and recipients. Open `/settings` and confirm Live performance -> Background alerts is enabled so cat/person/object rules continue checking when the Live Cameras page is closed.
+- **Email alerts do not send**: open `/settings`, check SMTP host/port/auth/from address, and confirm the rule has email enabled and recipients. Confirm Live performance -> Background alerts is enabled so cat/person/object rules continue checking when the Live Cameras page is closed.
 - **Service cannot write data or models**: open `/settings` and check storage paths, then verify `/opt/daygle-ai-camera/models` and the configured data directory exist. The Debian and Armbian installers run the systemd service as root and grant write access to config, data, and models paths.
 - **Need service logs**: run `sudo journalctl -u daygle-ai-camera -f`.
