@@ -1,6 +1,7 @@
 const els = {
   cameraSelect: document.getElementById('timelineCameraSelect'),
   timelineDate: document.getElementById('timelineDate'),
+  timespanSelect: document.getElementById('timelineSpan'),
   filterSelect: document.getElementById('timelineFilterSelect'),
   timelineLoadBtn: document.getElementById('timelineLoadBtn'),
   timelineStatus: document.getElementById('timelineStatus'),
@@ -21,8 +22,21 @@ const state = {
   activeRecordingId: null,
 };
 
-const TIMELINE_SECONDS = 24 * 60 * 60;
+const DAY_SECONDS = 24 * 60 * 60;
 const TIMELINE_ROW_HEIGHT = 42;
+
+function getTimespanConfig() {
+  const totalSeconds = Number(els.timespanSelect.value) || DAY_SECONDS;
+  const totalHours = totalSeconds / 3600;
+  let tickIntervalSeconds;
+  if (totalHours <= 1) tickIntervalSeconds = 900;
+  else if (totalHours <= 2) tickIntervalSeconds = 1800;
+  else if (totalHours <= 6) tickIntervalSeconds = 3600;
+  else if (totalHours <= 12) tickIntervalSeconds = 7200;
+  else tickIntervalSeconds = 10800;
+  return { totalSeconds, tickIntervalSeconds };
+}
+
 const SEGMENT_COLORS = [
   '#47d6ff',
   '#49e6a3',
@@ -186,8 +200,10 @@ function replaceUrl(recordingId = state.activeRecordingId) {
   const params = new URLSearchParams();
   const { cameraId, day } = timelineParams();
   const filter = els.filterSelect.value || '';
+  const span = els.timespanSelect.value || '';
   if (cameraId) params.set('camera_id', cameraId);
   if (day) params.set('day', day);
+  if (span && span !== String(DAY_SECONDS)) params.set('span', span);
   if (filter) params.set('filter', filter);
   if (recordingId) params.set('recording_id', String(recordingId));
   const query = params.toString();
@@ -298,14 +314,29 @@ function buildTimelineLayout(recordings) {
 }
 
 function renderTimeline(payload) {
-  const recordings = buildTimelineLayout(payload.recordings || []);
+  const { totalSeconds, tickIntervalSeconds } = getTimespanConfig();
+
+  // Clip recordings to the visible window
+  const windowRecordings = (payload.recordings || [])
+    .filter((r) => Number(r.timeline_start_seconds || 0) < totalSeconds)
+    .map((r) => {
+      const start = Number(r.timeline_start_seconds || 0);
+      const end = Math.min(Number(r.timeline_end_seconds || start + 1), totalSeconds);
+      return { ...r, timeline_end_seconds: end, timeline_duration_seconds: Math.max(1, end - start) };
+    });
+
+  const recordings = buildTimelineLayout(windowRecordings);
   const rowCount = Math.max(1, recordings.reduce((max, recording) => Math.max(max, recording.rowIndex + 1), 0));
-  const majorHours = [0, 3, 6, 9, 12, 15, 18, 21, 24];
-  els.timelineHours.innerHTML = majorHours.map((hour) => (
-    `<span class="timeline-hour major" style="left:${(hour / 24) * 100}%">${String(hour).padStart(2, '0')}:00</span>`
+
+  const ticks = [];
+  for (let s = 0; s <= totalSeconds; s += tickIntervalSeconds) ticks.push(s);
+  if (ticks[ticks.length - 1] < totalSeconds) ticks.push(totalSeconds);
+
+  els.timelineHours.innerHTML = ticks.map((seconds) => (
+    `<span class="timeline-hour major" style="left:${(seconds / totalSeconds) * 100}%">${formatClock(seconds)}</span>`
   )).join('');
-  els.timelineGrid.innerHTML = Array.from({ length: 25 }, (_, hour) => `
-    <span class="timeline-grid-line" style="left:${(hour / 24) * 100}%"></span>
+  els.timelineGrid.innerHTML = ticks.map((seconds) => `
+    <span class="timeline-grid-line" style="left:${(seconds / totalSeconds) * 100}%"></span>
   `).join('');
   els.timelineRows.style.height = `${Math.max(96, rowCount * TIMELINE_ROW_HEIGHT)}px`;
 
@@ -317,12 +348,12 @@ function renderTimeline(payload) {
   els.timelineRows.innerHTML = recordings.map((recording) => {
     const start = Number(recording.timeline_start_seconds || 0);
     const duration = Math.max(1, Number(recording.timeline_duration_seconds || 1));
-    const left = (start / TIMELINE_SECONDS) * 100;
-    const width = Math.max((duration / TIMELINE_SECONDS) * 100, 0.06);
+    const left = (start / totalSeconds) * 100;
+    const width = Math.max((duration / totalSeconds) * 100, 0.1);
     const color = colorForKey(recordingColorKey(recording));
     const activeClass = Number(recording.id) === Number(state.activeRecordingId) ? ' active' : '';
     const compactClass = width < 0.7 ? ' compact' : '';
-    const tinyClass = width < 0.2 ? ' tiny' : '';
+    const tinyClass = width < 0.25 ? ' tiny' : '';
     return `
       <button
         class="timeline-segment${activeClass}${compactClass}${tinyClass}"
@@ -502,6 +533,12 @@ els.filterSelect.addEventListener('change', () => {
   });
 });
 
+els.timespanSelect.addEventListener('change', () => {
+  renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
+    els.timelineStatus.textContent = error.message;
+  });
+});
+
 els.timelineRows.addEventListener('click', (event) => {
   const button = event.target.closest('[data-recording-id]');
   if (!button) return;
@@ -534,9 +571,11 @@ loadAuth().then(async () => {
   const queryDay = params.get('day');
   const queryCameraId = params.get('camera_id');
   const queryFilter = params.get('filter');
-  if (queryDay) els.timelineDate.value = queryDay;
+  const querySpan = params.get('span');
+  els.timelineDate.value = queryDay || new Date().toISOString().slice(0, 10);
   if (queryCameraId) els.cameraSelect.innerHTML = `<option value="${escapeHtml(queryCameraId)}" selected>${escapeHtml(queryCameraId)}</option>`;
   if (queryFilter) els.filterSelect.innerHTML = `<option value="${escapeHtml(queryFilter)}" selected>${escapeHtml(titleCase(queryFilter))}</option>`;
+  if (querySpan) els.timespanSelect.value = querySpan;
   await loadTimeline({ preserveSelection: true });
 }).catch((error) => {
   els.timelineStatus.textContent = error.message;
