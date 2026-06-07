@@ -2496,14 +2496,17 @@ def _recording_timeline_segment(recording: dict[str, Any], day_start: datetime, 
     if visible_end <= visible_start:
         return None
 
+    _generic = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous'}
     trigger_type = str(recording.get('trigger_type') or 'motion').strip().lower() or 'motion'
     trigger_label = str(recording.get('trigger_label') or '').strip().lower() or None
-    if trigger_type in {'motion', 'continuous', 'none', 'off'}:
-        display_label = trigger_type
+    if trigger_label and trigger_label not in _generic:
+        display_label = trigger_label
     elif trigger_type == 'human':
         display_label = 'person'
+    elif trigger_type in {'continuous', 'none', 'off'}:
+        display_label = trigger_type
     else:
-        display_label = trigger_label or trigger_type
+        display_label = trigger_type
 
     return {
         **recording,

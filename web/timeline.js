@@ -205,23 +205,28 @@ function populateControls(payload) {
 
 function populateFilterOptions(recordings) {
   const currentFilter = els.filterSelect.value || new URLSearchParams(window.location.search).get('filter') || '';
-  const options = [{ value: '', label: 'All recordings' }];
+  const counts = {};
+  recordings.forEach((recording) => {
+    const labels = new Set([recordingTypeLabel(recording).toLowerCase()]);
+    recordingDetectionLabels(recording).forEach((label) => labels.add(label));
+    labels.forEach((label) => { counts[label] = (counts[label] || 0) + 1; });
+  });
+
+  const options = [{ value: '', label: `All recordings${recordings.length ? ` (${recordings.length})` : ''}` }];
   const seen = new Set(['']);
-  const addOption = (value, label) => {
+  const addOption = (value) => {
     const normalized = String(value || '').trim().toLowerCase();
     if (!normalized || seen.has(normalized)) return;
     seen.add(normalized);
-    options.push({ value: normalized, label });
+    const count = counts[normalized];
+    options.push({ value: normalized, label: count ? `${titleCase(normalized)} (${count})` : titleCase(normalized) });
   };
 
   recordings.forEach((recording) => {
-    const displayLabel = recordingTypeLabel(recording).toLowerCase();
-    addOption(displayLabel, titleCase(displayLabel));
-    recordingDetectionLabels(recording).forEach((label) => addOption(label, titleCase(label)));
+    addOption(recordingTypeLabel(recording));
+    recordingDetectionLabels(recording).forEach(addOption);
   });
-  if (recordings.length) {
-    addOption('motion', 'Motion');
-  }
+  if (recordings.length) addOption('motion');
 
   const ordered = [options[0], ...options.slice(1).sort((left, right) => {
     if (left.value === 'motion') return -1;
@@ -341,28 +346,36 @@ function renderRecordingList(recordings) {
   els.timelineRecordings.innerHTML = recordings.map((recording) => {
     const activeClass = Number(recording.id) === Number(state.activeRecordingId) ? ' active' : '';
     const color = colorForKey(recordingColorKey(recording));
+    const label = titleCase(recordingTypeLabel(recording));
+    const start = formatClock(recording.timeline_start_seconds || 0);
+    const end = formatClock(recording.timeline_end_seconds || 0);
+    const duration = formatDuration(recording.duration_seconds);
+    const camera = escapeHtml(cameraLabel(recording));
     return `
       <button class="timeline-recording-item${activeClass}" type="button" data-recording-id="${recording.id}">
         <span class="timeline-recording-color" style="background:${color}"></span>
         <span class="timeline-recording-main">
-          <strong>${escapeHtml(recordingTypeLabel(recording))}</strong>
-          <span>${escapeHtml(formatClock(recording.timeline_start_seconds || 0))} to ${escapeHtml(formatClock(recording.timeline_end_seconds || 0))}</span>
+          <strong>${escapeHtml(label)}</strong>
+          <span>${escapeHtml(start)} — ${escapeHtml(end)}</span>
         </span>
-        <span class="timeline-recording-meta">${escapeHtml(formatDuration(recording.duration_seconds))} · ${escapeHtml(recordingTriggerSummary(recording))}</span>
-        <span class="timeline-recording-meta muted">Recording #${recording.id}</span>
+        <span class="timeline-recording-meta">
+          <span>${escapeHtml(duration)}</span>
+          <span>#${recording.id} · ${camera}</span>
+        </span>
       </button>
     `;
   }).join('');
 }
 
 function renderRecordingDetails(recording) {
+  const detections = recordingDetectionLabels(recording);
   els.recordingDetails.innerHTML = `
-    <div><span>Recording</span><strong>#${recording.id}</strong></div>
+    <div><span>Recording</span><strong><a href="/recordings?recording_id=${recording.id}" class="timeline-recording-link">#${recording.id} ↗</a></strong></div>
     <div><span>Camera</span><strong>${escapeHtml(cameraLabel(recording))}</strong></div>
-    <div><span>Trigger</span><strong>${escapeHtml(recordingTriggerSummary(recording))}</strong></div>
+    <div><span>Trigger</span><strong>${escapeHtml(titleCase(recordingTriggerSummary(recording)))}</strong></div>
     <div><span>Started</span><strong>${escapeHtml(formatDateTime(recording.started_at))}</strong></div>
     <div><span>Duration</span><strong>${escapeHtml(formatDuration(recording.duration_seconds))}</strong></div>
-    <div class="wide"><span>Detections</span><strong>${escapeHtml(recordingDetectionLabels(recording).join(', ') || 'none')}</strong></div>
+    <div class="wide"><span>Detections</span><strong>${detections.length ? detections.map((d) => `<span class="detection">${escapeHtml(titleCase(d))}</span>`).join(' ') : 'none'}</strong></div>
   `;
 }
 
