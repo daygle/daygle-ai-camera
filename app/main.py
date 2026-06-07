@@ -2631,6 +2631,7 @@ def delete_runtime_data(request: Request):
     delete_recording_files(recordings)
     deleted_events = database.delete_all_events()
     deleted_alerts = database.delete_all_alerts()
+    deleted_objects = database.delete_all_objects()
     deleted_plates = database.delete_all_plates()
     storage_config = effective_storage_config()
     deleted_snapshots = clear_runtime_media_directory(storage_config.get('snapshots_dir'))
@@ -2644,6 +2645,7 @@ def delete_runtime_data(request: Request):
             'recordings': len(recordings),
             'events': deleted_events,
             'alerts': deleted_alerts,
+            'objects': deleted_objects,
             'plates': deleted_plates,
             'snapshot_files': deleted_snapshots,
             'event_artifacts': deleted_event_artifacts,

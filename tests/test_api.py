@@ -1215,10 +1215,12 @@ def test_runtime_data_reset_clears_operational_data_but_keeps_settings(tmp_path,
         assert reset_payload['deleted']['events'] >= 1
         assert reset_payload['deleted']['recordings'] >= 1
         assert reset_payload['deleted']['alerts'] >= 1
+        assert reset_payload['deleted']['objects'] >= 1
 
         assert client.request('/api/events')[2] == []
         assert client.request('/api/recordings')[2] == []
         assert client.request('/api/alerts')[2] == []
+        assert client.request('/api/stats')[2]['objects'] == []
 
         status, _headers, settings_payload = client.request('/api/settings/system')
         assert status == 200
