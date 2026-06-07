@@ -4,19 +4,14 @@ const els = {
   aiStatusDetail: document.getElementById('aiStatusDetail'),
   totalEvents: document.getElementById('totalEvents'),
   totalAlerts: document.getElementById('totalAlerts'),
-  frameNumber: document.getElementById('frameNumber'),
-  searchBtn: document.getElementById('searchBtn'),
-  clearBtn: document.getElementById('clearBtn'),
-  searchInput: document.getElementById('searchInput'),
+  uptimeText: document.getElementById('uptimeText'),
   events: document.getElementById('events'),
   alerts: document.getElementById('alerts'),
-  objectStats: document.getElementById('objectStats'),
   plateFilter: document.getElementById('plateFilter'),
   plateSearchBtn: document.getElementById('plateSearchBtn'),
   plateClearBtn: document.getElementById('plateClearBtn'),
   plates: document.getElementById('plates'),
   plateSightings: document.getElementById('plateSightings'),
-  deleteAllObjectsBtn: document.getElementById('deleteAllObjectsBtn'),
   deleteAllEventsBtn: document.getElementById('deleteAllEventsBtn'),
   deleteAllAlertsBtn: document.getElementById('deleteAllAlertsBtn'),
   deleteAllPlatesBtn: document.getElementById('deleteAllPlatesBtn'),
@@ -78,6 +73,16 @@ function eventSourceLabel(event) {
   return String(event?.source || 'unknown');
 }
 
+function formatUptime(seconds) {
+  if (!seconds && seconds !== 0) return '—';
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
 function detectionBadges(detections = []) {
   if (!detections.length) return '<span class="muted">No detections</span>';
   return detections.map((d) => {
@@ -98,7 +103,7 @@ function recordingLink(recordings = []) {
 
 function renderEvents(events) {
   if (!events.length) {
-    els.events.innerHTML = '<div class="empty">No enabled alert events yet.</div>';
+    els.events.innerHTML = '<div class="empty">No detection events yet.</div>';
     return;
   }
 
@@ -136,24 +141,6 @@ function renderAlerts(alerts) {
   `).join('');
 }
 
-function renderObjectStats(objects = []) {
-  if (!objects.length) {
-    els.objectStats.innerHTML = '<span class="muted">No objects indexed yet.</span>';
-    return;
-  }
-
-  els.objectStats.innerHTML = objects.map((obj) => `
-    <button class="chip" data-label="${escapeHtml(obj.label)}">${escapeHtml(obj.label)} · ${obj.count}</button>
-  `).join('');
-
-  document.querySelectorAll('[data-label]').forEach((button) => {
-    button.addEventListener('click', () => {
-      els.searchInput.value = button.dataset.label;
-      loadEvents(button.dataset.label);
-    });
-  });
-}
-
 function renderPlates(plates = []) {
   if (!plates.length) {
     els.plates.innerHTML = '<div class="empty">No plates seen yet.</div>';
@@ -189,7 +176,7 @@ function bindDeleteButtons() {
       if (!confirm(`Delete event #${button.dataset.deleteEvent}? This cannot be undone.`)) return;
       try {
         await api(`/api/events/${button.dataset.deleteEvent}`, { method: 'DELETE' });
-        await Promise.all([loadStats(), loadEvents(els.searchInput.value.trim())]);
+        await Promise.all([loadStats(), loadEvents()]);
         bindDeleteButtons();
       } catch (error) {
         alert(`Failed to delete event: ${error.message}`);
@@ -214,24 +201,10 @@ async function loadAuth() {
   const authInfo = await api('/api/auth/me');
   authState = { user: authInfo.user, csrfToken: authInfo.csrf_token };
   if (authInfo.user.role !== 'admin') {
-    if (els.deleteAllObjectsBtn) els.deleteAllObjectsBtn.hidden = true;
     if (els.deleteAllEventsBtn) els.deleteAllEventsBtn.hidden = true;
     if (els.deleteAllAlertsBtn) els.deleteAllAlertsBtn.hidden = true;
     if (els.deleteAllPlatesBtn) els.deleteAllPlatesBtn.hidden = true;
   } else {
-    if (els.deleteAllObjectsBtn) {
-      els.deleteAllObjectsBtn.hidden = false;
-      els.deleteAllObjectsBtn.addEventListener('click', async () => {
-        if (!confirm('Delete ALL object detections used by Object Search? This cannot be undone.')) return;
-        try {
-          await api('/api/objects', { method: 'DELETE' });
-          await Promise.all([loadStats(), loadEvents(els.searchInput.value.trim())]);
-          bindDeleteButtons();
-        } catch (error) {
-          alert(`Failed to delete object detections: ${error.message}`);
-        }
-      });
-    }
     if (els.deleteAllEventsBtn) {
       els.deleteAllEventsBtn.hidden = false;
       els.deleteAllEventsBtn.addEventListener('click', async () => {
@@ -277,13 +250,14 @@ async function loadStatus() {
   try {
     const [status, aiStatus] = await Promise.all([api('/api/status'), api('/api/status/ai')]);
     els.statusText.textContent = `${status.status} · ${status.mode}`;
-    els.frameNumber.textContent = status.frame_number;
+    els.uptimeText.textContent = formatUptime(status.uptime_seconds);
     els.aiModeText.textContent = aiStatus.mode;
     els.aiModeText.className = `ai-mode ${aiStatus.mode.toLowerCase().replace(/\s+/g, '-')}`;
     const errorText = aiStatus.error ? ` · ${aiStatus.error}` : '';
     els.aiStatusDetail.textContent = `${aiStatus.active_backend} · model loaded: ${aiStatus.model_loaded}${errorText}`;
   } catch (error) {
     els.statusText.textContent = 'offline';
+    els.uptimeText.textContent = '—';
     els.aiModeText.textContent = 'MODEL FAILED';
     els.aiModeText.className = 'ai-mode model-failed';
     els.aiStatusDetail.textContent = error.message;
@@ -294,16 +268,10 @@ async function loadStats() {
   const stats = await api('/api/stats');
   els.totalEvents.textContent = stats.total_events;
   els.totalAlerts.textContent = stats.total_alerts;
-  renderObjectStats(stats.objects);
-  if (els.deleteAllObjectsBtn && authState.user?.role === 'admin') {
-    els.deleteAllObjectsBtn.hidden = !(stats.objects || []).length;
-  }
 }
 
-async function loadEvents(label = '') {
-  const params = new URLSearchParams({ alerted_only: 'true' });
-  if (label) params.set('label', label);
-  renderEvents(await api(`/api/events?${params.toString()}`));
+async function loadEvents() {
+  renderEvents(await api('/api/events'));
 }
 
 async function loadAlerts() {
@@ -332,22 +300,11 @@ async function refreshAll() {
   bindDeleteButtons();
 }
 
-els.searchBtn.addEventListener('click', () => {
-  const label = els.searchInput.value.trim();
-  loadEvents(label).then(() => bindDeleteButtons());
-});
-els.clearBtn.addEventListener('click', () => {
-  els.searchInput.value = '';
-  loadEvents().then(() => bindDeleteButtons());
-});
 els.plateSearchBtn.addEventListener('click', () => searchPlateSightings(els.plateFilter.value.trim()));
 els.plateClearBtn.addEventListener('click', () => {
   els.plateFilter.value = '';
   loadPlates();
   searchPlateSightings();
-});
-els.searchInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') loadEvents(els.searchInput.value.trim());
 });
 
 loadAuth().then(refreshAll);
