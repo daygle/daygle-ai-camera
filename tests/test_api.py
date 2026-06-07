@@ -1092,6 +1092,7 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
                 "record_on_motion": False,
                 "record_on_human": True,
                 "record_on_objects": ["cat", "dog", "package"],
+                "motion_min_confidence": 0.61,
                 "pre_event_seconds": 2,
                 "post_event_seconds": 3,
                 "max_clip_seconds": 10,
@@ -1105,6 +1106,7 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
         assert status == 200
         assert recording["mode"] == "objects"
         assert recording["record_on_objects"] == ["cat", "dog", "package"]
+        assert recording["motion_min_confidence"] == 0.61
 
         status, _headers, storage = client.request(
             "/api/settings/system/storage",
@@ -1426,6 +1428,71 @@ def test_background_live_alert_monitor_triggers_cat_email_without_live_page(tmp_
     assert sent
     assert sent[0][0]['rule_name'] == 'Cat live'
     assert sent[0][2] == ['owner@example.com']
+
+
+def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _image_bytes):
+            return [
+                {
+                    'label': 'person',
+                    'confidence': 0.4,
+                    'box': {'x': 64, 'y': 72, 'width': 320, 'height': 360},
+                }
+            ]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    main.live_detection_last_checked.clear()
+    main.database.set_setting('recording', {'motion_min_confidence': 0.45}, main.utc_now())
+
+    camera_settings = {
+        'id': 'camera-1',
+        'name': 'Front Door',
+        'detection': {
+            'object_labels': ['cat'],
+            'zones': [
+                {
+                    'id': 'motion-zone',
+                    'name': 'Motion Zone',
+                    'x': 0,
+                    'y': 0,
+                    'width': 1,
+                    'height': 1,
+                    'monitor_motion': True,
+                    'monitor_objects': False,
+                    'monitor_anpr': False,
+                },
+            ],
+        },
+    }
+
+    blocked_event_id = main.process_live_stream_alerts(
+        b'jpeg-frame',
+        {'width': 1280, 'height': 720},
+        camera_settings,
+        enforce_interval=False,
+    )
+    assert blocked_event_id is None
+
+    main.database.set_setting('recording', {'motion_min_confidence': 0.35}, main.utc_now())
+
+    allowed_event_id = main.process_live_stream_alerts(
+        b'jpeg-frame',
+        {'width': 1280, 'height': 720},
+        camera_settings,
+        enforce_interval=False,
+    )
+    assert allowed_event_id is not None
+    event = main.database.get_event(allowed_event_id)
+    assert event is not None
+    assert any(detection['label'] == 'motion' for detection in event['detections'])
 
 def test_live_stream_detection_queue_runs_in_background_and_deduplicates(tmp_path, monkeypatch):
     _app, _database_path = _load_app(tmp_path, monkeypatch)

@@ -73,6 +73,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "record_on_motion": True,
         "record_on_human": True,
         "record_on_objects": ["cat", "dog", "package", "parcel"],
+        "motion_min_confidence": 0.45,
         "pre_event_seconds": 5,
         "post_event_seconds": 10,
         "extension_step_seconds": 10,

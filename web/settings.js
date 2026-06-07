@@ -67,6 +67,7 @@ const FIELD_LABELS = {
   post_event_seconds: 'Post-Event Seconds',
   extension_step_seconds: 'Extension Step Seconds',
   max_clip_seconds: 'Max Clip Seconds',
+  motion_min_confidence: 'Motion Min Confidence',
   retention_days: 'Retention Days',
   max_storage_gb: 'Max Storage GB',
   auto_purge_enabled: 'Auto Purge',
@@ -372,6 +373,7 @@ function payloadFor(form) {
   if ('record_on_objects' in data) data.record_on_objects = data.record_on_objects.split(',').map((label) => label.trim()).filter(Boolean);
   if ('vehicle_labels' in data) data.vehicle_labels = data.vehicle_labels.split(',').map((label) => label.trim()).filter(Boolean);
   if ('min_confidence' in data && data.min_confidence !== '') data.min_confidence = Number(data.min_confidence);
+  if ('motion_min_confidence' in data && data.motion_min_confidence !== '') data.motion_min_confidence = Number(data.motion_min_confidence);
   if ('session_timeout_hours' in data && data.session_timeout_hours !== '') data.session_timeout_hours = Number(data.session_timeout_hours);
   return data;
 }

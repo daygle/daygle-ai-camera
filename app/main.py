@@ -923,6 +923,7 @@ def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings
 def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any], *, enforce_interval: bool = True) -> int | None:
     camera_id = str(settings.get('id') or 'camera')
     live_settings = effective_live_config()
+    recording_settings = effective_recording_config()
     detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 0.25))
     if not hasattr(detector, 'detect_image'):
         update_live_detection_status(camera_id, state='skipped', reason='Live stream alerts require ONNX AI mode.', detections=[])
@@ -949,6 +950,12 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
     detections = normalize_detection_boxes_for_frame(detections, frame)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     motion_detections = filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_motion', require_zones=True)
+    try:
+        motion_min_confidence = float(recording_settings.get('motion_min_confidence', 0.45))
+    except (TypeError, ValueError):
+        motion_min_confidence = 0.45
+    motion_min_confidence = max(0.0, min(1.0, motion_min_confidence))
+    motion_detections = [detection for detection in motion_detections if float(detection.get('confidence', 0)) >= motion_min_confidence]
     object_detections = filter_detections_for_camera(detections, settings)
     anpr_detections = filter_detections_for_camera_anpr(detections, settings)
     zone_rules = zone_object_alert_rules(settings)
@@ -2058,6 +2065,7 @@ def _settings_section_recording() -> str:
     return (
         '<section class="card"><h2>Recording Clips</h2>'
         '<form id="recordingSettingsForm" class="form-grid">'
+        '<input name="motion_min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Motion min confidence" />'
         '<input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" />'
         '<input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" />'
         '<input name="extension_step_seconds" type="number" min="0" max="300" placeholder="Extension step seconds" />'
@@ -2913,6 +2921,16 @@ def _int_field(payload: dict[str, Any], field: str, default: int, minimum: int, 
     return value
 
 
+def _float_field(payload: dict[str, Any], field: str, default: float, minimum: float, maximum: float) -> float:
+    try:
+        value = float(payload.get(field, default))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f'{field} must be a number.') from exc
+    if value < minimum or value > maximum:
+        raise HTTPException(status_code=400, detail=f'{field} must be between {minimum} and {maximum}.')
+    return value
+
+
 def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | None = None, index: int = 1) -> dict[str, Any]:
     current = current or effective_camera_config()
     updated = {
@@ -3033,6 +3051,7 @@ def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'record_on_motion': _bool_value(merged.get('record_on_motion', True)),
         'record_on_human': _bool_value(merged.get('record_on_human', True)),
         'record_on_objects': object_labels,
+        'motion_min_confidence': _float_field(merged, 'motion_min_confidence', 0.45, 0.0, 1.0),
         'pre_event_seconds': _int_field(merged, 'pre_event_seconds', 5, 0, 300),
         'post_event_seconds': _int_field(merged, 'post_event_seconds', 10, 0, 300),
         'extension_step_seconds': _int_field(merged, 'extension_step_seconds', 10, 0, 300),
