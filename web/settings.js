@@ -101,7 +101,8 @@ function createLiveSettingsSection() {
     <form id="liveSettingsForm" class="form-grid">
       <input name="snapshot_refresh_ms" type="number" min="150" max="5000" step="10" placeholder="Snapshot refresh ms (e.g. 500)" />
       <input name="detection_status_refresh_ms" type="number" min="500" max="15000" step="100" placeholder="Detection status refresh ms (e.g. 2000)" />
-      <input name="detection_interval_seconds" type="number" min="0.2" max="10" step="0.1" placeholder="Detection interval seconds (e.g. 1.0)" />
+      <input name="detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="Detection interval seconds (e.g. 0.25)" />
+      <input name="event_debounce_seconds" type="number" min="0" max="120" step="0.5" placeholder="Duplicate event debounce seconds (e.g. 10)" />
       <label><span>Background alerts</span><select name="background_detection_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
       <button type="submit">Save live settings</button>
     </form>
@@ -277,6 +278,7 @@ function payloadFor(form) {
     if (key in data && data[key] !== '') data[key] = Number.parseInt(data[key], 10);
   }
   if ('detection_interval_seconds' in data && data.detection_interval_seconds !== '') data.detection_interval_seconds = Number(data.detection_interval_seconds);
+  if ('event_debounce_seconds' in data && data.event_debounce_seconds !== '') data.event_debounce_seconds = Number(data.event_debounce_seconds);
   if ('record_on_objects' in data) data.record_on_objects = data.record_on_objects.split(',').map((label) => label.trim()).filter(Boolean);
   if ('vehicle_labels' in data) data.vehicle_labels = data.vehicle_labels.split(',').map((label) => label.trim()).filter(Boolean);
   if ('min_confidence' in data && data.min_confidence !== '') data.min_confidence = Number(data.min_confidence);

@@ -109,7 +109,8 @@ def effective_live_config() -> dict[str, Any]:
     settings = {
         'snapshot_refresh_ms': 500,
         'detection_status_refresh_ms': 2000,
-        'detection_interval_seconds': 0.5,
+        'detection_interval_seconds': 0.25,
+        'event_debounce_seconds': 10.0,
         'background_detection_enabled': True,
     }
     config_live = config.get('live', {})
@@ -185,6 +186,7 @@ last_detector_error: str | None = getattr(detector, 'unavailable_reason', None)
 alerts = AlertEngine(effective_alert_rules())
 live_detection_last_checked: dict[str, float] = {}
 live_detection_status: dict[str, dict[str, Any]] = {}
+live_event_last_emitted: dict[str, dict[str, Any]] = {}
 live_detection_worker_lock = threading.Lock()
 active_live_detection_cameras: set[str] = set()
 live_alert_monitor_stop = threading.Event()
@@ -701,6 +703,36 @@ def update_live_detection_status(camera_id: str, **updates: Any) -> None:
     }
 
 
+def detection_label_set(detections: list[dict[str, Any]]) -> set[str]:
+    return {
+        str(detection.get('label') or '').strip().lower()
+        for detection in detections
+        if str(detection.get('label') or '').strip()
+    }
+
+
+def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: float) -> bool:
+    if debounce_seconds <= 0 or not labels:
+        return False
+    previous = live_event_last_emitted.get(camera_id)
+    if not previous:
+        return False
+    elapsed = time.time() - float(previous.get('timestamp', 0))
+    if elapsed > debounce_seconds:
+        return False
+    previous_labels = {str(label).strip().lower() for label in previous.get('labels', []) if str(label).strip()}
+    return bool(previous_labels & labels)
+
+
+def remember_live_event(camera_id: str, labels: set[str]) -> None:
+    if not labels:
+        return
+    live_event_last_emitted[camera_id] = {
+        'timestamp': time.time(),
+        'labels': sorted(labels),
+    }
+
+
 def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any]:
     selected_config = get_camera_config(camera_id)
     camera_key = str(selected_config.get('id') or 'camera')
@@ -739,7 +771,7 @@ def run_live_alert_monitor_once() -> int:
                 recording_config=camera_event_recording_config(selected_config),
             )
         now = time.time()
-        detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 1.0))
+        detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 0.25))
         with live_detection_worker_lock:
             if camera_id in active_live_detection_cameras:
                 continue
@@ -767,7 +799,7 @@ def run_live_alert_monitor_once() -> int:
 def live_alert_monitor_loop() -> None:
     while not live_alert_monitor_stop.is_set():
         run_live_alert_monitor_once()
-        interval = max(0.2, float(effective_live_config().get('detection_interval_seconds', 1.0)))
+        interval = max(0.1, float(effective_live_config().get('detection_interval_seconds', 0.25)))
         live_alert_monitor_stop.wait(interval)
 
 
@@ -801,7 +833,7 @@ def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings
     # Skip snapshot-triggered detection in that mode to avoid duplicate alerts/recordings.
     if normalize_bool_setting(effective_live_config().get('background_detection_enabled'), True):
         return
-    detection_interval_seconds = float(effective_live_config().get('detection_interval_seconds', 1.0))
+    detection_interval_seconds = float(effective_live_config().get('detection_interval_seconds', 0.25))
     now = time.time()
     with live_detection_worker_lock:
         if camera_id in active_live_detection_cameras:
@@ -826,7 +858,8 @@ def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings
 
 def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any], *, enforce_interval: bool = True) -> int | None:
     camera_id = str(settings.get('id') or 'camera')
-    detection_interval_seconds = float(effective_live_config().get('detection_interval_seconds', 1.0))
+    live_settings = effective_live_config()
+    detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 0.25))
     if not hasattr(detector, 'detect_image'):
         update_live_detection_status(camera_id, state='skipped', reason='Live stream alerts require ONNX AI mode.', detections=[])
         return None
@@ -899,6 +932,23 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             'alert_triggered': 'motion' in triggered_labels,
         })
     matched_labels = [str(detection.get('label')) for detection in alert_detections if detection.get('label')]
+    camera_recording_config = camera_event_recording_config(settings)
+    should_record_event, _trigger_type, _trigger_label = recording_service.should_record(recording_detections, camera_recording_config)
+    debounce_seconds = max(0.0, float(live_settings.get('event_debounce_seconds', 10.0)))
+    debounced_labels = detection_label_set([detection for detection in recording_detections if detection.get('alert_triggered')])
+    if not debounced_labels:
+        debounced_labels = detection_label_set(recording_detections)
+    if should_record_event and live_event_is_debounced(camera_id, debounced_labels, debounce_seconds):
+        update_live_detection_status(
+            camera_id,
+            state='checked',
+            reason=f'Ongoing detection suppressed for {debounce_seconds:.1f}s debounce window.',
+            detected_labels=raw_labels,
+            matched_labels=matched_labels,
+            detections=recording_detections,
+            anpr_detections=anpr_detections,
+        )
+        return None
 
     event_time = datetime.now(timezone.utc).isoformat()
     snapshot_path = storage.save_image_snapshot(image_bytes, f'{camera_id}.jpg')
@@ -922,8 +972,10 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         'rtsp',
         recording_detections,
         camera_id=camera_id,
-        recording_config=camera_event_recording_config(settings),
+        recording_config=camera_recording_config,
     )
+    if recording_id is not None:
+        remember_live_event(camera_id, debounced_labels)
     process_anpr_for_event(event_id, anpr_detections, snapshot_path, event_time)
 
     for alert in triggered:
@@ -2701,15 +2753,22 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
     detection_status_refresh_ms = _int_field(merged, 'detection_status_refresh_ms', 2000, 500, 15000)
     background_detection_enabled = normalize_bool_setting(merged.get('background_detection_enabled'), True)
     try:
-        detection_interval_seconds = float(merged.get('detection_interval_seconds', 1.0))
+        detection_interval_seconds = float(merged.get('detection_interval_seconds', 0.25))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail='detection_interval_seconds must be a number.') from exc
-    if detection_interval_seconds < 0.2 or detection_interval_seconds > 10:
-        raise HTTPException(status_code=400, detail='detection_interval_seconds must be between 0.2 and 10.')
+    if detection_interval_seconds < 0.1 or detection_interval_seconds > 10:
+        raise HTTPException(status_code=400, detail='detection_interval_seconds must be between 0.1 and 10.')
+    try:
+        event_debounce_seconds = float(merged.get('event_debounce_seconds', 10.0))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='event_debounce_seconds must be a number.') from exc
+    if event_debounce_seconds < 0 or event_debounce_seconds > 120:
+        raise HTTPException(status_code=400, detail='event_debounce_seconds must be between 0 and 120.')
     return {
         'snapshot_refresh_ms': snapshot_refresh_ms,
         'detection_status_refresh_ms': detection_status_refresh_ms,
         'detection_interval_seconds': detection_interval_seconds,
+        'event_debounce_seconds': event_debounce_seconds,
         'background_detection_enabled': background_detection_enabled,
     }
 
