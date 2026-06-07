@@ -442,7 +442,7 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
             'points': points,
             'enabled': bool(zone.get('enabled', True)),
             'monitor_motion': monitor_motion,
-            'monitor_objects': True,
+            'monitor_objects': bool(zone.get('monitor_objects', True)),
             'object_labels': [rule['label'] for rule in object_rules if str(rule.get('label') or '').strip().lower() != 'motion'],
             'object_rules': object_rules,
             'monitor_anpr': bool(zone.get('monitor_anpr', True)),
@@ -527,30 +527,6 @@ def detection_overlap_ratio_with_zone_rect(detection: dict[str, Any], zone: dict
     zx1 = float(zone.get('x') or 0)
     zy1 = float(zone.get('y') or 0)
     zw = max(0.0, float(zone.get('width') or 0))
-
-
-    @app.post('/api/detect/frame')
-    async def detect_frame(request: Request):
-        image_bytes, _filename, _content_type = await _read_uploaded_image(request)
-        if not image_bytes:
-            raise HTTPException(status_code=400, detail='Uploaded image is empty')
-
-        ai_settings = effective_ai_config()
-        ai_state = ai_status_payload(ai_settings)
-        if ai_settings.get('backend') == 'onnx' and not ai_state['detector_loaded']:
-            raise HTTPException(status_code=400, detail=ai_state['last_detector_error'] or 'ONNX detector is not loaded.')
-        try:
-            detections = detector.detect_image(image_bytes)
-        except DetectorUnavailableError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        return {
-            'detections': detections,
-            'count': len(detections),
-            'ai_backend': ai_state['active_backend'],
-        }
     zh = max(0.0, float(zone.get('height') or 0))
     zx2 = zx1 + zw
     zy2 = zy1 + zh
@@ -2356,21 +2332,47 @@ def live_snapshot(overlay: bool = Query(True), camera_id: str | None = None):
 
 
 @app.post('/api/detect/test-image')
-async def detect_test_image(request: Request):
+async def detect_test_image(request: Request, camera_id: str | None = Query(None)):
     image_bytes, filename, content_type = await _read_uploaded_image(request)
     if not image_bytes:
         raise HTTPException(status_code=400, detail='Uploaded image is empty')
 
     ai_settings = effective_ai_config()
     ai_state = ai_status_payload(ai_settings)
-    if ai_settings.get('backend') == 'onnx' and not ai_state['detector_loaded']:
-        raise HTTPException(status_code=400, detail=ai_state['last_detector_error'] or 'ONNX detector is not loaded.')
+    ai_error: str | None = None
     try:
         detections = detector.detect_image(image_bytes)
     except DetectorUnavailableError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        detections = []
+        ai_error = str(exc) or ai_state.get('last_detector_error') or ai_state.get('error') or 'Detector unavailable.'
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    camera_settings = get_camera_config(camera_id) if camera_id else None
+    if camera_settings is not None:
+        object_matches = filter_detections_for_camera(detections, camera_settings)
+        motion_matches = zone_motion_detections(detections, camera_settings)
+        seen: set[int] = set()
+        active_detections: list[dict[str, Any]] = []
+        for d in object_matches + motion_matches:
+            if id(d) not in seen:
+                seen.add(id(d))
+                active_detections.append(d)
+        if not active_detections:
+            return {
+                'created': False,
+                'event_id': None,
+                'recording_id': None,
+                'detections': detections,
+                'alerts': [],
+                'plate_events': [],
+                'snapshot_path': None,
+                'ai_backend': ai_state['configured_backend'],
+                'backend_used': ai_state['configured_backend'],
+                'detector_backend': ai_state['active_backend'],
+                'ai_error': ai_error,
+            }
+        detections = active_detections
 
     snapshot_path = storage.save_image_snapshot(image_bytes, filename)
     alerts.rules = effective_alert_rules()
@@ -2415,6 +2417,32 @@ async def detect_test_image(request: Request):
         'ai_backend': ai_state['configured_backend'],
         'backend_used': ai_state['configured_backend'],
         'detector_backend': ai_state['active_backend'],
+        'ai_error': ai_error,
+    }
+
+
+@app.post('/api/detect/frame')
+async def detect_frame(request: Request):
+    image_bytes, _filename, _content_type = await _read_uploaded_image(request)
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail='Uploaded image is empty')
+
+    ai_settings = effective_ai_config()
+    ai_state = ai_status_payload(ai_settings)
+    ai_error: str | None = None
+    try:
+        detections = detector.detect_image(image_bytes)
+    except DetectorUnavailableError as exc:
+        detections = []
+        ai_error = str(exc) or ai_state.get('last_detector_error') or ai_state.get('error') or 'Detector unavailable.'
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        'detections': detections,
+        'count': len(detections),
+        'ai_backend': ai_state['active_backend'],
+        'ai_error': ai_error,
     }
 
 
@@ -2546,25 +2574,11 @@ def _recording_timeline_segment(recording: dict[str, Any], day_start: datetime, 
     if visible_end <= visible_start:
         return None
 
-    _generic = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous'}
-    trigger_type = str(recording.get('trigger_type') or 'motion').strip().lower() or 'motion'
-    trigger_label = str(recording.get('trigger_label') or '').strip().lower() or None
-    if trigger_label and trigger_label not in _generic:
-        display_label = trigger_label
-    elif trigger_type == 'human':
-        display_label = 'person'
-    elif trigger_type in {'continuous', 'none', 'off'}:
-        display_label = trigger_type
-    else:
-        display_label = trigger_type
-
     return {
         **recording,
         'timeline_start_seconds': max(0.0, (visible_start - day_start).total_seconds()),
         'timeline_end_seconds': min(86400.0, (visible_end - day_start).total_seconds()),
         'timeline_duration_seconds': max(1.0, (visible_end - visible_start).total_seconds()),
-        'color_key': display_label,
-        'color_label': display_label,
     }
 
 
@@ -3424,17 +3438,18 @@ def download_yolov8n_model():
 def test_ai_detector():
     ai_settings = effective_ai_config()
     ai_state = ai_status_payload(ai_settings)
-    if ai_settings.get('backend') == 'onnx' and not ai_state['detector_loaded']:
-        raise HTTPException(status_code=400, detail=ai_state['last_detector_error'] or 'ONNX detector is not loaded.')
+    ai_error: str | None = None
+    detections: list = []
     if not hasattr(detector, 'detect_image'):
-        raise HTTPException(status_code=400, detail='Configured detector cannot run image inference.')
-    try:
-        detections = detector.detect_image(ONE_PIXEL_PNG)
-    except DetectorUnavailableError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {'ok': True, 'backend_used': ai_state['configured_backend'], 'detections': detections, 'status': ai_state}
+        ai_error = 'Configured detector cannot run image inference.'
+    else:
+        try:
+            detections = detector.detect_image(ONE_PIXEL_PNG)
+        except DetectorUnavailableError as exc:
+            ai_error = str(exc) or ai_state.get('last_detector_error') or 'Detector unavailable.'
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {'ok': ai_error is None, 'backend_used': ai_state['configured_backend'], 'detections': detections, 'status': ai_state, 'ai_error': ai_error}
 
 
 @app.get('/api/settings/alerts')

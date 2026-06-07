@@ -257,10 +257,10 @@ class OnnxYoloDetector:
                     label=label,
                     confidence=float(score_array[index]),
                     box={
-                        "x": round(float(x1), 2),
-                        "y": round(float(y1), 2),
-                        "width": round(float(x2 - x1), 2),
-                        "height": round(float(y2 - y1), 2),
+                        "x": round(float(x1) / original_width, 4),
+                        "y": round(float(y1) / original_height, 4),
+                        "width": round(float(x2 - x1) / original_width, 4),
+                        "height": round(float(y2 - y1) / original_height, 4),
                     },
                 )
             )

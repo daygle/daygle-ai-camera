@@ -357,13 +357,18 @@ class EventDatabase:
             if older_than:
                 purge_ids.update(int(row["id"]) for row in candidates if str(row["started_at"]) < older_than)
             if max_storage_bytes is not None:
-                existing = [row for row in candidates if Path(str(row["file_path"])).is_file()]
-                total = sum(Path(str(row["file_path"])).stat().st_size for row in existing)
-                for row in existing:
+                existing_with_sizes: list[tuple[dict[str, Any], int]] = []
+                for row in candidates:
+                    try:
+                        existing_with_sizes.append((row, Path(str(row["file_path"])).stat().st_size))
+                    except OSError:
+                        continue
+                total = sum(size for _, size in existing_with_sizes)
+                for row, size in existing_with_sizes:
                     if total <= max_storage_bytes:
                         break
                     purge_ids.add(int(row["id"]))
-                    total -= Path(str(row["file_path"])).stat().st_size
+                    total -= size
             if not purge_ids:
                 return []
             rows = [row for row in candidates if int(row["id"]) in purge_ids]

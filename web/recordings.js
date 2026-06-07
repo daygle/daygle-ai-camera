@@ -35,7 +35,7 @@ async function api(path, options = {}) {
     headers['X-CSRF-Token'] = authState.csrfToken;
   }
   const response = await fetch(path, { ...options, headers });
-  if (response.status === 401) window.location.href = '/login';
+  if (response.status === 401) { window.location.href = '/login'; throw new Error('Authentication required'); }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.detail || `Request failed: ${response.status}`);
   return payload;
@@ -79,9 +79,11 @@ function recordingTriggerLabel(recording) {
 }
 
 function recordingDetectionLabels(recording) {
-  return Array.from(new Set((recording.detections || [])
+  const all = Array.from(new Set((recording.detections || [])
     .map((detection) => String(detection.label || '').trim().toLowerCase())
     .filter(Boolean)));
+  const specific = all.filter((label) => !GENERIC_TRIGGER_LABELS.has(label));
+  return specific.length ? specific : all;
 }
 
 function recordingDisplayTrigger(recording) {
@@ -148,7 +150,7 @@ function renderRecordingDetails(recording) {
     <div><span>Trigger</span><strong>${escapeHtml(recordingDisplayTrigger(recording))}</strong></div>
     <div><span>Started</span><strong>${formatDate(recording.started_at)}</strong></div>
     <div><span>Duration</span><strong>${Number(recording.duration_seconds || 0).toFixed(1)}s</strong></div>
-    <div class="wide"><span>Detections</span><strong>${(recording.detections || []).map((d) => d.label).join(', ') || 'none'}</strong></div>
+    <div class="wide"><span>Detections</span><strong>${(recording.detections || []).map((d) => escapeHtml(d.label)).join(', ') || 'none'}</strong></div>
   `;
 }
 
@@ -185,19 +187,24 @@ function clearOverlayTrackDetections() {
 }
 
 function normalizeDetectionBox(box, width, height) {
-  const pixelX = Number(box?.x ?? 0);
-  const pixelY = Number(box?.y ?? 0);
-  const pixelWidth = Number(box?.width ?? 0);
-  const pixelHeight = Number(box?.height ?? 0);
-  if (!Number.isFinite(pixelX) || !Number.isFinite(pixelY) || !Number.isFinite(pixelWidth) || !Number.isFinite(pixelHeight)) {
+  const rawX = Number(box?.x ?? 0);
+  const rawY = Number(box?.y ?? 0);
+  const rawWidth = Number(box?.width ?? 0);
+  const rawHeight = Number(box?.height ?? 0);
+  if (!Number.isFinite(rawX) || !Number.isFinite(rawY) || !Number.isFinite(rawWidth) || !Number.isFinite(rawHeight)) {
     return null;
   }
-  if (pixelWidth <= 0 || pixelHeight <= 0 || width <= 0 || height <= 0) return null;
+  if (rawWidth <= 0 || rawHeight <= 0) return null;
+  // Detector returns [0,1] normalized coords; only divide if clearly pixel-space.
+  if (rawX <= 1 && rawY <= 1 && rawWidth <= 1 && rawHeight <= 1) {
+    return { x: rawX, y: rawY, width: rawWidth, height: rawHeight };
+  }
+  if (width <= 0 || height <= 0) return null;
   return {
-    x: Math.max(0, Math.min(1, pixelX / width)),
-    y: Math.max(0, Math.min(1, pixelY / height)),
-    width: Math.max(0, Math.min(1, pixelWidth / width)),
-    height: Math.max(0, Math.min(1, pixelHeight / height)),
+    x: Math.max(0, Math.min(1, rawX / width)),
+    y: Math.max(0, Math.min(1, rawY / height)),
+    width: Math.max(0, Math.min(1, rawWidth / width)),
+    height: Math.max(0, Math.min(1, rawHeight / height)),
   };
 }
 

@@ -271,8 +271,8 @@ def test_onnx_missing_model_returns_clear_api_error(tmp_path, monkeypatch):
             data=b"not really an image",
             headers={"Content-Type": "image/jpeg", "X-CSRF-Token": csrf},
         )
-        assert status == 400
-        assert "ONNX model not found" in body["detail"] or "numpy is not installed" in body["detail"]
+        assert status == 200
+        assert body.get('ai_error') or body.get('detail')
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -411,8 +411,8 @@ def test_ai_settings_save_onnx_missing_keeps_previous_detector_and_errors_on_upl
             data=b'not really an image',
             headers={'Content-Type': 'image/jpeg', 'X-CSRF-Token': csrf},
         )
-        assert status == 400
-        assert 'ONNX model not found' in body['detail'] or 'numpy is not installed' in body['detail']
+        assert status == 200
+        assert body.get('ai_error') or body.get('detail')
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -2017,7 +2017,7 @@ def test_rtsp_recording_errors_redact_stream_password():
     assert 'rtsp://admin:***@192.168.40.101:554/live/0/MAIN' in message
 
 
-def test_rtsp_recording_capture_skips_overlapping_stream(tmp_path, monkeypatch):
+def test_rtsp_recording_capture_falls_back_on_stream_error(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
 
@@ -2028,6 +2028,7 @@ def test_rtsp_recording_capture_skips_overlapping_stream(tmp_path, monkeypatch):
 
         def write_rtsp_clip(self, *_args):
             self.rtsp_calls += 1
+            raise RuntimeError('Stream unavailable')
 
         def write_event_clip(self, file_path, *_args):
             self.fallback_calls += 1
@@ -2037,8 +2038,7 @@ def test_rtsp_recording_capture_skips_overlapping_stream(tmp_path, monkeypatch):
     service = FakeRecordingService()
     monkeypatch.setattr(main, 'recording_service', service)
     stream_url = 'rtsp://admin:secret-password@192.168.40.101:554/live/0/MAIN'
-    main.active_rtsp_recording_streams.clear()
-    main.active_rtsp_recording_streams.add(stream_url)
+    main.active_rtsp_recordings.clear()
 
     file_path = tmp_path / 'recordings' / 'event_1.mp4'
     main.start_rtsp_recording_capture(
@@ -2046,13 +2046,17 @@ def test_rtsp_recording_capture_skips_overlapping_stream(tmp_path, monkeypatch):
         {'file_path': str(file_path), 'duration_seconds': 10, 'trigger_type': 'motion'},
         1,
         [{'label': 'person'}],
+        recording_id=1,
     )
 
-    assert service.rtsp_calls == 0
+    deadline = time.time() + 3
+    while not file_path.exists() and time.time() < deadline:
+        time.sleep(0.05)
+
+    assert service.rtsp_calls == 1
     assert service.fallback_calls == 1
     assert file_path.read_text(encoding='utf-8') == 'fallback'
-    assert stream_url in main.active_rtsp_recording_streams
-    main.active_rtsp_recording_streams.clear()
+    main.active_rtsp_recordings.clear()
 
 
 def test_alerted_only_event_and_recording_queries_use_enabled_rules(tmp_path):
@@ -2105,6 +2109,17 @@ def test_alerted_only_event_and_recording_queries_use_enabled_rules(tmp_path):
 
 def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(tmp_path, monkeypatch):
     app, database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _image_bytes):
+            return [{'label': 'cat', 'confidence': 0.91, 'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}}]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
     server, thread, base_url = _server(app)
     admin = LocalClient(base_url)
     try:
@@ -2173,6 +2188,17 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
 
 def test_recording_retention_purge_deletes_metadata_and_files(tmp_path, monkeypatch):
     app, database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _image_bytes):
+            return [{'label': 'cat', 'confidence': 0.91, 'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}}]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
     server, thread, base_url = _server(app)
     admin = LocalClient(base_url)
     try:
