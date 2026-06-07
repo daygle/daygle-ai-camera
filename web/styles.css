@@ -335,15 +335,19 @@ input[type="file"] { padding: 10px; }
 .recordings-list { max-height: calc(100vh - 290px); }
 .recording-row { display: grid; gap: 8px; }
 .event-row,
+.alert-row,
 .recording-row {
   padding: 9px 11px;
 }
-.event-row { gap: 6px; }
+.event-row,
+.alert-row { gap: 6px; }
 .event-row-badges,
+.alert-row-badges,
 .recording-row-badges {
   line-height: 1.2;
 }
 .event-row-meta,
+.alert-row-meta,
 .recording-row-meta {
   margin: 0;
   font-size: 13px;
@@ -370,10 +374,12 @@ input[type="file"] { padding: 10px; }
   gap: 8px;
 }
 .event-row .item-title,
+.alert-row .item-title,
 .recording-row .item-title {
   gap: 8px;
 }
 .event-row .item-title span:last-child,
+.alert-row .item-title span:last-child,
 .recording-row .item-title span:last-child {
   font-size: 12px;
 }
@@ -394,15 +400,18 @@ input[type="file"] { padding: 10px; }
     max-height: calc(100vh - 250px);
   }
   .event-row,
+  .alert-row,
   .recording-row {
     padding: 8px 10px;
   }
   .event-row-meta,
+  .alert-row-meta,
   .recording-row-meta {
     font-size: 12px;
     line-height: 1.25;
   }
   #events .detection,
+  #alerts .detection,
   .recordings-list .detection {
     margin: 3px 5px 0 0;
     padding: 3px 7px;

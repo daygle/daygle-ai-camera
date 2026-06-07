@@ -145,13 +145,13 @@ function renderAlerts(alerts) {
   }
 
   els.alerts.innerHTML = alerts.map((alert) => `
-    <div class="item">
+    <div class="item alert-row">
       <div class="item-title">
         <span>${escapeHtml(alert.rule_name)}</span>
         <span>${formatDate(alert.created_at)}</span>
       </div>
-      <p>${escapeHtml(alert.message)}</p>
-      <span class="detection">${escapeHtml(alert.label)} · ${Math.round(alert.confidence * 100)}%</span>
+      <p class="muted alert-row-meta">${escapeHtml(alert.message)}</p>
+      <div class="alert-row-badges"><span class="detection">${escapeHtml(alert.label)} · ${Math.round(alert.confidence * 100)}%</span></div>
     </div>
   `).join('');
 }
