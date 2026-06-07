@@ -83,10 +83,12 @@ function recordingDisplayTrigger(recording) {
   const triggerLabel = recordingTriggerLabel(recording);
   const detectionLabels = recordingDetectionLabels(recording);
   const firstSpecificDetection = detectionLabels.find((label) => !GENERIC_TRIGGER_LABELS.has(label));
+  const hasDetections = detectionLabels.length > 0;
 
   if (triggerType === 'motion' || triggerType === 'alert' || triggerType === 'human') {
     if (firstSpecificDetection) return `motion · ${firstSpecificDetection}`;
-    if (triggerLabel && !GENERIC_TRIGGER_LABELS.has(triggerLabel)) return `motion · ${triggerLabel}`;
+    // If detections exist and none are specific, trust the detection set and keep this as motion.
+    if (!hasDetections && triggerLabel && !GENERIC_TRIGGER_LABELS.has(triggerLabel)) return `motion · ${triggerLabel}`;
     return 'motion';
   }
 
