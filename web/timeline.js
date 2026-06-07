@@ -270,9 +270,9 @@ function buildTimelineLayout(recordings) {
 function renderTimeline(payload) {
   const recordings = buildTimelineLayout(payload.recordings || []);
   const rowCount = Math.max(1, recordings.reduce((max, recording) => Math.max(max, recording.rowIndex + 1), 0));
-  els.timelineHours.innerHTML = Array.from({ length: 25 }, (_, hour) => `
-    <span class="timeline-hour" style="left:${(hour / 24) * 100}%">${String(hour).padStart(2, '0')}:00</span>
-  `).join('');
+  els.timelineHours.innerHTML = Array.from({ length: 25 }, (_, hour) => (
+    `<span class="timeline-hour ${hour % 2 === 0 ? 'major' : 'minor'}" style="left:${(hour / 24) * 100}%">${hour % 2 === 0 ? `${String(hour).padStart(2, '0')}:00` : ''}</span>`
+  )).join('');
   els.timelineGrid.innerHTML = Array.from({ length: 25 }, (_, hour) => `
     <span class="timeline-grid-line" style="left:${(hour / 24) * 100}%"></span>
   `).join('');
