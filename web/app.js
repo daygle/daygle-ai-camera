@@ -265,34 +265,54 @@ async function loadStatus() {
 }
 
 async function loadStats() {
-  const stats = await api('/api/stats');
-  els.totalEvents.textContent = stats.total_events;
-  els.totalAlerts.textContent = stats.total_alerts;
+  try {
+    const stats = await api('/api/stats');
+    els.totalEvents.textContent = stats.total_events;
+    els.totalAlerts.textContent = stats.total_alerts;
+  } catch {
+    // Keep last values on failure.
+  }
 }
 
 async function loadEvents() {
-  renderEvents(await api('/api/events'));
+  try {
+    renderEvents(await api('/api/events'));
+  } catch {
+    els.events.innerHTML = '<div class="empty">Could not load events.</div>';
+  }
 }
 
 async function loadAlerts() {
-  const alerts = await api('/api/alerts');
-  renderAlerts(alerts);
-  if (els.deleteAllAlertsBtn && authState.user?.role === 'admin') {
-    els.deleteAllAlertsBtn.hidden = alerts.length === 0;
+  try {
+    const alerts = await api('/api/alerts');
+    renderAlerts(alerts);
+    if (els.deleteAllAlertsBtn && authState.user?.role === 'admin') {
+      els.deleteAllAlertsBtn.hidden = alerts.length === 0;
+    }
+  } catch {
+    els.alerts.innerHTML = '<div class="empty">Could not load alerts.</div>';
   }
 }
 
 async function loadPlates() {
-  const plates = await api('/api/plates');
-  renderPlates(plates);
-  if (els.deleteAllPlatesBtn && authState.user?.role === 'admin') {
-    els.deleteAllPlatesBtn.hidden = plates.length === 0;
+  try {
+    const plates = await api('/api/plates');
+    renderPlates(plates);
+    if (els.deleteAllPlatesBtn && authState.user?.role === 'admin') {
+      els.deleteAllPlatesBtn.hidden = plates.length === 0;
+    }
+  } catch {
+    els.plates.innerHTML = '<div class="empty">Could not load plates.</div>';
   }
 }
 
 async function searchPlateSightings(query = '') {
-  const q = query ? encodeURIComponent(query) : '';
-  renderPlateSightings(await api(`/api/plates/search?q=${q}`));
+  try {
+    const q = query ? encodeURIComponent(query) : '';
+    renderPlateSightings(await api(`/api/plates/search?q=${q}`));
+  } catch {
+    els.plateSightings.innerHTML = '<div class="empty">Could not load plate sightings.</div>';
+  }
 }
 
 async function refreshAll() {
@@ -307,6 +327,6 @@ els.plateClearBtn.addEventListener('click', () => {
   searchPlateSightings();
 });
 
-loadAuth().then(refreshAll);
+loadAuth().then(refreshAll).catch(() => {});
 setInterval(loadStatus, 3000);
-setInterval(loadStats, 10000);
+setInterval(() => loadStats().catch(() => {}), 10000);

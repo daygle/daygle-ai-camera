@@ -419,7 +419,7 @@ async function loadCameras() {
   try {
     const data = await api('/api/cameras');
     const cameras = data?.cameras || [];
-    if (cameras.length <= 1 || !els.cameraFilter) return;
+    if (!cameras.length || !els.cameraFilter) return;
     for (const camera of cameras) {
       const option = document.createElement('option');
       option.value = camera.id;
