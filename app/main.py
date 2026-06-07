@@ -1045,7 +1045,7 @@ def log_detector_initialization(context: str = 'startup') -> None:
 
 PUBLIC_PREFIXES = ('/static/',)
 PUBLIC_PATHS = {'/favicon.ico', '/login', '/setup'}
-ADMIN_PATHS = {'/settings', '/alert-settings', '/system-settings', '/users', '/zones'}
+ADMIN_PATHS = {'/settings', '/system-settings', '/users', '/zones'}
 MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
 
@@ -1767,13 +1767,23 @@ def zones_page():
 @app.get('/events')
 @app.get('/alerts')
 @app.get('/search')
-@app.get('/recordings')
 def dashboard_aliases():
+    return root()
+
+
+@app.get('/recordings')
+def recordings_page():
+    recordings_path = web_dir / 'recordings.html'
+    if recordings_path.exists():
+        return FileResponse(recordings_path)
     return root()
 
 
 @app.get('/settings')
 def settings_page():
+    return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Setup / AI Settings - Daygle AI Camera</title>
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>Setup / AI Settings</h1><p class="muted">Configure AI detection, models, and email delivery.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/system-settings">System settings</a><a class="button-link secondary-link" href="/zones">Zone rules</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>AI status</h2><div id="settingsMessage" class="muted"></div><div id="aiStatusPanel" class="status-panel"></div><div class="button-row"><button id="checkModelBtn" class="secondary" type="button">Check model</button><button id="downloadModelBtn" type="button">Download YOLOv8n ONNX</button><button id="reloadDetectorBtn" class="secondary" type="button">Reload detector</button><button id="testDetectorBtn" class="secondary" type="button">Test detector</button></div></section><section class="card"><h2>AI settings</h2><form id="aiSettingsForm" class="form-grid"><label><span>AI enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Backend</span><select name="backend"><option value="onnx">onnx</option></select></label><label><span>Confidence</span><input name="confidence" type="number" min="0" max="1" step="0.01" /></label><label><span>IOU threshold</span><input name="iou_threshold" type="number" min="0" max="1" step="0.01" /></label><label><span>Input size</span><input name="input_size" type="number" min="32" max="2048" step="32" /></label><label><span>Model path</span><input name="model_path" /></label><label><span>Labels path</span><input name="labels_path" /></label><button type="submit">Save AI settings</button></form></section><section class="card"><h2>Email delivery</h2><form id="emailSettingsForm" class="form-grid"><label><span>Email alerts</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="host" placeholder="SMTP host" /><input name="port" type="number" min="1" max="65535" placeholder="Port" /><input name="from_address" type="email" placeholder="From address" /><input name="username" placeholder="SMTP username" /><input name="password" type="password" placeholder="SMTP password" autocomplete="new-password" /><label><span>STARTTLS</span><select name="use_tls"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>SSL</span><select name="use_ssl"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><button type="submit">Save mail server</button><input id="testEmailRecipient" type="email" placeholder="Test recipient email" /><button id="testEmailBtn" class="secondary" type="button">Send test email</button></form><p class="muted">Object-specific alert rules are configured on the Zones page.</p></section></main><script src="/static/settings.js"></script></body></html>""")
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>Setup / AI Settings · Daygle AI Camera</title>
 <link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>Setup / AI Settings</h1><p class="muted">Configure AI detection, install models, and reload the detector.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/system-settings">System settings</a><a class="button-link secondary-link" href="/alert-settings">Alert settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>AI status</h2><div id="settingsMessage" class="muted"></div><div id="aiStatusPanel" class="status-panel"></div><div class="button-row"><button id="checkModelBtn" class="secondary" type="button">Check model</button><button id="downloadModelBtn" type="button">Download YOLOv8n ONNX</button><button id="reloadDetectorBtn" class="secondary" type="button">Reload detector</button><button id="testDetectorBtn" class="secondary" type="button">Test detector</button></div></section><section class="card"><h2>AI settings</h2><form id="aiSettingsForm" class="form-grid"><label><span>AI enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Backend</span><select name="backend"><option value="onnx">onnx</option></select></label><label><span>Confidence</span><input name="confidence" type="number" min="0" max="1" step="0.01" /></label><label><span>IOU threshold</span><input name="iou_threshold" type="number" min="0" max="1" step="0.01" /></label><label><span>Input size</span><input name="input_size" type="number" min="32" max="2048" step="32" /></label><label><span>Model path</span><input name="model_path" /></label><label><span>Labels path</span><input name="labels_path" /></label><button type="submit">Save AI settings</button></form></section></main><script src="/static/settings.js"></script></body></html>""")
@@ -1781,6 +1791,7 @@ def settings_page():
 
 @app.get('/alert-settings')
 def alert_settings_page():
+    return RedirectResponse('/settings', status_code=303)
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>Alert Settings - Daygle AI Camera</title>
 <link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>Alert Settings</h1><p class="muted">Configure email delivery. Object alert rules are managed per camera zone.</p></div><div class="hero-actions"><a class="button-link secondary-link" href="/zones">Zone rules</a><a class="button-link secondary-link" href="/settings">AI settings</a><a class="button-link" href="/">Dashboard</a></div></header><section class="card"><h2>Email delivery</h2><div id="settingsMessage" class="muted"></div><form id="emailSettingsForm" class="form-grid"><label><span>Email alerts</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><input name="host" placeholder="SMTP host" /><input name="port" type="number" min="1" max="65535" placeholder="Port" /><input name="from_address" type="email" placeholder="From address" /><input name="username" placeholder="SMTP username" /><input name="password" type="password" placeholder="SMTP password" autocomplete="new-password" /><label><span>STARTTLS</span><select name="use_tls"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>SSL</span><select name="use_ssl"><option value="false">Disabled</option><option value="true">Enabled</option></select></label><button type="submit">Save mail server</button><input id="testEmailRecipient" type="email" placeholder="Test recipient email" /><button id="testEmailBtn" class="secondary" type="button">Send test email</button></form><p class="muted">Create object-specific alert rules from Zones, where each rule belongs to a camera and monitoring area.</p></section></main><script src="/static/alert-settings.js"></script></body></html>""")
@@ -2090,13 +2101,13 @@ def stream_recording(recording_id: int, request: Request):
     file_path = Path(recording['file_path'])
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail='Recording media file not found')
-    if not mp4_has_video_stream(file_path):
+
+    stream_path = recording_stream_path(file_path)
+    if not stream_path.exists() or not mp4_has_video_stream(stream_path):
         raise HTTPException(
             status_code=415,
             detail='Recording file is not a playable video stream. Generate a new recording to rebuild media.',
         )
-
-    stream_path = recording_stream_path(file_path)
     file_size = stream_path.stat().st_size
     media_type = mimetypes.guess_type(stream_path.name)[0] or 'video/mp4'
     range_header = request.headers.get('range')

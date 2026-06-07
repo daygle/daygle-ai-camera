@@ -15,7 +15,6 @@
       <a href="/anpr" data-match="/anpr">ANPR</a>
       <a href="/recordings" data-match="/recordings">Recordings</a>
       <a href="/settings" data-match="/settings" data-admin="true">AI</a>
-      <a href="/alert-settings" data-match="/alert-settings" data-admin="true">Alerts</a>
       <a href="/system-settings" data-match="/system-settings" data-admin="true">System</a>
       <a href="/users" data-match="/users" data-admin="true">Users</a>
     </div>

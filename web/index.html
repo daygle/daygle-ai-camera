@@ -13,7 +13,7 @@
       <div>
         <p class="eyebrow">Daygle Vision Platform</p>
         <h1>AI Camera Dashboard</h1>
-        <p class="muted">Monitor detections, alerts, recordings, and plate sightings from one place.</p>
+        <p class="muted">Monitor camera health, recent detections, alerts, and plate sightings from one place.</p>
       </div>
       <div class="hero-actions">
         <a class="button-link" href="/live">Open live cameras</a>
@@ -48,23 +48,6 @@
       <article class="card">
         <div class="section-header"><h2>Alert History</h2><button id="deleteAllAlertsBtn" class="secondary delete-btn" type="button" hidden>Delete all</button></div>
         <div id="alerts" class="list"></div>
-      </article>
-    </section>
-
-    <section class="grid main-grid">
-      <article class="card">
-        <div class="section-header"><h2>Recordings / Playback</h2><button id="deleteAllRecordingsBtn" class="secondary delete-btn" type="button" hidden>Delete all</button></div>
-        <div class="search-row">
-          <input id="recordingFilter" placeholder="Filter clips by object label..." />
-          <button id="recordingSearchBtn">Filter</button>
-          <button id="recordingClearBtn">All</button>
-        </div>
-        <div id="recordings" class="list"></div>
-      </article>
-      <article class="card playback-card">
-        <div class="section-header"><h2>Clip Player</h2></div>
-        <video id="clipPlayer" controls></video>
-        <p id="clipPlayerStatus" class="muted">Select a recording to play.</p>
       </article>
     </section>
 

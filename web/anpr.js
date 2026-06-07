@@ -49,7 +49,7 @@ function renderSightings(events) {
       <div class="item-title"><span>${escapeHtml(event.plate_number)}</span><span>${Math.round(event.confidence * 100)}%</span></div>
       <p class="muted">${formatDate(event.created_at)} · Event #${event.event_id}</p>
       <p class="muted">Image: ${escapeHtml(event.image_path || 'none')}</p>
-      <div>${(event.event?.recordings || []).map((recording) => `<a class="link-button" href="/api/recordings/${recording.id}/stream">Play clip #${recording.id}</a>`).join('') || '<span class="muted">No recording</span>'}</div>
+      <div>${(event.event?.recordings || []).map((recording) => `<a class="link-button" href="/recordings?recording_id=${recording.id}">Play clip #${recording.id}</a>`).join('') || '<span class="muted">No recording</span>'}</div>
     </div>
   `).join('') : '<div class="empty">No plate sightings match.</div>';
 }
@@ -65,7 +65,7 @@ function renderDetails(plate) {
       <div class="item">
         <div class="item-title"><span>Event #${event.event_id}</span><span>${Math.round(event.confidence * 100)}%</span></div>
         <p class="muted">${formatDate(event.created_at)}</p>
-        <div>${(event.event?.recordings || []).map((recording) => `<a class="link-button" href="/api/recordings/${recording.id}/stream">Play clip #${recording.id}</a>`).join('') || '<span class="muted">No recording</span>'}</div>
+        <div>${(event.event?.recordings || []).map((recording) => `<a class="link-button" href="/recordings?recording_id=${recording.id}">Play clip #${recording.id}</a>`).join('') || '<span class="muted">No recording</span>'}</div>
       </div>
     `).join('')}
   `;

@@ -134,7 +134,7 @@ function renderEvents(events) {
 
 function recordingLink(recordings = []) {
   if (!recordings.length) return '<span class="muted">Recording: none</span>';
-  return recordings.map((recording) => `<button class="link-button" data-play-recording="${recording.id}">Recording #${recording.id}</button>`).join('');
+  return recordings.map((recording) => `<a class="link-button" href="/recordings?recording_id=${recording.id}">Recording #${recording.id}</a>`).join('');
 }
 
 function renderAlerts(alerts) {
@@ -169,13 +169,14 @@ function renderObjectStats(objects = []) {
     button.addEventListener('click', () => {
       els.searchInput.value = button.dataset.label;
       loadEvents(button.dataset.label);
-      loadRecordings(button.dataset.label);
+      if (els.recordings) loadRecordings(button.dataset.label);
     });
   });
 }
 
 
 function renderRecordings(recordings) {
+  if (!els.recordings) return;
   if (!recordings.length) {
     els.recordings.innerHTML = '<div class="empty">No enabled alert recordings yet.</div>';
     return;
@@ -209,6 +210,7 @@ function renderRecordings(recordings) {
 }
 
 function bindPlaybackButtons() {
+  if (!els.clipPlayer) return;
   document.querySelectorAll('[data-play-recording]').forEach((button) => {
     button.addEventListener('click', () => {
       playRecording(button.dataset.playRecording);
@@ -222,7 +224,9 @@ function bindDeleteButtons() {
       if (!confirm(`Delete event #${button.dataset.deleteEvent}? This cannot be undone.`)) return;
       try {
         await api(`/api/events/${button.dataset.deleteEvent}`, { method: 'DELETE' });
-        await Promise.all([loadStats(), loadEvents(els.searchInput.value.trim()), loadRecordings(els.recordingFilter.value.trim())]);
+        const tasks = [loadStats(), loadEvents(els.searchInput.value.trim())];
+        if (els.recordings) tasks.push(loadRecordings(els.recordingFilter.value.trim()));
+        await Promise.all(tasks);
         bindDeleteButtons();
         bindPlaybackButtons();
       } catch (error) {
@@ -231,6 +235,7 @@ function bindDeleteButtons() {
     });
   });
   document.querySelectorAll('[data-delete-recording]').forEach((button) => {
+    if (!els.recordings) return;
     button.addEventListener('click', async () => {
       if (!confirm(`Delete recording #${button.dataset.deleteRecording}? This cannot be undone.`)) return;
       try {
@@ -258,6 +263,10 @@ function bindDeleteButtons() {
 }
 
 async function playRecording(id) {
+  if (!els.clipPlayer) {
+    window.location.href = `/recordings?recording_id=${encodeURIComponent(id)}`;
+    return;
+  }
   if (!id) return;
   const recording = await api(`/api/recordings/${id}`);
   if (recording.media_ready === false) {
@@ -285,7 +294,7 @@ async function playRecording(id) {
   }
 }
 
-els.clipPlayer.addEventListener('error', () => {
+els.clipPlayer?.addEventListener('error', () => {
   const error = els.clipPlayer.error;
   const messages = {
     1: 'Playback was aborted.',
@@ -317,11 +326,9 @@ async function loadAuth() {
         if (!confirm('Delete ALL object detections used by Object Search? This cannot be undone.')) return;
         try {
           await api('/api/objects', { method: 'DELETE' });
-          await Promise.all([
-            loadStats(),
-            loadEvents(els.searchInput.value.trim()),
-            loadRecordings(els.recordingFilter.value.trim()),
-          ]);
+          const tasks = [loadStats(), loadEvents(els.searchInput.value.trim())];
+          if (els.recordings) tasks.push(loadRecordings(els.recordingFilter.value.trim()));
+          await Promise.all(tasks);
           bindDeleteButtons();
           bindPlaybackButtons();
         } catch (error) {
@@ -335,7 +342,9 @@ async function loadAuth() {
         if (!confirm('Delete ALL events? This cannot be undone.')) return;
         try {
           const result = await api('/api/events', { method: 'DELETE' });
-          await Promise.all([loadStats(), loadEvents(), loadRecordings()]);
+          const tasks = [loadStats(), loadEvents()];
+          if (els.recordings) tasks.push(loadRecordings());
+          await Promise.all(tasks);
           bindPlaybackButtons();
           bindDeleteButtons();
         } catch (error) {
@@ -462,6 +471,7 @@ async function loadAlerts() {
 }
 
 async function loadRecordings(label = '') {
+  if (!els.recordings) return;
   const params = new URLSearchParams({ alerted_only: 'true' });
   if (label) params.set('label', label);
   const path = `/api/recordings?${params.toString()}`;
@@ -484,7 +494,9 @@ async function searchPlateSightings(query = '') {
 }
 
 async function refreshAll() {
-  await Promise.all([loadStatus(), loadStats(), loadEvents(), loadAlerts(), loadRecordings(), loadPlates(), searchPlateSightings()]);
+  const tasks = [loadStatus(), loadStats(), loadEvents(), loadAlerts(), loadPlates(), searchPlateSightings()];
+  if (els.recordings) tasks.push(loadRecordings());
+  await Promise.all(tasks);
   bindPlaybackButtons();
   bindDeleteButtons();
 }
@@ -492,15 +504,15 @@ async function refreshAll() {
 els.searchBtn.addEventListener('click', () => {
   const label = els.searchInput.value.trim();
   loadEvents(label).then(() => { bindDeleteButtons(); bindPlaybackButtons(); });
-  loadRecordings(label).then(() => { bindPlaybackButtons(); bindDeleteButtons(); });
+  if (els.recordings) loadRecordings(label).then(() => { bindPlaybackButtons(); bindDeleteButtons(); });
 });
 els.clearBtn.addEventListener('click', () => {
   els.searchInput.value = '';
   loadEvents().then(() => { bindDeleteButtons(); bindPlaybackButtons(); });
-  loadRecordings().then(() => { bindPlaybackButtons(); bindDeleteButtons(); });
+  if (els.recordings) loadRecordings().then(() => { bindPlaybackButtons(); bindDeleteButtons(); });
 });
-els.recordingSearchBtn.addEventListener('click', () => loadRecordings(els.recordingFilter.value.trim()).then(() => { bindPlaybackButtons(); bindDeleteButtons(); }));
-els.recordingClearBtn.addEventListener('click', () => {
+els.recordingSearchBtn?.addEventListener('click', () => loadRecordings(els.recordingFilter.value.trim()).then(() => { bindPlaybackButtons(); bindDeleteButtons(); }));
+els.recordingClearBtn?.addEventListener('click', () => {
   els.recordingFilter.value = '';
   loadRecordings().then(() => { bindPlaybackButtons(); bindDeleteButtons(); });
 });
@@ -514,10 +526,10 @@ els.searchInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     const label = els.searchInput.value.trim();
     loadEvents(label);
-    loadRecordings(label);
+    if (els.recordings) loadRecordings(label);
   }
 });
-els.recordingFilter.addEventListener('keydown', (event) => {
+els.recordingFilter?.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') loadRecordings(els.recordingFilter.value.trim());
 });
 

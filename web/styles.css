@@ -95,7 +95,7 @@ h1 { font-size: clamp(34px, 5vw, 64px); margin: 0; line-height: 1; }
 h2 { margin: 0; font-size: 20px; }
 .muted { color: var(--muted); }
 .grid { display: grid; gap: 18px; }
-.stats-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 18px; }
+.stats-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin-bottom: 18px; }
 .main-grid { grid-template-columns: 1.3fr .7fr; margin-bottom: 18px; }
 .card {
   border: 1px solid var(--border);
@@ -213,7 +213,7 @@ input[type="file"] { padding: 10px; }
   .app-nav { grid-template-columns: 1fr; gap: 10px; }
   .app-nav-links, .app-nav-account { justify-content: flex-start; overflow-x: auto; }
   .hero { flex-direction: column; align-items: stretch; }
-  .stats-grid, .main-grid { grid-template-columns: 1fr; }
+  .stats-grid, .main-grid, .recordings-layout { grid-template-columns: 1fr; }
   .search-row { grid-template-columns: 1fr; }
   .hero-actions { justify-content: flex-start; }
   .form-grid, .user-row, .status-panel { grid-template-columns: 1fr; }
@@ -325,6 +325,14 @@ input[type="file"] { padding: 10px; }
   min-height: 260px;
   object-fit: contain;
   background: #000;
+}
+.recordings-layout { display: grid; grid-template-columns: minmax(360px, .85fr) minmax(0, 1.15fr); gap: 18px; align-items: start; }
+.recordings-list { max-height: calc(100vh - 290px); }
+.recording-row { display: grid; gap: 8px; }
+.recordings-player-card { position: sticky; top: 86px; }
+.recordings-player-card video { min-height: 420px; max-height: 68vh; object-fit: contain; }
+@media (max-width: 900px) {
+  .recordings-player-card { position: static; }
 }
 .zone-overlay { position: absolute; pointer-events: auto; z-index: 2; touch-action: none; }
 .monitor-zone-polygon { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }

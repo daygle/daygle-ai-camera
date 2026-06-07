@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Recordings - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell page-stack recordings-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Recorded Clips</p>
+        <h1>Recordings</h1>
+        <p class="muted">Review captured clips, inspect trigger details, and manage recording files.</p>
+      </div>
+      <div class="hero-actions">
+        <a class="button-link secondary-link" href="/zones">Zone rules</a>
+        <a class="button-link" href="/live">Live cameras</a>
+      </div>
+    </header>
+
+    <section class="recordings-layout">
+      <article class="card recordings-list-card">
+        <div class="section-header">
+          <h2>Clip Library</h2>
+          <button id="deleteAllRecordingsBtn" class="secondary delete-btn" type="button" hidden>Delete all</button>
+        </div>
+        <div class="search-row">
+          <input id="recordingFilter" placeholder="Filter clips by object label..." />
+          <button id="recordingSearchBtn">Filter</button>
+          <button id="recordingClearBtn" class="secondary">All</button>
+        </div>
+        <div id="recordings" class="list recordings-list"></div>
+      </article>
+
+      <article class="card playback-card recordings-player-card">
+        <div class="section-header"><h2>Playback</h2></div>
+        <video id="clipPlayer" controls preload="metadata"></video>
+        <p id="clipPlayerStatus" class="muted">Select a recording to play.</p>
+        <div id="recordingDetails" class="status-panel"></div>
+      </article>
+    </section>
+  </main>
+  <script src="/static/nav.js"></script>
+  <script src="/static/recordings.js"></script>
+</body>
+</html>

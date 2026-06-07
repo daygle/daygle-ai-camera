@@ -736,16 +736,13 @@ def test_admin_alert_rule_crud_and_alert_engine_uses_db_rules(tmp_path, monkeypa
     try:
         _setup_admin(client)
         csrf = _login(client)
-        status, _headers, alert_page = client.request("/alert-settings")
+        status, _headers, alert_page = client.request("/settings")
         assert status == 200
-        assert 'select name="object" id="objectSelect"' in alert_page
-        assert 'Choose Motion or a detector object label.' in alert_page
         assert 'id="testEmailRecipient"' in alert_page
         assert 'id="testEmailBtn"' in alert_page
-        assert 'id="newAlertRuleBtn"' in alert_page
-        assert 'Add alert rule' in alert_page
-        assert 'class="list alert-rules-list"' in alert_page
-        assert 'Alert trigger' in alert_page
+        assert 'Email delivery' in alert_page
+        assert 'Object-specific alert rules are configured on the Zones page.' in alert_page
+        assert 'id="newAlertRuleBtn"' not in alert_page
 
         initial = client.request("/api/settings/alerts")[2]
         assert "person" in initial["available_labels"]
