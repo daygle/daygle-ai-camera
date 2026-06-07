@@ -20,25 +20,31 @@ function getCameraFilterSelect() {
 
 function ensureCameraFilterControl() {
   const searchRow = document.querySelector('.search-row');
-  if (!searchRow || getCameraFilterSelect()) return;
+  if (!searchRow) return null;
   searchRow.classList.add('anpr-search-row');
-  const select = document.createElement('select');
-  select.id = 'anprCameraFilter';
-  select.setAttribute('aria-label', 'Filter by camera');
-  select.innerHTML = '<option value="">All cameras</option>';
-  searchRow.prepend(select);
-  select.addEventListener('change', async () => {
-    selectedCameraId = select.value;
-    plateResultsEl.innerHTML = '';
-    plateDetailsEl.innerHTML = '';
-    await loadAll();
-    setMessage(selectedCameraId ? 'Showing ANPR results for selected camera.' : 'Showing ANPR results for all cameras.');
-  });
+  let select = getCameraFilterSelect();
+  if (!select) {
+    select = document.createElement('select');
+    select.id = 'anprCameraFilter';
+    select.setAttribute('aria-label', 'Filter by camera');
+    select.innerHTML = '<option value="">All cameras</option>';
+    searchRow.prepend(select);
+  }
+  if (!select.dataset.boundChangeHandler) {
+    select.addEventListener('change', async () => {
+      selectedCameraId = select.value;
+      plateResultsEl.innerHTML = '';
+      plateDetailsEl.innerHTML = '';
+      await loadAll();
+      setMessage(selectedCameraId ? 'Showing ANPR results for selected camera.' : 'Showing ANPR results for all cameras.');
+    });
+    select.dataset.boundChangeHandler = 'true';
+  }
+  return select;
 }
 
 function renderCameraOptions(cameras) {
-  ensureCameraFilterControl();
-  const select = getCameraFilterSelect();
+  const select = ensureCameraFilterControl();
   if (!select) return;
   const previous = selectedCameraId || select.value;
   const options = ['<option value="">All cameras</option>'];

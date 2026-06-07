@@ -1,9 +1,52 @@
 from __future__ import annotations
 
+import ctypes
+import ctypes.util
+import logging
 import os
 import threading
 import time
 from typing import Any
+
+
+logger = logging.getLogger('daygle.ai')
+_ffmpeg_log_level_applied = False
+
+
+def _configure_ffmpeg_log_level() -> None:
+    global _ffmpeg_log_level_applied
+    if _ffmpeg_log_level_applied:
+        return
+    _ffmpeg_log_level_applied = True
+
+    # Default to quiet so libavcodec decode noise does not flood journald.
+    level_name = str(os.environ.get('DAYGLE_FFMPEG_LOGLEVEL', 'quiet')).strip().lower()
+    level_map = {
+        'quiet': -8,
+        'panic': 0,
+        'fatal': 8,
+        'error': 16,
+        'warning': 24,
+        'info': 32,
+        'verbose': 40,
+        'debug': 48,
+        'trace': 56,
+    }
+    level = level_map.get(level_name)
+    if level is None:
+        logger.warning('Unknown DAYGLE_FFMPEG_LOGLEVEL=%s; keeping FFmpeg defaults.', level_name)
+        return
+
+    library_name = ctypes.util.find_library('avutil')
+    if not library_name:
+        return
+    try:
+        avutil = ctypes.CDLL(library_name)
+        avutil.av_log_set_level.argtypes = [ctypes.c_int]
+        avutil.av_log_set_level.restype = None
+        avutil.av_log_set_level(level)
+    except Exception as exc:  # pragma: no cover - depends on system libraries
+        logger.debug('Unable to set FFmpeg log level via libavutil: %s', exc)
 
 
 class OpenCvStreamCamera:
@@ -43,6 +86,8 @@ class OpenCvStreamCamera:
     def _open_capture(self):
         if not self.stream_url:
             raise RuntimeError("ONVIF/RTSP stream URL is not configured.")
+
+        _configure_ffmpeg_log_level()
 
         # Prefer TCP for RTSP cameras. UDP packet loss and frequent reconnects
         # can make inexpensive ONVIF cameras fail during session setup.
