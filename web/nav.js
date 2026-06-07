@@ -14,7 +14,7 @@
       <a href="/zones" data-match="/zones" data-admin="true">Zones</a>
       <a href="/anpr" data-match="/anpr">ANPR</a>
       <a href="/recordings" data-match="/recordings">Recordings</a>
-      <a href="/settings" data-match="/settings" data-admin="true">AI</a>
+      <a href="/ai" data-match="/ai" data-admin="true">AI</a>
       <a href="/system-settings" data-match="/system-settings" data-admin="true">System</a>
       <a href="/users" data-match="/users" data-admin="true">Users</a>
     </div>

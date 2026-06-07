@@ -73,6 +73,37 @@ function createLiveSettingsSection() {
 
 createLiveSettingsSection();
 
+function createEmailDeliverySection() {
+  const section = document.createElement('section');
+  section.className = 'card';
+  section.innerHTML = `
+    <h2>Email delivery</h2>
+    <form id="emailSettingsForm" class="form-grid">
+      <label><span>Email alerts</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+      <input name="host" placeholder="SMTP host" />
+      <input name="port" type="number" min="1" max="65535" placeholder="Port" />
+      <input name="from_address" type="email" placeholder="From address" />
+      <input name="username" placeholder="SMTP username" />
+      <input name="password" type="password" placeholder="SMTP password" autocomplete="new-password" />
+      <label><span>STARTTLS</span><select name="use_tls"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+      <label><span>SSL</span><select name="use_ssl"><option value="false">Disabled</option><option value="true">Enabled</option></select></label>
+      <button type="submit">Save mail server</button>
+      <input id="testEmailRecipient" type="email" placeholder="Test recipient email" />
+      <button id="testEmailBtn" class="secondary" type="button">Send test email</button>
+    </form>
+    <p class="muted">Object-specific alert rules are configured on the Zones page.</p>
+  `;
+
+  const authSection = document.getElementById('authSettingsForm')?.closest('section');
+  if (authSection) {
+    authSection.before(section);
+  } else {
+    document.querySelector('main')?.append(section);
+  }
+}
+
+createEmailDeliverySection();
+
 let cameras = [];
 
 function newCameraTemplate() {
@@ -154,6 +185,10 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 }
 
+const emailForm = document.getElementById('emailSettingsForm');
+const testEmailRecipient = document.getElementById('testEmailRecipient');
+const testEmailBtn = document.getElementById('testEmailBtn');
+
 const forms = {
   anpr: document.getElementById('anprSettingsForm'),
   live: document.getElementById('liveSettingsForm'),
@@ -202,10 +237,29 @@ function payloadFor(form) {
   return data;
 }
 
+function emailPayload(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  for (const key of ['enabled', 'use_tls', 'use_ssl']) if (key in data) data[key] = data[key] === 'true';
+  if (data.port !== '') data.port = Number.parseInt(data.port, 10);
+  return data;
+}
+
+function renderEmail(settings) {
+  if (!emailForm) return;
+  for (const [key, value] of Object.entries(settings || {})) {
+    if (emailForm.elements[key]) emailForm.elements[key].value = String(value ?? '');
+  }
+  if (!emailForm.elements.port.value) emailForm.elements.port.value = '587';
+  if (testEmailRecipient && !testEmailRecipient.value) testEmailRecipient.value = settings.from_address || '';
+}
+
 async function loadSettings() {
   const me = await api('/api/auth/me');
   csrfToken = me.csrf_token;
-  const settings = await api('/api/settings/system');
+  const [settings, emailSettings] = await Promise.all([
+    api('/api/settings/system'),
+    api('/api/settings/alert-email'),
+  ]);
   cameras = settings.cameras || [settings.camera];
   renderCameraManager();
   fillForm(forms.anpr, settings.anpr);
@@ -220,6 +274,7 @@ async function loadSettings() {
   }
   fillForm(forms.storage, settings.storage);
   fillForm(forms.auth, settings.auth);
+  renderEmail(emailSettings);
   setMessage('System settings loaded.');
 }
 
@@ -242,6 +297,38 @@ bindForm('recording', 'Recording');
 bindForm('retention', 'Retention', 'recording');
 bindForm('storage', 'Storage');
 bindForm('auth', 'Login security');
+
+emailForm?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    renderEmail(await api('/api/settings/alert-email', { method: 'PUT', body: JSON.stringify(emailPayload(emailForm)) }));
+    setMessage('Mail server settings saved.');
+  } catch (error) {
+    setMessage(error.message);
+  }
+});
+
+testEmailBtn?.addEventListener('click', async () => {
+  const recipient = testEmailRecipient.value.trim() || emailForm.elements.from_address.value.trim();
+  if (!recipient) {
+    setMessage('Enter a test recipient email address.');
+    return;
+  }
+  testEmailBtn.disabled = true;
+  setMessage('Sending test email...');
+  try {
+    await api('/api/settings/alert-email/test', {
+      method: 'POST',
+      body: JSON.stringify({ settings: emailPayload(emailForm), recipient }),
+    });
+    setMessage(`Test email sent to ${recipient}.`);
+  } catch (error) {
+    setMessage(error.message);
+  } finally {
+    testEmailBtn.disabled = false;
+  }
+});
+
 document.getElementById('purgeRecordingsBtn').addEventListener('click', async () => {
   try {
     const result = await api('/api/recordings/purge', { method: 'POST' });

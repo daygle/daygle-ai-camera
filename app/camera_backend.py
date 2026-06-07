@@ -46,7 +46,7 @@ class OpenCvStreamCamera:
 
         # Prefer TCP for RTSP cameras. UDP packet loss and frequent reconnects
         # can make inexpensive ONVIF cameras fail during session setup.
-        os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|max_delay;500000|stimeout;5000000")
+        os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|max_delay;500000|stimeout;5000000|fflags;discardcorrupt")
 
         import cv2
 
