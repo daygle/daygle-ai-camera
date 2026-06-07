@@ -36,6 +36,8 @@ const SEGMENT_COLORS = [
   '#14b8a6',
 ];
 
+const GENERIC_TIMELINE_LABELS = new Set(['motion', 'alert', 'human', 'object', 'none', 'off', 'continuous']);
+
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
   if (state.auth.csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((options.method || 'GET').toUpperCase())) {
@@ -92,21 +94,33 @@ function recordingTriggerLabel(recording) {
 }
 
 function recordingDetectionLabels(recording) {
-  return Array.from(new Set((recording.detections || [])
+  const labels = new Set((recording.detections || [])
     .map((detection) => String(detection.label || '').trim().toLowerCase())
-    .filter(Boolean)));
+    .filter(Boolean));
+  const triggerLabel = recordingTriggerLabel(recording);
+  if (triggerLabel) labels.add(triggerLabel);
+
+  const uniqueLabels = Array.from(labels);
+  const specificLabels = uniqueLabels.filter((label) => !GENERIC_TIMELINE_LABELS.has(label));
+  return specificLabels.length ? specificLabels : uniqueLabels;
 }
 
 function recordingTypeLabel(recording) {
   const triggerType = recordingTriggerType(recording);
   const triggerLabel = recordingTriggerLabel(recording);
+  const detectionLabels = recordingDetectionLabels(recording);
+
   if (triggerType === 'motion' || triggerType === 'alert' || triggerType === 'human') {
-    // In many deployments recording policy stores trigger_type as "alert" even for motion-style captures.
+    // Prefer concrete object labels for timeline chips/segments, fall back to generic motion.
+    if (triggerLabel && !GENERIC_TIMELINE_LABELS.has(triggerLabel)) return triggerLabel;
+    const firstSpecificDetection = detectionLabels.find((label) => !GENERIC_TIMELINE_LABELS.has(label));
+    if (firstSpecificDetection) return firstSpecificDetection;
     return 'motion';
   }
   if (triggerType === 'continuous' || triggerType === 'none' || triggerType === 'off') {
     return triggerType;
   }
+  if (triggerLabel && !GENERIC_TIMELINE_LABELS.has(triggerLabel)) return triggerLabel;
   return triggerLabel || triggerType;
 }
 
@@ -117,13 +131,14 @@ function recordingColorKey(recording) {
 function recordingTriggerSummary(recording) {
   const triggerType = recordingTriggerType(recording);
   const triggerLabel = recordingTriggerLabel(recording);
-  if (!triggerLabel || triggerLabel === triggerType || (triggerType === 'human' && triggerLabel === 'person')) {
-    return recordingTypeLabel(recording);
+  const typeLabel = recordingTypeLabel(recording);
+  if (!triggerLabel || triggerLabel === triggerType || triggerLabel === typeLabel) {
+    return typeLabel;
   }
-  if (triggerType === 'human' || triggerType === 'alert') {
-    return `motion · detected ${triggerLabel}`;
+  if (triggerType === 'human' || triggerType === 'alert' || triggerType === 'motion') {
+    return `${typeLabel} · motion`;
   }
-  return `${recordingTypeLabel(recording)} · detected ${triggerLabel}`;
+  return `${typeLabel} · detected ${triggerLabel}`;
 }
 
 function recordingFilterTokens(recording) {
