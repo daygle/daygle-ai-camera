@@ -7,10 +7,13 @@ const els = {
   clipPlayerStatus: document.getElementById('clipPlayerStatus'),
   recordingDetails: document.getElementById('recordingDetails'),
   deleteAllRecordingsBtn: document.getElementById('deleteAllRecordingsBtn'),
+  clipOverlay: document.getElementById('clipOverlay'),
 };
 
 let authState = { user: null, csrfToken: null };
 let recordingRefreshTimer = null;
+let activeRecording = null;
+let overlayResizeObserver = null;
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -88,10 +91,95 @@ function renderRecordingDetails(recording) {
   `;
 }
 
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function clearClipOverlay() {
+  if (!els.clipOverlay) return;
+  const context = els.clipOverlay.getContext('2d');
+  if (!context) return;
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.clearRect(0, 0, els.clipOverlay.width, els.clipOverlay.height);
+}
+
+function resizeClipOverlay() {
+  if (!els.clipOverlay || !els.clipPlayer) return;
+  const width = Math.max(1, Math.round(els.clipPlayer.clientWidth));
+  const height = Math.max(1, Math.round(els.clipPlayer.clientHeight));
+  const dpr = window.devicePixelRatio || 1;
+  const targetWidth = Math.max(1, Math.round(width * dpr));
+  const targetHeight = Math.max(1, Math.round(height * dpr));
+  if (els.clipOverlay.width !== targetWidth || els.clipOverlay.height !== targetHeight) {
+    els.clipOverlay.width = targetWidth;
+    els.clipOverlay.height = targetHeight;
+  }
+}
+
+function drawClipOverlay() {
+  if (!els.clipOverlay || !els.clipPlayer) return;
+  resizeClipOverlay();
+  const context = els.clipOverlay.getContext('2d');
+  if (!context) return;
+  const cssWidth = Math.max(1, els.clipPlayer.clientWidth);
+  const cssHeight = Math.max(1, els.clipPlayer.clientHeight);
+  const dpr = window.devicePixelRatio || 1;
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.clearRect(0, 0, els.clipOverlay.width, els.clipOverlay.height);
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const detections = Array.isArray(activeRecording?.detections) ? activeRecording.detections : [];
+  if (!detections.length) return;
+
+  const videoWidth = Math.max(1, Number(els.clipPlayer.videoWidth || cssWidth));
+  const videoHeight = Math.max(1, Number(els.clipPlayer.videoHeight || cssHeight));
+  const scale = Math.min(cssWidth / videoWidth, cssHeight / videoHeight);
+  const renderWidth = videoWidth * scale;
+  const renderHeight = videoHeight * scale;
+  const offsetX = (cssWidth - renderWidth) / 2;
+  const offsetY = (cssHeight - renderHeight) / 2;
+
+  context.font = '12px Inter, ui-sans-serif, system-ui, sans-serif';
+  context.textBaseline = 'middle';
+  context.lineWidth = 2;
+
+  detections.forEach((detection) => {
+    const box = detection?.box || detection || {};
+    const x = clamp(Number(box.x ?? 0), 0, 1);
+    const y = clamp(Number(box.y ?? 0), 0, 1);
+    const width = clamp(Number(box.width ?? 0), 0, 1);
+    const height = clamp(Number(box.height ?? 0), 0, 1);
+    if (width <= 0 || height <= 0) return;
+
+    const drawX = offsetX + (x * renderWidth);
+    const drawY = offsetY + (y * renderHeight);
+    const drawWidth = width * renderWidth;
+    const drawHeight = height * renderHeight;
+    if (drawWidth < 2 || drawHeight < 2) return;
+
+    context.strokeStyle = '#49e6a3';
+    context.strokeRect(drawX, drawY, drawWidth, drawHeight);
+
+    const confidence = Math.round(Number(detection.confidence || 0) * 100);
+    const label = `${String(detection.label || 'object')} ${confidence}%`;
+    const textWidth = context.measureText(label).width;
+    const labelHeight = 20;
+    const labelWidth = textWidth + 12;
+    const labelY = drawY > labelHeight + 4 ? drawY - labelHeight - 4 : drawY + 4;
+
+    context.fillStyle = 'rgba(7, 11, 19, 0.86)';
+    context.fillRect(drawX, labelY, labelWidth, labelHeight);
+    context.fillStyle = '#49e6a3';
+    context.fillText(label, drawX + 6, labelY + (labelHeight / 2));
+  });
+}
+
 async function playRecording(id) {
   const recording = await api(`/api/recordings/${id}`);
+  activeRecording = recording;
   renderRecordingDetails(recording);
   if (recording.media_ready === false) {
+    clearClipOverlay();
     els.clipPlayerStatus.textContent = `Recording #${id} is still being prepared.`;
     return;
   }
@@ -99,6 +187,7 @@ async function playRecording(id) {
   els.clipPlayer.removeAttribute('src');
   els.clipPlayer.load();
   els.clipPlayer.src = `/api/recordings/${id}/stream?t=${Date.now()}`;
+  drawClipOverlay();
   els.clipPlayerStatus.textContent = `Loading recording #${id}...`;
   try {
     els.clipPlayer.load();
@@ -157,8 +246,20 @@ els.clipPlayer.addEventListener('error', () => {
     3: 'The recording could not be decoded by this browser.',
     4: 'The recording format is not supported by this browser.',
   };
+  clearClipOverlay();
   els.clipPlayerStatus.textContent = messages[error?.code] || 'Unable to play this recording.';
 });
+
+['loadedmetadata', 'loadeddata', 'play', 'pause', 'seeked', 'timeupdate'].forEach((eventName) => {
+  els.clipPlayer.addEventListener(eventName, drawClipOverlay);
+});
+
+window.addEventListener('resize', drawClipOverlay);
+
+if ('ResizeObserver' in window && els.clipPlayer) {
+  overlayResizeObserver = new ResizeObserver(drawClipOverlay);
+  overlayResizeObserver.observe(els.clipPlayer);
+}
 
 els.recordingSearchBtn.addEventListener('click', () => loadRecordings(els.recordingFilter.value.trim()));
 els.recordingClearBtn.addEventListener('click', () => {

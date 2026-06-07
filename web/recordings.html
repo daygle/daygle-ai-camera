@@ -33,7 +33,10 @@
 
       <article class="card playback-card recordings-player-card">
         <div class="section-header"><h2>Playback</h2></div>
-        <video id="clipPlayer" controls preload="metadata"></video>
+        <div class="clip-player-wrap">
+          <video id="clipPlayer" controls preload="metadata"></video>
+          <canvas id="clipOverlay" class="clip-overlay" aria-hidden="true"></canvas>
+        </div>
         <p id="clipPlayerStatus" class="muted">Select a recording to play.</p>
         <div id="recordingDetails" class="status-panel"></div>
       </article>
