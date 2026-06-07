@@ -260,9 +260,15 @@ input[type="file"] { padding: 10px; }
 @media (max-width: 900px) {
   .app-nav { grid-template-columns: 1fr; gap: 10px; }
   .app-nav-links, .app-nav-account { justify-content: flex-start; overflow-x: auto; }
+  .app-nav-links { scrollbar-width: none; }
   .hero { flex-direction: column; align-items: stretch; }
   .stats-grid, .main-grid, .recordings-layout { grid-template-columns: 1fr; }
   .search-row { grid-template-columns: 1fr; }
+  /* Override custom search rows that wouldn't collapse from the base .search-row rule */
+  .recordings-search-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .recordings-search-row select { grid-column: 1 / -1; }
+  .anpr-search-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .anpr-search-row select { grid-column: 1 / -1; }
   .hero-actions { justify-content: flex-start; }
   .form-grid, .user-row, .status-panel { grid-template-columns: 1fr; }
 }
@@ -707,6 +713,8 @@ input[type="file"] { padding: 10px; }
 
 @media (max-width: 900px) {
   .recordings-player-card { position: static; }
+  /* 420px min-height is too tall when stacked on mobile */
+  .recordings-player-card video { min-height: 200px; max-height: 50vh; }
   .recording-timeline-layout {
     grid-template-columns: 1fr;
   }
@@ -837,4 +845,28 @@ input[type="file"] { padding: 10px; }
   #plateDetails .item {
     padding: 8px 10px;
   }
+}
+
+/* Small phones (≤600px): compact nav, tighter cards, section headers that wrap */
+@media (max-width: 600px) {
+  .card { padding: 16px; }
+  .section-header { flex-wrap: wrap; }
+  /* Compact two-row nav: [brand · account] / [nav links] */
+  .app-nav {
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    gap: 6px;
+  }
+  .app-nav-links {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    scrollbar-width: none;
+  }
+  .app-nav-links::-webkit-scrollbar { display: none; }
+  .app-nav-account { grid-row: 1; grid-column: 2; }
+  /* Clip overlay controls stack vertically on small phones */
+  .clip-overlay-controls { flex-direction: column; align-items: stretch; gap: 8px; }
+  /* Keep buttons full-width in recordings list for easier tapping */
+  .recording-row .button-row { flex-direction: column; }
+  .recording-row .button-row button { width: 100%; }
 }
