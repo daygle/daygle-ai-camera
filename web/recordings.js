@@ -264,9 +264,11 @@ async function loadAuth() {
   if (authInfo.user.role === 'admin') {
     els.deleteAllRecordingsBtn.hidden = false;
     els.deleteAllRecordingsBtn.addEventListener('click', async () => {
-      if (!confirm('Delete ALL recordings? This will remove the media files too.')) return;
-      await api('/api/recordings', { method: 'DELETE' });
+      if (!confirm('Delete ALL recordings and media files? Settings, users, and rules will not be changed.')) return;
+      const result = await api('/api/recordings', { method: 'DELETE' });
       await loadRecordings();
+      const deletedCount = Number(result?.deleted || 0);
+      els.clipPlayerStatus.textContent = `Deleted ${deletedCount} recording${deletedCount === 1 ? '' : 's'}. Settings were not changed.`;
     });
   }
 }

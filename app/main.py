@@ -1716,6 +1716,26 @@ def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
                 thumbnail.unlink(missing_ok=True)
 
 
+def clear_runtime_media_directory(path_value: str | None) -> int:
+    if not path_value:
+        return 0
+    path = Path(str(path_value))
+    if not path.exists() or not path.is_dir():
+        return 0
+    deleted = 0
+    for child in path.iterdir():
+        try:
+            if child.is_file() or child.is_symlink():
+                child.unlink(missing_ok=True)
+                deleted += 1
+            elif child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+                deleted += 1
+        except OSError:
+            continue
+    return deleted
+
+
 def recording_playback_sidecar_path(file_path: Path) -> Path:
     return file_path.with_name(f'{file_path.stem}.h264.mp4')
 
@@ -2602,6 +2622,35 @@ def delete_all_recordings(request: Request):
     recordings = database.delete_all_recordings()
     delete_recording_files(recordings)
     return {'ok': True, 'deleted': len(recordings)}
+
+
+@app.delete('/api/system/runtime-data')
+def delete_runtime_data(request: Request):
+    require_admin(request)
+    recordings = database.delete_all_recordings()
+    delete_recording_files(recordings)
+    deleted_events = database.delete_all_events()
+    deleted_alerts = database.delete_all_alerts()
+    deleted_plates = database.delete_all_plates()
+    storage_config = effective_storage_config()
+    deleted_snapshots = clear_runtime_media_directory(storage_config.get('snapshots_dir'))
+    deleted_event_artifacts = clear_runtime_media_directory(storage_config.get('events_dir'))
+    deleted_plate_artifacts = clear_runtime_media_directory(storage_config.get('plates_dir'))
+    with active_rtsp_recordings_lock:
+        active_rtsp_recordings.clear()
+    return {
+        'ok': True,
+        'deleted': {
+            'recordings': len(recordings),
+            'events': deleted_events,
+            'alerts': deleted_alerts,
+            'plates': deleted_plates,
+            'snapshot_files': deleted_snapshots,
+            'event_artifacts': deleted_event_artifacts,
+            'plate_artifacts': deleted_plate_artifacts,
+        },
+        'preserved': ['settings', 'users', 'sessions', 'rules'],
+    }
 
 
 @app.get('/api/users')

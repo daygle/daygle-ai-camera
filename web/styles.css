@@ -218,6 +218,45 @@ input[type="file"] { padding: 10px; }
 .status-panel span { display: block; color: var(--muted); font-size: 12px; font-weight: 800; margin-bottom: 5px; }
 .status-panel strong { overflow-wrap: anywhere; }
 .button-row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+.danger-zone-card {
+  border-color: rgba(248,113,113,.5);
+  background: linear-gradient(180deg, rgba(56, 20, 34, 0.45), rgba(10, 16, 28, 0.9));
+  box-shadow: 0 20px 56px rgba(0,0,0,.38);
+}
+
+.danger-zone-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.danger-zone-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(248,113,113,.45);
+  border-radius: 999px;
+  background: rgba(248,113,113,.14);
+  color: #fecaca;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+}
+
+.danger-zone-warning {
+  color: #ffc9c9;
+}
+
+.danger-zone-confirm-hint {
+  margin: 10px 0 0;
+  color: #ffd4d4;
+  font-size: 12px;
+  font-weight: 800;
+}
 @media (max-width: 900px) {
   .app-nav { grid-template-columns: 1fr; gap: 10px; }
   .app-nav-links, .app-nav-account { justify-content: flex-start; overflow-x: auto; }

@@ -141,6 +141,30 @@ function createDatabaseRestoreSection() {
 
 createDatabaseRestoreSection();
 
+function createRuntimeResetSection() {
+  const section = document.createElement('section');
+  section.className = 'card danger-zone-card';
+  section.innerHTML = `
+    <div class="danger-zone-header">
+      <h2>Danger Zone</h2>
+      <span class="danger-zone-badge">Irreversible</span>
+    </div>
+    <p class="muted">Start clean removes operational data so you can begin fresh. This action deletes events, recordings, alert history, and ANPR plate history/files.</p>
+    <p class="muted danger-zone-warning"><strong>Settings, users, sessions, and alert rules are preserved.</strong> This action cannot be undone.</p>
+    <p class="danger-zone-confirm-hint">Confirmation required: type START CLEAN when prompted.</p>
+    <div class="button-row"><button id="startCleanBtn" class="secondary delete-btn" type="button">Start Clean</button></div>
+  `;
+
+  const restoreSection = document.getElementById('databaseRestoreForm')?.closest('section');
+  if (restoreSection) {
+    restoreSection.after(section);
+  } else {
+    document.querySelector('main')?.append(section);
+  }
+}
+
+createRuntimeResetSection();
+
 function createCameraManagerSection() {
   const section = document.createElement('section');
   section.className = 'card';
@@ -327,6 +351,7 @@ function escapeHtml(value) {
 const emailForm = document.getElementById('emailSettingsForm');
 const testEmailRecipient = document.getElementById('testEmailRecipient');
 const testEmailBtn = document.getElementById('testEmailBtn');
+const startCleanBtn = document.getElementById('startCleanBtn');
 
 const forms = {
   anpr: document.getElementById('anprSettingsForm'),
@@ -512,3 +537,28 @@ document.getElementById('saveCamerasBtn').addEventListener('click', async () => 
 });
 
 loadSettings().catch((error) => setMessage(error.message));
+
+startCleanBtn?.addEventListener('click', async () => {
+  const confirmed = confirm('Start clean now? This permanently deletes events, recordings, alerts, and plates, while keeping settings and users.');
+  if (!confirmed) return;
+
+  const phrase = prompt('Type START CLEAN to confirm this irreversible action.');
+  if (phrase !== 'START CLEAN') {
+    setMessage('Start clean cancelled. Confirmation phrase did not match.');
+    return;
+  }
+
+  startCleanBtn.disabled = true;
+  setMessage('Starting clean reset...');
+  try {
+    const result = await api('/api/system/runtime-data', { method: 'DELETE' });
+    const deleted = result?.deleted || {};
+    setMessage(
+      `Clean start complete. Deleted ${Number(deleted.recordings || 0)} recordings, ${Number(deleted.events || 0)} events, ${Number(deleted.alerts || 0)} alerts, and ${Number(deleted.plates || 0)} plate records. Settings were preserved.`,
+    );
+  } catch (error) {
+    setMessage(error.message);
+  } finally {
+    startCleanBtn.disabled = false;
+  }
+});

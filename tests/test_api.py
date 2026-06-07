@@ -1138,6 +1138,97 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+def test_runtime_data_reset_clears_operational_data_but_keeps_settings(tmp_path, monkeypatch):
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        status, _headers, updated_recording = client.request(
+            '/api/settings/system/recording',
+            method='PUT',
+            json_body={
+                'enabled': True,
+                'mode': 'motion',
+                'continuous': False,
+                'record_on_motion': True,
+                'record_on_human': True,
+                'record_on_objects': ['cat'],
+                'motion_min_confidence': 0.52,
+                'pre_event_seconds': 5,
+                'post_event_seconds': 10,
+                'max_clip_seconds': 60,
+                'format': 'mp4',
+                'retention_days': 21,
+                'max_storage_gb': 8,
+                'auto_purge_enabled': True,
+            },
+            headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        assert updated_recording['motion_min_confidence'] == 0.52
+        assert updated_recording['retention_days'] == 21
+
+        import app.main as main_module
+
+        file_path = tmp_path / 'data' / 'recordings' / 'reset-test.mp4'
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(b'not-a-real-video')
+
+        event_id = main_module.database.add_event(
+            created_at='2026-06-07T00:00:00+00:00',
+            source='camera',
+            snapshot_path=None,
+            detections=[{'label': 'dog', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.2}}],
+            metadata={'camera_id': 'camera-1', 'camera_name': 'Primary Camera'},
+        )
+        main_module.database.add_recording(
+            event_id=event_id,
+            camera_id='camera-1',
+            started_at='2026-06-07T00:00:00+00:00',
+            ended_at='2026-06-07T00:00:10+00:00',
+            duration_seconds=10.0,
+            file_path=str(file_path),
+            thumbnail_path=None,
+            source='camera',
+            created_at='2026-06-07T00:00:00+00:00',
+            trigger_type='alert',
+            trigger_label='dog',
+        )
+        main_module.database.add_alert(
+            created_at='2026-06-07T00:00:01+00:00',
+            rule_name='Dog alert',
+            event_id=event_id,
+            label='dog',
+            confidence=0.9,
+            message='Alert triggered: dog detected',
+        )
+
+        status, _headers, reset_payload = client.request(
+            '/api/system/runtime-data',
+            method='DELETE',
+            headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        assert reset_payload['deleted']['events'] >= 1
+        assert reset_payload['deleted']['recordings'] >= 1
+        assert reset_payload['deleted']['alerts'] >= 1
+
+        assert client.request('/api/events')[2] == []
+        assert client.request('/api/recordings')[2] == []
+        assert client.request('/api/alerts')[2] == []
+
+        status, _headers, settings_payload = client.request('/api/settings/system')
+        assert status == 200
+        assert settings_payload['recording']['motion_min_confidence'] == 0.52
+        assert settings_payload['recording']['retention_days'] == 21
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 
 def test_onvif_camera_settings_build_rtsp_url(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
