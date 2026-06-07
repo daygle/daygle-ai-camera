@@ -2016,6 +2016,14 @@ def test_recordings_timeline_returns_camera_day_segments(tmp_path, monkeypatch):
         assert motion_segment['color_key'] == 'motion'
         assert motion_segment['color_label'] == 'motion'
 
+        status, _headers, local_payload = admin.request(
+            f'/api/recordings/timeline?camera_id=camera-1&day={target_day}&tz_offset_minutes=-120'
+        )
+        assert status == 200
+        local_segment = next(recording for recording in local_payload['recordings'] if recording['id'] == recording_id)
+        assert local_segment['timeline_start_seconds'] == 10 * 3600 + 15 * 60
+        assert local_payload['timeline_timezone_offset_minutes'] == -120
+
         status, _headers, empty_payload = admin.request('/api/recordings/timeline?camera_id=camera-1&day=2026-06-08')
         assert status == 200
         assert empty_payload['recordings'] == []

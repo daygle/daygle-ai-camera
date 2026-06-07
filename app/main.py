@@ -2430,7 +2430,11 @@ def _recording_timeline_segment(recording: dict[str, Any], day_start: datetime, 
 
 
 @app.get('/api/recordings/timeline')
-def recordings_timeline(camera_id: str | None = None, day: str | None = None):
+def recordings_timeline(
+    camera_id: str | None = None,
+    day: str | None = None,
+    tz_offset_minutes: int | None = Query(None, ge=-840, le=840),
+):
     cameras = [
         {
             'id': str(camera_settings.get('id') or ''),
@@ -2454,8 +2458,17 @@ def recordings_timeline(camera_id: str | None = None, day: str | None = None):
     else:
         target_day = datetime.now(timezone.utc).date()
 
-    day_start = datetime.combine(target_day, datetime.min.time(), tzinfo=timezone.utc)
-    day_end = day_start + timedelta(days=1)
+    if tz_offset_minutes is None:
+        timeline_timezone = timezone.utc
+    else:
+        # Browser getTimezoneOffset() is UTC-local minutes, so invert to get local UTC offset.
+        timeline_timezone = timezone(timedelta(minutes=-tz_offset_minutes))
+
+    day_start_local = datetime.combine(target_day, datetime.min.time(), tzinfo=timeline_timezone)
+    day_end_local = day_start_local + timedelta(days=1)
+    day_start = day_start_local.astimezone(timezone.utc)
+    day_end = day_end_local.astimezone(timezone.utc)
+
     recordings = database.list_recordings_for_camera_day(selected_camera_id, day_start.isoformat(), day_end.isoformat())
     segments = [
         segment
@@ -2471,6 +2484,7 @@ def recordings_timeline(camera_id: str | None = None, day: str | None = None):
         'day': target_day.isoformat(),
         'day_start': day_start.isoformat(),
         'day_end': day_end.isoformat(),
+        'timeline_timezone_offset_minutes': tz_offset_minutes if tz_offset_minutes is not None else 0,
         'recordings': segments,
     }
 

@@ -435,7 +435,10 @@ async function renderFilteredTimeline({ preserveSelection = true } = {}) {
 async function loadTimeline({ preserveSelection = true } = {}) {
   const { cameraId, day } = timelineParams();
   els.timelineStatus.textContent = 'Loading timeline…';
-  const payload = await api(`/api/recordings/timeline?camera_id=${encodeURIComponent(cameraId)}&day=${encodeURIComponent(day)}`);
+  const timezoneOffsetMinutes = new Date().getTimezoneOffset();
+  const payload = await api(
+    `/api/recordings/timeline?camera_id=${encodeURIComponent(cameraId)}&day=${encodeURIComponent(day)}&tz_offset_minutes=${encodeURIComponent(timezoneOffsetMinutes)}`,
+  );
   state.payload = payload;
   populateControls(payload);
   populateFilterOptions(payload.recordings || []);
