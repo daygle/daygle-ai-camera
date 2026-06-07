@@ -6,3 +6,5 @@ config.yaml
 .pytest_cache/
 models/*.onnx
 models/*.pt
+data/*
+!data/
