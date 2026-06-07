@@ -25,7 +25,10 @@
             <button id="deleteAllRecordingsBtn" class="secondary delete-btn" type="button" hidden>Delete All Recordings</button>
           </div>
         </div>
-        <div class="search-row">
+        <div class="search-row recordings-search-row">
+          <select id="cameraFilter" aria-label="Filter by camera">
+            <option value="">All Cameras</option>
+          </select>
           <input id="recordingFilter" placeholder="Filter clips by object label..." />
           <button id="recordingSearchBtn">Filter</button>
           <button id="recordingClearBtn" class="secondary">All</button>
