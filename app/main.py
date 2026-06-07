@@ -57,6 +57,7 @@ async def app_lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        recording_service.stop_prebuffer_workers()
         stop_live_alert_monitor()
 
 
@@ -1180,23 +1181,60 @@ def attach_event_recording(
         metadata['camera_id'] = camera_id
     recording_id = database.add_recording(created_at=utc_now(), **metadata)
     if stream_url:
-        start_rtsp_recording_capture(stream_url, metadata, event_id, detections)
+        start_rtsp_recording_capture(
+            stream_url,
+            metadata,
+            event_id,
+            detections,
+            camera_id=camera_id,
+            event_time=event_time,
+            recording_config=recording_config,
+        )
     purge_recordings_by_policy()
     return recording_id
 
 
-def start_rtsp_recording_capture(stream_url: str, metadata: dict[str, Any], event_id: int, detections: list[dict[str, Any]]) -> None:
+def start_rtsp_recording_capture(
+    stream_url: str,
+    metadata: dict[str, Any],
+    event_id: int,
+    detections: list[dict[str, Any]],
+    *,
+    camera_id: str | None = None,
+    event_time: str | None = None,
+    recording_config: dict[str, Any] | None = None,
+) -> None:
     file_path = Path(str(metadata.get('file_path') or ''))
     duration_seconds = float(metadata.get('duration_seconds') or 1)
     trigger_type = str(metadata.get('trigger_type') or 'motion')
     trigger_label = metadata.get('trigger_label')
+    pre_seconds = max(0, int((recording_config or {}).get('pre_event_seconds', 0)))
+    post_seconds = max(0, int((recording_config or {}).get('post_event_seconds', 0)))
+
+    try:
+        triggered_at = datetime.fromisoformat(str(event_time or utc_now()))
+    except ValueError:
+        triggered_at = datetime.now(timezone.utc)
+    if triggered_at.tzinfo is None:
+        triggered_at = triggered_at.replace(tzinfo=timezone.utc)
 
     def write_generated_fallback() -> None:
         recording_service.write_event_clip(file_path, event_id, detections, duration_seconds, trigger_type, str(trigger_label) if trigger_label else None)
 
     def capture() -> None:
         try:
-            recording_service.write_rtsp_clip(stream_url, file_path, duration_seconds)
+            if camera_id and pre_seconds > 0:
+                recording_service.write_rtsp_clip_with_prebuffer(
+                    stream_url=stream_url,
+                    camera_id=camera_id,
+                    file_path=file_path,
+                    triggered_at=triggered_at,
+                    pre_seconds=pre_seconds,
+                    post_seconds=post_seconds,
+                    max_duration_seconds=duration_seconds,
+                )
+            else:
+                recording_service.write_rtsp_clip(stream_url, file_path, duration_seconds)
         except Exception as exc:
             logger.warning('RTSP recording capture failed for event %s, writing generated fallback: %s', event_id, exc)
             write_generated_fallback()
@@ -1472,7 +1510,7 @@ def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
         ffmpeg,
         '-y',
         '-fflags',
-        '+discardcorrupt+genpts',
+        '+discardcorrupt',
         '-err_detect',
         'ignore_err',
         '-i',

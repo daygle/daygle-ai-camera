@@ -5,6 +5,8 @@ import logging
 import re
 import shutil
 import subprocess
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,10 @@ class RecordingService:
         storage_config = config.get('storage', {})
         self.recordings_dir = Path(storage_config.get('recordings_dir') or Path(storage_config.get('data_dir', 'data')) / 'recordings')
         self.recordings_dir.mkdir(parents=True, exist_ok=True)
+        self.prebuffer_dir = self.recordings_dir / '.prebuffer'
+        self.prebuffer_dir.mkdir(parents=True, exist_ok=True)
+        self._prebuffer_lock = threading.Lock()
+        self._prebuffer_workers: dict[str, dict[str, Any]] = {}
 
     @property
     def enabled(self) -> bool:
@@ -137,7 +143,7 @@ class RecordingService:
             ffmpeg,
             '-y',
             '-fflags',
-            '+discardcorrupt+genpts',
+            '+discardcorrupt',
             '-err_detect',
             'ignore_err',
             '-rtsp_transport',
@@ -166,6 +172,217 @@ class RecordingService:
         if not tmp_path.exists():
             raise RuntimeError('ffmpeg did not create an RTSP recording file.')
         tmp_path.replace(file_path)
+
+    def stop_prebuffer_workers(self) -> None:
+        with self._prebuffer_lock:
+            workers = list(self._prebuffer_workers.items())
+            self._prebuffer_workers = {}
+        for _camera_id, worker in workers:
+            stop_event = worker.get('stop_event')
+            thread = worker.get('thread')
+            if isinstance(stop_event, threading.Event):
+                stop_event.set()
+            if isinstance(thread, threading.Thread):
+                thread.join(timeout=2)
+
+    def write_rtsp_clip_with_prebuffer(
+        self,
+        *,
+        stream_url: str,
+        camera_id: str,
+        file_path: Path,
+        triggered_at: datetime,
+        pre_seconds: int,
+        post_seconds: int,
+        max_duration_seconds: float,
+    ) -> None:
+        pre_seconds = max(0, int(pre_seconds))
+        post_seconds = max(0, int(post_seconds))
+        max_duration_seconds = max(1.0, float(max_duration_seconds))
+
+        if pre_seconds <= 0:
+            self.write_rtsp_clip(stream_url, file_path, max_duration_seconds)
+            return
+
+        buffer_seconds = max(pre_seconds + post_seconds + 5, pre_seconds + 10, 15)
+        camera_key = self._camera_key(camera_id)
+        self._ensure_prebuffer_worker(camera_key, stream_url, buffer_seconds)
+
+        end_capture_at = triggered_at.timestamp() + post_seconds
+        delay = end_capture_at - time.time()
+        if delay > 0:
+            time.sleep(delay)
+
+        start_ts = triggered_at.timestamp() - pre_seconds
+        end_ts = end_capture_at
+        segments = self._collect_prebuffer_segments(camera_key, start_ts, end_ts)
+        if not segments:
+            logger.info('No prebuffer segments available for %s; falling back to direct RTSP clip capture.', camera_key)
+            self.write_rtsp_clip(stream_url, file_path, max_duration_seconds)
+            return
+
+        ffmpeg = shutil.which('ffmpeg')
+        if not ffmpeg:
+            self.write_rtsp_clip(stream_url, file_path, max_duration_seconds)
+            return
+
+        list_path = file_path.with_name(f'{file_path.stem}.concat.txt')
+        tmp_path = file_path.with_name(f'{file_path.stem}.prebuffer.tmp{file_path.suffix}')
+        list_content = ''.join(f"file '{segment}'\n" for segment in segments)
+        list_path.write_text(list_content, encoding='utf-8')
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        command = [
+            ffmpeg,
+            '-y',
+            '-fflags',
+            '+discardcorrupt',
+            '-err_detect',
+            'ignore_err',
+            '-f',
+            'concat',
+            '-safe',
+            '0',
+            '-i',
+            str(list_path),
+            '-an',
+            '-c:v',
+            'libx264',
+            '-preset',
+            'veryfast',
+            '-pix_fmt',
+            'yuv420p',
+            '-movflags',
+            '+faststart',
+            '-t',
+            f'{max_duration_seconds:.3f}',
+            str(tmp_path),
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=max(60, int(max_duration_seconds) + 45), check=False)
+        list_path.unlink(missing_ok=True)
+        if result.returncode != 0 or not tmp_path.exists() or tmp_path.stat().st_size <= 0:
+            tmp_path.unlink(missing_ok=True)
+            logger.warning('Failed to render clip from prebuffer for %s; falling back to direct RTSP capture.', camera_key)
+            self.write_rtsp_clip(stream_url, file_path, max_duration_seconds)
+            return
+        tmp_path.replace(file_path)
+
+    @staticmethod
+    def _camera_key(camera_id: str) -> str:
+        return re.sub(r'[^a-zA-Z0-9_-]+', '-', str(camera_id or '').strip().lower()).strip('-') or 'camera'
+
+    def _ensure_prebuffer_worker(self, camera_key: str, stream_url: str, buffer_seconds: int) -> None:
+        with self._prebuffer_lock:
+            existing = self._prebuffer_workers.get(camera_key)
+            if existing and existing.get('stream_url') == stream_url and existing.get('buffer_seconds') == buffer_seconds:
+                thread = existing.get('thread')
+                if isinstance(thread, threading.Thread) and thread.is_alive():
+                    return
+            if existing and isinstance(existing.get('stop_event'), threading.Event):
+                existing['stop_event'].set()
+
+            stop_event = threading.Event()
+            thread = threading.Thread(
+                target=self._run_prebuffer_worker,
+                args=(camera_key, stream_url, int(buffer_seconds), stop_event),
+                name=f'prebuffer-{camera_key}',
+                daemon=True,
+            )
+            self._prebuffer_workers[camera_key] = {
+                'thread': thread,
+                'stop_event': stop_event,
+                'stream_url': stream_url,
+                'buffer_seconds': int(buffer_seconds),
+            }
+            thread.start()
+
+    def _run_prebuffer_worker(self, camera_key: str, stream_url: str, buffer_seconds: int, stop_event: threading.Event) -> None:
+        ffmpeg = shutil.which('ffmpeg')
+        if not ffmpeg:
+            logger.warning('ffmpeg is required for rolling prebuffer but is not installed.')
+            return
+        camera_dir = self.prebuffer_dir / camera_key
+        camera_dir.mkdir(parents=True, exist_ok=True)
+        output_pattern = camera_dir / 'segment-%Y%m%dT%H%M%S.ts'
+
+        while not stop_event.is_set():
+            command = [
+                ffmpeg,
+                '-nostdin',
+                '-hide_banner',
+                '-loglevel',
+                'error',
+                '-rtsp_transport',
+                'tcp',
+                '-fflags',
+                '+discardcorrupt',
+                '-err_detect',
+                'ignore_err',
+                '-i',
+                stream_url,
+                '-an',
+                '-c:v',
+                'copy',
+                '-f',
+                'segment',
+                '-segment_time',
+                '1',
+                '-segment_format',
+                'mpegts',
+                '-reset_timestamps',
+                '1',
+                '-strftime',
+                '1',
+                str(output_pattern),
+            ]
+            process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                while process.poll() is None and not stop_event.is_set():
+                    self._prune_prebuffer_segments(camera_dir, buffer_seconds)
+                    time.sleep(1)
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                self._prune_prebuffer_segments(camera_dir, buffer_seconds)
+            if not stop_event.is_set():
+                time.sleep(1)
+
+    def _prune_prebuffer_segments(self, camera_dir: Path, keep_seconds: int) -> None:
+        cutoff = time.time() - max(keep_seconds, 5)
+        for segment in camera_dir.glob('segment-*.ts'):
+            try:
+                if segment.stat().st_mtime < cutoff:
+                    segment.unlink(missing_ok=True)
+            except OSError:
+                continue
+
+    def _collect_prebuffer_segments(self, camera_key: str, start_ts: float, end_ts: float) -> list[Path]:
+        camera_dir = self.prebuffer_dir / camera_key
+        if not camera_dir.exists():
+            return []
+        selected: list[Path] = []
+        for segment in sorted(camera_dir.glob('segment-*.ts')):
+            try:
+                modified = segment.stat().st_mtime
+            except OSError:
+                continue
+            if modified < start_ts - 2:
+                continue
+            if modified > end_ts + 2:
+                continue
+            selected.append(segment)
+        if selected:
+            return selected
+        # Fallback to most recent segments covering the requested span.
+        segment_list = sorted(camera_dir.glob('segment-*.ts'))
+        if not segment_list:
+            return []
+        window_seconds = max(1, int(end_ts - start_ts))
+        return segment_list[-window_seconds:]
 
     @staticmethod
     def redact_stream_credentials(message: str) -> str:
