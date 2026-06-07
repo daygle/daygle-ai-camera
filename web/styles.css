@@ -441,6 +441,25 @@ input[type="file"] { padding: 10px; }
 .clip-overlay-toggle {
   margin-top: 10px;
 }
+.clip-overlay-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.clip-overlay-offset {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-weight: 800;
+}
+.clip-overlay-offset input {
+  width: 96px;
+  padding: 8px 10px;
+  border-radius: 12px;
+}
 
 #recentPlates .item,
 #plateResults .item,

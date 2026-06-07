@@ -9,6 +9,7 @@ const els = {
   deleteAllRecordingsBtn: document.getElementById('deleteAllRecordingsBtn'),
   clipOverlay: document.getElementById('clipOverlay'),
   clipOverlayToggle: document.getElementById('clipOverlayToggle'),
+  clipOverlayOffset: document.getElementById('clipOverlayOffset'),
 };
 
 let authState = { user: null, csrfToken: null };
@@ -16,8 +17,10 @@ let recordingRefreshTimer = null;
 let activeRecording = null;
 let overlayResizeObserver = null;
 const OVERLAY_TOGGLE_KEY = 'daygle.recordings.overlay.enabled';
+const OVERLAY_OFFSET_KEY = 'daygle.recordings.overlay.offset.seconds';
 let overlayEnabled = true;
-const EVENT_OVERLAY_WINDOW_SECONDS = 2.5;
+let overlayOffsetSeconds = 0;
+const EVENT_OVERLAY_WINDOW_SECONDS = 0.8;
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -111,7 +114,8 @@ function shouldRenderOverlayForTime(recording, playerTimeSeconds) {
   const anchorSeconds = detectionAnchorSeconds(recording);
   if (anchorSeconds === null) return true;
   const duration = Math.max(0, Number(recording?.duration_seconds || 0));
-  const clampedAnchor = duration > 0 ? clamp(anchorSeconds, 0, duration) : anchorSeconds;
+  const shiftedAnchor = anchorSeconds + overlayOffsetSeconds;
+  const clampedAnchor = duration > 0 ? clamp(shiftedAnchor, 0, duration) : shiftedAnchor;
   return Math.abs(playerTimeSeconds - clampedAnchor) <= EVENT_OVERLAY_WINDOW_SECONDS / 2;
 }
 
@@ -293,6 +297,23 @@ if (els.clipOverlayToggle) {
     localStorage.setItem(OVERLAY_TOGGLE_KEY, overlayEnabled ? '1' : '0');
     drawClipOverlay();
   });
+}
+
+if (els.clipOverlayOffset) {
+  const savedOffsetValue = Number(localStorage.getItem(OVERLAY_OFFSET_KEY));
+  overlayOffsetSeconds = Number.isFinite(savedOffsetValue) ? clamp(savedOffsetValue, -10, 10) : 0;
+  els.clipOverlayOffset.value = overlayOffsetSeconds.toFixed(1);
+
+  const updateOffset = () => {
+    const parsed = Number(els.clipOverlayOffset.value);
+    overlayOffsetSeconds = Number.isFinite(parsed) ? clamp(parsed, -10, 10) : 0;
+    els.clipOverlayOffset.value = overlayOffsetSeconds.toFixed(1);
+    localStorage.setItem(OVERLAY_OFFSET_KEY, overlayOffsetSeconds.toFixed(1));
+    drawClipOverlay();
+  };
+
+  els.clipOverlayOffset.addEventListener('change', updateOffset);
+  els.clipOverlayOffset.addEventListener('blur', updateOffset);
 }
 
 els.recordingSearchBtn.addEventListener('click', () => loadRecordings(els.recordingFilter.value.trim()));
