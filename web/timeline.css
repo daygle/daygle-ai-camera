@@ -1,8 +1,20 @@
+.timeline-shell {
+  width: min(1600px, calc(100% - 32px));
+}
+
 .recording-timeline-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(360px, .85fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   align-items: start;
+}
+
+.playback-card {
+  order: 1;
+}
+
+.timeline-card {
+  order: 2;
 }
 .timeline-card {
   display: grid;
