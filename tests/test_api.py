@@ -2082,6 +2082,68 @@ def test_monitoring_zones_filter_object_detections_by_label(tmp_path, monkeypatc
     assert [detection['label'] for detection in filtered] == ['person', 'cat']
 
 
+def test_monitoring_zones_normalize_object_rules(tmp_path, monkeypatch):
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    main = sys.modules["app.main"]
+    zones = main.normalize_monitoring_zones([
+        {
+            'id': 'porch',
+            'name': 'Porch',
+            'x': 0,
+            'y': 0,
+            'width': 1,
+            'height': 1,
+            'object_rules': [
+                {
+                    'label': 'Cat',
+                    'record_on_detect': False,
+                    'alert_on_detect': True,
+                    'min_confidence': 0.7,
+                    'cooldown_seconds': 5,
+                    'email_enabled': True,
+                    'email_recipients': 'alerts@example.test, bad-address',
+                }
+            ],
+        }
+    ])
+
+    rule = zones[0]['object_rules'][0]
+    assert zones[0]['object_labels'] == ['cat']
+    assert rule['label'] == 'cat'
+    assert rule['record_on_detect'] is False
+    assert rule['alert_on_detect'] is True
+    assert rule['min_confidence'] == 0.7
+    assert rule['cooldown_seconds'] == 5
+    assert rule['email_recipients'] == ['alerts@example.test']
+
+
+def test_zone_object_alert_rules_are_scoped_to_matching_zone(tmp_path, monkeypatch):
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    main = sys.modules["app.main"]
+    zones = main.normalize_monitoring_zones([
+        {
+            'id': 'porch',
+            'name': 'Porch',
+            'x': 0,
+            'y': 0,
+            'width': 0.5,
+            'height': 0.5,
+            'object_rules': [{'label': 'cat', 'alert_on_detect': True, 'record_on_detect': False}],
+        }
+    ])
+    settings = {'id': 'front', 'name': 'Front Door', 'detection': {'zones': zones}}
+    detections = [
+        {'label': 'cat', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.1, 'height': 0.1}},
+        {'label': 'dog', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.1, 'height': 0.1}},
+        {'label': 'cat', 'confidence': 0.9, 'box': {'x': 0.8, 'y': 0.8, 'width': 0.1, 'height': 0.1}},
+    ]
+
+    rules = main.zone_object_alert_rules(settings, detections)
+
+    assert [rule['name'] for rule in rules] == ['Front Door / Porch / cat']
+    assert main.zone_record_on_detect_labels(settings, detections) == set()
+
+
 def test_camera_object_labels_filter_without_monitoring_zones(tmp_path, monkeypatch):
     _app, _database_path = _load_app(tmp_path, monkeypatch)
     main = sys.modules["app.main"]

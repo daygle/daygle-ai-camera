@@ -5,6 +5,8 @@ const liveEls = {
   detectionStatus: document.getElementById('liveDetectionStatus'),
   overlayToggle: document.getElementById('overlayToggle'),
   cameraSelect: document.getElementById('cameraSelect'),
+  viewModeSelect: document.getElementById('viewModeSelect'),
+  cameraGrid: document.getElementById('cameraGrid'),
   zoneOverlay: document.getElementById('zoneOverlay'),
   zoneList: document.getElementById('zoneList'),
   cameraRecordingControls: document.getElementById('cameraRecordingControls'),
@@ -12,6 +14,8 @@ const liveEls = {
   saveZonesBtn: document.getElementById('saveZonesBtn'),
 };
 
+const pageMode = document.querySelector('[data-live-page]')?.dataset.livePage || 'live';
+const isZonesPage = pageMode === 'zones';
 const DEFAULT_SNAPSHOT_REFRESH_MS = 500;
 const DEFAULT_DETECTION_STATUS_REFRESH_MS = 2000;
 const CLOSE_DRAFT_DISTANCE = 0.035;
@@ -21,6 +25,7 @@ let snapshotRefreshMs = DEFAULT_SNAPSHOT_REFRESH_MS;
 let detectionStatusRefreshMs = DEFAULT_DETECTION_STATUS_REFRESH_MS;
 let csrfToken = null;
 let cameras = [];
+let availableLabels = [];
 let selectedCamera = null;
 let selectedZoneIndex = null;
 let drawingMode = false;
@@ -63,10 +68,21 @@ function clamp(value, min = 0, max = 1) {
 }
 
 function normalizePoint(point) {
-  return {
-    x: clamp(Number(point?.x) || 0),
-    y: clamp(Number(point?.y) || 0),
-  };
+  return { x: clamp(Number(point?.x) || 0), y: clamp(Number(point?.y) || 0) };
+}
+
+function roundCoord(value) {
+  return Math.round(clamp(value) * 10000) / 10000;
+}
+
+function normalizeLabelList(value) {
+  const source = Array.isArray(value) ? value : String(value || '').split(',');
+  const seen = new Set();
+  return source.map((label) => String(label).trim().toLowerCase()).filter((label) => {
+    if (!label || seen.has(label)) return false;
+    seen.add(label);
+    return true;
+  });
 }
 
 function rectanglePoints(zone) {
@@ -96,30 +112,55 @@ function updateZoneBounds(zone) {
   zone.height = roundCoord(Math.max(0.01, bottom - top));
 }
 
-function roundCoord(value) {
-  return Math.round(clamp(value) * 10000) / 10000;
+function defaultObjectRule(label = '') {
+  return {
+    label: String(label || '').trim().toLowerCase(),
+    enabled: true,
+    record_on_detect: true,
+    alert_on_detect: true,
+    min_confidence: 0.5,
+    cooldown_seconds: 60,
+    email_enabled: false,
+    email_recipients: [],
+  };
+}
+
+function normalizeObjectRules(zone) {
+  if (Array.isArray(zone.object_rules) && zone.object_rules.length) {
+    const seen = new Set();
+    return zone.object_rules.map((rule) => ({ ...defaultObjectRule(rule?.label), ...rule }))
+      .map((rule) => ({
+        ...rule,
+        label: String(rule.label || '').trim().toLowerCase(),
+        enabled: rule.enabled !== false,
+        record_on_detect: rule.record_on_detect !== false,
+        alert_on_detect: rule.alert_on_detect !== false,
+        min_confidence: clamp(Number(rule.min_confidence ?? 0.5), 0, 1),
+        cooldown_seconds: Math.max(0, Number.parseInt(rule.cooldown_seconds ?? 60, 10) || 0),
+        email_enabled: rule.email_enabled === true,
+        email_recipients: normalizeEmailList(rule.email_recipients),
+      }))
+      .filter((rule) => {
+        if (!rule.label || seen.has(rule.label)) return false;
+        seen.add(rule.label);
+        return true;
+      });
+  }
+  return normalizeLabelList(zone.object_labels).map(defaultObjectRule);
+}
+
+function normalizeEmailList(value) {
+  const source = Array.isArray(value) ? value : String(value || '').split(',');
+  return source.map((recipient) => String(recipient).trim()).filter(Boolean);
 }
 
 function normalizeZone(zone) {
   const sourcePoints = Array.isArray(zone.points) && zone.points.length >= 3 ? zone.points : rectanglePoints(zone);
   zone.points = sourcePoints.map(normalizePoint);
-  zone.object_labels = normalizeLabelList(zone.object_labels);
+  zone.object_rules = normalizeObjectRules(zone);
+  zone.object_labels = zone.object_rules.map((rule) => rule.label);
   updateZoneBounds(zone);
   return zone;
-}
-
-function normalizeLabelList(value) {
-  const source = Array.isArray(value) ? value : String(value || '').split(',');
-  const seen = new Set();
-  return source.map((label) => String(label).trim().toLowerCase()).filter((label) => {
-    if (!label || seen.has(label)) return false;
-    seen.add(label);
-    return true;
-  });
-}
-
-function labelListValue(value) {
-  return normalizeLabelList(value).join(', ');
 }
 
 function visibleImageRect() {
@@ -132,7 +173,6 @@ function visibleImageRect() {
   let height = frameRect.height;
   let left = frameRect.left;
   let top = frameRect.top;
-
   if (frameRatio > imageRatio) {
     width = height * imageRatio;
     left += (frameRect.width - width) / 2;
@@ -144,6 +184,7 @@ function visibleImageRect() {
 }
 
 function syncZoneOverlayToImage() {
+  if (!isZonesPage || !liveEls.zoneOverlay || !liveEls.frameWrap || !liveEls.frame) return;
   const wrapRect = liveEls.frameWrap.getBoundingClientRect();
   const imageRect = visibleImageRect();
   liveEls.zoneOverlay.style.left = `${imageRect.left - wrapRect.left}px`;
@@ -152,17 +193,52 @@ function syncZoneOverlayToImage() {
   liveEls.zoneOverlay.style.height = `${imageRect.height}px`;
 }
 
-function snapshotUrl() {
-  const overlay = liveEls.overlayToggle.checked ? '1' : '0';
-  const cameraId = encodeURIComponent(selectedCamera?.id || '');
+function snapshotUrl(camera = selectedCamera) {
+  const overlay = liveEls.overlayToggle?.checked ? '1' : '0';
+  const cameraId = encodeURIComponent(camera?.id || '');
   return `/api/live/snapshot?overlay=${overlay}&camera_id=${cameraId}&t=${Date.now()}`;
 }
 
+function isAllCameraMode() {
+  return pageMode === 'live' && liveEls.viewModeSelect?.value === 'all';
+}
+
 function refreshFrame() {
-  if (!selectedCamera) return;
-  if (document.hidden || liveEls.frame.dataset.loading === 'true') return;
+  if (!selectedCamera || document.hidden) return;
+  if (isAllCameraMode()) {
+    renderCameraGridFrames();
+    return;
+  }
+  if (liveEls.frame.dataset.loading === 'true') return;
   liveEls.frame.dataset.loading = 'true';
   liveEls.frame.src = snapshotUrl();
+}
+
+function renderCameraGridFrames() {
+  if (!liveEls.cameraGrid) return;
+  liveEls.cameraGrid.querySelectorAll('img[data-camera-id]').forEach((image) => {
+    image.src = snapshotUrl(cameras.find((camera) => camera.id === image.dataset.cameraId));
+  });
+}
+
+function renderCameraGrid() {
+  if (!liveEls.cameraGrid) return;
+  liveEls.cameraGrid.innerHTML = cameras.map((camera) => `
+    <article class="live-camera-tile">
+      <img data-camera-id="${escapeHtml(camera.id)}" alt="${escapeHtml(camera.name || camera.id)} live footage" />
+      <div class="live-status">${escapeHtml(camera.name || camera.id)}</div>
+    </article>
+  `).join('');
+  renderCameraGridFrames();
+}
+
+function syncViewMode() {
+  const allMode = isAllCameraMode();
+  if (liveEls.frameWrap) liveEls.frameWrap.hidden = allMode;
+  if (liveEls.cameraGrid) liveEls.cameraGrid.hidden = !allMode;
+  if (liveEls.cameraSelect?.closest('label')) liveEls.cameraSelect.closest('label').hidden = allMode;
+  if (allMode) renderCameraGrid();
+  refreshDetectionStatus();
 }
 
 function formatDetectionStatus(payload) {
@@ -183,7 +259,12 @@ function formatDetectionStatus(payload) {
 }
 
 async function refreshDetectionStatus() {
-  if (!selectedCamera || !liveEls.detectionStatus) return;
+  if (!liveEls.detectionStatus) return;
+  if (isAllCameraMode()) {
+    liveEls.detectionStatus.textContent = 'Live AI: showing all cameras. Select one camera for detailed status.';
+    return;
+  }
+  if (!selectedCamera) return;
   try {
     const cameraId = encodeURIComponent(selectedCamera.id);
     liveEls.detectionStatus.textContent = formatDetectionStatus(await api(`/api/live/detection-status?camera_id=${cameraId}`));
@@ -196,9 +277,11 @@ function setSelectedCamera(cameraId) {
   selectedCamera = cameras.find((camera) => camera.id === cameraId) || cameras[0];
   if (!selectedCamera) return;
   selectedZoneIndex = null;
-  liveEls.cameraSelect.value = selectedCamera.id;
-  renderZones();
-  renderCameraRecordingControls();
+  if (liveEls.cameraSelect) liveEls.cameraSelect.value = selectedCamera.id;
+  if (isZonesPage) {
+    renderZones();
+    renderCameraRecordingControls();
+  }
   refreshFrame();
   refreshDetectionStatus();
 }
@@ -225,38 +308,77 @@ function renderZoneBox(zone, index) {
 }
 
 function updateSelectionStyles() {
-  liveEls.zoneOverlay.querySelectorAll('.monitor-zone-polygon, .zone-label').forEach((element) => {
+  liveEls.zoneOverlay?.querySelectorAll('.monitor-zone-polygon, .zone-label').forEach((element) => {
     element.classList.toggle('selected', Number(element.dataset.zoneIndex) === selectedZoneIndex);
   });
-  liveEls.zoneList.querySelectorAll('[data-select-zone]').forEach((row) => {
+  liveEls.zoneList?.querySelectorAll('[data-select-zone]').forEach((row) => {
     row.classList.toggle('selected', Number(row.dataset.selectZone) === selectedZoneIndex);
   });
 }
 
+function objectRuleOptions(selectedLabel) {
+  const labels = [...new Set([...availableLabels, selectedLabel].filter(Boolean))];
+  const options = labels.map((label) => `<option value="${escapeHtml(label)}" ${label === selectedLabel ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
+  return `<option value="">Object...</option>${options}`;
+}
+
+function renderObjectRules(zone, zoneIndex) {
+  zone.object_rules = normalizeObjectRules(zone);
+  if (!zone.object_rules.length) {
+    return '<div class="empty compact-empty">No object rules yet. Choose an object below to add recording and alert settings for this zone.</div>';
+  }
+  return zone.object_rules.map((rule, ruleIndex) => `
+    <div class="zone-object-rule" data-zone-rule="${zoneIndex}:${ruleIndex}">
+      <label><span>Object</span><select data-zone-rule-label="${zoneIndex}:${ruleIndex}">${objectRuleOptions(rule.label)}</select></label>
+      <label><span>Record</span><select data-zone-rule-record="${zoneIndex}:${ruleIndex}"><option value="true" ${rule.record_on_detect !== false ? 'selected' : ''}>On detect</option><option value="false" ${rule.record_on_detect === false ? 'selected' : ''}>Off</option></select></label>
+      <label><span>Alert</span><select data-zone-rule-alert="${zoneIndex}:${ruleIndex}"><option value="true" ${rule.alert_on_detect !== false ? 'selected' : ''}>On detect</option><option value="false" ${rule.alert_on_detect === false ? 'selected' : ''}>Off</option></select></label>
+      <label><span>Min confidence</span><input data-zone-rule-confidence="${zoneIndex}:${ruleIndex}" type="number" min="0" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" /></label>
+      <label><span>Cooldown</span><input data-zone-rule-cooldown="${zoneIndex}:${ruleIndex}" type="number" min="0" step="1" value="${escapeHtml(rule.cooldown_seconds)}" /></label>
+      <label><span>Email</span><select data-zone-rule-email="${zoneIndex}:${ruleIndex}"><option value="false" ${rule.email_enabled !== true ? 'selected' : ''}>Off</option><option value="true" ${rule.email_enabled === true ? 'selected' : ''}>On</option></select></label>
+      <input data-zone-rule-recipients="${zoneIndex}:${ruleIndex}" value="${escapeHtml(rule.email_recipients.join(', '))}" placeholder="Email recipients" />
+      <button class="secondary" type="button" data-delete-zone-rule="${zoneIndex}:${ruleIndex}">Remove</button>
+    </div>
+  `).join('');
+}
+
 function renderZones() {
-  if (!selectedCamera) return;
+  if (!isZonesPage || !selectedCamera) return;
   syncZoneOverlayToImage();
   const zones = cameraDetection().zones;
   zones.forEach(normalizeZone);
   liveEls.zoneOverlay.innerHTML = zones.map((zone, index) => (zone.enabled === false ? '' : renderZoneBox(zone, index))).join('');
-
   if (!zones.length) {
     liveEls.zoneList.innerHTML = '<div class="empty">No monitoring areas yet. Click "Draw area", place corner dots on the footage, then click the first dot to close the area.</div>';
     return;
   }
-
   liveEls.zoneList.innerHTML = zones.map((zone, index) => `
     <div class="item zone-row ${index === selectedZoneIndex ? 'selected' : ''}${zone.enabled === false ? ' disabled' : ''}" data-select-zone="${index}">
-      <input data-zone-name="${index}" value="${escapeHtml(zone.name || `Zone ${index + 1}`)}" />
-      <label><span>Zone</span><select data-zone-enabled="${index}"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Shown</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
-      <label><span>Motion</span><select data-zone-motion="${index}"><option value="true" ${zone.monitor_motion !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_motion === false ? 'selected' : ''}>Off</option></select></label>
-      <label><span>Objects</span><select data-zone-objects="${index}"><option value="true" ${zone.monitor_objects !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_objects === false ? 'selected' : ''}>Off</option></select></label>
-      <label class="zone-object-labels"><span>Object labels</span><input data-zone-object-labels="${index}" value="${escapeHtml(labelListValue(zone.object_labels))}" placeholder="person, cat" /></label>
-      <label><span>ANPR</span><select data-zone-anpr="${index}"><option value="true" ${zone.monitor_anpr !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_anpr === false ? 'selected' : ''}>Off</option></select></label>
-      <button class="secondary" type="button" data-delete-zone="${index}">Remove</button>
+      <div class="zone-row-main">
+        <input data-zone-name="${index}" value="${escapeHtml(zone.name || `Zone ${index + 1}`)}" />
+        <label><span>Zone</span><select data-zone-enabled="${index}"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Shown</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
+        <label><span>Motion</span><select data-zone-motion="${index}"><option value="true" ${zone.monitor_motion !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_motion === false ? 'selected' : ''}>Off</option></select></label>
+        <label><span>Objects</span><select data-zone-objects="${index}"><option value="true" ${zone.monitor_objects !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_objects === false ? 'selected' : ''}>Off</option></select></label>
+        <label><span>ANPR</span><select data-zone-anpr="${index}"><option value="true" ${zone.monitor_anpr !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_anpr === false ? 'selected' : ''}>Off</option></select></label>
+        <button class="secondary" type="button" data-delete-zone="${index}">Remove</button>
+      </div>
+      <div class="zone-object-rules">
+        <div class="zone-object-rules-header">
+          <strong>Object settings</strong>
+          <select data-add-zone-rule="${index}">${objectRuleOptions('')}</select>
+        </div>
+        ${renderObjectRules(zone, index)}
+      </div>
     </div>
   `).join('');
+  bindZoneControls(zones);
+}
 
+function parseZoneRuleKey(value) {
+  const [zoneIndex, ruleIndex] = String(value).split(':').map((part) => Number.parseInt(part, 10));
+  return { zoneIndex, ruleIndex, rule: cameraDetection().zones[zoneIndex]?.object_rules?.[ruleIndex] };
+}
+
+function bindZoneControls(zones) {
   document.querySelectorAll('[data-zone-name]').forEach((input) => {
     input.addEventListener('focus', () => { selectedZoneIndex = Number(input.dataset.zoneName); updateSelectionStyles(); });
     input.addEventListener('input', () => {
@@ -266,40 +388,19 @@ function renderZones() {
       if (label) label.textContent = input.value || `Zone ${index + 1}`;
     });
   });
-  document.querySelectorAll('[data-zone-enabled]').forEach((select) => {
-    select.addEventListener('change', () => {
-      selectedZoneIndex = Number(select.dataset.zoneEnabled);
-      zones[selectedZoneIndex].enabled = select.value === 'true';
-      renderZones();
-      refreshFrame();
-    });
-  });
-  document.querySelectorAll('[data-zone-motion]').forEach((select) => {
-    select.addEventListener('change', () => {
-      selectedZoneIndex = Number(select.dataset.zoneMotion);
-      zones[selectedZoneIndex].monitor_motion = select.value === 'true';
-      renderZones();
-    });
-  });
-  document.querySelectorAll('[data-zone-objects]').forEach((select) => {
-    select.addEventListener('change', () => {
-      selectedZoneIndex = Number(select.dataset.zoneObjects);
-      zones[selectedZoneIndex].monitor_objects = select.value === 'true';
-      renderZones();
-    });
-  });
-  document.querySelectorAll('[data-zone-object-labels]').forEach((input) => {
-    input.addEventListener('focus', () => { selectedZoneIndex = Number(input.dataset.zoneObjectLabels); updateSelectionStyles(); });
-    input.addEventListener('input', () => {
-      const index = Number(input.dataset.zoneObjectLabels);
-      zones[index].object_labels = normalizeLabelList(input.value);
-    });
-  });
-  document.querySelectorAll('[data-zone-anpr]').forEach((select) => {
-    select.addEventListener('change', () => {
-      selectedZoneIndex = Number(select.dataset.zoneAnpr);
-      zones[selectedZoneIndex].monitor_anpr = select.value === 'true';
-      renderZones();
+  [
+    ['zoneEnabled', 'enabled'],
+    ['zoneMotion', 'monitor_motion'],
+    ['zoneObjects', 'monitor_objects'],
+    ['zoneAnpr', 'monitor_anpr'],
+  ].forEach(([datasetKey, zoneKey]) => {
+    document.querySelectorAll(`[data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((select) => {
+      select.addEventListener('change', () => {
+        selectedZoneIndex = Number(select.dataset[datasetKey]);
+        zones[selectedZoneIndex][zoneKey] = select.value === 'true';
+        renderZones();
+        refreshFrame();
+      });
     });
   });
   document.querySelectorAll('[data-delete-zone]').forEach((button) => {
@@ -315,6 +416,49 @@ function renderZones() {
       if (event.target.closest('input, select, button')) return;
       selectedZoneIndex = Number(row.dataset.selectZone);
       renderZones();
+    });
+  });
+  document.querySelectorAll('[data-add-zone-rule]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const label = select.value;
+      if (!label) return;
+      const zone = zones[Number(select.dataset.addZoneRule)];
+      zone.object_rules = normalizeObjectRules(zone);
+      if (!zone.object_rules.some((rule) => rule.label === label)) zone.object_rules.push(defaultObjectRule(label));
+      zone.object_labels = zone.object_rules.map((rule) => rule.label);
+      renderZones();
+    });
+  });
+  document.querySelectorAll('[data-delete-zone-rule]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const { zoneIndex, ruleIndex } = parseZoneRuleKey(button.dataset.deleteZoneRule);
+      zones[zoneIndex].object_rules.splice(ruleIndex, 1);
+      zones[zoneIndex].object_labels = zones[zoneIndex].object_rules.map((rule) => rule.label);
+      renderZones();
+    });
+  });
+  bindRuleFields();
+}
+
+function bindRuleFields() {
+  const bindings = [
+    ['zoneRuleLabel', 'label', (value) => value],
+    ['zoneRuleRecord', 'record_on_detect', (value) => value === 'true'],
+    ['zoneRuleAlert', 'alert_on_detect', (value) => value === 'true'],
+    ['zoneRuleConfidence', 'min_confidence', (value) => clamp(Number(value || 0), 0, 1)],
+    ['zoneRuleCooldown', 'cooldown_seconds', (value) => Math.max(0, Number.parseInt(value || 0, 10) || 0)],
+    ['zoneRuleEmail', 'email_enabled', (value) => value === 'true'],
+    ['zoneRuleRecipients', 'email_recipients', normalizeEmailList],
+  ];
+  bindings.forEach(([datasetKey, ruleKey, transform]) => {
+    document.querySelectorAll(`[data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((field) => {
+      field.addEventListener('change', () => {
+        const { zoneIndex, rule } = parseZoneRuleKey(field.dataset[datasetKey]);
+        if (!rule) return;
+        rule[ruleKey] = transform(field.value);
+        cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).map((item) => item.label);
+        if (ruleKey === 'label') renderZones();
+      });
     });
   });
 }
@@ -336,10 +480,7 @@ function renderCameraRecordingControls() {
 
 function pointFromEvent(event) {
   const rect = liveEls.zoneOverlay.getBoundingClientRect();
-  return {
-    x: clamp((event.clientX - rect.left) / rect.width),
-    y: clamp((event.clientY - rect.top) / rect.height),
-  };
+  return { x: clamp((event.clientX - rect.left) / rect.width), y: clamp((event.clientY - rect.top) / rect.height) };
 }
 
 function pointDistance(first, second) {
@@ -355,38 +496,15 @@ function updateDraggedZone(event) {
   if (!zone) return;
   const dx = point.x - zoneDrag.startPoint.x;
   const dy = point.y - zoneDrag.startPoint.y;
-
   if (zoneDrag.mode === 'move') {
     const xs = zoneDrag.startPoints.map((startPoint) => startPoint.x);
     const ys = zoneDrag.startPoints.map((startPoint) => startPoint.y);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-    const safeDx = clamp(dx, -minX, 1 - maxX);
-    const safeDy = clamp(dy, -minY, 1 - maxY);
-    zone.points = zoneDrag.startPoints.map((startPoint) => ({
-      x: roundCoord(startPoint.x + safeDx),
-      y: roundCoord(startPoint.y + safeDy),
-    }));
+    const safeDx = clamp(dx, -Math.min(...xs), 1 - Math.max(...xs));
+    const safeDy = clamp(dy, -Math.min(...ys), 1 - Math.max(...ys));
+    zone.points = zoneDrag.startPoints.map((startPoint) => ({ x: roundCoord(startPoint.x + safeDx), y: roundCoord(startPoint.y + safeDy) }));
   } else if (zoneDrag.mode === 'point') {
     zone.points[zoneDrag.pointIndex] = normalizePoint(point);
-  } else {
-    const start = zoneDrag.startZone;
-    let left = start.x;
-    let top = start.y;
-    let right = start.x + start.width;
-    let bottom = start.y + start.height;
-    if (zoneDrag.mode.includes('w')) left = clamp(start.x + dx, 0, right - 0.01);
-    if (zoneDrag.mode.includes('e')) right = clamp(start.x + start.width + dx, left + 0.01, 1);
-    if (zoneDrag.mode.includes('n')) top = clamp(start.y + dy, 0, bottom - 0.01);
-    if (zoneDrag.mode.includes('s')) bottom = clamp(start.y + start.height + dy, top + 0.01, 1);
-    zone.x = left;
-    zone.y = top;
-    zone.width = right - left;
-    zone.height = bottom - top;
   }
-
   normalizeZone(zone);
   renderZones();
 }
@@ -425,6 +543,7 @@ function finishDraftPolygon() {
     monitor_motion: true,
     monitor_objects: true,
     object_labels: [],
+    object_rules: [],
     monitor_anpr: true,
   });
   selectedZoneIndex = zones.length - 1;
@@ -436,81 +555,74 @@ function finishDraftPolygon() {
   refreshFrame();
 }
 
-liveEls.zoneOverlay.addEventListener('pointerdown', (event) => {
-  if (!selectedCamera) return;
-
-  if (drawingMode) {
-    event.preventDefault();
-    const point = pointFromEvent(event);
-    const firstPoint = draftPolygon?.points[0];
-    const closeToFirstPoint = firstPoint && draftPolygon.points.length >= 3 && pointDistance(point, firstPoint) <= CLOSE_DRAFT_DISTANCE;
-    if (event.target.closest('[data-close-draft]') || closeToFirstPoint) {
-      finishDraftPolygon();
+function bindZoneDrawing() {
+  if (!isZonesPage || !liveEls.zoneOverlay) return;
+  liveEls.zoneOverlay.addEventListener('pointerdown', (event) => {
+    if (!selectedCamera) return;
+    if (drawingMode) {
+      event.preventDefault();
+      const point = pointFromEvent(event);
+      const firstPoint = draftPolygon?.points[0];
+      const closeToFirstPoint = firstPoint && draftPolygon.points.length >= 3 && pointDistance(point, firstPoint) <= CLOSE_DRAFT_DISTANCE;
+      if (event.target.closest('[data-close-draft]') || closeToFirstPoint) {
+        finishDraftPolygon();
+        return;
+      }
+      draftPolygon ||= { points: [], preview: point };
+      draftPolygon.points.push(point);
+      draftPolygon.preview = point;
+      liveEls.addZoneBtn.textContent = draftPolygon.points.length >= 3 ? 'Finish area' : 'Cancel drawing';
+      renderDraftPolygon();
+      liveEls.zoneOverlay.setPointerCapture(event.pointerId);
       return;
     }
-    draftPolygon ||= { points: [], preview: point };
-    draftPolygon.points.push(point);
-    draftPolygon.preview = point;
-    liveEls.addZoneBtn.textContent = draftPolygon.points.length >= 3 ? 'Finish area' : 'Cancel drawing';
+    const pointHandle = event.target.closest('[data-point-index]');
+    const zoneBox = event.target.closest('.monitor-zone-polygon[data-zone-index], .zone-label[data-zone-index], polygon[data-zone-index]');
+    if (pointHandle || zoneBox) {
+      event.preventDefault();
+      const index = Number((pointHandle || zoneBox).dataset.zoneIndex);
+      const zone = cameraDetection().zones[index];
+      selectedZoneIndex = index;
+      zoneDrag = {
+        index,
+        mode: pointHandle ? 'point' : 'move',
+        pointIndex: pointHandle ? Number(pointHandle.dataset.pointIndex) : null,
+        startPoint: pointFromEvent(event),
+        startPoints: zone.points.map((zonePoint) => ({ ...zonePoint })),
+      };
+      liveEls.zoneOverlay.setPointerCapture(event.pointerId);
+      renderZones();
+    }
+  });
+  liveEls.zoneOverlay.addEventListener('pointermove', (event) => {
+    if (zoneDrag) {
+      updateDraggedZone(event);
+      return;
+    }
+    if (!draftPolygon) return;
+    draftPolygon.preview = pointFromEvent(event);
     renderDraftPolygon();
-    liveEls.zoneOverlay.setPointerCapture(event.pointerId);
-    return;
-  }
-
-  const pointHandle = event.target.closest('[data-point-index]');
-  const zoneBox = event.target.closest('.monitor-zone-polygon[data-zone-index], .zone-label[data-zone-index], polygon[data-zone-index]');
-
-  if (pointHandle || zoneBox) {
-    event.preventDefault();
-    const index = Number((pointHandle || zoneBox).dataset.zoneIndex);
-    const zone = cameraDetection().zones[index];
-    selectedZoneIndex = index;
-    zoneDrag = {
-      index,
-      mode: pointHandle ? 'point' : 'move',
-      pointIndex: pointHandle ? Number(pointHandle.dataset.pointIndex) : null,
-      startPoint: pointFromEvent(event),
-      startZone: { ...zone },
-      startPoints: zone.points.map((zonePoint) => ({ ...zonePoint })),
-    };
-    liveEls.zoneOverlay.setPointerCapture(event.pointerId);
-    renderZones();
-    return;
-  }
-});
-
-liveEls.zoneOverlay.addEventListener('pointermove', (event) => {
-  if (zoneDrag) {
-    updateDraggedZone(event);
-    return;
-  }
-
-  if (!draftPolygon) return;
-  draftPolygon.preview = pointFromEvent(event);
-  renderDraftPolygon();
-});
-
-liveEls.zoneOverlay.addEventListener('pointerup', (event) => {
-  if (zoneDrag) {
-    updateDraggedZone(event);
+  });
+  liveEls.zoneOverlay.addEventListener('pointerup', (event) => {
+    if (zoneDrag) {
+      updateDraggedZone(event);
+      zoneDrag = null;
+      renderZones();
+    }
+  });
+  liveEls.zoneOverlay.addEventListener('pointercancel', () => {
     zoneDrag = null;
     renderZones();
-    return;
-  }
-});
-
-liveEls.zoneOverlay.addEventListener('pointercancel', () => {
-  zoneDrag = null;
-  renderZones();
-  if (draftPolygon) renderDraftPolygon();
-});
+    if (draftPolygon) renderDraftPolygon();
+  });
+}
 
 liveEls.frame.addEventListener('load', () => {
   liveEls.frame.dataset.loading = 'false';
   syncZoneOverlayToImage();
   liveEls.status.textContent = liveEls.overlayToggle.checked
-    ? `${selectedCamera?.name || 'Camera'} - object overlay on`
-    : `${selectedCamera?.name || 'Camera'} - object overlay off`;
+    ? `${selectedCamera?.name || 'Camera'} - matched alert boxes on`
+    : `${selectedCamera?.name || 'Camera'} - matched alert boxes off`;
 });
 
 liveEls.frame.addEventListener('error', () => {
@@ -520,7 +632,8 @@ liveEls.frame.addEventListener('error', () => {
 
 liveEls.overlayToggle.addEventListener('change', refreshFrame);
 liveEls.cameraSelect.addEventListener('change', () => setSelectedCamera(liveEls.cameraSelect.value));
-liveEls.addZoneBtn.addEventListener('click', () => {
+liveEls.viewModeSelect?.addEventListener('change', syncViewMode);
+liveEls.addZoneBtn?.addEventListener('click', () => {
   if (drawingMode && draftPolygon?.points.length >= 3) {
     finishDraftPolygon();
     return;
@@ -531,9 +644,10 @@ liveEls.addZoneBtn.addEventListener('click', () => {
   liveEls.addZoneBtn.textContent = drawingMode ? 'Cancel drawing' : 'Draw area';
   renderZones();
 });
-liveEls.saveZonesBtn.addEventListener('click', async () => {
+liveEls.saveZonesBtn?.addEventListener('click', async () => {
   try {
     liveEls.saveZonesBtn.disabled = true;
+    cameraDetection().zones.forEach(normalizeZone);
     await api(`/api/cameras/${encodeURIComponent(selectedCamera.id)}`, { method: 'PUT', body: JSON.stringify(selectedCamera) });
     const payload = await api('/api/cameras');
     const cameraId = selectedCamera.id;
@@ -562,9 +676,19 @@ async function init() {
     snapshotRefreshMs = DEFAULT_SNAPSHOT_REFRESH_MS;
     detectionStatusRefreshMs = DEFAULT_DETECTION_STATUS_REFRESH_MS;
   }
+  if (isZonesPage) {
+    try {
+      const alerts = await api('/api/settings/alerts');
+      availableLabels = alerts.available_labels || [];
+    } catch {
+      availableLabels = [];
+    }
+  }
   const payload = await api('/api/cameras');
   cameras = payload.cameras || [];
   renderCameraOptions();
+  bindZoneDrawing();
+  syncViewMode();
   refreshTimer = setInterval(refreshFrame, snapshotRefreshMs);
   detectionStatusTimer = setInterval(refreshDetectionStatus, detectionStatusRefreshMs);
 }

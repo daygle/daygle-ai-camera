@@ -3,54 +3,43 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Live Camera · Daygle AI Camera</title>
+  <title>Live Camera - Daygle AI Camera</title>
   <link rel="icon" href="/favicon.ico" type="image/svg+xml" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
-  <main class="shell live-shell">
+  <main class="shell live-shell" data-live-page="live">
     <section class="live-viewer-card">
       <header class="live-toolbar">
         <div>
           <p class="eyebrow">Live Cameras</p>
           <h1>Live Footage</h1>
-          <p class="muted">Choose a camera, toggle object overlays, and draw monitoring areas for motion or object detection.</p>
+          <p class="muted">Watch one camera or all cameras with matched object alert boxes overlaid on the footage.</p>
         </div>
         <div class="live-controls">
+          <label>
+            <span>View</span>
+            <select id="viewModeSelect">
+              <option value="single">One camera</option>
+              <option value="all">All cameras</option>
+            </select>
+          </label>
           <label>
             <span>Camera</span>
             <select id="cameraSelect"></select>
           </label>
           <label class="toggle-control" for="overlayToggle">
             <input id="overlayToggle" type="checkbox" checked />
-            <span>Object sighting overlay</span>
+            <span>Matched alert boxes</span>
           </label>
         </div>
       </header>
       <div class="live-frame-wrap" id="liveFrameWrap">
         <img id="liveFrame" class="live-frame" alt="Live camera footage" />
-        <div id="zoneOverlay" class="zone-overlay" aria-label="Monitoring areas"></div>
-        <div id="liveStatus" class="live-status">Connecting to camera…</div>
+        <div id="liveStatus" class="live-status">Connecting to camera...</div>
       </div>
+      <div id="cameraGrid" class="live-camera-grid" hidden></div>
       <div id="liveDetectionStatus" class="live-detection-status">Live AI status waiting for frames.</div>
-    </section>
-
-    <section class="card zone-editor-card">
-      <div class="section-header">
-        <div>
-          <h2>Monitoring areas</h2>
-          <p class="muted">Place corner dots on the live footage, then click the first dot to close the area. Areas control motion alerts, object alerts, and ANPR for this camera.</p>
-        </div>
-        <div class="button-row">
-          <button id="addZoneBtn" type="button">Draw area</button>
-          <button id="saveZonesBtn" class="secondary" type="button">Save areas</button>
-        </div>
-      </div>
-      <div id="zoneList" class="list"></div>
-      <div class="camera-recording-settings">
-        <h3>Camera recording</h3>
-        <div id="cameraRecordingControls" class="form-grid compact-grid"></div>
-      </div>
     </section>
   </main>
   <script src="/static/nav.js"></script>

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Zones - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell live-shell zones-shell" data-live-page="zones">
+    <section class="live-viewer-card zones-workspace">
+      <header class="live-toolbar">
+        <div>
+          <p class="eyebrow">Camera Zones</p>
+          <h1>Zones</h1>
+          <p class="muted">Choose a camera, draw monitoring areas, then decide which objects should record or alert inside each zone.</p>
+        </div>
+        <div class="live-controls">
+          <label>
+            <span>Camera</span>
+            <select id="cameraSelect"></select>
+          </label>
+          <label class="toggle-control" for="overlayToggle">
+            <input id="overlayToggle" type="checkbox" checked />
+            <span>Matched alert boxes</span>
+          </label>
+        </div>
+      </header>
+      <div class="zones-layout">
+        <div>
+          <div class="live-frame-wrap" id="liveFrameWrap">
+            <img id="liveFrame" class="live-frame" alt="Live camera footage" />
+            <div id="zoneOverlay" class="zone-overlay" aria-label="Monitoring areas"></div>
+            <div id="liveStatus" class="live-status">Connecting to camera...</div>
+          </div>
+          <div id="liveDetectionStatus" class="live-detection-status">Live AI status waiting for frames.</div>
+        </div>
+        <section class="card zone-editor-card">
+          <div class="section-header">
+            <div>
+              <h2>Monitoring Areas</h2>
+              <p class="muted">Place corner dots on the footage, then click the first dot to close the area.</p>
+            </div>
+            <div class="button-row">
+              <button id="addZoneBtn" type="button">Draw area</button>
+              <button id="saveZonesBtn" class="secondary" type="button">Save areas</button>
+            </div>
+          </div>
+          <div id="zoneList" class="list zones-list"></div>
+          <div class="camera-recording-settings">
+            <h3>Camera recording</h3>
+            <div id="cameraRecordingControls" class="form-grid compact-grid"></div>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+  <script src="/static/nav.js"></script>
+  <script src="/static/live.js"></script>
+</body>
+</html>

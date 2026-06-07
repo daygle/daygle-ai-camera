@@ -11,6 +11,7 @@
     <div class="app-nav-links">
       <a href="/" data-match="/">Dashboard</a>
       <a href="/live" data-match="/live">Live</a>
+      <a href="/zones" data-match="/zones" data-admin="true">Zones</a>
       <a href="/anpr" data-match="/anpr">ANPR</a>
       <a href="/recordings" data-match="/recordings">Recordings</a>
       <a href="/settings" data-match="/settings" data-admin="true">AI</a>

@@ -277,6 +277,60 @@ def normalize_label_list(value: Any) -> list[str]:
     return labels
 
 
+def normalize_email_recipients(value: Any) -> list[str]:
+    raw_recipients = value.split(',') if isinstance(value, str) else value
+    if not isinstance(raw_recipients, list):
+        return []
+    recipients: list[str] = []
+    seen: set[str] = set()
+    for raw_recipient in raw_recipients:
+        recipient = str(raw_recipient).strip()
+        if recipient and '@' in recipient and recipient.lower() not in seen:
+            recipients.append(recipient)
+            seen.add(recipient.lower())
+    return recipients
+
+
+def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_rules = zone.get('object_rules')
+    if isinstance(raw_rules, list):
+        source_rules = raw_rules
+    else:
+        source_rules = [{'label': label} for label in normalize_label_list(zone.get('object_labels', []))]
+
+    rules: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for rule in source_rules:
+        if not isinstance(rule, dict):
+            continue
+        labels = normalize_label_list(rule.get('label') or rule.get('object') or '')
+        if not labels:
+            continue
+        label = labels[0]
+        if label in seen:
+            continue
+        seen.add(label)
+        try:
+            min_confidence = float(rule.get('min_confidence', 0.5))
+        except (TypeError, ValueError):
+            min_confidence = 0.5
+        try:
+            cooldown_seconds = int(rule.get('cooldown_seconds', 60))
+        except (TypeError, ValueError):
+            cooldown_seconds = 60
+        rules.append({
+            'label': label,
+            'enabled': normalize_bool_setting(rule.get('enabled'), True),
+            'record_on_detect': normalize_bool_setting(rule.get('record_on_detect'), True),
+            'alert_on_detect': normalize_bool_setting(rule.get('alert_on_detect'), True),
+            'min_confidence': max(0.0, min(1.0, min_confidence)),
+            'cooldown_seconds': max(0, cooldown_seconds),
+            'email_enabled': normalize_bool_setting(rule.get('email_enabled'), False),
+            'email_recipients': normalize_email_recipients(rule.get('email_recipients', [])),
+        })
+    return rules
+
+
 def normalize_camera_recording_settings(settings: Any) -> dict[str, Any]:
     recording = default_camera_recording_settings()
     if isinstance(settings, dict):
@@ -343,7 +397,8 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
             'enabled': bool(zone.get('enabled', True)),
             'monitor_motion': bool(zone.get('monitor_motion', True)),
             'monitor_objects': bool(zone.get('monitor_objects', True)),
-            'object_labels': normalize_label_list(zone.get('object_labels', [])),
+            'object_labels': [rule['label'] for rule in normalize_zone_object_rules(zone)],
+            'object_rules': normalize_zone_object_rules(zone),
             'monitor_anpr': bool(zone.get('monitor_anpr', True)),
         })
     return normalized
@@ -445,6 +500,9 @@ def detection_overlap_ratio_with_zone_rect(detection: dict[str, Any], zone: dict
 def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any], *, min_overlap_ratio: float = 0.2) -> bool:
     if detection_center_in_zone(detection, zone):
         return True
+    points = zone.get('points') or []
+    if isinstance(points, list) and len(points) >= 3:
+        return False
     return detection_overlap_ratio_with_zone_rect(detection, zone) >= min_overlap_ratio
 
 
@@ -508,6 +566,57 @@ def filter_detections_for_camera_zones(detections: list[dict[str, Any]], setting
             for zone in zones
         )
     ]
+
+
+def zone_object_alert_rules(settings: dict[str, Any], detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    detection_settings = settings.get('detection') or {}
+    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
+    rules: list[dict[str, Any]] = []
+    camera_name = str(settings.get('name') or settings.get('id') or 'Camera')
+    for zone in zones:
+        zone_name = str(zone.get('name') or zone.get('id') or 'Zone')
+        for rule in normalize_zone_object_rules(zone):
+            if not rule.get('enabled', True) or not rule.get('alert_on_detect', True):
+                continue
+            label = str(rule.get('label') or '').strip().lower()
+            if not label:
+                continue
+            if not any(
+                str(detection.get('label') or '').strip().lower() == label
+                and detection_matches_zone(detection, zone)
+                and float(detection.get('confidence') or 0) >= float(rule.get('min_confidence', 0.5))
+                for detection in detections
+            ):
+                continue
+            rules.append({
+                'name': f'{camera_name} / {zone_name} / {label}',
+                'object': label,
+                'min_confidence': rule.get('min_confidence', 0.5),
+                'cooldown_seconds': rule.get('cooldown_seconds', 60),
+                'enabled': True,
+                'email_enabled': bool(rule.get('email_enabled', False)),
+                'email_recipients': rule.get('email_recipients', []),
+            })
+    return rules
+
+
+def zone_record_on_detect_labels(settings: dict[str, Any], detections: list[dict[str, Any]]) -> set[str]:
+    detection_settings = settings.get('detection') or {}
+    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
+    labels: set[str] = set()
+    for zone in zones:
+        for rule in normalize_zone_object_rules(zone):
+            label = str(rule.get('label') or '').strip().lower()
+            if not label or not rule.get('enabled', True) or not rule.get('record_on_detect', True):
+                continue
+            if any(
+                str(detection.get('label') or '').strip().lower() == label
+                and detection_matches_zone(detection, zone)
+                and float(detection.get('confidence') or 0) >= float(rule.get('min_confidence', 0.5))
+                for detection in detections
+            ):
+                labels.add(label)
+    return labels
 
 
 def filter_detections_for_camera_anpr(detections: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
@@ -712,13 +821,17 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         )
         return None
 
-    alerts.rules = effective_alert_rules()
+    zone_rules = zone_object_alert_rules(settings, object_detections)
+    alerts.rules = zone_rules + effective_alert_rules()
     triggered = alerts.process(alert_detections)
     triggered_labels = {str(alert.get('label') or '').lower() for alert in triggered}
+    record_on_detect_labels = zone_record_on_detect_labels(settings, object_detections)
     recording_detections = [
         {
             **detection,
-            'alert_triggered': str(detection.get('label') or '').lower() in triggered_labels,
+            'alert_matched': str(detection.get('label') or '').lower() in triggered_labels,
+            'alert_triggered': str(detection.get('label') or '').lower() in triggered_labels
+            and (not zone_rules or str(detection.get('label') or '').lower() in record_on_detect_labels),
         }
         for detection in alert_detections
     ]
@@ -759,10 +872,10 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             confidence=alert['confidence'],
             message=alert['message'],
         )
-    deliver_email_alerts(triggered, event_id)
+    deliver_email_alerts(triggered, event_id, rules=zone_rules + effective_alert_rules())
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     email_rules = [
-        rule for rule in effective_alert_rules()
+        rule for rule in (zone_rules + effective_alert_rules())
         if rule.get('enabled', True) and rule.get('email_enabled') and str(rule.get('name') or '') in triggered_rule_names
     ]
     email_recipients = sorted({recipient for rule in email_rules for recipient in rule.get('email_recipients', [])})
@@ -772,7 +885,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         reason='Alert matched.' if triggered else 'Detections found, but no alert rule matched or rule is in cooldown.',
         detected_labels=raw_labels,
         matched_labels=matched_labels,
-        detections=object_detections,
+        detections=recording_detections,
         anpr_detections=anpr_detections,
         triggered_alerts=triggered,
         event_id=event_id,
@@ -887,7 +1000,7 @@ def log_detector_initialization(context: str = 'startup') -> None:
 
 PUBLIC_PREFIXES = ('/static/',)
 PUBLIC_PATHS = {'/favicon.ico', '/login', '/setup'}
-ADMIN_PATHS = {'/settings', '/alert-settings', '/system-settings', '/users'}
+ADMIN_PATHS = {'/settings', '/alert-settings', '/system-settings', '/users', '/zones'}
 MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
 
@@ -1073,14 +1186,14 @@ def recording_skip_reason(detections: list[dict[str, Any]], recording_config: di
     return f'Recording policy skipped this event. Detected labels: {labels}. Mode: {mode}.'
 
 
-def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int) -> None:
+def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: list[dict[str, Any]] | None = None) -> None:
     if not triggered:
         return
     event = database.get_event(event_id) or {}
     metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
     camera_name = str(metadata.get('camera_name') or '').strip() or None
     camera_id = str(metadata.get('camera_id') or '').strip() or None
-    rules_by_name = {str(rule.get('name')): rule for rule in effective_alert_rules()}
+    rules_by_name = {str(rule.get('name')): rule for rule in (rules or effective_alert_rules())}
     mailer = EmailAlertService(effective_email_alert_settings())
     for alert in triggered:
         rule = rules_by_name.get(str(alert.get('rule_name')))
@@ -1259,6 +1372,8 @@ def render_live_snapshot_jpeg_overlay(image_bytes: bytes, detections: list[dict[
         return image_bytes
     height, width = image.shape[:2]
     for detection in detections:
+        if detection.get('alert_matched', detection.get('alert_triggered')) is False:
+            continue
         box = detection.get('box') or {}
         x = int(max(0, min(1, float(box.get('x') or 0))) * width)
         y = int(max(0, min(1, float(box.get('y') or 0))) * height)
@@ -1593,6 +1708,14 @@ def live_page():
     live_path = web_dir / 'live.html'
     if live_path.exists():
         return FileResponse(live_path)
+    return root()
+
+
+@app.get('/zones')
+def zones_page():
+    zones_path = web_dir / 'zones.html'
+    if zones_path.exists():
+        return FileResponse(zones_path)
     return root()
 
 
