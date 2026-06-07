@@ -139,7 +139,10 @@ function recordingFilterTokens(recording) {
 function matchesRecordingFilter(recording, filterValue) {
   const normalized = String(filterValue || '').trim().toLowerCase();
   if (!normalized) return true;
-  if (normalized === 'motion') return ['motion', 'human', 'alert'].includes(recordingTriggerType(recording));
+  if (normalized === 'motion') {
+    const triggerType = recordingTriggerType(recording);
+    return !['continuous', 'off', 'none'].includes(triggerType);
+  }
   return recordingFilterTokens(recording).has(normalized);
 }
 
@@ -201,6 +204,9 @@ function populateFilterOptions(recordings) {
     addOption(displayLabel, titleCase(displayLabel));
     recordingDetectionLabels(recording).forEach((label) => addOption(label, titleCase(label)));
   });
+  if (recordings.length) {
+    addOption('motion', 'Motion');
+  }
 
   const ordered = [options[0], ...options.slice(1).sort((left, right) => {
     if (left.value === 'motion') return -1;

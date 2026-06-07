@@ -472,63 +472,63 @@ input[type="file"] { padding: 10px; }
   border-radius: 12px;
 }
 
-.recording-timeline-layout {
+.timeline-shell .recording-timeline-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(360px, .85fr);
   gap: 18px;
   align-items: start;
 }
-.timeline-card {
+.timeline-shell .timeline-card {
   display: grid;
   gap: 18px;
 }
-.timeline-card .section-header {
+.timeline-shell .timeline-card .section-header {
   align-items: flex-start;
   gap: 10px;
 }
-.timeline-card .section-header h2 {
+.timeline-shell .timeline-card .section-header h2 {
   font-size: 22px;
 }
-.timeline-card .section-header .muted {
+.timeline-shell .timeline-card .section-header .muted {
   margin-top: 2px;
   max-width: 34ch;
   text-align: right;
 }
-.timeline-card .status-panel {
+.timeline-shell .timeline-card .status-panel {
   margin: 0;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-.timeline-controls {
+.timeline-shell .timeline-controls {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(180px, 220px) minmax(180px, 220px) auto;
   gap: 12px;
   align-items: end;
 }
-.timeline-controls label {
+.timeline-shell .timeline-controls label {
   display: grid;
   gap: 8px;
   min-width: 0;
   color: var(--muted);
   font-weight: 800;
 }
-.timeline-controls span {
+.timeline-shell .timeline-controls span {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .08em;
 }
-.timeline-summary {
+.timeline-shell .timeline-summary {
   margin: 0;
 }
-.timeline-summary strong {
+.timeline-shell .timeline-summary strong {
   font-size: 22px;
 }
-.timeline-legend {
+.timeline-shell .timeline-legend {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   min-height: 24px;
 }
-.timeline-legend-chip {
+.timeline-shell .timeline-legend-chip {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -540,26 +540,26 @@ input[type="file"] { padding: 10px; }
   font-weight: 800;
   font-size: 12px;
 }
-.timeline-legend-swatch {
+.timeline-shell .timeline-legend-swatch {
   width: 10px;
   height: 10px;
   border-radius: 999px;
   box-shadow: 0 0 0 3px rgba(255,255,255,.06);
 }
-.timeline-scroll {
+.timeline-shell .timeline-scroll {
   overflow-x: auto;
   padding-bottom: 6px;
 }
-.timeline-hours,
-.timeline-track {
+.timeline-shell .timeline-hours,
+.timeline-shell .timeline-track {
   min-width: 960px;
 }
-.timeline-hours {
+.timeline-shell .timeline-hours {
   position: relative;
   height: 34px;
   margin-bottom: 12px;
 }
-.timeline-hour {
+.timeline-shell .timeline-hour {
   position: absolute;
   top: 0;
   transform: translateX(-50%);
@@ -568,16 +568,16 @@ input[type="file"] { padding: 10px; }
   font-weight: 800;
   white-space: nowrap;
 }
-.timeline-hour.minor {
+.timeline-shell .timeline-hour.minor {
   display: none;
 }
-.timeline-hour:first-child {
+.timeline-shell .timeline-hour:first-child {
   transform: translateX(0);
 }
-.timeline-hour:last-child {
+.timeline-shell .timeline-hour:last-child {
   transform: translateX(-100%);
 }
-.timeline-track {
+.timeline-shell .timeline-track {
   position: relative;
   min-height: 112px;
   border: 1px solid var(--border);
@@ -586,32 +586,32 @@ input[type="file"] { padding: 10px; }
   box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
   overflow: hidden;
 }
-.timeline-grid,
-.timeline-rows {
+.timeline-shell .timeline-grid,
+.timeline-shell .timeline-rows {
   position: relative;
   min-height: 112px;
 }
-.timeline-grid {
+.timeline-shell .timeline-grid {
   position: absolute;
   inset: 0;
 }
-.timeline-grid-line {
+.timeline-shell .timeline-grid-line {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 1px;
   background: rgba(255,255,255,.09);
 }
-.timeline-grid-line:first-child,
-.timeline-grid-line:last-child {
+.timeline-shell .timeline-grid-line:first-child,
+.timeline-shell .timeline-grid-line:last-child {
   background: rgba(71,214,255,.24);
 }
-.timeline-empty {
+.timeline-shell .timeline-empty {
   display: grid;
   place-items: center;
   min-height: 112px;
 }
-.timeline-segment {
+.timeline-shell .timeline-segment {
   position: absolute;
   height: 30px;
   min-width: 10px;
@@ -627,25 +627,25 @@ input[type="file"] { padding: 10px; }
   box-shadow: 0 10px 24px rgba(0,0,0,.22);
   overflow: hidden;
 }
-.timeline-segment:hover,
-.timeline-segment.active {
+.timeline-shell .timeline-segment:hover,
+.timeline-shell .timeline-segment.active {
   border-color: rgba(255,255,255,.38);
   transform: translateY(-1px);
 }
-.timeline-segment-label,
-.timeline-segment-time {
+.timeline-shell .timeline-segment-label,
+.timeline-shell .timeline-segment-time {
   font-size: 10px;
   font-weight: 900;
   white-space: nowrap;
 }
-.timeline-segment-time {
+.timeline-shell .timeline-segment-time {
   color: rgba(237,243,255,.78);
 }
-.timeline-recordings {
+.timeline-shell .timeline-recordings {
   gap: 10px;
   max-height: 260px;
 }
-.timeline-recording-item {
+.timeline-shell .timeline-recording-item {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -658,26 +658,26 @@ input[type="file"] { padding: 10px; }
   gap: 12px;
   text-align: left;
 }
-.timeline-recording-item:hover,
-.timeline-recording-item.active {
+.timeline-shell .timeline-recording-item:hover,
+.timeline-shell .timeline-recording-item.active {
   border-color: rgba(71,214,255,.35);
   background: rgba(71,214,255,.1);
 }
-.timeline-recording-color {
+.timeline-shell .timeline-recording-color {
   width: 10px;
   height: 44px;
   border-radius: 999px;
 }
-.timeline-recording-main {
+.timeline-shell .timeline-recording-main {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
-.timeline-recording-main strong {
+.timeline-shell .timeline-recording-main strong {
   font-size: 14px;
 }
-.timeline-recording-main span,
-.timeline-recording-meta {
+.timeline-shell .timeline-recording-main span,
+.timeline-shell .timeline-recording-meta {
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
@@ -712,13 +712,13 @@ input[type="file"] { padding: 10px; }
 
 @media (max-width: 900px) {
   .recordings-player-card { position: static; }
-  .recording-timeline-layout {
+  .timeline-shell .recording-timeline-layout {
     grid-template-columns: 1fr;
   }
-  .timeline-controls {
+  .timeline-shell .timeline-controls {
     grid-template-columns: 1fr;
   }
-  .timeline-recording-item {
+  .timeline-shell .timeline-recording-item {
     grid-template-columns: 10px minmax(0, 1fr);
   }
 }
