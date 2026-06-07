@@ -13,6 +13,7 @@ logger = logging.getLogger('daygle.ai')
 # Cached library handles discovered on first VideoCapture open.
 _avutil_libs: list[Any] = []
 _avutil_libs_searched = False
+_avutil_lock = threading.Lock()
 
 
 def _configure_ffmpeg_log_level() -> None:
@@ -40,55 +41,62 @@ def _configure_ffmpeg_log_level() -> None:
     }
     level = level_map.get(level_name)
     if level is None:
-        logger.warning('Unknown DAYGLE_FFMPEG_LOGLEVEL=%s; keeping FFmpeg defaults.', level_name)
+        logger.warning('Unknown DAYGLE_FFMPEG_LOGLEVEL=%s; log level unchanged.', level_name)
         return
 
     # Discover libavutil handles once; after that just re-apply the level.
+    # Double-checked locking keeps this safe when multiple camera threads
+    # each open a VideoCapture concurrently.
     if not _avutil_libs_searched:
-        _avutil_libs_searched = True
-        import glob as _glob
+        with _avutil_lock:
+            if not _avutil_libs_searched:
+                import glob as _glob
 
-        lib_paths: list[str] = []
+                lib_paths: list[str] = []
 
-        # opencv-python-headless bundles its own copy of FFmpeg. The system
-        # libavutil is a separate shared-library instance, so calling
-        # av_log_set_level on it has no effect on OpenCV's decoder output.
-        # Search the cv2 package directory for the bundled libavutil first.
-        try:
-            import importlib.util as _ilu
-            _spec = _ilu.find_spec('cv2')
-            if _spec and _spec.origin:
-                _pkg_dir = os.path.dirname(_spec.origin)
-                for _d in [_pkg_dir, os.path.join(_pkg_dir, '.libs')]:
-                    lib_paths.extend(sorted(_glob.glob(os.path.join(_d, 'libavutil*.so*'))))
-        except Exception:
-            pass
+                # opencv-python-headless bundles its own copy of FFmpeg. The system
+                # libavutil is a separate shared-library instance, so calling
+                # av_log_set_level on it has no effect on OpenCV's decoder output.
+                # Search the cv2 package directory for the bundled libavutil first.
+                try:
+                    import importlib.util as _ilu
+                    _spec = _ilu.find_spec('cv2')
+                    if _spec and _spec.origin:
+                        _pkg_dir = os.path.dirname(_spec.origin)
+                        for _d in [_pkg_dir, os.path.join(_pkg_dir, '.libs')]:
+                            lib_paths.extend(sorted(_glob.glob(os.path.join(_d, 'libavutil*.so*'))))
+                except Exception:
+                    pass
 
-        # Scan /proc/self/maps for any libavutil already mapped into this
-        # process (populated after cv2.VideoCapture() opens the stream).
-        try:
-            with open('/proc/self/maps') as _maps:
-                for _line in _maps:
-                    if 'libavutil' in _line and '.so' in _line:
-                        _parts = _line.rstrip().split()
-                        if _parts and _parts[-1].startswith('/') and _parts[-1] not in lib_paths:
-                            lib_paths.append(_parts[-1])
-        except Exception:
-            pass
+                # Scan /proc/self/maps for any libavutil already mapped into this
+                # process (populated after cv2.VideoCapture() opens the stream).
+                try:
+                    with open('/proc/self/maps') as _maps:
+                        for _line in _maps:
+                            if 'libavutil' in _line and '.so' in _line:
+                                _parts = _line.rstrip().split()
+                                if _parts and _parts[-1].startswith('/') and _parts[-1] not in lib_paths:
+                                    lib_paths.append(_parts[-1])
+                except Exception:
+                    pass
 
-        # Fall back to the system-installed library.
-        _system_lib = ctypes.util.find_library('avutil')
-        if _system_lib and _system_lib not in lib_paths:
-            lib_paths.append(_system_lib)
+                # Fall back to the system-installed library.
+                _system_lib = ctypes.util.find_library('avutil')
+                if _system_lib and _system_lib not in lib_paths:
+                    lib_paths.append(_system_lib)
 
-        for lib_name in lib_paths:
-            try:
-                avutil = ctypes.CDLL(lib_name)
-                avutil.av_log_set_level.argtypes = [ctypes.c_int]
-                avutil.av_log_set_level.restype = None
-                _avutil_libs.append(avutil)
-            except Exception as exc:
-                logger.debug('Unable to load avutil %s: %s', lib_name, exc)
+                for lib_name in lib_paths:
+                    try:
+                        avutil = ctypes.CDLL(lib_name)
+                        avutil.av_log_set_level.argtypes = [ctypes.c_int]
+                        avutil.av_log_set_level.restype = None
+                        _avutil_libs.append(avutil)
+                    except Exception as exc:
+                        logger.debug('Unable to load avutil %s: %s', lib_name, exc)
+
+                # Set the flag last so other threads never see a partially
+                # populated _avutil_libs list.
+                _avutil_libs_searched = True
 
     for avutil in _avutil_libs:
         try:
