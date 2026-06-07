@@ -5,23 +5,12 @@ const els = {
   totalEvents: document.getElementById('totalEvents'),
   totalAlerts: document.getElementById('totalAlerts'),
   frameNumber: document.getElementById('frameNumber'),
-  userMenuBtn: document.getElementById('userMenuBtn'),
-  usersLink: document.getElementById('usersLink'),
-  settingsLink: document.getElementById('settingsLink'),
-  alertSettingsLink: document.getElementById('alertSettingsLink'),
-  systemSettingsLink: document.getElementById('systemSettingsLink'),
   searchBtn: document.getElementById('searchBtn'),
   clearBtn: document.getElementById('clearBtn'),
   searchInput: document.getElementById('searchInput'),
   events: document.getElementById('events'),
   alerts: document.getElementById('alerts'),
   objectStats: document.getElementById('objectStats'),
-  recordings: document.getElementById('recordings'),
-  recordingFilter: document.getElementById('recordingFilter'),
-  recordingSearchBtn: document.getElementById('recordingSearchBtn'),
-  recordingClearBtn: document.getElementById('recordingClearBtn'),
-  clipPlayer: document.getElementById('clipPlayer'),
-  clipPlayerStatus: document.getElementById('clipPlayerStatus'),
   plateFilter: document.getElementById('plateFilter'),
   plateSearchBtn: document.getElementById('plateSearchBtn'),
   plateClearBtn: document.getElementById('plateClearBtn'),
@@ -30,15 +19,10 @@ const els = {
   deleteAllObjectsBtn: document.getElementById('deleteAllObjectsBtn'),
   deleteAllEventsBtn: document.getElementById('deleteAllEventsBtn'),
   deleteAllAlertsBtn: document.getElementById('deleteAllAlertsBtn'),
-  deleteAllRecordingsBtn: document.getElementById('deleteAllRecordingsBtn'),
   deleteAllPlatesBtn: document.getElementById('deleteAllPlatesBtn'),
 };
 
 let authState = { user: null, csrfToken: null };
-let recordingRefreshTimer = null;
-['userMenuBtn', 'usersLink', 'settingsLink', 'alertSettingsLink', 'systemSettingsLink'].forEach((key) => {
-  if (!els[key]) els[key] = { hidden: false, textContent: '' };
-});
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -94,21 +78,22 @@ function eventSourceLabel(event) {
   return String(event?.source || 'unknown');
 }
 
-function recordingSourceLabel(recording) {
-  const metadata = recording?.event?.metadata || {};
-  const fromMetadata = cameraLabel(metadata.camera_name, metadata.camera_id);
-  if (fromMetadata) return fromMetadata;
-  const fromRecording = cameraLabel('', recording?.camera_id);
-  if (fromRecording) return fromRecording;
-  return String(recording?.source || 'unknown');
-}
-
 function detectionBadges(detections = []) {
   if (!detections.length) return '<span class="muted">No detections</span>';
   return detections.map((d) => {
     const confidence = Math.round((d.confidence || 0) * 100);
     return `<span class="detection">${escapeHtml(d.label)} · ${confidence}%</span>`;
   }).join('');
+}
+
+function plateBadges(plateEvents = []) {
+  if (!plateEvents.length) return '';
+  return plateEvents.map((p) => `<span class="detection">${escapeHtml(p.plate_number)} ${Math.round((p.confidence || 0) * 100)}%</span>`).join('');
+}
+
+function recordingLink(recordings = []) {
+  if (!recordings.length) return '<span class="muted">Recording: none</span>';
+  return recordings.map((recording) => `<a class="link-button" href="/recordings?recording_id=${recording.id}">Recording #${recording.id}</a>`).join('');
 }
 
 function renderEvents(events) {
@@ -131,11 +116,6 @@ function renderEvents(events) {
       </div>
     </div>
   `).join('');
-}
-
-function recordingLink(recordings = []) {
-  if (!recordings.length) return '<span class="muted">Recording: none</span>';
-  return recordings.map((recording) => `<a class="link-button" href="/recordings?recording_id=${recording.id}">Recording #${recording.id}</a>`).join('');
 }
 
 function renderAlerts(alerts) {
@@ -170,234 +150,8 @@ function renderObjectStats(objects = []) {
     button.addEventListener('click', () => {
       els.searchInput.value = button.dataset.label;
       loadEvents(button.dataset.label);
-      if (els.recordings) loadRecordings(button.dataset.label);
     });
   });
-}
-
-
-function renderRecordings(recordings) {
-  if (!els.recordings) return;
-  if (!recordings.length) {
-    els.recordings.innerHTML = '<div class="empty">No enabled alert recordings yet.</div>';
-    return;
-  }
-
-  els.recordings.innerHTML = recordings.map((recording) => {
-    const eventLabel = recording.event_id ? `Event #${recording.event_id}` : 'No linked event';
-    const fileName = (recording.file_path || '').split('/').pop();
-    const mediaReady = recording.media_ready !== false;
-    return `
-      <div class="item">
-        <div class="item-title">
-          <span>Recording #${recording.id} · ${escapeHtml(eventLabel)}</span>
-          <span>${formatDate(recording.started_at)}</span>
-        </div>
-        <div>${detectionBadges(recording.detections)}</div>
-        <div>${plateBadges(recording.plate_events)}</div>
-        <p class="muted">Duration: ${Number(recording.duration_seconds || 0).toFixed(1)}s · Camera: ${escapeHtml(recordingSourceLabel(recording))} · Trigger: ${escapeHtml(recording.trigger_type || 'motion')} ${escapeHtml(recording.trigger_label || '')} · ${escapeHtml(fileName)}</p>
-        <button class="secondary" data-play-recording="${recording.id}" ${mediaReady ? '' : 'disabled'}>${mediaReady ? 'Play Clip' : 'Preparing Clip...'}</button>
-        <button class="secondary delete-btn" data-delete-recording="${recording.id}">Delete</button>
-      </div>
-    `;
-  }).join('');
-  if (recordings.some((recording) => recording.media_ready === false)) {
-    clearTimeout(recordingRefreshTimer);
-    recordingRefreshTimer = setTimeout(() => loadRecordings(els.recordingFilter.value.trim()), 3000);
-  } else {
-    clearTimeout(recordingRefreshTimer);
-    recordingRefreshTimer = null;
-  }
-}
-
-function bindPlaybackButtons() {
-  if (!els.clipPlayer) return;
-  document.querySelectorAll('[data-play-recording]').forEach((button) => {
-    button.addEventListener('click', () => {
-      playRecording(button.dataset.playRecording);
-    });
-  });
-}
-
-function bindDeleteButtons() {
-  document.querySelectorAll('[data-delete-event]').forEach((button) => {
-    button.addEventListener('click', async () => {
-      if (!confirm(`Delete event #${button.dataset.deleteEvent}? This cannot be undone.`)) return;
-      try {
-        await api(`/api/events/${button.dataset.deleteEvent}`, { method: 'DELETE' });
-        const tasks = [loadStats(), loadEvents(els.searchInput.value.trim())];
-        if (els.recordings) tasks.push(loadRecordings(els.recordingFilter.value.trim()));
-        await Promise.all(tasks);
-        bindDeleteButtons();
-        bindPlaybackButtons();
-      } catch (error) {
-        alert(`Failed to delete event: ${error.message}`);
-      }
-    });
-  });
-  document.querySelectorAll('[data-delete-recording]').forEach((button) => {
-    if (!els.recordings) return;
-    button.addEventListener('click', async () => {
-      if (!confirm(`Delete recording #${button.dataset.deleteRecording}? This cannot be undone.`)) return;
-      try {
-        await api(`/api/recordings/${button.dataset.deleteRecording}`, { method: 'DELETE' });
-        await loadRecordings(els.recordingFilter.value.trim());
-        bindDeleteButtons();
-        bindPlaybackButtons();
-      } catch (error) {
-        alert(`Failed to delete recording: ${error.message}`);
-      }
-    });
-  });
-  document.querySelectorAll('[data-delete-plate]').forEach((button) => {
-    button.addEventListener('click', async () => {
-      if (!confirm(`Delete plate #${button.dataset.deletePlate}? This cannot be undone.`)) return;
-      try {
-        await api(`/api/plates/${button.dataset.deletePlate}`, { method: 'DELETE' });
-        await Promise.all([loadPlates(), searchPlateSightings(els.plateFilter.value.trim())]);
-        bindDeleteButtons();
-      } catch (error) {
-        alert(`Failed to delete plate: ${error.message}`);
-      }
-    });
-  });
-}
-
-async function playRecording(id) {
-  if (!els.clipPlayer) {
-    window.location.href = `/recordings?recording_id=${encodeURIComponent(id)}`;
-    return;
-  }
-  if (!id) return;
-  const recording = await api(`/api/recordings/${id}`);
-  if (recording.media_ready === false) {
-    els.clipPlayerStatus.textContent = `Recording #${id} is still being prepared. Try again in a few seconds.`;
-    return;
-  }
-  const clipUrl = `/api/recordings/${id}/stream?t=${Date.now()}`;
-  els.clipPlayerStatus.textContent = `Loading recording #${id}...`;
-  els.clipPlayer.pause();
-  els.clipPlayer.src = clipUrl;
-  els.clipPlayer.load();
-  try {
-    await els.clipPlayer.play();
-    els.clipPlayerStatus.textContent = `Playing recording #${id}.`;
-  } catch (error) {
-    if (error?.name === 'AbortError') {
-      els.clipPlayerStatus.textContent = `Recording #${id} loaded. Press play to start.`;
-      return;
-    }
-    if (error?.name === 'NotAllowedError') {
-      els.clipPlayerStatus.textContent = `Recording #${id} loaded. Press play to start.`;
-      return;
-    }
-    els.clipPlayerStatus.textContent = `Unable to play recording #${id}: ${error?.message || 'media playback failed'}.`;
-  }
-}
-
-els.clipPlayer?.addEventListener('error', () => {
-  const error = els.clipPlayer.error;
-  const messages = {
-    1: 'Playback was aborted.',
-    2: 'The recording could not be downloaded.',
-    3: 'The recording could not be decoded by this browser.',
-    4: 'The recording format is not supported by this browser.',
-  };
-  els.clipPlayerStatus.textContent = messages[error?.code] || 'Unable to play this recording.';
-});
-
-async function loadAuth() {
-  const authInfo = await api('/api/auth/me');
-  authState = { user: authInfo.user, csrfToken: authInfo.csrf_token };
-  els.userMenuBtn.textContent = `${authInfo.user.username} ▼`;
-  if (authInfo.user.role !== 'admin') {
-    els.usersLink.hidden = true;
-    els.settingsLink.hidden = true;
-    els.alertSettingsLink.hidden = true;
-    els.systemSettingsLink.hidden = true;
-    if (els.deleteAllObjectsBtn) els.deleteAllObjectsBtn.hidden = true;
-    if (els.deleteAllEventsBtn) els.deleteAllEventsBtn.hidden = true;
-    if (els.deleteAllAlertsBtn) els.deleteAllAlertsBtn.hidden = true;
-    if (els.deleteAllRecordingsBtn) els.deleteAllRecordingsBtn.hidden = true;
-    if (els.deleteAllPlatesBtn) els.deleteAllPlatesBtn.hidden = true;
-  } else {
-    if (els.deleteAllObjectsBtn) {
-      els.deleteAllObjectsBtn.hidden = false;
-      els.deleteAllObjectsBtn.addEventListener('click', async () => {
-        if (!confirm('Delete ALL object detections used by Object Search? This cannot be undone.')) return;
-        try {
-          await api('/api/objects', { method: 'DELETE' });
-          const tasks = [loadStats(), loadEvents(els.searchInput.value.trim())];
-          if (els.recordings) tasks.push(loadRecordings(els.recordingFilter.value.trim()));
-          await Promise.all(tasks);
-          bindDeleteButtons();
-          bindPlaybackButtons();
-        } catch (error) {
-          alert(`Failed to delete object detections: ${error.message}`);
-        }
-      });
-    }
-    if (els.deleteAllEventsBtn) {
-      els.deleteAllEventsBtn.hidden = false;
-      els.deleteAllEventsBtn.addEventListener('click', async () => {
-        if (!confirm('Delete ALL events? This cannot be undone.')) return;
-        try {
-          const result = await api('/api/events', { method: 'DELETE' });
-          const tasks = [loadStats(), loadEvents()];
-          if (els.recordings) tasks.push(loadRecordings());
-          await Promise.all(tasks);
-          bindPlaybackButtons();
-          bindDeleteButtons();
-        } catch (error) {
-          alert(`Failed to delete events: ${error.message}`);
-        }
-      });
-    }
-    if (els.deleteAllAlertsBtn) {
-      els.deleteAllAlertsBtn.hidden = false;
-      els.deleteAllAlertsBtn.addEventListener('click', async () => {
-        if (!confirm('Delete ALL alert history? This cannot be undone.')) return;
-        try {
-          await api('/api/alerts', { method: 'DELETE' });
-          await Promise.all([loadAlerts(), loadStats()]);
-        } catch (error) {
-          alert(`Failed to delete alert history: ${error.message}`);
-        }
-      });
-    }
-    if (els.deleteAllRecordingsBtn) {
-      els.deleteAllRecordingsBtn.hidden = false;
-      els.deleteAllRecordingsBtn.addEventListener('click', async () => {
-        if (!confirm('Delete ALL recordings? This will remove the media files too. Cannot be undone.')) return;
-        try {
-          const result = await api('/api/recordings', { method: 'DELETE' });
-          await loadRecordings();
-          bindPlaybackButtons();
-          bindDeleteButtons();
-        } catch (error) {
-          alert(`Failed to delete recordings: ${error.message}`);
-        }
-      });
-    }
-    if (els.deleteAllPlatesBtn) {
-      els.deleteAllPlatesBtn.hidden = false;
-      els.deleteAllPlatesBtn.addEventListener('click', async () => {
-        if (!confirm('Delete ALL plates and sightings? This cannot be undone.')) return;
-        try {
-          await api('/api/plates', { method: 'DELETE' });
-          await Promise.all([loadPlates(), searchPlateSightings(els.plateFilter.value.trim())]);
-          bindDeleteButtons();
-        } catch (error) {
-          alert(`Failed to delete plates: ${error.message}`);
-        }
-      });
-    }
-  }
-}
-
-function plateBadges(plateEvents = []) {
-  if (!plateEvents.length) return '';
-  return plateEvents.map((p) => `<span class="detection">${escapeHtml(p.plate_number)} ${Math.round((p.confidence || 0) * 100)}%</span>`).join('');
 }
 
 function renderPlates(plates = []) {
@@ -427,6 +181,96 @@ function renderPlateSightings(events = []) {
       <div>${recordingLink(event.event?.recordings || [])}</div>
     </div>
   `).join('');
+}
+
+function bindDeleteButtons() {
+  document.querySelectorAll('[data-delete-event]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (!confirm(`Delete event #${button.dataset.deleteEvent}? This cannot be undone.`)) return;
+      try {
+        await api(`/api/events/${button.dataset.deleteEvent}`, { method: 'DELETE' });
+        await Promise.all([loadStats(), loadEvents(els.searchInput.value.trim())]);
+        bindDeleteButtons();
+      } catch (error) {
+        alert(`Failed to delete event: ${error.message}`);
+      }
+    });
+  });
+  document.querySelectorAll('[data-delete-plate]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (!confirm(`Delete plate #${button.dataset.deletePlate}? This cannot be undone.`)) return;
+      try {
+        await api(`/api/plates/${button.dataset.deletePlate}`, { method: 'DELETE' });
+        await Promise.all([loadPlates(), searchPlateSightings(els.plateFilter.value.trim())]);
+        bindDeleteButtons();
+      } catch (error) {
+        alert(`Failed to delete plate: ${error.message}`);
+      }
+    });
+  });
+}
+
+async function loadAuth() {
+  const authInfo = await api('/api/auth/me');
+  authState = { user: authInfo.user, csrfToken: authInfo.csrf_token };
+  if (authInfo.user.role !== 'admin') {
+    if (els.deleteAllObjectsBtn) els.deleteAllObjectsBtn.hidden = true;
+    if (els.deleteAllEventsBtn) els.deleteAllEventsBtn.hidden = true;
+    if (els.deleteAllAlertsBtn) els.deleteAllAlertsBtn.hidden = true;
+    if (els.deleteAllPlatesBtn) els.deleteAllPlatesBtn.hidden = true;
+  } else {
+    if (els.deleteAllObjectsBtn) {
+      els.deleteAllObjectsBtn.hidden = false;
+      els.deleteAllObjectsBtn.addEventListener('click', async () => {
+        if (!confirm('Delete ALL object detections used by Object Search? This cannot be undone.')) return;
+        try {
+          await api('/api/objects', { method: 'DELETE' });
+          await Promise.all([loadStats(), loadEvents(els.searchInput.value.trim())]);
+          bindDeleteButtons();
+        } catch (error) {
+          alert(`Failed to delete object detections: ${error.message}`);
+        }
+      });
+    }
+    if (els.deleteAllEventsBtn) {
+      els.deleteAllEventsBtn.hidden = false;
+      els.deleteAllEventsBtn.addEventListener('click', async () => {
+        if (!confirm('Delete ALL events? This cannot be undone.')) return;
+        try {
+          await api('/api/events', { method: 'DELETE' });
+          await Promise.all([loadStats(), loadEvents()]);
+          bindDeleteButtons();
+        } catch (error) {
+          alert(`Failed to delete events: ${error.message}`);
+        }
+      });
+    }
+    if (els.deleteAllAlertsBtn) {
+      els.deleteAllAlertsBtn.hidden = false;
+      els.deleteAllAlertsBtn.addEventListener('click', async () => {
+        if (!confirm('Delete ALL alert history? This cannot be undone.')) return;
+        try {
+          await api('/api/alerts', { method: 'DELETE' });
+          await Promise.all([loadAlerts(), loadStats()]);
+        } catch (error) {
+          alert(`Failed to delete alert history: ${error.message}`);
+        }
+      });
+    }
+    if (els.deleteAllPlatesBtn) {
+      els.deleteAllPlatesBtn.hidden = false;
+      els.deleteAllPlatesBtn.addEventListener('click', async () => {
+        if (!confirm('Delete ALL plates and sightings? This cannot be undone.')) return;
+        try {
+          await api('/api/plates', { method: 'DELETE' });
+          await Promise.all([loadPlates(), searchPlateSightings(els.plateFilter.value.trim())]);
+          bindDeleteButtons();
+        } catch (error) {
+          alert(`Failed to delete plates: ${error.message}`);
+        }
+      });
+    }
+  }
 }
 
 async function loadStatus() {
@@ -459,8 +303,7 @@ async function loadStats() {
 async function loadEvents(label = '') {
   const params = new URLSearchParams({ alerted_only: 'true' });
   if (label) params.set('label', label);
-  const path = `/api/events?${params.toString()}`;
-  renderEvents(await api(path));
+  renderEvents(await api(`/api/events?${params.toString()}`));
 }
 
 async function loadAlerts() {
@@ -469,15 +312,6 @@ async function loadAlerts() {
   if (els.deleteAllAlertsBtn && authState.user?.role === 'admin') {
     els.deleteAllAlertsBtn.hidden = alerts.length === 0;
   }
-}
-
-async function loadRecordings(label = '') {
-  if (!els.recordings) return;
-  const params = new URLSearchParams({ alerted_only: 'true' });
-  if (label) params.set('label', label);
-  const path = `/api/recordings?${params.toString()}`;
-  renderRecordings(await api(path));
-  bindPlaybackButtons();
 }
 
 async function loadPlates() {
@@ -489,33 +323,22 @@ async function loadPlates() {
 }
 
 async function searchPlateSightings(query = '') {
-  const path = query ? `/api/plates/search?q=${encodeURIComponent(query)}` : '/api/plates/search?q=';
-  renderPlateSightings(await api(path));
-  bindPlaybackButtons();
+  const q = query ? encodeURIComponent(query) : '';
+  renderPlateSightings(await api(`/api/plates/search?q=${q}`));
 }
 
 async function refreshAll() {
-  const tasks = [loadStatus(), loadStats(), loadEvents(), loadAlerts(), loadPlates(), searchPlateSightings()];
-  if (els.recordings) tasks.push(loadRecordings());
-  await Promise.all(tasks);
-  bindPlaybackButtons();
+  await Promise.all([loadStatus(), loadStats(), loadEvents(), loadAlerts(), loadPlates(), searchPlateSightings()]);
   bindDeleteButtons();
 }
 
 els.searchBtn.addEventListener('click', () => {
   const label = els.searchInput.value.trim();
-  loadEvents(label).then(() => { bindDeleteButtons(); bindPlaybackButtons(); });
-  if (els.recordings) loadRecordings(label).then(() => { bindPlaybackButtons(); bindDeleteButtons(); });
+  loadEvents(label).then(() => bindDeleteButtons());
 });
 els.clearBtn.addEventListener('click', () => {
   els.searchInput.value = '';
-  loadEvents().then(() => { bindDeleteButtons(); bindPlaybackButtons(); });
-  if (els.recordings) loadRecordings().then(() => { bindPlaybackButtons(); bindDeleteButtons(); });
-});
-els.recordingSearchBtn?.addEventListener('click', () => loadRecordings(els.recordingFilter.value.trim()).then(() => { bindPlaybackButtons(); bindDeleteButtons(); }));
-els.recordingClearBtn?.addEventListener('click', () => {
-  els.recordingFilter.value = '';
-  loadRecordings().then(() => { bindPlaybackButtons(); bindDeleteButtons(); });
+  loadEvents().then(() => bindDeleteButtons());
 });
 els.plateSearchBtn.addEventListener('click', () => searchPlateSightings(els.plateFilter.value.trim()));
 els.plateClearBtn.addEventListener('click', () => {
@@ -524,14 +347,7 @@ els.plateClearBtn.addEventListener('click', () => {
   searchPlateSightings();
 });
 els.searchInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    const label = els.searchInput.value.trim();
-    loadEvents(label);
-    if (els.recordings) loadRecordings(label);
-  }
-});
-els.recordingFilter?.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') loadRecordings(els.recordingFilter.value.trim());
+  if (event.key === 'Enter') loadEvents(els.searchInput.value.trim());
 });
 
 loadAuth().then(refreshAll);
