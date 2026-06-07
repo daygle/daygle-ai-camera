@@ -1349,6 +1349,80 @@ def test_opencv_stream_camera_reuses_rtsp_capture(monkeypatch):
     assert 'fflags;discardcorrupt' in os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS']
 
 
+def test_opencv_stream_camera_applies_ffmpeg_log_level_after_each_videocapture(monkeypatch):
+    """_configure_ffmpeg_log_level must be called after every VideoCapture
+    construction — including on reconnect — so FFmpeg's own init cannot reset
+    the quiet level back to a noisy default."""
+    import app.camera_backend as camera_backend
+    from app.camera_backend import OpenCvStreamCamera
+
+    log_level_call_counts = []  # records len(FakeCapture.instances) at each call
+
+    class FakeImage:
+        shape = (720, 1280, 3)
+
+    class FakeEncoded:
+        def tobytes(self):
+            return b'jpeg'
+
+    class FakeCapture:
+        instances: list = []
+
+        def __init__(self, _stream_url):
+            FakeCapture.instances.append(self)
+            self._reads = 0
+
+        def set(self, _prop, _value):
+            pass
+
+        def isOpened(self):
+            return True
+
+        def grab(self):
+            return True
+
+        def read(self):
+            self._reads += 1
+            # First capture fails its first read to trigger a reconnect.
+            if len(FakeCapture.instances) == 1 and self._reads == 1:
+                return False, None
+            return True, FakeImage()
+
+        def release(self):
+            pass
+
+    class FakeCv2:
+        CAP_PROP_BUFFERSIZE = 38
+
+        @staticmethod
+        def VideoCapture(stream_url):
+            return FakeCapture(stream_url)
+
+        @staticmethod
+        def imencode(_ext, _img):
+            return True, FakeEncoded()
+
+    monkeypatch.setitem(sys.modules, 'cv2', FakeCv2)
+    monkeypatch.delenv('OPENCV_FFMPEG_CAPTURE_OPTIONS', raising=False)
+    monkeypatch.setattr(
+        camera_backend,
+        '_configure_ffmpeg_log_level',
+        lambda: log_level_call_counts.append(len(FakeCapture.instances)),
+    )
+
+    camera = OpenCvStreamCamera('rtsp://example/stream')
+    FakeCapture.instances.clear()
+    camera.read_jpeg()
+
+    # Initial open + reconnect should each create one VideoCapture.
+    assert len(FakeCapture.instances) == 2, "expected reconnect to create a second VideoCapture"
+    # _configure_ffmpeg_log_level must have been called once per VideoCapture.
+    assert len(log_level_call_counts) == 2, f"expected 2 calls, got {len(log_level_call_counts)}"
+    # Each call must have happened *after* the corresponding VideoCapture was built.
+    assert log_level_call_counts[0] == 1, "first call must see 1 VideoCapture instance"
+    assert log_level_call_counts[1] == 2, "second call must see 2 VideoCapture instances"
+
+
 def test_live_stream_detection_triggers_email_alert(tmp_path, monkeypatch):
     _app, _database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
