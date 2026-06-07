@@ -499,6 +499,11 @@ input[type="file"] { padding: 10px; }
   padding: 8px 10px;
   border-radius: 12px;
 }
+.clip-overlay-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
 
 .recording-timeline-layout {
   display: grid;

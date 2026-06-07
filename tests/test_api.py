@@ -112,6 +112,13 @@ def _post_test_image_detection(client: LocalClient, csrf_token: str | None = Non
     return client.request(path, method='POST', data=TEST_IMAGE_PNG, headers=headers)
 
 
+def _post_frame_detection(client: LocalClient, csrf_token: str | None = None):
+    headers = {'Content-Type': 'image/png'}
+    if csrf_token:
+        headers['X-CSRF-Token'] = csrf_token
+    return client.request('/api/detect/frame', method='POST', data=TEST_IMAGE_PNG, headers=headers)
+
+
 def _body(response):
     data = response.read()
     if "application/json" in response.headers.get("content-type", ""):
@@ -595,6 +602,13 @@ def test_setup_login_success_session_validation_and_protected_routes(tmp_path, m
         status, _headers, created = _post_test_image_detection(client, csrf)
         assert status == 200
         assert created["created"] is True
+
+        status, _headers, _frame_blocked = _post_frame_detection(client)
+        assert status == 403
+        status, _headers, frame_payload = _post_frame_detection(client, csrf)
+        assert status == 200
+        assert isinstance(frame_payload["detections"], list)
+        assert frame_payload["count"] == len(frame_payload["detections"])
 
         assert client.request("/api/events")[0] == 200
         assert client.request("/api/alerts")[0] == 200

@@ -9,6 +9,7 @@ const els = {
   deleteAllRecordingsBtn: document.getElementById('deleteAllRecordingsBtn'),
   clipOverlay: document.getElementById('clipOverlay'),
   clipOverlayToggle: document.getElementById('clipOverlayToggle'),
+  clipOverlayTrackToggle: document.getElementById('clipOverlayTrackToggle'),
   clipOverlayOffset: document.getElementById('clipOverlayOffset'),
 };
 
@@ -17,11 +18,20 @@ let recordingRefreshTimer = null;
 let activeRecording = null;
 let overlayResizeObserver = null;
 const OVERLAY_TOGGLE_KEY = 'daygle.recordings.overlay.enabled';
+const OVERLAY_TRACK_KEY = 'daygle.recordings.overlay.track.enabled';
 const OVERLAY_OFFSET_KEY = 'daygle.recordings.overlay.offset.seconds';
 let overlayEnabled = true;
+let overlayTrackEnabled = false;
 let overlayOffsetSeconds = 0;
 const EVENT_OVERLAY_WINDOW_SECONDS = 2.0;
 const GENERIC_TRIGGER_LABELS = new Set(['motion', 'alert', 'human', 'object', 'none', 'off', 'continuous']);
+const OVERLAY_TRACK_INTERVAL_MS = 420;
+const OVERLAY_TRACK_MAX_WIDTH = 640;
+const OVERLAY_TRACK_MAX_HEIGHT = 360;
+const overlayTrackCanvas = document.createElement('canvas');
+let overlayTrackLastRunMs = 0;
+let overlayTrackInFlight = false;
+let overlayTrackDetections = null;
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -176,6 +186,78 @@ function clearClipOverlay() {
   context.clearRect(0, 0, els.clipOverlay.width, els.clipOverlay.height);
 }
 
+function clearOverlayTrackDetections() {
+  overlayTrackDetections = null;
+  overlayTrackLastRunMs = 0;
+}
+
+function normalizeDetectionBox(box, width, height) {
+  const pixelX = Number(box?.x ?? 0);
+  const pixelY = Number(box?.y ?? 0);
+  const pixelWidth = Number(box?.width ?? 0);
+  const pixelHeight = Number(box?.height ?? 0);
+  if (!Number.isFinite(pixelX) || !Number.isFinite(pixelY) || !Number.isFinite(pixelWidth) || !Number.isFinite(pixelHeight)) {
+    return null;
+  }
+  if (pixelWidth <= 0 || pixelHeight <= 0 || width <= 0 || height <= 0) return null;
+  return {
+    x: Math.max(0, Math.min(1, pixelX / width)),
+    y: Math.max(0, Math.min(1, pixelY / height)),
+    width: Math.max(0, Math.min(1, pixelWidth / width)),
+    height: Math.max(0, Math.min(1, pixelHeight / height)),
+  };
+}
+
+async function detectOverlayFrameDetections() {
+  if (!overlayTrackEnabled || !activeRecording || !els.clipPlayer) return;
+  if (els.clipPlayer.readyState < 2 || els.clipPlayer.videoWidth <= 0 || els.clipPlayer.videoHeight <= 0) return;
+
+  const now = performance.now();
+  if (overlayTrackInFlight || now - overlayTrackLastRunMs < OVERLAY_TRACK_INTERVAL_MS) return;
+  overlayTrackLastRunMs = now;
+  overlayTrackInFlight = true;
+
+  try {
+    const sourceWidth = Number(els.clipPlayer.videoWidth || 0);
+    const sourceHeight = Number(els.clipPlayer.videoHeight || 0);
+    if (sourceWidth <= 0 || sourceHeight <= 0) return;
+    const scale = Math.min(1, OVERLAY_TRACK_MAX_WIDTH / sourceWidth, OVERLAY_TRACK_MAX_HEIGHT / sourceHeight);
+    const frameWidth = Math.max(1, Math.round(sourceWidth * scale));
+    const frameHeight = Math.max(1, Math.round(sourceHeight * scale));
+
+    overlayTrackCanvas.width = frameWidth;
+    overlayTrackCanvas.height = frameHeight;
+    const context = overlayTrackCanvas.getContext('2d');
+    if (!context) return;
+    context.drawImage(els.clipPlayer, 0, 0, frameWidth, frameHeight);
+
+    const blob = await new Promise((resolve) => {
+      overlayTrackCanvas.toBlob((value) => resolve(value), 'image/jpeg', 0.8);
+    });
+    if (!blob) return;
+
+    const payload = await api('/api/detect/frame', {
+      method: 'POST',
+      headers: { 'Content-Type': 'image/jpeg' },
+      body: blob,
+    });
+    const detections = Array.isArray(payload?.detections) ? payload.detections : [];
+    overlayTrackDetections = detections.map((detection) => {
+      const normalizedBox = normalizeDetectionBox(detection?.box || {}, frameWidth, frameHeight);
+      if (!normalizedBox) return null;
+      return {
+        ...detection,
+        box: normalizedBox,
+      };
+    }).filter(Boolean);
+  } catch (_error) {
+    // Keep the last successful overlay detections if transient frame inference fails.
+  } finally {
+    overlayTrackInFlight = false;
+    drawClipOverlay();
+  }
+}
+
 function resizeClipOverlay() {
   if (!els.clipOverlay || !els.clipPlayer) return;
   const width = Math.max(1, Math.round(els.clipPlayer.clientWidth));
@@ -202,10 +284,17 @@ function drawClipOverlay() {
   if (!overlayEnabled) return;
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-  const detections = Array.isArray(activeRecording?.detections) ? activeRecording.detections : [];
+  if (overlayTrackEnabled) {
+    detectOverlayFrameDetections();
+  }
+
+  const eventDetections = Array.isArray(activeRecording?.detections) ? activeRecording.detections : [];
+  const detections = overlayTrackEnabled && Array.isArray(overlayTrackDetections) && overlayTrackDetections.length
+    ? overlayTrackDetections
+    : eventDetections;
   if (!detections.length) return;
   const playerTime = Number(els.clipPlayer.currentTime || 0);
-  if (!shouldRenderOverlayForTime(activeRecording, playerTime)) return;
+  if (!overlayTrackEnabled && !shouldRenderOverlayForTime(activeRecording, playerTime)) return;
 
   const videoWidth = Math.max(1, Number(els.clipPlayer.videoWidth || cssWidth));
   const videoHeight = Math.max(1, Number(els.clipPlayer.videoHeight || cssHeight));
@@ -253,6 +342,7 @@ function drawClipOverlay() {
 async function playRecording(id) {
   const recording = await api(`/api/recordings/${id}`);
   activeRecording = recording;
+  clearOverlayTrackDetections();
   renderRecordingDetails(recording);
   if (recording.media_ready === false) {
     clearClipOverlay();
@@ -346,6 +436,18 @@ if (els.clipOverlayToggle) {
   els.clipOverlayToggle.addEventListener('change', () => {
     overlayEnabled = Boolean(els.clipOverlayToggle.checked);
     localStorage.setItem(OVERLAY_TOGGLE_KEY, overlayEnabled ? '1' : '0');
+    drawClipOverlay();
+  });
+}
+
+if (els.clipOverlayTrackToggle) {
+  const savedTrackValue = localStorage.getItem(OVERLAY_TRACK_KEY);
+  overlayTrackEnabled = savedTrackValue === '1';
+  els.clipOverlayTrackToggle.checked = overlayTrackEnabled;
+  els.clipOverlayTrackToggle.addEventListener('change', () => {
+    overlayTrackEnabled = Boolean(els.clipOverlayTrackToggle.checked);
+    localStorage.setItem(OVERLAY_TRACK_KEY, overlayTrackEnabled ? '1' : '0');
+    clearOverlayTrackDetections();
     drawClipOverlay();
   });
 }

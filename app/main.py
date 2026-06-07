@@ -489,6 +489,30 @@ def detection_overlap_ratio_with_zone_rect(detection: dict[str, Any], zone: dict
     zx1 = float(zone.get('x') or 0)
     zy1 = float(zone.get('y') or 0)
     zw = max(0.0, float(zone.get('width') or 0))
+
+
+    @app.post('/api/detect/frame')
+    async def detect_frame(request: Request):
+        image_bytes, _filename, _content_type = await _read_uploaded_image(request)
+        if not image_bytes:
+            raise HTTPException(status_code=400, detail='Uploaded image is empty')
+
+        ai_settings = effective_ai_config()
+        ai_state = ai_status_payload(ai_settings)
+        if ai_settings.get('backend') == 'onnx' and not ai_state['detector_loaded']:
+            raise HTTPException(status_code=400, detail=ai_state['last_detector_error'] or 'ONNX detector is not loaded.')
+        try:
+            detections = detector.detect_image(image_bytes)
+        except DetectorUnavailableError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        return {
+            'detections': detections,
+            'count': len(detections),
+            'ai_backend': ai_state['active_backend'],
+        }
     zh = max(0.0, float(zone.get('height') or 0))
     zx2 = zx1 + zw
     zy2 = zy1 + zh
