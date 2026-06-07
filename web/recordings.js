@@ -44,7 +44,18 @@ function formatDate(value) {
 
 function detectionBadges(detections = []) {
   if (!detections.length) return '<span class="muted">No detections</span>';
-  return detections.map((d) => `<span class="detection">${escapeHtml(d.label)} · ${Math.round((d.confidence || 0) * 100)}%</span>`).join('');
+  const normalized = detections
+    .map((detection) => ({
+      label: String(detection.label || '').trim().toLowerCase(),
+      confidence: Number(detection.confidence || 0),
+    }))
+    .filter((detection) => detection.label);
+  if (!normalized.length) return '<span class="muted">No detections</span>';
+  const hasSpecific = normalized.some((detection) => detection.label !== 'motion');
+  const visible = hasSpecific
+    ? normalized.filter((detection) => detection.label !== 'motion')
+    : normalized;
+  return visible.map((detection) => `<span class="detection">${escapeHtml(detection.label)} · ${Math.round(detection.confidence * 100)}%</span>`).join('');
 }
 
 function cameraLabel(recording) {

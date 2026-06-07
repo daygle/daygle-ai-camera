@@ -748,6 +748,7 @@ def extend_active_rtsp_recording(
     camera_id: str,
     event_time: str,
     recording_config: dict[str, Any] | None,
+    detections: list[dict[str, Any]] | None = None,
 ) -> int | None:
     try:
         event_dt = datetime.fromisoformat(str(event_time))
@@ -775,6 +776,23 @@ def extend_active_rtsp_recording(
         recording_id = int(session.get('recording_id'))
 
     database.update_recording_timing(recording_id, ended_at=ended_at, duration_seconds=duration_seconds)
+    if detections:
+        should_record, trigger_type, trigger_label = recording_service.should_record(detections, config)
+        if should_record and trigger_label:
+            current_recording = database.get_recording(recording_id) or {}
+            current_label = str(current_recording.get('trigger_label') or '').strip().lower()
+            current_type = str(current_recording.get('trigger_type') or '').strip().lower()
+            generic_labels = {'', 'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous'}
+            candidate_label = str(trigger_label).strip().lower()
+            if (
+                candidate_label not in generic_labels
+                and (current_label in generic_labels or current_type in {'motion', 'human'})
+            ):
+                database.update_recording_trigger(
+                    recording_id,
+                    trigger_type='alert' if trigger_type in {'motion', 'human'} else trigger_type,
+                    trigger_label=candidate_label,
+                )
     return recording_id
 
 
@@ -1014,6 +1032,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             camera_id=camera_id,
             event_time=datetime.now(timezone.utc).isoformat(),
             recording_config=camera_recording_config,
+            detections=recording_detections,
         )
         update_live_detection_status(
             camera_id,
@@ -1339,6 +1358,7 @@ def attach_event_recording(
             camera_id=camera_id,
             event_time=event_time,
             recording_config=recording_config,
+            detections=detections,
         )
         if extended_recording_id is not None:
             return extended_recording_id

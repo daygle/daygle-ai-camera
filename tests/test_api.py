@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from http.cookiejar import CookieJar
 from pathlib import Path
 from urllib.error import HTTPError
@@ -1494,6 +1495,56 @@ def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypat
     assert event is not None
     assert any(detection['label'] == 'motion' for detection in event['detections'])
 
+
+def test_extend_active_rtsp_recording_updates_trigger_label_to_specific_object(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    now = datetime.now(timezone.utc)
+    started_at = (now - timedelta(seconds=5)).isoformat()
+    ended_at = now.isoformat()
+    file_path = tmp_path / 'data' / 'recordings' / 'extend-trigger.mp4'
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(b'placeholder')
+
+    recording_id = main.database.add_recording(
+        event_id=None,
+        camera_id='camera-1',
+        started_at=started_at,
+        ended_at=ended_at,
+        duration_seconds=5.0,
+        file_path=str(file_path),
+        thumbnail_path=None,
+        source='rtsp',
+        created_at=started_at,
+        trigger_type='motion',
+        trigger_label='motion',
+    )
+
+    with main.active_rtsp_recordings_lock:
+        main.active_rtsp_recordings['camera-1'] = {
+            'recording_id': recording_id,
+            'start_capture_ts': (now - timedelta(seconds=5)).timestamp(),
+            'capture_deadline_ts': now.timestamp(),
+            'max_capture_deadline_ts': (now + timedelta(seconds=20)).timestamp(),
+        }
+
+    extended_id = main.extend_active_rtsp_recording(
+        camera_id='camera-1',
+        event_time=now.isoformat(),
+        recording_config={'enabled': True, 'mode': 'motion', 'record_on_alert': True, 'extension_step_seconds': 10},
+        detections=[{'label': 'dog', 'confidence': 0.88, 'alert_triggered': True}],
+    )
+
+    assert extended_id == recording_id
+    updated = main.database.get_recording(recording_id)
+    assert updated is not None
+    assert updated['trigger_label'] == 'dog'
+    assert updated['trigger_type'] == 'alert'
+
+    with main.active_rtsp_recordings_lock:
+        main.active_rtsp_recordings.pop('camera-1', None)
+
 def test_live_stream_detection_queue_runs_in_background_and_deduplicates(tmp_path, monkeypatch):
     _app, _database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
@@ -1806,6 +1857,35 @@ def test_rtsp_recording_metadata_can_skip_generated_placeholder(tmp_path):
     assert metadata['source'] == 'rtsp'
     assert metadata['file_path'].endswith('.mp4')
     assert not Path(metadata['file_path']).exists()
+
+
+def test_alert_recording_prefers_specific_object_label_over_motion(tmp_path):
+    from app.recordings import RecordingService
+
+    service = RecordingService({
+        'storage': {'recordings_dir': str(tmp_path / 'recordings')},
+        'recording': {
+            'enabled': True,
+            'mode': 'motion',
+            'record_on_alert': True,
+            'format': 'mp4',
+        },
+    })
+
+    metadata = service.event_recording_metadata(
+        43,
+        '2026-06-06T00:00:00+00:00',
+        'rtsp',
+        [
+            {'label': 'person', 'confidence': 0.91, 'alert_triggered': False},
+            {'label': 'motion', 'confidence': 0.99, 'alert_triggered': True},
+        ],
+        write_clip=False,
+    )
+
+    assert metadata is not None
+    assert metadata['trigger_type'] == 'alert'
+    assert metadata['trigger_label'] == 'person'
 
 
 def test_rtsp_recording_errors_redact_stream_password():

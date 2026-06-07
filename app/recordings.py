@@ -21,6 +21,7 @@ class RecordingService:
     VALID_MODES = {'off', 'continuous', 'motion', 'human', 'objects'}
     VALID_SOURCES = {'camera', 'upload', 'rtsp'}
     PLAYBACK_FORMAT = 'mp4'
+    GENERIC_TRIGGER_LABELS = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous'}
 
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
@@ -61,19 +62,31 @@ class RecordingService:
         labels = [label for label in labels if label]
         object_labels = {str(label).lower() for label in config.get('record_on_objects', [])}
 
+        def preferred_label(candidates: list[dict[str, Any]], *, allow_motion: bool = False) -> str | None:
+            sorted_candidates = sorted(candidates, key=lambda detection: float(detection.get('confidence') or 0), reverse=True)
+            for candidate in sorted_candidates:
+                label = str(candidate.get('label') or '').strip().lower()
+                if not label:
+                    continue
+                if not allow_motion and (label == 'motion' or label in self.GENERIC_TRIGGER_LABELS):
+                    continue
+                return label
+            return None
+
         if bool(config.get('continuous')) or mode == 'continuous':
             return True, 'continuous', labels[0] if labels else None
         if bool(config.get('record_on_alert', False)):
-            alert_labels = [
-                str(detection.get('label') or '').lower()
-                for detection in detections
-                if detection.get('alert_triggered') and detection.get('label')
-            ]
+            alert_detections = [detection for detection in detections if detection.get('alert_triggered') and detection.get('label')]
+            alert_labels = [str(detection.get('label') or '').lower() for detection in alert_detections]
             if alert_labels:
+                if alert_labels[0] == 'motion':
+                    specific_label = preferred_label(alert_detections) or preferred_label(detections)
+                    if specific_label:
+                        return True, 'alert', specific_label
                 return True, 'alert', alert_labels[0]
             return False, 'none', None
         if (mode == 'motion' or bool(config.get('record_on_motion', True))) and labels:
-            return True, 'motion', labels[0]
+            return True, 'motion', preferred_label(detections) or labels[0]
         if (mode == 'human' or bool(config.get('record_on_human', True))) and 'person' in labels:
             return True, 'human', 'person'
         for label in labels:

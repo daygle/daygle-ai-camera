@@ -295,6 +295,14 @@ class EventDatabase:
             )
             return cursor.rowcount > 0
 
+    def update_recording_trigger(self, recording_id: int, *, trigger_type: str, trigger_label: str | None) -> bool:
+        with self.connect() as db:
+            cursor = db.execute(
+                "UPDATE recordings SET trigger_type = ?, trigger_label = ? WHERE id = ?",
+                (str(trigger_type or 'motion'), str(trigger_label).strip().lower() if trigger_label else None, recording_id),
+            )
+            return cursor.rowcount > 0
+
     def delete_event(self, event_id: int) -> dict[str, Any] | None:
         with self.connect() as db:
             row = db.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
