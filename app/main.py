@@ -2412,15 +2412,20 @@ def _recording_timeline_segment(recording: dict[str, Any], day_start: datetime, 
 
     trigger_type = str(recording.get('trigger_type') or 'motion').strip().lower() or 'motion'
     trigger_label = str(recording.get('trigger_label') or '').strip().lower() or None
-    color_key = trigger_label or trigger_type
+    if trigger_type in {'motion', 'continuous', 'none', 'off'}:
+        display_label = trigger_type
+    elif trigger_type == 'human':
+        display_label = 'person'
+    else:
+        display_label = trigger_label or trigger_type
 
     return {
         **recording,
         'timeline_start_seconds': max(0.0, (visible_start - day_start).total_seconds()),
         'timeline_end_seconds': min(86400.0, (visible_end - day_start).total_seconds()),
         'timeline_duration_seconds': max(1.0, (visible_end - visible_start).total_seconds()),
-        'color_key': color_key,
-        'color_label': trigger_label or trigger_type,
+        'color_key': display_label,
+        'color_label': display_label,
     }
 
 

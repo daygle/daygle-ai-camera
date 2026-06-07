@@ -1973,20 +1973,48 @@ def test_recordings_timeline_returns_camera_day_segments(tmp_path, monkeypatch):
             trigger_label='person',
         )
 
+        motion_started_at = f'{target_day}T08:30:00+00:00'
+        motion_ended_at = f'{target_day}T08:30:10+00:00'
+        motion_event_id = main_module.database.add_event(
+            created_at=motion_started_at,
+            source='camera',
+            snapshot_path=None,
+            detections=[{'label': 'person', 'confidence': 0.88, 'box': {'x': 0.15, 'y': 0.25, 'width': 0.2, 'height': 0.25}}],
+            metadata={'camera_id': 'camera-1', 'camera_name': 'Primary Camera'},
+        )
+        motion_recording_id = main_module.database.add_recording(
+            event_id=motion_event_id,
+            camera_id='camera-1',
+            started_at=motion_started_at,
+            ended_at=motion_ended_at,
+            duration_seconds=10.0,
+            file_path=str(file_path.with_name('timeline-motion-test.mp4')),
+            thumbnail_path=None,
+            source='camera',
+            created_at=motion_started_at,
+            trigger_type='motion',
+            trigger_label='person',
+        )
+        Path(str(file_path.with_name('timeline-motion-test.mp4'))).write_bytes(b'not-a-real-video')
+
         status, _headers, payload = admin.request(f'/api/recordings/timeline?camera_id=camera-1&day={target_day}')
         assert status == 200
         assert payload['camera']['id'] == 'camera-1'
         assert payload['day'] == target_day
         assert payload['cameras']
-        assert len(payload['recordings']) == 1
+        assert len(payload['recordings']) == 2
 
-        segment = payload['recordings'][0]
+        segment = next(recording for recording in payload['recordings'] if recording['id'] == recording_id)
         assert segment['id'] == recording_id
         assert segment['timeline_start_seconds'] == 8 * 3600 + 15 * 60
         assert segment['timeline_end_seconds'] == 8 * 3600 + 15 * 60 + 12
         assert segment['timeline_duration_seconds'] == 12
         assert segment['color_key'] == 'person'
         assert segment['event']['metadata']['camera_id'] == 'camera-1'
+
+        motion_segment = next(recording for recording in payload['recordings'] if recording['id'] == motion_recording_id)
+        assert motion_segment['color_key'] == 'motion'
+        assert motion_segment['color_label'] == 'motion'
 
         status, _headers, empty_payload = admin.request('/api/recordings/timeline?camera_id=camera-1&day=2026-06-08')
         assert status == 200
