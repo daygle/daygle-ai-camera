@@ -232,7 +232,7 @@ SMTP settings are stored in SQLite under `app_settings.key = alert_email`. Alert
 
 ### System Settings
 
-Route: `/system-settings`
+Route: `/settings` (legacy `/system-settings` also works)
 
 - Camera: backend (`onvif` or `rtsp`), device label, stream URL or ONVIF host credentials, width, height, FPS, flip.
 - ANPR: enable/disable, OCR backend, confidence threshold, and vehicle labels.
@@ -246,7 +246,7 @@ Camera, ANPR, recording, storage, and login security settings are stored in SQLi
 
 #### P6S / ONVIF stream testing
 
-Most ONVIF-compatible cameras expose the video itself as an RTSP stream. To test a P6S-style camera while waiting for the OV5647, open `/system-settings`, set **Camera backend** to `onvif / RTSP`, and either:
+Most ONVIF-compatible cameras expose the video itself as an RTSP stream. To test a P6S-style camera while waiting for the OV5647, open `/settings`, set **Camera backend** to `onvif / RTSP`, and either:
 
 - paste the complete `stream_url`, for example `rtsp://username:password@192.168.1.50:554/stream1`; or
 - enter `host`, `username`, `password`, optional `port` (default `554`), and `path` so Daygle can build the RTSP URL.
@@ -346,7 +346,7 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `GET` | `/users` | Admin user management |
 | `GET` | `/settings` | Admin AI settings |
 | `GET` | `/alert-settings` | Admin alert and SMTP settings |
-| `GET` | `/system-settings` | Admin camera, recording, storage, and login settings |
+| `GET` | `/settings` | Admin camera, recording, storage, and login settings |
 | `GET` | `/anpr` | Plate search, history, details, and alert rules |
 | `GET` | `/api/auth/me` | Current user, CSRF token, and session expiry |
 | `PUT` | `/api/profile` | Update profile preferences |
@@ -413,7 +413,7 @@ Useful `app_settings` keys:
 
 The recording layer creates event-linked clips and dashboard playback wiring for live camera detections and uploaded-image tests.
 
-Recording policy is managed at `/system-settings`:
+Recording policy is managed at `/settings`:
 
 - `continuous`: record every detection event.
 - `motion`: record when any detection is present.
@@ -497,6 +497,6 @@ python -m pytest
 - **Setup redirects to login**: a user already exists; sign in with an admin account.
 - **Dashboard shows MODEL MISSING**: open `/settings`, download YOLOv8n ONNX or set a readable model path, then reload the detector.
 - **ONNX fails to load**: confirm model and labels paths are readable and ONNX Runtime is installed.
-- **Email alerts do not send**: open `/alert-settings`, check SMTP host/port/auth/from address, and confirm the rule has email enabled and recipients. Open `/system-settings` and confirm Live performance -> Background alerts is enabled so cat/person/object rules continue checking when the Live Cameras page is closed.
-- **Service cannot write data or models**: open `/system-settings` and check storage paths, then verify `/opt/daygle-ai-camera/models` and the configured data directory exist. The Debian and Armbian installers run the systemd service as root and grant write access to config, data, and models paths.
+- **Email alerts do not send**: open `/alert-settings`, check SMTP host/port/auth/from address, and confirm the rule has email enabled and recipients. Open `/settings` and confirm Live performance -> Background alerts is enabled so cat/person/object rules continue checking when the Live Cameras page is closed.
+- **Service cannot write data or models**: open `/settings` and check storage paths, then verify `/opt/daygle-ai-camera/models` and the configured data directory exist. The Debian and Armbian installers run the systemd service as root and grant write access to config, data, and models paths.
 - **Need service logs**: run `sudo journalctl -u daygle-ai-camera -f`.

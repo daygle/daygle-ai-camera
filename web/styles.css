@@ -160,6 +160,9 @@ textarea {
 .empty { color: var(--muted); padding: 12px; }
 
 .hero-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+/* Legacy page-header shortcut buttons are deprecated in favor of the top nav. */
+.hero > .hero-actions,
+.hero > .button-link { display: none !important; }
 .user-menu { position: relative; }
 .user-menu-panel {
   display: none;
