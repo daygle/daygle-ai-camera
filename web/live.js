@@ -19,7 +19,7 @@ const pageMode = document.querySelector('[data-live-page]')?.dataset.livePage ||
 const isZonesPage = pageMode === 'zones';
 const DEFAULT_SNAPSHOT_REFRESH_MS = 500;
 const DEFAULT_DETECTION_STATUS_REFRESH_MS = 2000;
-const CLOSE_DRAFT_DISTANCE = 0.035;
+const CLOSE_DRAFT_DISTANCE_PX = 20;
 let refreshTimer;
 let detectionStatusTimer;
 let snapshotRefreshMs = DEFAULT_SNAPSHOT_REFRESH_MS;
@@ -304,7 +304,7 @@ function renderCameraOptions() {
 function renderZoneBox(zone, index) {
   const selected = index === selectedZoneIndex ? ' selected' : '';
   const points = zone.points.map((point) => `${point.x * 100},${point.y * 100}`).join(' ');
-  const labelPoint = zone.points[0] || { x: zone.x, y: zone.y };
+  const labelPoint = { x: zone.x, y: zone.y };
   const handles = zone.points.map((point, pointIndex) => (
     `<i class="zone-handle zone-point-handle" data-zone-index="${index}" data-point-index="${pointIndex}" style="left:${point.x * 100}%;top:${point.y * 100}%"></i>`
   )).join('');
@@ -441,9 +441,10 @@ function bindZoneControls(zones) {
   });
   document.querySelectorAll('[data-delete-zone-rule]').forEach((button) => {
     button.addEventListener('click', () => {
-      const { zoneIndex, ruleIndex } = parseZoneRuleKey(button.dataset.deleteZoneRule);
+      const { zoneIndex, ruleIndex, rule } = parseZoneRuleKey(button.dataset.deleteZoneRule);
+      if (rule?.label === 'motion') zones[zoneIndex].monitor_motion = false;
       zones[zoneIndex].object_rules.splice(ruleIndex, 1);
-      zones[zoneIndex].object_labels = zones[zoneIndex].object_rules.map((rule) => rule.label);
+      zones[zoneIndex].object_labels = zones[zoneIndex].object_rules.map((r) => r.label);
       renderZones();
     });
   });
@@ -503,9 +504,9 @@ function pointFromEvent(event) {
   return { x: clamp((event.clientX - rect.left) / rect.width), y: clamp((event.clientY - rect.top) / rect.height) };
 }
 
-function pointDistance(first, second) {
-  const dx = first.x - second.x;
-  const dy = first.y - second.y;
+function pointDistancePx(first, second, rect) {
+  const dx = (first.x - second.x) * rect.width;
+  const dy = (first.y - second.y) * rect.height;
   return Math.sqrt((dx * dx) + (dy * dy));
 }
 
@@ -608,7 +609,8 @@ function bindZoneDrawing() {
       event.preventDefault();
       const point = pointFromEvent(event);
       const firstPoint = draftPolygon?.points[0];
-      const closeToFirstPoint = firstPoint && draftPolygon.points.length >= 3 && pointDistance(point, firstPoint) <= CLOSE_DRAFT_DISTANCE;
+      const overlayRect = liveEls.zoneOverlay.getBoundingClientRect();
+      const closeToFirstPoint = firstPoint && draftPolygon.points.length >= 3 && pointDistancePx(point, firstPoint, overlayRect) <= CLOSE_DRAFT_DISTANCE_PX;
       if (event.target.closest('[data-close-draft]') || closeToFirstPoint) {
         finishDraftPolygon();
         return;
@@ -711,7 +713,15 @@ liveEls.saveZonesBtn?.addEventListener('click', async () => {
   }
 });
 
-window.addEventListener('resize', renderZones);
+window.addEventListener('resize', syncZoneOverlayToImage);
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && drawingMode) {
+    drawingMode = false;
+    draftPolygon = null;
+    if (liveEls.addZoneBtn) liveEls.addZoneBtn.textContent = 'Draw area';
+    renderDraftPolygon();
+  }
+});
 
 async function init() {
   const me = await api('/api/auth/me');
