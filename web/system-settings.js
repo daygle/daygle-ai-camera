@@ -1,6 +1,50 @@
 let csrfToken = null;
 const messageEl = document.getElementById('systemMessage');
 
+function titleCaseWords(value) {
+  return String(value || '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+function labelTextForField(field) {
+  if (field.dataset.cameraField) return titleCaseWords(field.dataset.cameraField);
+  if (field.dataset.cameraRecording) return titleCaseWords(field.dataset.cameraRecording);
+  if (field.name) return titleCaseWords(field.name);
+  const placeholder = String(field.getAttribute('placeholder') || '').trim();
+  if (placeholder) {
+    return placeholder
+      .replace(/\s*\(e\.g\.[^)]+\)/gi, '')
+      .replace(/\s*\([^)]*\)\s*$/g, '')
+      .trim();
+  }
+  return 'Field';
+}
+
+function enhanceFormFieldLabels(root = document) {
+  root.querySelectorAll('form .form-grid, form .compact-grid').forEach((grid) => {
+    Array.from(grid.children).forEach((child) => {
+      if (!(child instanceof HTMLElement)) return;
+      if (child.tagName === 'LABEL' || child.tagName === 'BUTTON') return;
+      if (!child.matches('input, select, textarea')) return;
+      if (child.matches('input[type="hidden"]')) return;
+      if (child.dataset.autoLabeled === 'true') return;
+
+      const wrapper = document.createElement('label');
+      const title = document.createElement('span');
+      title.textContent = labelTextForField(child);
+      child.replaceWith(wrapper);
+      wrapper.append(title, child);
+      child.dataset.autoLabeled = 'true';
+    });
+  });
+}
+
 function createDatabaseRestoreSection() {
   const section = document.createElement('section');
   section.className = 'card';
@@ -103,6 +147,7 @@ function createEmailDeliverySection() {
 }
 
 createEmailDeliverySection();
+enhanceFormFieldLabels();
 
 let cameras = [];
 
@@ -155,6 +200,8 @@ function renderCameraManager() {
       <p class="muted">Monitoring areas: ${(camera.detection?.zones || []).length}. Use Live Cameras to configure motion alerts, object alerts, ANPR, and areas visually.</p>
     </div>
   `).join('');
+
+  enhanceFormFieldLabels(manager);
 
   manager.querySelectorAll('[data-camera-field]').forEach((input) => {
     input.addEventListener('input', () => {
@@ -275,6 +322,7 @@ async function loadSettings() {
   fillForm(forms.storage, settings.storage);
   fillForm(forms.auth, settings.auth);
   renderEmail(emailSettings);
+  enhanceFormFieldLabels();
   setMessage('System settings loaded.');
 }
 
