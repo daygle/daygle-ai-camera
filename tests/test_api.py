@@ -2133,7 +2133,16 @@ def test_zone_object_alert_rules_are_scoped_to_matching_zone(tmp_path, monkeypat
             'width': 0.5,
             'height': 0.5,
             'object_rules': [{'label': 'cat', 'alert_on_detect': True, 'record_on_detect': False}],
-        }
+        },
+        {
+            'id': 'driveway',
+            'name': 'Driveway',
+            'x': 0.5,
+            'y': 0.5,
+            'width': 0.5,
+            'height': 0.5,
+            'object_rules': [{'label': 'cat', 'alert_on_detect': False, 'record_on_detect': True}],
+        },
     ])
     settings = {'id': 'front', 'name': 'Front Door', 'detection': {'zones': zones}}
     detections = [
@@ -2142,10 +2151,17 @@ def test_zone_object_alert_rules_are_scoped_to_matching_zone(tmp_path, monkeypat
         {'label': 'cat', 'confidence': 0.9, 'box': {'x': 0.8, 'y': 0.8, 'width': 0.1, 'height': 0.1}},
     ]
 
-    rules = main.zone_object_alert_rules(settings, detections)
+    rules = main.zone_object_alert_rules(settings)
+    alert_detections = main.zone_alert_detections(settings, detections)
 
     assert [rule['name'] for rule in rules] == ['Front Door / Porch / cat']
-    assert main.zone_record_on_detect_labels(settings, detections) == set()
+    assert len(alert_detections) == 1
+    assert alert_detections[0]['zone_id'] == 'porch'
+    assert alert_detections[0]['box']['x'] == 0.1
+    triggered = main.AlertEngine(rules).process(alert_detections + [{**detections[2], 'zone_id': 'driveway'}])
+    assert [alert['rule_name'] for alert in triggered] == ['Front Door / Porch / cat']
+    assert main.zone_record_on_detect(detections[0], settings) is False
+    assert main.zone_record_on_detect(detections[2], settings) is True
 
 
 def test_camera_object_labels_filter_without_monitoring_zones(tmp_path, monkeypatch):

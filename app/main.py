@@ -570,29 +570,47 @@ def filter_detections_for_camera_zones(detections: list[dict[str, Any]], setting
     ]
 
 
-def zone_object_alert_rules(settings: dict[str, Any], detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any], *, action: str) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    detection_settings = settings.get('detection') or {}
+    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
+    label = str(detection.get('label') or '').strip().lower()
+    if not label:
+        return []
+    matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for zone in zones:
+        if not detection_matches_zone(detection, zone):
+            continue
+        for rule in normalize_zone_object_rules(zone):
+            if not rule.get('enabled', True):
+                continue
+            if action == 'alert' and not rule.get('alert_on_detect', True):
+                continue
+            if action == 'record' and not rule.get('record_on_detect', True):
+                continue
+            if str(rule.get('label') or '').strip().lower() != label:
+                continue
+            if float(detection.get('confidence') or 0) < float(rule.get('min_confidence', 0.5)):
+                continue
+            matches.append((zone, rule))
+    return matches
+
+
+def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
     rules: list[dict[str, Any]] = []
-    camera_name = str(settings.get('name') or settings.get('id') or 'Camera')
     for zone in zones:
-        zone_name = str(zone.get('name') or zone.get('id') or 'Zone')
+        zone_id = str(zone.get('id') or zone.get('name') or 'zone')
         for rule in normalize_zone_object_rules(zone):
             if not rule.get('enabled', True) or not rule.get('alert_on_detect', True):
                 continue
             label = str(rule.get('label') or '').strip().lower()
             if not label:
                 continue
-            if not any(
-                str(detection.get('label') or '').strip().lower() == label
-                and detection_matches_zone(detection, zone)
-                and float(detection.get('confidence') or 0) >= float(rule.get('min_confidence', 0.5))
-                for detection in detections
-            ):
-                continue
             rules.append({
-                'name': f'{camera_name} / {zone_name} / {label}',
+                'name': zone_rule_name(settings, zone, rule),
                 'object': label,
+                'zone_id': zone_id,
                 'min_confidence': rule.get('min_confidence', 0.5),
                 'cooldown_seconds': rule.get('cooldown_seconds', 60),
                 'enabled': True,
@@ -604,23 +622,37 @@ def zone_object_alert_rules(settings: dict[str, Any], detections: list[dict[str,
     return rules
 
 
-def zone_record_on_detect_labels(settings: dict[str, Any], detections: list[dict[str, Any]]) -> set[str]:
-    detection_settings = settings.get('detection') or {}
-    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
-    labels: set[str] = set()
-    for zone in zones:
-        for rule in normalize_zone_object_rules(zone):
-            label = str(rule.get('label') or '').strip().lower()
-            if not label or not rule.get('enabled', True) or not rule.get('record_on_detect', True):
+def zone_rule_name(settings: dict[str, Any], zone: dict[str, Any], rule: dict[str, Any]) -> str:
+    camera_name = str(settings.get('name') or settings.get('id') or 'Camera')
+    zone_name = str(zone.get('name') or zone.get('id') or 'Zone')
+    label = str(rule.get('label') or '').strip().lower()
+    return f'{camera_name} / {zone_name} / {label}'
+
+
+def zone_alert_detections(settings: dict[str, Any], detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    matched: list[dict[str, Any]] = []
+    seen: set[tuple[int, str]] = set()
+    for index, detection in enumerate(detections):
+        for zone, _rule in zone_object_rule_matches(settings, detection, action='alert'):
+            zone_id = str(zone.get('id') or zone.get('name') or 'zone')
+            key = (index, zone_id)
+            if key in seen:
                 continue
-            if any(
-                str(detection.get('label') or '').strip().lower() == label
-                and detection_matches_zone(detection, zone)
-                and float(detection.get('confidence') or 0) >= float(rule.get('min_confidence', 0.5))
-                for detection in detections
-            ):
-                labels.add(label)
-    return labels
+            seen.add(key)
+            matched.append({
+                **detection,
+                'zone_id': zone_id,
+                'zone_name': zone.get('name') or zone_id,
+            })
+    return matched
+
+
+def zone_record_on_detect(detection: dict[str, Any], settings: dict[str, Any]) -> bool:
+    return bool(zone_object_rule_matches(settings, detection, action='record'))
+
+
+def zone_detection_alert_rule_names(settings: dict[str, Any], detection: dict[str, Any]) -> set[str]:
+    return {zone_rule_name(settings, zone, rule) for zone, rule in zone_object_rule_matches(settings, detection, action='alert')}
 
 
 def filter_detections_for_camera_anpr(detections: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
@@ -805,7 +837,9 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
     motion_detections = filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_motion', require_zones=True)
     object_detections = filter_detections_for_camera(detections, settings)
     anpr_detections = filter_detections_for_camera_anpr(detections, settings)
-    alert_detections = list(object_detections)
+    zone_rules = zone_object_alert_rules(settings)
+    object_alert_detections = zone_alert_detections(settings, object_detections) if zone_rules else list(object_detections)
+    alert_detections = list(object_alert_detections)
     if motion_detections:
         strongest_motion = max(motion_detections, key=lambda detection: float(detection.get('confidence', 0)))
         alert_detections.append({
@@ -825,20 +859,28 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         )
         return None
 
-    zone_rules = zone_object_alert_rules(settings, object_detections)
     alerts.rules = zone_rules + effective_alert_rules()
     triggered = alerts.process(alert_detections)
+    triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     triggered_labels = {str(alert.get('label') or '').lower() for alert in triggered}
-    record_on_detect_labels = zone_record_on_detect_labels(settings, object_detections)
     recording_detections = [
         {
             **detection,
-            'alert_matched': str(detection.get('label') or '').lower() in triggered_labels,
-            'alert_triggered': str(detection.get('label') or '').lower() in triggered_labels
-            and (not zone_rules or str(detection.get('label') or '').lower() in record_on_detect_labels),
+            'alert_matched': bool(zone_detection_alert_rule_names(settings, detection) & triggered_rule_names)
+            if zone_rules else str(detection.get('label') or '').lower() in triggered_labels,
+            'alert_triggered': zone_record_on_detect(detection, settings)
+            if zone_rules else str(detection.get('label') or '').lower() in triggered_labels,
         }
-        for detection in alert_detections
+        for detection in object_detections
     ]
+    if motion_detections:
+        recording_detections.append({
+            **strongest_motion,
+            'label': 'motion',
+            'motion_event': True,
+            'alert_matched': 'motion' in triggered_labels,
+            'alert_triggered': 'motion' in triggered_labels,
+        })
     matched_labels = [str(detection.get('label')) for detection in alert_detections if detection.get('label')]
 
     event_time = datetime.now(timezone.utc).isoformat()
@@ -877,7 +919,6 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             message=alert['message'],
         )
     deliver_email_alerts(triggered, event_id, rules=zone_rules + effective_alert_rules())
-    triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     email_rules = [
         rule for rule in (zone_rules + effective_alert_rules())
         if rule.get('enabled', True) and rule.get('email_enabled') and str(rule.get('name') or '') in triggered_rule_names

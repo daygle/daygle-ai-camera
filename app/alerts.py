@@ -38,6 +38,11 @@ class AlertEngine:
                 if self._normalize_object_label(rule.get('object')) != label_key:
                     continue
 
+                rule_zone_id = str(rule.get('zone_id') or '').strip()
+                detection_zone_id = str(detection.get('zone_id') or '').strip()
+                if rule_zone_id and rule_zone_id != detection_zone_id:
+                    continue
+
                 if confidence < float(rule.get('min_confidence', 0.5)):
                     continue
 
