@@ -100,11 +100,12 @@ function recordingDetectionLabels(recording) {
 function recordingTypeLabel(recording) {
   const triggerType = recordingTriggerType(recording);
   const triggerLabel = recordingTriggerLabel(recording);
-  if (triggerType === 'motion' || triggerType === 'continuous' || triggerType === 'none' || triggerType === 'off') {
-    return triggerType;
+  if (triggerType === 'motion' || triggerType === 'alert' || triggerType === 'human') {
+    // In many deployments recording policy stores trigger_type as "alert" even for motion-style captures.
+    return 'motion';
   }
-  if (triggerType === 'human') {
-    return 'person';
+  if (triggerType === 'continuous' || triggerType === 'none' || triggerType === 'off') {
+    return triggerType;
   }
   return triggerLabel || triggerType;
 }
@@ -118,6 +119,9 @@ function recordingTriggerSummary(recording) {
   const triggerLabel = recordingTriggerLabel(recording);
   if (!triggerLabel || triggerLabel === triggerType || (triggerType === 'human' && triggerLabel === 'person')) {
     return recordingTypeLabel(recording);
+  }
+  if (triggerType === 'human' || triggerType === 'alert') {
+    return `motion · detected ${triggerLabel}`;
   }
   return `${recordingTypeLabel(recording)} · detected ${triggerLabel}`;
 }
@@ -135,7 +139,7 @@ function recordingFilterTokens(recording) {
 function matchesRecordingFilter(recording, filterValue) {
   const normalized = String(filterValue || '').trim().toLowerCase();
   if (!normalized) return true;
-  if (normalized === 'motion') return recordingTriggerType(recording) === 'motion';
+  if (normalized === 'motion') return ['motion', 'human', 'alert'].includes(recordingTriggerType(recording));
   return recordingFilterTokens(recording).has(normalized);
 }
 
@@ -270,8 +274,9 @@ function buildTimelineLayout(recordings) {
 function renderTimeline(payload) {
   const recordings = buildTimelineLayout(payload.recordings || []);
   const rowCount = Math.max(1, recordings.reduce((max, recording) => Math.max(max, recording.rowIndex + 1), 0));
-  els.timelineHours.innerHTML = Array.from({ length: 25 }, (_, hour) => (
-    `<span class="timeline-hour ${hour % 2 === 0 ? 'major' : 'minor'}" style="left:${(hour / 24) * 100}%">${hour % 2 === 0 ? `${String(hour).padStart(2, '0')}:00` : ''}</span>`
+  const majorHours = [0, 3, 6, 9, 12, 15, 18, 21, 24];
+  els.timelineHours.innerHTML = majorHours.map((hour) => (
+    `<span class="timeline-hour major" style="left:${(hour / 24) * 100}%">${String(hour).padStart(2, '0')}:00</span>`
   )).join('');
   els.timelineGrid.innerHTML = Array.from({ length: 25 }, (_, hour) => `
     <span class="timeline-grid-line" style="left:${(hour / 24) * 100}%"></span>

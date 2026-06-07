@@ -44,11 +44,12 @@ body {
 .app-nav a {
   color: var(--text);
   text-decoration: none;
-  font-weight: 850;
+    gap: 16px;
 }
 .app-brand { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }
-.brand-mark {
-  display: grid;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 4px;
   place-items: center;
   width: 34px;
   height: 34px;
@@ -56,7 +57,8 @@ body {
   color: #04111c;
   background: linear-gradient(135deg, var(--accent), var(--success));
 }
-.app-nav-links,
+    margin: 0;
+    max-width: 40ch;
 .app-nav-account {
   display: flex;
   align-items: center;
@@ -65,13 +67,17 @@ body {
 }
 .app-nav-links { overflow-x: auto; scrollbar-width: thin; }
 .app-nav-account { justify-content: flex-end; }
-.app-nav-links a,
+    grid-template-columns: repeat(3, minmax(160px, 1fr)) auto;
 .app-nav-account a,
 .app-nav-account .nav-logout-btn {
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: rgba(255,255,255,.03);
   display: inline-flex;
   align-items: center;
   min-height: 38px;
-  padding: 9px 11px;
+    gap: 6px;
   border: 1px solid transparent;
   border-radius: 12px;
   color: var(--muted);
@@ -81,11 +87,15 @@ body {
   background: none;
   cursor: pointer;
   font: inherit;
+  .timeline-controls button {
+    min-height: 46px;
+    white-space: nowrap;
+  }
 }
 .app-nav a.active,
 .app-nav a:hover,
 .app-nav .nav-logout-btn:hover {
-  border-color: var(--border);
+    font-size: 20px;
   color: var(--text);
   background: rgba(255,255,255,.06);
 }
@@ -93,8 +103,12 @@ body {
 .eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: .18em; font-size: 12px; font-weight: 800; }
 h1 { font-size: clamp(34px, 5vw, 64px); margin: 0; line-height: 1; }
 h2 { margin: 0; font-size: 20px; }
-.muted { color: var(--muted); }
+    overflow-x: auto;
 .grid { display: grid; gap: 18px; }
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(7,11,19,.7));
+    padding: 10px 10px 6px;
 .stats-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin-bottom: 18px; }
 .main-grid {
   grid-template-columns: 1.3fr .7fr;
@@ -102,8 +116,8 @@ h2 { margin: 0; font-size: 20px; }
   align-items: start;
 }
 .card {
-  border: 1px solid var(--border);
-  background: linear-gradient(180deg, var(--panel), rgba(10, 16, 28, 0.86));
+    height: 24px;
+    margin-bottom: 8px;
   box-shadow: 0 18px 50px rgba(0,0,0,.32);
   border-radius: 24px;
   padding: 22px;
@@ -114,9 +128,6 @@ h2 { margin: 0; font-size: 20px; }
 
 .ai-status-card small { display: block; margin-top: 6px; line-height: 1.4; }
 .ai-mode { font-size: 24px; letter-spacing: .04em; }
-.ai-mode.onnx-active { color: var(--success); }
-.ai-mode.model-failed { color: var(--danger); }
-.section-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .primary, button {
   border: 0;
   border-radius: 14px;
@@ -127,7 +138,7 @@ h2 { margin: 0; font-size: 20px; }
   cursor: pointer;
 }
 button.secondary { background: var(--panel-strong); color: var(--text); border: 1px solid var(--border); }
-button.delete-btn { color: #f87171; border-color: rgba(248,113,113,.35); }
+    border-radius: 16px;
 button.delete-btn:hover { background: rgba(248,113,113,.12); border-color: #f87171; }
 input,
 select,
@@ -137,14 +148,14 @@ textarea {
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(255,255,255,.05);
+    background: rgba(255,255,255,.07);
   color: var(--text);
   padding: 12px 14px;
   outline: none;
 }
 .search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; margin-bottom: 16px; }
 .anpr-search-card h2 { margin-bottom: 12px; }
-.anpr-search-row { grid-template-columns: minmax(180px, 260px) minmax(0, 1fr) auto auto; }
+    .timeline-controls { grid-template-columns: 1fr; padding: 10px; }
 .pill, .chip {
   display: inline-flex;
   align-items: center;
