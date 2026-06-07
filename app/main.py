@@ -2013,6 +2013,14 @@ def recordings_page():
     return root()
 
 
+@app.get('/recordings/timeline')
+def recordings_timeline_page():
+    timeline_path = web_dir / 'timeline.html'
+    if timeline_path.exists():
+        return FileResponse(timeline_path)
+    return root()
+
+
 @app.get('/ai')
 def ai_settings_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
@@ -2376,6 +2384,90 @@ def runtime_config():
 @app.get('/api/recordings')
 def recordings(label: str | None = None, limit: int = Query(50, ge=1, le=200), alerted_only: bool = False):
     return database.list_recordings(label=label, limit=limit, alerted_only=alerted_only)
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value or ''))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _recording_timeline_segment(recording: dict[str, Any], day_start: datetime, day_end: datetime) -> dict[str, Any] | None:
+    started_at = _parse_iso_datetime(recording.get('started_at'))
+    ended_at = _parse_iso_datetime(recording.get('ended_at'))
+    duration_seconds = max(0.0, float(recording.get('duration_seconds') or 0.0))
+    if started_at is None:
+        return None
+    if ended_at is None or ended_at <= started_at:
+        ended_at = started_at + timedelta(seconds=max(duration_seconds, 1.0))
+
+    visible_start = max(started_at, day_start)
+    visible_end = min(ended_at, day_end)
+    if visible_end <= visible_start:
+        return None
+
+    trigger_type = str(recording.get('trigger_type') or 'motion').strip().lower() or 'motion'
+    trigger_label = str(recording.get('trigger_label') or '').strip().lower() or None
+    color_key = trigger_label or trigger_type
+
+    return {
+        **recording,
+        'timeline_start_seconds': max(0.0, (visible_start - day_start).total_seconds()),
+        'timeline_end_seconds': min(86400.0, (visible_end - day_start).total_seconds()),
+        'timeline_duration_seconds': max(1.0, (visible_end - visible_start).total_seconds()),
+        'color_key': color_key,
+        'color_label': trigger_label or trigger_type,
+    }
+
+
+@app.get('/api/recordings/timeline')
+def recordings_timeline(camera_id: str | None = None, day: str | None = None):
+    cameras = [
+        {
+            'id': str(camera_settings.get('id') or ''),
+            'name': camera_default_name(camera_settings, f'Camera {index}'),
+        }
+        for index, camera_settings in enumerate(effective_cameras_config(), start=1)
+    ]
+    if not cameras:
+        raise HTTPException(status_code=404, detail='No cameras configured')
+
+    selected_camera_id = normalize_camera_id(camera_id or cameras[0]['id'])
+    selected_camera = next((camera for camera in cameras if camera['id'] == selected_camera_id), None)
+    if selected_camera is None:
+        raise HTTPException(status_code=404, detail='Camera not found')
+
+    if day:
+        try:
+            target_day = datetime.strptime(day, '%Y-%m-%d').date()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail='Invalid day. Use YYYY-MM-DD.') from exc
+    else:
+        target_day = datetime.now(timezone.utc).date()
+
+    day_start = datetime.combine(target_day, datetime.min.time(), tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+    recordings = database.list_recordings_for_camera_day(selected_camera_id, day_start.isoformat(), day_end.isoformat())
+    segments = [
+        segment
+        for segment in (
+            _recording_timeline_segment(recording, day_start, day_end)
+            for recording in recordings
+        )
+        if segment is not None
+    ]
+    return {
+        'camera': selected_camera,
+        'cameras': cameras,
+        'day': target_day.isoformat(),
+        'day_start': day_start.isoformat(),
+        'day_end': day_end.isoformat(),
+        'recordings': segments,
+    }
 
 
 @app.post('/api/recordings/purge')

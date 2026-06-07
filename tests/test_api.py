@@ -1935,6 +1935,67 @@ def test_recording_retention_purge_deletes_metadata_and_files(tmp_path, monkeypa
         thread.join(timeout=5)
 
 
+def test_recordings_timeline_returns_camera_day_segments(tmp_path, monkeypatch):
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    admin = LocalClient(base_url)
+    try:
+        _setup_admin(admin)
+        target_day = '2026-06-07'
+        started_at = f'{target_day}T08:15:00+00:00'
+        ended_at = f'{target_day}T08:15:12+00:00'
+        _login(admin)
+
+        import app.main as main_module
+
+        file_path = tmp_path / 'data' / 'recordings' / 'timeline-test.mp4'
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(b'not-a-real-video')
+
+        event_id = main_module.database.add_event(
+            created_at=started_at,
+            source='camera',
+            snapshot_path=None,
+            detections=[{'label': 'person', 'confidence': 0.99, 'box': {'x': 0.1, 'y': 0.2, 'width': 0.3, 'height': 0.4}}],
+            metadata={'camera_id': 'camera-1', 'camera_name': 'Primary Camera'},
+        )
+        recording_id = main_module.database.add_recording(
+            event_id=event_id,
+            camera_id='camera-1',
+            started_at=started_at,
+            ended_at=ended_at,
+            duration_seconds=12.0,
+            file_path=str(file_path),
+            thumbnail_path=None,
+            source='camera',
+            created_at=started_at,
+            trigger_type='human',
+            trigger_label='person',
+        )
+
+        status, _headers, payload = admin.request(f'/api/recordings/timeline?camera_id=camera-1&day={target_day}')
+        assert status == 200
+        assert payload['camera']['id'] == 'camera-1'
+        assert payload['day'] == target_day
+        assert payload['cameras']
+        assert len(payload['recordings']) == 1
+
+        segment = payload['recordings'][0]
+        assert segment['id'] == recording_id
+        assert segment['timeline_start_seconds'] == 8 * 3600 + 15 * 60
+        assert segment['timeline_end_seconds'] == 8 * 3600 + 15 * 60 + 12
+        assert segment['timeline_duration_seconds'] == 12
+        assert segment['color_key'] == 'person'
+        assert segment['event']['metadata']['camera_id'] == 'camera-1'
+
+        status, _headers, empty_payload = admin.request('/api/recordings/timeline?camera_id=camera-1&day=2026-06-08')
+        assert status == 200
+        assert empty_payload['recordings'] == []
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path, monkeypatch):
     app, _database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)

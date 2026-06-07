@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Recording Timeline - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell page-stack timeline-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Camera Playback</p>
+        <h1>Recording Timeline</h1>
+        <p class="muted">Choose a camera and day, then click a coloured segment to open and play that clip.</p>
+      </div>
+      <div class="button-row">
+        <a class="button-link secondary-link" href="/recordings">Clip Library</a>
+      </div>
+    </header>
+
+    <section class="recording-timeline-layout">
+      <article class="card timeline-card">
+        <div class="section-header">
+          <h2>Daily timeline</h2>
+          <p id="timelineStatus" class="muted">Loading timeline…</p>
+        </div>
+        <div class="timeline-controls">
+          <label>
+            <span>Camera</span>
+            <select id="timelineCameraSelect"></select>
+          </label>
+          <label>
+            <span>Day</span>
+            <input id="timelineDate" type="date" />
+          </label>
+          <button id="timelineLoadBtn" type="button">Load Timeline</button>
+        </div>
+        <div id="timelineSummary" class="status-panel timeline-summary"></div>
+        <div id="timelineLegend" class="timeline-legend"></div>
+        <div class="timeline-scroll">
+          <div id="timelineHours" class="timeline-hours"></div>
+          <div id="timelineTrack" class="timeline-track">
+            <div id="timelineGrid" class="timeline-grid" aria-hidden="true"></div>
+            <div id="timelineRows" class="timeline-rows"></div>
+          </div>
+        </div>
+        <div id="timelineRecordings" class="list timeline-recordings"></div>
+      </article>
+
+      <article class="card playback-card recordings-player-card">
+        <div class="section-header"><h2>Playback</h2></div>
+        <div class="clip-player-wrap">
+          <video id="clipPlayer" controls preload="metadata"></video>
+        </div>
+        <p id="clipPlayerStatus" class="muted">Select a timeline segment to play a recording.</p>
+        <div id="recordingDetails" class="status-panel"></div>
+      </article>
+    </section>
+  </main>
+  <script src="/static/nav.js"></script>
+  <script src="/static/timeline.js"></script>
+</body>
+</html>

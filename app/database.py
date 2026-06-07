@@ -260,6 +260,28 @@ class EventDatabase:
                 rows = db.execute("SELECT * FROM recordings ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
             return [self._recording_with_event(db, row) for row in rows]
 
+    def list_recordings_for_camera_day(self, camera_id: str, day_start: str, day_end: str) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute(
+                """
+                SELECT DISTINCT r.*
+                FROM recordings r
+                LEFT JOIN events e ON e.id = r.event_id
+                WHERE (
+                    r.camera_id = ?
+                    OR (
+                        r.camera_id IS NULL
+                        AND e.metadata LIKE ?
+                    )
+                )
+                AND r.started_at < ?
+                AND COALESCE(r.ended_at, r.started_at) >= ?
+                ORDER BY r.started_at ASC, r.id ASC
+                """,
+                (camera_id, f'%"camera_id": "{camera_id}"%', day_end, day_start),
+            ).fetchall()
+            return [self._recording_with_event(db, row) for row in rows]
+
     def get_recording(self, recording_id: int) -> dict[str, Any] | None:
         with self.connect() as db:
             row = db.execute("SELECT * FROM recordings WHERE id = ?", (recording_id,)).fetchone()
