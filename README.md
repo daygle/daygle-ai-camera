@@ -202,7 +202,7 @@ Route: `/profile`
 
 ### AI Settings
 
-Route: `/settings`
+Route: `/ai` (legacy `/settings` also works)
 
 - AI enabled state.
 - Backend: `onnx`.

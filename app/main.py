@@ -1780,10 +1780,6 @@ def recordings_page():
 
 
 @app.get('/settings')
-def settings_page():
-    return RedirectResponse('/ai', status_code=303)
-
-
 @app.get('/ai')
 def ai_settings_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
