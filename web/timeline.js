@@ -37,7 +37,7 @@ function parseTimeInput(value, fallback) {
 function getTimeRangeConfig() {
   const fromSeconds = parseTimeInput(els.fromTime.value, 0);
   const toRaw = parseTimeInput(els.toTime.value, DAY_SECONDS);
-  const toSeconds = toRaw <= fromSeconds ? fromSeconds + 3600 : toRaw;
+  const toSeconds = Math.min(toRaw <= fromSeconds ? fromSeconds + 3600 : toRaw, DAY_SECONDS);
   const totalSeconds = toSeconds - fromSeconds;
   const totalHours = totalSeconds / 3600;
   let tickIntervalSeconds;
@@ -368,7 +368,7 @@ function renderTimeline(payload) {
   const tickPos = (s) => ((s - fromSeconds) / totalSeconds) * 100;
 
   els.timelineHours.innerHTML = ticks.map((s) => (
-    `<span class="timeline-hour major" style="left:${tickPos(s)}%">${formatClock(s)}</span>`
+    `<span class="timeline-hour major" style="left:${tickPos(s)}%">${formatClock(Math.min(s, DAY_SECONDS - 1))}</span>`
   )).join('');
   els.timelineGrid.innerHTML = ticks.map((s) => `
     <span class="timeline-grid-line" style="left:${tickPos(s)}%"></span>
@@ -516,7 +516,7 @@ async function renderFilteredTimeline({ preserveSelection = true } = {}) {
   const filterLabel = els.filterSelect.value ? ` matching ${titleCase(els.filterSelect.value)}` : '';
   const { fromSeconds, toSeconds } = getTimeRangeConfig();
   const timeRangeLabel = (fromSeconds > 0 || toSeconds < DAY_SECONDS)
-    ? ` from ${formatClock(fromSeconds)} to ${formatClock(toSeconds)}`
+    ? ` from ${els.fromTime.value || '00:00'} to ${els.toTime.value || '23:59'}`
     : '';
   els.timelineStatus.textContent = `${recordings.length} clip${recordings.length === 1 ? '' : 's'}${filterLabel}${timeRangeLabel} for ${state.payload.camera.name} on ${state.payload.day}.`;
 
