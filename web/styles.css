@@ -437,6 +437,7 @@ input[type="file"] { padding: 10px; }
 .recordings-list-card .search-row {
   margin-bottom: 10px;
 }
+.recordings-search-row { grid-template-columns: minmax(140px, 200px) minmax(0, 1fr) auto auto; }
 @media (min-width: 901px) {
   #events,
   .recordings-list {

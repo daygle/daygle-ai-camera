@@ -1,5 +1,6 @@
 const els = {
   recordings: document.getElementById('recordings'),
+  cameraFilter: document.getElementById('cameraFilter'),
   recordingFilter: document.getElementById('recordingFilter'),
   recordingSearchBtn: document.getElementById('recordingSearchBtn'),
   recordingClearBtn: document.getElementById('recordingClearBtn'),
@@ -134,7 +135,7 @@ function renderRecordings(recordings) {
   }).join('');
   if (recordings.some((recording) => recording.media_ready === false)) {
     clearTimeout(recordingRefreshTimer);
-    recordingRefreshTimer = setTimeout(() => loadRecordings(els.recordingFilter.value.trim()), 3000);
+    recordingRefreshTimer = setTimeout(() => loadRecordings(els.recordingFilter.value.trim(), els.cameraFilter?.value || ''), 3000);
   } else {
     clearTimeout(recordingRefreshTimer);
     recordingRefreshTimer = null;
@@ -414,9 +415,26 @@ async function loadLiveSettings() {
   }
 }
 
-async function loadRecordings(label = '') {
+async function loadCameras() {
+  try {
+    const data = await api('/api/cameras');
+    const cameras = data?.cameras || [];
+    if (cameras.length <= 1 || !els.cameraFilter) return;
+    for (const camera of cameras) {
+      const option = document.createElement('option');
+      option.value = camera.id;
+      option.textContent = camera.name || camera.id;
+      els.cameraFilter.appendChild(option);
+    }
+  } catch (_error) {
+    // Keep "All Cameras" only if cameras unavailable
+  }
+}
+
+async function loadRecordings(label = '', cameraId = '') {
   const params = new URLSearchParams();
   if (label) params.set('label', label);
+  if (cameraId) params.set('camera_id', cameraId);
   renderRecordings(await api(`/api/recordings?${params.toString()}`));
 }
 
@@ -467,17 +485,20 @@ if (els.clipOverlayTrackToggle) {
 }
 
 
-els.recordingSearchBtn.addEventListener('click', () => loadRecordings(els.recordingFilter.value.trim()));
+els.cameraFilter?.addEventListener('change', () => loadRecordings(els.recordingFilter.value.trim(), els.cameraFilter.value));
+els.recordingSearchBtn.addEventListener('click', () => loadRecordings(els.recordingFilter.value.trim(), els.cameraFilter?.value || ''));
 els.recordingClearBtn.addEventListener('click', () => {
   els.recordingFilter.value = '';
+  if (els.cameraFilter) els.cameraFilter.value = '';
   loadRecordings();
 });
 els.recordingFilter.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') loadRecordings(els.recordingFilter.value.trim());
+  if (event.key === 'Enter') loadRecordings(els.recordingFilter.value.trim(), els.cameraFilter?.value || '');
 });
 
 loadAuth().then(async () => {
-  await Promise.all([loadRecordings(), loadLiveSettings()]);
+  await Promise.all([loadCameras(), loadLiveSettings()]);
+  await loadRecordings();
   const selected = new URLSearchParams(window.location.search).get('recording_id');
   if (selected) playRecording(selected).catch((error) => { els.clipPlayerStatus.textContent = error.message; });
 }).catch((error) => { els.clipPlayerStatus.textContent = error.message; });

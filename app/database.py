@@ -217,47 +217,31 @@ class EventDatabase:
                 raise RuntimeError("Failed to create recording row")
             return cursor.lastrowid
 
-    def list_recordings(self, label: str | None = None, limit: int = 50, alerted_only: bool = False) -> list[dict[str, Any]]:
+    def list_recordings(self, label: str | None = None, camera_id: str | None = None, limit: int = 50, alerted_only: bool = False) -> list[dict[str, Any]]:
         with self.connect() as db:
-            alert_filter = """
-                AND EXISTS (
-                    SELECT 1
-                    FROM alert_history ah
-                    JOIN alert_rules ar ON ar.name = ah.rule_name
-                    WHERE ah.event_id = r.event_id
-                    AND ar.enabled = 1
-                )
-            """
+            conditions: list[str] = []
+            params: list[Any] = []
+
             if label:
-                rows = db.execute(
-                    f"""
-                    SELECT DISTINCT r.* FROM recordings r
-                    LEFT JOIN detections d ON d.event_id = r.event_id
-                    WHERE d.label = ?
-                    {alert_filter if alerted_only else ''}
-                    ORDER BY r.started_at DESC
-                    LIMIT ?
-                    """,
-                    (label, limit),
-                ).fetchall()
-            elif alerted_only:
-                rows = db.execute(
-                    f"""
-                    SELECT r.* FROM recordings r
-                    WHERE EXISTS (
-                        SELECT 1
-                        FROM alert_history ah
-                        JOIN alert_rules ar ON ar.name = ah.rule_name
-                        WHERE ah.event_id = r.event_id
-                        AND ar.enabled = 1
-                    )
-                    ORDER BY r.started_at DESC
-                    LIMIT ?
-                    """,
-                    (limit,),
-                ).fetchall()
+                conditions.append("d.label = ?")
+                params.append(label)
+            if camera_id:
+                conditions.append("r.camera_id = ?")
+                params.append(camera_id)
+            if alerted_only:
+                conditions.append(
+                    "EXISTS (SELECT 1 FROM alert_history ah JOIN alert_rules ar ON ar.name = ah.rule_name WHERE ah.event_id = r.event_id AND ar.enabled = 1)"
+                )
+
+            where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+            if label:
+                sql = f"SELECT DISTINCT r.* FROM recordings r LEFT JOIN detections d ON d.event_id = r.event_id {where} ORDER BY r.started_at DESC LIMIT ?"
             else:
-                rows = db.execute("SELECT * FROM recordings ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
+                sql = f"SELECT r.* FROM recordings r {where} ORDER BY r.started_at DESC LIMIT ?"
+
+            params.append(limit)
+            rows = db.execute(sql, params).fetchall()
             return [self._recording_with_event(db, row) for row in rows]
 
     def list_recordings_for_camera_day(self, camera_id: str, day_start: str, day_end: str) -> list[dict[str, Any]]:
