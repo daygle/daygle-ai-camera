@@ -187,6 +187,8 @@ alerts = AlertEngine(effective_alert_rules())
 live_detection_last_checked: dict[str, float] = {}
 live_detection_status: dict[str, dict[str, Any]] = {}
 live_event_last_emitted: dict[str, dict[str, Any]] = {}
+live_detection_retry_after: dict[str, float] = {}
+live_detection_failure_count: dict[str, int] = {}
 live_detection_worker_lock = threading.Lock()
 active_live_detection_cameras: set[str] = set()
 live_alert_monitor_stop = threading.Event()
@@ -733,6 +735,26 @@ def remember_live_event(camera_id: str, labels: set[str]) -> None:
     }
 
 
+def clear_live_camera_backoff(camera_id: str) -> None:
+    live_detection_retry_after.pop(camera_id, None)
+    live_detection_failure_count.pop(camera_id, None)
+
+
+def schedule_live_camera_backoff(camera_id: str, message: str) -> float:
+    failure_count = live_detection_failure_count.get(camera_id, 0) + 1
+    live_detection_failure_count[camera_id] = failure_count
+    backoff_seconds = min(300.0, max(10.0, 5.0 * (2 ** min(failure_count - 1, 5))))
+    retry_after = time.time() + backoff_seconds
+    live_detection_retry_after[camera_id] = retry_after
+    update_live_detection_status(
+        camera_id,
+        state='error',
+        reason=f'{message} Retrying in {int(backoff_seconds)}s.',
+        detections=[],
+    )
+    return backoff_seconds
+
+
 def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any]:
     selected_config = get_camera_config(camera_id)
     camera_key = str(selected_config.get('id') or 'camera')
@@ -763,6 +785,10 @@ def run_live_alert_monitor_once() -> int:
         camera_id = str(selected_config.get('id') or 'camera')
         if not _camera_has_live_alert_stream(selected_config):
             continue
+        retry_after = live_detection_retry_after.get(camera_id, 0)
+        now = time.time()
+        if retry_after and now < retry_after:
+            continue
         stream_url = build_stream_url(selected_config)
         if stream_url:
             recording_service.prime_rtsp_prebuffer(
@@ -770,7 +796,6 @@ def run_live_alert_monitor_once() -> int:
                 camera_id=camera_id,
                 recording_config=camera_event_recording_config(selected_config),
             )
-        now = time.time()
         detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 0.25))
         with live_detection_worker_lock:
             if camera_id in active_live_detection_cameras:
@@ -785,11 +810,12 @@ def run_live_alert_monitor_once() -> int:
                 update_live_detection_status(camera_id, state='skipped', reason='Background alerts require a camera that can read JPEG frames.', detections=[])
                 continue
             image_bytes, frame = selected_camera.read_jpeg()
+            clear_live_camera_backoff(camera_id)
             process_live_stream_alerts(image_bytes, frame, copy.deepcopy(selected_config), enforce_interval=False)
             processed += 1
         except Exception as exc:
             logger.warning('Background live alert check failed for camera %s: %s', camera_id, exc)
-            update_live_detection_status(camera_id, state='error', reason=str(exc), detections=[])
+            schedule_live_camera_backoff(camera_id, str(exc))
         finally:
             with live_detection_worker_lock:
                 active_live_detection_cameras.discard(camera_id)
