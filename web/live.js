@@ -11,6 +11,7 @@ const liveEls = {
   zoneList: document.getElementById('zoneList'),
   cameraRecordingControls: document.getElementById('cameraRecordingControls'),
   addZoneBtn: document.getElementById('addZoneBtn'),
+  fullFrameZoneBtn: document.getElementById('fullFrameZoneBtn'),
   saveZonesBtn: document.getElementById('saveZonesBtn'),
 };
 
@@ -565,6 +566,35 @@ function finishDraftPolygon() {
   refreshFrame();
 }
 
+function addFullFrameZone() {
+  if (!selectedCamera) return;
+  const zones = cameraDetection().zones;
+  zones.push({
+    id: `zone-${Date.now()}`,
+    name: `Zone ${zones.length + 1}`,
+    points: [
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 1, y: 1 },
+      { x: 0, y: 1 },
+    ],
+    enabled: true,
+    monitor_motion: true,
+    monitor_objects: true,
+    object_labels: [],
+    object_rules: [],
+    monitor_anpr: true,
+  });
+  selectedZoneIndex = zones.length - 1;
+  draftPolygon = null;
+  drawingMode = false;
+  zoneDrag = null;
+  if (liveEls.addZoneBtn) liveEls.addZoneBtn.textContent = 'Draw area';
+  normalizeZone(zones[selectedZoneIndex]);
+  renderZones();
+  refreshFrame();
+}
+
 function bindZoneDrawing() {
   if (!isZonesPage || !liveEls.zoneOverlay) return;
   liveEls.zoneOverlay.addEventListener('pointerdown', (event) => {
@@ -653,6 +683,10 @@ liveEls.addZoneBtn?.addEventListener('click', () => {
   zoneDrag = null;
   liveEls.addZoneBtn.textContent = drawingMode ? 'Cancel drawing' : 'Draw area';
   renderZones();
+});
+liveEls.fullFrameZoneBtn?.addEventListener('click', () => {
+  addFullFrameZone();
+  liveEls.status.textContent = 'Full-frame monitoring area added. Save areas to keep it.';
 });
 liveEls.saveZonesBtn?.addEventListener('click', async () => {
   try {
