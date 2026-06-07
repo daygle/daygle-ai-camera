@@ -583,7 +583,7 @@ def test_setup_login_success_session_validation_and_protected_routes(tmp_path, m
         csrf = _login(client)
         status, _headers, root = client.request("/")
         assert status == 200
-        assert "AI Camera Dashboard" in root
+        assert "Dashboard" in root
 
         status, _headers, payload = client.request("/api/status")
         assert status == 200

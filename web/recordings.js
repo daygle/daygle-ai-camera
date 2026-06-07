@@ -56,9 +56,9 @@ function renderRecordings(recordings) {
           <span>Recording #${recording.id}</span>
           <span>${formatDate(recording.started_at)}</span>
         </div>
-        <div>${detectionBadges(recording.detections)}</div>
-        <p class="muted">Event #${recording.event_id || 'none'} · ${Number(recording.duration_seconds || 0).toFixed(1)}s · ${escapeHtml(cameraLabel(recording))}</p>
-        <p class="muted">${escapeHtml(recording.trigger_type || 'motion')} ${escapeHtml(recording.trigger_label || '')} · ${escapeHtml(fileName)}</p>
+        <div class="recording-row-badges">${detectionBadges(recording.detections)}</div>
+        <p class="muted recording-row-meta">Event #${recording.event_id || 'none'} · ${Number(recording.duration_seconds || 0).toFixed(1)}s · ${escapeHtml(cameraLabel(recording))}</p>
+        <p class="muted recording-row-meta">${escapeHtml(recording.trigger_type || 'motion')} ${escapeHtml(recording.trigger_label || '')} · ${escapeHtml(fileName)}</p>
         <div class="button-row">
           <button class="secondary" data-play-recording="${recording.id}" ${mediaReady ? '' : 'disabled'}>${mediaReady ? 'Play' : 'Preparing...'}</button>
           <button class="secondary delete-btn" data-delete-recording="${recording.id}">Delete</button>

@@ -334,6 +334,81 @@ input[type="file"] { padding: 10px; }
 .recordings-layout { display: grid; grid-template-columns: minmax(360px, .85fr) minmax(0, 1.15fr); gap: 18px; align-items: start; }
 .recordings-list { max-height: calc(100vh - 290px); }
 .recording-row { display: grid; gap: 8px; }
+.event-row,
+.recording-row {
+  padding: 9px 11px;
+}
+.event-row { gap: 6px; }
+.event-row-badges,
+.recording-row-badges {
+  line-height: 1.2;
+}
+.event-row-meta,
+.recording-row-meta {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.event-row-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+#events .detection,
+.recordings-list .detection {
+  margin: 4px 6px 0 0;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+.recordings-list {
+  gap: 8px;
+}
+.recording-row .button-row,
+.event-row .button-row {
+  margin-top: 2px;
+  gap: 8px;
+}
+.event-row .item-title,
+.recording-row .item-title {
+  gap: 8px;
+}
+.event-row .item-title span:last-child,
+.recording-row .item-title span:last-child {
+  font-size: 12px;
+}
+.event-row-footer .link-button {
+  padding: 2px 0;
+}
+.event-row button,
+.recording-row button {
+  padding: 8px 12px;
+  border-radius: 12px;
+}
+.recordings-list-card .search-row {
+  margin-bottom: 10px;
+}
+@media (min-width: 901px) {
+  #events,
+  .recordings-list {
+    max-height: calc(100vh - 250px);
+  }
+  .event-row,
+  .recording-row {
+    padding: 8px 10px;
+  }
+  .event-row-meta,
+  .recording-row-meta {
+    font-size: 12px;
+    line-height: 1.25;
+  }
+  #events .detection,
+  .recordings-list .detection {
+    margin: 3px 5px 0 0;
+    padding: 3px 7px;
+    font-size: 10px;
+  }
+}
 .recordings-player-card { position: sticky; top: 86px; }
 .recordings-player-card video { min-height: 420px; max-height: 68vh; object-fit: contain; }
 @media (max-width: 900px) {

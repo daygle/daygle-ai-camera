@@ -118,16 +118,17 @@ function renderEvents(events) {
   }
 
   els.events.innerHTML = events.map((event) => `
-    <div class="item">
+    <div class="item event-row">
       <div class="item-title">
         <span>Event #${event.id}</span>
         <span>${formatDate(event.created_at)}</span>
       </div>
-      <div>${detectionBadges(event.detections)}</div>
-      <div>${plateBadges(event.plate_events)}</div>
-      <p class="muted">Camera: ${escapeHtml(eventSourceLabel(event))} · ${escapeHtml(event.recording_status || 'none')}</p>
-      <div>${recordingLink(event.recordings)}</div>
-      <button class="secondary delete-btn" data-delete-event="${event.id}">Delete</button>
+      <div class="event-row-badges">${detectionBadges(event.detections)}${plateBadges(event.plate_events)}</div>
+      <p class="muted event-row-meta">Camera: ${escapeHtml(eventSourceLabel(event))} · ${escapeHtml(event.recording_status || 'none')}</p>
+      <div class="event-row-footer">
+        <div>${recordingLink(event.recordings)}</div>
+        <button class="secondary delete-btn" data-delete-event="${event.id}">Delete</button>
+      </div>
     </div>
   `).join('');
 }
@@ -395,7 +396,7 @@ async function loadAuth() {
 }
 
 function plateBadges(plateEvents = []) {
-  if (!plateEvents.length) return '<span class="muted">No plates</span>';
+  if (!plateEvents.length) return '';
   return plateEvents.map((p) => `<span class="detection">${escapeHtml(p.plate_number)} ${Math.round((p.confidence || 0) * 100)}%</span>`).join('');
 }
 
