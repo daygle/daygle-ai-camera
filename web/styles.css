@@ -438,6 +438,9 @@ input[type="file"] { padding: 10px; }
   pointer-events: none;
   border-radius: 16px;
 }
+.clip-overlay-toggle {
+  margin-top: 10px;
+}
 
 #recentPlates .item,
 #plateResults .item,

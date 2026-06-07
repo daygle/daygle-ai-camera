@@ -37,6 +37,10 @@
           <video id="clipPlayer" controls preload="metadata"></video>
           <canvas id="clipOverlay" class="clip-overlay" aria-hidden="true"></canvas>
         </div>
+        <label class="toggle-control clip-overlay-toggle" for="clipOverlayToggle">
+          <input id="clipOverlayToggle" type="checkbox" checked />
+          <span>Show object boxes</span>
+        </label>
         <p id="clipPlayerStatus" class="muted">Select a recording to play.</p>
         <div id="recordingDetails" class="status-panel"></div>
       </article>

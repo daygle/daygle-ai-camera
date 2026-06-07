@@ -8,12 +8,15 @@ const els = {
   recordingDetails: document.getElementById('recordingDetails'),
   deleteAllRecordingsBtn: document.getElementById('deleteAllRecordingsBtn'),
   clipOverlay: document.getElementById('clipOverlay'),
+  clipOverlayToggle: document.getElementById('clipOverlayToggle'),
 };
 
 let authState = { user: null, csrfToken: null };
 let recordingRefreshTimer = null;
 let activeRecording = null;
 let overlayResizeObserver = null;
+const OVERLAY_TOGGLE_KEY = 'daygle.recordings.overlay.enabled';
+let overlayEnabled = true;
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -126,6 +129,7 @@ function drawClipOverlay() {
   const dpr = window.devicePixelRatio || 1;
   context.setTransform(1, 0, 0, 1, 0, 0);
   context.clearRect(0, 0, els.clipOverlay.width, els.clipOverlay.height);
+  if (!overlayEnabled) return;
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   const detections = Array.isArray(activeRecording?.detections) ? activeRecording.detections : [];
@@ -259,6 +263,17 @@ window.addEventListener('resize', drawClipOverlay);
 if ('ResizeObserver' in window && els.clipPlayer) {
   overlayResizeObserver = new ResizeObserver(drawClipOverlay);
   overlayResizeObserver.observe(els.clipPlayer);
+}
+
+if (els.clipOverlayToggle) {
+  const savedValue = localStorage.getItem(OVERLAY_TOGGLE_KEY);
+  overlayEnabled = savedValue !== '0';
+  els.clipOverlayToggle.checked = overlayEnabled;
+  els.clipOverlayToggle.addEventListener('change', () => {
+    overlayEnabled = Boolean(els.clipOverlayToggle.checked);
+    localStorage.setItem(OVERLAY_TOGGLE_KEY, overlayEnabled ? '1' : '0');
+    drawClipOverlay();
+  });
 }
 
 els.recordingSearchBtn.addEventListener('click', () => loadRecordings(els.recordingFilter.value.trim()));
