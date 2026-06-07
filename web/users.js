@@ -23,16 +23,22 @@ function setMessage(text) {
   message.textContent = text;
 }
 
+function roleLabel(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return 'Unknown';
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
 function renderUsers(users) {
   usersEl.innerHTML = users.map((user) => `
     <div class="item user-row">
-      <div><strong>${escapeHtml(user.username)}</strong><p class="muted">${escapeHtml(user.role)} · ${user.is_active ? 'active' : 'disabled'}</p></div>
+      <div><strong>${escapeHtml(user.username)}</strong><p class="muted">${escapeHtml(roleLabel(user.role))} · ${user.is_active ? 'Active' : 'Disabled'}</p></div>
       <select data-action="role" data-id="${user.id}">
-        <option value="viewer" ${user.role === 'viewer' ? 'selected' : ''}>viewer</option>
-        <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>admin</option>
+        <option value="viewer" ${user.role === 'viewer' ? 'selected' : ''}>Viewer</option>
+        <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
       </select>
       <button class="secondary" data-action="toggle" data-id="${user.id}" data-active="${user.is_active}">${user.is_active ? 'Disable' : 'Enable'}</button>
-      <button class="secondary" data-action="reset" data-id="${user.id}">Reset password</button>
+      <button class="secondary" data-action="reset" data-id="${user.id}">Reset Password</button>
     </div>
   `).join('');
 }

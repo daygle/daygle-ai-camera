@@ -103,8 +103,8 @@ function createLiveSettingsSection() {
       <input name="detection_status_refresh_ms" type="number" min="500" max="15000" step="100" placeholder="Detection status refresh ms (e.g. 2000)" />
       <input name="detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="Detection interval seconds (e.g. 0.25)" />
       <input name="event_debounce_seconds" type="number" min="0" max="120" step="0.5" placeholder="Duplicate event debounce seconds (e.g. 10)" />
-      <label><span>Background alerts</span><select name="background_detection_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
-      <button type="submit">Save live settings</button>
+      <label><span>Background Alerts</span><select name="background_detection_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+      <button type="submit">Save Live Settings</button>
     </form>
     <p class="muted">Lower values can improve responsiveness but increase CPU/network usage. Background alerts keep checking cameras even when no Live Cameras page is open.</p>
   `;
@@ -124,7 +124,7 @@ function createEmailDeliverySection() {
   section.innerHTML = `
     <h2>Email delivery</h2>
     <form id="emailSettingsForm" class="form-grid">
-      <label><span>Email alerts</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+      <label><span>Email Alerts</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
       <input name="host" placeholder="SMTP host" />
       <input name="port" type="number" min="1" max="65535" placeholder="Port" />
       <input name="from_address" type="email" placeholder="From address" />
@@ -132,7 +132,7 @@ function createEmailDeliverySection() {
       <input name="password" type="password" placeholder="SMTP password" autocomplete="new-password" />
       <label><span>STARTTLS</span><select name="use_tls"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
       <label><span>SSL</span><select name="use_ssl"><option value="false">Disabled</option><option value="true">Enabled</option></select></label>
-      <button type="submit">Save mail server</button>
+      <button type="submit">Save Mail Server</button>
       <input id="testEmailRecipient" type="email" placeholder="Test recipient email" />
       <button id="testEmailBtn" class="secondary" type="button">Send test email</button>
     </form>
@@ -182,7 +182,7 @@ function renderCameraManager() {
       <div class="form-grid compact-grid">
         <input data-camera-field="id" value="${escapeHtml(camera.id || '')}" placeholder="Camera ID" />
         <input data-camera-field="name" value="${escapeHtml(camera.name || '')}" placeholder="Display name" />
-        <label><span>Backend</span><select data-camera-field="backend"><option value="onvif" ${camera.backend === 'onvif' ? 'selected' : ''}>onvif / RTSP</option><option value="rtsp" ${camera.backend === 'rtsp' ? 'selected' : ''}>rtsp</option></select></label>
+        <label><span>Backend</span><select data-camera-field="backend"><option value="onvif" ${camera.backend === 'onvif' ? 'selected' : ''}>ONVIF / RTSP</option><option value="rtsp" ${camera.backend === 'rtsp' ? 'selected' : ''}>RTSP</option></select></label>
         <input data-camera-field="stream_url" value="${escapeHtml(camera.stream_url || '')}" placeholder="RTSP stream URL" />
         <input data-camera-field="host" value="${escapeHtml(camera.host || '')}" placeholder="Host/IP" />
         <input data-camera-field="port" type="number" value="${escapeHtml(camera.port || 554)}" placeholder="Port" />
