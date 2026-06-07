@@ -140,10 +140,11 @@
 .timeline-segment {
   position: absolute;
   height: 30px;
-  min-width: 10px;
+  min-width: 2px;
+  box-sizing: border-box;
   border: 1px solid rgba(255,255,255,.08);
   border-radius: 12px;
-  padding: 5px 9px;
+  padding: 5px 7px;
   background: linear-gradient(135deg, var(--segment-color), rgba(7,11,19,.96));
   color: var(--text);
   display: inline-flex;
@@ -166,6 +167,22 @@
 }
 .timeline-segment-time {
   color: rgba(237,243,255,.78);
+}
+.timeline-segment.compact {
+  padding-left: 4px;
+  padding-right: 4px;
+  gap: 4px;
+}
+.timeline-segment.tiny {
+  padding-left: 0;
+  padding-right: 0;
+  gap: 0;
+  border-radius: 999px;
+}
+.timeline-segment.tiny .timeline-segment-label,
+.timeline-segment.compact .timeline-segment-time,
+.timeline-segment.tiny .timeline-segment-time {
+  display: none;
 }
 .timeline-recordings {
   gap: 10px;

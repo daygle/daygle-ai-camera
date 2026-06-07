@@ -298,12 +298,14 @@ function renderTimeline(payload) {
     const start = Number(recording.timeline_start_seconds || 0);
     const duration = Math.max(1, Number(recording.timeline_duration_seconds || 1));
     const left = (start / TIMELINE_SECONDS) * 100;
-    const width = Math.max((duration / TIMELINE_SECONDS) * 100, 0.45);
+    const width = Math.max((duration / TIMELINE_SECONDS) * 100, 0.06);
     const color = colorForKey(recordingColorKey(recording));
     const activeClass = Number(recording.id) === Number(state.activeRecordingId) ? ' active' : '';
+    const compactClass = width < 0.7 ? ' compact' : '';
+    const tinyClass = width < 0.2 ? ' tiny' : '';
     return `
       <button
-        class="timeline-segment${activeClass}"
+        class="timeline-segment${activeClass}${compactClass}${tinyClass}"
         type="button"
         data-recording-id="${recording.id}"
         title="${escapeHtml(`${recordingTriggerSummary(recording)} · ${formatClock(start)} · ${formatDuration(recording.duration_seconds)}`)}"
