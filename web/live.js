@@ -115,12 +115,13 @@ function updateZoneBounds(zone) {
 }
 
 function defaultObjectRule(label = '') {
+  const isMotion = String(label || '').trim().toLowerCase() === 'motion';
   return {
     label: String(label || '').trim().toLowerCase(),
     enabled: true,
     record_on_detect: true,
     alert_on_detect: true,
-    min_confidence: 0.5,
+    min_confidence: isMotion ? 0.45 : 0.5,
     cooldown_seconds: 60,
     email_enabled: false,
     email_recipients: [],
@@ -164,7 +165,10 @@ function normalizeZone(zone) {
   const sourcePoints = Array.isArray(zone.points) && zone.points.length >= 3 ? zone.points : rectanglePoints(zone);
   zone.points = sourcePoints.map(normalizePoint);
   zone.object_rules = normalizeObjectRules(zone);
-  zone.object_labels = zone.object_rules.map((rule) => rule.label);
+  if (zone.monitor_motion !== false && !zone.object_rules.some((r) => r.label === 'motion')) {
+    zone.object_rules.unshift(defaultObjectRule('motion'));
+  }
+  zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion').map((rule) => rule.label);
   updateZoneBounds(zone);
   return zone;
 }
@@ -323,9 +327,10 @@ function updateSelectionStyles() {
 }
 
 function objectRuleOptions(selectedLabel) {
-  const labels = [...new Set([...availableLabels, selectedLabel].filter(Boolean))];
-  const options = labels.map((label) => `<option value="${escapeHtml(label)}" ${label === selectedLabel ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
-  return `<option value="">Object...</option>${options}`;
+  const labels = [...new Set([...availableLabels, selectedLabel].filter((l) => Boolean(l) && l !== 'motion'))];
+  const coco = labels.map((label) => `<option value="${escapeHtml(label)}" ${label === selectedLabel ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
+  const motionSelected = selectedLabel === 'motion';
+  return `<option value="">Object...</option><option value="motion" ${motionSelected ? 'selected' : ''}>motion</option>${coco}`;
 }
 
 function renderObjectRules(zone, zoneIndex) {
@@ -365,14 +370,12 @@ function renderZones() {
       <div class="zone-row-main">
         <input data-zone-name="${index}" value="${escapeHtml(zone.name || `Zone ${index + 1}`)}" />
         <label><span>Zone</span><select data-zone-enabled="${index}"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Shown</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
-        <label><span>Motion</span><select data-zone-motion="${index}"><option value="true" ${zone.monitor_motion !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_motion === false ? 'selected' : ''}>Off</option></select></label>
-        <label><span>Objects</span><select data-zone-objects="${index}"><option value="true" ${zone.monitor_objects !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_objects === false ? 'selected' : ''}>Off</option></select></label>
         <label><span>ANPR</span><select data-zone-anpr="${index}"><option value="true" ${zone.monitor_anpr !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_anpr === false ? 'selected' : ''}>Off</option></select></label>
         <button class="secondary" type="button" data-delete-zone="${index}">Remove</button>
       </div>
       <div class="zone-object-rules">
         <div class="zone-object-rules-header">
-          <strong>Object settings</strong>
+          <strong>Detection rules</strong>
           <select data-add-zone-rule="${index}">${objectRuleOptions('')}</select>
         </div>
         ${renderObjectRules(zone, index)}
@@ -399,8 +402,6 @@ function bindZoneControls(zones) {
   });
   [
     ['zoneEnabled', 'enabled'],
-    ['zoneMotion', 'monitor_motion'],
-    ['zoneObjects', 'monitor_objects'],
     ['zoneAnpr', 'monitor_anpr'],
   ].forEach(([datasetKey, zoneKey]) => {
     document.querySelectorAll(`[data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((select) => {
@@ -559,10 +560,8 @@ function finishDraftPolygon() {
     name: `Zone ${zones.length + 1}`,
     points: draftPolygon.points.map(normalizePoint),
     enabled: true,
-    monitor_motion: true,
-    monitor_objects: true,
     object_labels: [],
-    object_rules: [],
+    object_rules: [defaultObjectRule('motion')],
     monitor_anpr: true,
   });
   selectedZoneIndex = zones.length - 1;
@@ -587,10 +586,8 @@ function addFullFrameZone() {
       { x: 0, y: 1 },
     ],
     enabled: true,
-    monitor_motion: true,
-    monitor_objects: true,
     object_labels: [],
-    object_rules: [],
+    object_rules: [defaultObjectRule('motion')],
     monitor_anpr: true,
   });
   selectedZoneIndex = zones.length - 1;

@@ -1107,7 +1107,6 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
                 "record_on_motion": False,
                 "record_on_human": True,
                 "record_on_objects": ["cat", "dog", "package"],
-                "motion_min_confidence": 0.61,
                 "pre_event_seconds": 2,
                 "post_event_seconds": 3,
                 "max_clip_seconds": 10,
@@ -1121,7 +1120,6 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
         assert status == 200
         assert recording["mode"] == "objects"
         assert recording["record_on_objects"] == ["cat", "dog", "package"]
-        assert recording["motion_min_confidence"] == 0.61
 
         status, _headers, storage = client.request(
             "/api/settings/system/storage",
@@ -1170,7 +1168,6 @@ def test_runtime_data_reset_clears_operational_data_but_keeps_settings(tmp_path,
                 'record_on_motion': True,
                 'record_on_human': True,
                 'record_on_objects': ['cat'],
-                'motion_min_confidence': 0.52,
                 'pre_event_seconds': 5,
                 'post_event_seconds': 10,
                 'max_clip_seconds': 60,
@@ -1182,7 +1179,6 @@ def test_runtime_data_reset_clears_operational_data_but_keeps_settings(tmp_path,
             headers={'X-CSRF-Token': csrf},
         )
         assert status == 200
-        assert updated_recording['motion_min_confidence'] == 0.52
         assert updated_recording['retention_days'] == 21
 
         import app.main as main_module
@@ -1238,7 +1234,6 @@ def test_runtime_data_reset_clears_operational_data_but_keeps_settings(tmp_path,
 
         status, _headers, settings_payload = client.request('/api/settings/system')
         assert status == 200
-        assert settings_payload['recording']['motion_min_confidence'] == 0.52
         assert settings_payload['recording']['retention_days'] == 21
     finally:
         server.should_exit = True
@@ -1558,9 +1553,8 @@ def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypat
 
     monkeypatch.setattr(main, 'detector', FakeDetector())
     main.live_detection_last_checked.clear()
-    main.database.set_setting('recording', {'motion_min_confidence': 0.45}, main.utc_now())
 
-    camera_settings = {
+    strict_settings = {
         'id': 'camera-1',
         'name': 'Front Door',
         'detection': {
@@ -1573,8 +1567,7 @@ def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypat
                     'y': 0,
                     'width': 1,
                     'height': 1,
-                    'monitor_motion': True,
-                    'monitor_objects': False,
+                    'object_rules': [{'label': 'motion', 'min_confidence': 0.45}],
                     'monitor_anpr': False,
                 },
             ],
@@ -1584,17 +1577,35 @@ def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypat
     blocked_event_id = main.process_live_stream_alerts(
         b'jpeg-frame',
         {'width': 1280, 'height': 720},
-        camera_settings,
+        strict_settings,
         enforce_interval=False,
     )
     assert blocked_event_id is None
 
-    main.database.set_setting('recording', {'motion_min_confidence': 0.35}, main.utc_now())
+    relaxed_settings = {
+        'id': 'camera-1',
+        'name': 'Front Door',
+        'detection': {
+            'object_labels': ['cat'],
+            'zones': [
+                {
+                    'id': 'motion-zone',
+                    'name': 'Motion Zone',
+                    'x': 0,
+                    'y': 0,
+                    'width': 1,
+                    'height': 1,
+                    'object_rules': [{'label': 'motion', 'min_confidence': 0.35}],
+                    'monitor_anpr': False,
+                },
+            ],
+        },
+    }
 
     allowed_event_id = main.process_live_stream_alerts(
         b'jpeg-frame',
         {'width': 1280, 'height': 720},
-        camera_settings,
+        relaxed_settings,
         enforce_interval=False,
     )
     assert allowed_event_id is not None
@@ -2441,6 +2452,7 @@ def test_monitoring_zones_normalize_object_rules(tmp_path, monkeypatch):
             'y': 0,
             'width': 1,
             'height': 1,
+            'monitor_motion': False,
             'object_rules': [
                 {
                     'label': 'Cat',
@@ -2480,6 +2492,7 @@ def test_zone_object_alert_rules_are_scoped_to_matching_zone(tmp_path, monkeypat
             'y': 0,
             'width': 0.5,
             'height': 0.5,
+            'monitor_motion': False,
             'object_rules': [{'label': 'cat', 'alert_on_detect': True, 'record_on_detect': False}],
         },
         {
@@ -2489,6 +2502,7 @@ def test_zone_object_alert_rules_are_scoped_to_matching_zone(tmp_path, monkeypat
             'y': 0.5,
             'width': 0.5,
             'height': 0.5,
+            'monitor_motion': False,
             'object_rules': [{'label': 'cat', 'alert_on_detect': False, 'record_on_detect': True}],
         },
     ])

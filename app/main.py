@@ -340,6 +340,23 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
     return rules
 
 
+def zone_has_motion_rule(zone: dict[str, Any]) -> bool:
+    return any(
+        str(rule.get('label') or '').strip().lower() == 'motion' and rule.get('enabled', True)
+        for rule in zone.get('object_rules', [])
+    )
+
+
+def zone_motion_min_confidence(zone: dict[str, Any]) -> float:
+    for rule in zone.get('object_rules', []):
+        if str(rule.get('label') or '').strip().lower() == 'motion' and rule.get('enabled', True):
+            try:
+                return max(0.0, min(1.0, float(rule.get('min_confidence', 0.45))))
+            except (TypeError, ValueError):
+                return 0.45
+    return 0.45
+
+
 def normalize_camera_recording_settings(settings: Any) -> dict[str, Any]:
     recording = default_camera_recording_settings()
     if isinstance(settings, dict):
@@ -395,6 +412,26 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
         if len(points) < 3:
             points = rectangle_zone_points(x, y, width, height)
         x, y, width, height = zone_bounds(points)
+        object_rules = normalize_zone_object_rules(zone)
+        had_monitor_motion = bool(zone.get('monitor_motion', True))
+        has_motion_rule = any(str(r.get('label') or '').strip().lower() == 'motion' for r in object_rules)
+        if had_monitor_motion and not has_motion_rule:
+            object_rules.insert(0, {
+                'label': 'motion',
+                'enabled': True,
+                'record_on_detect': True,
+                'alert_on_detect': True,
+                'min_confidence': 0.45,
+                'cooldown_seconds': 60,
+                'email_enabled': False,
+                'email_recipients': [],
+                'active_start': None,
+                'active_end': None,
+            })
+        monitor_motion = any(
+            str(r.get('label') or '').strip().lower() == 'motion' and r.get('enabled', True)
+            for r in object_rules
+        )
         normalized.append({
             'id': normalize_camera_id(zone.get('id'), f'zone-{index}'),
             'name': str(zone.get('name') or f'Zone {index}').strip() or f'Zone {index}',
@@ -404,10 +441,10 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
             'height': round(height, 4),
             'points': points,
             'enabled': bool(zone.get('enabled', True)),
-            'monitor_motion': bool(zone.get('monitor_motion', True)),
-            'monitor_objects': bool(zone.get('monitor_objects', True)),
-            'object_labels': [rule['label'] for rule in normalize_zone_object_rules(zone)],
-            'object_rules': normalize_zone_object_rules(zone),
+            'monitor_motion': monitor_motion,
+            'monitor_objects': True,
+            'object_labels': [rule['label'] for rule in object_rules if str(rule.get('label') or '').strip().lower() != 'motion'],
+            'object_rules': object_rules,
             'monitor_anpr': bool(zone.get('monitor_anpr', True)),
         })
     return normalized
@@ -572,6 +609,24 @@ def point_on_segment(x: float, y: float, x1: float, y1: float, x2: float, y2: fl
 
 def filter_detections_for_camera(detections: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
     return filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects')
+
+
+def zone_motion_detections(detections: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
+    detection_settings = settings.get('detection') or {}
+    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_motion', True)]
+    if not zones:
+        return []
+    seen: set[int] = set()
+    result: list[dict[str, Any]] = []
+    for i, detection in enumerate(detections):
+        for zone in zones:
+            if detection_matches_zone(detection, zone):
+                conf_threshold = zone_motion_min_confidence(zone)
+                if float(detection.get('confidence', 0)) >= conf_threshold and i not in seen:
+                    seen.add(i)
+                    result.append(detection)
+                break
+    return result
 
 
 def detection_label_allowed_for_zone(detection: dict[str, Any], zone: dict[str, Any], camera_labels: set[str]) -> bool:
@@ -992,13 +1047,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
 
     detections = normalize_detection_boxes_for_frame(detections, frame)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
-    motion_detections = filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_motion', require_zones=True)
-    try:
-        motion_min_confidence = float(recording_settings.get('motion_min_confidence', 0.45))
-    except (TypeError, ValueError):
-        motion_min_confidence = 0.45
-    motion_min_confidence = max(0.0, min(1.0, motion_min_confidence))
-    motion_detections = [detection for detection in motion_detections if float(detection.get('confidence', 0)) >= motion_min_confidence]
+    motion_detections = zone_motion_detections(detections, settings)
     object_detections = filter_detections_for_camera(detections, settings)
     anpr_detections = filter_detections_for_camera_anpr(detections, settings)
     zone_rules = zone_object_alert_rules(settings)
@@ -1038,12 +1087,14 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         for detection in object_detections
     ]
     if motion_detections:
+        _motion_synthetic = {**strongest_motion, 'label': 'motion'}
+        _motion_record = zone_record_on_detect(_motion_synthetic, settings)
         recording_detections.append({
             **strongest_motion,
             'label': 'motion',
             'motion_event': True,
             'alert_matched': 'motion' in triggered_labels,
-            'alert_triggered': 'motion' in triggered_labels,
+            'alert_triggered': 'motion' in triggered_labels or _motion_record,
         })
         _generic_labels = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous'}
         _orig_label = str(strongest_motion.get('label') or '').strip().lower()
@@ -2143,7 +2194,6 @@ def _settings_section_recording() -> str:
     return (
         '<section class="card"><h2>Recording Clips</h2>'
         '<form id="recordingSettingsForm" class="form-grid">'
-        '<input name="motion_min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Motion min confidence" />'
         '<input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" />'
         '<input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" />'
         '<input name="extension_step_seconds" type="number" min="0" max="300" placeholder="Extension step seconds" />'
@@ -3163,7 +3213,6 @@ def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'record_on_motion': _bool_value(merged.get('record_on_motion', True)),
         'record_on_human': _bool_value(merged.get('record_on_human', True)),
         'record_on_objects': object_labels,
-        'motion_min_confidence': _float_field(merged, 'motion_min_confidence', 0.45, 0.0, 1.0),
         'pre_event_seconds': _int_field(merged, 'pre_event_seconds', 5, 0, 300),
         'post_event_seconds': _int_field(merged, 'post_event_seconds', 10, 0, 300),
         'extension_step_seconds': _int_field(merged, 'extension_step_seconds', 10, 0, 300),
