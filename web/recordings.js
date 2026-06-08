@@ -13,6 +13,7 @@ const els = {
   clipOverlayTrackToggle: document.getElementById('clipOverlayTrackToggle'),
   videoModal: document.getElementById('videoModal'),
   videoModalClose: document.getElementById('videoModalClose'),
+  videoModalDownload: document.getElementById('videoModalDownload'),
   listStatus: document.getElementById('listStatus'),
 };
 
@@ -371,6 +372,8 @@ function closeVideoModal() {
   els.clipPlayer.pause();
   els.clipPlayer.removeAttribute('src');
   els.clipPlayer.load();
+  els.videoModalDownload.hidden = true;
+  els.videoModalDownload.removeAttribute('href');
   clearClipOverlay();
   clearOverlayTrackDetections();
   activeRecording = null;
@@ -389,6 +392,8 @@ async function playRecording(id) {
     els.clipPlayerStatus.textContent = `Recording #${id} is still being prepared.`;
     return;
   }
+  els.videoModalDownload.href = `/api/recordings/${id}/download`;
+  els.videoModalDownload.hidden = false;
   els.clipPlayer.pause();
   els.clipPlayer.removeAttribute('src');
   els.clipPlayer.load();

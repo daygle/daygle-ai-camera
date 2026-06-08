@@ -68,7 +68,10 @@
     <div class="video-modal-content card">
       <div class="video-modal-header">
         <h2>Playback</h2>
-        <button id="videoModalClose" class="secondary" type="button" aria-label="Close">✕</button>
+        <div class="button-row">
+          <a id="videoModalDownload" class="secondary" download hidden>Download</a>
+          <button id="videoModalClose" class="secondary" type="button" aria-label="Close">✕</button>
+        </div>
       </div>
       <div class="clip-player-wrap">
         <video id="clipPlayer" controls preload="metadata"></video>
