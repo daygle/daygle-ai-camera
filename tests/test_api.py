@@ -602,6 +602,62 @@ def test_logout_user_creation_and_password_reset(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+def test_user_account_name_email_fields(tmp_path, monkeypatch):
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        # Create user with name/email fields
+        status, _headers, user = client.request(
+            "/api/users",
+            method="POST",
+            json_body={"username": "named", "password": "Named123!", "role": "viewer", "first_name": "Jane", "last_name": "Doe", "email": "jane@example.com"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert user["first_name"] == "Jane"
+        assert user["last_name"] == "Doe"
+        assert user["email"] == "jane@example.com"
+
+        # Create user with null name fields (must not 500)
+        status, _headers, user2 = client.request(
+            "/api/users",
+            method="POST",
+            json_body={"username": "nullfields", "password": "Null1234!", "role": "viewer", "first_name": None, "last_name": None, "email": None},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert user2["first_name"] == ""
+        assert user2["last_name"] == ""
+        assert user2["email"] == ""
+
+        # Update profile name/email and verify /api/auth/me returns them (not blank)
+        named_client = LocalClient(base_url)
+        named_csrf = _login(named_client, "named", "Named123!")
+        status, _headers, updated = named_client.request(
+            "/api/profile",
+            method="PUT",
+            json_body={"username": "named", "first_name": "Janet", "last_name": "Smith", "email": "janet@example.com", "timezone": "UTC", "date_format": "iso", "time_format": "24h"},
+            headers={"X-CSRF-Token": named_csrf},
+        )
+        assert status == 200
+        assert updated["first_name"] == "Janet"
+        assert updated["email"] == "janet@example.com"
+
+        # /api/auth/me must return updated fields so the profile form pre-fills correctly
+        status, _headers, me = named_client.request("/api/auth/me")
+        assert status == 200
+        assert me["user"]["first_name"] == "Janet"
+        assert me["user"]["last_name"] == "Smith"
+        assert me["user"]["email"] == "janet@example.com"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_admin_ai_settings_viewer_denied_and_db_override(tmp_path, monkeypatch):
     app, database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
