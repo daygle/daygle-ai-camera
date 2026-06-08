@@ -88,7 +88,7 @@ function renderAi(settings) {
   }
   renderStatus(settings);
   if (settings.reload_succeeded === false) setMessage(`Settings saved, but detector reload failed: ${settings.reload_error || settings.last_detector_error}`);
-  else setMessage(settings.last_detector_error ? `Detector warning: ${settings.last_detector_error}` : 'AI detector is ready.');
+  else messageEl.textContent = settings.last_detector_error ? `Detector warning: ${settings.last_detector_error}` : '';
 }
 
 async function loadAll() {

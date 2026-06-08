@@ -164,7 +164,7 @@ function renderRecordingDetails(recording) {
     <div><span>Trigger</span><strong>${escapeHtml(recordingDisplayTrigger(recording))}</strong></div>
     <div><span>Started</span><strong>${formatDate(recording.started_at)}</strong></div>
     <div><span>Duration</span><strong>${Number(recording.duration_seconds || 0).toFixed(1)}s</strong></div>
-    <div class="wide"><span>Detections</span><strong>${(recording.detections || []).filter((d) => { const label = String(d.label || '').trim().toLowerCase(); return label && (!configuredLabels || (configuredLabels.has(label) && Number(d.confidence || 0) >= (configuredLabels.get(label) ?? 0))); }).map((d) => escapeHtml(String(d.label || '').trim().toLowerCase())).join(', ') || 'none'}</strong></div>
+    <div class="wide"><span>Detections</span><strong>${(recording.detections || []).filter((d) => { const label = String(d.label || '').trim().toLowerCase(); return label && (!configuredLabels || (configuredLabels.has(label) && Number(d.confidence || 0) >= (configuredLabels.get(label) ?? 0))); }).map((d) => escapeHtml(`${String(d.label || '').trim().toLowerCase()} (${Math.round(Number(d.confidence || 0) * 100)}%)`)).join(', ') || 'none'}</strong></div>
   `;
 }
 

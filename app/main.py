@@ -2,6 +2,7 @@
 
 import copy
 import importlib.util
+import io
 import json
 import logging
 import mimetypes
@@ -216,6 +217,14 @@ active_rtsp_recordings: dict[str, dict[str, Any]] = {}
 active_rtsp_recordings_lock = threading.Lock()
 live_detection_worker_lock = threading.Lock()
 active_live_detection_cameras: set[str] = set()
+_frame_motion_prev: dict[str, Any] = {}
+_frame_motion_lock = threading.Lock()
+
+_MOTION_FRAME_W = 160
+_MOTION_FRAME_H = 120
+_MOTION_PIXEL_THRESHOLD = 20    # intensity change per pixel (0–255) to count as changed
+_MOTION_GATE_FRACTION = 0.003   # 0.3% of pixels must change before any motion is reported
+_MOTION_SCALE_FRACTION = 0.05   # 5% of pixels changed maps to confidence 1.0
 live_alert_monitor_stop = threading.Event()
 live_alert_monitor_thread: threading.Thread | None = None
 
@@ -796,6 +805,29 @@ def detection_label_set(detections: list[dict[str, Any]]) -> set[str]:
     }
 
 
+def detect_frame_motion(camera_id: str, image_bytes: bytes) -> tuple[bool, float]:
+    """Frame-differencing motion gate. Returns (has_motion, confidence 0-1).
+    Compares current frame to previous; fails open so object rules are never blocked."""
+    try:
+        import numpy as _np
+        from PIL import Image as _Image
+        img = _Image.open(io.BytesIO(image_bytes)).convert('L').resize(
+            (_MOTION_FRAME_W, _MOTION_FRAME_H), _Image.NEAREST
+        )
+        current = _np.array(img, dtype=_np.float32)
+        with _frame_motion_lock:
+            prev = _frame_motion_prev.get(camera_id)
+            _frame_motion_prev[camera_id] = current
+        if prev is None:
+            return False, 0.0
+        changed_fraction = float(_np.mean(_np.abs(current - prev) > _MOTION_PIXEL_THRESHOLD))
+        if changed_fraction < _MOTION_GATE_FRACTION:
+            return False, 0.0
+        return True, round(min(1.0, changed_fraction / _MOTION_SCALE_FRACTION), 3)
+    except Exception:
+        return True, 0.5  # fail open: allow motion if comparison unavailable
+
+
 def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: float) -> bool:
     if debounce_seconds <= 0 or not labels:
         return False
@@ -1047,7 +1079,8 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
 
     detections = normalize_detection_boxes_for_frame(detections, frame)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
-    motion_detections = zone_motion_detections(detections, settings)
+    frame_has_motion, frame_motion_confidence = detect_frame_motion(camera_id, image_bytes)
+    motion_detections = zone_motion_detections(detections, settings) if frame_has_motion else []
     object_detections = filter_detections_for_camera(detections, settings)
     anpr_detections = filter_detections_for_camera_anpr(detections, settings)
     zone_rules = zone_object_alert_rules(settings)
@@ -1058,6 +1091,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         alert_detections.append({
             **strongest_motion,
             'label': 'motion',
+            'confidence': frame_motion_confidence,
             'motion_event': True,
         })
     if not alert_detections and not anpr_detections:
@@ -1092,6 +1126,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         recording_detections.append({
             **strongest_motion,
             'label': 'motion',
+            'confidence': frame_motion_confidence,
             'motion_event': True,
             'alert_matched': 'motion' in triggered_labels,
             'alert_triggered': 'motion' in triggered_labels or _motion_record,
