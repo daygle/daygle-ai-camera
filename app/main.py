@@ -3421,13 +3421,14 @@ def export_yolo_onnx(model_name: str, destination: Path) -> int:
     if model_name not in YOLO_MODELS:
         raise ValueError(f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
     info = YOLO_MODELS[model_name]
+    pt_name = info['pt']
     destination.parent.mkdir(parents=True, exist_ok=True)
     command = [
         sys.executable,
         '-c',
         (
             'from ultralytics import YOLO\n'
-            f"model = YOLO('{info[\"pt\"]}')\n"
+            f"model = YOLO('{pt_name}')\n"
             "model.export(format='onnx')\n"
         ),
     ]
