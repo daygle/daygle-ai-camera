@@ -47,11 +47,15 @@ def _configure_file_logging() -> None:
     log_dir = Path(__file__).resolve().parent.parent / 'data' / 'logs'
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / 'app.log'
+    root = logging.getLogger()
+    # Guard against duplicate handlers on re-import (tests, hot-reload)
+    for existing in root.handlers:
+        if isinstance(existing, logging.handlers.RotatingFileHandler) and existing.baseFilename == str(log_path):
+            return
     handler = logging.handlers.RotatingFileHandler(
         log_path, maxBytes=10 * 1024 * 1024, backupCount=5, encoding='utf-8'
     )
     handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
-    root = logging.getLogger()
     if not root.handlers:
         logging.basicConfig(level=logging.INFO)
     root.addHandler(handler)
@@ -1546,11 +1550,18 @@ def require_admin(request: Request) -> dict[str, Any]:
     return user
 
 
+_LOOPBACK = {'127.0.0.1', '::1', 'localhost'}
+
 def _request_ip(request: Request) -> str:
-    forwarded = request.headers.get('x-forwarded-for')
-    if forwarded:
-        return forwarded.split(',')[0].strip()
-    return request.client.host if request.client else 'unknown'
+    direct = request.client.host if request.client else ''
+    # Only trust X-Forwarded-For when the direct connection comes from a
+    # loopback address (i.e. a local reverse proxy like nginx). Accepting it
+    # unconditionally lets any client spoof their recorded IP.
+    if direct in _LOOPBACK:
+        forwarded = request.headers.get('x-forwarded-for')
+        if forwarded:
+            return forwarded.split(',')[0].strip()
+    return direct or 'unknown'
 
 
 def write_audit_log(

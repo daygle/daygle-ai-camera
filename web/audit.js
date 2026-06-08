@@ -51,6 +51,10 @@ async function loadEntries(offset = 0) {
   currentOffset = offset;
   try {
     const resp = await fetch(`/api/audit?${buildQuery(offset)}`);
+    if (resp.status === 401) {
+      window.location.href = '/login';
+      return;
+    }
     if (!resp.ok) {
       showToast('Failed to load audit log: ' + resp.status, true);
       return;
@@ -64,6 +68,25 @@ async function loadEntries(offset = 0) {
   }
 }
 
+function makeCell(text, opts = {}) {
+  const td = document.createElement('td');
+  if (opts.noWrap) td.style.whiteSpace = 'nowrap';
+  if (opts.className) td.className = opts.className;
+  if (opts.code) {
+    const code = document.createElement('code');
+    code.textContent = text;
+    td.appendChild(code);
+  } else if (opts.badge) {
+    const span = document.createElement('span');
+    span.className = `status-badge ${opts.badge}`;
+    span.textContent = text;
+    td.appendChild(span);
+  } else {
+    td.textContent = text;
+  }
+  return td;
+}
+
 function renderEntries(entries) {
   tbody.innerHTML = '';
   const isEmpty = entries.length === 0;
@@ -74,16 +97,14 @@ function renderEntries(entries) {
   for (const entry of entries) {
     const tr = document.createElement('tr');
     const statusClass = entry.status === 'success' ? 'status-success' : 'status-failed';
-    tr.innerHTML = `
-      <td style="white-space:nowrap">${formatTime(entry.created_at)}</td>
-      <td>${entry.username || '—'}</td>
-      <td><code>${entry.action || '—'}</code></td>
-      <td><code>${entry.resource || '—'}</code></td>
-      <td>${entry.resource_id != null ? entry.resource_id : '—'}</td>
-      <td><span class="status-badge ${statusClass}">${entry.status || 'success'}</span></td>
-      <td style="white-space:nowrap">${entry.ip_address || '—'}</td>
-      <td class="details-cell">${formatDetails(entry.details)}</td>
-    `;
+    tr.appendChild(makeCell(formatTime(entry.created_at), { noWrap: true }));
+    tr.appendChild(makeCell(entry.username || '—'));
+    tr.appendChild(makeCell(entry.action || '—', { code: true }));
+    tr.appendChild(makeCell(entry.resource || '—', { code: true }));
+    tr.appendChild(makeCell(entry.resource_id != null ? String(entry.resource_id) : '—'));
+    tr.appendChild(makeCell(entry.status || 'success', { badge: statusClass }));
+    tr.appendChild(makeCell(entry.ip_address || '—', { noWrap: true }));
+    tr.appendChild(makeCell(formatDetails(entry.details), { className: 'details-cell' }));
     tbody.appendChild(tr);
   }
 }

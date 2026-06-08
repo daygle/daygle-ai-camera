@@ -2724,3 +2724,87 @@ def test_check_model_updates_endpoints(tmp_path, monkeypatch):
         server.should_exit = True
         thread.join(timeout=5)
 
+
+
+def test_audit_log_admin_access_and_viewer_denied(tmp_path, monkeypatch):
+    app, _ = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    admin = LocalClient(base_url)
+    viewer = LocalClient(base_url)
+    unauth = LocalClient(base_url)
+    try:
+        _setup_admin(admin)
+        csrf = _login(admin)
+
+        # Admin: login events should appear in the audit log
+        status, _, payload = admin.request("/api/audit")
+        assert status == 200
+        assert "entries" in payload
+        assert "total" in payload
+        assert payload["total"] >= 1
+        assert any(e["action"] == "login" for e in payload["entries"])
+
+        # Pagination: limit and offset
+        status, _, page = admin.request("/api/audit?limit=1&offset=0")
+        assert status == 200
+        assert len(page["entries"]) == 1
+
+        # Filter by action
+        status, _, filtered = admin.request("/api/audit?action=login")
+        assert status == 200
+        assert all(e["action"] == "login" for e in filtered["entries"])
+
+        # Filter by username
+        status, _, by_user = admin.request("/api/audit?username=admin")
+        assert status == 200
+        assert all(e["username"] == "admin" for e in by_user["entries"])
+
+        # Viewer is denied (create one first via admin)
+        admin.request("/api/users", method="POST", json_body={"username": "viewer1", "password": "Viewer123!", "role": "viewer"}, headers={"X-CSRF-Token": csrf})
+        _login(viewer, username="viewer1", password="Viewer123!")
+        status, _, _ = viewer.request("/api/audit")
+        assert status == 403
+
+        # Unauthenticated is denied
+        status, _, _ = unauth.request("/api/audit")
+        assert status == 401
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_audit_log_records_admin_actions(tmp_path, monkeypatch):
+    app, _ = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    admin = LocalClient(base_url)
+    try:
+        _setup_admin(admin)
+        csrf = _login(admin)
+
+        # Create a user -> should record a 'create' / 'user' entry
+        admin.request("/api/users", method="POST", json_body={"username": "newuser", "password": "NewUser1!", "role": "viewer"}, headers={"X-CSRF-Token": csrf})
+
+        status, _, payload = admin.request("/api/audit?action=create&resource=user")
+        assert status == 200
+        assert payload["total"] >= 1
+        entry = payload["entries"][0]
+        assert entry["action"] == "create"
+        assert entry["resource"] == "user"
+        assert entry["username"] == "admin"
+        assert entry["status"] == "success"
+        assert entry.get("details", {}).get("username") == "newuser"
+
+        # Failed login -> should record a 'login' / 'failed' entry
+        bad = LocalClient(base_url)
+        bad.request("/login")
+        bad_csrf = bad.cookie("daygle_csrf") or ""
+        bad.request("/login", method="POST", form={"username": "admin", "password": "wrong", "csrf_token": bad_csrf}, follow_redirects=False)
+
+        status, _, logins = admin.request("/api/audit?action=login")
+        assert status == 200
+        failed = [e for e in logins["entries"] if e["status"] == "failed"]
+        assert len(failed) >= 1
+        assert failed[0]["username"] == "admin"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
