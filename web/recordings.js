@@ -69,7 +69,7 @@ function detectionBadges(detections = []) {
       label: String(detection.label || '').trim().toLowerCase(),
       confidence: Number(detection.confidence || 0),
     }))
-    .filter((detection) => detection.label && (!configuredLabels || configuredLabels.has(detection.label)));
+    .filter((detection) => detection.label);
   if (!normalized.length) return '<span class="muted">No detections</span>';
   const hasSpecific = normalized.some((detection) => detection.label !== 'motion');
   const visible = hasSpecific
