@@ -27,11 +27,17 @@ function setMessage(text, isError = false) {
 }
 
 function renderProfile(user) {
+  profileForm.elements.first_name.value = user.first_name || '';
+  profileForm.elements.last_name.value = user.last_name || '';
+  profileForm.elements.email.value = user.email || '';
   profileForm.elements.timezone.value = user.timezone || 'Australia/Sydney';
   profileForm.elements.date_format.value = user.date_format || 'locale';
   profileForm.elements.time_format.value = user.time_format || '24h';
+  const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ');
   summaryEl.innerHTML = `
     <div><span>Username</span><strong>${escapeHtml(user.username)}</strong></div>
+    ${fullName ? `<div><span>Name</span><strong>${escapeHtml(fullName)}</strong></div>` : ''}
+    ${user.email ? `<div><span>Email</span><strong>${escapeHtml(user.email)}</strong></div>` : ''}
     <div><span>Role</span><strong>${escapeHtml(user.role)}</strong></div>
     <div><span>Timezone</span><strong>${escapeHtml(user.timezone || 'Australia/Sydney')}</strong></div>
     <div><span>Date/time</span><strong>${escapeHtml(user.date_format || 'locale')} / ${escapeHtml(user.time_format || '24h')}</strong></div>

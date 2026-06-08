@@ -63,6 +63,9 @@ class AuthService:
                     password_hash TEXT NOT NULL,
                     role TEXT NOT NULL CHECK(role IN ('admin', 'viewer')),
                     is_active INTEGER NOT NULL DEFAULT 1,
+                    first_name TEXT NOT NULL DEFAULT '',
+                    last_name TEXT NOT NULL DEFAULT '',
+                    email TEXT NOT NULL DEFAULT '',
                     timezone TEXT NOT NULL DEFAULT 'Australia/Sydney',
                     date_format TEXT NOT NULL DEFAULT 'locale',
                     time_format TEXT NOT NULL DEFAULT '24h',
@@ -99,6 +102,11 @@ class AuthService:
                 """
             )
             db.execute("DELETE FROM user_sessions WHERE expires_at <= ?", (utc_now(),))
+            for col in ("first_name", "last_name", "email"):
+                try:
+                    db.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+                except Exception:
+                    pass
 
     def users_exist(self) -> bool:
         with self.connect() as db:
@@ -136,7 +144,7 @@ class AuthService:
             return False
         return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
 
-    def create_user(self, username: str, password: str, role: str = "viewer") -> dict[str, Any]:
+    def create_user(self, username: str, password: str, role: str = "viewer", *, first_name: str = "", last_name: str = "", email: str = "") -> dict[str, Any]:
         username = username.strip()
         if not username:
             raise AuthError("Username is required.")
@@ -150,10 +158,10 @@ class AuthService:
             with self.connect() as db:
                 cursor = db.execute(
                     """
-                    INSERT INTO users (username, password_hash, role, is_active, created_at, updated_at)
-                    VALUES (?, ?, ?, 1, ?, ?)
+                    INSERT INTO users (username, password_hash, role, is_active, first_name, last_name, email, created_at, updated_at)
+                    VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)
                     """,
-                    (username, self.hash_password(password), role, now, now),
+                    (username, self.hash_password(password), role, first_name.strip(), last_name.strip(), email.strip(), now, now),
                 )
                 user_id = cursor.lastrowid
         except sqlite3.IntegrityError as exc:
@@ -163,14 +171,14 @@ class AuthService:
     def list_users(self) -> list[dict[str, Any]]:
         with self.connect() as db:
             rows = db.execute(
-                "SELECT id, username, role, is_active, timezone, date_format, time_format, failed_attempts, locked_until, created_at, updated_at, last_login_at FROM users ORDER BY username"
+                "SELECT id, username, first_name, last_name, email, role, is_active, timezone, date_format, time_format, failed_attempts, locked_until, created_at, updated_at, last_login_at FROM users ORDER BY username"
             ).fetchall()
             return [dict(row) for row in rows]
 
     def get_user(self, user_id: int) -> dict[str, Any] | None:
         with self.connect() as db:
             row = db.execute(
-                "SELECT id, username, role, is_active, timezone, date_format, time_format, failed_attempts, locked_until, created_at, updated_at, last_login_at FROM users WHERE id = ?",
+                "SELECT id, username, first_name, last_name, email, role, is_active, timezone, date_format, time_format, failed_attempts, locked_until, created_at, updated_at, last_login_at FROM users WHERE id = ?",
                 (user_id,),
             ).fetchone()
             return dict(row) if row else None
@@ -214,12 +222,24 @@ class AuthService:
         self,
         user_id: int,
         *,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        email: str | None = None,
         timezone_name: str | None = None,
         date_format: str | None = None,
         time_format: str | None = None,
     ) -> dict[str, Any]:
         updates: list[str] = []
         params: list[Any] = []
+        if first_name is not None:
+            updates.append("first_name = ?")
+            params.append(first_name.strip())
+        if last_name is not None:
+            updates.append("last_name = ?")
+            params.append(last_name.strip())
+        if email is not None:
+            updates.append("email = ?")
+            params.append(email.strip())
         if timezone_name is not None:
             timezone_name = timezone_name.strip()
             if not timezone_name:
