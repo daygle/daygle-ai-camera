@@ -11,6 +11,9 @@ const els = {
   clipOverlay: document.getElementById('clipOverlay'),
   clipOverlayToggle: document.getElementById('clipOverlayToggle'),
   clipOverlayTrackToggle: document.getElementById('clipOverlayTrackToggle'),
+  videoModal: document.getElementById('videoModal'),
+  videoModalClose: document.getElementById('videoModalClose'),
+  listStatus: document.getElementById('listStatus'),
 };
 
 let authState = { user: null, csrfToken: null };
@@ -355,11 +358,31 @@ function drawClipOverlay() {
   });
 }
 
+function openVideoModal() {
+  els.videoModal.hidden = false;
+  document.body.style.overflow = 'hidden';
+  els.videoModalClose.focus();
+}
+
+function closeVideoModal() {
+  els.videoModal.hidden = true;
+  document.body.style.overflow = '';
+  els.clipPlayer.pause();
+  els.clipPlayer.removeAttribute('src');
+  els.clipPlayer.load();
+  clearClipOverlay();
+  clearOverlayTrackDetections();
+  activeRecording = null;
+  els.clipPlayerStatus.textContent = '';
+  els.recordingDetails.innerHTML = '';
+}
+
 async function playRecording(id) {
   const recording = await api(`/api/recordings/${id}`);
   activeRecording = recording;
   clearOverlayTrackDetections();
   renderRecordingDetails(recording);
+  openVideoModal();
   if (recording.media_ready === false) {
     clearClipOverlay();
     els.clipPlayerStatus.textContent = `Recording #${id} is still being prepared.`;
@@ -411,7 +434,7 @@ async function loadAuth() {
       const result = await api('/api/recordings', { method: 'DELETE' });
       await loadRecordings();
       const deletedCount = Number(result?.deleted || 0);
-      els.clipPlayerStatus.textContent = `Deleted ${deletedCount} recording${deletedCount === 1 ? '' : 's'}. Settings were not changed.`;
+      els.listStatus.textContent = `Deleted ${deletedCount} recording${deletedCount === 1 ? '' : 's'}. Settings were not changed.`;
     });
   }
 }
@@ -530,9 +553,19 @@ els.recordingFilter.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') loadRecordings(els.recordingFilter.value.trim(), els.cameraFilter?.value || '');
 });
 
+els.videoModalClose.addEventListener('click', () => closeVideoModal());
+
+els.videoModal.addEventListener('click', (event) => {
+  if (event.target === els.videoModal || event.target.classList.contains('video-modal-backdrop')) closeVideoModal();
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !els.videoModal.hidden) closeVideoModal();
+});
+
 loadAuth().then(async () => {
   await Promise.all([loadCameras(), loadLiveSettings()]);
   await loadRecordings();
   const selected = new URLSearchParams(window.location.search).get('recording_id');
-  if (selected) playRecording(selected).catch((error) => { els.clipPlayerStatus.textContent = error.message; });
-}).catch((error) => { els.clipPlayerStatus.textContent = error.message; });
+  if (selected) playRecording(selected).catch((error) => { els.listStatus.textContent = error.message; });
+}).catch((error) => { els.listStatus.textContent = error.message; });

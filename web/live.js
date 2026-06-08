@@ -253,19 +253,49 @@ function syncViewMode() {
 
 function formatDetectionStatus(payload) {
   if (!payload) return 'Live AI status unavailable.';
-  const labels = [...new Set((payload.detected_labels || []).map((label) => String(label || '').trim()).filter(Boolean))].join(', ') || 'none';
-  const alerts = (payload.triggered_alerts || []).map((alert) => alert.rule_name).join(', ') || 'none';
-  const recording = payload.recording_state
-    ? `recording ${payload.recording_state}${payload.recording_id ? ` #${payload.recording_id}` : ''}`
-    : 'recording pending';
-  const email = payload.email_attempted
-    ? `email sent/attempted to ${(payload.email_recipients || []).join(', ')}`
-    : payload.email_enabled_rules
-      ? 'email rule matched but delivery was not attempted'
-      : 'no email-enabled matching rule';
-  if (payload.state === 'alerted') return `Live AI: alert matched (${alerts}); ${email}; ${recording}.`;
-  if (payload.state === 'checked') return `Live AI: scan complete; detected labels: ${labels}; ${payload.reason}`;
-  return `Live AI: ${payload.state || 'waiting'} - ${payload.reason || payload.ai_error || 'waiting for frames'}`;
+
+  // Build "label (XX%)" strings, deduplicating by highest confidence
+  const confMap = new Map();
+  for (const d of (payload.detections || [])) {
+    const label = String(d.label || '').trim().toLowerCase();
+    const conf = Number(d.confidence || 0);
+    if (!label) continue;
+    if (!confMap.has(label) || conf > confMap.get(label)) confMap.set(label, conf);
+  }
+  // Fall back to plain detected_labels if detections had no usable entries
+  if (confMap.size === 0) {
+    for (const label of (payload.detected_labels || [])) {
+      const l = String(label || '').trim().toLowerCase();
+      if (l) confMap.set(l, 0);
+    }
+  }
+  const labelStr = confMap.size
+    ? Array.from(confMap.entries())
+        .map(([label, conf]) => conf > 0 ? `${label} (${Math.round(conf * 100)}%)` : label)
+        .join(', ')
+    : null;
+
+  if (payload.state === 'alerted') {
+    const alerts = (payload.triggered_alerts || []).map((a) => a.rule_name).join(', ') || 'unknown rule';
+    const parts = [`Live AI: alert triggered — ${alerts}`];
+    if (labelStr) parts.push(`detected ${labelStr}`);
+    if (payload.recording_state) parts.push(`recording ${payload.recording_state}${payload.recording_id ? ` #${payload.recording_id}` : ''}`);
+    return `${parts.join('; ')}.`;
+  }
+
+  if (payload.state === 'checked') {
+    if (!labelStr) return 'Live AI: scan complete — no detections.';
+    const reason = String(payload.reason || '');
+    let suffix;
+    if (/debounce|suppressed/i.test(reason)) suffix = 'event suppressed (debounce active)';
+    else if (/cooldown/i.test(reason)) suffix = 'alert rule in cooldown';
+    else if (/no alert rule|no matching|no new alert/i.test(reason)) suffix = 'no matching alert rule';
+    else if (/no detections matched/i.test(reason)) suffix = 'outside monitored zones';
+    else suffix = reason || 'no alert triggered';
+    return `Live AI: detected ${labelStr} — ${suffix}.`;
+  }
+
+  return `Live AI: ${payload.state || 'waiting'} — ${payload.reason || payload.ai_error || 'waiting for frames'}`;
 }
 
 async function refreshDetectionStatus() {
