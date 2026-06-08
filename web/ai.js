@@ -70,9 +70,12 @@ function formPayload(form) {
 }
 
 function renderStatus(status) {
+  const modelDisplay = status.model_name
+    ? `${escapeHtml(status.model_name)} <span class="muted" style="font-weight:400;font-size:12px">${escapeHtml(status.model_path || '')}</span>`
+    : escapeHtml(status.model_path || 'Not Set');
   statusPanel.innerHTML = `
     <div><span>Current Backend</span><strong>${escapeHtml(displayValue(status.current_backend || status.configured_backend, 'Not Set'))}</strong></div>
-    <div><span>Model Path</span><strong>${escapeHtml(status.model_path || 'Not Set')}</strong></div>
+    <div><span>Model</span><strong>${modelDisplay}</strong></div>
     <div><span>Labels Path</span><strong>${escapeHtml(status.labels_path || 'Not Set')}</strong></div>
     <div><span>Model exists</span><strong>${yesNo(status.model_exists)}</strong></div>
     <div><span>ONNX Runtime Installed</span><strong>${yesNo(status.onnx_runtime_installed)}</strong></div>

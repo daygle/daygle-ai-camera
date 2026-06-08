@@ -287,7 +287,8 @@ async function loadStatus() {
     els.aiModeText.textContent = aiStatus.mode;
     els.aiModeText.className = `ai-mode ${aiStatus.mode.toLowerCase().replace(/\s+/g, '-')}`;
     const errorText = aiStatus.error ? ` · ${aiStatus.error}` : '';
-    els.aiStatusDetail.textContent = `${aiStatus.active_backend} · model loaded: ${aiStatus.model_loaded}${errorText}`;
+    const modelText = aiStatus.model_name ? ` · ${aiStatus.model_name}` : '';
+    els.aiStatusDetail.textContent = `${aiStatus.active_backend}${modelText} · model loaded: ${aiStatus.model_loaded}${errorText}`;
   } catch (error) {
     els.statusText.textContent = 'offline';
     els.uptimeText.textContent = '-';

@@ -1355,6 +1355,12 @@ def ai_status_payload(ai_settings: dict[str, Any] | None = None) -> dict[str, An
     else:
         mode = 'MODEL FAILED'
     inference_available = detector_loaded
+    model_path_str = str(settings.get('model_path') or '')
+    model_filename = Path(model_path_str).name if model_path_str else ''
+    model_label = next(
+        (info['label'] for info in YOLO_MODELS.values() if info['onnx'] == model_filename),
+        None,
+    )
     return {
         'current_backend': configured_backend,
         'active_backend': active_backend,
@@ -1362,7 +1368,8 @@ def ai_status_payload(ai_settings: dict[str, Any] | None = None) -> dict[str, An
         'mode': mode,
         'model_loaded': model_loaded,
         'detector_loaded': detector_loaded,
-        'model_path': str(settings.get('model_path') or ''),
+        'model_path': model_path_str,
+        'model_name': model_label,
         'labels_path': str(settings.get('labels_path') or ''),
         'model_exists': exists,
         'onnx_runtime_installed': runtime_installed,
