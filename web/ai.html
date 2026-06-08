@@ -33,8 +33,16 @@
     </section>
 
     <section class="card">
-      <h2>Available Models</h2>
-      <p class="muted">Larger models detect objects more accurately but use more CPU. Download installs the model and switches to it immediately.</p>
+      <div class="section-header">
+        <div>
+          <h2>Available Models</h2>
+          <p class="muted">Larger models detect objects more accurately but use more CPU. Download installs the model and switches to it immediately.</p>
+        </div>
+        <div class="button-row">
+          <button id="checkModelUpdatesBtn" class="secondary" type="button">Check for Updates</button>
+        </div>
+      </div>
+      <div id="modelUpdatesMessage" class="muted" style="margin-bottom:8px"></div>
       <div id="modelList"></div>
     </section>
 

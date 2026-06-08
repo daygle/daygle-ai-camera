@@ -1259,6 +1259,7 @@ input[type="file"] { padding: 10px; }
 }
 .badge-active { background: var(--accent); color: #000; }
 .badge-installed { background: var(--panel-strong); color: var(--text-muted); border: 1px solid var(--border); }
+.badge-update { background: rgba(248, 197, 93, 0.15); color: rgb(248, 197, 93); border: 1px solid rgba(248, 197, 93, 0.4); }
 
 /* ─── Toast notifications ───────────────────────────────────────────────────── */
 .toast-container {

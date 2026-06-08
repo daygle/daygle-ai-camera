@@ -1,0 +1,11 @@
+{
+  "schema_version": "1",
+  "updated_at": "2026-06-08",
+  "models": {
+    "yolov8n": {"version": "1.0.0"},
+    "yolov8s": {"version": "1.0.0"},
+    "yolov8m": {"version": "1.0.0"},
+    "yolov8l": {"version": "1.0.0"},
+    "yolov8x": {"version": "1.0.0"}
+  }
+}

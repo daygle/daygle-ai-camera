@@ -3,6 +3,8 @@ const aiForm = document.getElementById('aiSettingsForm');
 const messageEl = document.getElementById('settingsMessage');
 const statusPanel = document.getElementById('aiStatusPanel');
 const modelList = document.getElementById('modelList');
+const modelUpdatesMessage = document.getElementById('modelUpdatesMessage');
+let modelUpdateMap = {};
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -101,19 +103,29 @@ function renderModelList(models) {
     return;
   }
   modelList.innerHTML = models.map((m) => {
+    const updateInfo = modelUpdateMap[m.id] || {};
+    const hasUpdate = updateInfo.update_available === true;
     const sizeMb = m.size_bytes ? `${(m.size_bytes / 1048576).toFixed(0)} MB` : `~${m.approx_mb} MB`;
-    const badge = m.active
+    const statusBadge = m.active
       ? '<span class="badge badge-active">Active</span>'
       : m.installed ? '<span class="badge badge-installed">Installed</span>' : '';
-    const action = m.active
-      ? '<button class="secondary" disabled>In Use</button>'
-      : m.installed
-        ? `<button class="secondary model-use-btn" data-model-id="${escapeHtml(m.id)}" data-model-path="${escapeHtml(m.path)}">Use</button>`
-        : `<button class="model-download-btn" data-model-id="${escapeHtml(m.id)}">Download &amp; Install</button>`;
+    const updateBadge = hasUpdate ? '<span class="badge badge-update">Update Available</span>' : '';
+    const versionLabel = m.installed_version ? `<span class="muted" style="font-size:11px">v${escapeHtml(m.installed_version)}</span>` : '';
+    let action;
+    if (!m.installed) {
+      action = `<button class="model-download-btn" data-model-id="${escapeHtml(m.id)}">Download &amp; Install</button>`;
+    } else if (hasUpdate) {
+      const useBtn = m.active ? '' : `<button class="secondary model-use-btn" data-model-id="${escapeHtml(m.id)}" data-model-path="${escapeHtml(m.path)}">Use</button>`;
+      action = `${useBtn}<button class="model-update-btn" data-model-id="${escapeHtml(m.id)}">Update</button>`;
+    } else if (m.active) {
+      action = '<button class="secondary" disabled>In Use</button>';
+    } else {
+      action = `<button class="secondary model-use-btn" data-model-id="${escapeHtml(m.id)}" data-model-path="${escapeHtml(m.path)}">Use</button>`;
+    }
     return `
       <div class="model-row" id="model-row-${escapeHtml(m.id)}">
         <div class="model-row-info">
-          <strong>${escapeHtml(m.label)}</strong>${badge}
+          <strong>${escapeHtml(m.label)}</strong>${statusBadge}${updateBadge}${versionLabel}
           <span class="muted">${escapeHtml(m.description)}</span>
         </div>
         <div class="model-row-meta"><span class="muted">${sizeMb}</span></div>
@@ -160,6 +172,26 @@ function renderModelList(models) {
       }
     });
   });
+
+  modelList.querySelectorAll('.model-update-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const modelId = btn.dataset.modelId;
+      btn.disabled = true;
+      btn.textContent = 'Updating…';
+      setMessage(`Updating ${modelId}… this may take several minutes.`);
+      try {
+        const result = await api('/api/settings/ai/update-model', { method: 'POST', body: JSON.stringify({ model: modelId }) });
+        renderAi(result.status || result);
+        setMessage(result.message || `${modelId} updated.`);
+        delete modelUpdateMap[modelId];
+        await loadModels();
+      } catch (error) {
+        setMessage(error.message, true);
+        btn.disabled = false;
+        btn.textContent = 'Update';
+      }
+    });
+  });
 }
 
 async function loadModels() {
@@ -167,6 +199,33 @@ async function loadModels() {
     renderModelList(await api('/api/settings/ai/models'));
   } catch {
     modelList.innerHTML = '<p class="muted">Could not load model list.</p>';
+  }
+}
+
+async function checkForModelUpdates() {
+  const btn = document.getElementById('checkModelUpdatesBtn');
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+  modelUpdatesMessage.textContent = '';
+  try {
+    const result = await api('/api/settings/ai/check-model-updates');
+    modelUpdateMap = {};
+    for (const m of result.models || []) modelUpdateMap[m.id] = m;
+    if (result.error) {
+      modelUpdatesMessage.textContent = `Update check failed: ${result.error}`;
+    } else if (result.any_updates) {
+      modelUpdatesMessage.textContent = 'Updates are available for one or more installed models.';
+    } else if ((result.models || []).length === 0) {
+      modelUpdatesMessage.textContent = 'No models installed yet.';
+    } else {
+      modelUpdatesMessage.textContent = 'All installed models are up to date.';
+    }
+    await loadModels();
+  } catch (error) {
+    modelUpdatesMessage.textContent = `Update check failed: ${error.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Check for Updates';
   }
 }
 
@@ -205,5 +264,6 @@ aiForm.addEventListener('submit', async (event) => {
 document.getElementById('checkModelBtn').addEventListener('click', () => runAction('checkModelBtn', '/api/settings/ai/check-model', 'Checking model'));
 document.getElementById('reloadDetectorBtn').addEventListener('click', () => runAction('reloadDetectorBtn', '/api/settings/ai/reload', 'Reloading detector'));
 document.getElementById('testDetectorBtn').addEventListener('click', () => runAction('testDetectorBtn', '/api/settings/ai/test-detector', 'Testing detector'));
+document.getElementById('checkModelUpdatesBtn').addEventListener('click', checkForModelUpdates);
 
 loadAll().catch((error) => setMessage(error.message, true));
