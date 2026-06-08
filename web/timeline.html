@@ -60,17 +60,24 @@
         </div>
         <div id="timelineRecordings" class="list timeline-recordings"></div>
       </article>
-
-      <article class="card playback-card recordings-player-card">
-        <div class="section-header"><h2>Playback</h2></div>
-        <div class="clip-player-wrap">
-          <video id="clipPlayer" controls preload="metadata"></video>
-        </div>
-        <p id="clipPlayerStatus" class="muted">Select a timeline segment to play a recording.</p>
-        <div id="recordingDetails" class="status-panel"></div>
-      </article>
     </section>
   </main>
+
+  <div id="videoModal" class="video-modal" role="dialog" aria-modal="true" aria-label="Playback" hidden>
+    <div class="video-modal-backdrop"></div>
+    <div class="video-modal-content card">
+      <div class="video-modal-header">
+        <h2>Playback</h2>
+        <button id="videoModalClose" class="secondary" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="clip-player-wrap">
+        <video id="clipPlayer" controls preload="metadata"></video>
+      </div>
+      <p id="clipPlayerStatus" class="muted"></p>
+      <div id="recordingDetails" class="status-panel"></div>
+    </div>
+  </div>
+
   <script src="/static/nav.js"></script>
   <script src="/static/timeline.js"></script>
 </body>

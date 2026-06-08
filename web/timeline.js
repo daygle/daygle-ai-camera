@@ -15,6 +15,8 @@ const els = {
   clipPlayer: document.getElementById('clipPlayer'),
   clipPlayerStatus: document.getElementById('clipPlayerStatus'),
   recordingDetails: document.getElementById('recordingDetails'),
+  videoModal: document.getElementById('videoModal'),
+  videoModalClose: document.getElementById('videoModalClose'),
 };
 
 const state = {
@@ -435,14 +437,26 @@ function renderRecordingList(recordings) {
 }
 
 function renderRecordingDetails(recording) {
-  const detections = recordingDetectionLabels(recording);
+  const seen = new Map();
+  for (const d of (recording.detections || [])) {
+    const label = String(d.label || '').trim().toLowerCase();
+    if (!label) continue;
+    const conf = Number(d.confidence || 0);
+    if (!seen.has(label) || conf > seen.get(label)) seen.set(label, conf);
+  }
+  const detectionBadges = seen.size
+    ? Array.from(seen.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([label, conf]) => `<span class="detection">${escapeHtml(titleCase(label))} (${Math.round(conf * 100)}%)</span>`)
+        .join(' ')
+    : 'none';
   els.recordingDetails.innerHTML = `
     <div><span>Recording</span><strong><a href="/recordings?recording_id=${recording.id}" class="timeline-recording-link">#${recording.id} ↗</a></strong></div>
     <div><span>Camera</span><strong>${escapeHtml(cameraLabel(recording))}</strong></div>
     <div><span>Trigger</span><strong>${escapeHtml(titleCase(recordingTriggerSummary(recording)))}</strong></div>
     <div><span>Started</span><strong>${escapeHtml(formatDateTime(recording.started_at))}</strong></div>
     <div><span>Duration</span><strong>${escapeHtml(formatDuration(recording.duration_seconds))}</strong></div>
-    <div class="wide"><span>Detections</span><strong>${detections.length ? detections.map((d) => `<span class="detection">${escapeHtml(titleCase(d))}</span>`).join(' ') : 'none'}</strong></div>
+    <div class="wide"><span>Detections</span><strong>${detectionBadges}</strong></div>
   `;
 }
 
@@ -453,12 +467,28 @@ function highlightActiveRecording() {
   });
 }
 
+function openVideoModal() {
+  els.videoModal.hidden = false;
+  document.body.style.overflow = 'hidden';
+  els.videoModalClose.focus();
+}
+
+function closeVideoModal() {
+  els.videoModal.hidden = true;
+  document.body.style.overflow = '';
+  els.clipPlayer.pause();
+  els.clipPlayer.removeAttribute('src');
+  els.clipPlayer.load();
+}
+
 async function playRecording(recordingId, updateHistory = true) {
   const recording = await api(`/api/recordings/${recordingId}`);
   state.activeRecordingId = Number(recording.id);
   renderRecordingDetails(recording);
   highlightActiveRecording();
   if (updateHistory) replaceUrl(state.activeRecordingId);
+
+  openVideoModal();
 
   if (recording.media_ready === false) {
     els.clipPlayer.pause();
@@ -486,10 +516,8 @@ async function playRecording(recordingId, updateHistory = true) {
 
 function clearPlayback(updateHistory = true) {
   state.activeRecordingId = null;
-  els.clipPlayer.pause();
-  els.clipPlayer.removeAttribute('src');
-  els.clipPlayer.load();
-  els.clipPlayerStatus.textContent = 'Select a timeline segment to play a recording.';
+  closeVideoModal();
+  els.clipPlayerStatus.textContent = '';
   els.recordingDetails.innerHTML = '';
   highlightActiveRecording();
   if (updateHistory) replaceUrl(null);
@@ -599,6 +627,16 @@ els.timelineRecordings.addEventListener('click', (event) => {
   playRecording(button.dataset.recordingId).catch((error) => {
     els.clipPlayerStatus.textContent = error.message;
   });
+});
+
+els.videoModalClose.addEventListener('click', () => clearPlayback());
+
+els.videoModal.addEventListener('click', (event) => {
+  if (event.target === els.videoModal || event.target.classList.contains('video-modal-backdrop')) clearPlayback();
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !els.videoModal.hidden) clearPlayback();
 });
 
 els.clipPlayer.addEventListener('error', () => {

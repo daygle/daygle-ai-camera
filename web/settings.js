@@ -154,15 +154,8 @@ function createRuntimeResetSection() {
     <div class="button-row"><button id="startCleanBtn" class="secondary delete-btn" type="button">Start Clean</button></div>
   `;
 
-  const restoreSection = document.getElementById('databaseRestoreForm')?.closest('section');
-  if (restoreSection) {
-    restoreSection.after(section);
-  } else {
-    document.querySelector('main')?.append(section);
-  }
+  document.querySelector('main')?.append(section);
 }
-
-createRuntimeResetSection();
 
 
 function createLiveSettingsSection() {
@@ -238,6 +231,7 @@ function createEmailDeliverySection() {
 }
 
 createEmailDeliverySection();
+createRuntimeResetSection();
 enhanceFormFieldLabels();
 ensureRecordingExtensionStepField();
 enhanceFormFieldLabels();

@@ -1145,7 +1145,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         created_at=event_time,
         source='rtsp',
         snapshot_path=snapshot_path,
-        detections=alert_detections or anpr_detections,
+        detections=recording_detections or anpr_detections,
         alert_triggered=bool(triggered),
         metadata={
             'camera_id': settings.get('id'),
