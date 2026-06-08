@@ -53,12 +53,12 @@ class EmailAlertService:
                 ]
             )
         )
-        if snapshot_bytes:
+        if snapshot_bytes is not None:
             message.add_attachment(
                 snapshot_bytes,
-                maintype='image',
-                subtype='jpeg',
-                filename=f'alert_{event_id}.jpg',
+                maintype="image",
+                subtype="jpeg",
+                filename=f"alert_{event_id}.jpg",
             )
         self._deliver(message)
 

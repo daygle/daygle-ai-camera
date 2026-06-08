@@ -762,14 +762,14 @@ def test_profile_update_and_password_change(tmp_path, monkeypatch):
 
 
 def test_email_alert_settings_and_delivery(tmp_path, monkeypatch):
-    sent: list[tuple[dict[str, object], int, list[str]]] = []
+    sent: list[tuple[dict[str, object], int, list[str], bytes | None]] = []
 
     class FakeEmailAlertService:
         def __init__(self, settings):
             self.settings = settings
 
         def send_alert(self, alert, *, event_id, recipients, camera_name=None, camera_id=None, snapshot_bytes=None):
-            sent.append((alert, event_id, list(recipients)))
+            sent.append((alert, event_id, list(recipients), snapshot_bytes))
 
     app, _database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
@@ -841,6 +841,28 @@ def test_email_alert_settings_and_delivery(tmp_path, monkeypatch):
         assert sent
         assert sent[0][1] == event_id
         assert sent[0][2] == ["user@example.com"]
+        assert sent[0][3] is None  # no snapshot_path on this event
+
+        # Second pass: event with a real snapshot file — snapshot_bytes should be populated
+        import cv2
+        import numpy as np
+        snap_file = tmp_path / 'snap.jpg'
+        _, encoded = cv2.imencode('.jpg', np.zeros((10, 10, 3), dtype=np.uint8))
+        snap_file.write_bytes(encoded.tobytes())
+        sent.clear()
+        main_module.alerts.rules = main_module.effective_alert_rules()
+        triggered2 = main_module.alerts.process(detections)
+        event_id2 = main_module.database.add_event(
+            created_at=datetime.now(timezone.utc).isoformat(),
+            source='motion',
+            snapshot_path=str(snap_file),
+            detections=detections,
+            alert_triggered=bool(triggered2),
+            metadata={},
+        )
+        main_module.deliver_email_alerts(triggered2, event_id2)
+        assert sent
+        assert sent[0][3] is not None  # annotated snapshot bytes attached
     finally:
         server.should_exit = True
         thread.join(timeout=5)

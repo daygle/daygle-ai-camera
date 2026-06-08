@@ -1683,9 +1683,13 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
     camera_id = str(metadata.get('camera_id') or '').strip() or None
     rules_by_name = {str(rule.get('name')): rule for rule in (rules or effective_alert_rules())}
 
+    any_email_enabled = any(
+        rules_by_name.get(str(alert.get('rule_name')), {}).get('email_enabled')
+        for alert in triggered
+    )
     snapshot_bytes: bytes | None = None
     snapshot_path = str(event.get('snapshot_path') or '')
-    if snapshot_path:
+    if any_email_enabled and snapshot_path:
         try:
             snap_path = Path(snapshot_path)
             if snap_path.exists():
@@ -1700,8 +1704,8 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
                     for d in db_detections
                 ]
                 snapshot_bytes = render_live_snapshot_jpeg_overlay(raw_bytes, overlay_detections)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug('Failed to annotate snapshot for email alert event %s: %s', event_id, exc)
 
     mailer = EmailAlertService(effective_email_alert_settings())
     for alert in triggered:
