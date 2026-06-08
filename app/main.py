@@ -719,7 +719,9 @@ def zone_detection_alert_rule_names(settings: dict[str, Any], detection: dict[st
 
 def filter_detections_for_camera_anpr(detections: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
-    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_anpr', True)]
+    if not detection_settings.get('anpr_enabled', True):
+        return []
+    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True)]
     if not zones:
         return []
     return [detection for detection in detections if any(detection_matches_zone(detection, zone) for zone in zones)]
@@ -2334,96 +2336,6 @@ def live_snapshot(overlay: bool = Query(True), camera_id: str | None = None):
             image_bytes = render_live_snapshot_jpeg_overlay(image_bytes, detections)
         return Response(content=image_bytes, media_type='image/jpeg')
     raise HTTPException(status_code=503, detail='Live snapshots require an ONVIF/RTSP camera backend.')
-
-
-@app.post('/api/detect/test-image')
-async def detect_test_image(request: Request, camera_id: str | None = Query(None)):
-    image_bytes, filename, content_type = await _read_uploaded_image(request)
-    if not image_bytes:
-        raise HTTPException(status_code=400, detail='Uploaded image is empty')
-
-    ai_settings = effective_ai_config()
-    ai_state = ai_status_payload(ai_settings)
-    ai_error: str | None = None
-    try:
-        detections = detector.detect_image(image_bytes)
-    except DetectorUnavailableError as exc:
-        detections = []
-        ai_error = str(exc) or ai_state.get('last_detector_error') or ai_state.get('error') or 'Detector unavailable.'
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    camera_settings = get_camera_config(camera_id) if camera_id else None
-    if camera_settings is not None:
-        object_matches = filter_detections_for_camera(detections, camera_settings)
-        motion_matches = zone_motion_detections(detections, camera_settings)
-        seen: set[int] = set()
-        active_detections: list[dict[str, Any]] = []
-        for d in object_matches + motion_matches:
-            if id(d) not in seen:
-                seen.add(id(d))
-                active_detections.append(d)
-        if not active_detections:
-            return {
-                'created': False,
-                'event_id': None,
-                'recording_id': None,
-                'detections': detections,
-                'alerts': [],
-                'plate_events': [],
-                'snapshot_path': None,
-                'ai_backend': ai_state['configured_backend'],
-                'backend_used': ai_state['configured_backend'],
-                'detector_backend': ai_state['active_backend'],
-                'ai_error': ai_error,
-            }
-        detections = active_detections
-
-    snapshot_path = storage.save_image_snapshot(image_bytes, filename)
-    alerts.rules = effective_alert_rules()
-    triggered = alerts.process(detections)
-    event_time = datetime.now(timezone.utc).isoformat()
-    event_id = database.add_event(
-        created_at=event_time,
-        source='test-image',
-        snapshot_path=snapshot_path,
-        detections=detections,
-        alert_triggered=bool(triggered),
-        metadata={
-            'filename': filename,
-            'content_type': content_type,
-            'ai_backend': ai_state['configured_backend'],
-            'detector_backend': ai_state['active_backend'],
-        },
-    )
-
-    recording_id = attach_event_recording(event_id, event_time, 'test-image', detections)
-    plate_events = process_anpr_for_event(event_id, detections, snapshot_path, event_time)
-
-    for alert in triggered:
-        database.add_alert(
-            created_at=datetime.now(timezone.utc).isoformat(),
-            rule_name=alert['rule_name'],
-            event_id=event_id,
-            label=alert['label'],
-            confidence=alert['confidence'],
-            message=alert['message'],
-        )
-    deliver_email_alerts(triggered, event_id)
-
-    return {
-        'created': True,
-        'event_id': event_id,
-        'recording_id': recording_id,
-        'detections': detections,
-        'alerts': triggered,
-        'plate_events': plate_events,
-        'snapshot_path': snapshot_path,
-        'ai_backend': ai_state['configured_backend'],
-        'backend_used': ai_state['configured_backend'],
-        'detector_backend': ai_state['active_backend'],
-        'ai_error': ai_error,
-    }
 
 
 @app.post('/api/detect/frame')

@@ -22,6 +22,14 @@ const OVERLAY_TRACK_KEY = 'daygle.recordings.overlay.track.enabled';
 let overlayEnabled = true;
 let overlayTrackEnabled = false;
 const GENERIC_TRIGGER_LABELS = new Set(['motion', 'alert', 'human', 'object', 'none', 'off', 'continuous']);
+
+function filterByConfiguredLabels(detections) {
+  if (!configuredLabels) return detections;
+  return detections.filter((d) => {
+    const label = String(d.label || '').trim().toLowerCase();
+    return configuredLabels.has(label) || configuredLabels.has('motion') && label === 'motion';
+  });
+}
 let overlayTrackIntervalMs = 420;
 const OVERLAY_TRACK_MAX_WIDTH = 640;
 const OVERLAY_TRACK_MAX_HEIGHT = 360;
@@ -29,6 +37,7 @@ const overlayTrackCanvas = document.createElement('canvas');
 let overlayTrackLastRunMs = 0;
 let overlayTrackInFlight = false;
 let overlayTrackDetections = null;
+let configuredLabels = null; // null = no filter loaded yet
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -57,7 +66,7 @@ function detectionBadges(detections = []) {
       label: String(detection.label || '').trim().toLowerCase(),
       confidence: Number(detection.confidence || 0),
     }))
-    .filter((detection) => detection.label);
+    .filter((detection) => detection.label && (!configuredLabels || configuredLabels.has(detection.label)));
   if (!normalized.length) return '<span class="muted">No detections</span>';
   const hasSpecific = normalized.some((detection) => detection.label !== 'motion');
   const visible = hasSpecific
@@ -291,11 +300,13 @@ function drawClipOverlay() {
 
   const allEventDetections = Array.isArray(activeRecording?.detections) ? activeRecording.detections : [];
   const hasSpecificEvent = allEventDetections.some((d) => !GENERIC_TRIGGER_LABELS.has(String(d.label || '').toLowerCase()));
-  const eventDetections = hasSpecificEvent
-    ? allEventDetections.filter((d) => !GENERIC_TRIGGER_LABELS.has(String(d.label || '').toLowerCase()))
-    : allEventDetections;
+  const eventDetections = filterByConfiguredLabels(
+    hasSpecificEvent
+      ? allEventDetections.filter((d) => !GENERIC_TRIGGER_LABELS.has(String(d.label || '').toLowerCase()))
+      : allEventDetections
+  );
   const detections = overlayTrackEnabled && Array.isArray(overlayTrackDetections) && overlayTrackDetections.length
-    ? overlayTrackDetections
+    ? filterByConfiguredLabels(overlayTrackDetections)
     : eventDetections;
   if (!detections.length) return;
   const playerTime = Number(els.clipPlayer.currentTime || 0);
@@ -407,9 +418,32 @@ async function loadAuth() {
 
 async function loadLiveSettings() {
   try {
-    const settings = await api('/api/settings/system');
+    const [settings, alertData] = await Promise.all([
+      api('/api/settings/system'),
+      api('/api/settings/alerts'),
+    ]);
+
     const intervalMs = Number(settings?.live?.overlay_track_interval_ms);
     if (Number.isFinite(intervalMs) && intervalMs >= 100) overlayTrackIntervalMs = intervalMs;
+
+    const labels = new Set(['motion']);
+    for (const rule of (alertData?.rules || [])) {
+      if (rule.enabled !== false) {
+        const label = String(rule.label || rule.object || '').trim().toLowerCase();
+        if (label) labels.add(label);
+      }
+    }
+    for (const camera of (settings?.cameras || [])) {
+      for (const zone of (camera?.detection?.zones || [])) {
+        for (const rule of (zone?.object_rules || [])) {
+          if (rule.enabled !== false) {
+            const label = String(rule.label || '').trim().toLowerCase();
+            if (label) labels.add(label);
+          }
+        }
+      }
+    }
+    configuredLabels = labels;
   } catch (_error) {
     // Keep default if settings unavailable.
   }

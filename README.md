@@ -235,7 +235,7 @@ Camera, email delivery, ANPR, recording, storage, and login security settings ar
 
 #### P6S / ONVIF stream testing
 
-Most ONVIF-compatible cameras expose the video itself as an RTSP stream. To test a P6S-style camera while waiting for the OV5647, open `/settings`, set **Camera backend** to `onvif / RTSP`, and either:
+Most ONVIF-compatible cameras expose the video itself as an RTSP stream. To test a P6S-style camera, open `/settings`, set **Camera backend** to `onvif / RTSP`, and either:
 
 - paste the complete `stream_url`, for example `rtsp://username:password@192.168.1.50:554/stream1`; or
 - enter `host`, `username`, `password`, optional `port` (default `554`), and `path` so Daygle can build the RTSP URL.
@@ -342,7 +342,6 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `GET` | `/api/status` | Camera and detector status |
 | `GET` | `/api/status/ai` | Detailed AI status |
 | `GET` | `/api/live/snapshot` | Live ONVIF/RTSP JPEG snapshot |
-| `POST` | `/api/detect/test-image` | Upload image for active detector inference |
 | `GET` | `/api/events` | List/search events |
 | `GET` | `/api/alerts` | Alert history |
 | `GET` | `/api/recordings` | List recordings |

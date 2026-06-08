@@ -54,6 +54,7 @@ function renderCameraCard(camera, index) {
   const recEnabled = camera.recording?.enabled !== false;
   const continuous = camera.recording?.continuous === true;
   const alertClips = camera.recording?.record_on_alert !== false;
+  const anprEnabled = camera.detection?.anpr_enabled !== false;
   const res = `${camera.width || 1280}×${camera.height || 720}`;
   const fps = camera.fps || 15;
 
@@ -96,6 +97,10 @@ function renderCameraCard(camera, index) {
             ${recEnabled && alertClips ? `<span class="chip">Alert clips</span>` : ''}
             ${recEnabled && continuous ? `<span class="chip">Continuous</span>` : ''}
           </span>
+        </div>
+        <div class="cam-meta-row">
+          <span class="cam-meta-label">ANPR</span>
+          <span class="cam-meta-value">${anprEnabled ? '<span class="chip chip-green">Enabled</span>' : '<span class="chip chip-dim">Disabled</span>'}</span>
         </div>
         ${(camera.detection?.zones || []).length > 0 ? `<div class="cam-meta-row">
           <span class="cam-meta-label">Zones</span>
@@ -181,6 +186,7 @@ function fillModal(camera, index) {
   document.getElementById('editRecordingEnabled').value = String(camera.recording?.enabled !== false);
   document.getElementById('editRecordOnAlert').value = String(camera.recording?.record_on_alert !== false);
   document.getElementById('editContinuous').value = String(camera.recording?.continuous === true);
+  document.getElementById('editAnprEnabled').value = String(camera.detection?.anpr_enabled !== false);
 
   const manual = camera.backend === 'rtsp';
   document.getElementById('rtspManualFields').hidden = !manual;
@@ -191,7 +197,7 @@ function fillModal(camera, index) {
 
 function openEditModal(index) {
   const camera = index === null
-    ? { id: `camera-${cameras.length + 1}`, name: `Camera ${cameras.length + 1}`, backend: 'onvif', port: 554, path: 'stream1', width: 1280, height: 720, fps: 15, recording: { enabled: true, record_on_alert: true, continuous: false } }
+    ? { id: `camera-${cameras.length + 1}`, name: `Camera ${cameras.length + 1}`, backend: 'onvif', port: 554, path: 'stream1', width: 1280, height: 720, fps: 15, recording: { enabled: true, record_on_alert: true, continuous: false }, detection: { anpr_enabled: true } }
     : cameras[index];
   fillModal(camera, index);
   openModal(modal);
@@ -217,6 +223,9 @@ function collectModalData() {
       record_on_alert: document.getElementById('editRecordOnAlert').value === 'true',
       continuous: document.getElementById('editContinuous').value === 'true',
     },
+    detection: {
+      anpr_enabled: document.getElementById('editAnprEnabled').value === 'true',
+    },
   };
 }
 
@@ -229,7 +238,11 @@ editForm.addEventListener('submit', async (e) => {
   if (index === null) {
     cameras.push(data);
   } else {
-    cameras[index] = { ...cameras[index], ...data };
+    cameras[index] = {
+      ...cameras[index],
+      ...data,
+      detection: { ...(cameras[index].detection || {}), ...data.detection },
+    };
   }
 
   try {

@@ -116,6 +116,18 @@
             <label><span>FPS</span><input id="editFps" name="fps" type="number" min="1" max="120" placeholder="15" /></label>
           </div>
           <p class="form-help muted">These values are hints passed to the stream decoder. Leave at defaults unless your camera requires specific dimensions.</p>
+
+          <div class="form-group">
+            <p class="form-group-label">Detection</p>
+            <div class="form-grid">
+              <label><span>ANPR (Number Plate Recognition)</span>
+                <select id="editAnprEnabled" name="anpr_enabled">
+                  <option value="true">Enabled</option>
+                  <option value="false">Disabled</option>
+                </select>
+              </label>
+            </div>
+          </div>
         </div>
 
         <div class="modal-footer">

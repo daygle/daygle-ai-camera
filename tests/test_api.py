@@ -102,15 +102,6 @@ TEST_IMAGE_PNG = (
 )
 
 
-def _post_test_image_detection(client: LocalClient, csrf_token: str | None = None, camera_id: str | None = None):
-    path = '/api/detect/test-image'
-    if camera_id:
-        path = f'{path}?camera_id={camera_id}'
-    headers = {'Content-Type': 'image/png'}
-    if csrf_token:
-        headers['X-CSRF-Token'] = csrf_token
-    return client.request(path, method='POST', data=TEST_IMAGE_PNG, headers=headers)
-
 
 def _post_frame_detection(client: LocalClient, csrf_token: str | None = None):
     headers = {'Content-Type': 'image/png'}
@@ -266,7 +257,7 @@ def test_onnx_missing_model_returns_clear_api_error(tmp_path, monkeypatch):
         _setup_admin(client)
         csrf = _login(client)
         status, _headers, body = client.request(
-            "/api/detect/test-image",
+            "/api/detect/frame",
             method="POST",
             data=b"not really an image",
             headers={"Content-Type": "image/jpeg", "X-CSRF-Token": csrf},
@@ -308,79 +299,6 @@ def test_status_ai_reports_model_missing_for_missing_onnx(tmp_path, monkeypatch)
         thread.join(timeout=5)
 
 
-def test_test_image_upload_uses_onnx_backend_not_mock(tmp_path, monkeypatch):
-    import app.detector as detector_module
-
-    known_png = (
-        b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
-        b'\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04'
-        b'\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82'
-    )
-
-    class FakeOnnxYoloDetector:
-        backend = 'onnx'
-
-        def __init__(self, model_path, labels_path=None, **_kwargs):
-            self.model_path = Path(model_path)
-            self.labels_path = Path(labels_path or '')
-            self.unavailable_reason = None
-
-        @property
-        def available(self):
-            return True
-
-        def detect_image(self, image_bytes: bytes):
-            assert image_bytes == known_png
-            return [
-                {
-                    'label': 'known_onnx_object',
-                    'confidence': 0.991,
-                    'box': {'x': 1.0, 'y': 2.0, 'width': 3.0, 'height': 4.0},
-                }
-            ]
-
-    monkeypatch.setattr(detector_module, 'OnnxYoloDetector', FakeOnnxYoloDetector)
-    app, _database_path = _load_app(
-        tmp_path,
-        monkeypatch,
-        extra_ai=f"""  backend: onnx
-  model_path: {tmp_path / 'fake.onnx'}
-  labels_path: {tmp_path / 'labels.txt'}
-""",
-    )
-    server, thread, base_url = _server(app)
-    client = LocalClient(base_url)
-    try:
-        _setup_admin(client)
-        csrf = _login(client)
-        Path(tmp_path / 'fake.onnx').write_bytes(b'fake')
-        status, _headers, ai_status = client.request('/api/status/ai')
-        assert status == 200
-        assert ai_status['active_backend'] == 'onnx'
-        assert ai_status['model_loaded'] is True
-        assert ai_status['mode'] == 'ONNX ACTIVE'
-
-        status, _headers, created = client.request(
-            '/api/detect/test-image',
-            method='POST',
-            data=known_png,
-            headers={'Content-Type': 'image/png', 'X-CSRF-Token': csrf},
-        )
-        assert status == 200
-        assert created['ai_backend'] == 'onnx'
-        assert created['detections'] == [
-            {
-                'label': 'known_onnx_object',
-                'confidence': 0.991,
-                'box': {'x': 1.0, 'y': 2.0, 'width': 3.0, 'height': 4.0},
-            }
-        ]
-        event = client.request(f"/api/events/{created['event_id']}")[2]
-        assert event['metadata']['ai_backend'] == 'onnx'
-    finally:
-        server.should_exit = True
-        thread.join(timeout=5)
-
 
 def test_ai_settings_save_onnx_missing_keeps_previous_detector_and_errors_on_upload(tmp_path, monkeypatch):
     app, database_path = _load_app(tmp_path, monkeypatch)
@@ -406,7 +324,7 @@ def test_ai_settings_save_onnx_missing_keeps_previous_detector_and_errors_on_upl
         assert json.loads(value)['backend'] == 'onnx'
 
         status, _headers, body = client.request(
-            '/api/detect/test-image',
+            '/api/detect/frame',
             method='POST',
             data=b'not really an image',
             headers={'Content-Type': 'image/jpeg', 'X-CSRF-Token': csrf},
@@ -597,12 +515,6 @@ def test_setup_login_success_session_validation_and_protected_routes(tmp_path, m
         assert status == 200
         assert payload["status"] == "online"
 
-        status, _headers, _payload = _post_test_image_detection(client)
-        assert status == 403
-        status, _headers, created = _post_test_image_detection(client, csrf)
-        assert status == 200
-        assert created["created"] is True
-
         status, _headers, _frame_blocked = _post_frame_detection(client)
         assert status == 403
         status, _headers, frame_payload = _post_frame_detection(client, csrf)
@@ -612,7 +524,7 @@ def test_setup_login_success_session_validation_and_protected_routes(tmp_path, m
 
         assert client.request("/api/events")[0] == 200
         assert client.request("/api/alerts")[0] == 200
-        assert client.request("/api/stats")[2]["total_events"] == 1
+        assert client.request("/api/stats")[2]["total_events"] == 0
         assert client.request("/api/config")[2]["auth"]["enabled"] is True
         assert client.request("/api/config")[2]["anpr"]["enabled"] is True
         assert client.request("/static/app.js")[0] == 200
@@ -684,15 +596,6 @@ def test_logout_user_creation_and_password_reset(tmp_path, monkeypatch):
         assert viewer_client.request("/api/status")[0] == 200
         assert viewer_client.request("/api/users")[0] == 403
 
-        status, _headers, created = _post_test_image_detection(viewer_client, viewer_csrf)
-        assert status == 200
-        assert created["created"] is True
-        assert created["event_id"] >= 1
-        assert created["detections"]
-
-        events = viewer_client.request("/api/events")[2]
-        assert events[0]["source"] == "test-image"
-        assert viewer_client.request(f"/api/events/{created['event_id']}")[2]["id"] == created["event_id"]
         assert viewer_client.request("/api/config")[2]["ai"]["backend"] == "onnx"
     finally:
         server.should_exit = True
@@ -913,12 +816,30 @@ def test_email_alert_settings_and_delivery(tmp_path, monkeypatch):
         assert status == 200
         assert rule["email_recipients"] == ["user@example.com"]
 
-        main_module.detector.categories = ["cat"]
-        status, _headers, created = _post_test_image_detection(client, csrf)
-        assert status == 200
-        assert created["created"] is True
+        detections = [{'label': 'cat', 'confidence': 0.9, 'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}}]
+        main_module.alerts.rules = main_module.effective_alert_rules()
+        triggered = main_module.alerts.process(detections)
+        event_time = datetime.now(timezone.utc).isoformat()
+        event_id = main_module.database.add_event(
+            created_at=event_time,
+            source='motion',
+            snapshot_path=None,
+            detections=detections,
+            alert_triggered=bool(triggered),
+            metadata={},
+        )
+        for alert in triggered:
+            main_module.database.add_alert(
+                created_at=datetime.now(timezone.utc).isoformat(),
+                rule_name=alert['rule_name'],
+                event_id=event_id,
+                label=alert['label'],
+                confidence=alert['confidence'],
+                message=alert['message'],
+            )
+        main_module.deliver_email_alerts(triggered, event_id)
         assert sent
-        assert sent[0][1] == created["event_id"]
+        assert sent[0][1] == event_id
         assert sent[0][2] == ["user@example.com"]
     finally:
         server.should_exit = True
@@ -989,12 +910,19 @@ def test_anpr_event_search_alerts_and_plate_status_api(tmp_path, monkeypatch):
         _setup_admin(admin)
         admin_csrf = _login(admin)
         main_module = sys.modules["app.main"]
-        main_module.detector.categories = ["car"]
-
-        status, _headers, created = _post_test_image_detection(admin, admin_csrf)
-        assert status == 200
-        assert created['plate_events']
-        plate_number = created['plate_events'][0]['plate_number']
+        detections = [{'label': 'car', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.2}}]
+        event_time = datetime.now(timezone.utc).isoformat()
+        event_id = main_module.database.add_event(
+            created_at=event_time,
+            source='motion',
+            snapshot_path=None,
+            detections=detections,
+            alert_triggered=False,
+            metadata={},
+        )
+        plate_events = main_module.process_anpr_for_event(event_id, detections, None, event_time)
+        assert plate_events
+        plate_number = plate_events[0]['plate_number']
 
         status, _headers, plates = admin.request('/api/plates')
         assert status == 200
@@ -1003,10 +931,9 @@ def test_anpr_event_search_alerts_and_plate_status_api(tmp_path, monkeypatch):
 
         status, _headers, search = admin.request(f'/api/plates/search?q={plate_number}')
         assert status == 200
-        assert search[0]['event']['id'] == created['event_id']
-        assert search[0]['event']['recordings']
+        assert search[0]['event']['id'] == event_id
 
-        event = admin.request(f"/api/events/{created['event_id']}")[2]
+        event = admin.request(f"/api/events/{event_id}")[2]
         assert event['plate_events'][0]['plate_number'] == plate_number
 
         status, _headers, whitelisted = admin.request(
@@ -1036,7 +963,7 @@ def test_anpr_event_search_alerts_and_plate_status_api(tmp_path, monkeypatch):
         )
         assert status == 200
         assert rule['plate_pattern'] == plate_number
-        assert any(alert['rule_name'] == 'Watch plate' for alert in main_module.trigger_plate_alerts(created['plate_events']))
+        assert any(alert['rule_name'] == 'Watch plate' for alert in main_module.trigger_plate_alerts(plate_events))
 
         status, _headers, edited = admin.request(
             f"/api/plate-alerts/{rule['id']}",
@@ -2210,14 +2137,24 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         )
         assert status == 200
 
-        status, _headers, created = _post_test_image_detection(admin, admin_csrf)
-        assert status == 200
-        assert created['recording_id'] is not None
+        detections = [{'label': 'cat', 'confidence': 0.91, 'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}}]
+        event_time = datetime.now(timezone.utc).isoformat()
+        snapshot_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'test.png')
+        event_id = main.database.add_event(
+            created_at=event_time,
+            source='motion',
+            snapshot_path=snapshot_path,
+            detections=detections,
+            alert_triggered=False,
+            metadata={},
+        )
+        recording_id = main.attach_event_recording(event_id, event_time, 'upload', detections)
+        assert recording_id is not None
 
         status, _headers, recordings = admin.request('/api/recordings')
         assert status == 200
-        assert recordings[0]['id'] == created['recording_id']
-        assert recordings[0]['event_id'] == created['event_id']
+        assert recordings[0]['id'] == recording_id
+        assert recordings[0]['event_id'] == event_id
         assert recordings[0]['detections']
         assert recordings[0]['source'] == 'upload'
         assert recordings[0]['trigger_type'] in {'motion', 'human', 'object', 'continuous'}
@@ -2226,16 +2163,16 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         label = recordings[0]['detections'][0]['label']
         status, _headers, filtered = admin.request(f'/api/recordings?label={label}')
         assert status == 200
-        assert any(recording['id'] == created['recording_id'] for recording in filtered)
+        assert any(recording['id'] == recording_id for recording in filtered)
 
-        status, _headers, detail = admin.request(f"/api/recordings/{created['recording_id']}")
+        status, _headers, detail = admin.request(f"/api/recordings/{recording_id}")
         assert status == 200
-        assert detail['event']['id'] == created['event_id']
-        event = admin.request(f"/api/events/{created['event_id']}")[2]
+        assert detail['event']['id'] == event_id
+        event = admin.request(f"/api/events/{event_id}")[2]
         assert event['recording_status'] == 'linked'
-        assert event['recordings'][0]['id'] == created['recording_id']
+        assert event['recordings'][0]['id'] == recording_id
 
-        status, headers, _media = admin.request(f"/api/recordings/{created['recording_id']}/stream")
+        status, headers, _media = admin.request(f"/api/recordings/{recording_id}/stream")
         assert status == 200
         assert headers['content-type'].startswith('video/mp4')
 
@@ -2243,17 +2180,17 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         viewer_csrf = _login(viewer_client, viewer['username'], 'Viewer123!')
         assert viewer_client.request('/api/recordings')[0] == 200
         status, _headers, denied = viewer_client.request(
-            f"/api/recordings/{created['recording_id']}", method='DELETE', headers={'X-CSRF-Token': viewer_csrf}
+            f"/api/recordings/{recording_id}", method='DELETE', headers={'X-CSRF-Token': viewer_csrf}
         )
         assert status == 403
         assert denied['detail'] == 'Admin access required'
 
         status, _headers, deleted = admin.request(
-            f"/api/recordings/{created['recording_id']}", method='DELETE', headers={'X-CSRF-Token': admin_csrf}
+            f"/api/recordings/{recording_id}", method='DELETE', headers={'X-CSRF-Token': admin_csrf}
         )
         assert status == 200
         assert deleted['ok'] is True
-        assert admin.request(f"/api/recordings/{created['recording_id']}")[0] == 404
+        assert admin.request(f"/api/recordings/{recording_id}")[0] == 404
         assert not Path(recordings[0]['file_path']).exists()
         with sqlite3.connect(database_path) as db:
             count = db.execute('SELECT COUNT(*) FROM recordings').fetchone()[0]
@@ -2281,15 +2218,25 @@ def test_recording_retention_purge_deletes_metadata_and_files(tmp_path, monkeypa
     try:
         _setup_admin(admin)
         admin_csrf = _login(admin)
-        status, _headers, created = _post_test_image_detection(admin, admin_csrf)
-        assert status == 200
-        recording = admin.request(f"/api/recordings/{created['recording_id']}")[2]
+        detections = [{'label': 'cat', 'confidence': 0.91, 'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}}]
+        event_time = datetime.now(timezone.utc).isoformat()
+        event_id = main.database.add_event(
+            created_at=event_time,
+            source='motion',
+            snapshot_path=None,
+            detections=detections,
+            alert_triggered=False,
+            metadata={},
+        )
+        recording_id = main.attach_event_recording(event_id, event_time, 'upload', detections)
+        assert recording_id is not None
+        recording = admin.request(f"/api/recordings/{recording_id}")[2]
         file_path = Path(recording['file_path'])
         assert file_path.exists()
 
         old_started = '2000-01-01T00:00:00+00:00'
         with sqlite3.connect(database_path) as db:
-            db.execute("UPDATE recordings SET started_at = ?, ended_at = ? WHERE id = ?", (old_started, old_started, created['recording_id']))
+            db.execute("UPDATE recordings SET started_at = ?, ended_at = ? WHERE id = ?", (old_started, old_started, recording_id))
             db.commit()
 
         status, _headers, purged = admin.request('/api/recordings/purge', method='POST', headers={'X-CSRF-Token': admin_csrf})
@@ -2297,7 +2244,7 @@ def test_recording_retention_purge_deletes_metadata_and_files(tmp_path, monkeypa
         assert purged['purged'] == 1
         assert purged['files_deleted'] == 1
         assert not file_path.exists()
-        assert admin.request(f"/api/recordings/{created['recording_id']}")[0] == 404
+        assert admin.request(f"/api/recordings/{recording_id}")[0] == 404
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -2453,10 +2400,6 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
         assert status == 200
         assert status_payload['camera_id'] == 'garage'
         assert status_payload['resolution'] == {'width': 640, 'height': 480}
-
-        status, _headers, no_detection = _post_test_image_detection(client, csrf, camera_id='garage')
-        assert status == 200
-        assert no_detection['created'] is False
 
         status, _headers, updated = client.request(
             '/api/cameras/front-door',

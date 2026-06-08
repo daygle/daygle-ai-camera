@@ -370,7 +370,6 @@ function renderZones() {
       <div class="zone-row-main">
         <input data-zone-name="${index}" value="${escapeHtml(zone.name || `Zone ${index + 1}`)}" />
         <label><span>Zone</span><select data-zone-enabled="${index}"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Shown</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
-        <label><span>ANPR</span><select data-zone-anpr="${index}"><option value="true" ${zone.monitor_anpr !== false ? 'selected' : ''}>On</option><option value="false" ${zone.monitor_anpr === false ? 'selected' : ''}>Off</option></select></label>
         <button class="secondary" type="button" data-delete-zone="${index}">Remove</button>
       </div>
       <div class="zone-object-rules">
@@ -400,17 +399,12 @@ function bindZoneControls(zones) {
       if (label) label.textContent = input.value || `Zone ${index + 1}`;
     });
   });
-  [
-    ['zoneEnabled', 'enabled'],
-    ['zoneAnpr', 'monitor_anpr'],
-  ].forEach(([datasetKey, zoneKey]) => {
-    document.querySelectorAll(`[data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((select) => {
-      select.addEventListener('change', () => {
-        selectedZoneIndex = Number(select.dataset[datasetKey]);
-        zones[selectedZoneIndex][zoneKey] = select.value === 'true';
-        renderZones();
-        refreshFrame();
-      });
+  document.querySelectorAll('[data-zone-enabled]').forEach((select) => {
+    select.addEventListener('change', () => {
+      selectedZoneIndex = Number(select.dataset.zoneEnabled);
+      zones[selectedZoneIndex].enabled = select.value === 'true';
+      renderZones();
+      refreshFrame();
     });
   });
   document.querySelectorAll('[data-delete-zone]').forEach((button) => {

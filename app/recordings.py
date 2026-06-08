@@ -127,7 +127,7 @@ class RecordingService:
         if write_clip:
             self.write_event_clip(file_path, event_id, detections, duration_seconds, trigger_type, trigger_label)
 
-        mapped_source = 'upload' if source in {'test-image', 'upload'} else 'rtsp' if source == 'rtsp' else 'camera'
+        mapped_source = 'upload' if source == 'upload' else 'rtsp' if source == 'rtsp' else 'camera'
         if mapped_source not in self.VALID_SOURCES:
             mapped_source = 'camera'
         return {
