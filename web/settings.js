@@ -416,6 +416,92 @@ forms.databaseRestore.addEventListener('submit', async (event) => {
 
 loadSettings().catch((error) => setMessage(error.message));
 
+function initSoftwareUpdateSection() {
+  const checkBtn = document.getElementById('checkUpdateBtn');
+  const applyBtn = document.getElementById('applyUpdateBtn');
+  const statusEl = document.getElementById('updateStatus');
+  const outputEl = document.getElementById('updateOutput');
+  if (!checkBtn) return;
+
+  function showUpdateStatus(html, type = '') {
+    if (!statusEl) return;
+    statusEl.style.display = '';
+    statusEl.innerHTML = html;
+    statusEl.className = 'status-panel' + (type ? ` status-${type}` : '');
+  }
+
+  function showUpdateOutput(text) {
+    if (!outputEl) return;
+    outputEl.style.display = text ? '' : 'none';
+    outputEl.textContent = text;
+  }
+
+  checkBtn.addEventListener('click', async () => {
+    checkBtn.disabled = true;
+    if (applyBtn) applyBtn.style.display = 'none';
+    showUpdateStatus('Checking for updates...', '');
+    showUpdateOutput('');
+    try {
+      const result = await api('/api/update/check');
+      if (result.error) {
+        showUpdateStatus(`Could not reach GitHub: ${escapeHtml(result.error)}`, 'error');
+        return;
+      }
+      const current = escapeHtml(result.current_version || 'unknown');
+      const latest = escapeHtml(result.latest_version || 'unknown');
+      if (result.update_available) {
+        const notesHtml = result.release_notes
+          ? `<p class="muted" style="margin-top:.5rem;white-space:pre-wrap">${escapeHtml(result.release_notes.slice(0, 600))}</p>`
+          : '';
+        showUpdateStatus(
+          `<strong>Update available:</strong> v${current} &rarr; v${latest}${notesHtml}`,
+          'warning',
+        );
+        if (applyBtn) applyBtn.style.display = '';
+      } else {
+        showUpdateStatus(`You are running the latest version (v${current}).`, 'ok');
+      }
+    } catch (err) {
+      showUpdateStatus(`Check failed: ${escapeHtml(err.message)}`, 'error');
+    } finally {
+      checkBtn.disabled = false;
+    }
+  });
+
+  applyBtn?.addEventListener('click', async () => {
+    if (!confirm('Apply the update now? The service will restart automatically if running under systemd. Make sure to save any open settings first.')) return;
+    applyBtn.disabled = true;
+    checkBtn.disabled = true;
+    showUpdateStatus('Downloading and applying update — this may take a minute...', '');
+    showUpdateOutput('');
+    try {
+      const result = await api('/api/update/apply', { method: 'POST' });
+      showUpdateOutput(result.output || '');
+      if (result.ok) {
+        const restartMsg = result.service_restart_scheduled
+          ? ' The service is restarting — please refresh this page in a few seconds.'
+          : ' Restart the service manually to apply changes.';
+        showUpdateStatus(
+          `Update applied successfully. New version: v${escapeHtml(result.new_version || 'unknown')}.${restartMsg}`,
+          'ok',
+        );
+        applyBtn.style.display = 'none';
+        const versionEl = document.getElementById('currentVersion');
+        if (versionEl && result.new_version) versionEl.textContent = result.new_version;
+      } else {
+        showUpdateStatus('Update failed. See output below for details.', 'error');
+      }
+    } catch (err) {
+      showUpdateStatus(`Update failed: ${escapeHtml(err.message)}`, 'error');
+    } finally {
+      applyBtn.disabled = false;
+      checkBtn.disabled = false;
+    }
+  });
+}
+
+initSoftwareUpdateSection();
+
 startCleanBtn?.addEventListener('click', async () => {
   const confirmed = confirm('Start clean now? This permanently deletes events, recordings, alerts, and plates, while keeping settings and users.');
   if (!confirmed) return;

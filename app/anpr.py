@@ -48,10 +48,18 @@ class AnprPipeline:
         results: list[dict[str, Any]] = []
         for index, detection in enumerate(vehicle_detections):
             crop_path = storage.save_plate_crop(event_id=event_id, source_path=image_path, detection=detection, index=index)
+            if not crop_path:
+                logger.debug("Skipping ANPR for event %s detection %s: no image available", event_id, index)
+                continue
             plate_number, confidence = self.ocr.read_plate(crop_path, event_id=event_id, detection=detection, index=index)
             plate_number = normalize_plate(plate_number)
-            if not plate_number or confidence < self.min_confidence:
+            if not plate_number:
+                logger.debug("No plate text found for event %s detection %s", event_id, index)
                 continue
+            if confidence < self.min_confidence:
+                logger.debug("Plate %r confidence %.2f below threshold %.2f for event %s", plate_number, confidence, self.min_confidence, event_id)
+                continue
+            logger.info("ANPR event %s: plate=%r confidence=%.2f", event_id, plate_number, confidence)
             results.append(
                 {
                     "plate_number": plate_number,
@@ -72,12 +80,19 @@ class PaddleOcrBackend:
             raise AnprUnavailableError(f"PaddleOCR is not available: {exc}") from exc
 
     def read_plate(self, image_path: str, *, event_id: int, detection: dict[str, Any], index: int) -> tuple[str, float]:
-        result = self.reader.ocr(image_path, cls=True)
+        try:
+            result = self.reader.ocr(image_path, cls=True)
+        except Exception as exc:
+            logger.warning("PaddleOCR failed for %r: %s", image_path, exc)
+            return ("", 0.0)
         candidates: list[tuple[str, float]] = []
         for group in result or []:
             for item in group or []:
-                text, confidence = item[1]
-                candidates.append((str(text), float(confidence)))
+                try:
+                    text, confidence = item[1]
+                    candidates.append((str(text), float(confidence)))
+                except (TypeError, ValueError, IndexError):
+                    continue
         return max(candidates, key=lambda item: item[1]) if candidates else ("", 0.0)
 
 
@@ -90,8 +105,17 @@ class EasyOcrBackend:
             raise AnprUnavailableError(f"EasyOCR is not available: {exc}") from exc
 
     def read_plate(self, image_path: str, *, event_id: int, detection: dict[str, Any], index: int) -> tuple[str, float]:
-        result = self.reader.readtext(image_path)
-        candidates = [(str(item[1]), float(item[2])) for item in result or []]
+        try:
+            result = self.reader.readtext(image_path)
+        except Exception as exc:
+            logger.warning("EasyOCR failed for %r: %s", image_path, exc)
+            return ("", 0.0)
+        candidates: list[tuple[str, float]] = []
+        for item in result or []:
+            try:
+                candidates.append((str(item[1]), float(item[2])))
+            except (TypeError, ValueError, IndexError):
+                continue
         return max(candidates, key=lambda item: item[1]) if candidates else ("", 0.0)
 
 

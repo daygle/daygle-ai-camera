@@ -356,7 +356,7 @@ def test_live_snapshot_renderer_can_hide_object_overlay(tmp_path, monkeypatch):
     with_overlay = main.render_live_snapshot_svg(frame, detections, overlay=True)
     assert 'Overlay ON' in with_overlay
     assert '<g class="detection-box"' in with_overlay
-    assert 'person Â· 92%' in with_overlay
+    assert 'person · 92%' in with_overlay
 
 
 def test_live_snapshot_jpeg_overlay_changes_frame_when_detections_exist(tmp_path, monkeypatch):

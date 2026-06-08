@@ -229,6 +229,10 @@ input[type="file"] { padding: 10px; }
 .status-panel .wide { grid-column: 1 / -1; }
 .status-panel span { display: block; color: var(--muted); font-size: 12px; font-weight: 800; margin-bottom: 5px; }
 .status-panel strong { overflow-wrap: anywhere; }
+.status-panel.status-ok { border: 1px solid rgba(73,230,163,.4); background: rgba(73,230,163,.07); border-radius: 10px; padding: 10px 14px; grid-template-columns: 1fr; }
+.status-panel.status-warning { border: 1px solid rgba(251,191,36,.4); background: rgba(251,191,36,.07); border-radius: 10px; padding: 10px 14px; grid-template-columns: 1fr; }
+.status-panel.status-error { border: 1px solid rgba(248,113,113,.4); background: rgba(248,113,113,.07); border-radius: 10px; padding: 10px 14px; grid-template-columns: 1fr; }
+.update-output { background: rgba(0,0,0,.4); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; font-size: 12px; line-height: 1.6; overflow-x: auto; white-space: pre-wrap; max-height: 320px; overflow-y: auto; margin-top: 12px; color: var(--muted); }
 .button-row { display: flex; gap: 10px; flex-wrap: wrap; }
 
 .danger-zone-card {

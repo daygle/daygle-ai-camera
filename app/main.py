@@ -2,6 +2,7 @@
 
 import copy
 import importlib.util
+import json
 import logging
 import mimetypes
 import os
@@ -13,6 +14,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from html import escape
@@ -721,7 +724,7 @@ def filter_detections_for_camera_anpr(detections: list[dict[str, Any]], settings
     detection_settings = settings.get('detection') or {}
     if not detection_settings.get('anpr_enabled', True):
         return []
-    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True)]
+    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_anpr', True)]
     if not zones:
         return []
     return [detection for detection in detections if any(detection_matches_zone(detection, zone) for zone in zones)]
@@ -1318,7 +1321,7 @@ async def authentication_middleware(request: Request, call_next):
     request.state.session = session
     request.state.user = session['user']
 
-    admin_required = path in ADMIN_PATHS or path.startswith('/api/users') or path.startswith('/api/settings/ai') or path.startswith('/api/settings/anpr') or path.startswith('/api/settings/system') or (path.startswith('/api/cameras') and request.method in MUTATING_METHODS) or (
+    admin_required = path in ADMIN_PATHS or path.startswith('/api/users') or path.startswith('/api/settings/ai') or path.startswith('/api/settings/anpr') or path.startswith('/api/settings/system') or path.startswith('/api/update/') or (path.startswith('/api/cameras') and request.method in MUTATING_METHODS) or (
         path.startswith('/api/settings/alert-email') and request.method in MUTATING_METHODS
     ) or (
         path.startswith('/api/settings/alerts') and request.method in MUTATING_METHODS
@@ -1382,7 +1385,7 @@ async def form_data(request: Request) -> dict[str, str]:
 def auth_page(title: str, body: str) -> HTMLResponse:
     return HTMLResponse(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>{escape(title)} Ã‚Â· Daygle AI Camera</title><link rel="stylesheet" href="/static/styles.css" /></head>
+<title>{escape(title)} · Daygle AI Camera</title><link rel="stylesheet" href="/static/styles.css" /></head>
 <body><main class="auth-shell"><section class="card auth-card"><p class="eyebrow">Daygle AI Camera</p>{body}</section></main></body></html>""")
 
 
@@ -1581,6 +1584,11 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
 
 plate_alert_last_triggered: dict[str, float] = {}
 
+GITHUB_REPO = 'daygle/daygle-ai-camera'
+_update_in_progress = False
+_update_lock = threading.Lock()
+_plate_alert_lock = threading.Lock()
+
 
 def process_anpr_for_event(event_id: int, detections: list[dict[str, Any]], image_path: str | None, created_at: str) -> list[dict[str, Any]]:
     plate_results = anpr_pipeline.process_event(event_id=event_id, detections=detections, image_path=image_path, storage=storage)
@@ -1609,9 +1617,6 @@ def trigger_plate_alerts(plate_events: list[dict[str, Any]]) -> list[dict[str, A
             if not rule.get('enabled', True):
                 continue
             rule_key = f"{rule['id']}:{plate_event['plate_number']}"
-            last = plate_alert_last_triggered.get(rule_key, 0)
-            if time.time() - last < int(rule.get('cooldown_seconds', 60)):
-                continue
             rule_type = str(rule.get('rule_type'))
             matched = False
             if rule_type == 'plate':
@@ -1620,9 +1625,15 @@ def trigger_plate_alerts(plate_events: list[dict[str, Any]]) -> list[dict[str, A
                 matched = not plate.get('is_whitelisted') and not plate.get('is_blacklisted')
             elif rule_type == 'blacklisted':
                 matched = bool(plate.get('is_blacklisted'))
-            if matched:
-                plate_alert_last_triggered[rule_key] = time.time()
-                triggered.append({'rule_name': rule['rule_name'], 'plate_number': plate_event['plate_number'], 'plate_event_id': plate_event['id']})
+            if not matched:
+                continue
+            now = time.time()
+            cooldown = int(rule.get('cooldown_seconds', 60))
+            with _plate_alert_lock:
+                if now - plate_alert_last_triggered.get(rule_key, 0) < cooldown:
+                    continue
+                plate_alert_last_triggered[rule_key] = now
+            triggered.append({'rule_name': rule['rule_name'], 'plate_number': plate_event['plate_number'], 'plate_event_id': plate_event['id']})
     return triggered
 
 
@@ -1684,7 +1695,7 @@ def render_live_snapshot_svg(
             label_y = max(28, y - 10)
             detection_markup.append(
                 f'<g class="detection-box"><rect x="{x:.1f}" y="{y:.1f}" width="{box_width:.1f}" height="{box_height:.1f}" />'
-                f'<text x="{x:.1f}" y="{label_y:.1f}">{label} Ã‚Â· {confidence}%</text></g>'
+                f'<text x="{x:.1f}" y="{label_y:.1f}">{label} · {confidence}%</text></g>'
             )
 
     overlay_state = 'ON' if overlay else 'OFF'
@@ -1719,7 +1730,7 @@ def render_live_snapshot_svg(
   {''.join(detection_markup)}
   <rect x="24" y="24" width="520" height="116" rx="20" fill="rgba(7,11,19,.58)" stroke="rgba(255,255,255,.12)" />
   <text x="48" y="70" class="hud">{escape(camera_name).upper()}</text>
-  <text x="48" y="112" class="muted">Frame #{frame_number} Ã‚Â· {timestamp} Ã‚Â· Overlay {overlay_state}</text>
+  <text x="48" y="112" class="muted">Frame #{frame_number} · {timestamp} · Overlay {overlay_state}</text>
 </svg>'''
 
 
@@ -2150,15 +2161,32 @@ def ai_settings_page():
 @app.get('/profile')
 def profile_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Profile Ã‚Â· Daygle AI Camera</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Profile · Daygle AI Camera</title>
 <link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Account</p><h1>Profile</h1><p class="muted">Manage your display preferences and password.</p></div></header><section class="card"><h2>Profile Details</h2><div id="profileMessage" class="muted"></div><div id="profileSummary" class="status-panel"></div><form id="profileForm" class="form-grid"><input name="timezone" placeholder="Timezone" required /><label><span>Date Format</span><select name="date_format"><option value="locale">Browser Locale</option><option value="iso">YYYY-MM-DD</option><option value="au">DD/MM/YYYY</option><option value="us">MM/DD/YYYY</option></select></label><label><span>Time Format</span><select name="time_format"><option value="24h">24 Hour</option><option value="12h">12 Hour</option></select></label><button type="submit">Save Profile</button></form></section><section class="card"><h2>Change Password</h2><form id="passwordForm" class="form-grid"><input name="current_password" type="password" placeholder="Current password" autocomplete="current-password" required /><input name="new_password" type="password" placeholder="New password" autocomplete="new-password" required /><input name="confirm_password" type="password" placeholder="Confirm password" autocomplete="new-password" required /><button type="submit">Change Password</button></form></section></main><script src="/static/profile.js"></script></body></html>""")
 
 
 @app.get('/anpr')
 def anpr_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" /><title>ANPR Ã‚Â· Daygle AI Camera</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" /><title>ANPR · Daygle AI Camera</title>
 <link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Recognition</p><h1>ANPR</h1><p class="muted">Search plates, review sightings, and manage plate alerts.</p></div></header><section class="card anpr-search-card"><h2>Plate search</h2><div id="anprMessage" class="muted"></div><div class="search-row anpr-search-row"><select id="anprCameraFilter" aria-label="Filter by camera"><option value="">All cameras</option></select><input id="plateSearchInput" placeholder="ABC123, 1ABC2D, XYZ999..." /><button id="plateSearchBtn">Search</button><button id="plateClearBtn" class="secondary">Recent</button></div><div id="plateResults" class="list"></div></section><section class="grid main-grid"><article class="card"><div class="section-header"><h2>Recent plates</h2><button id="deleteAllPlatesBtn" class="secondary delete-btn" type="button" hidden>Delete All</button></div><div id="recentPlates" class="list"></div></article><article class="card"><div class="section-header"><h2>Plate details</h2></div><div id="plateDetails" class="list"></div></article></section><section class="card"><h2>Plate alert rules</h2><form id="plateAlertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="rule_name" placeholder="Rule name" required /><label><span>Type</span><select name="rule_type"><option value="plate">Specific Plate</option><option value="unknown">Unknown Plate</option><option value="blacklisted">Blacklisted Plate</option></select></label><input name="plate_pattern" placeholder="Plate pattern" /><input name="cooldown_seconds" type="number" min="0" placeholder="Cooldown seconds" value="60" /><label><span>Enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><button type="submit">Save Rule</button><button id="cancelPlateRuleEdit" class="secondary" type="button">Cancel Edit</button></form><div id="plateAlertRules" class="list"></div></section></main><script src="/static/anpr.js"></script></body></html>""")
+
+
+def _settings_section_update() -> str:
+    version_file = BASE_DIR / 'VERSION'
+    current_version = version_file.read_text(encoding='utf-8').strip() if version_file.exists() else 'unknown'
+    return (
+        f'<section class="card" id="updateSection">'
+        f'<h2>Software Updates</h2>'
+        f'<p class="muted">Current version: <strong id="currentVersion">{escape(current_version)}</strong></p>'
+        f'<div id="updateStatus" class="status-panel" style="display:none"></div>'
+        f'<div class="button-row">'
+        f'<button id="checkUpdateBtn" type="button">Check for Updates</button>'
+        f'<button id="applyUpdateBtn" class="secondary" type="button" style="display:none">Apply Update</button>'
+        f'</div>'
+        f'<pre id="updateOutput" class="update-output" style="display:none"></pre>'
+        f'</section>'
+    )
 
 
 def _settings_section_anpr() -> str:
@@ -2228,6 +2256,7 @@ def _settings_section_auth() -> str:
 @app.get('/settings')
 def system_settings_page():
     sections = ''.join([
+        _settings_section_update(),
         _settings_section_anpr(),
         _settings_section_recording(),
         _settings_section_retention(),
@@ -2249,7 +2278,7 @@ def system_settings_page():
 @app.get('/users')
 def users_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Users Ã‚Â· Daygle AI Camera</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Users · Daygle AI Camera</title>
 <link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell"><header class="hero"><div><p class="eyebrow">Administration</p><h1>User Management</h1><p class="muted">Create users, change roles, disable accounts, and reset passwords.</p></div></header><section class="card"><div id="userMessage" class="muted"></div><div id="users" class="list"></div></section><section class="card"><h2>Create User</h2><form id="createUserForm" class="form-grid"><input name="username" placeholder="Username" required /><select name="role"><option value="viewer">Viewer</option><option value="admin">Admin</option></select><input name="password" type="password" placeholder="Temporary Password" required /><button>Create</button></form></section></main><script src="/static/users.js"></script></body></html>""")
 
 
@@ -3578,6 +3607,124 @@ def delete_alert_rule(rule_id: int):
         raise HTTPException(status_code=404, detail='Alert rule not found')
     alerts.rules = effective_alert_rules()
     return {'ok': True}
+
+
+def _current_version() -> str:
+    version_file = BASE_DIR / 'VERSION'
+    return version_file.read_text(encoding='utf-8').strip() if version_file.exists() else 'unknown'
+
+
+def _parse_semver(v: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(x) for x in v.split('.'))
+    except ValueError:
+        return (0,)
+
+
+@app.get('/api/update/check')
+def check_update(request: Request):
+    require_admin(request)
+    current_version = _current_version()
+    try:
+        req = urllib.request.Request(
+            f'https://api.github.com/repos/{GITHUB_REPO}/releases/latest',
+            headers={
+                'User-Agent': 'daygle-ai-camera-updater/1.0',
+                'Accept': 'application/vnd.github.v3+json',
+            },
+        )
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read())
+        tag_name = str(data.get('tag_name') or '')
+        latest_version = tag_name.lstrip('v')
+        update_available = bool(
+            latest_version
+            and current_version != 'unknown'
+            and _parse_semver(latest_version) > _parse_semver(current_version)
+        )
+        return {
+            'current_version': current_version,
+            'latest_version': latest_version,
+            'tag_name': tag_name,
+            'html_url': str(data.get('html_url') or ''),
+            'release_notes': str(data.get('body') or ''),
+            'published_at': str(data.get('published_at') or ''),
+            'update_available': update_available,
+        }
+    except urllib.error.HTTPError as exc:
+        return {'current_version': current_version, 'latest_version': None, 'update_available': False, 'error': f'GitHub API error {exc.code}: {exc.reason}'}
+    except Exception as exc:
+        return {'current_version': current_version, 'latest_version': None, 'update_available': False, 'error': str(exc)}
+
+
+@app.post('/api/update/apply')
+def apply_update(request: Request):
+    global _update_in_progress
+    require_admin(request)
+
+    with _update_lock:
+        if _update_in_progress:
+            raise HTTPException(status_code=409, detail='An update is already in progress.')
+        _update_in_progress = True
+
+    update_script = BASE_DIR / 'scripts' / 'update.sh'
+    if not update_script.exists():
+        with _update_lock:
+            _update_in_progress = False
+        raise HTTPException(status_code=503, detail='Update script not found.')
+
+    try:
+        result = subprocess.run(
+            ['bash', str(update_script)],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            cwd=str(BASE_DIR),
+        )
+    except subprocess.TimeoutExpired:
+        with _update_lock:
+            _update_in_progress = False
+        raise HTTPException(status_code=504, detail='Update timed out after 5 minutes.')
+    except Exception as exc:
+        with _update_lock:
+            _update_in_progress = False
+        raise HTTPException(status_code=500, detail=f'Update failed: {exc}') from exc
+
+    output = ((result.stdout or '') + ('\n' + result.stderr if result.stderr else '')).strip()
+
+    service_restart_scheduled = False
+    if result.returncode == 0:
+        check = subprocess.run(
+            ['systemctl', 'is-active', 'daygle-ai-camera'],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+        if check.returncode == 0:
+            def _delayed_restart() -> None:
+                global _update_in_progress
+                time.sleep(3)
+                try:
+                    subprocess.run(['systemctl', 'restart', 'daygle-ai-camera'], timeout=30, check=False)
+                except Exception as exc:
+                    logger.warning('Service restart after update failed: %s', exc)
+                finally:
+                    with _update_lock:
+                        _update_in_progress = False
+            threading.Thread(target=_delayed_restart, daemon=True, name='update-restart').start()
+            service_restart_scheduled = True
+        else:
+            with _update_lock:
+                _update_in_progress = False
+    else:
+        with _update_lock:
+            _update_in_progress = False
+
+    return {
+        'ok': result.returncode == 0,
+        'output': output[-4000:],
+        'returncode': result.returncode,
+        'new_version': _current_version(),
+        'service_restart_scheduled': service_restart_scheduled,
+    }
 
 
 if __name__ == '__main__':
