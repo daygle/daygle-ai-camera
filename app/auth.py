@@ -102,11 +102,10 @@ class AuthService:
                 """
             )
             db.execute("DELETE FROM user_sessions WHERE expires_at <= ?", (utc_now(),))
+            existing_cols = {row[1] for row in db.execute("PRAGMA table_info(users)").fetchall()}
             for col in ("first_name", "last_name", "email"):
-                try:
+                if col not in existing_cols:
                     db.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
-                except Exception:
-                    pass
 
     def users_exist(self) -> bool:
         with self.connect() as db:
@@ -161,7 +160,7 @@ class AuthService:
                     INSERT INTO users (username, password_hash, role, is_active, first_name, last_name, email, created_at, updated_at)
                     VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)
                     """,
-                    (username, self.hash_password(password), role, first_name.strip(), last_name.strip(), email.strip(), now, now),
+                    (username, self.hash_password(password), role, (first_name or '').strip(), (last_name or '').strip(), (email or '').strip(), now, now),
                 )
                 user_id = cursor.lastrowid
         except sqlite3.IntegrityError as exc:
@@ -352,7 +351,7 @@ class AuthService:
             row = db.execute(
                 """
                 SELECT s.session_token, s.csrf_token, s.expires_at, u.id, u.username, u.role, u.is_active,
-                       u.timezone, u.date_format, u.time_format
+                       u.first_name, u.last_name, u.email, u.timezone, u.date_format, u.time_format
                 FROM user_sessions s
                 JOIN users u ON u.id = s.user_id
                 WHERE s.session_token = ?
@@ -381,6 +380,9 @@ class AuthService:
         return {
             "id": row["id"],
             "username": row["username"],
+            "first_name": row["first_name"],
+            "last_name": row["last_name"],
+            "email": row["email"],
             "role": row["role"],
             "is_active": bool(row["is_active"]),
             "timezone": row["timezone"],
