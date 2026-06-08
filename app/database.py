@@ -572,7 +572,16 @@ class EventDatabase:
 
     def alerts(self, limit: int = 25) -> list[dict[str, Any]]:
         with self.connect() as db:
-            rows = db.execute("SELECT * FROM alert_history ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+            rows = db.execute(
+                """
+                SELECT ah.*, r.id AS recording_id
+                FROM alert_history ah
+                LEFT JOIN recordings r ON r.event_id = ah.event_id
+                ORDER BY ah.created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
             return [dict(row) for row in rows]
 
     def delete_all_alerts(self) -> int:

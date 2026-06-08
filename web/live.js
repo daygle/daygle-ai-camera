@@ -369,7 +369,7 @@ function renderZones() {
     <div class="item zone-row ${index === selectedZoneIndex ? 'selected' : ''}${zone.enabled === false ? ' disabled' : ''}" data-select-zone="${index}">
       <div class="zone-row-main">
         <input data-zone-name="${index}" value="${escapeHtml(zone.name || `Zone ${index + 1}`)}" />
-        <label><span>Zone</span><select data-zone-enabled="${index}"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Shown</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
+        <label><span>Zone</span><select data-zone-enabled="${index}"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Displayed</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
         <button class="secondary" type="button" data-delete-zone="${index}">Remove</button>
       </div>
       <div class="zone-object-rules">

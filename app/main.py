@@ -134,7 +134,7 @@ def effective_live_config() -> dict[str, Any]:
         'detection_interval_seconds': 0.25,
         'event_debounce_seconds': 10.0,
         'background_detection_enabled': True,
-        'overlay_track_interval_ms': 420,
+        'overlay_track_interval_ms': 450,
     }
     config_live = config.get('live', {})
     if isinstance(config_live, dict):
@@ -3253,7 +3253,7 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail='event_debounce_seconds must be a number.') from exc
     if event_debounce_seconds < 0 or event_debounce_seconds > 120:
         raise HTTPException(status_code=400, detail='event_debounce_seconds must be between 0 and 120.')
-    overlay_track_interval_ms = _int_field(merged, 'overlay_track_interval_ms', 420, 100, 5000)
+    overlay_track_interval_ms = _int_field(merged, 'overlay_track_interval_ms', 450, 100, 5000)
     return {
         'snapshot_refresh_ms': snapshot_refresh_ms,
         'detection_status_refresh_ms': detection_status_refresh_ms,

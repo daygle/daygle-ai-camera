@@ -137,6 +137,7 @@ function renderAlerts(alerts) {
       </div>
       <p class="muted alert-row-meta">${escapeHtml(alert.message)}</p>
       <div class="alert-row-badges"><span class="detection">${escapeHtml(alert.label)} · ${Math.round(alert.confidence * 100)}%</span></div>
+      ${alert.recording_id ? `<a class="button-link secondary-link" href="/recordings?recording_id=${encodeURIComponent(alert.recording_id)}">View Footage</a>` : ''}
     </div>
   `).join('');
 }
