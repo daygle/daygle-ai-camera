@@ -768,7 +768,7 @@ def test_email_alert_settings_and_delivery(tmp_path, monkeypatch):
         def __init__(self, settings):
             self.settings = settings
 
-        def send_alert(self, alert, *, event_id, recipients, camera_name=None, camera_id=None):
+        def send_alert(self, alert, *, event_id, recipients, camera_name=None, camera_id=None, snapshot_bytes=None):
             sent.append((alert, event_id, list(recipients)))
 
     app, _database_path = _load_app(tmp_path, monkeypatch)
@@ -1375,7 +1375,7 @@ def test_live_stream_detection_triggers_email_alert(tmp_path, monkeypatch):
         def __init__(self, settings):
             self.settings = settings
 
-        def send_alert(self, alert, *, event_id, recipients, camera_name=None, camera_id=None):
+        def send_alert(self, alert, *, event_id, recipients, camera_name=None, camera_id=None, snapshot_bytes=None):
             sent.append((alert, event_id, list(recipients)))
 
     monkeypatch.setattr(main, 'detector', FakeDetector())
@@ -1465,7 +1465,7 @@ def test_background_live_alert_monitor_triggers_cat_email_without_live_page(tmp_
         def __init__(self, settings):
             self.settings = settings
 
-        def send_alert(self, alert, *, event_id, recipients, camera_name=None, camera_id=None):
+        def send_alert(self, alert, *, event_id, recipients, camera_name=None, camera_id=None, snapshot_bytes=None):
             sent.append((alert, event_id, list(recipients)))
 
     camera_settings = {

@@ -24,6 +24,7 @@ class EmailAlertService:
         recipients: list[str],
         camera_name: str | None = None,
         camera_id: str | None = None,
+        snapshot_bytes: bytes | None = None,
     ) -> None:
         recipients = [recipient.strip() for recipient in recipients if recipient and recipient.strip()]
         if not recipients or not self.configured():
@@ -52,6 +53,13 @@ class EmailAlertService:
                 ]
             )
         )
+        if snapshot_bytes:
+            message.add_attachment(
+                snapshot_bytes,
+                maintype='image',
+                subtype='jpeg',
+                filename=f'alert_{event_id}.jpg',
+            )
         self._deliver(message)
 
     def send_test(self, recipient: str) -> None:

@@ -1682,6 +1682,27 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
     camera_name = str(metadata.get('camera_name') or '').strip() or None
     camera_id = str(metadata.get('camera_id') or '').strip() or None
     rules_by_name = {str(rule.get('name')): rule for rule in (rules or effective_alert_rules())}
+
+    snapshot_bytes: bytes | None = None
+    snapshot_path = str(event.get('snapshot_path') or '')
+    if snapshot_path:
+        try:
+            snap_path = Path(snapshot_path)
+            if snap_path.exists():
+                raw_bytes = snap_path.read_bytes()
+                db_detections = event.get('detections') or []
+                overlay_detections = [
+                    {
+                        'label': d.get('label'),
+                        'confidence': d.get('confidence'),
+                        'box': {'x': d.get('x', 0), 'y': d.get('y', 0), 'width': d.get('width', 0), 'height': d.get('height', 0)},
+                    }
+                    for d in db_detections
+                ]
+                snapshot_bytes = render_live_snapshot_jpeg_overlay(raw_bytes, overlay_detections)
+        except Exception:
+            pass
+
     mailer = EmailAlertService(effective_email_alert_settings())
     for alert in triggered:
         rule = rules_by_name.get(str(alert.get('rule_name')))
@@ -1694,6 +1715,7 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
                 recipients=rule.get('email_recipients', []),
                 camera_name=camera_name,
                 camera_id=camera_id,
+                snapshot_bytes=snapshot_bytes,
             )
         except EmailAlertError as exc:
             logger.warning('Failed to send email alert for event %s rule %s: %s', event_id, alert.get('rule_name'), exc)
