@@ -2801,6 +2801,27 @@ def stream_recording(recording_id: int, request: Request):
     )
 
 
+@app.get('/api/recordings/{recording_id}/download')
+def download_recording(recording_id: int):
+    recording = database.get_recording(recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail='Recording not found')
+    file_path = Path(recording['file_path'])
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail='Recording media file not found')
+    stream_path = recording_stream_path(file_path)
+    if not stream_path.exists() or not mp4_has_video_stream(stream_path):
+        raise HTTPException(status_code=415, detail='Recording file is not a playable video stream.')
+    started_at = str(recording.get('started_at') or '')
+    safe_ts = re.sub(r'[^\w\-]', '_', started_at)[:19]
+    filename = f'recording_{recording_id}_{safe_ts}.mp4'
+    return FileResponse(
+        stream_path,
+        media_type='video/mp4',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )
+
+
 @app.delete('/api/recordings/{recording_id}')
 def delete_recording(recording_id: int, request: Request):
     require_admin(request)

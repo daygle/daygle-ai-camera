@@ -17,6 +17,7 @@ const els = {
   recordingDetails: document.getElementById('recordingDetails'),
   videoModal: document.getElementById('videoModal'),
   videoModalClose: document.getElementById('videoModalClose'),
+  videoModalDownload: document.getElementById('videoModalDownload'),
 };
 
 const state = {
@@ -518,6 +519,8 @@ function closeVideoModal() {
   els.clipPlayer.pause();
   els.clipPlayer.removeAttribute('src');
   els.clipPlayer.load();
+  els.videoModalDownload.hidden = true;
+  els.videoModalDownload.removeAttribute('href');
 }
 
 async function playRecording(recordingId, updateHistory = true) {
@@ -537,6 +540,8 @@ async function playRecording(recordingId, updateHistory = true) {
     return;
   }
 
+  els.videoModalDownload.href = `/api/recordings/${recording.id}/download`;
+  els.videoModalDownload.hidden = false;
   els.clipPlayer.pause();
   els.clipPlayer.src = `/api/recordings/${recording.id}/stream?t=${Date.now()}`;
   els.clipPlayerStatus.textContent = `Loading recording #${recording.id}...`;
