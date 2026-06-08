@@ -130,6 +130,24 @@ class EventDatabase:
                     updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL,
+                    user_id INTEGER,
+                    username TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    resource TEXT NOT NULL,
+                    resource_id TEXT,
+                    details TEXT NOT NULL DEFAULT '{}',
+                    ip_address TEXT,
+                    status TEXT NOT NULL DEFAULT 'success'
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
+                CREATE INDEX IF NOT EXISTS idx_audit_log_username ON audit_log(username);
+                CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action);
+                CREATE INDEX IF NOT EXISTS idx_audit_log_resource ON audit_log(resource);
+
                 CREATE TABLE IF NOT EXISTS alert_rules (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
@@ -707,6 +725,84 @@ class EventDatabase:
         with self.connect() as db:
             cursor = db.execute("DELETE FROM alert_rules WHERE id = ?", (rule_id,))
             return cursor.rowcount > 0
+
+    def add_audit_log(
+        self,
+        *,
+        created_at: str,
+        user_id: int | None,
+        username: str,
+        action: str,
+        resource: str,
+        resource_id: str | None = None,
+        details: dict[str, Any] | None = None,
+        ip_address: str | None = None,
+        status: str = 'success',
+    ) -> None:
+        with self.connect() as db:
+            db.execute(
+                """
+                INSERT INTO audit_log (created_at, user_id, username, action, resource, resource_id, details, ip_address, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (created_at, user_id, username, action, resource, resource_id, json.dumps(details or {}), ip_address, status),
+            )
+
+    def list_audit_logs(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        action: str | None = None,
+        username: str | None = None,
+        resource: str | None = None,
+    ) -> list[dict[str, Any]]:
+        conditions: list[str] = []
+        params: list[Any] = []
+        if action:
+            conditions.append("action = ?")
+            params.append(action)
+        if username:
+            conditions.append("username = ?")
+            params.append(username)
+        if resource:
+            conditions.append("resource LIKE ?")
+            params.append(f"{resource}%")
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        with self.connect() as db:
+            rows = db.execute(
+                f"SELECT * FROM audit_log {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                params + [limit, offset],
+            ).fetchall()
+        result = []
+        for row in rows:
+            entry = dict(row)
+            entry['details'] = json.loads(entry.get('details') or '{}')
+            result.append(entry)
+        return result
+
+    def count_audit_logs(
+        self,
+        *,
+        action: str | None = None,
+        username: str | None = None,
+        resource: str | None = None,
+    ) -> int:
+        conditions: list[str] = []
+        params: list[Any] = []
+        if action:
+            conditions.append("action = ?")
+            params.append(action)
+        if username:
+            conditions.append("username = ?")
+            params.append(username)
+        if resource:
+            conditions.append("resource LIKE ?")
+            params.append(f"{resource}%")
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        with self.connect() as db:
+            row = db.execute(f"SELECT COUNT(*) AS count FROM audit_log {where}", params).fetchone()
+            return int(row['count'])
 
     def _alert_rule(self, row: sqlite3.Row) -> dict[str, Any]:
         rule = dict(row)
