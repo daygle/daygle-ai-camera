@@ -2503,6 +2503,7 @@ async def update_profile(request: Request):
     try:
         updated = auth.update_profile(
             int(user['id']),
+            username=payload.get('username'),
             first_name=payload.get('first_name'),
             last_name=payload.get('last_name'),
             email=payload.get('email'),

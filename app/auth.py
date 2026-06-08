@@ -222,6 +222,7 @@ class AuthService:
         self,
         user_id: int,
         *,
+        username: str | None = None,
         first_name: str | None = None,
         last_name: str | None = None,
         email: str | None = None,
@@ -231,6 +232,12 @@ class AuthService:
     ) -> dict[str, Any]:
         updates: list[str] = []
         params: list[Any] = []
+        if username is not None:
+            username = username.strip()
+            if not username:
+                raise AuthError("Username is required.")
+            updates.append("username = ?")
+            params.append(username)
         if first_name is not None:
             updates.append("first_name = ?")
             params.append(first_name.strip())
@@ -263,10 +270,13 @@ class AuthService:
             return existing
         updates.append("updated_at = ?")
         params.extend([utc_now(), user_id])
-        with self.connect() as db:
-            cursor = db.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", params)
-            if cursor.rowcount == 0:
-                raise AuthError("User not found.")
+        try:
+            with self.connect() as db:
+                cursor = db.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", params)
+                if cursor.rowcount == 0:
+                    raise AuthError("User not found.")
+        except sqlite3.IntegrityError as exc:
+            raise AuthError("Username already exists.") from exc
         return self.get_user(user_id)  # type: ignore[return-value]
 
     def change_password(self, user_id: int, current_password: str, new_password: str) -> None:

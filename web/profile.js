@@ -27,6 +27,7 @@ function setMessage(text, isError = false) {
 }
 
 function renderProfile(user) {
+  profileForm.elements.username.value = user.username || '';
   profileForm.elements.first_name.value = user.first_name || '';
   profileForm.elements.last_name.value = user.last_name || '';
   profileForm.elements.email.value = user.email || '';
