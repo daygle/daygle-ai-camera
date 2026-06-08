@@ -156,8 +156,13 @@ function recordingTriggerLabel(recording) {
 
 function recordingDetectionLabels(recording) {
   const labels = new Set((recording.detections || [])
-    .map((detection) => String(detection.label || '').trim().toLowerCase())
-    .filter((label) => label && (!configuredLabels || configuredLabels.has(label))));
+    .filter((d) => {
+      const label = String(d.label || '').trim().toLowerCase();
+      if (!label) return false;
+      if (!configuredLabels) return true;
+      return configuredLabels.has(label) && Number(d.confidence || 0) >= (configuredLabels.get(label) ?? 0);
+    })
+    .map((d) => String(d.label || '').trim().toLowerCase()));
   const triggerLabel = recordingTriggerLabel(recording);
   if (triggerLabel && (!configuredLabels || configuredLabels.has(triggerLabel))) labels.add(triggerLabel);
 
@@ -474,8 +479,8 @@ function renderRecordingDetails(recording) {
   for (const d of (recording.detections || [])) {
     const label = String(d.label || '').trim().toLowerCase();
     if (!label) continue;
-    if (configuredLabels && !configuredLabels.has(label)) continue;
     const conf = Number(d.confidence || 0);
+    if (configuredLabels && (!configuredLabels.has(label) || conf < (configuredLabels.get(label) ?? 0))) continue;
     if (!seen.has(label) || conf > seen.get(label)) seen.set(label, conf);
   }
   const detectionBadges = seen.size
@@ -617,11 +622,15 @@ async function loadAuth() {
 async function loadConfiguredLabels() {
   try {
     const [settings, alertData] = await Promise.all([api('/api/settings/system'), api('/api/settings/alerts')]);
-    const labels = new Set(['motion']);
+    const labels = new Map([['motion', 0.45]]);
+    const setMin = (label, conf) => {
+      if (!label) return;
+      if (!labels.has(label) || conf < labels.get(label)) labels.set(label, conf);
+    };
     for (const rule of (alertData?.rules || [])) {
       if (rule.enabled !== false) {
         const label = String(rule.label || rule.object || '').trim().toLowerCase();
-        if (label) labels.add(label);
+        setMin(label, Number(rule.min_confidence ?? 0.5));
       }
     }
     for (const camera of (settings?.cameras || [])) {
@@ -629,7 +638,7 @@ async function loadConfiguredLabels() {
         for (const rule of (zone?.object_rules || [])) {
           if (rule.enabled !== false) {
             const label = String(rule.label || '').trim().toLowerCase();
-            if (label) labels.add(label);
+            setMin(label, Number(rule.min_confidence ?? 0.5));
           }
         }
       }

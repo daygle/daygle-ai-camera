@@ -88,7 +88,7 @@ function detectionBadges(detections = []) {
   if (!detections.length) return '<span class="muted">No detections</span>';
   const normalized = detections
     .map((d) => ({ label: String(d.label || '').trim().toLowerCase(), confidence: Number(d.confidence || 0) }))
-    .filter((d) => d.label && (!configuredLabels || configuredLabels.has(d.label)));
+    .filter((d) => d.label && (!configuredLabels || (configuredLabels.has(d.label) && d.confidence >= (configuredLabels.get(d.label) ?? 0))));
   if (!normalized.length) return '<span class="muted">No detections</span>';
   return normalized.map((d) => `<span class="detection">${escapeHtml(d.label)} · ${Math.round(d.confidence * 100)}%</span>`).join('');
 }
@@ -203,11 +203,15 @@ function bindDeleteButtons() {
 async function loadConfiguredLabels() {
   try {
     const [settings, alertData] = await Promise.all([api('/api/settings/system'), api('/api/settings/alerts')]);
-    const labels = new Set(['motion']);
+    const labels = new Map([['motion', 0.45]]);
+    const setMin = (label, conf) => {
+      if (!label) return;
+      if (!labels.has(label) || conf < labels.get(label)) labels.set(label, conf);
+    };
     for (const rule of (alertData?.rules || [])) {
       if (rule.enabled !== false) {
         const label = String(rule.label || rule.object || '').trim().toLowerCase();
-        if (label) labels.add(label);
+        setMin(label, Number(rule.min_confidence ?? 0.5));
       }
     }
     for (const camera of (settings?.cameras || [])) {
@@ -215,7 +219,7 @@ async function loadConfiguredLabels() {
         for (const rule of (zone?.object_rules || [])) {
           if (rule.enabled !== false) {
             const label = String(rule.label || '').trim().toLowerCase();
-            if (label) labels.add(label);
+            setMin(label, Number(rule.min_confidence ?? 0.5));
           }
         }
       }
