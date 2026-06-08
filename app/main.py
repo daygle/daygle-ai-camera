@@ -2173,16 +2173,18 @@ def recordings_timeline_page():
 
 @app.get('/ai')
 def ai_settings_page():
-    return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" /><title>AI Settings - Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>AI Settings</h1><p class="muted">Configure AI detection, install models, and reload the detector.</p></div></header><section class="card"><h2>AI Status</h2><div id="settingsMessage" class="muted"></div><div id="aiStatusPanel" class="status-panel"></div><div class="button-row"><button id="checkModelBtn" class="secondary" type="button">Check Model</button><button id="downloadModelBtn" type="button">Download YOLOv8n ONNX</button><button id="reloadDetectorBtn" class="secondary" type="button">Reload Detector</button><button id="testDetectorBtn" class="secondary" type="button">Test Detector</button></div></section><section class="card"><h2>AI Settings</h2><form id="aiSettingsForm" class="form-grid"><label><span>AI Enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Backend</span><select name="backend"><option value="onnx">ONNX</option></select></label><label><span>IoU Threshold</span><input name="iou_threshold" type="number" min="0" max="1" step="0.01" /></label><label><span>Input Size</span><input name="input_size" type="number" min="32" max="2048" step="32" /></label><label><span>Model Path</span><input name="model_path" /></label><label><span>Labels Path</span><input name="labels_path" /></label><button type="submit">Save AI Settings</button></form></section></main><script src="/static/ai.js"></script></body></html>""")
+    ai_path = web_dir / 'ai.html'
+    if ai_path.exists():
+        return FileResponse(ai_path)
+    return root()
 
 
 @app.get('/profile')
 def profile_page():
-    return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Profile · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Account</p><h1>Profile</h1><p class="muted">Manage your display preferences and password.</p></div></header><section class="card"><h2>Profile Details</h2><div id="profileMessage" class="muted"></div><div id="profileSummary" class="status-panel"></div><form id="profileForm" class="form-grid"><input name="timezone" placeholder="Timezone" required /><label><span>Date Format</span><select name="date_format"><option value="locale">Browser Locale</option><option value="iso">YYYY-MM-DD</option><option value="au">DD/MM/YYYY</option><option value="us">MM/DD/YYYY</option></select></label><label><span>Time Format</span><select name="time_format"><option value="24h">24 Hour</option><option value="12h">12 Hour</option></select></label><button type="submit">Save Profile</button></form></section><section class="card"><h2>Change Password</h2><form id="passwordForm" class="form-grid"><input name="current_password" type="password" placeholder="Current password" autocomplete="current-password" required /><input name="new_password" type="password" placeholder="New password" autocomplete="new-password" required /><input name="confirm_password" type="password" placeholder="Confirm password" autocomplete="new-password" required /><button type="submit">Change Password</button></form></section></main><script src="/static/profile.js"></script></body></html>""")
+    profile_path = web_dir / 'profile.html'
+    if profile_path.exists():
+        return FileResponse(profile_path)
+    return root()
 
 
 @app.get('/anpr')
@@ -2297,9 +2299,10 @@ def system_settings_page():
 
 @app.get('/users')
 def users_page():
-    return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Users · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell"><header class="hero"><div><p class="eyebrow">Administration</p><h1>User Management</h1><p class="muted">Create users, change roles, disable accounts, and reset passwords.</p></div></header><section class="card"><div id="userMessage" class="muted"></div><div id="users" class="list"></div></section><section class="card"><h2>Create User</h2><form id="createUserForm" class="form-grid"><input name="username" placeholder="Username" required /><select name="role"><option value="viewer">Viewer</option><option value="admin">Admin</option></select><input name="password" type="password" placeholder="Temporary Password" required /><button>Create</button></form></section></main><script src="/static/users.js"></script></body></html>""")
+    users_path = web_dir / 'users.html'
+    if users_path.exists():
+        return FileResponse(users_path)
+    return root()
 
 
 @app.get('/api/auth/me')

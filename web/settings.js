@@ -466,14 +466,14 @@ function initSoftwareUpdateSection() {
     if (!confirm('Apply the update now? The service will restart automatically if running under systemd. Make sure to save any open settings first.')) return;
     applyBtn.disabled = true;
     checkBtn.disabled = true;
-    showUpdateStatus('Downloading and applying update — this may take a minute...', '');
+    showUpdateStatus('Downloading and applying update - this may take a minute...', '');
     showUpdateOutput('');
     try {
       const result = await api('/api/update/apply', { method: 'POST' });
       showUpdateOutput(result.output || '');
       if (result.ok) {
         const restartMsg = result.service_restart_scheduled
-          ? ' The service is restarting — please refresh this page in a few seconds.'
+          ? ' The service is restarting - please refresh this page in a few seconds.'
           : ' Restart the service manually to apply changes.';
         showUpdateStatus(
           `Update applied successfully. New version: v${escapeHtml(result.new_version || 'unknown')}.${restartMsg}`,

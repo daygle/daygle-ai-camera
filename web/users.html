@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Users - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell page-stack">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Administration</p>
+        <h1>User Management</h1>
+        <p class="muted">Create users, change roles, disable accounts, and reset passwords.</p>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>Users</h2>
+      </div>
+      <div id="userMessage" class="muted"></div>
+      <div id="users" class="list"></div>
+    </section>
+
+    <section class="card">
+      <h2>Create User</h2>
+      <form id="createUserForm" class="form-grid">
+        <label>
+          <span>Username</span>
+          <input name="username" placeholder="Username" required />
+        </label>
+        <label>
+          <span>Role</span>
+          <select name="role">
+            <option value="viewer">Viewer</option>
+            <option value="admin">Admin</option>
+          </select>
+        </label>
+        <label>
+          <span>Temporary Password</span>
+          <input name="password" type="password" placeholder="Temporary password" required />
+        </label>
+        <button type="submit">Create User</button>
+      </form>
+    </section>
+  </main>
+  <script src="/static/nav.js"></script>
+  <script src="/static/users.js"></script>
+</body>
+</html>

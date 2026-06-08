@@ -1278,7 +1278,7 @@ def test_opencv_stream_camera_reuses_rtsp_capture(monkeypatch):
 
 def test_opencv_stream_camera_applies_ffmpeg_log_level_after_each_videocapture(monkeypatch):
     """_configure_ffmpeg_log_level must be called after every VideoCapture
-    construction — including on reconnect — so FFmpeg's own init cannot reset
+    construction - including on reconnect - so FFmpeg's own init cannot reset
     the quiet level back to a noisy default."""
     import app.camera_backend as camera_backend
     from app.camera_backend import OpenCvStreamCamera

@@ -806,10 +806,12 @@ input[type="file"] { padding: 10px; }
   pointer-events: auto;
 }
 .close-draft-point:active { cursor: pointer; }
+.zones-hero-controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; align-self: flex-end; }
+.zones-hero-controls label { display: flex; align-items: center; gap: 8px; }
 .zones-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(520px, 1fr); gap: 18px; align-items: start; }
 .zones-shell .live-frame { height: min(68vh, 720px); }
 .zone-editor-card { margin-top: 18px; }
-.zones-layout .zone-editor-card { margin-top: 0; max-height: calc(100vh - 174px); overflow: auto; }
+.zones-layout .zone-editor-card { margin-top: 0; max-height: calc(100vh - 290px); overflow: auto; }
 .zone-editor-card .form-grid + .list { margin-top: 18px; }
 .camera-recording-settings { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
 .camera-recording-settings h3 { margin: 0; }

@@ -8,54 +8,53 @@
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
-  <main class="shell live-shell zones-shell" data-live-page="zones">
-    <section class="live-viewer-card zones-workspace">
-      <header class="live-toolbar">
-        <div>
-          <p class="eyebrow">Camera Zones</p>
-          <h1>Zones</h1>
-          <p class="muted">Choose a camera, draw monitoring areas, then decide which objects should record or alert inside each zone.</p>
-        </div>
-        <div class="live-controls">
-          <label>
-            <span>Camera</span>
-            <select id="cameraSelect"></select>
-          </label>
-          <label class="toggle-control" for="overlayToggle">
-            <input id="overlayToggle" type="checkbox" checked />
-            <span>Matched motion/object boxes</span>
-          </label>
-        </div>
-      </header>
-      <div class="zones-layout">
-        <div>
-          <div class="live-frame-wrap" id="liveFrameWrap">
-            <img id="liveFrame" class="live-frame" alt="Live camera footage" />
-            <div id="zoneOverlay" class="zone-overlay" aria-label="Monitoring areas"></div>
-            <div id="liveStatus" class="live-status">Connecting to camera...</div>
-          </div>
-          <div id="liveDetectionStatus" class="live-detection-status">Live AI status waiting for frames.</div>
-        </div>
-        <section class="card zone-editor-card">
-          <div class="section-header">
-            <div>
-              <h2>Monitoring Areas</h2>
-              <p class="muted">Place corner dots on the footage, then click the first dot to close the area.</p>
-            </div>
-            <div class="button-row">
-              <button id="addZoneBtn" type="button">Draw Area</button>
-              <button id="fullFrameZoneBtn" class="secondary" type="button">Full Frame</button>
-              <button id="saveZonesBtn" class="secondary" type="button">Save Areas</button>
-            </div>
-          </div>
-          <div id="zoneList" class="list zones-list"></div>
-          <div class="camera-recording-settings">
-            <h3>Camera recording</h3>
-            <div id="cameraRecordingControls" class="form-grid compact-grid"></div>
-          </div>
-        </section>
+  <main class="shell page-stack zones-shell" data-live-page="zones">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Administration</p>
+        <h1>Zones</h1>
+        <p class="muted">Choose a camera, draw monitoring areas, then decide which objects should record or alert inside each zone.</p>
       </div>
-    </section>
+      <div class="zones-hero-controls">
+        <label>
+          <span>Camera</span>
+          <select id="cameraSelect"></select>
+        </label>
+        <label class="toggle-control" for="overlayToggle">
+          <input id="overlayToggle" type="checkbox" checked />
+          <span>Matched motion/object boxes</span>
+        </label>
+      </div>
+    </header>
+
+    <div class="zones-layout">
+      <div class="zones-feed-col">
+        <div class="live-frame-wrap card" id="liveFrameWrap">
+          <img id="liveFrame" class="live-frame" alt="Live camera footage" />
+          <div id="zoneOverlay" class="zone-overlay" aria-label="Monitoring areas"></div>
+          <div id="liveStatus" class="live-status">Connecting to camera...</div>
+        </div>
+        <div id="liveDetectionStatus" class="live-detection-status">Live AI status waiting for frames.</div>
+      </div>
+      <section class="card zone-editor-card">
+        <div class="section-header">
+          <div>
+            <h2>Monitoring Areas</h2>
+            <p class="muted">Place corner dots on the footage, then click the first dot to close the area.</p>
+          </div>
+          <div class="button-row">
+            <button id="addZoneBtn" type="button">Draw Area</button>
+            <button id="fullFrameZoneBtn" class="secondary" type="button">Full Frame</button>
+            <button id="saveZonesBtn" class="secondary" type="button">Save Areas</button>
+          </div>
+        </div>
+        <div id="zoneList" class="list zones-list"></div>
+        <div class="camera-recording-settings">
+          <h3>Camera recording</h3>
+          <div id="cameraRecordingControls" class="form-grid compact-grid"></div>
+        </div>
+      </section>
+    </div>
   </main>
   <script src="/static/nav.js"></script>
   <script src="/static/live.js"></script>

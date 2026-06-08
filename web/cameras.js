@@ -110,7 +110,7 @@ function renderCameraCard(camera, index) {
 
       <div class="cam-card-footer">
         <a class="button-link secondary-link cam-live-link" href="/live?camera=${encodeURIComponent(camera.id || '')}">View Live</a>
-        <span class="cam-footer-hint muted">Configure zones and alerts from Live view</span>
+        <a class="cam-footer-hint muted" href="/zones?camera=${encodeURIComponent(camera.id || '')}">Configure zones &amp; alerts</a>
       </div>
     </article>
   `;
