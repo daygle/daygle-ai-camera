@@ -1724,8 +1724,47 @@ def deliver_push_notifications(triggered: list[dict[str, Any]], event_id: int, r
 plate_alert_last_triggered: dict[str, float] = {}
 
 GITHUB_REPO = 'daygle/daygle-ai-camera'
+MODELS_MANIFEST_URL = f'https://raw.githubusercontent.com/{GITHUB_REPO}/main/models-manifest.json'
 _update_in_progress = False
 _update_lock = threading.Lock()
+
+
+def _installed_models_path() -> Path:
+    return BASE_DIR / 'models' / 'installed.json'
+
+
+def _read_installed_models() -> dict[str, Any]:
+    p = _installed_models_path()
+    if p.exists():
+        try:
+            return json.loads(p.read_text(encoding='utf-8'))
+        except Exception:
+            return {}
+    return {}
+
+
+def _write_installed_models(data: dict[str, Any]) -> None:
+    p = _installed_models_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(data, indent=2), encoding='utf-8')
+
+
+def _sha256_file(path: Path) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(65536), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _fetch_models_manifest() -> dict[str, Any]:
+    req = urllib.request.Request(
+        MODELS_MANIFEST_URL,
+        headers={'User-Agent': 'daygle-ai-camera-updater/1.0'},
+    )
+    with urllib.request.urlopen(req, timeout=10) as response:
+        return json.loads(response.read())
 _plate_alert_lock = threading.Lock()
 
 
@@ -3558,6 +3597,18 @@ def _do_download_model(model_name: str) -> dict[str, Any]:
                 f'Details: {exc}'
             ),
         ) from exc
+    try:
+        manifest = _fetch_models_manifest()
+        installed_version = manifest.get('models', {}).get(model_name, {}).get('version', '1.0.0')
+    except Exception:
+        installed_version = '1.0.0'
+    installed_meta = _read_installed_models()
+    installed_meta[model_name] = {
+        'version': installed_version,
+        'installed_at': utc_now(),
+        'sha256': _sha256_file(destination),
+    }
+    _write_installed_models(installed_meta)
     ai_settings = effective_ai_config()
     updated = validate_ai_settings({**ai_settings, 'model_path': str(destination.relative_to(BASE_DIR))})
     database.set_setting('ai', updated, utc_now())
@@ -3577,11 +3628,13 @@ def _do_download_model(model_name: str) -> dict[str, Any]:
 def list_ai_models():
     models_dir = BASE_DIR / 'models'
     active_path = str(effective_ai_config().get('model_path') or '')
+    installed_meta = _read_installed_models()
     result = []
     for model_id, info in YOLO_MODELS.items():
         onnx_path = models_dir / info['onnx']
         rel_path = str((models_dir / info['onnx']).relative_to(BASE_DIR))
         installed = onnx_path.exists()
+        meta = installed_meta.get(model_id, {})
         result.append({
             'id': model_id,
             'label': info['label'],
@@ -3591,6 +3644,7 @@ def list_ai_models():
             'installed': installed,
             'active': active_path == rel_path,
             'size_bytes': onnx_path.stat().st_size if installed else None,
+            'installed_version': meta.get('version') if installed else None,
         })
     return result
 
@@ -3604,6 +3658,52 @@ async def download_ai_model(request: Request):
 @app.post('/api/settings/ai/download-yolov8n')
 def download_yolov8n_model():
     return _do_download_model('yolov8n')
+
+
+@app.get('/api/settings/ai/check-model-updates')
+def check_model_updates(request: Request):
+    require_admin(request)
+    installed_meta = _read_installed_models()
+    try:
+        manifest = _fetch_models_manifest()
+    except urllib.error.HTTPError as exc:
+        return JSONResponse(status_code=502, content={'error': f'Manifest fetch error {exc.code}: {exc.reason}', 'models': [], 'any_updates': False})
+    except Exception as exc:
+        return JSONResponse(status_code=502, content={'error': str(exc), 'models': [], 'any_updates': False})
+    manifest_models = manifest.get('models', {})
+    result = []
+    for model_id in YOLO_MODELS:
+        if model_id not in installed_meta:
+            continue
+        installed_version = installed_meta[model_id].get('version')
+        remote_version = manifest_models.get(model_id, {}).get('version')
+        update_available = bool(
+            remote_version
+            and installed_version
+            and installed_version != 'unknown'
+            and _parse_semver(remote_version) > _parse_semver(installed_version)
+        )
+        result.append({
+            'id': model_id,
+            'installed_version': installed_version,
+            'latest_version': remote_version,
+            'update_available': update_available,
+        })
+    return {
+        'manifest_updated_at': manifest.get('updated_at'),
+        'models': result,
+        'any_updates': any(m['update_available'] for m in result),
+    }
+
+
+@app.post('/api/settings/ai/update-model')
+async def update_ai_model(request: Request):
+    require_admin(request)
+    body = await request.json()
+    model_name = str(body.get('model') or '').strip().lower()
+    if model_name not in YOLO_MODELS:
+        raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'.")
+    return _do_download_model(model_name)
 
 
 @app.post('/api/settings/ai/test-detector')
