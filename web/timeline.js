@@ -157,9 +157,9 @@ function recordingTriggerLabel(recording) {
 function recordingDetectionLabels(recording) {
   const labels = new Set((recording.detections || [])
     .map((detection) => String(detection.label || '').trim().toLowerCase())
-    .filter(Boolean));
+    .filter((label) => label && (!configuredLabels || configuredLabels.has(label))));
   const triggerLabel = recordingTriggerLabel(recording);
-  if (triggerLabel) labels.add(triggerLabel);
+  if (triggerLabel && (!configuredLabels || configuredLabels.has(triggerLabel))) labels.add(triggerLabel);
 
   const uniqueLabels = Array.from(labels);
   const specificLabels = uniqueLabels.filter((label) => !GENERIC_TIMELINE_LABELS.has(label));
@@ -725,7 +725,8 @@ loadAuth().then(async () => {
   if (queryFilter) els.filterSelect.innerHTML = `<option value="${escapeHtml(queryFilter)}" selected>${escapeHtml(titleCase(queryFilter))}</option>`;
   if (queryFromTime) els.fromTime.value = queryFromTime;
   if (queryToTime) els.toTime.value = queryToTime;
-  await Promise.all([loadConfiguredLabels(), loadTimeline({ preserveSelection: true })]);
+  await loadConfiguredLabels();
+  await loadTimeline({ preserveSelection: true });
 }).catch((error) => {
   els.timelineStatus.textContent = error.message;
   els.clipPlayerStatus.textContent = error.message;
