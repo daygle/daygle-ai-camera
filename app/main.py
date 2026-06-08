@@ -34,6 +34,7 @@ from app.auth import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, AuthError, AuthSe
 from app.database import EventDatabase
 from app.detector import DetectorUnavailableError, create_detector, load_labels
 from app.email_alerts import EmailAlertError, EmailAlertService
+from app.push_notifications import PushNotificationError, PushNotificationService
 from app.camera_backend import OpenCvStreamCamera
 from app.recordings import RecordingService
 from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, load_settings
@@ -214,6 +215,14 @@ def effective_alert_rules() -> list[dict[str, Any]]:
 def effective_email_alert_settings() -> dict[str, Any]:
     settings = copy.deepcopy(config.get('alerts', {}).get('email', {}))
     override = database.get_setting('alert_email')
+    if isinstance(override, dict):
+        settings.update(override)
+    return settings
+
+
+def effective_push_notification_settings() -> dict[str, Any]:
+    settings = copy.deepcopy(config.get('alerts', {}).get('push_notification', {}))
+    override = database.get_setting('alert_push')
     if isinstance(override, dict):
         settings.update(override)
     return settings
@@ -1259,6 +1268,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         if motion_email_enabled or str(alert.get('label') or '').strip().lower() != 'motion'
     ]
     deliver_email_alerts(email_triggered, event_id, rules=zone_rules + effective_alert_rules())
+    deliver_push_notifications(triggered, event_id, rules=zone_rules + effective_alert_rules())
     email_rules = [
         rule for rule in (zone_rules + effective_alert_rules())
         if rule.get('enabled', True) and rule.get('email_enabled') and str(rule.get('name') or '') in {
@@ -1427,6 +1437,8 @@ async def authentication_middleware(request: Request, call_next):
 
     admin_required = path in ADMIN_PATHS or path.startswith('/api/users') or path.startswith('/api/settings/ai') or path.startswith('/api/settings/anpr') or path.startswith('/api/settings/system') or path.startswith('/api/update/') or (path.startswith('/api/cameras') and request.method in MUTATING_METHODS) or (
         path.startswith('/api/settings/alert-email') and request.method in MUTATING_METHODS
+    ) or (
+        path.startswith('/api/settings/alert-push') and request.method in MUTATING_METHODS
     ) or (
         path.startswith('/api/settings/alerts') and request.method in MUTATING_METHODS
     )
@@ -1684,6 +1696,28 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
             )
         except EmailAlertError as exc:
             logger.warning('Failed to send email alert for event %s rule %s: %s', event_id, alert.get('rule_name'), exc)
+
+
+def deliver_push_notifications(triggered: list[dict[str, Any]], event_id: int, rules: list[dict[str, Any]] | None = None) -> None:
+    if not triggered:
+        return
+    push_settings = effective_push_notification_settings()
+    if not push_settings.get('enabled'):
+        return
+    event = database.get_event(event_id) or {}
+    metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
+    camera_name = str(metadata.get('camera_name') or '').strip() or None
+    camera_id = str(metadata.get('camera_id') or '').strip() or None
+    rules_by_name = {str(rule.get('name')): rule for rule in (rules or effective_alert_rules())}
+    notifier = PushNotificationService(push_settings)
+    for alert in triggered:
+        rule = rules_by_name.get(str(alert.get('rule_name')))
+        if not rule or not rule.get('push_enabled'):
+            continue
+        try:
+            notifier.send_alert(alert, event_id=event_id, camera_name=camera_name, camera_id=camera_id)
+        except PushNotificationError as exc:
+            logger.warning('Failed to send push notification for event %s rule %s: %s', event_id, alert.get('rule_name'), exc)
 
 
 plate_alert_last_triggered: dict[str, float] = {}
@@ -3062,6 +3096,8 @@ def validate_alert_rule(payload: dict[str, Any], *, partial: bool = False) -> di
         rule['enabled'] = bool(payload.get('enabled', True))
     if 'email_enabled' in payload or not partial:
         rule['email_enabled'] = bool(payload.get('email_enabled', False))
+    if 'push_enabled' in payload or not partial:
+        rule['push_enabled'] = bool(payload.get('push_enabled', False))
     if 'email_recipients' in payload or not partial:
         raw_recipients = payload.get('email_recipients', [])
         if isinstance(raw_recipients, str):
@@ -3109,6 +3145,28 @@ def validate_alert_email_settings(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail='From address must be a valid email address.')
     if updated['use_ssl']:
         updated['use_tls'] = False
+    return updated
+
+
+def validate_push_notification_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    current = effective_push_notification_settings()
+    allowed = {'enabled', 'server_url', 'topic', 'priority', 'username', 'password'}
+    updated = {key: current.get(key) for key in allowed if key in current}
+    for key, value in payload.items():
+        if key in allowed:
+            updated[key] = value
+    updated['enabled'] = _bool_value(updated.get('enabled', False))
+    for key in ('server_url', 'topic', 'priority', 'username', 'password'):
+        updated[key] = str(updated.get(key) or '').strip()
+    if not updated['server_url']:
+        updated['server_url'] = 'https://ntfy.sh'
+    if not updated['priority']:
+        updated['priority'] = 'default'
+    valid_priorities = {'min', 'low', 'default', 'high', 'urgent'}
+    if updated['priority'] not in valid_priorities:
+        raise HTTPException(status_code=400, detail=f"priority must be one of: {', '.join(sorted(valid_priorities))}.")
+    if updated['enabled'] and not updated['topic']:
+        raise HTTPException(status_code=400, detail='Topic is required when push notifications are enabled.')
     return updated
 
 
@@ -3573,6 +3631,29 @@ async def test_alert_email_settings(request: Request):
     except EmailAlertError as exc:
         raise HTTPException(status_code=400, detail=f'Test email failed: {exc}') from exc
     return {'ok': True, 'recipient': recipient}
+
+
+@app.get('/api/settings/alert-push')
+def get_push_notification_settings():
+    return effective_push_notification_settings()
+
+
+@app.put('/api/settings/alert-push')
+async def update_push_notification_settings(request: Request):
+    payload = await request.json()
+    settings = validate_push_notification_settings(payload)
+    return database.set_setting('alert_push', settings, utc_now())
+
+
+@app.post('/api/settings/alert-push/test')
+async def test_push_notification_settings(request: Request):
+    payload = await request.json()
+    settings = validate_push_notification_settings(payload.get('settings') if isinstance(payload.get('settings'), dict) else payload)
+    try:
+        PushNotificationService(settings).send_test()
+    except PushNotificationError as exc:
+        raise HTTPException(status_code=400, detail=f'Test notification failed: {exc}') from exc
+    return {'ok': True}
 
 
 @app.get('/api/settings/system')
