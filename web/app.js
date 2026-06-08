@@ -103,7 +103,7 @@ function recordingLink(recordings = []) {
 
 function renderEvents(events) {
   if (!events.length) {
-    els.events.innerHTML = '<div class="empty">No detection events yet.</div>';
+    els.events.innerHTML = '<div class="empty">No recorded events yet.</div>';
     return;
   }
 
@@ -276,7 +276,7 @@ async function loadStats() {
 
 async function loadEvents() {
   try {
-    renderEvents(await api('/api/events'));
+    renderEvents(await api('/api/events?with_recording=true'));
   } catch {
     els.events.innerHTML = '<div class="empty">Could not load events.</div>';
   }

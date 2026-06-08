@@ -318,12 +318,12 @@ function renderLegend(recordings) {
   `).join('');
 }
 
-function buildTimelineLayout(recordings) {
+function buildTimelineLayout(recordings, preEventSeconds = 0) {
   const rowEnds = [];
   return recordings.map((recording) => {
     const start = Number(recording.timeline_start_seconds || 0);
     const end = Number(recording.timeline_end_seconds || start + 1);
-    let rowIndex = rowEnds.findIndex((rowEnd) => rowEnd <= start);
+    let rowIndex = rowEnds.findIndex((rowEnd) => rowEnd <= start + preEventSeconds);
     if (rowIndex === -1) {
       rowIndex = rowEnds.length;
       rowEnds.push(end);
@@ -358,7 +358,7 @@ function renderTimeline(payload) {
       };
     });
 
-  const recordings = buildTimelineLayout(windowRecordings);
+  const recordings = buildTimelineLayout(windowRecordings, Number(payload.pre_event_seconds || 0));
   const rowCount = Math.max(1, recordings.reduce((max, recording) => Math.max(max, recording.rowIndex + 1), 0));
 
   const ticks = [];

@@ -2452,8 +2452,8 @@ async def detect_frame(request: Request):
 
 
 @app.get('/api/events')
-def events(label: str | None = None, limit: int = Query(50, ge=1, le=200), alerted_only: bool = False):
-    return database.search_events(label=label, limit=limit, alerted_only=alerted_only)
+def events(label: str | None = None, limit: int = Query(50, ge=1, le=200), alerted_only: bool = False, with_recording: bool = False):
+    return database.search_events(label=label, limit=limit, alerted_only=alerted_only, with_recording=with_recording)
 
 
 @app.get('/api/events/{event_id}')
@@ -2636,6 +2636,7 @@ def recordings_timeline(
         )
         if segment is not None
     ]
+    rec_config = effective_recording_config()
     return {
         'camera': selected_camera,
         'cameras': cameras,
@@ -2643,6 +2644,7 @@ def recordings_timeline(
         'day_start': day_start.isoformat(),
         'day_end': day_end.isoformat(),
         'timeline_timezone_offset_minutes': tz_offset_minutes if tz_offset_minutes is not None else 0,
+        'pre_event_seconds': max(0, int(rec_config.get('pre_event_seconds', 5))),
         'recordings': segments,
     }
 

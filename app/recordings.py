@@ -80,13 +80,12 @@ class RecordingService:
             alert_labels = [str(detection.get('label') or '').lower() for detection in alert_detections]
             if alert_labels:
                 if alert_labels[0] == 'motion':
-                    specific_label = preferred_label(alert_detections) or preferred_label(detections)
-                    if specific_label:
-                        return True, 'alert', specific_label
+                    specific_label = preferred_label(alert_detections)
+                    return True, 'alert', specific_label or 'motion'
                 return True, 'alert', alert_labels[0]
             return False, 'none', None
         if (mode == 'motion' or bool(config.get('record_on_motion', True))) and labels:
-            return True, 'motion', preferred_label(detections) or labels[0]
+            return True, 'motion', 'motion'
         if (mode == 'human' or bool(config.get('record_on_human', True))) and 'person' in labels:
             return True, 'human', 'person'
         for label in labels:

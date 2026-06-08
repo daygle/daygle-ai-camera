@@ -488,7 +488,7 @@ class EventDatabase:
                 (created_at, rule_name, event_id, label, confidence, message),
             )
 
-    def search_events(self, label: str | None = None, limit: int = 50, alerted_only: bool = False) -> list[dict[str, Any]]:
+    def search_events(self, label: str | None = None, limit: int = 50, alerted_only: bool = False, with_recording: bool = False) -> list[dict[str, Any]]:
         with self.connect() as db:
             alert_filter = """
                 AND EXISTS (
@@ -499,6 +499,7 @@ class EventDatabase:
                     AND ar.enabled = 1
                 )
             """
+            recording_filter = "AND EXISTS (SELECT 1 FROM recordings WHERE recordings.event_id = e.id)"
             if label:
                 rows = db.execute(
                     f"""
@@ -506,6 +507,7 @@ class EventDatabase:
                     JOIN detections d ON d.event_id = e.id
                     WHERE d.label = ?
                     {alert_filter if alerted_only else ''}
+                    {recording_filter if with_recording else ''}
                     ORDER BY e.created_at DESC
                     LIMIT ?
                     """,
@@ -513,7 +515,7 @@ class EventDatabase:
                 ).fetchall()
             elif alerted_only:
                 rows = db.execute(
-                    """
+                    f"""
                     SELECT e.* FROM events e
                     WHERE EXISTS (
                         SELECT 1
@@ -522,6 +524,17 @@ class EventDatabase:
                         WHERE ah.event_id = e.id
                         AND ar.enabled = 1
                     )
+                    {recording_filter if with_recording else ''}
+                    ORDER BY e.created_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+            elif with_recording:
+                rows = db.execute(
+                    f"""
+                    SELECT e.* FROM events e
+                    WHERE {recording_filter[4:]}
                     ORDER BY e.created_at DESC
                     LIMIT ?
                     """,

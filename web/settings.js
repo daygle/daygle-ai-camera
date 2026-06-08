@@ -164,27 +164,6 @@ function createRuntimeResetSection() {
 
 createRuntimeResetSection();
 
-function createCamerasLinkSection() {
-  const section = document.createElement('section');
-  section.className = 'card';
-  section.innerHTML = `
-    <div class="section-header">
-      <div>
-        <h2>Cameras</h2>
-        <p class="muted">Add, remove, and configure RTSP/ONVIF camera connections. Set up motion alerts, object detection, and recording from Live Cameras.</p>
-      </div>
-      <a class="button-link" href="/cameras">Manage Cameras</a>
-    </div>
-  `;
-  const firstSection = document.querySelector('main > section');
-  if (firstSection) {
-    firstSection.before(section);
-  } else {
-    document.querySelector('main')?.append(section);
-  }
-}
-
-createCamerasLinkSection();
 
 function createLiveSettingsSection() {
   const section = document.createElement('section');
