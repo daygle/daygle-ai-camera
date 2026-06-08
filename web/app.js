@@ -18,6 +18,7 @@ const els = {
 };
 
 let authState = { user: null, csrfToken: null };
+let configuredLabels = null;
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -85,10 +86,11 @@ function formatUptime(seconds) {
 
 function detectionBadges(detections = []) {
   if (!detections.length) return '<span class="muted">No detections</span>';
-  return detections.map((d) => {
-    const confidence = Math.round((d.confidence || 0) * 100);
-    return `<span class="detection">${escapeHtml(d.label)} · ${confidence}%</span>`;
-  }).join('');
+  const normalized = detections
+    .map((d) => ({ label: String(d.label || '').trim().toLowerCase(), confidence: Number(d.confidence || 0) }))
+    .filter((d) => d.label && (!configuredLabels || configuredLabels.has(d.label)));
+  if (!normalized.length) return '<span class="muted">No detections</span>';
+  return normalized.map((d) => `<span class="detection">${escapeHtml(d.label)} · ${Math.round(d.confidence * 100)}%</span>`).join('');
 }
 
 function plateBadges(plateEvents = []) {
@@ -196,6 +198,32 @@ function bindDeleteButtons() {
       }
     });
   });
+}
+
+async function loadConfiguredLabels() {
+  try {
+    const [settings, alertData] = await Promise.all([api('/api/settings/system'), api('/api/settings/alerts')]);
+    const labels = new Set(['motion']);
+    for (const rule of (alertData?.rules || [])) {
+      if (rule.enabled !== false) {
+        const label = String(rule.label || rule.object || '').trim().toLowerCase();
+        if (label) labels.add(label);
+      }
+    }
+    for (const camera of (settings?.cameras || [])) {
+      for (const zone of (camera?.detection?.zones || [])) {
+        for (const rule of (zone?.object_rules || [])) {
+          if (rule.enabled !== false) {
+            const label = String(rule.label || '').trim().toLowerCase();
+            if (label) labels.add(label);
+          }
+        }
+      }
+    }
+    configuredLabels = labels;
+  } catch {
+    // Show all labels if settings unavailable.
+  }
 }
 
 async function loadAuth() {
@@ -328,6 +356,6 @@ els.plateClearBtn.addEventListener('click', () => {
   searchPlateSightings();
 });
 
-loadAuth().then(refreshAll).catch(() => {});
+loadAuth().then(() => Promise.all([loadConfiguredLabels(), refreshAll()])).catch(() => {});
 setInterval(loadStatus, 3000);
 setInterval(() => loadStats().catch(() => {}), 10000);

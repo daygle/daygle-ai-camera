@@ -27,6 +27,8 @@ const state = {
   timeFormat: '24h',
 };
 
+let configuredLabels = null;
+
 const DAY_SECONDS = 24 * 60 * 60;
 const TIMELINE_ROW_HEIGHT = 42;
 
@@ -472,6 +474,7 @@ function renderRecordingDetails(recording) {
   for (const d of (recording.detections || [])) {
     const label = String(d.label || '').trim().toLowerCase();
     if (!label) continue;
+    if (configuredLabels && !configuredLabels.has(label)) continue;
     const conf = Number(d.confidence || 0);
     if (!seen.has(label) || conf > seen.get(label)) seen.set(label, conf);
   }
@@ -611,6 +614,32 @@ async function loadAuth() {
   state.timeFormat = authInfo.user?.time_format || '24h';
 }
 
+async function loadConfiguredLabels() {
+  try {
+    const [settings, alertData] = await Promise.all([api('/api/settings/system'), api('/api/settings/alerts')]);
+    const labels = new Set(['motion']);
+    for (const rule of (alertData?.rules || [])) {
+      if (rule.enabled !== false) {
+        const label = String(rule.label || rule.object || '').trim().toLowerCase();
+        if (label) labels.add(label);
+      }
+    }
+    for (const camera of (settings?.cameras || [])) {
+      for (const zone of (camera?.detection?.zones || [])) {
+        for (const rule of (zone?.object_rules || [])) {
+          if (rule.enabled !== false) {
+            const label = String(rule.label || '').trim().toLowerCase();
+            if (label) labels.add(label);
+          }
+        }
+      }
+    }
+    configuredLabels = labels;
+  } catch {
+    // Show all labels if settings unavailable.
+  }
+}
+
 els.timelineLoadBtn.addEventListener('click', () => {
   loadTimeline({ preserveSelection: false }).catch((error) => {
     els.timelineStatus.textContent = error.message;
@@ -696,7 +725,7 @@ loadAuth().then(async () => {
   if (queryFilter) els.filterSelect.innerHTML = `<option value="${escapeHtml(queryFilter)}" selected>${escapeHtml(titleCase(queryFilter))}</option>`;
   if (queryFromTime) els.fromTime.value = queryFromTime;
   if (queryToTime) els.toTime.value = queryToTime;
-  await loadTimeline({ preserveSelection: true });
+  await Promise.all([loadConfiguredLabels(), loadTimeline({ preserveSelection: true })]);
 }).catch((error) => {
   els.timelineStatus.textContent = error.message;
   els.clipPlayerStatus.textContent = error.message;
