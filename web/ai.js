@@ -2,6 +2,7 @@ let csrfToken = null;
 const aiForm = document.getElementById('aiSettingsForm');
 const messageEl = document.getElementById('settingsMessage');
 const statusPanel = document.getElementById('aiStatusPanel');
+const modelList = document.getElementById('modelList');
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -91,10 +92,85 @@ function renderAi(settings) {
   else messageEl.textContent = settings.last_detector_error ? `Detector warning: ${settings.last_detector_error}` : '';
 }
 
+function renderModelList(models) {
+  if (!models.length) {
+    modelList.innerHTML = '<p class="muted">No models available.</p>';
+    return;
+  }
+  modelList.innerHTML = models.map((m) => {
+    const sizeMb = m.size_bytes ? `${(m.size_bytes / 1048576).toFixed(0)} MB` : `~${m.approx_mb} MB`;
+    const badge = m.active
+      ? '<span class="badge badge-active">Active</span>'
+      : m.installed ? '<span class="badge badge-installed">Installed</span>' : '';
+    const action = m.active
+      ? '<button class="secondary" disabled>In Use</button>'
+      : m.installed
+        ? `<button class="secondary model-use-btn" data-model-id="${escapeHtml(m.id)}" data-model-path="${escapeHtml(m.path)}">Use</button>`
+        : `<button class="model-download-btn" data-model-id="${escapeHtml(m.id)}">Download &amp; Install</button>`;
+    return `
+      <div class="model-row" id="model-row-${escapeHtml(m.id)}">
+        <div class="model-row-info">
+          <strong>${escapeHtml(m.label)}</strong>${badge}
+          <span class="muted">${escapeHtml(m.description)}</span>
+        </div>
+        <div class="model-row-meta"><span class="muted">${sizeMb}</span></div>
+        <div class="model-row-action">${action}</div>
+      </div>`;
+  }).join('');
+
+  modelList.querySelectorAll('.model-download-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const modelId = btn.dataset.modelId;
+      btn.disabled = true;
+      btn.textContent = 'Downloading…';
+      setMessage(`Downloading ${modelId}… this may take several minutes.`);
+      try {
+        const result = await api('/api/settings/ai/download-model', { method: 'POST', body: JSON.stringify({ model: modelId }) });
+        renderAi(result.status || result);
+        setMessage(result.message || `${modelId} installed.`);
+        await loadModels();
+      } catch (error) {
+        setMessage(error.message, true);
+        btn.disabled = false;
+        btn.textContent = 'Download & Install';
+      }
+    });
+  });
+
+  modelList.querySelectorAll('.model-use-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const modelId = btn.dataset.modelId;
+      const modelPath = btn.dataset.modelPath;
+      btn.disabled = true;
+      btn.textContent = 'Switching…';
+      setMessage(`Switching to ${modelId}…`);
+      try {
+        const current = await api('/api/settings/ai');
+        const result = await api('/api/settings/ai', { method: 'PUT', body: JSON.stringify({ ...current, model_path: modelPath }) });
+        renderAi(result);
+        setMessage(`Switched to ${modelId}.`);
+        await loadModels();
+      } catch (error) {
+        setMessage(error.message, true);
+        btn.disabled = false;
+        btn.textContent = 'Use';
+      }
+    });
+  });
+}
+
+async function loadModels() {
+  try {
+    renderModelList(await api('/api/settings/ai/models'));
+  } catch {
+    modelList.innerHTML = '<p class="muted">Could not load model list.</p>';
+  }
+}
+
 async function loadAll() {
   const me = await api('/api/auth/me');
   csrfToken = me.csrf_token;
-  const aiSettings = await api('/api/settings/ai');
+  const [aiSettings] = await Promise.all([api('/api/settings/ai'), loadModels()]);
   renderAi(aiSettings);
 }
 
@@ -106,6 +182,7 @@ async function runAction(buttonId, path, label) {
     const result = await api(path, { method: 'POST' });
     renderAi(result.status || result);
     setMessage(result.message || `${label} complete.`);
+    await loadModels();
   } catch (error) {
     setMessage(error.message, true);
     renderAi(await api('/api/settings/ai'));
@@ -118,11 +195,11 @@ aiForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
     renderAi(await api('/api/settings/ai', { method: 'PUT', body: JSON.stringify(formPayload(aiForm)) }));
+    await loadModels();
   } catch (error) { setMessage(error.message, true); }
 });
 
 document.getElementById('checkModelBtn').addEventListener('click', () => runAction('checkModelBtn', '/api/settings/ai/check-model', 'Checking model'));
-document.getElementById('downloadModelBtn').addEventListener('click', () => runAction('downloadModelBtn', '/api/settings/ai/download-yolov8n', 'Downloading YOLOv8n ONNX'));
 document.getElementById('reloadDetectorBtn').addEventListener('click', () => runAction('reloadDetectorBtn', '/api/settings/ai/reload', 'Reloading detector'));
 document.getElementById('testDetectorBtn').addEventListener('click', () => runAction('testDetectorBtn', '/api/settings/ai/test-detector', 'Testing detector'));
 

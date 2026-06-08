@@ -43,6 +43,34 @@ logger = logging.getLogger('daygle.ai')
 
 YOLOV8N_MODEL = 'yolov8n.pt'
 YOLOV8N_ONNX = 'yolov8n.onnx'
+
+YOLO_MODELS: dict[str, dict[str, Any]] = {
+    'yolov8n': {
+        'pt': 'yolov8n.pt', 'onnx': 'yolov8n.onnx',
+        'label': 'YOLOv8n · Nano', 'approx_mb': 6,
+        'description': 'Fastest inference, lowest accuracy. Best for low-power or embedded hardware.',
+    },
+    'yolov8s': {
+        'pt': 'yolov8s.pt', 'onnx': 'yolov8s.onnx',
+        'label': 'YOLOv8s · Small', 'approx_mb': 22,
+        'description': 'Good balance of speed and accuracy for most systems.',
+    },
+    'yolov8m': {
+        'pt': 'yolov8m.pt', 'onnx': 'yolov8m.onnx',
+        'label': 'YOLOv8m · Medium', 'approx_mb': 52,
+        'description': 'Significantly better accuracy. Recommended for IR or night-vision cameras.',
+    },
+    'yolov8l': {
+        'pt': 'yolov8l.pt', 'onnx': 'yolov8l.onnx',
+        'label': 'YOLOv8l · Large', 'approx_mb': 87,
+        'description': 'High accuracy. Requires a capable CPU or GPU.',
+    },
+    'yolov8x': {
+        'pt': 'yolov8x.pt', 'onnx': 'yolov8x.onnx',
+        'label': 'YOLOv8x · Extra Large', 'approx_mb': 131,
+        'description': 'Best possible accuracy. GPU strongly recommended.',
+    },
+}
 ONE_PIXEL_PNG = (
     b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
     b'\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04'
@@ -1091,7 +1119,6 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         alert_detections.append({
             **strongest_motion,
             'label': 'motion',
-            'confidence': frame_motion_confidence,
             'motion_event': True,
         })
     if not alert_detections and not anpr_detections:
@@ -1126,7 +1153,6 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         recording_detections.append({
             **strongest_motion,
             'label': 'motion',
-            'confidence': frame_motion_confidence,
             'motion_event': True,
             'alert_matched': 'motion' in triggered_labels,
             'alert_triggered': 'motion' in triggered_labels or _motion_record,
@@ -3391,14 +3417,17 @@ def check_ai_model():
     return ai_status_payload(effective_ai_config())
 
 
-def export_yolov8n_onnx(destination: Path) -> int:
+def export_yolo_onnx(model_name: str, destination: Path) -> int:
+    if model_name not in YOLO_MODELS:
+        raise ValueError(f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
+    info = YOLO_MODELS[model_name]
     destination.parent.mkdir(parents=True, exist_ok=True)
     command = [
         sys.executable,
         '-c',
         (
             'from ultralytics import YOLO\n'
-            f"model = YOLO('{YOLOV8N_MODEL}')\n"
+            f"model = YOLO('{info[\"pt\"]}')\n"
             "model.export(format='onnx')\n"
         ),
     ]
@@ -3413,8 +3442,7 @@ def export_yolov8n_onnx(destination: Path) -> int:
     if result.returncode != 0:
         details = (result.stderr or result.stdout or '').strip()
         raise RuntimeError(details or f'Ultralytics export exited with status {result.returncode}.')
-
-    exported = destination.parent / YOLOV8N_ONNX
+    exported = destination.parent / info['onnx']
     if exported != destination and exported.exists():
         exported.replace(destination)
     if not destination.exists():
@@ -3426,34 +3454,68 @@ def export_yolov8n_onnx(destination: Path) -> int:
     return destination.stat().st_size
 
 
-@app.post('/api/settings/ai/download-yolov8n')
-def download_yolov8n_model():
-    ai_settings = effective_ai_config()
-    destination = BASE_DIR / 'models' / YOLOV8N_ONNX
+def _do_download_model(model_name: str) -> dict[str, Any]:
+    if model_name not in YOLO_MODELS:
+        raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
+    info = YOLO_MODELS[model_name]
+    destination = BASE_DIR / 'models' / info['onnx']
     try:
-        exported_bytes = export_yolov8n_onnx(destination)
-    except (RuntimeError, subprocess.TimeoutExpired) as exc:  # pragma: no cover - environment dependent
+        exported_bytes = export_yolo_onnx(model_name, destination)
+    except (RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
         raise HTTPException(
             status_code=502,
             detail=(
-                'Failed to export YOLOv8n ONNX model. Install the export dependencies with '
-                '`pip install ultralytics onnx`, then retry. '
+                f"Failed to export {info['label']} ONNX model. "
+                'Install export dependencies with `pip install ultralytics onnx`, then retry. '
                 f'Details: {exc}'
             ),
         ) from exc
-
+    ai_settings = effective_ai_config()
     updated = validate_ai_settings({**ai_settings, 'model_path': str(destination.relative_to(BASE_DIR))})
     database.set_setting('ai', updated, utc_now())
     reloaded, error = reload_detector(updated)
     return {
         'ok': True,
-        'message': f'Exported YOLOv8n ONNX to {destination.relative_to(BASE_DIR)}.',
+        'message': f"Exported {info['label']} ONNX to {destination.relative_to(BASE_DIR)}.",
         'model_path': str(destination.relative_to(BASE_DIR)),
         'bytes': exported_bytes,
         'reload_succeeded': reloaded,
         'reload_error': error,
         'status': ai_status_payload(updated),
     }
+
+
+@app.get('/api/settings/ai/models')
+def list_ai_models():
+    models_dir = BASE_DIR / 'models'
+    active_path = str(effective_ai_config().get('model_path') or '')
+    result = []
+    for model_id, info in YOLO_MODELS.items():
+        onnx_path = models_dir / info['onnx']
+        rel_path = str((models_dir / info['onnx']).relative_to(BASE_DIR))
+        installed = onnx_path.exists()
+        result.append({
+            'id': model_id,
+            'label': info['label'],
+            'description': info['description'],
+            'approx_mb': info['approx_mb'],
+            'path': rel_path,
+            'installed': installed,
+            'active': active_path == rel_path,
+            'size_bytes': onnx_path.stat().st_size if installed else None,
+        })
+    return result
+
+
+@app.post('/api/settings/ai/download-model')
+async def download_ai_model(request: Request):
+    body = await request.json()
+    return _do_download_model(str(body.get('model') or '').strip().lower())
+
+
+@app.post('/api/settings/ai/download-yolov8n')
+def download_yolov8n_model():
+    return _do_download_model('yolov8n')
 
 
 @app.post('/api/settings/ai/test-detector')

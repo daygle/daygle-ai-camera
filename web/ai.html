@@ -24,13 +24,18 @@
         </div>
         <div class="button-row">
           <button id="checkModelBtn" class="secondary" type="button">Check Model</button>
-          <button id="downloadModelBtn" type="button">Download YOLOv8n ONNX</button>
           <button id="reloadDetectorBtn" class="secondary" type="button">Reload Detector</button>
           <button id="testDetectorBtn" class="secondary" type="button">Test Detector</button>
         </div>
       </div>
       <div id="settingsMessage" class="muted"></div>
       <div id="aiStatusPanel" class="status-panel"></div>
+    </section>
+
+    <section class="card">
+      <h2>Available Models</h2>
+      <p class="muted">Larger models detect objects more accurately but use more CPU. Download installs the model and switches to it immediately.</p>
+      <div id="modelList"></div>
     </section>
 
     <section class="card">
