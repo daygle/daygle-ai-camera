@@ -90,7 +90,7 @@ function recordingTriggerLabel(recording) {
 function recordingDetectionLabels(recording) {
   const all = Array.from(new Set((recording.detections || [])
     .map((detection) => String(detection.label || '').trim().toLowerCase())
-    .filter(Boolean)));
+    .filter((label) => label && (!configuredLabels || configuredLabels.has(label)))));
   const specific = all.filter((label) => !GENERIC_TRIGGER_LABELS.has(label));
   return specific.length ? specific : all;
 }
@@ -159,7 +159,7 @@ function renderRecordingDetails(recording) {
     <div><span>Trigger</span><strong>${escapeHtml(recordingDisplayTrigger(recording))}</strong></div>
     <div><span>Started</span><strong>${formatDate(recording.started_at)}</strong></div>
     <div><span>Duration</span><strong>${Number(recording.duration_seconds || 0).toFixed(1)}s</strong></div>
-    <div class="wide"><span>Detections</span><strong>${(recording.detections || []).map((d) => escapeHtml(d.label)).join(', ') || 'none'}</strong></div>
+    <div class="wide"><span>Detections</span><strong>${(recording.detections || []).map((d) => String(d.label || '').trim().toLowerCase()).filter((label) => label && (!configuredLabels || configuredLabels.has(label))).map(escapeHtml).join(', ') || 'none'}</strong></div>
   `;
 }
 

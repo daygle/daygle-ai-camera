@@ -356,6 +356,6 @@ els.plateClearBtn.addEventListener('click', () => {
   searchPlateSightings();
 });
 
-loadAuth().then(() => Promise.all([loadConfiguredLabels(), refreshAll()])).catch(() => {});
+loadAuth().then(async () => { await loadConfiguredLabels(); await refreshAll(); }).catch(() => {});
 setInterval(loadStatus, 3000);
 setInterval(() => loadStats().catch(() => {}), 10000);
