@@ -245,7 +245,7 @@ function colorForKey(key) {
 
 function timelineParams(overrides = {}) {
   const cameraId = overrides.cameraId || els.cameraSelect.value || '';
-  const day = overrides.day || els.timelineDate.value || new Date().toISOString().slice(0, 10);
+  const day = overrides.day || els.timelineDate.value || new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   return { cameraId, day };
 }
 
@@ -267,7 +267,7 @@ function replaceUrl(recordingId = state.activeRecordingId) {
 
 function populateControls(payload) {
   const selectedCameraId = payload.camera?.id || '';
-  const selectedDay = payload.day || new Date().toISOString().slice(0, 10);
+  const selectedDay = payload.day || new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   els.cameraSelect.innerHTML = payload.cameras.map((camera) => (
     `<option value="${escapeHtml(camera.id)}" ${camera.id === selectedCameraId ? 'selected' : ''}>${escapeHtml(camera.name)}</option>`
   )).join('');
@@ -734,7 +734,7 @@ loadAuth().then(async () => {
   const queryFilter = params.get('filter');
   const queryFromTime = params.get('from_time');
   const queryToTime = params.get('to_time');
-  els.timelineDate.value = queryDay || new Date().toISOString().slice(0, 10);
+  els.timelineDate.value = queryDay || new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   if (queryCameraId) els.cameraSelect.innerHTML = `<option value="${escapeHtml(queryCameraId)}" selected>${escapeHtml(queryCameraId)}</option>`;
   if (queryFilter) els.filterSelect.innerHTML = `<option value="${escapeHtml(queryFilter)}" selected>${escapeHtml(titleCase(queryFilter))}</option>`;
   if (queryFromTime) els.fromTime.value = queryFromTime;
