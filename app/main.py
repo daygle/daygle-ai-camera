@@ -1288,7 +1288,7 @@ def log_detector_initialization(context: str = 'startup') -> None:
 
 PUBLIC_PREFIXES = ('/static/',)
 PUBLIC_PATHS = {'/favicon.ico', '/login', '/setup'}
-ADMIN_PATHS = {'/ai', '/settings', '/users', '/zones'}
+ADMIN_PATHS = {'/ai', '/cameras', '/settings', '/users', '/zones'}
 MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
 
@@ -2104,6 +2104,14 @@ def zones_page():
     zones_path = web_dir / 'zones.html'
     if zones_path.exists():
         return FileResponse(zones_path)
+    return root()
+
+
+@app.get('/cameras')
+def cameras_page():
+    cameras_path = web_dir / 'cameras.html'
+    if cameras_path.exists():
+        return FileResponse(cameras_path)
     return root()
 
 
