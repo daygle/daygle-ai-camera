@@ -334,7 +334,7 @@ async function loadSettings() {
   fillForm(forms.auth, settings.auth);
   renderEmail(emailSettings);
   enhanceFormFieldLabels();
-  setMessage('System settings loaded.');
+  messageEl.textContent = '';
 }
 
 function bindForm(name, label, endpointName = name) {
