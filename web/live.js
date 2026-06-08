@@ -277,14 +277,14 @@ function formatDetectionStatus(payload) {
 
   if (payload.state === 'alerted') {
     const alerts = (payload.triggered_alerts || []).map((a) => a.rule_name).join(', ') || 'unknown rule';
-    const parts = [`Live AI: alert triggered — ${alerts}`];
+    const parts = [`Live AI: alert triggered - ${alerts}`];
     if (labelStr) parts.push(`detected ${labelStr}`);
     if (payload.recording_state) parts.push(`recording ${payload.recording_state}${payload.recording_id ? ` #${payload.recording_id}` : ''}`);
     return `${parts.join('; ')}.`;
   }
 
   if (payload.state === 'checked') {
-    if (!labelStr) return 'Live AI: scan complete — no detections.';
+    if (!labelStr) return 'Live AI: scan complete - no detections.';
     const reason = String(payload.reason || '');
     let suffix;
     if (/debounce|suppressed/i.test(reason)) suffix = 'event suppressed (debounce active)';
@@ -292,10 +292,10 @@ function formatDetectionStatus(payload) {
     else if (/no alert rule|no matching|no new alert/i.test(reason)) suffix = 'no matching alert rule';
     else if (/no detections matched/i.test(reason)) suffix = 'outside monitored zones';
     else suffix = reason || 'no alert triggered';
-    return `Live AI: detected ${labelStr} — ${suffix}.`;
+    return `Live AI: detected ${labelStr} - ${suffix}.`;
   }
 
-  return `Live AI: ${payload.state || 'waiting'} — ${payload.reason || payload.ai_error || 'waiting for frames'}`;
+  return `Live AI: ${payload.state || 'waiting'} - ${payload.reason || payload.ai_error || 'waiting for frames'}`;
 }
 
 async function refreshDetectionStatus() {
