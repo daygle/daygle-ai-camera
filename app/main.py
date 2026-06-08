@@ -2503,6 +2503,10 @@ async def update_profile(request: Request):
     try:
         updated = auth.update_profile(
             int(user['id']),
+            username=payload.get('username'),
+            first_name=payload.get('first_name'),
+            last_name=payload.get('last_name'),
+            email=payload.get('email'),
             timezone_name=payload.get('timezone'),
             date_format=payload.get('date_format'),
             time_format=payload.get('time_format'),
@@ -2947,7 +2951,14 @@ def list_users(request: Request):
 async def create_user(request: Request):
     payload = await request.json()
     try:
-        return auth.create_user(payload.get('username', ''), payload.get('password', ''), payload.get('role', 'viewer'))
+        return auth.create_user(
+            payload.get('username', ''),
+            payload.get('password', ''),
+            payload.get('role', 'viewer'),
+            first_name=payload.get('first_name', ''),
+            last_name=payload.get('last_name', ''),
+            email=payload.get('email', ''),
+        )
     except AuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

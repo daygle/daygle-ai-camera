@@ -31,9 +31,12 @@ function roleLabel(value) {
 }
 
 function renderUsers(users) {
-  usersEl.innerHTML = users.map((user) => `
+  usersEl.innerHTML = users.map((user) => {
+    const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ');
+    const subtitle = [escapeHtml(roleLabel(user.role)), user.is_active ? 'Active' : 'Disabled', fullName ? escapeHtml(fullName) : '', user.email ? escapeHtml(user.email) : ''].filter(Boolean).join(' · ');
+    return `
     <div class="item user-row">
-      <div><strong>${escapeHtml(user.username)}</strong><p class="muted">${escapeHtml(roleLabel(user.role))} · ${user.is_active ? 'Active' : 'Disabled'}</p></div>
+      <div><strong>${escapeHtml(user.username)}</strong><p class="muted">${subtitle}</p></div>
       <select data-action="role" data-id="${user.id}">
         <option value="viewer" ${user.role === 'viewer' ? 'selected' : ''}>Viewer</option>
         <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
@@ -41,7 +44,8 @@ function renderUsers(users) {
       <button class="secondary" data-action="toggle" data-id="${user.id}" data-active="${user.is_active}">${user.is_active ? 'Disable' : 'Enable'}</button>
       <button class="secondary" data-action="reset" data-id="${user.id}">Reset Password</button>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 async function loadUsers() {
