@@ -36,7 +36,7 @@ const FIELD_LABELS = {
   snapshot_refresh_ms: 'Snapshot Refresh',
   detection_status_refresh_ms: 'Detection Status Refresh',
   detection_interval_seconds: 'Detection Interval',
-  event_debounce_seconds: 'Duplicate Event Debounce',
+  event_debounce_seconds: 'Fallback Event Merge (s)',
   background_detection_enabled: 'Background Alerts',
   data_dir: 'Data Directory',
   snapshots_dir: 'Snapshots Directory',
@@ -65,7 +65,7 @@ const FIELD_LABELS = {
   fps: 'FPS',
   pre_event_seconds: 'Pre-Event Seconds',
   post_event_seconds: 'Post-Event Seconds',
-  extension_step_seconds: 'Extension Step Seconds',
+  extension_step_seconds: 'Extend On Motion (s)',
   max_clip_seconds: 'Max Clip Seconds',
   retention_days: 'Retention Days',
   max_storage_gb: 'Max Storage GB',
@@ -167,7 +167,7 @@ function createLiveSettingsSection() {
       <label><span>Snapshot Refresh</span><input name="snapshot_refresh_ms" type="number" min="150" max="5000" step="10" placeholder="500" /><span class="field-help">How often the live camera image updates.</span></label>
       <label><span>Detection Status Refresh</span><input name="detection_status_refresh_ms" type="number" min="500" max="15000" step="100" placeholder="2000" /><span class="field-help">How often the live detection summary updates.</span></label>
       <label><span>Detection Interval</span><input name="detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="0.25" /><span class="field-help">How often AI checks each camera for motion and objects.</span></label>
-      <label><span>Duplicate Event Debounce</span><input name="event_debounce_seconds" type="number" min="0" max="120" step="0.5" placeholder="10" /><span class="field-help">Prevents repeated recordings for the same ongoing event.</span></label>
+      <label><span>Fallback Event Merge (s)</span><input name="event_debounce_seconds" type="number" min="0" max="300" step="1" placeholder="10" /><span class="field-help">Fallback merge window for detections with no matching zone rule. Per-object merge windows are controlled by each object's Cooldown on the Zones page.</span></label>
       <label><span>AI Track Interval (ms)</span><input name="overlay_track_interval_ms" type="number" min="100" max="5000" step="50" placeholder="450" /><span class="field-help">How often the playback AI tracker refreshes detection boxes. Lower is smoother but uses more CPU.</span></label>
       <label><span>Background Alerts</span><select name="background_detection_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
       <button type="submit">Save Live Settings</button>
@@ -191,7 +191,7 @@ function ensureRecordingExtensionStepField() {
 
   const postInput = form.querySelector('input[name="post_event_seconds"]');
   const label = document.createElement('label');
-  label.innerHTML = '<span>Extension Step Seconds</span><input name="extension_step_seconds" type="number" min="0" max="300" placeholder="10" /><span class="field-help">How many seconds to extend an active clip when new detections continue.</span>';
+  label.innerHTML = '<span>Extend On Motion (s)</span><input name="extension_step_seconds" type="number" min="0" max="300" placeholder="10" /><span class="field-help">Each time motion continues within the Event Merge Window, the recording is extended by this many seconds. Set to 30–60 to keep recording while activity is ongoing.</span>';
   if (postInput?.parentElement?.tagName === 'LABEL') {
     postInput.parentElement.insertAdjacentElement('afterend', label);
   } else if (postInput) {

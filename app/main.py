@@ -1112,10 +1112,26 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
     matched_labels = [str(detection.get('label')) for detection in alert_detections if detection.get('label')]
     camera_recording_config = camera_event_recording_config(settings)
     should_record_event, _trigger_type, _trigger_label = recording_service.should_record(recording_detections, camera_recording_config)
-    debounce_seconds = max(0.0, float(live_settings.get('event_debounce_seconds', 10.0)))
     debounced_labels = detection_label_set([detection for detection in recording_detections if detection.get('alert_triggered')])
     if not debounced_labels:
         debounced_labels = detection_label_set(recording_detections)
+    global_debounce = max(0.0, float(live_settings.get('event_debounce_seconds', 10.0)))
+    label_cooldowns: dict[str, float] = {}
+    for _zone in (settings.get('detection') or {}).get('zones', []):
+        for _rule in (_zone.get('object_rules') or []):
+            if not _rule.get('enabled', True):
+                continue
+            _lbl = str(_rule.get('label') or '').strip().lower()
+            if not _lbl:
+                continue
+            try:
+                _cd = max(0.0, float(_rule.get('cooldown_seconds', 60)))
+            except (TypeError, ValueError):
+                _cd = 60.0
+            if _lbl not in label_cooldowns or _cd > label_cooldowns[_lbl]:
+                label_cooldowns[_lbl] = _cd
+    _matching = [label_cooldowns[_lbl] for _lbl in debounced_labels if _lbl in label_cooldowns]
+    debounce_seconds = max(_matching) if _matching else global_debounce
     if should_record_event and live_event_is_debounced(camera_id, debounced_labels, debounce_seconds):
         extended_recording_id = extend_active_rtsp_recording(
             camera_id=camera_id,
@@ -2227,10 +2243,10 @@ def _settings_section_recording() -> str:
     return (
         '<section class="card"><h2>Recording Clips</h2>'
         '<form id="recordingSettingsForm" class="form-grid">'
-        '<input name="pre_event_seconds" type="number" min="0" max="300" placeholder="Pre-event seconds" />'
-        '<input name="post_event_seconds" type="number" min="0" max="300" placeholder="Post-event seconds" />'
-        '<input name="extension_step_seconds" type="number" min="0" max="300" placeholder="Extension step seconds" />'
-        '<input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="Max clip seconds" />'
+        '<input name="pre_event_seconds" type="number" min="0" max="300" placeholder="10" />'
+        '<input name="post_event_seconds" type="number" min="0" max="300" placeholder="15" />'
+        '<input name="extension_step_seconds" type="number" min="0" max="300" placeholder="45" />'
+        '<input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="300" />'
         '<input name="format" placeholder="Format: mp4" />'
         '<button type="submit">Save Clip Settings</button>'
         '</form><p class="muted">Alert-triggered and continuous recording are configured per camera above or from Live Cameras.</p></section>'
@@ -3198,10 +3214,10 @@ def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'record_on_motion': _bool_value(merged.get('record_on_motion', True)),
         'record_on_human': _bool_value(merged.get('record_on_human', True)),
         'record_on_objects': object_labels,
-        'pre_event_seconds': _int_field(merged, 'pre_event_seconds', 5, 0, 300),
-        'post_event_seconds': _int_field(merged, 'post_event_seconds', 10, 0, 300),
-        'extension_step_seconds': _int_field(merged, 'extension_step_seconds', 10, 0, 300),
-        'max_clip_seconds': _int_field(merged, 'max_clip_seconds', 60, 1, 3600),
+        'pre_event_seconds': _int_field(merged, 'pre_event_seconds', 10, 0, 300),
+        'post_event_seconds': _int_field(merged, 'post_event_seconds', 15, 0, 300),
+        'extension_step_seconds': _int_field(merged, 'extension_step_seconds', 45, 0, 300),
+        'max_clip_seconds': _int_field(merged, 'max_clip_seconds', 300, 1, 3600),
         'format': fmt,
         'retention_days': _int_field(merged, 'retention_days', 14, 1, 3650),
         'max_storage_gb': _int_field(merged, 'max_storage_gb', 20, 1, 100000),
@@ -3254,8 +3270,8 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
         event_debounce_seconds = float(merged.get('event_debounce_seconds', 10.0))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail='event_debounce_seconds must be a number.') from exc
-    if event_debounce_seconds < 0 or event_debounce_seconds > 120:
-        raise HTTPException(status_code=400, detail='event_debounce_seconds must be between 0 and 120.')
+    if event_debounce_seconds < 0 or event_debounce_seconds > 300:
+        raise HTTPException(status_code=400, detail='event_debounce_seconds must be between 0 and 300.')
     overlay_track_interval_ms = _int_field(merged, 'overlay_track_interval_ms', 450, 100, 5000)
     return {
         'snapshot_refresh_ms': snapshot_refresh_ms,
