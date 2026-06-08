@@ -60,7 +60,7 @@ function setMessage(text) { messageEl.textContent = text; }
 function formPayload(form) {
   const data = Object.fromEntries(new FormData(form).entries());
   data.enabled = data.enabled === 'true';
-  for (const key of ['confidence', 'iou_threshold']) if (data[key] !== '') data[key] = Number(data[key]);
+  for (const key of ['iou_threshold']) if (data[key] !== '') data[key] = Number(data[key]);
   if (data.input_size !== '') data.input_size = Number.parseInt(data.input_size, 10);
   return data;
 }

@@ -84,6 +84,25 @@ def effective_ai_config() -> dict[str, Any]:
     return settings
 
 
+def compute_minimum_rule_confidence(fallback: float = 0.05) -> float:
+    """Return the lowest min_confidence across all enabled object rules so YOLO's floor never silently suppresses per-rule thresholds."""
+    min_conf: float | None = None
+    for camera in effective_cameras_config():
+        for zone in camera.get('zones', []):
+            for rule in zone.get('object_rules', []):
+                if not rule.get('enabled', True):
+                    continue
+                if str(rule.get('label') or '').strip().lower() == 'motion':
+                    continue
+                try:
+                    conf = float(rule.get('min_confidence', fallback))
+                    if min_conf is None or conf < min_conf:
+                        min_conf = conf
+                except (TypeError, ValueError):
+                    pass
+    return min_conf if min_conf is not None else fallback
+
+
 def effective_camera_config() -> dict[str, Any]:
     settings = copy.deepcopy(config.get('camera', {}))
     override = database.get_setting('camera')
@@ -1019,6 +1038,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         return None
 
     try:
+        detector.confidence = compute_minimum_rule_confidence()
         detections = detector.detect_image(image_bytes)
     except (DetectorUnavailableError, ValueError) as exc:
         logger.warning('Live detection skipped for camera %s: %s', camera_id, exc)
@@ -2155,7 +2175,7 @@ def recordings_timeline_page():
 def ai_settings_page():
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>AI Settings - Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>AI Settings</h1><p class="muted">Configure AI detection, install models, and reload the detector.</p></div></header><section class="card"><h2>AI Status</h2><div id="settingsMessage" class="muted"></div><div id="aiStatusPanel" class="status-panel"></div><div class="button-row"><button id="checkModelBtn" class="secondary" type="button">Check Model</button><button id="downloadModelBtn" type="button">Download YOLOv8n ONNX</button><button id="reloadDetectorBtn" class="secondary" type="button">Reload Detector</button><button id="testDetectorBtn" class="secondary" type="button">Test Detector</button></div></section><section class="card"><h2>AI Settings</h2><form id="aiSettingsForm" class="form-grid"><label><span>AI Enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Backend</span><select name="backend"><option value="onnx">ONNX</option></select></label><label><span>Confidence</span><input name="confidence" type="number" min="0" max="1" step="0.01" /></label><label><span>IoU Threshold</span><input name="iou_threshold" type="number" min="0" max="1" step="0.01" /></label><label><span>Input Size</span><input name="input_size" type="number" min="32" max="2048" step="32" /></label><label><span>Model Path</span><input name="model_path" /></label><label><span>Labels Path</span><input name="labels_path" /></label><button type="submit">Save AI Settings</button></form></section></main><script src="/static/ai.js"></script></body></html>""")
+<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Administration</p><h1>AI Settings</h1><p class="muted">Configure AI detection, install models, and reload the detector.</p></div></header><section class="card"><h2>AI Status</h2><div id="settingsMessage" class="muted"></div><div id="aiStatusPanel" class="status-panel"></div><div class="button-row"><button id="checkModelBtn" class="secondary" type="button">Check Model</button><button id="downloadModelBtn" type="button">Download YOLOv8n ONNX</button><button id="reloadDetectorBtn" class="secondary" type="button">Reload Detector</button><button id="testDetectorBtn" class="secondary" type="button">Test Detector</button></div></section><section class="card"><h2>AI Settings</h2><form id="aiSettingsForm" class="form-grid"><label><span>AI Enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label><span>Backend</span><select name="backend"><option value="onnx">ONNX</option></select></label><label><span>IoU Threshold</span><input name="iou_threshold" type="number" min="0" max="1" step="0.01" /></label><label><span>Input Size</span><input name="input_size" type="number" min="32" max="2048" step="32" /></label><label><span>Model Path</span><input name="model_path" /></label><label><span>Labels Path</span><input name="labels_path" /></label><button type="submit">Save AI Settings</button></form></section></main><script src="/static/ai.js"></script></body></html>""")
 
 
 @app.get('/profile')
@@ -2377,6 +2397,7 @@ async def detect_frame(request: Request):
     ai_state = ai_status_payload(ai_settings)
     ai_error: str | None = None
     try:
+        detector.confidence = compute_minimum_rule_confidence()
         detections = detector.detect_image(image_bytes)
     except DetectorUnavailableError as exc:
         detections = []
@@ -2460,7 +2481,6 @@ def runtime_config():
         'ai': {
             'enabled': effective_ai_config().get('enabled'),
             'backend': effective_ai_config().get('backend'),
-            'confidence': effective_ai_config().get('confidence'),
             'iou_threshold': effective_ai_config().get('iou_threshold'),
             'input_size': effective_ai_config().get('input_size'),
             'model_path': effective_ai_config().get('model_path'),
@@ -2865,7 +2885,7 @@ def delete_plate_alert(rule_id: int, request: Request):
 
 def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_ai_config()
-    allowed = {'enabled', 'backend', 'confidence', 'iou_threshold', 'input_size', 'model_path', 'labels_path'}
+    allowed = {'enabled', 'backend', 'iou_threshold', 'input_size', 'model_path', 'labels_path'}
     updated = {key: current.get(key) for key in allowed if key in current}
     for key, value in payload.items():
         if key in allowed:
@@ -2879,7 +2899,7 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if backend != 'onnx':
         raise HTTPException(status_code=400, detail='AI backend must be onnx.')
     updated['backend'] = backend
-    for field in ('confidence', 'iou_threshold'):
+    for field in ('iou_threshold',):
         try:
             updated[field] = float(updated.get(field, 0.45))
         except (TypeError, ValueError) as exc:
