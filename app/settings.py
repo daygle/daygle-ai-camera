@@ -34,7 +34,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "input_size": 640,
         "model_path": "models/yolov8n.onnx",
         "labels_path": "models/coco.names",
-        "categories": ["person", "cat", "dog", "car", "truck", "bus", "motorcycle", "bicycle", "bird", "package"],
+        "categories": ["person", "cat", "dog", "car", "truck", "bus", "motorcycle", "bicycle", "bird", "suitcase", "backpack"],
     },
     "anpr": {
         "enabled": True,
@@ -72,7 +72,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "continuous": False,
         "record_on_motion": True,
         "record_on_human": True,
-        "record_on_objects": ["cat", "dog", "package", "parcel"],
+        "record_on_objects": ["cat", "dog", "suitcase", "backpack"],
         "motion_min_confidence": 0.45,
         "pre_event_seconds": 10,
         "post_event_seconds": 15,
