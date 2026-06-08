@@ -2585,3 +2585,64 @@ def test_camera_object_labels_filter_without_monitoring_zones(tmp_path, monkeypa
 
     assert [detection['label'] for detection in filtered] == ['person']
 
+
+def test_check_model_updates_endpoints(tmp_path, monkeypatch):
+    app, _ = _load_app(tmp_path, monkeypatch)
+    main_module = sys.modules["app.main"]
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        # All versions match — no updates
+        monkeypatch.setattr(main_module, "_fetch_models_manifest", lambda: {
+            "updated_at": "2026-06-08",
+            "models": {mid: {"version": "1.0.0"} for mid in ["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"]},
+        })
+        monkeypatch.setattr(main_module, "_read_installed_models", lambda: {
+            "yolov8n": {"version": "1.0.0", "installed_at": "2026-06-08T00:00:00Z", "sha256": "abc"},
+        })
+        status, _, payload = client.request("/api/settings/ai/check-model-updates")
+        assert status == 200
+        assert payload["any_updates"] is False
+        n_row = next(m for m in payload["models"] if m["id"] == "yolov8n")
+        assert n_row["update_available"] is False
+        assert n_row["installed_version"] == "1.0.0"
+        assert n_row["latest_version"] == "1.0.0"
+
+        # Manifest bumped to 2.0.0 — update available
+        monkeypatch.setattr(main_module, "_fetch_models_manifest", lambda: {
+            "updated_at": "2026-06-09",
+            "models": {mid: {"version": "2.0.0"} for mid in ["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"]},
+        })
+        status, _, payload = client.request("/api/settings/ai/check-model-updates")
+        assert status == 200
+        assert payload["any_updates"] is True
+        n_row = next(m for m in payload["models"] if m["id"] == "yolov8n")
+        assert n_row["update_available"] is True
+        assert n_row["latest_version"] == "2.0.0"
+
+        # Unknown installed version (legacy install) — treated as needing update
+        monkeypatch.setattr(main_module, "_read_installed_models", lambda: {
+            "yolov8n": {"version": "unknown", "installed_at": "2026-06-08T00:00:00Z", "sha256": "abc"},
+        })
+        status, _, payload = client.request("/api/settings/ai/check-model-updates")
+        assert status == 200
+        n_row = next(m for m in payload["models"] if m["id"] == "yolov8n")
+        assert n_row["update_available"] is True
+
+        # Manifest fetch failure — returns 200 with readable error field, not 502
+        def _raise():
+            raise RuntimeError("Connection refused")
+        monkeypatch.setattr(main_module, "_fetch_models_manifest", _raise)
+        status, _, payload = client.request("/api/settings/ai/check-model-updates")
+        assert status == 200
+        assert "error" in payload
+        assert "Connection refused" in payload["error"]
+        assert payload["any_updates"] is False
+        assert payload["models"] == []
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
