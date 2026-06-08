@@ -404,6 +404,7 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
             'email_recipients': normalize_email_recipients(rule.get('email_recipients', [])),
             'active_start': str(rule.get('active_start') or '').strip() or None,
             'active_end': str(rule.get('active_end') or '').strip() or None,
+            'push_enabled': normalize_bool_setting(rule.get('push_enabled'), False),
         })
     return rules
 
