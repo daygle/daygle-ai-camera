@@ -164,19 +164,17 @@ function createRuntimeResetSection() {
 
 createRuntimeResetSection();
 
-function createCameraManagerSection() {
+function createCamerasLinkSection() {
   const section = document.createElement('section');
   section.className = 'card';
   section.innerHTML = `
     <div class="section-header">
       <div>
         <h2>Cameras</h2>
-        <p class="muted">Manage RTSP/ONVIF camera connections here. Configure motion alerts, object alerts, ANPR, and monitoring areas from Live Cameras.</p>
+        <p class="muted">Add, remove, and configure RTSP/ONVIF camera connections. Set up motion alerts, object detection, and recording from Live Cameras.</p>
       </div>
-      <button id="addCameraBtn" type="button">Add Camera</button>
+      <a class="button-link" href="/cameras">Manage Cameras</a>
     </div>
-    <div id="cameraManager" class="camera-manager"></div>
-    <div class="button-row"><button id="saveCamerasBtn" type="button">Save Cameras</button></div>
   `;
   const firstSection = document.querySelector('main > section');
   if (firstSection) {
@@ -186,7 +184,7 @@ function createCameraManagerSection() {
   }
 }
 
-createCameraManagerSection();
+createCamerasLinkSection();
 
 function createLiveSettingsSection() {
   const section = document.createElement('section');
@@ -204,9 +202,9 @@ function createLiveSettingsSection() {
     </form>
     <p class="muted">Lower values can improve responsiveness but increase CPU/network usage. Background alerts keep checking cameras even when no Live Cameras page is open.</p>
   `;
-  const cameraSection = document.getElementById('cameraManager')?.closest('section');
-  if (cameraSection) {
-    cameraSection.after(section);
+  const camerasSection = document.querySelector('main > section');
+  if (camerasSection) {
+    camerasSection.after(section);
   } else {
     document.querySelector('main')?.append(section);
   }
@@ -264,85 +262,6 @@ createEmailDeliverySection();
 enhanceFormFieldLabels();
 ensureRecordingExtensionStepField();
 enhanceFormFieldLabels();
-
-let cameras = [];
-
-function newCameraTemplate() {
-  const number = cameras.length + 1;
-  return {
-    id: `camera-${number}`,
-    name: `Camera ${number}`,
-    backend: 'onvif',
-    device: 0,
-    stream_url: '',
-    host: '',
-    port: 554,
-    path: 'stream1',
-    username: '',
-    password: '',
-    width: 1280,
-    height: 720,
-    fps: 15,
-    flip: 'none',
-    detection: { motion_enabled: true, object_detection_enabled: true, zones: [] },
-    recording: { enabled: true, record_on_alert: true, continuous: false },
-  };
-}
-
-function renderCameraManager() {
-  const manager = document.getElementById('cameraManager');
-  manager.innerHTML = cameras.map((camera, index) => `
-    <div class="item camera-config-card" data-camera-index="${index}">
-      <div class="section-header"><h3>${escapeHtml(camera.name || camera.id || `Camera ${index + 1}`)}</h3><button class="secondary" type="button" data-remove-camera="${index}" ${cameras.length <= 1 ? 'disabled' : ''}>Remove</button></div>
-      <div class="form-grid compact-grid">
-        <input data-camera-field="id" value="${escapeHtml(camera.id || '')}" placeholder="Camera ID" />
-        <input data-camera-field="name" value="${escapeHtml(camera.name || '')}" placeholder="Display name" />
-        <label><span>Backend</span><select data-camera-field="backend"><option value="onvif" ${camera.backend === 'onvif' ? 'selected' : ''}>ONVIF / RTSP</option><option value="rtsp" ${camera.backend === 'rtsp' ? 'selected' : ''}>RTSP</option></select></label>
-        <input data-camera-field="stream_url" value="${escapeHtml(camera.stream_url || '')}" placeholder="RTSP stream URL" />
-        <input data-camera-field="host" value="${escapeHtml(camera.host || '')}" placeholder="Host/IP" />
-        <input data-camera-field="port" type="number" value="${escapeHtml(camera.port || 554)}" placeholder="Port" />
-        <input data-camera-field="path" value="${escapeHtml(camera.path || '')}" placeholder="Stream path" />
-        <input data-camera-field="username" value="${escapeHtml(camera.username || '')}" placeholder="Username" />
-        <input data-camera-field="password" type="password" value="${escapeHtml(camera.password || '')}" placeholder="Password" />
-        <input data-camera-field="width" type="number" value="${escapeHtml(camera.width || 1280)}" placeholder="Width" />
-        <input data-camera-field="height" type="number" value="${escapeHtml(camera.height || 720)}" placeholder="Height" />
-        <input data-camera-field="fps" type="number" value="${escapeHtml(camera.fps || 15)}" placeholder="FPS" />
-      </div>
-      <div class="form-grid compact-grid">
-        <label><span>Recording</span><select data-camera-recording="enabled"><option value="true" ${camera.recording?.enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${camera.recording?.enabled === false ? 'selected' : ''}>Disabled</option></select></label>
-        <label><span>Alert clips</span><select data-camera-recording="record_on_alert"><option value="true" ${camera.recording?.record_on_alert !== false ? 'selected' : ''}>Enabled</option><option value="false" ${camera.recording?.record_on_alert === false ? 'selected' : ''}>Disabled</option></select></label>
-        <label><span>Continuous</span><select data-camera-recording="continuous"><option value="false" ${camera.recording?.continuous !== true ? 'selected' : ''}>Disabled</option><option value="true" ${camera.recording?.continuous === true ? 'selected' : ''}>Enabled</option></select></label>
-      </div>
-      <p class="muted">Monitoring areas: ${(camera.detection?.zones || []).length}. Use Live Cameras to configure motion alerts, object alerts, ANPR, and areas visually.</p>
-    </div>
-  `).join('');
-
-  enhanceFormFieldLabels(manager);
-
-  manager.querySelectorAll('[data-camera-field]').forEach((input) => {
-    input.addEventListener('input', () => {
-      const card = input.closest('[data-camera-index]');
-      const camera = cameras[Number(card.dataset.cameraIndex)];
-      const field = input.dataset.cameraField;
-      camera[field] = ['port', 'width', 'height', 'fps'].includes(field) ? Number.parseInt(input.value || '0', 10) : input.value;
-      if (field === 'name') {
-        const heading = card.querySelector('.section-header h3');
-        if (heading) heading.textContent = camera.name || camera.id || `Camera ${Number(card.dataset.cameraIndex) + 1}`;
-      }
-    });
-  });
-  manager.querySelectorAll('[data-camera-recording]').forEach((select) => {
-    select.addEventListener('change', () => {
-      const card = select.closest('[data-camera-index]');
-      const camera = cameras[Number(card.dataset.cameraIndex)];
-      camera.recording ||= { enabled: true, record_on_alert: true, continuous: false };
-      camera.recording[select.dataset.cameraRecording] = select.value === 'true';
-    });
-  });
-  manager.querySelectorAll('[data-remove-camera]').forEach((button) => {
-    button.addEventListener('click', () => { cameras.splice(Number(button.dataset.removeCamera), 1); renderCameraManager(); });
-  });
-}
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
@@ -425,8 +344,6 @@ async function loadSettings() {
     api('/api/settings/system'),
     api('/api/settings/alert-email'),
   ]);
-  cameras = settings.cameras || [settings.camera];
-  renderCameraManager();
   fillForm(forms.anpr, settings.anpr);
   fillForm(forms.live, settings.live);
   if (forms.anpr.elements.vehicle_labels) {
@@ -513,23 +430,6 @@ forms.databaseRestore.addEventListener('submit', async (event) => {
     forms.databaseRestore.reset();
     await loadSettings();
     setMessage(`${result.message} Safety backup: ${result.safety_backup}`);
-  } catch (error) {
-    setMessage(error.message);
-  }
-});
-
-
-document.getElementById('addCameraBtn').addEventListener('click', () => {
-  cameras.push(newCameraTemplate());
-  renderCameraManager();
-});
-
-document.getElementById('saveCamerasBtn').addEventListener('click', async () => {
-  try {
-    const result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras }) });
-    cameras = result.cameras || [];
-    renderCameraManager();
-    setMessage('Camera list saved.');
   } catch (error) {
     setMessage(error.message);
   }

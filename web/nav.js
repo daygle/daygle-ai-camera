@@ -12,6 +12,7 @@
       <a href="/" data-match="/">Dashboard</a>
       <a href="/live" data-match="/live">Live</a>
       <a href="/zones" data-match="/zones" data-admin="true">Zones</a>
+      <a href="/cameras" data-match="/cameras" data-admin="true">Cameras</a>
       <a href="/anpr" data-match="/anpr">ANPR</a>
       <a href="/recordings" data-match="/recordings">Recordings</a>
       <a href="/recordings/timeline" data-match="/recordings/timeline">Timeline</a>

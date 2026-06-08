@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cameras - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell page-stack">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Administration</p>
+        <h1>Cameras</h1>
+        <p class="muted">Manage RTSP and ONVIF camera connections. Configure motion, object alerts, and recording from Live Cameras.</p>
+      </div>
+      <div class="cam-hero-action">
+        <button id="addCameraBtn" type="button">+ Add Camera</button>
+      </div>
+    </header>
+
+    <div id="cameraMessage" class="muted"></div>
+    <div id="cameraGrid" class="camera-page-grid"></div>
+    <div id="cameraEmpty" class="camera-empty-state" hidden>
+      <div class="camera-empty-icon">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+      </div>
+      <h2>No cameras yet</h2>
+      <p class="muted">Add your first camera to start monitoring.</p>
+      <button id="addCameraEmptyBtn" type="button">+ Add Camera</button>
+    </div>
+  </main>
+
+  <!-- Edit / Add Camera Modal -->
+  <div id="cameraModal" class="modal-backdrop" hidden aria-modal="true" role="dialog" aria-labelledby="modalTitle">
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 id="modalTitle">Add Camera</h2>
+        <button class="modal-close" id="modalCloseBtn" type="button" aria-label="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <div class="modal-tabs" role="tablist">
+        <button class="modal-tab active" data-tab="connection" role="tab" aria-selected="true">Connection</button>
+        <button class="modal-tab" data-tab="recording" role="tab" aria-selected="false">Recording</button>
+        <button class="modal-tab" data-tab="advanced" role="tab" aria-selected="false">Advanced</button>
+      </div>
+
+      <form id="cameraEditForm" class="modal-body" novalidate>
+        <input type="hidden" id="editCameraIndex" value="" />
+
+        <!-- Connection Tab -->
+        <div class="modal-tab-panel" data-panel="connection">
+          <div class="form-grid">
+            <label><span>Camera Name</span><input id="editName" name="name" placeholder="e.g. Front Door" required /></label>
+            <label><span>Camera ID</span><input id="editId" name="id" placeholder="e.g. front-door" /></label>
+            <label class="full-width"><span>Backend</span>
+              <select id="editBackend" name="backend">
+                <option value="onvif">ONVIF / RTSP (auto-build URL)</option>
+                <option value="rtsp">RTSP (manual URL)</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="rtspManualFields" class="form-group" hidden>
+            <p class="form-group-label">RTSP URL</p>
+            <div class="form-grid">
+              <label class="full-width"><span>Stream URL</span><input id="editStreamUrl" name="stream_url" placeholder="rtsp://user:pass@192.168.1.100:554/stream1" /></label>
+            </div>
+          </div>
+
+          <div id="onvifFields" class="form-group">
+            <p class="form-group-label">Connection details</p>
+            <div class="form-grid">
+              <label><span>Host / IP</span><input id="editHost" name="host" placeholder="192.168.1.100" /></label>
+              <label><span>Port</span><input id="editPort" name="port" type="number" min="1" max="65535" placeholder="554" /></label>
+              <label><span>Stream path</span><input id="editPath" name="path" placeholder="stream1" /></label>
+              <label><span>Username</span><input id="editUsername" name="username" placeholder="admin" autocomplete="off" /></label>
+              <label class="full-width"><span>Password</span><input id="editPassword" name="password" type="password" placeholder="••••••••" autocomplete="new-password" /></label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recording Tab -->
+        <div class="modal-tab-panel" data-panel="recording" hidden>
+          <div class="form-grid">
+            <label><span>Recording</span>
+              <select id="editRecordingEnabled" name="recording_enabled">
+                <option value="true">Enabled</option>
+                <option value="false">Disabled</option>
+              </select>
+            </label>
+            <label><span>Alert Clips</span>
+              <select id="editRecordOnAlert" name="record_on_alert">
+                <option value="true">Enabled</option>
+                <option value="false">Disabled</option>
+              </select>
+            </label>
+            <label><span>Continuous Recording</span>
+              <select id="editContinuous" name="continuous">
+                <option value="false">Disabled</option>
+                <option value="true">Enabled</option>
+              </select>
+            </label>
+          </div>
+          <p class="form-help muted">Alert clips record a short clip each time a detection event fires. Continuous recording writes an uninterrupted stream regardless of events.</p>
+        </div>
+
+        <!-- Advanced Tab -->
+        <div class="modal-tab-panel" data-panel="advanced" hidden>
+          <div class="form-grid">
+            <label><span>Width (px)</span><input id="editWidth" name="width" type="number" min="160" max="7680" placeholder="1280" /></label>
+            <label><span>Height (px)</span><input id="editHeight" name="height" type="number" min="90" max="4320" placeholder="720" /></label>
+            <label><span>FPS</span><input id="editFps" name="fps" type="number" min="1" max="120" placeholder="15" /></label>
+          </div>
+          <p class="form-help muted">These values are hints passed to the stream decoder. Leave at defaults unless your camera requires specific dimensions.</p>
+        </div>
+
+        <div class="modal-footer">
+          <button class="secondary" id="modalCancelBtn" type="button">Cancel</button>
+          <button type="submit" id="modalSaveBtn">Save Camera</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Delete confirmation modal -->
+  <div id="deleteModal" class="modal-backdrop" hidden aria-modal="true" role="dialog">
+    <div class="modal-panel modal-panel-sm">
+      <div class="modal-header">
+        <h2>Remove camera?</h2>
+        <button class="modal-close" id="deleteModalCloseBtn" type="button" aria-label="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <p class="muted" id="deleteModalBody">This will remove the camera from your configuration. Existing recordings are not deleted.</p>
+      <div class="modal-footer">
+        <button class="secondary" id="deleteCancelBtn" type="button">Cancel</button>
+        <button class="delete-btn" id="deleteConfirmBtn" type="button">Remove Camera</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/nav.js"></script>
+  <script src="/static/cameras.js"></script>
+</body>
+</html>

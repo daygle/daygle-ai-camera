@@ -870,3 +870,348 @@ input[type="file"] { padding: 10px; }
   .recording-row .button-row { flex-direction: column; }
   .recording-row .button-row button { width: 100%; }
 }
+
+/* ─── Cameras page ─────────────────────────────────────────────────────────── */
+.cam-hero-action { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+
+.camera-page-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
+  gap: 18px;
+}
+
+.cam-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--panel), rgba(10, 16, 28, 0.86));
+  box-shadow: 0 18px 50px rgba(0,0,0,.32);
+  border-radius: 22px;
+  overflow: hidden;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.cam-card:hover {
+  border-color: rgba(71, 214, 255, 0.22);
+  box-shadow: 0 22px 60px rgba(0,0,0,.40);
+}
+
+.cam-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cam-card-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.cam-icon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(71, 214, 255, 0.08);
+  color: var(--accent);
+}
+
+.cam-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.cam-id {
+  font-size: 12px;
+  font-weight: 700;
+  display: block;
+  margin-top: 2px;
+}
+
+.cam-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.cam-card-actions button {
+  padding: 8px 13px;
+  border-radius: 11px;
+  font-size: 13px;
+}
+
+.cam-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid;
+}
+
+.cam-badge-idle {
+  background: rgba(71, 214, 255, 0.1);
+  border-color: rgba(71, 214, 255, 0.3);
+  color: var(--accent);
+}
+
+.cam-badge-warn {
+  background: rgba(248, 197, 93, 0.1);
+  border-color: rgba(248, 197, 93, 0.3);
+  color: #f8c55d;
+}
+
+.cam-card-body {
+  flex: 1;
+  display: grid;
+  gap: 0;
+  padding: 6px 0;
+}
+
+.cam-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 18px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.cam-meta-row:last-child { border-bottom: 0; }
+
+.cam-meta-label {
+  flex-shrink: 0;
+  width: 100px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.cam-meta-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cam-url-row .cam-meta-value {
+  font-family: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+  font-size: 12px;
+}
+
+.cam-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+  color: var(--muted);
+}
+
+.chip-green {
+  background: rgba(73, 230, 163, 0.12);
+  border-color: rgba(73, 230, 163, 0.3);
+  color: var(--success);
+}
+
+.chip-dim {
+  background: rgba(255,255,255,0.05);
+  border-color: var(--border);
+  color: var(--muted);
+}
+
+.cam-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  background: rgba(255,255,255,0.02);
+}
+
+.cam-footer-hint {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cam-live-link {
+  padding: 9px 14px;
+  font-size: 13px;
+  border-radius: 11px;
+}
+
+/* Empty state */
+.camera-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 64px 24px;
+  gap: 16px;
+  border: 1px dashed var(--border);
+  border-radius: 24px;
+  background: rgba(255,255,255,0.02);
+}
+
+.camera-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 80px;
+  height: 80px;
+  border-radius: 24px;
+  border: 1px solid var(--border);
+  background: rgba(71, 214, 255, 0.06);
+  color: var(--accent);
+  opacity: 0.7;
+}
+
+.camera-empty-state h2 { margin: 0; font-size: 22px; }
+
+/* ─── Modal ────────────────────────────────────────────────────────────────── */
+.modal-open { overflow: hidden; }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(4, 8, 16, 0.78);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.modal-panel {
+  width: min(600px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(18, 25, 42, 0.98), rgba(10, 16, 28, 0.99));
+  box-shadow: 0 32px 80px rgba(0,0,0,.56);
+}
+
+.modal-panel-sm { width: min(460px, 100%); }
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-header h2 { margin: 0; font-size: 20px; }
+
+.modal-close {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  cursor: pointer;
+}
+.modal-close:hover { color: var(--text); background: rgba(255,255,255,0.1); }
+
+.modal-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 12px 24px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-tab {
+  padding: 9px 16px 11px;
+  border-radius: 12px 12px 0 0;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  position: relative;
+  bottom: -1px;
+}
+
+.modal-tab:hover { color: var(--text); }
+
+.modal-tab.active {
+  background: linear-gradient(180deg, rgba(18, 25, 42, 0.98), rgba(10, 16, 28, 0.99));
+  border-color: var(--border);
+  border-bottom-color: transparent;
+  color: var(--text);
+}
+
+.modal-body {
+  padding: 22px 24px 0;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 20px 24px 24px;
+  position: sticky;
+  bottom: 0;
+  background: linear-gradient(180deg, transparent, rgba(10, 16, 28, 0.99) 30%);
+}
+
+.form-group {
+  margin-top: 20px;
+}
+
+.form-group-label {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.form-grid .full-width { grid-column: 1 / -1; }
+
+.form-help {
+  margin: 14px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.modal-tab-panel .form-grid {
+  margin-top: 0;
+}
+
+@media (max-width: 600px) {
+  .cam-card-header { flex-direction: column; }
+  .cam-card-actions { align-self: stretch; justify-content: flex-start; flex-wrap: wrap; }
+  .cam-name { max-width: none; }
+  .modal-tabs { overflow-x: auto; scrollbar-width: none; }
+  .modal-tabs::-webkit-scrollbar { display: none; }
+}
