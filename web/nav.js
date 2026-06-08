@@ -35,6 +35,7 @@ window.showToast = function (message, isError) {
       <a href="/ai" data-match="/ai" data-admin="true">AI</a>
       <a href="/settings" data-match="/settings" data-admin="true">Settings</a>
       <a href="/users" data-match="/users" data-admin="true">Users</a>
+      <a href="/audit" data-match="/audit" data-admin="true">Audit Log</a>
     </div>
     <div class="app-nav-account">
       <a href="/profile" data-match="/profile" id="navUser">Profile</a>

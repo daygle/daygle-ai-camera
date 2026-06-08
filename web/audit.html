@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Audit Log - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <style>
+    .audit-filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    .audit-filters input,
+    .audit-filters select {
+      flex: 1 1 140px;
+      min-width: 0;
+    }
+    .audit-table-wrap {
+      overflow-x: auto;
+    }
+    .audit-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    .audit-table th {
+      text-align: left;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 2px solid var(--border, #e2e8f0);
+      white-space: nowrap;
+      color: var(--text-muted, #64748b);
+      font-weight: 600;
+    }
+    .audit-table td {
+      padding: 0.45rem 0.75rem;
+      border-bottom: 1px solid var(--border, #e2e8f0);
+      vertical-align: top;
+    }
+    .audit-table tr:last-child td {
+      border-bottom: none;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .status-success { background: #dcfce7; color: #166534; }
+    .status-failed  { background: #fee2e2; color: #991b1b; }
+    .details-cell {
+      max-width: 260px;
+      word-break: break-all;
+      color: var(--text-muted, #64748b);
+      font-size: 0.8rem;
+    }
+    .pagination {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-top: 1rem;
+      font-size: 0.9rem;
+    }
+    .pagination button {
+      padding: 0.3rem 0.9rem;
+    }
+    #auditEmpty {
+      padding: 2rem 0;
+      text-align: center;
+      color: var(--text-muted, #64748b);
+    }
+  </style>
+</head>
+<body>
+  <main class="shell page-stack">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Administration</p>
+        <h1>Audit Log</h1>
+        <p class="muted">Track who changed what and when — logins, settings changes, deletions, and more.</p>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>Log entries</h2>
+        <button id="refreshBtn" class="secondary" type="button">Refresh</button>
+      </div>
+
+      <div class="audit-filters">
+        <input id="filterUsername" placeholder="Filter by username" />
+        <select id="filterAction">
+          <option value="">All actions</option>
+          <option value="login">login</option>
+          <option value="logout">logout</option>
+          <option value="create">create</option>
+          <option value="update">update</option>
+          <option value="delete">delete</option>
+          <option value="delete_all">delete_all</option>
+          <option value="backup">backup</option>
+          <option value="restore">restore</option>
+        </select>
+        <input id="filterResource" placeholder="Filter by resource (e.g. user, settings)" />
+        <button id="applyFiltersBtn" type="button">Apply</button>
+        <button id="clearFiltersBtn" class="secondary" type="button">Clear</button>
+      </div>
+
+      <div id="auditEmpty" hidden>No audit log entries match the current filters.</div>
+      <div class="audit-table-wrap">
+        <table class="audit-table" id="auditTable">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>User</th>
+              <th>Action</th>
+              <th>Resource</th>
+              <th>ID</th>
+              <th>Status</th>
+              <th>IP Address</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody id="auditBody"></tbody>
+        </table>
+      </div>
+
+      <div class="pagination" id="pagination" hidden>
+        <button id="prevBtn" class="secondary" type="button">Previous</button>
+        <span id="pageInfo"></span>
+        <button id="nextBtn" class="secondary" type="button">Next</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/nav.js"></script>
+  <script src="/static/audit.js"></script>
+</body>
+</html>

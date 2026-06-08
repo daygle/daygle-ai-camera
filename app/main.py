@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import logging
+import logging.handlers
 import mimetypes
 import os
 import re
@@ -41,6 +42,22 @@ from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, load_settings
 from app.storage import Storage
 
 logger = logging.getLogger('daygle.ai')
+
+def _configure_file_logging() -> None:
+    log_dir = Path(__file__).resolve().parent.parent / 'data' / 'logs'
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / 'app.log'
+    handler = logging.handlers.RotatingFileHandler(
+        log_path, maxBytes=10 * 1024 * 1024, backupCount=5, encoding='utf-8'
+    )
+    handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
+    root = logging.getLogger()
+    if not root.handlers:
+        logging.basicConfig(level=logging.INFO)
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
+_configure_file_logging()
 
 YOLOV8N_MODEL = 'yolov8n.pt'
 YOLOV8N_ONNX = 'yolov8n.onnx'
@@ -1408,7 +1425,7 @@ def log_detector_initialization(context: str = 'startup') -> None:
 
 PUBLIC_PREFIXES = ('/static/',)
 PUBLIC_PATHS = {'/favicon.ico', '/login', '/setup'}
-ADMIN_PATHS = {'/ai', '/cameras', '/settings', '/users', '/zones'}
+ADMIN_PATHS = {'/ai', '/cameras', '/settings', '/users', '/zones', '/audit'}
 MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
 
@@ -1527,6 +1544,40 @@ def require_admin(request: Request) -> dict[str, Any]:
     if user.get('role') != 'admin':
         raise HTTPException(status_code=403, detail='Admin access required')
     return user
+
+
+def _request_ip(request: Request) -> str:
+    forwarded = request.headers.get('x-forwarded-for')
+    if forwarded:
+        return forwarded.split(',')[0].strip()
+    return request.client.host if request.client else 'unknown'
+
+
+def write_audit_log(
+    request: Request,
+    action: str,
+    resource: str,
+    resource_id: Any = None,
+    details: dict[str, Any] | None = None,
+    status: str = 'success',
+) -> None:
+    user: dict[str, Any] | None = getattr(request.state, 'user', None)
+    user_id: int | None = int(user['id']) if user else None
+    username: str = str(user['username']) if user else 'anonymous'
+    try:
+        database.add_audit_log(
+            created_at=utc_now(),
+            user_id=user_id,
+            username=username,
+            action=action,
+            resource=resource,
+            resource_id=str(resource_id) if resource_id is not None else None,
+            details=details,
+            ip_address=_request_ip(request),
+            status=status,
+        )
+    except Exception as exc:
+        logger.warning('Failed to write audit log: %s', exc)
 
 
 def attach_event_recording(
@@ -2193,12 +2244,20 @@ async def login(request: Request):
     data = await form_data(request)
     if data.get('csrf_token') != request.cookies.get(CSRF_COOKIE):
         return login_page(request, 'Security token expired. Try again.')
+    username = data.get('username', '')
+    ip = _request_ip(request)
     try:
-        _user, token, _csrf_token, expires_at = auth.authenticate(
-            data.get('username', ''), data.get('password', ''), request.client.host if request.client else 'unknown'
-        )
+        _user, token, _csrf_token, expires_at = auth.authenticate(username, data.get('password', ''), ip)
     except AuthError as exc:
+        try:
+            database.add_audit_log(created_at=utc_now(), user_id=None, username=username, action='login', resource='session', ip_address=ip, status='failed', details={'reason': str(exc)})
+        except Exception:
+            pass
         return login_page(request, str(exc))
+    try:
+        database.add_audit_log(created_at=utc_now(), user_id=int(_user['id']), username=str(_user['username']), action='login', resource='session', ip_address=ip, status='success')
+    except Exception:
+        pass
     response = RedirectResponse('/', status_code=303)
     set_session_cookie(response, request, token, expires_at)
     response.delete_cookie(CSRF_COOKIE)
@@ -2249,6 +2308,7 @@ def logout_post(request: Request):
     session = require_session(request)
     if request.headers.get(CSRF_HEADER) != session['csrf_token']:
         return JSONResponse({'detail': 'CSRF token missing or invalid'}, status_code=403)
+    write_audit_log(request, 'logout', 'session')
     auth.delete_session(request.cookies.get(SESSION_COOKIE_NAME))
     response = JSONResponse({'ok': True})
     clear_auth_cookies(response)
@@ -2629,6 +2689,7 @@ def delete_event(event_id: int, request: Request):
         snapshot = Path(snapshot_path)
         if snapshot.exists() and snapshot.is_file():
             snapshot.unlink(missing_ok=True)
+    write_audit_log(request, 'delete', 'event', event_id)
     return {'ok': True}
 
 
@@ -2636,6 +2697,7 @@ def delete_event(event_id: int, request: Request):
 def delete_all_events(request: Request):
     require_admin(request)
     deleted = database.delete_all_events()
+    write_audit_log(request, 'delete_all', 'events', details={'count': deleted})
     return {'ok': True, 'deleted': deleted}
 
 
@@ -2648,6 +2710,7 @@ def alert_history(limit: int = Query(25, ge=1, le=200)):
 def delete_all_alert_history(request: Request):
     require_admin(request)
     deleted = database.delete_all_alerts()
+    write_audit_log(request, 'delete_all', 'alert_history', details={'count': deleted})
     return {'ok': True, 'deleted': deleted}
 
 
@@ -2899,6 +2962,7 @@ def delete_recording(recording_id: int, request: Request):
     if recording is None:
         raise HTTPException(status_code=404, detail='Recording not found')
     delete_recording_files([recording])
+    write_audit_log(request, 'delete', 'recording', recording_id)
     return {'ok': True}
 
 
@@ -2907,6 +2971,7 @@ def delete_all_recordings(request: Request):
     require_admin(request)
     recordings = database.delete_all_recordings()
     delete_recording_files(recordings)
+    write_audit_log(request, 'delete_all', 'recordings', details={'count': len(recordings)})
     return {'ok': True, 'deleted': len(recordings)}
 
 
@@ -2925,7 +2990,7 @@ def delete_runtime_data(request: Request):
     deleted_plate_artifacts = clear_runtime_media_directory(storage_config.get('plates_dir'))
     with active_rtsp_recordings_lock:
         active_rtsp_recordings.clear()
-    return {
+    result = {
         'ok': True,
         'deleted': {
             'recordings': len(recordings),
@@ -2939,6 +3004,8 @@ def delete_runtime_data(request: Request):
         },
         'preserved': ['settings', 'users', 'sessions', 'rules'],
     }
+    write_audit_log(request, 'delete_all', 'runtime_data', details=result['deleted'])
+    return result
 
 
 @app.get('/api/users')
@@ -2949,9 +3016,10 @@ def list_users(request: Request):
 
 @app.post('/api/users')
 async def create_user(request: Request):
+    require_admin(request)
     payload = await request.json()
     try:
-        return auth.create_user(
+        user = auth.create_user(
             payload.get('username', ''),
             payload.get('password', ''),
             payload.get('role', 'viewer'),
@@ -2959,15 +3027,27 @@ async def create_user(request: Request):
             last_name=payload.get('last_name', ''),
             email=payload.get('email', ''),
         )
+        write_audit_log(request, 'create', 'user', user['id'], {'username': user['username'], 'role': user['role']})
+        return user
     except AuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.patch('/api/users/{user_id}')
 async def update_user(user_id: int, request: Request):
+    require_admin(request)
     payload = await request.json()
+    changes: dict[str, Any] = {}
+    if 'role' in payload:
+        changes['role'] = payload['role']
+    if 'is_active' in payload:
+        changes['is_active'] = payload['is_active']
+    if 'password' in payload:
+        changes['password_changed'] = True
     try:
-        return auth.update_user(user_id, role=payload.get('role'), is_active=payload.get('is_active'), password=payload.get('password'))
+        user = auth.update_user(user_id, role=payload.get('role'), is_active=payload.get('is_active'), password=payload.get('password'))
+        write_audit_log(request, 'update', 'user', user_id, {'target_username': user.get('username'), **changes})
+        return user
     except AuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -3065,6 +3145,7 @@ def delete_plate(plate_id: int, request: Request):
     plate = database.delete_plate(plate_id)
     if plate is None:
         raise HTTPException(status_code=404, detail='Plate not found')
+    write_audit_log(request, 'delete', 'plate', plate_id, {'plate_number': plate.get('plate_number')})
     return {'ok': True}
 
 
@@ -3072,6 +3153,7 @@ def delete_plate(plate_id: int, request: Request):
 def delete_all_plates(request: Request):
     require_admin(request)
     deleted = database.delete_all_plates()
+    write_audit_log(request, 'delete_all', 'plates', details={'count': deleted})
     return {'ok': True, 'deleted': deleted}
 
 
@@ -3083,7 +3165,9 @@ def list_plate_alerts():
 @app.post('/api/plate-alerts')
 async def create_plate_alert(request: Request):
     require_admin(request)
-    return database.create_plate_alert_rule(validate_plate_alert_rule(await request.json()), utc_now())
+    rule = database.create_plate_alert_rule(validate_plate_alert_rule(await request.json()), utc_now())
+    write_audit_log(request, 'create', 'plate_alert_rule', rule['id'], {'rule_name': rule.get('rule_name')})
+    return rule
 
 
 @app.put('/api/plate-alerts/{rule_id}')
@@ -3092,6 +3176,7 @@ async def update_plate_alert(rule_id: int, request: Request):
     rule = database.update_plate_alert_rule(rule_id, validate_plate_alert_rule(await request.json(), partial=True), utc_now())
     if rule is None:
         raise HTTPException(status_code=404, detail='Plate alert rule not found')
+    write_audit_log(request, 'update', 'plate_alert_rule', rule_id, {'rule_name': rule.get('rule_name')})
     return rule
 
 
@@ -3100,6 +3185,7 @@ def delete_plate_alert(rule_id: int, request: Request):
     require_admin(request)
     if not database.delete_plate_alert_rule(rule_id):
         raise HTTPException(status_code=404, detail='Plate alert rule not found')
+    write_audit_log(request, 'delete', 'plate_alert_rule', rule_id)
     return {'ok': True}
 
 
@@ -3554,6 +3640,7 @@ def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
 
 @app.put('/api/settings/ai')
 async def update_ai_settings(request: Request):
+    require_admin(request)
     payload = await request.json()
     new_settings = validate_ai_settings(payload)
     database.set_setting('ai', new_settings, utc_now())
@@ -3561,6 +3648,7 @@ async def update_ai_settings(request: Request):
     response = detector_status(new_settings)
     response['reload_succeeded'] = reloaded
     response['reload_error'] = error
+    write_audit_log(request, 'update', 'settings.ai', details={'model_path': new_settings.get('model_path'), 'backend': new_settings.get('backend')})
     return response
 
 
@@ -3787,9 +3875,12 @@ def get_alert_email_settings():
 
 @app.put('/api/settings/alert-email')
 async def update_alert_email_settings(request: Request):
+    require_admin(request)
     payload = await request.json()
     settings = validate_alert_email_settings(payload)
-    return database.set_setting('alert_email', settings, utc_now())
+    result = database.set_setting('alert_email', settings, utc_now())
+    write_audit_log(request, 'update', 'settings.alert_email')
+    return result
 
 
 @app.post('/api/settings/alert-email/test')
@@ -3813,9 +3904,12 @@ def get_push_notification_settings():
 
 @app.put('/api/settings/alert-push')
 async def update_push_notification_settings(request: Request):
+    require_admin(request)
     payload = await request.json()
     settings = validate_push_notification_settings(payload)
-    return database.set_setting('alert_push', settings, utc_now())
+    result = database.set_setting('alert_push', settings, utc_now())
+    write_audit_log(request, 'update', 'settings.alert_push')
+    return result
 
 
 @app.post('/api/settings/alert-push/test')
@@ -3853,8 +3947,10 @@ def get_system_settings():
 
 
 @app.get('/api/settings/system/database/backup')
-def backup_database():
+def backup_database(request: Request):
+    require_admin(request)
     backup_path = create_database_backup()
+    write_audit_log(request, 'backup', 'database', details={'filename': backup_path.name})
     return FileResponse(
         backup_path,
         media_type='application/vnd.sqlite3',
@@ -3864,7 +3960,8 @@ def backup_database():
 
 
 @app.post('/api/settings/system/database/restore')
-async def restore_database(file: UploadFile = File(...)):
+async def restore_database(request: Request, file: UploadFile = File(...)):
+    require_admin(request)
     filename = Path(file.filename or '').name
     if not filename:
         raise HTTPException(status_code=400, detail='Choose a SQLite database backup file to restore.')
@@ -3882,6 +3979,7 @@ async def restore_database(file: UploadFile = File(...)):
         safety_backup = create_database_backup(prefix='pre-restore-daygle-database')
         shutil.move(str(restore_temp), database.database_path)
         refresh_runtime_after_database_restore()
+        write_audit_log(request, 'restore', 'database', details={'source_filename': filename, 'safety_backup': str(safety_backup)})
         return {
             'ok': True,
             'message': 'Database restored successfully.',
@@ -3895,10 +3993,12 @@ async def restore_database(file: UploadFile = File(...)):
 
 @app.put('/api/settings/system/camera')
 async def update_camera_settings(request: Request):
+    require_admin(request)
     settings = validate_camera_settings(await request.json())
     database.set_setting('camera', settings, utc_now())
     database.set_setting('cameras', [settings], utc_now())
     apply_camera_settings(settings)
+    write_audit_log(request, 'update', 'settings.camera', details={'camera_name': settings.get('name')})
     return settings
 
 
@@ -3909,15 +4009,18 @@ def list_cameras():
 
 @app.put('/api/cameras')
 async def update_cameras(request: Request):
+    require_admin(request)
     settings = validate_cameras_settings(await request.json())
     database.set_setting('cameras', settings, utc_now())
     database.set_setting('camera', settings[0], utc_now())
     apply_cameras_settings(settings)
+    write_audit_log(request, 'update', 'settings.cameras', details={'count': len(settings)})
     return {'cameras': settings}
 
 
 @app.put('/api/cameras/{camera_id}')
 async def update_camera(camera_id: str, request: Request):
+    require_admin(request)
     normalized = normalize_camera_id(camera_id)
     payload = await request.json()
     settings_list = list(effective_cameras_config())
@@ -3928,6 +4031,7 @@ async def update_camera(camera_id: str, request: Request):
             if index == 0:
                 database.set_setting('camera', settings_list[0], utc_now())
             apply_cameras_settings(settings_list)
+            write_audit_log(request, 'update', 'settings.camera', normalized, {'camera_name': settings_list[index].get('name')})
             return settings_list[index]
     raise HTTPException(status_code=404, detail='Camera not found')
 
@@ -3939,9 +4043,11 @@ def get_anpr_settings():
 
 @app.put('/api/settings/anpr')
 async def update_anpr_settings(request: Request):
+    require_admin(request)
     settings = validate_anpr_settings(await request.json())
     database.set_setting('anpr', settings, utc_now())
     apply_anpr_settings()
+    write_audit_log(request, 'update', 'settings.anpr')
     return settings
 
 
@@ -3952,58 +4058,72 @@ async def update_system_anpr_settings(request: Request):
 
 @app.put('/api/settings/system/live')
 async def update_live_settings(request: Request):
+    require_admin(request)
     settings = validate_live_settings(await request.json())
     database.set_setting('live', settings, utc_now())
+    write_audit_log(request, 'update', 'settings.live')
     return settings
 
 
 @app.put('/api/settings/system/recording')
 async def update_recording_settings(request: Request):
+    require_admin(request)
     settings = validate_recording_settings(await request.json())
     database.set_setting('recording', settings, utc_now())
     apply_storage_and_recording_settings()
+    write_audit_log(request, 'update', 'settings.recording')
     return settings
 
 
 @app.put('/api/settings/system/storage')
 async def update_storage_settings(request: Request):
+    require_admin(request)
     settings = validate_storage_settings(await request.json())
     database.set_setting('storage', settings, utc_now())
     apply_storage_and_recording_settings()
+    write_audit_log(request, 'update', 'settings.storage')
     return settings
 
 
 @app.put('/api/settings/system/auth')
 async def update_auth_settings(request: Request):
+    require_admin(request)
     settings = validate_auth_settings(await request.json())
     database.set_setting('auth', settings, utc_now())
     auth.apply_config(settings)
+    write_audit_log(request, 'update', 'settings.auth')
     return settings
 
 
 @app.post('/api/settings/alerts')
 async def create_alert_rule(request: Request):
+    require_admin(request)
     payload = await request.json()
     rule = database.create_alert_rule(validate_alert_rule(payload), utc_now())
     alerts.rules = effective_alert_rules()
+    write_audit_log(request, 'create', 'alert_rule', rule['id'], {'name': rule.get('name'), 'object': rule.get('object')})
     return rule
 
 
 @app.put('/api/settings/alerts/{rule_id}')
 async def update_alert_rule(rule_id: int, request: Request):
+    require_admin(request)
     payload = await request.json()
     rule = database.update_alert_rule(rule_id, validate_alert_rule(payload, partial=True), utc_now())
     if rule is None:
         raise HTTPException(status_code=404, detail='Alert rule not found')
     alerts.rules = effective_alert_rules()
+    write_audit_log(request, 'update', 'alert_rule', rule_id, {'name': rule.get('name')})
     return rule
 
 
 @app.delete('/api/settings/alerts/{rule_id}')
-def delete_alert_rule(rule_id: int):
+def delete_alert_rule(rule_id: int, request: Request):
+    require_admin(request)
     if not database.delete_alert_rule(rule_id):
         raise HTTPException(status_code=404, detail='Alert rule not found')
     alerts.rules = effective_alert_rules()
+    write_audit_log(request, 'delete', 'alert_rule', rule_id)
     return {'ok': True}
 
 
@@ -4123,6 +4243,29 @@ def apply_update(request: Request):
         'new_version': _current_version(),
         'service_restart_scheduled': service_restart_scheduled,
     }
+
+
+@app.get('/api/audit')
+def list_audit_log(
+    request: Request,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    action: str | None = None,
+    username: str | None = None,
+    resource: str | None = None,
+):
+    require_admin(request)
+    entries = database.list_audit_logs(limit=limit, offset=offset, action=action or None, username=username or None, resource=resource or None)
+    total = database.count_audit_logs(action=action or None, username=username or None, resource=resource or None)
+    return {'entries': entries, 'total': total, 'limit': limit, 'offset': offset}
+
+
+@app.get('/audit')
+def audit_page():
+    audit_path = web_dir / 'audit.html'
+    if audit_path.exists():
+        return FileResponse(audit_path)
+    return root()
 
 
 if __name__ == '__main__':
