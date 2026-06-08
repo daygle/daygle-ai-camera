@@ -201,6 +201,32 @@ function ensureRecordingExtensionStepField() {
   }
 }
 
+function createPushNotificationSection() {
+  const section = document.createElement('section');
+  section.className = 'card';
+  section.innerHTML = `
+    <h2>Push notifications (Android)</h2>
+    <form id="pushSettingsForm" class="form-grid">
+      <label><span>Push Alerts</span><select name="enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select></label>
+      <input name="server_url" placeholder="ntfy server URL (e.g. https://ntfy.sh)" />
+      <input name="topic" placeholder="Topic name" />
+      <label><span>Priority</span><select name="priority"><option value="default">Default</option><option value="min">Min</option><option value="low">Low</option><option value="high">High</option><option value="urgent">Urgent</option></select></label>
+      <input name="username" placeholder="Username (optional)" autocomplete="off" />
+      <input name="password" type="password" placeholder="Password (optional)" autocomplete="new-password" />
+      <button type="submit">Save Push Settings</button>
+      <button id="testPushBtn" class="secondary" type="button">Send Test Notification</button>
+    </form>
+    <p class="muted">Install the <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy app</a> on your Android device and subscribe to your topic to receive alerts. Per-rule push alerts are toggled on the Live page.</p>
+  `;
+
+  const authSection = document.getElementById('authSettingsForm')?.closest('section');
+  if (authSection) {
+    authSection.before(section);
+  } else {
+    document.querySelector('main')?.append(section);
+  }
+}
+
 function createEmailDeliverySection() {
   const section = document.createElement('section');
   section.className = 'card';
@@ -230,6 +256,7 @@ function createEmailDeliverySection() {
   }
 }
 
+createPushNotificationSection();
 createEmailDeliverySection();
 createRuntimeResetSection();
 enhanceFormFieldLabels();
@@ -243,6 +270,8 @@ function escapeHtml(value) {
 const emailForm = document.getElementById('emailSettingsForm');
 const testEmailRecipient = document.getElementById('testEmailRecipient');
 const testEmailBtn = document.getElementById('testEmailBtn');
+const pushForm = document.getElementById('pushSettingsForm');
+const testPushBtn = document.getElementById('testPushBtn');
 const startCleanBtn = document.getElementById('startCleanBtn');
 
 const forms = {
@@ -313,12 +342,28 @@ function renderEmail(settings) {
   if (testEmailRecipient && !testEmailRecipient.value) testEmailRecipient.value = settings.from_address || '';
 }
 
+function pushPayload(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  if ('enabled' in data) data.enabled = data.enabled === 'true';
+  return data;
+}
+
+function renderPush(settings) {
+  if (!pushForm) return;
+  for (const [key, value] of Object.entries(settings || {})) {
+    if (pushForm.elements[key]) pushForm.elements[key].value = String(value ?? '');
+  }
+  if (!pushForm.elements.server_url.value) pushForm.elements.server_url.value = 'https://ntfy.sh';
+  if (!pushForm.elements.priority.value) pushForm.elements.priority.value = 'default';
+}
+
 async function loadSettings() {
   const me = await api('/api/auth/me');
   csrfToken = me.csrf_token;
-  const [settings, emailSettings] = await Promise.all([
+  const [settings, emailSettings, pushSettings] = await Promise.all([
     api('/api/settings/system'),
     api('/api/settings/alert-email'),
+    api('/api/settings/alert-push'),
   ]);
   fillForm(forms.anpr, settings.anpr);
   fillForm(forms.live, settings.live);
@@ -333,6 +378,7 @@ async function loadSettings() {
   fillForm(forms.storage, settings.storage);
   fillForm(forms.auth, settings.auth);
   renderEmail(emailSettings);
+  renderPush(pushSettings);
   enhanceFormFieldLabels();
   messageEl.textContent = '';
 }
@@ -364,6 +410,32 @@ emailForm?.addEventListener('submit', async (event) => {
     setMessage('Mail server settings saved.');
   } catch (error) {
     setMessage(error.message, true);
+  }
+});
+
+pushForm?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    renderPush(await api('/api/settings/alert-push', { method: 'PUT', body: JSON.stringify(pushPayload(pushForm)) }));
+    setMessage('Push notification settings saved.');
+  } catch (error) {
+    setMessage(error.message, true);
+  }
+});
+
+testPushBtn?.addEventListener('click', async () => {
+  testPushBtn.disabled = true;
+  setMessage('Sending test notification...');
+  try {
+    await api('/api/settings/alert-push/test', {
+      method: 'POST',
+      body: JSON.stringify({ settings: pushPayload(pushForm) }),
+    });
+    setMessage('Test notification sent.');
+  } catch (error) {
+    setMessage(error.message, true);
+  } finally {
+    testPushBtn.disabled = false;
   }
 });
 

@@ -54,6 +54,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "use_tls": True,
             "use_ssl": False,
         },
+        "push_notification": {
+            "enabled": False,
+            "server_url": "https://ntfy.sh",
+            "topic": "",
+            "priority": "default",
+            "username": "",
+            "password": "",
+        },
         "rules": [
             {
                 "name": "Person alert",
@@ -63,6 +71,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "enabled": True,
                 "email_enabled": False,
                 "email_recipients": [],
+                "push_enabled": False,
             }
         ],
     },

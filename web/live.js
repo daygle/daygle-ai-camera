@@ -125,6 +125,7 @@ function defaultObjectRule(label = '') {
     cooldown_seconds: 60,
     email_enabled: false,
     email_recipients: [],
+    push_enabled: false,
     active_start: null,
     active_end: null,
   };
@@ -144,6 +145,7 @@ function normalizeObjectRules(zone) {
         cooldown_seconds: Math.max(0, Number.parseInt(rule.cooldown_seconds ?? 60, 10) || 0),
         email_enabled: rule.email_enabled === true,
         email_recipients: normalizeEmailList(rule.email_recipients),
+        push_enabled: rule.push_enabled === true,
         active_start: rule.active_start || null,
         active_end: rule.active_end || null,
       }))
@@ -378,6 +380,7 @@ function renderObjectRules(zone, zoneIndex) {
       <label><span>Cooldown</span><input data-zone-rule-cooldown="${zoneIndex}:${ruleIndex}" type="number" min="0" step="1" value="${escapeHtml(rule.cooldown_seconds)}" /></label>
       <label><span>Email</span><select data-zone-rule-email="${zoneIndex}:${ruleIndex}"><option value="false" ${rule.email_enabled !== true ? 'selected' : ''}>Off</option><option value="true" ${rule.email_enabled === true ? 'selected' : ''}>On</option></select></label>
       <input data-zone-rule-recipients="${zoneIndex}:${ruleIndex}" value="${escapeHtml(rule.email_recipients.join(', '))}" placeholder="Email recipients" />
+      <label><span>Push</span><select data-zone-rule-push="${zoneIndex}:${ruleIndex}"><option value="false" ${rule.push_enabled !== true ? 'selected' : ''}>Off</option><option value="true" ${rule.push_enabled === true ? 'selected' : ''}>On</option></select></label>
       <label><span>Active start</span><input data-zone-rule-active-start="${zoneIndex}:${ruleIndex}" type="time" value="${escapeHtml(rule.active_start || '')}" /></label>
       <label><span>Active end</span><input data-zone-rule-active-end="${zoneIndex}:${ruleIndex}" type="time" value="${escapeHtml(rule.active_end || '')}" /></label>
       <button class="secondary" type="button" data-delete-zone-rule="${zoneIndex}:${ruleIndex}">Remove</button>
@@ -485,6 +488,7 @@ function bindRuleFields() {
     ['zoneRuleCooldown', 'cooldown_seconds', (value) => Math.max(0, Number.parseInt(value || 0, 10) || 0)],
     ['zoneRuleEmail', 'email_enabled', (value) => value === 'true'],
     ['zoneRuleRecipients', 'email_recipients', normalizeEmailList],
+    ['zoneRulePush', 'push_enabled', (value) => value === 'true'],
     ['zoneRuleActiveStart', 'active_start', (value) => value || null],
     ['zoneRuleActiveEnd', 'active_end', (value) => value || null],
   ];
