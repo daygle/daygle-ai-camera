@@ -21,7 +21,10 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 }
 
-function setMessage(text) { messageEl.textContent = text; }
+function setMessage(text, isError = false) {
+  messageEl.textContent = text;
+  if (text) window.showToast?.(text, isError);
+}
 
 function renderProfile(user) {
   profileForm.elements.timezone.value = user.timezone || 'Australia/Sydney';
@@ -47,14 +50,14 @@ profileForm.addEventListener('submit', async (event) => {
   try {
     renderProfile(await api('/api/profile', { method: 'PUT', body: JSON.stringify(payload) }));
     setMessage('Profile saved.');
-  } catch (error) { setMessage(error.message); }
+  } catch (error) { setMessage(error.message, true); }
 });
 
 passwordForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const payload = Object.fromEntries(new FormData(passwordForm).entries());
   if (payload.new_password !== payload.confirm_password) {
-    setMessage('Passwords do not match.');
+    setMessage('Passwords do not match.', true);
     return;
   }
   delete payload.confirm_password;
@@ -62,7 +65,7 @@ passwordForm.addEventListener('submit', async (event) => {
     await api('/api/profile/password', { method: 'POST', body: JSON.stringify(payload) });
     passwordForm.reset();
     setMessage('Password changed.');
-  } catch (error) { setMessage(error.message); }
+  } catch (error) { setMessage(error.message, true); }
 });
 
-loadProfile().catch((error) => setMessage(error.message));
+loadProfile().catch((error) => setMessage(error.message, true));

@@ -85,7 +85,10 @@ function formatDate(value) {
   return value ? new Date(value).toLocaleString() : 'Unknown time';
 }
 
-function setMessage(text) { messageEl.textContent = text; }
+function setMessage(text, isError = false) {
+  messageEl.textContent = text;
+  if (text) window.showToast?.(text, isError);
+}
 
 function renderPlateCards(container, plates) {
   container.innerHTML = plates.length ? plates.map((plate) => `
@@ -193,7 +196,7 @@ document.addEventListener('click', async (event) => {
       await loadAll();
       setMessage(`Deleted ${result.deleted} plate(s).`);
     } catch (error) {
-      setMessage(`Failed: ${error.message}`);
+      setMessage(`Failed: ${error.message}`, true);
     }
   }
 });
@@ -212,4 +215,4 @@ alertForm.addEventListener('submit', async (event) => {
 });
 
 document.getElementById('cancelPlateRuleEdit').addEventListener('click', () => alertForm.reset());
-loadAll().catch((error) => setMessage(error.message));
+loadAll().catch((error) => setMessage(error.message, true));

@@ -1,3 +1,19 @@
+window.showToast = function (message, isError) {
+  if (!message) return;
+  let container = document.getElementById('toastContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toastContainer';
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  toast.className = 'toast' + (isError ? ' error' : '');
+  toast.textContent = String(message);
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 3500);
+};
+
 (async function () {
   if (document.querySelector('.app-nav')) return;
   const currentPath = window.location.pathname;

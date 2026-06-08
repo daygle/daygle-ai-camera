@@ -258,7 +258,7 @@ async function loadStatus() {
     els.aiStatusDetail.textContent = `${aiStatus.active_backend} · model loaded: ${aiStatus.model_loaded}${errorText}`;
   } catch (error) {
     els.statusText.textContent = 'offline';
-    els.uptimeText.textContent = '—';
+    els.uptimeText.textContent = '-';
     els.aiModeText.textContent = 'MODEL FAILED';
     els.aiModeText.className = 'ai-mode model-failed';
     els.aiStatusDetail.textContent = error.message;

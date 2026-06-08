@@ -19,8 +19,9 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
 }
 
-function setMessage(text) {
+function setMessage(text, isError = false) {
   message.textContent = text;
+  if (text) window.showToast?.(text, isError);
 }
 
 function roleLabel(value) {
@@ -81,4 +82,4 @@ form.addEventListener('submit', async (event) => {
   await loadUsers();
 });
 
-loadUsers().catch((error) => setMessage(error.message));
+loadUsers().catch((error) => setMessage(error.message, true));

@@ -1233,3 +1233,39 @@ input[type="file"] { padding: 10px; }
   .modal-tabs { overflow-x: auto; scrollbar-width: none; }
   .modal-tabs::-webkit-scrollbar { display: none; }
 }
+
+/* ─── Toast notifications ───────────────────────────────────────────────────── */
+.toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+  max-width: 340px;
+  width: calc(100vw - 48px);
+}
+.toast {
+  background: var(--panel-strong);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--success);
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 14px;
+  line-height: 1.45;
+  box-shadow: 0 8px 32px rgba(0,0,0,.4);
+  word-break: break-word;
+  animation: toast-in 0.22s ease, toast-out 0.3s ease 3.2s forwards;
+}
+.toast.error { border-left-color: var(--danger); }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes toast-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}

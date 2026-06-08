@@ -268,7 +268,10 @@ async function api(path, options = {}) {
   return payload;
 }
 
-function setMessage(text) { messageEl.textContent = text; }
+function setMessage(text, isError = false) {
+  messageEl.textContent = text;
+  if (text) window.showToast?.(text, isError);
+}
 
 function fillForm(form, values) {
   for (const [key, value] of Object.entries(values || {})) {
@@ -342,7 +345,7 @@ function bindForm(name, label, endpointName = name) {
       fillForm(forms[name], updated);
       setMessage(`${label} settings saved.`);
     } catch (error) {
-      setMessage(error.message);
+      setMessage(error.message, true);
     }
   });
 }
@@ -360,7 +363,7 @@ emailForm?.addEventListener('submit', async (event) => {
     renderEmail(await api('/api/settings/alert-email', { method: 'PUT', body: JSON.stringify(emailPayload(emailForm)) }));
     setMessage('Mail server settings saved.');
   } catch (error) {
-    setMessage(error.message);
+    setMessage(error.message, true);
   }
 });
 
@@ -379,7 +382,7 @@ testEmailBtn?.addEventListener('click', async () => {
     });
     setMessage(`Test email sent to ${recipient}.`);
   } catch (error) {
-    setMessage(error.message);
+    setMessage(error.message, true);
   } finally {
     testEmailBtn.disabled = false;
   }
@@ -390,7 +393,7 @@ document.getElementById('purgeRecordingsBtn').addEventListener('click', async ()
     const result = await api('/api/recordings/purge', { method: 'POST' });
     setMessage(`Purged ${result.purged} recording(s), deleted ${result.files_deleted} file(s).`);
   } catch (error) {
-    setMessage(error.message);
+    setMessage(error.message, true);
   }
 });
 
@@ -404,11 +407,11 @@ forms.databaseRestore.addEventListener('submit', async (event) => {
     await loadSettings();
     setMessage(`${result.message} Safety backup: ${result.safety_backup}`);
   } catch (error) {
-    setMessage(error.message);
+    setMessage(error.message, true);
   }
 });
 
-loadSettings().catch((error) => setMessage(error.message));
+loadSettings().catch((error) => setMessage(error.message, true));
 
 function initSoftwareUpdateSection() {
   const checkBtn = document.getElementById('checkUpdateBtn');
@@ -515,7 +518,7 @@ startCleanBtn?.addEventListener('click', async () => {
       `Clean start complete. Deleted ${Number(deleted.recordings || 0)} recordings, ${Number(deleted.events || 0)} events, ${Number(deleted.alerts || 0)} alerts, and ${Number(deleted.plates || 0)} plate records. Settings were preserved.`,
     );
   } catch (error) {
-    setMessage(error.message);
+    setMessage(error.message, true);
   } finally {
     startCleanBtn.disabled = false;
   }

@@ -55,7 +55,10 @@ function displayValue(value, fallback = 'None') {
 }
 
 function yesNo(value) { return value ? 'Yes' : 'No'; }
-function setMessage(text) { messageEl.textContent = text; }
+function setMessage(text, isError = false) {
+  messageEl.textContent = text;
+  if (text) window.showToast?.(text, isError);
+}
 
 function formPayload(form) {
   const data = Object.fromEntries(new FormData(form).entries());
@@ -104,7 +107,7 @@ async function runAction(buttonId, path, label) {
     renderAi(result.status || result);
     setMessage(result.message || `${label} complete.`);
   } catch (error) {
-    setMessage(error.message);
+    setMessage(error.message, true);
     renderAi(await api('/api/settings/ai'));
   } finally {
     button.disabled = false;
@@ -115,7 +118,7 @@ aiForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
     renderAi(await api('/api/settings/ai', { method: 'PUT', body: JSON.stringify(formPayload(aiForm)) }));
-  } catch (error) { setMessage(error.message); }
+  } catch (error) { setMessage(error.message, true); }
 });
 
 document.getElementById('checkModelBtn').addEventListener('click', () => runAction('checkModelBtn', '/api/settings/ai/check-model', 'Checking model'));
@@ -123,4 +126,4 @@ document.getElementById('downloadModelBtn').addEventListener('click', () => runA
 document.getElementById('reloadDetectorBtn').addEventListener('click', () => runAction('reloadDetectorBtn', '/api/settings/ai/reload', 'Reloading detector'));
 document.getElementById('testDetectorBtn').addEventListener('click', () => runAction('testDetectorBtn', '/api/settings/ai/test-detector', 'Testing detector'));
 
-loadAll().catch((error) => setMessage(error.message));
+loadAll().catch((error) => setMessage(error.message, true));
