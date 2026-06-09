@@ -2270,6 +2270,90 @@ def test_camera_object_labels_filter_without_monitoring_zones(tmp_path, monkeypa
     assert [detection['label'] for detection in filtered] == ['person']
 
 
+def test_zone_spatial_filtering_blocks_detections_outside_zone(tmp_path, monkeypatch):
+    """Objects outside the configured zone area must not trigger alerts."""
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, image_bytes, confidence=None):
+            return [
+                # person inside left-half zone (center x=0.2)
+                {'label': 'person', 'confidence': 0.9, 'box': {'x': 0.15, 'y': 0.3, 'width': 0.1, 'height': 0.2}},
+                # person outside zone (center x=0.75)
+                {'label': 'person', 'confidence': 0.9, 'box': {'x': 0.7, 'y': 0.3, 'width': 0.1, 'height': 0.2}},
+            ]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    main.live_detection_last_checked.clear()
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
+
+    zones = main.normalize_monitoring_zones([
+        {
+            'id': 'left-half',
+            'name': 'Left Half',
+            'x': 0.0,
+            'y': 0.0,
+            'width': 0.5,
+            'height': 1.0,
+            'monitor_motion': False,
+            'monitor_objects': True,
+            'object_rules': [{'label': 'person', 'alert_on_detect': True, 'record_on_detect': True, 'min_confidence': 0.5}],
+        }
+    ])
+    settings = {
+        'id': 'camera-1',
+        'name': 'Front Door',
+        'detection': {'zones': zones},
+    }
+
+    event_id = main.process_live_stream_alerts(b'jpeg-frame', {'width': 1280, 'height': 720}, settings)
+
+    assert event_id is not None
+    event = main.database.get_event(event_id)
+    assert event is not None
+    # Only the detection inside the zone should appear in the event
+    assert len(event['detections']) == 1
+    # Detections are stored flat (x, y, width, height) in the database
+    det = event['detections'][0]
+    assert det['x'] == pytest.approx(0.15, abs=0.01)
+
+
+def test_zone_label_aliases_match_configured_rules(tmp_path, monkeypatch):
+    """Detection labels that are aliases of a configured rule label should still match."""
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    zones = main.normalize_monitoring_zones([
+        {
+            'id': 'porch',
+            'name': 'Porch',
+            'x': 0.0,
+            'y': 0.0,
+            'width': 1.0,
+            'height': 1.0,
+            'monitor_motion': False,
+            'monitor_objects': True,
+            'object_rules': [{'label': 'person', 'alert_on_detect': True, 'min_confidence': 0.5}],
+        }
+    ])
+    settings = {'detection': {'zones': zones}}
+
+    # A detection with an aliased label ('human' → 'person') should be allowed in the zone
+    aliased_detection = {'label': 'human', 'confidence': 0.8, 'box': {'x': 0.3, 'y': 0.3, 'width': 0.1, 'height': 0.1}}
+    filtered = main.filter_detections_for_camera_zones([aliased_detection], settings, zone_monitor_key='monitor_objects', require_zones=True)
+    assert len(filtered) == 1
+
+    # zone_object_rule_matches should also resolve the alias
+    matches = main.zone_object_rule_matches(settings, aliased_detection, action='alert')
+    assert len(matches) == 1
+    assert matches[0][1]['label'] == 'person'
+
+
 def test_check_model_updates_endpoints(tmp_path, monkeypatch):
     app, _ = _load_app(tmp_path, monkeypatch)
     main_module = sys.modules["app.main"]

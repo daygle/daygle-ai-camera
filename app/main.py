@@ -738,7 +738,8 @@ def detection_label_allowed_for_zone(detection: dict[str, Any], zone: dict[str, 
     allowed_labels = zone_labels or camera_labels
     if not allowed_labels:
         return True
-    return str(detection.get('label') or '').strip().lower() in allowed_labels
+    label = str(detection.get('label') or '').strip().lower()
+    return _LABEL_ALIASES.get(label, label) in allowed_labels
 
 
 def filter_detections_for_camera_zones(detections: list[dict[str, Any]], settings: dict[str, Any], *, zone_monitor_key: str, require_zones: bool = False) -> list[dict[str, Any]]:
@@ -764,6 +765,7 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
     detection_settings = settings.get('detection') or {}
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
     label = str(detection.get('label') or '').strip().lower()
+    label = _LABEL_ALIASES.get(label, label)
     if not label:
         return []
     matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
