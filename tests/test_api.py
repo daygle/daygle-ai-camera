@@ -2677,3 +2677,80 @@ def test_object_outside_zone_does_not_create_recording(tmp_path, monkeypatch):
     event_id = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
 
     assert event_id is None, "Person outside the zone must not produce any event"
+
+
+def test_compute_minimum_rule_confidence_falls_back_to_global_ai_confidence(tmp_path, monkeypatch):
+    """When no zone object rules are configured, compute_minimum_rule_confidence must
+    return the global AI confidence setting rather than a hardcoded floor value."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    # Store a non-default global confidence so we can distinguish it from any magic fallback.
+    main.database.set_setting('ai', {'backend': 'onnx', 'confidence': 0.62, 'model_path': 'fake.onnx'}, main.utc_now())
+    main._min_rule_confidence_cache = None  # bust the TTL cache
+
+    # No cameras have zone rules → fallback must be the global 0.62.
+    main.database.set_setting('cameras', [], main.utc_now())
+    assert main.compute_minimum_rule_confidence() == pytest.approx(0.62)
+
+
+def test_compute_minimum_rule_confidence_uses_lowest_zone_rule_below_global(tmp_path, monkeypatch):
+    """When a zone rule has a lower min_confidence than the global setting, the zone
+    rule's value must win so YOLO doesn't silently filter those detections."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    global_confidence = 0.60
+    main.database.set_setting('ai', {'backend': 'onnx', 'confidence': global_confidence, 'model_path': 'fake.onnx'}, main.utc_now())
+    main.database.set_setting(
+        'cameras',
+        [{
+            'id': 'cam-1',
+            'name': 'Test',
+            'detection': {
+                'zones': [{
+                    'id': 'z1', 'name': 'Z1', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
+                    'monitor_objects': True,
+                    'object_rules': [
+                        {'label': 'person', 'enabled': True, 'min_confidence': 0.35},
+                        {'label': 'cat',    'enabled': True, 'min_confidence': 0.45},
+                    ],
+                }],
+            },
+        }],
+        main.utc_now(),
+    )
+    main._min_rule_confidence_cache = None
+
+    assert main.compute_minimum_rule_confidence() == pytest.approx(0.35)
+
+
+def test_compute_minimum_rule_confidence_ignores_motion_rules(tmp_path, monkeypatch):
+    """Motion rules must be excluded from the minimum search; only object rules count."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    main.database.set_setting('ai', {'backend': 'onnx', 'confidence': 0.50, 'model_path': 'fake.onnx'}, main.utc_now())
+    main.database.set_setting(
+        'cameras',
+        [{
+            'id': 'cam-1',
+            'name': 'Test',
+            'detection': {
+                'zones': [{
+                    'id': 'z1', 'name': 'Z1', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
+                    'monitor_objects': True,
+                    'object_rules': [
+                        {'label': 'motion', 'enabled': True, 'min_confidence': 0.10},  # must be ignored
+                        {'label': 'person', 'enabled': True, 'min_confidence': 0.55},
+                    ],
+                }],
+            },
+        }],
+        main.utc_now(),
+    )
+    main._min_rule_confidence_cache = None
+
+    # Motion rule (0.10) must be ignored; person rule (0.55) > global (0.50) so global wins
+    # (zone rules with higher thresholds must not raise YOLO's detection floor above global)
+    assert main.compute_minimum_rule_confidence() == pytest.approx(0.50)

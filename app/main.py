@@ -141,8 +141,11 @@ _min_rule_confidence_cache: tuple[float, float] | None = None  # (value, timesta
 _MIN_RULE_CONFIDENCE_TTL = 5.0  # seconds; short enough to pick up user edits promptly
 
 
-def compute_minimum_rule_confidence(fallback: float = 0.05) -> float:
+def compute_minimum_rule_confidence(fallback: float | None = None) -> float:
     """Return the lowest min_confidence across all enabled object rules so YOLO's floor never silently suppresses per-rule thresholds.
+
+    Falls back to the configured global AI confidence when no zone rules define a
+    lower threshold, so the model detection threshold always matches user expectation.
 
     Result is cached for _MIN_RULE_CONFIDENCE_TTL seconds to avoid a database
     read on every detection frame (called at ~4 Hz per camera from the hot path).
@@ -153,7 +156,12 @@ def compute_minimum_rule_confidence(fallback: float = 0.05) -> float:
         if time.time() - cached_at < _MIN_RULE_CONFIDENCE_TTL:
             return cached_value
 
-    min_conf: float | None = None
+    if fallback is None:
+        fallback = float(effective_ai_config().get('confidence') or 0.45)
+
+    # Start at the global confidence floor so zone rules with higher thresholds
+    # never silently raise YOLO's detection threshold above the global setting.
+    min_conf: float = fallback
     for camera in effective_cameras_config():
         for zone in camera.get('detection', {}).get('zones', []):
             for rule in zone.get('object_rules', []):
@@ -163,11 +171,11 @@ def compute_minimum_rule_confidence(fallback: float = 0.05) -> float:
                     continue
                 try:
                     conf = float(rule.get('min_confidence', fallback))
-                    if min_conf is None or conf < min_conf:
+                    if conf < min_conf:
                         min_conf = conf
                 except (TypeError, ValueError):
                     pass
-    result = min_conf if min_conf is not None else fallback
+    result = min_conf
     _min_rule_confidence_cache = (result, time.time())
     return result
 
@@ -3725,7 +3733,8 @@ def get_ai_settings():
 
 
 def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
-    global detector, last_detector_error
+    global detector, last_detector_error, _min_rule_confidence_cache
+    _min_rule_confidence_cache = None
     previous_detector = detector
     candidate = create_detector(ai_settings)
     candidate_error = getattr(candidate, 'unavailable_reason', None)
