@@ -88,6 +88,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "extension_step_seconds": 45,
         "max_clip_seconds": 300,
         "format": "mp4",
+        "chunk_duration_seconds": 3600,
         "retention_days": 14,
         "max_storage_gb": 20,
         "auto_purge_enabled": True,

@@ -113,6 +113,7 @@ async def app_lifespan(_app: FastAPI):
         yield
     finally:
         recording_service.stop_prebuffer_workers()
+        recording_service.stop_all_continuous_recordings()
         stop_live_alert_monitor()
 
 
@@ -1077,12 +1078,20 @@ def run_live_alert_monitor_once() -> int:
         if retry_after and now < retry_after:
             continue
         stream_url = build_stream_url(selected_config)
+        cam_rec_config = camera_event_recording_config(selected_config)
         if stream_url:
             recording_service.prime_rtsp_prebuffer(
                 stream_url=stream_url,
                 camera_id=camera_id,
-                recording_config=camera_event_recording_config(selected_config),
+                recording_config=cam_rec_config,
             )
+            if recording_service.mode_for(cam_rec_config) == 'continuous':
+                recording_service.start_continuous_chunk_recording(
+                    stream_url=stream_url,
+                    camera_id=camera_id,
+                    recording_config=cam_rec_config,
+                    on_chunk_complete=_make_continuous_chunk_callback(camera_id),
+                )
         detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 0.25))
         with live_detection_worker_lock:
             if camera_id in active_live_detection_cameras:
@@ -1634,6 +1643,45 @@ def write_audit_log(
         )
     except Exception as exc:
         logger.warning('Failed to write audit log: %s', exc)
+
+
+def _parse_chunk_start_time(file_path: Path) -> datetime | None:
+    stem = file_path.stem  # e.g. 'continuous_camera-1_20260609T140000'
+    parts = stem.rsplit('_', 1)
+    if len(parts) != 2:
+        return None
+    try:
+        return datetime.strptime(parts[1], '%Y%m%dT%H%M%S').replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _make_continuous_chunk_callback(camera_id: str) -> Any:
+    def on_chunk_complete(camera_key: str, file_path: Path) -> None:
+        try:
+            started_at_dt = _parse_chunk_start_time(file_path)
+            stat = file_path.stat()
+            ended_at_dt = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+            if started_at_dt is None:
+                started_at_dt = ended_at_dt - timedelta(seconds=effective_recording_config().get('chunk_duration_seconds', 3600))
+            duration_seconds = max(1.0, (ended_at_dt - started_at_dt).total_seconds())
+            database.add_recording(
+                event_id=None,
+                camera_id=camera_id,
+                started_at=started_at_dt.isoformat(),
+                ended_at=ended_at_dt.isoformat(),
+                duration_seconds=duration_seconds,
+                file_path=str(file_path),
+                thumbnail_path=None,
+                source='rtsp',
+                created_at=utc_now(),
+                trigger_type='continuous',
+                trigger_label=None,
+            )
+            purge_recordings_by_policy()
+        except Exception as exc:
+            logger.warning('Failed to register continuous chunk %s for camera %s: %s', file_path.name, camera_id, exc)
+    return on_chunk_complete
 
 
 def attach_event_recording(
@@ -2855,11 +2903,18 @@ def _recording_timeline_segment(recording: dict[str, Any], day_start: datetime, 
     if visible_end <= visible_start:
         return None
 
+    trigger_type = str(recording.get('trigger_type') or 'motion').lower()
+    trigger_label = str(recording.get('trigger_label') or '').strip().lower()
+    # Use the specific label for human/object/alert triggers; fall back to trigger_type for generic triggers.
+    color_key = trigger_label if trigger_type in {'human', 'object', 'alert'} and trigger_label else trigger_type
+
     return {
         **recording,
         'timeline_start_seconds': max(0.0, (visible_start - day_start).total_seconds()),
         'timeline_end_seconds': min(86400.0, (visible_end - day_start).total_seconds()),
         'timeline_duration_seconds': max(1.0, (visible_end - visible_start).total_seconds()),
+        'color_key': color_key,
+        'color_label': color_key,
     }
 
 
@@ -3590,6 +3645,7 @@ def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'extension_step_seconds': _int_field(merged, 'extension_step_seconds', 45, 0, 300),
         'max_clip_seconds': _int_field(merged, 'max_clip_seconds', 300, 1, 3600),
         'format': fmt,
+        'chunk_duration_seconds': _int_field(merged, 'chunk_duration_seconds', 3600, 60, 86400),
         'retention_days': _int_field(merged, 'retention_days', 14, 1, 3650),
         'max_storage_gb': _int_field(merged, 'max_storage_gb', 20, 1, 100000),
         'auto_purge_enabled': _bool_value(merged.get('auto_purge_enabled', True)),
@@ -3669,7 +3725,14 @@ def apply_camera_settings(settings: dict[str, Any]) -> None:
 def apply_storage_and_recording_settings() -> None:
     global storage, recording_service
     storage = Storage({**config, 'storage': effective_storage_config()})
+    old_service = recording_service
     recording_service = RecordingService({**config, 'storage': effective_storage_config(), 'recording': effective_recording_config()})
+    if old_service is not None:
+        try:
+            old_service.stop_prebuffer_workers()
+            old_service.stop_all_continuous_recordings()
+        except Exception:
+            pass
 
 
 def apply_anpr_settings() -> None:
