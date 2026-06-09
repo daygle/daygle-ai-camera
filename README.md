@@ -1,8 +1,8 @@
 # Daygle AI Camera
 
-Daygle AI Camera is an Orange Pi 3B / Armbian-friendly AI camera platform with a FastAPI backend, SQLite storage, session authentication, a browser dashboard, ONVIF/RTSP camera support, and ONNX YOLO object detection.
+Daygle AI Camera is an Orange Pi 3B / Armbian-friendly AI camera platform with a FastAPI backend, SQLite storage, session authentication, a browser dashboard, multi-camera ONVIF/RTSP support, monitoring zones, ONNX YOLO object detection, ANPR, push notifications, and an audit log.
 
-The app is now designed to be configured from the web UI. `config.yaml` is only a small bootstrap file for settings the app must know before the database and dashboard can load.
+The app is designed to be configured entirely from the web UI. `config.yaml` is only a small bootstrap file for settings the app must know before the database and dashboard can load.
 
 ## Features
 
@@ -10,12 +10,18 @@ The app is now designed to be configured from the web UI. `config.yaml` is only 
 - First-run setup flow for creating the initial administrator.
 - Admin/viewer roles with admin-only settings and user management.
 - Profile page for timezone, date/time format, and password changes.
-- Web-managed AI settings for ONNX detection.
+- **Multi-camera management**: add, configure, and monitor multiple RTSP/ONVIF cameras from the web UI.
+- **Monitoring zones**: draw polygon zones on the live view and assign per-zone object rules, motion rules, cooldowns, email recipients, and ANPR areas.
+- Web-managed AI settings for ONNX detection. Supports YOLOv8 Nano through Extra-Large (n/s/m/l/x).
 - Modular ANPR/ALPR pipeline for vehicle detections, plate OCR, plate search, and plate alerts.
-- Web-managed alert rules with optional SMTP email delivery.
-- Web-managed system settings for camera, recording policy, retention, storage directories, and login security.
-- SQLite persistence for events, detections, alerts, users, sessions, runtime settings, and alert rules.
-- ONVIF/RTSP live snapshot support for testing P6S-style IP cameras before CSI camera hardware arrives.
+- Web-managed alert rules with optional SMTP email delivery and push notification delivery (ntfy-compatible).
+- **Push notifications**: send alerts to any ntfy-compatible server with optional authentication and priority.
+- Web-managed system settings for recording policy, retention, storage directories, and login security.
+- SQLite persistence for events, detections, alerts, users, sessions, runtime settings, alert rules, and audit log.
+- **Audit log**: tamper-evident log of admin actions (logins, settings changes, user management) available at `/audit`.
+- **Over-the-air software updates**: check for new releases and apply updates directly from the browser settings page.
+- **Database backup & restore**: download a SQLite backup or upload a previous backup to restore from the browser.
+- **Timeline playback**: visual day-view timeline of recording clips by camera.
 - Background live AI alert checks continue polling configured RTSP/ONVIF cameras even when no Live Cameras page is open.
 - Debian and Armbian install scripts plus a systemd unit for Linux/Orange Pi deployment.
 
@@ -200,21 +206,48 @@ Route: `/profile`
 - Set time format.
 - Change password.
 
+### Cameras
+
+Route: `/cameras`
+
+Add and manage multiple RTSP/ONVIF cameras. Each camera can have:
+
+- Name, backend (`onvif` / `rtsp`), stream URL or ONVIF credentials, width, height, and FPS.
+- Per-camera motion detection toggle and email notification toggle.
+- Per-camera object detection and ANPR enable/disable.
+- Per-camera recording policy (alert-triggered or continuous).
+
+After saving cameras, configure per-camera monitoring areas from the Zones page.
+
+### Zones
+
+Route: `/zones`
+
+Draw polygon monitoring zones directly on the live camera view. For each zone you can set:
+
+- Zone name and enable/disable state.
+- Motion monitoring: minimum confidence and cooldown.
+- Object rules per label: enable/disable, record on detect, alert on detect, minimum confidence, cooldown, email recipients, and active time window.
+- ANPR monitoring enable/disable.
+
+Zone-based rules replace the global single-camera alert rules when zones are configured for a camera.
+
 ### AI Settings
 
 Route: `/ai`
 
 - AI enabled state.
 - Backend: `onnx`.
-- Confidence threshold.
-- IOU threshold.
-- Input size.
-- Model path.
-- Labels path.
-- Check model.
-- Download YOLOv8n ONNX (exports locally from `yolov8n.pt`).
-- Reload detector.
-- Test detector.
+- Confidence threshold, IOU threshold, and input size.
+- Model path and labels path.
+- Model selector: download and switch between YOLOv8 model sizes:
+  - **YOLOv8n · Nano** (~6 MB) — fastest inference, lowest accuracy.
+  - **YOLOv8s · Small** (~22 MB) — good balance of speed and accuracy.
+  - **YOLOv8m · Medium** (~52 MB) — significantly better accuracy; recommended for IR/night-vision cameras.
+  - **YOLOv8l · Large** (~87 MB) — high accuracy; requires a capable CPU or GPU.
+  - **YOLOv8x · Extra Large** (~131 MB) — best accuracy; GPU strongly recommended.
+- Check model, reload detector, test detector.
+- Check for and apply model updates from the remote manifest.
 
 AI settings are stored in SQLite under `app_settings.key = ai`.
 
@@ -222,20 +255,21 @@ AI settings are stored in SQLite under `app_settings.key = ai`.
 
 Route: `/settings`
 
-- Camera: backend (`onvif` or `rtsp`), device label, stream URL or ONVIF host credentials, width, height, FPS, flip.
 - Email delivery: SMTP host, port, username, password, from address, STARTTLS, and SSL.
+- Push notifications: ntfy-compatible server URL, topic, priority, and optional username/password.
 - ANPR: enable/disable, OCR backend, confidence threshold, and vehicle labels.
-- Recording policy: continuous recording, record on motion, record on human, and selected object labels such as `cat`, `dog`, `package`, and `parcel`.
-- Clip settings: pre-event seconds, post-event seconds, max clip seconds, and file format.
+- Recording clips: pre-event seconds, post-event seconds, extension step, max clip seconds, and file format.
 - Retention: auto purge, retention days, max storage GB, and manual purge.
-- Storage: data, snapshots, events, and recordings directories.
+- Storage: data, snapshots, events, recordings, and plates directories.
 - Login security: session timeout, max login attempts, lockout minutes.
+- Software updates: check for new releases and apply updates from GitHub directly from the browser.
+- Database: download a SQLite backup or restore from a previously downloaded backup file.
 
-Camera, email delivery, ANPR, recording, storage, and login security settings are stored in SQLite and applied at runtime where possible. Database path, auth enablement, cookie name, and server bind settings remain bootstrap YAML.
+Camera settings are now managed from the Cameras page (`/cameras`). Recording and alert-triggering are configured per camera and per zone.
 
 #### P6S / ONVIF stream testing
 
-Most ONVIF-compatible cameras expose the video itself as an RTSP stream. To test a P6S-style camera, open `/settings`, set **Camera backend** to `onvif / RTSP`, and either:
+Most ONVIF-compatible cameras expose the video itself as an RTSP stream. Open `/cameras`, add a camera, set **Camera backend** to `onvif / RTSP`, and either:
 
 - paste the complete `stream_url`, for example `rtsp://username:password@192.168.1.50:554/stream1`; or
 - enter `host`, `username`, `password`, optional `port` (default `554`), and `path` so Daygle can build the RTSP URL.
@@ -253,6 +287,8 @@ Camera/Image -> YOLO Object Detection -> Vehicle Detection -> Plate Detection ->
 ```
 
 Vehicle labels are configurable and default to `car`, `truck`, `bus`, and `motorcycle`. When one is detected, the ANPR pipeline writes a plate crop artifact, runs OCR, stores a plate event, and links it back to the original event and any recording.
+
+ANPR can be enabled or disabled per camera and per monitoring zone from the Cameras and Zones pages.
 
 Supported OCR backends:
 
@@ -282,6 +318,12 @@ Plate alert examples:
 
 Admins can whitelist or blacklist plates and add notes such as `Family Car`, `Delivery Driver`, or `Blacklisted`.
 
+### Audit Log
+
+Route: `/audit`
+
+The audit log records admin actions with timestamp, username, IP address, action type, resource, and outcome. Filterable by action, username, and resource. Useful for compliance and incident investigation.
+
 ## ONNX YOLO Setup
 
 The default setup expects ONNX detection and a real ONVIF/RTSP camera.
@@ -289,8 +331,8 @@ The default setup expects ONNX detection and a real ONVIF/RTSP camera.
 To enable ONNX inference:
 
 1. Sign in as an admin.
-2. Open `/settings`.
-3. Click **Download YOLOv8n ONNX** to export `yolov8n.pt` to ONNX locally, or enter your own model path.
+2. Open `/ai`.
+3. Select a model size, then click **Download** to export it locally. YOLOv8n is the default starting point; YOLOv8m or larger is recommended for IR or night-vision cameras.
 4. Save AI settings.
 5. Use **Check model**, **Reload detector**, and **Test detector**.
 
@@ -303,7 +345,7 @@ pip install ultralytics onnx
 python scripts/download_yolov8n_onnx.py --output models/yolov8n.onnx
 ```
 
-For service installs, the dashboard download/export writes to `/opt/daygle-ai-camera/models/yolov8n.onnx`. The Debian and Armbian installers create that directory, preserve existing `*.onnx` and `*.pt` files during reinstall, and allow the root-running service to write there.
+For service installs, the dashboard download/export writes to `/opt/daygle-ai-camera/models/`. The Debian and Armbian installers create that directory, preserve existing `*.onnx` and `*.pt` files during reinstall, and allow the root-running service to write there.
 
 ## Users and Roles
 
@@ -318,7 +360,7 @@ Admins can open `/users` to create users, disable users, change roles, and reset
 
 Roles:
 
-- `admin`: dashboard, events, alerts, recordings, users, profile, AI settings, and settings.
+- `admin`: dashboard, events, alerts, recordings, cameras, zones, users, profile, AI settings, system settings, and audit log.
 - `viewer`: dashboard, events, alert history, recordings, and profile.
 
 Password policy requires at least 8 characters with uppercase, lowercase, numeric, and symbol characters.
@@ -331,11 +373,17 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `GET/POST` | `/login` | Login |
 | `GET/POST` | `/logout` | End session |
 | `GET` | `/` | Dashboard |
+| `GET` | `/live` | Live camera view |
+| `GET` | `/cameras` | Admin camera management |
+| `GET` | `/zones` | Admin monitoring zone editor |
 | `GET` | `/profile` | Current user profile |
 | `GET` | `/users` | Admin user management |
 | `GET` | `/ai` | Admin AI settings |
-| `GET` | `/settings` | Admin camera, email, recording, storage, and login settings |
+| `GET` | `/settings` | Admin system settings (email, push, recording, storage, updates, backup) |
 | `GET` | `/anpr` | Plate search, history, details, and alert rules |
+| `GET` | `/audit` | Admin audit log |
+| `GET` | `/recordings` | Recordings list |
+| `GET` | `/recordings/timeline` | Day-view recording timeline |
 | `GET` | `/api/auth/me` | Current user, CSRF token, and session expiry |
 | `PUT` | `/api/profile` | Update profile preferences |
 | `POST` | `/api/profile/password` | Change current user's password |
@@ -344,28 +392,46 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `GET` | `/api/live/snapshot` | Live ONVIF/RTSP JPEG snapshot |
 | `GET` | `/api/events` | List/search events |
 | `GET` | `/api/alerts` | Alert history |
+| `GET` | `/api/cameras` | List cameras |
+| `PUT` | `/api/cameras` | Admin update all cameras |
+| `PUT` | `/api/cameras/{camera_id}` | Admin update a single camera |
 | `GET` | `/api/recordings` | List recordings |
-| `GET` | `/api/recordings/{id}/stream` | Stream recording media when present |
+| `GET` | `/api/recordings/{id}/stream` | Stream recording media |
 | `POST` | `/api/recordings/purge` | Admin purge using retention settings |
 | `GET` | `/api/plates` | Recent vehicle plates |
 | `GET` | `/api/plates/{id}` | Plate details and history |
 | `GET` | `/api/plates/search` | Search plate events |
-| `POST` | `/api/plates/whitelist` | Admin whitelist plate and notes |
-| `POST` | `/api/plates/blacklist` | Admin blacklist plate and notes |
+| `POST` | `/api/plates/whitelist` | Admin whitelist plate |
+| `POST` | `/api/plates/blacklist` | Admin blacklist plate |
 | `GET/POST` | `/api/plate-alerts` | View/create plate alert rules |
 | `PUT/DELETE` | `/api/plate-alerts/{id}` | Edit/delete plate alert rules |
 | `GET/POST` | `/api/users` | Admin list/create users |
 | `PATCH` | `/api/users/{id}` | Admin role/status/password updates |
 | `GET/PUT` | `/api/settings/ai` | Admin AI settings |
-| `GET/PUT` | `/api/settings/alert-email` | Admin SMTP settings |
+| `GET` | `/api/settings/ai/models` | List available YOLO models and install status |
+| `POST` | `/api/settings/ai/download-model` | Download and export a YOLO model |
+| `GET` | `/api/settings/ai/check-model-updates` | Check for model updates |
+| `POST` | `/api/settings/ai/update-model` | Update an installed model |
+| `POST` | `/api/settings/ai/reload` | Reload the active detector |
+| `POST` | `/api/settings/ai/test-detector` | Test inference on a blank image |
+| `GET/PUT` | `/api/settings/alert-email` | Admin SMTP email settings |
+| `POST` | `/api/settings/alert-email/test` | Send a test email |
+| `GET/PUT` | `/api/settings/alert-push` | Admin push notification settings |
+| `POST` | `/api/settings/alert-push/test` | Send a test push notification |
 | `GET/POST` | `/api/settings/alerts` | View/create alert rules |
 | `PUT/DELETE` | `/api/settings/alerts/{id}` | Edit/delete alert rules |
 | `GET` | `/api/settings/system` | Admin system settings summary |
-| `PUT` | `/api/settings/system/camera` | Admin camera settings |
+| `GET` | `/api/settings/system/database/backup` | Download SQLite backup |
+| `POST` | `/api/settings/system/database/restore` | Restore from a SQLite backup |
+| `PUT` | `/api/settings/system/camera` | Admin single-camera settings (legacy) |
 | `GET/PUT` | `/api/settings/anpr` | Admin ANPR settings |
+| `PUT` | `/api/settings/system/live` | Admin live detection settings |
 | `PUT` | `/api/settings/system/recording` | Admin recording settings |
 | `PUT` | `/api/settings/system/storage` | Admin storage settings |
 | `PUT` | `/api/settings/system/auth` | Admin login security settings |
+| `GET` | `/api/update/check` | Check for a new software release |
+| `POST` | `/api/update/apply` | Apply a software update via git pull |
+| `GET` | `/api/audit` | Admin audit log entries |
 
 ## Database
 
@@ -385,13 +451,17 @@ Core tables:
 - `vehicle_plates`
 - `plate_events`
 - `plate_alert_rules`
+- `audit_log`
 
 Useful `app_settings` keys:
 
 - `ai`
 - `alert_email`
+- `alert_push`
 - `camera`
+- `cameras`
 - `anpr`
+- `live`
 - `recording`
 - `storage`
 - `auth`
@@ -400,21 +470,28 @@ Useful `app_settings` keys:
 
 The recording layer creates event-linked clips and dashboard playback wiring for live camera detections and uploaded-image tests.
 
-Recording policy is managed at `/settings`:
+Recording policy is managed per camera from the Cameras page (`/cameras`) and per zone from the Zones page (`/zones`):
 
-- `continuous`: record every detection event.
-- `motion`: record when any detection is present.
-- `human`: record when `person` is detected.
-- `objects`: record selected labels such as `cat`, `dog`, `package`, and `parcel`.
+- **Alert-triggered**: record when an alert rule matches (default for new cameras).
+- **Continuous**: record every detection event.
 
-The policy also has independent toggles for continuous, motion, human, and selected object recording. The dashboard recordings list shows the trigger type and trigger label for each clip.
+Global clip settings are managed at `/settings`:
+
+- `pre_event_seconds`: seconds of pre-buffer captured before the event.
+- `post_event_seconds`: seconds to continue recording after the event.
+- `extension_step_seconds`: seconds to extend an active recording when a new event arrives during the post-event window.
+- `max_clip_seconds`: maximum clip length.
 
 Retention is managed on the same page:
 
-- `auto_purge_enabled`: purge after recording creation.
+- `auto_purge_enabled`: purge on recording creation.
 - `retention_days`: delete clips older than this age.
 - `max_storage_gb`: delete oldest clips until the recording folder is under the cap.
 - **Purge now**: run retention purge manually.
+
+### Timeline
+
+The Timeline page (`/recordings/timeline`) shows a visual day-view of recording clips per camera. Click a coloured segment to open and play that clip.
 
 Fresh installs use the current schema directly. The app does not carry migration code for older local development databases; delete the old SQLite file when schema-breaking changes are made during development.
 
@@ -433,6 +510,30 @@ Current limitations:
 - Uploaded-image events create generated footage, not real camera footage.
 - RTSP/ONVIF camera events create linked recording artifacts from the live event path.
 - Retention runs when clips are created or when an admin clicks **Purge now**; there is no background scheduler yet.
+
+## Push Notifications
+
+Daygle supports sending alert notifications to any ntfy-compatible push notification server. Configure the server URL, topic, optional credentials, and priority from `/settings` under **Push Notifications**.
+
+To test your configuration, click **Send Test Notification**. Notifications include the detected label, confidence score, camera name, and alert rule name.
+
+## Software Updates
+
+Admins can check for new releases and apply updates without SSH access:
+
+1. Open `/settings` → **Software Updates**.
+2. Click **Check for Updates** to compare the current version against the latest GitHub release.
+3. If an update is available, click **Apply Update** to pull the latest code and reinstall dependencies.
+4. For service installs, the service restarts automatically after a successful update.
+
+The update mechanism runs `scripts/update.sh`, which does a `git pull` and `pip install -r requirements.txt` in the app directory.
+
+## Database Backup and Restore
+
+The SQLite database contains all events, detections, recordings metadata, settings, users, alert rules, and audit history.
+
+- **Backup**: open `/settings` → **Database** → **Download Backup** to download a timestamped SQLite file.
+- **Restore**: upload a previously downloaded backup to replace the live database. A safety backup of the current database is created automatically before the restore completes.
 
 ## ANPR Limitations
 
@@ -482,8 +583,11 @@ python -m pytest
 
 - **Cannot log in after first start**: open `/setup` and create the initial admin user.
 - **Setup redirects to login**: a user already exists; sign in with an admin account.
-- **Dashboard shows MODEL MISSING**: open `/settings`, download YOLOv8n ONNX or set a readable model path, then reload the detector.
+- **Dashboard shows MODEL MISSING**: open `/ai`, download a YOLO model or set a readable model path, then reload the detector.
 - **ONNX fails to load**: confirm model and labels paths are readable and ONNX Runtime is installed.
-- **Email alerts do not send**: open `/settings`, check SMTP host/port/auth/from address, and confirm the rule has email enabled and recipients. Confirm Live performance -> Background alerts is enabled so cat/person/object rules continue checking when the Live Cameras page is closed.
-- **Service cannot write data or models**: open `/settings` and check storage paths, then verify `/opt/daygle-ai-camera/models` and the configured data directory exist. The Debian and Armbian installers run the systemd service as root and grant write access to config, data, and models paths.
+- **Email alerts do not send**: open `/settings`, check SMTP host/port/auth/from address, and confirm the alert rule has email enabled and recipients. Confirm **Background detection** is enabled in Live settings so rules continue checking when the Live Cameras page is closed.
+- **Push notifications not arriving**: open `/settings` → **Push Notifications**, verify server URL and topic, then send a test notification.
+- **Camera not connecting**: open `/cameras`, check the stream URL or ONVIF credentials, and verify the camera is reachable on the network.
+- **Service cannot write data or models**: check storage paths in `/settings`, then verify `/opt/daygle-ai-camera/models` and the configured data directory exist. The Debian and Armbian installers run the systemd service as root and grant write access to config, data, and models paths.
 - **Need service logs**: run `sudo journalctl -u daygle-ai-camera -f`.
+- **Need application logs**: the app writes rotating logs to `data/logs/app.log` (up to 10 MB × 5 files).
