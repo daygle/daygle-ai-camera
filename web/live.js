@@ -575,7 +575,7 @@ function bindZoneControls(zones) {
       const zone = zones[Number(select.dataset.addZoneRule)];
       zone.object_rules = normalizeObjectRules(zone);
       if (!zone.object_rules.some((rule) => rule.label === label)) zone.object_rules.push(defaultObjectRule(label));
-      zone.object_labels = zone.object_rules.map((rule) => rule.label);
+      zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion').map((rule) => rule.label);
       renderZones();
     });
   });
@@ -584,7 +584,7 @@ function bindZoneControls(zones) {
       const { zoneIndex, ruleIndex, rule } = parseZoneRuleKey(button.dataset.deleteZoneRule);
       if (rule?.label === 'motion') zones[zoneIndex].monitor_motion = false;
       zones[zoneIndex].object_rules.splice(ruleIndex, 1);
-      zones[zoneIndex].object_labels = zones[zoneIndex].object_rules.map((r) => r.label);
+      zones[zoneIndex].object_labels = zones[zoneIndex].object_rules.filter((r) => r.label !== 'motion').map((r) => r.label);
       renderZones();
     });
   });
@@ -611,7 +611,7 @@ function bindRuleFields() {
         const { zoneIndex, rule } = parseZoneRuleKey(field.dataset[datasetKey]);
         if (!rule) return;
         rule[ruleKey] = transform(field.value);
-        cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).map((item) => item.label);
+        cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
         if (ruleKey === 'label') renderZones();
       });
     });
