@@ -14,6 +14,9 @@ const els = {
   timelineRecordings: document.getElementById('timelineRecordings'),
   clipPlayer: document.getElementById('clipPlayer'),
   clipPlayerStatus: document.getElementById('clipPlayerStatus'),
+  clipOverlay: document.getElementById('clipOverlay'),
+  clipOverlayToggle: document.getElementById('clipOverlayToggle'),
+  clipOverlayTrackToggle: document.getElementById('clipOverlayTrackToggle'),
   recordingDetails: document.getElementById('recordingDetails'),
   videoModal: document.getElementById('videoModal'),
   videoModalClose: document.getElementById('videoModalClose'),
@@ -29,6 +32,25 @@ const state = {
 };
 
 let configuredLabels = null;
+let activeRecording = null;
+
+const OVERLAY_TOGGLE_KEY = 'daygle.timeline.overlay.enabled';
+const OVERLAY_TRACK_KEY = 'daygle.timeline.overlay.track.enabled';
+let overlayEnabled = false;
+let overlayTrackEnabled = false;
+let overlayTrackIntervalMs = 300;
+const OVERLAY_TRACK_MAX_WIDTH = 640;
+const OVERLAY_TRACK_MAX_HEIGHT = 360;
+const overlayTrackCanvas = document.createElement('canvas');
+let overlayTrackLastRunMs = 0;
+let overlayTrackInFlight = false;
+let overlayTrackDetections = null;
+let overlayTrackPrevDetections = null;
+let overlayTrackPrevUpdateMs = 0;
+let overlayTrackLastUpdateMs = 0;
+const OVERLAY_TRACK_LERP_MS = 150;
+let overlayRafId = null;
+let overlayResizeObserver = null;
 
 const DAY_SECONDS = 24 * 60 * 60;
 const TIMELINE_ROW_HEIGHT = 42;
@@ -70,6 +92,242 @@ const SEGMENT_COLORS = [
 ];
 
 const GENERIC_TIMELINE_LABELS = new Set(['motion', 'alert', 'human', 'object', 'none', 'off', 'continuous']);
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function filterByConfiguredLabels(detections) {
+  if (!configuredLabels) return detections;
+  return detections.filter((d) => {
+    const label = String(d.label || '').trim().toLowerCase();
+    return configuredLabels.has(label) || (configuredLabels.has('motion') && label === 'motion');
+  });
+}
+
+function detectionAnchorSeconds(recording) {
+  const startedAt = Date.parse(recording?.started_at || '');
+  const eventAt = Date.parse(recording?.event?.created_at || '');
+  if (!Number.isFinite(startedAt) || !Number.isFinite(eventAt)) return null;
+  const seconds = (eventAt - startedAt) / 1000;
+  return Number.isFinite(seconds) ? Math.max(0, seconds) : null;
+}
+
+function shouldRenderOverlayForTime(recording, playerTimeSeconds) {
+  const anchorSeconds = detectionAnchorSeconds(recording);
+  if (anchorSeconds === null) return true;
+  return playerTimeSeconds >= anchorSeconds;
+}
+
+function clearClipOverlay() {
+  if (!els.clipOverlay) return;
+  const context = els.clipOverlay.getContext('2d');
+  if (!context) return;
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.clearRect(0, 0, els.clipOverlay.width, els.clipOverlay.height);
+}
+
+function clearOverlayTrackDetections() {
+  overlayTrackDetections = null;
+  overlayTrackPrevDetections = null;
+  overlayTrackPrevUpdateMs = 0;
+  overlayTrackLastUpdateMs = 0;
+  overlayTrackLastRunMs = 0;
+}
+
+function interpolateDetections(prev, cur, t) {
+  if (!prev || !cur || t >= 1) return cur;
+  return cur.map((curDet) => {
+    const prevDet = prev.find((p) => p.label === curDet.label);
+    if (!prevDet?.box) return curDet;
+    const lerp = (a, b) => a + (b - a) * t;
+    return {
+      ...curDet,
+      box: {
+        x: lerp(prevDet.box.x, curDet.box.x),
+        y: lerp(prevDet.box.y, curDet.box.y),
+        width: lerp(prevDet.box.width, curDet.box.width),
+        height: lerp(prevDet.box.height, curDet.box.height),
+      },
+    };
+  });
+}
+
+function startOverlayRaf() {
+  if (overlayRafId !== null) return;
+  function loop() {
+    if (!overlayTrackEnabled || !els.clipPlayer || els.clipPlayer.paused) {
+      overlayRafId = null;
+      return;
+    }
+    detectOverlayFrameDetections();
+    drawClipOverlay();
+    overlayRafId = requestAnimationFrame(loop);
+  }
+  overlayRafId = requestAnimationFrame(loop);
+}
+
+function stopOverlayRaf() {
+  if (overlayRafId !== null) {
+    cancelAnimationFrame(overlayRafId);
+    overlayRafId = null;
+  }
+}
+
+function normalizeDetectionBox(box, width, height) {
+  const rawX = Number(box?.x ?? 0);
+  const rawY = Number(box?.y ?? 0);
+  const rawWidth = Number(box?.width ?? 0);
+  const rawHeight = Number(box?.height ?? 0);
+  if (!Number.isFinite(rawX) || !Number.isFinite(rawY) || !Number.isFinite(rawWidth) || !Number.isFinite(rawHeight)) return null;
+  if (rawWidth <= 0 || rawHeight <= 0) return null;
+  if (rawX <= 1 && rawY <= 1 && rawWidth <= 1 && rawHeight <= 1) {
+    return { x: rawX, y: rawY, width: rawWidth, height: rawHeight };
+  }
+  if (width <= 0 || height <= 0) return null;
+  return {
+    x: Math.max(0, Math.min(1, rawX / width)),
+    y: Math.max(0, Math.min(1, rawY / height)),
+    width: Math.max(0, Math.min(1, rawWidth / width)),
+    height: Math.max(0, Math.min(1, rawHeight / height)),
+  };
+}
+
+async function detectOverlayFrameDetections() {
+  if (!overlayTrackEnabled || !activeRecording || !els.clipPlayer) return;
+  if (els.clipPlayer.readyState < 2 || els.clipPlayer.videoWidth <= 0 || els.clipPlayer.videoHeight <= 0) return;
+  const now = performance.now();
+  if (overlayTrackInFlight || now - overlayTrackLastRunMs < overlayTrackIntervalMs) return;
+  overlayTrackLastRunMs = now;
+  overlayTrackInFlight = true;
+  try {
+    const sourceWidth = Number(els.clipPlayer.videoWidth || 0);
+    const sourceHeight = Number(els.clipPlayer.videoHeight || 0);
+    if (sourceWidth <= 0 || sourceHeight <= 0) return;
+    const scale = Math.min(1, OVERLAY_TRACK_MAX_WIDTH / sourceWidth, OVERLAY_TRACK_MAX_HEIGHT / sourceHeight);
+    const frameWidth = Math.max(1, Math.round(sourceWidth * scale));
+    const frameHeight = Math.max(1, Math.round(sourceHeight * scale));
+    overlayTrackCanvas.width = frameWidth;
+    overlayTrackCanvas.height = frameHeight;
+    const context = overlayTrackCanvas.getContext('2d');
+    if (!context) return;
+    context.drawImage(els.clipPlayer, 0, 0, frameWidth, frameHeight);
+    const blob = await new Promise((resolve) => {
+      overlayTrackCanvas.toBlob((value) => resolve(value), 'image/jpeg', 0.8);
+    });
+    if (!blob) return;
+    const payload = await api('/api/detect/frame', {
+      method: 'POST',
+      headers: { 'Content-Type': 'image/jpeg' },
+      body: blob,
+    });
+    const detections = Array.isArray(payload?.detections) ? payload.detections : [];
+    const newDetections = detections.map((detection) => {
+      const normalizedBox = normalizeDetectionBox(detection?.box || {}, frameWidth, frameHeight);
+      if (!normalizedBox) return null;
+      return { ...detection, box: normalizedBox };
+    }).filter(Boolean);
+    overlayTrackPrevDetections = overlayTrackDetections;
+    overlayTrackPrevUpdateMs = overlayTrackLastUpdateMs;
+    overlayTrackLastUpdateMs = performance.now();
+    overlayTrackDetections = newDetections;
+  } catch (_error) {
+    // Keep last successful overlay detections on transient failure.
+  } finally {
+    overlayTrackInFlight = false;
+    if (!overlayRafId) drawClipOverlay();
+  }
+}
+
+function resizeClipOverlay() {
+  if (!els.clipOverlay || !els.clipPlayer) return;
+  const width = Math.max(1, Math.round(els.clipPlayer.clientWidth));
+  const height = Math.max(1, Math.round(els.clipPlayer.clientHeight));
+  const dpr = window.devicePixelRatio || 1;
+  const targetWidth = Math.max(1, Math.round(width * dpr));
+  const targetHeight = Math.max(1, Math.round(height * dpr));
+  if (els.clipOverlay.width !== targetWidth || els.clipOverlay.height !== targetHeight) {
+    els.clipOverlay.width = targetWidth;
+    els.clipOverlay.height = targetHeight;
+  }
+}
+
+function drawClipOverlay() {
+  if (!els.clipOverlay || !els.clipPlayer) return;
+  resizeClipOverlay();
+  const context = els.clipOverlay.getContext('2d');
+  if (!context) return;
+  const cssWidth = Math.max(1, els.clipPlayer.clientWidth);
+  const cssHeight = Math.max(1, els.clipPlayer.clientHeight);
+  const dpr = window.devicePixelRatio || 1;
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.clearRect(0, 0, els.clipOverlay.width, els.clipOverlay.height);
+  if (!overlayEnabled) return;
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  if (overlayTrackEnabled && !overlayRafId) {
+    detectOverlayFrameDetections();
+  }
+
+  const allEventDetections = Array.isArray(activeRecording?.detections) ? activeRecording.detections : [];
+  const hasSpecificEvent = allEventDetections.some((d) => !GENERIC_TIMELINE_LABELS.has(String(d.label || '').toLowerCase()));
+  const eventDetections = filterByConfiguredLabels(
+    hasSpecificEvent
+      ? allEventDetections.filter((d) => !GENERIC_TIMELINE_LABELS.has(String(d.label || '').toLowerCase()))
+      : allEventDetections
+  );
+  let rawTrackDetections = overlayTrackEnabled && Array.isArray(overlayTrackDetections) && overlayTrackDetections.length
+    ? overlayTrackDetections : null;
+  if (rawTrackDetections && overlayTrackPrevDetections && overlayTrackLastUpdateMs > 0) {
+    const elapsed = performance.now() - overlayTrackLastUpdateMs;
+    const t = Math.min(1, elapsed / OVERLAY_TRACK_LERP_MS);
+    rawTrackDetections = interpolateDetections(overlayTrackPrevDetections, rawTrackDetections, t);
+  }
+  const detections = rawTrackDetections ? filterByConfiguredLabels(rawTrackDetections) : eventDetections;
+  if (!detections.length) return;
+  const playerTime = Number(els.clipPlayer.currentTime || 0);
+  if (!overlayTrackEnabled && !shouldRenderOverlayForTime(activeRecording, playerTime)) return;
+
+  const videoWidth = Math.max(1, Number(els.clipPlayer.videoWidth || cssWidth));
+  const videoHeight = Math.max(1, Number(els.clipPlayer.videoHeight || cssHeight));
+  const scale = Math.min(cssWidth / videoWidth, cssHeight / videoHeight);
+  const renderWidth = videoWidth * scale;
+  const renderHeight = videoHeight * scale;
+  const offsetX = (cssWidth - renderWidth) / 2;
+  const offsetY = (cssHeight - renderHeight) / 2;
+
+  context.font = '12px Inter, ui-sans-serif, system-ui, sans-serif';
+  context.textBaseline = 'middle';
+  context.lineWidth = 2;
+
+  detections.forEach((detection) => {
+    const box = detection?.box || detection || {};
+    const x = clamp(Number(box.x ?? 0), 0, 1);
+    const y = clamp(Number(box.y ?? 0), 0, 1);
+    const width = clamp(Number(box.width ?? 0), 0, 1);
+    const height = clamp(Number(box.height ?? 0), 0, 1);
+    if (width <= 0 || height <= 0) return;
+    const drawX = offsetX + (x * renderWidth);
+    const drawY = offsetY + (y * renderHeight);
+    const drawWidth = width * renderWidth;
+    const drawHeight = height * renderHeight;
+    if (drawWidth < 2 || drawHeight < 2) return;
+
+    context.strokeStyle = '#49e6a3';
+    context.strokeRect(drawX, drawY, drawWidth, drawHeight);
+
+    const confidence = Math.round(Number(detection.confidence || 0) * 100);
+    const label = `${String(detection.label || 'object')} ${confidence}%`;
+    const textWidth = context.measureText(label).width;
+    const labelHeight = 20;
+    const labelWidth = textWidth + 12;
+    const labelY = drawY > labelHeight + 4 ? drawY - labelHeight - 4 : drawY + 4;
+    context.fillStyle = 'rgba(7, 11, 19, 0.86)';
+    context.fillRect(drawX, labelY, labelWidth, labelHeight);
+    context.fillStyle = '#49e6a3';
+    context.fillText(label, drawX + 6, labelY + (labelHeight / 2));
+  });
+}
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -513,15 +771,21 @@ function closeVideoModal() {
   els.videoModal.hidden = true;
   document.body.style.overflow = '';
   els.clipPlayer.pause();
+  stopOverlayRaf();
   els.clipPlayer.removeAttribute('src');
   els.clipPlayer.load();
   els.videoModalDownload.hidden = true;
   els.videoModalDownload.removeAttribute('href');
+  clearClipOverlay();
+  clearOverlayTrackDetections();
+  activeRecording = null;
 }
 
 async function playRecording(recordingId, updateHistory = true) {
   const recording = await api(`/api/recordings/${recordingId}`);
+  activeRecording = recording;
   state.activeRecordingId = Number(recording.id);
+  clearOverlayTrackDetections();
   renderRecordingDetails(recording);
   highlightActiveRecording();
   if (updateHistory) replaceUrl(state.activeRecordingId);
@@ -532,6 +796,7 @@ async function playRecording(recordingId, updateHistory = true) {
     els.clipPlayer.pause();
     els.clipPlayer.removeAttribute('src');
     els.clipPlayer.load();
+    clearClipOverlay();
     els.clipPlayerStatus.textContent = `Recording #${recording.id} is still being prepared.`;
     return;
   }
@@ -540,6 +805,7 @@ async function playRecording(recordingId, updateHistory = true) {
   els.videoModalDownload.hidden = false;
   els.clipPlayer.pause();
   els.clipPlayer.src = `/api/recordings/${recording.id}/stream?t=${Date.now()}`;
+  drawClipOverlay();
   els.clipPlayerStatus.textContent = `Loading recording #${recording.id}...`;
   try {
     els.clipPlayer.load();
@@ -720,8 +986,58 @@ els.clipPlayer.addEventListener('error', () => {
     3: 'The recording could not be decoded by this browser.',
     4: 'The recording format is not supported by this browser.',
   };
+  clearClipOverlay();
   els.clipPlayerStatus.textContent = messages[error?.code] || 'Unable to play this recording.';
 });
+
+['loadedmetadata', 'loadeddata', 'pause', 'seeked', 'timeupdate'].forEach((eventName) => {
+  els.clipPlayer.addEventListener(eventName, drawClipOverlay);
+});
+
+els.clipPlayer.addEventListener('play', () => {
+  if (overlayTrackEnabled) startOverlayRaf();
+  drawClipOverlay();
+});
+
+els.clipPlayer.addEventListener('pause', () => {
+  stopOverlayRaf();
+  drawClipOverlay();
+});
+
+window.addEventListener('resize', drawClipOverlay);
+
+if ('ResizeObserver' in window && els.clipPlayer) {
+  overlayResizeObserver = new ResizeObserver(drawClipOverlay);
+  overlayResizeObserver.observe(els.clipPlayer);
+}
+
+if (els.clipOverlayToggle) {
+  const savedValue = localStorage.getItem(OVERLAY_TOGGLE_KEY);
+  overlayEnabled = savedValue === '1';
+  els.clipOverlayToggle.checked = overlayEnabled;
+  els.clipOverlayToggle.addEventListener('change', () => {
+    overlayEnabled = Boolean(els.clipOverlayToggle.checked);
+    localStorage.setItem(OVERLAY_TOGGLE_KEY, overlayEnabled ? '1' : '0');
+    drawClipOverlay();
+  });
+}
+
+if (els.clipOverlayTrackToggle) {
+  const savedTrackValue = localStorage.getItem(OVERLAY_TRACK_KEY);
+  overlayTrackEnabled = savedTrackValue === '1';
+  els.clipOverlayTrackToggle.checked = overlayTrackEnabled;
+  els.clipOverlayTrackToggle.addEventListener('change', () => {
+    overlayTrackEnabled = Boolean(els.clipOverlayTrackToggle.checked);
+    localStorage.setItem(OVERLAY_TRACK_KEY, overlayTrackEnabled ? '1' : '0');
+    clearOverlayTrackDetections();
+    if (overlayTrackEnabled && els.clipPlayer && !els.clipPlayer.paused) {
+      startOverlayRaf();
+    } else {
+      stopOverlayRaf();
+    }
+    drawClipOverlay();
+  });
+}
 
 loadAuth().then(async () => {
   const params = new URLSearchParams(window.location.search);
