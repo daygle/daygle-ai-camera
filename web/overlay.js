@@ -22,25 +22,67 @@ function normalizeDetectionBox(box, frameWidth, frameHeight) {
   };
 }
 
-// Extrapolates detections forward from cur using the velocity (cur - prev).
-// t=0 returns cur exactly; t=1 projects one full interval ahead.
-// This keeps the box on top of a moving object between inference updates
-// rather than lagging behind it.
-function interpolateDetections(prev, cur, t) {
-  if (!prev || !cur) return cur;
-  const tClamped = Math.min(1, Math.max(0, t));
-  if (tClamped === 0) return cur;
-  return cur.map((curDet) => {
-    const prevDet = prev.find((p) => p.label === curDet.label);
-    if (!prevDet?.box) return curDet;
-    const extrapolate = (a, b) => Math.max(0, Math.min(1, b + (b - a) * tClamped));
+// Finds the detection in `candidates` that best corresponds to `target`:
+// same label, then nearest box center. This keeps velocity estimates stable
+// when several objects of the same label are present, instead of always
+// matching the first one in the list.
+function matchDetection(candidates, target) {
+  if (!Array.isArray(candidates) || !candidates.length) return null;
+  const targetLabel = String(target?.label || '').toLowerCase();
+  const targetBox = target?.box;
+  let best = null;
+  let bestDist = Infinity;
+  for (const candidate of candidates) {
+    if (String(candidate?.label || '').toLowerCase() !== targetLabel) continue;
+    if (!candidate?.box || !targetBox) {
+      if (!best) best = candidate;
+      continue;
+    }
+    const dx = (candidate.box.x + candidate.box.width / 2) - (targetBox.x + targetBox.width / 2);
+    const dy = (candidate.box.y + candidate.box.height / 2) - (targetBox.y + targetBox.height / 2);
+    const dist = dx * dx + dy * dy;
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+// Projects detections from where they were observed (`curTime`) to a target
+// time, using the per-unit velocity measured between the two most recent
+// samples. All three time arguments must share one clock: the video's
+// currentTime (seconds) for recorded playback, or a monotonic wall clock
+// (milliseconds) for the live snapshot stream.
+//
+// Unlike interpolateDetections, this is anchored to *when each sample was
+// captured* rather than when it arrived, so it compensates for inference
+// latency: the box is placed where the object should be on the frame that is
+// actually on screen right now, not where it was when the detector last ran.
+// `maxLead` caps how far past the latest sample we extrapolate so a stale box
+// (object gone, video paused/seeked) does not drift away.
+function projectDetections(prevDetections, curDetections, prevTime, curTime, targetTime, maxLead) {
+  if (!Array.isArray(curDetections) || !curDetections.length) return curDetections;
+  if (!Array.isArray(prevDetections) || !prevDetections.length) return curDetections;
+  if (![prevTime, curTime, targetTime].every((value) => Number.isFinite(value))) return curDetections;
+  const interval = curTime - prevTime;
+  if (!(interval > 0)) return curDetections;
+  let lead = targetTime - curTime;
+  if (lead <= 0) return curDetections;
+  const cap = Number.isFinite(maxLead) ? maxLead : interval;
+  if (lead > cap) lead = cap;
+  const factor = lead / interval;
+  return curDetections.map((curDet) => {
+    const prevDet = matchDetection(prevDetections, curDet);
+    if (!prevDet?.box || !curDet?.box) return curDet;
+    const project = (a, b) => Math.max(0, Math.min(1, b + (b - a) * factor));
     return {
       ...curDet,
       box: {
-        x: extrapolate(prevDet.box.x, curDet.box.x),
-        y: extrapolate(prevDet.box.y, curDet.box.y),
-        width: extrapolate(prevDet.box.width, curDet.box.width),
-        height: extrapolate(prevDet.box.height, curDet.box.height),
+        x: project(prevDet.box.x, curDet.box.x),
+        y: project(prevDet.box.y, curDet.box.y),
+        width: project(prevDet.box.width, curDet.box.width),
+        height: project(prevDet.box.height, curDet.box.height),
       },
     };
   });
