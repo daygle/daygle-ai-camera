@@ -1766,6 +1766,10 @@ def attach_event_recording(
             event_time=event_time,
             recording_config=recording_config,
         )
+    else:
+        # The clip was written synchronously above; bake its detection track now
+        # so playback overlays can follow objects without per-frame inference.
+        schedule_recording_detection_track(recording_id, Path(str(metadata.get('file_path') or '')))
     purge_recordings_by_policy()
     return recording_id
 
@@ -1849,9 +1853,11 @@ def start_rtsp_recording_capture(
                 ended_at=ended_at,
                 duration_seconds=final_duration_seconds,
             )
+            schedule_recording_detection_track(recording_id, file_path)
         except Exception as exc:
             logger.warning('RTSP recording capture failed for event %s, writing generated fallback: %s', event_id, exc)
             write_generated_fallback()
+            schedule_recording_detection_track(recording_id, file_path)
         finally:
             if camera_id:
                 with active_rtsp_recordings_lock:
@@ -2191,6 +2197,7 @@ def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
         if raw_file_path:
             playback_paths = [
                 recording_playback_sidecar_path(file_path),
+                recording_track_sidecar_path(file_path),
                 file_path.with_name(f'{file_path.stem}.browser.mp4'),
                 file_path.with_name(f'{file_path.stem}.playback.mp4'),
             ]
@@ -2238,6 +2245,117 @@ def recording_stream_path(file_path: Path) -> Path:
         logger.warning('Recording playback conversion failed for %s: %s', file_path, exc)
         return file_path
     return playback_path if playback_path.exists() else file_path
+
+
+def recording_track_sidecar_path(file_path: Path) -> Path:
+    return file_path.with_name(f'{file_path.stem}.track.json')
+
+
+# Detection-track sampling: decode the finalized clip at this many frames per
+# second and run object detection on each sample, so the overlay can follow
+# objects during playback without re-running inference in the browser.
+TRACK_SAMPLE_FPS = 5.0
+TRACK_MAX_SAMPLES = 900
+TRACK_FRAME_MAX_WIDTH = 640
+TRACK_FRAME_MAX_HEIGHT = 360
+
+
+def build_recording_detection_track(
+    file_path: Path,
+    *,
+    sample_fps: float = TRACK_SAMPLE_FPS,
+    min_confidence: float | None = None,
+) -> list[dict[str, Any]] | None:
+    """Decode a finalized clip and run detection across sampled frames.
+
+    Returns a time-series ``[{"t": seconds_from_start, "detections": [...]}]``
+    where each detection matches the detector's output (normalized box). Returns
+    ``None`` when OpenCV is missing, the clip cannot be decoded, or the detector
+    is unavailable, so callers can simply skip writing a track.
+    """
+    try:
+        import cv2
+    except ImportError:
+        return None
+    if not file_path.exists():
+        return None
+    capture = cv2.VideoCapture(str(file_path))
+    if not capture.isOpened():
+        capture.release()
+        return None
+    confidence = min_confidence if min_confidence is not None else compute_minimum_rule_confidence()
+    sample_fps = max(1.0, float(sample_fps))
+    try:
+        source_fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
+        step = max(1, round(source_fps / sample_fps)) if source_fps > 0 else 1
+        track: list[dict[str, Any]] = []
+        frame_index = 0
+        while len(track) < TRACK_MAX_SAMPLES:
+            if not capture.grab():
+                break
+            if frame_index % step == 0:
+                ok, frame = capture.retrieve()
+                if ok and frame is not None:
+                    position_ms = float(capture.get(cv2.CAP_PROP_POS_MSEC) or 0.0)
+                    if position_ms > 0:
+                        t_seconds = position_ms / 1000.0
+                    else:
+                        t_seconds = frame_index / (source_fps if source_fps > 0 else sample_fps)
+                    height, width = frame.shape[:2]
+                    scale = min(1.0, TRACK_FRAME_MAX_WIDTH / max(1, width), TRACK_FRAME_MAX_HEIGHT / max(1, height))
+                    if scale < 1.0:
+                        frame = cv2.resize(
+                            frame,
+                            (max(1, int(width * scale)), max(1, int(height * scale))),
+                            interpolation=cv2.INTER_AREA,
+                        )
+                    encoded, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                    if encoded:
+                        try:
+                            detections = detector.detect_image(buffer.tobytes(), confidence=confidence)
+                        except DetectorUnavailableError:
+                            return None
+                        except Exception:
+                            detections = []
+                        track.append({'t': round(t_seconds, 3), 'detections': detections})
+            frame_index += 1
+        return track
+    finally:
+        capture.release()
+
+
+def write_recording_detection_track(file_path: Path, track: list[dict[str, Any]]) -> None:
+    recording_track_sidecar_path(file_path).write_text(json.dumps(track), encoding='utf-8')
+
+
+def load_recording_detection_track(file_path: Path) -> list[dict[str, Any]] | None:
+    sidecar = recording_track_sidecar_path(file_path)
+    if not sidecar.exists():
+        return None
+    try:
+        data = json.loads(sidecar.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, list) else None
+
+
+def schedule_recording_detection_track(recording_id: int | None, file_path: Path) -> None:
+    """Generate a detection track for a finalized clip on a background thread."""
+    if not str(file_path):
+        return
+
+    def worker() -> None:
+        try:
+            track = build_recording_detection_track(file_path)
+            # Only persist a track that actually localized something; an all-empty
+            # track would otherwise suppress the static event box on playback.
+            if track and any(sample.get('detections') for sample in track):
+                write_recording_detection_track(file_path, track)
+                logger.info('Generated detection track for recording %s (%d samples).', recording_id, len(track))
+        except Exception as exc:
+            logger.warning('Detection track generation failed for recording %s: %s', recording_id, exc)
+
+    threading.Thread(target=worker, name=f'track-gen-{recording_id or "rec"}', daemon=True).start()
 
 
 def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
@@ -3043,6 +3161,7 @@ def recording_detail(recording_id: int):
     recording = database.get_recording(recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail='Recording not found')
+    recording['track'] = load_recording_detection_track(Path(str(recording.get('file_path') or '')))
     return recording
 
 

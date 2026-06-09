@@ -88,6 +88,47 @@ function projectDetections(prevDetections, curDetections, prevTime, curTime, tar
   });
 }
 
+// Returns the detections for a baked detection track at playback time `t`
+// (seconds), linearly interpolating box positions between the two surrounding
+// samples so the overlay follows objects smoothly. `track` is the array
+// produced server-side: [{ t, detections: [{ label, confidence, box }] }],
+// assumed sorted ascending by t. Unlike projectDetections this interpolates
+// between known samples rather than extrapolating, because the whole clip's
+// detections are already known.
+function sampleTrackAtTime(track, t) {
+  if (!Array.isArray(track) || !track.length) return [];
+  const time = Number.isFinite(t) ? t : 0;
+  if (time <= track[0].t) return track[0].detections || [];
+  const last = track[track.length - 1];
+  if (time >= last.t) return last.detections || [];
+  let lo = 0;
+  let hi = track.length - 1;
+  while (lo + 1 < hi) {
+    const mid = (lo + hi) >> 1;
+    if (track[mid].t <= time) lo = mid; else hi = mid;
+  }
+  const prev = track[lo];
+  const next = track[hi];
+  const span = next.t - prev.t;
+  if (!(span > 0)) return next.detections || [];
+  const factor = (time - prev.t) / span;
+  if (factor <= 0) return prev.detections || [];
+  return (next.detections || []).map((nextDet) => {
+    const prevDet = matchDetection(prev.detections || [], nextDet);
+    if (!prevDet?.box || !nextDet?.box) return nextDet;
+    const lerp = (a, b) => Math.max(0, Math.min(1, a + (b - a) * factor));
+    return {
+      ...nextDet,
+      box: {
+        x: lerp(prevDet.box.x, nextDet.box.x),
+        y: lerp(prevDet.box.y, nextDet.box.y),
+        width: lerp(prevDet.box.width, nextDet.box.width),
+        height: lerp(prevDet.box.height, nextDet.box.height),
+      },
+    };
+  });
+}
+
 function resizeOverlayCanvas(canvas, referenceEl) {
   if (!canvas || !referenceEl) return;
   const dpr = window.devicePixelRatio || 1;
