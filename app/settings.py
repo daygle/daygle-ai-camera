@@ -62,18 +62,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "username": "",
             "password": "",
         },
-        "rules": [
-            {
-                "name": "Person alert",
-                "object": "person",
-                "min_confidence": 0.50,
-                "cooldown_seconds": 60,
-                "enabled": True,
-                "email_enabled": False,
-                "email_recipients": [],
-                "push_enabled": False,
-            }
-        ],
+        "rules": [],
     },
     "recording": {
         "enabled": True,

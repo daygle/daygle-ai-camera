@@ -148,29 +148,9 @@ class EventDatabase:
                 CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action);
                 CREATE INDEX IF NOT EXISTS idx_audit_log_resource ON audit_log(resource);
 
-                CREATE TABLE IF NOT EXISTS alert_rules (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    object TEXT NOT NULL,
-                    min_confidence REAL NOT NULL DEFAULT 0.5,
-                    cooldown_seconds INTEGER NOT NULL DEFAULT 60,
-                    enabled INTEGER NOT NULL DEFAULT 1,
-                    email_enabled INTEGER NOT NULL DEFAULT 0,
-                    email_recipients TEXT NOT NULL DEFAULT '[]',
-                    active_start TEXT,
-                    active_end TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_alert_rules_object ON alert_rules(object);
                 CREATE INDEX IF NOT EXISTS idx_plate_alert_rules_type ON plate_alert_rules(rule_type);
                 """
             )
-            try:
-                db.execute("ALTER TABLE alert_rules ADD COLUMN push_enabled INTEGER NOT NULL DEFAULT 0")
-            except Exception:
-                pass
 
     def add_event(
         self,
@@ -252,7 +232,7 @@ class EventDatabase:
                 params.append(camera_id)
             if alerted_only:
                 conditions.append(
-                    "EXISTS (SELECT 1 FROM alert_history ah JOIN alert_rules ar ON ar.name = ah.rule_name WHERE ah.event_id = r.event_id AND ar.enabled = 1)"
+                    "EXISTS (SELECT 1 FROM alert_history ah WHERE ah.event_id = r.event_id)"
                 )
 
             where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
@@ -516,9 +496,7 @@ class EventDatabase:
                 AND EXISTS (
                     SELECT 1
                     FROM alert_history ah
-                    JOIN alert_rules ar ON ar.name = ah.rule_name
                     WHERE ah.event_id = e.id
-                    AND ar.enabled = 1
                 )
             """
             recording_filter = "AND EXISTS (SELECT 1 FROM recordings WHERE recordings.event_id = e.id)"
@@ -542,9 +520,7 @@ class EventDatabase:
                     WHERE EXISTS (
                         SELECT 1
                         FROM alert_history ah
-                        JOIN alert_rules ar ON ar.name = ah.rule_name
                         WHERE ah.event_id = e.id
-                        AND ar.enabled = 1
                     )
                     {recording_filter if with_recording else ''}
                     ORDER BY e.created_at DESC
@@ -640,92 +616,6 @@ class EventDatabase:
             )
         return value
 
-    def list_alert_rules(self) -> list[dict[str, Any]]:
-        with self.connect() as db:
-            rows = db.execute("SELECT * FROM alert_rules ORDER BY name COLLATE NOCASE").fetchall()
-            return [self._alert_rule(row) for row in rows]
-
-    def seed_alert_rules(self, rules: list[dict[str, Any]], now: str) -> None:
-        with self.connect() as db:
-            count = db.execute("SELECT COUNT(*) AS count FROM alert_rules").fetchone()["count"]
-            if count:
-                return
-            for rule in rules:
-                db.execute(
-                    """
-                    INSERT INTO alert_rules (name, object, min_confidence, cooldown_seconds, enabled, email_enabled, email_recipients, push_enabled, active_start, active_end, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        str(rule.get("name") or rule.get("object") or "Alert"),
-                        str(rule.get("object") or ""),
-                        float(rule.get("min_confidence", 0.5)),
-                        int(rule.get("cooldown_seconds", 60)),
-                        int(bool(rule.get("enabled", True))),
-                        int(bool(rule.get("email_enabled", False))),
-                        json.dumps(rule.get("email_recipients", [])),
-                        int(bool(rule.get("push_enabled", False))),
-                        rule.get("active_start"),
-                        rule.get("active_end"),
-                        now,
-                        now,
-                    ),
-                )
-
-    def create_alert_rule(self, rule: dict[str, Any], now: str) -> dict[str, Any]:
-        with self.connect() as db:
-            cursor = db.execute(
-                """
-                INSERT INTO alert_rules (name, object, min_confidence, cooldown_seconds, enabled, email_enabled, email_recipients, push_enabled, active_start, active_end, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    rule["name"],
-                    rule["object"],
-                    float(rule["min_confidence"]),
-                    int(rule["cooldown_seconds"]),
-                    int(bool(rule["enabled"])),
-                    int(bool(rule.get("email_enabled", False))),
-                    json.dumps(rule.get("email_recipients", [])),
-                    int(bool(rule.get("push_enabled", False))),
-                    rule.get("active_start"),
-                    rule.get("active_end"),
-                    now,
-                    now,
-                ),
-            )
-            return self._alert_rule(db.execute("SELECT * FROM alert_rules WHERE id = ?", (cursor.lastrowid,)).fetchone())
-
-    def update_alert_rule(self, rule_id: int, rule: dict[str, Any], now: str) -> dict[str, Any] | None:
-        updates: list[str] = []
-        params: list[Any] = []
-        for key in ("name", "object", "min_confidence", "cooldown_seconds", "enabled", "email_enabled", "email_recipients", "push_enabled", "active_start", "active_end"):
-            if key in rule:
-                updates.append(f"{key} = ?")
-                value = rule[key]
-                if key in {"enabled", "email_enabled", "push_enabled"}:
-                    value = int(bool(value))
-                if key == "email_recipients":
-                    value = json.dumps(value)
-                params.append(value)
-        if not updates:
-            with self.connect() as db:
-                row = db.execute("SELECT * FROM alert_rules WHERE id = ?", (rule_id,)).fetchone()
-                return self._alert_rule(row) if row else None
-        updates.append("updated_at = ?")
-        params.extend([now, rule_id])
-        with self.connect() as db:
-            cursor = db.execute(f"UPDATE alert_rules SET {', '.join(updates)} WHERE id = ?", params)
-            if cursor.rowcount == 0:
-                return None
-            row = db.execute("SELECT * FROM alert_rules WHERE id = ?", (rule_id,)).fetchone()
-            return self._alert_rule(row)
-
-    def delete_alert_rule(self, rule_id: int) -> bool:
-        with self.connect() as db:
-            cursor = db.execute("DELETE FROM alert_rules WHERE id = ?", (rule_id,))
-            return cursor.rowcount > 0
-
     def add_audit_log(
         self,
         *,
@@ -803,14 +693,6 @@ class EventDatabase:
         with self.connect() as db:
             row = db.execute(f"SELECT COUNT(*) AS count FROM audit_log {where}", params).fetchone()
             return int(row['count'])
-
-    def _alert_rule(self, row: sqlite3.Row) -> dict[str, Any]:
-        rule = dict(row)
-        rule["enabled"] = bool(rule["enabled"])
-        rule["email_enabled"] = bool(rule.get("email_enabled"))
-        rule["email_recipients"] = json.loads(rule.get("email_recipients") or "[]")
-        rule["push_enabled"] = bool(rule.get("push_enabled"))
-        return rule
 
     def _event_with_detections(self, db: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
         detections = db.execute("SELECT * FROM detections WHERE event_id = ? ORDER BY confidence DESC", (row["id"],)).fetchall()

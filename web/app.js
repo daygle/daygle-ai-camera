@@ -187,18 +187,12 @@ function bindDeleteButtons() {
 
 async function loadConfiguredLabels() {
   try {
-    const [settings, alertData] = await Promise.all([api('/api/settings/system'), api('/api/settings/alerts')]);
+    const settings = await api('/api/settings/system');
     const labels = new Map([['motion', 0.45]]);
     const setMin = (label, conf) => {
       if (!label) return;
       if (!labels.has(label) || conf < labels.get(label)) labels.set(label, conf);
     };
-    for (const rule of (alertData?.rules || [])) {
-      if (rule.enabled !== false) {
-        const label = String(rule.label || rule.object || '').trim().toLowerCase();
-        setMin(label, Number(rule.min_confidence ?? 0.5));
-      }
-    }
     for (const camera of (settings?.cameras || [])) {
       for (const zone of (camera?.detection?.zones || [])) {
         for (const rule of (zone?.object_rules || [])) {

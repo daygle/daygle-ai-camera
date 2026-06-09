@@ -411,8 +411,6 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `POST` | `/api/settings/alert-email/test` | Send a test email |
 | `GET/PUT` | `/api/settings/alert-push` | Admin push notification settings |
 | `POST` | `/api/settings/alert-push/test` | Send a test push notification |
-| `GET/POST` | `/api/settings/alerts` | View/create alert rules |
-| `PUT/DELETE` | `/api/settings/alerts/{id}` | Edit/delete alert rules |
 | `GET` | `/api/settings/system` | Admin system settings summary |
 | `GET` | `/api/settings/system/database/backup` | Download SQLite backup |
 | `POST` | `/api/settings/system/database/restore` | Restore from a SQLite backup |
@@ -436,7 +434,6 @@ Core tables:
 - `user_sessions`
 - `login_attempts`
 - `app_settings`
-- `alert_rules`
 - `events`
 - `detections`
 - `alert_history`
