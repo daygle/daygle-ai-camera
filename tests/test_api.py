@@ -2893,3 +2893,61 @@ def test_live_stream_detection_records_during_alert_cooldown(tmp_path, monkeypat
     assert event2['recording_status'] == 'linked', (
         "Recording must be linked when the detection matches an alert rule, regardless of cooldown"
     )
+
+
+def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, monkeypatch):
+    """Cat with record_on_detect=True but alert_on_detect=False must not be silently dropped
+    when another label has an alert rule (which makes zone_rules non-empty and triggers
+    zone_alert_detections filtering)."""
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, image_bytes, confidence=None):
+            return [{'label': 'cat', 'confidence': 0.88, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.2}}]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
+    for rule in main.database.list_alert_rules():
+        main.database.delete_alert_rule(rule['id'])
+    main.live_detection_last_checked.clear()
+
+    # Camera has a zone covering the whole frame:
+    # - cat rule: record_on_detect=True, alert_on_detect=False (record only, no alert)
+    # - person rule: record_on_detect=False, alert_on_detect=True (alert only)
+    # The person alert rule makes zone_rules non-empty, which used to cause zone_alert_detections
+    # to filter out the cat entirely (no alert rule for cat).
+    event_id = main.process_live_stream_alerts(
+        b'cat-frame',
+        {'width': 1280, 'height': 720},
+        {
+            'id': 'camera-1',
+            'name': 'Front Door',
+            'detection': {
+                'zones': [
+                    {
+                        'id': 'porch',
+                        'name': 'Porch',
+                        'x': 0, 'y': 0, 'width': 1, 'height': 1,
+                        'monitor_motion': False,
+                        'monitor_objects': True,
+                        'object_rules': [
+                            {'label': 'cat', 'record_on_detect': True, 'alert_on_detect': False, 'min_confidence': 0.5},
+                            {'label': 'person', 'record_on_detect': False, 'alert_on_detect': True, 'min_confidence': 0.5},
+                        ],
+                    },
+                ],
+            },
+            'recording': {'enabled': True, 'record_on_alert': True, 'continuous': False},
+        },
+        enforce_interval=False,
+    )
+
+    assert event_id is not None, "Event must be created for record-only zone detection"
+    event = main.database.get_event(event_id)
+    assert any(d['label'] == 'cat' for d in event['detections']), "Cat must appear in event detections"
+    assert event['recording_status'] == 'linked', "Recording must be linked for record-only zone rule"

@@ -1240,7 +1240,17 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
     anpr_detections = filter_detections_for_camera_anpr(detections, settings)
     zone_rules = zone_object_alert_rules(settings)
     object_alert_detections = zone_alert_detections(settings, object_detections) if zone_rules else list(object_detections)
-    alert_detections = list(object_alert_detections)
+
+    # Detections that match a zone recording rule but NOT an alert rule (alert_on_detect=False).
+    # They must still produce an event and recording even though no alert notification fires.
+    # Without this they hit the early-return below and are silently dropped whenever
+    # another label has an alert rule (making zone_rules non-empty).
+    record_only_detections = (
+        [d for d in object_detections if zone_record_on_detect(d, settings) and not zone_object_rule_matches(settings, d, action='alert')]
+        if zone_rules else []
+    )
+
+    alert_detections = list(object_alert_detections) + record_only_detections
     if motion_detections:
         strongest_motion = max(motion_detections, key=lambda detection: float(detection.get('confidence', 0)))
         alert_detections.append({
