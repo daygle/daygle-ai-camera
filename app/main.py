@@ -247,10 +247,6 @@ def effective_auth_config() -> dict[str, Any]:
     return settings
 
 
-def effective_alert_rules() -> list[dict[str, Any]]:
-    return database.list_alert_rules()
-
-
 def effective_email_alert_settings() -> dict[str, Any]:
     settings = copy.deepcopy(config.get('alerts', {}).get('email', {}))
     override = database.get_setting('alert_email')
@@ -280,10 +276,9 @@ auth = AuthService(config['storage']['database'], effective_auth_config())
 SESSION_COOKIE_NAME = str(effective_auth_config().get('cookie_name', SESSION_COOKIE))
 
 
-database.seed_alert_rules(config.get('alerts', {}).get('rules', []), utc_now())
 detector = create_detector(effective_ai_config())
 last_detector_error: str | None = getattr(detector, 'unavailable_reason', None)
-alerts = AlertEngine(effective_alert_rules())
+alerts = AlertEngine([])
 live_detection_last_checked: dict[str, float] = {}
 live_detection_status: dict[str, dict[str, Any]] = {}
 live_event_last_emitted: dict[str, dict[str, Any]] = {}
@@ -1270,7 +1265,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         )
         return None
 
-    alerts.rules = zone_rules + effective_alert_rules()
+    alerts.rules = zone_rules
     triggered = alerts.process(alert_detections)
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     triggered_labels = {str(alert.get('label') or '').lower() for alert in triggered}
@@ -1382,10 +1377,10 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         alert for alert in triggered
         if motion_email_enabled or str(alert.get('label') or '').strip().lower() != 'motion'
     ]
-    deliver_email_alerts(email_triggered, event_id, rules=zone_rules + effective_alert_rules())
-    deliver_push_notifications(triggered, event_id, rules=zone_rules + effective_alert_rules())
+    deliver_email_alerts(email_triggered, event_id, rules=zone_rules)
+    deliver_push_notifications(triggered, event_id, rules=zone_rules)
     email_rules = [
-        rule for rule in (zone_rules + effective_alert_rules())
+        rule for rule in zone_rules
         if rule.get('enabled', True) and rule.get('email_enabled') and str(rule.get('name') or '') in {
             str(alert.get('rule_name') or '') for alert in email_triggered
         }
@@ -1554,8 +1549,6 @@ async def authentication_middleware(request: Request, call_next):
         path.startswith('/api/settings/alert-email') and request.method in MUTATING_METHODS
     ) or (
         path.startswith('/api/settings/alert-push') and request.method in MUTATING_METHODS
-    ) or (
-        path.startswith('/api/settings/alerts') and request.method in MUTATING_METHODS
     )
     if admin_required and session['user']['role'] != 'admin':
         return JSONResponse({'detail': 'Admin access required'}, status_code=403)
@@ -1875,7 +1868,7 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
     metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
     camera_name = str(metadata.get('camera_name') or '').strip() or None
     camera_id = str(metadata.get('camera_id') or '').strip() or None
-    rules_by_name = {str(rule.get('name')): rule for rule in (rules or effective_alert_rules())}
+    rules_by_name = {str(rule.get('name')): rule for rule in (rules or [])}
 
     any_email_enabled = any(
         rules_by_name.get(str(alert.get('rule_name')), {}).get('email_enabled')
@@ -1930,11 +1923,7 @@ def deliver_push_notifications(triggered: list[dict[str, Any]], event_id: int, r
     metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
     camera_name = str(metadata.get('camera_name') or '').strip() or None
     camera_id = str(metadata.get('camera_id') or '').strip() or None
-    # Build lookup: zone rules come last so they overwrite global DB rules on name collision.
-    # Caller passes zone_rules + global_rules; we rebuild with global first, zone second.
-    zone_rules = [r for r in (rules or []) if r.get('zone_id')]
-    global_rules = [r for r in (rules or effective_alert_rules()) if not r.get('zone_id')]
-    rules_by_name = {str(rule.get('name')): rule for rule in global_rules + zone_rules}
+    rules_by_name = {str(rule.get('name')): rule for rule in (rules or [])}
     notifier = PushNotificationService(push_settings)
     for alert in triggered:
         rule_name = str(alert.get('rule_name') or '')
@@ -2350,12 +2339,10 @@ def validate_restore_database(path: Path) -> None:
 def refresh_runtime_after_database_restore() -> None:
     database.init()
     auth.init()
-    database.seed_alert_rules(config.get('alerts', {}).get('rules', []), utc_now())
     apply_cameras_settings(effective_cameras_config())
     apply_storage_and_recording_settings()
     apply_anpr_settings()
     auth.apply_config(effective_auth_config())
-    alerts.rules = effective_alert_rules()
 
 
 def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
@@ -3390,6 +3377,8 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
     ai_status = ai_status_payload(ai_settings)
+    categories = ai_settings.get('categories', config.get('ai', {}).get('categories', []))
+    labels = load_labels(ai_settings.get('labels_path'), categories) or list(categories)
     return {
         **ai_settings,
         'active_backend': ai_status['active_backend'],
@@ -3404,69 +3393,9 @@ def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
         'active_config_source': ai_status['active_config_source'],
         'error': ai_status['error'],
         'last_detector_error': ai_status['last_detector_error'],
-        'categories': ai_settings.get('categories', config.get('ai', {}).get('categories', [])),
+        'categories': categories,
+        'available_labels': labels,
     }
-
-
-def available_labels() -> list[str]:
-    ai_settings = effective_ai_config()
-    labels = load_labels(ai_settings.get('labels_path'), ai_settings.get('categories', []))
-    return labels or list(ai_settings.get('categories', []))
-
-
-def validate_alert_rule(payload: dict[str, Any], *, partial: bool = False) -> dict[str, Any]:
-    rule: dict[str, Any] = {}
-    required = ('name', 'object')
-    for field in required:
-        if not partial and not str(payload.get(field, '')).strip():
-            raise HTTPException(status_code=400, detail=f'{field} is required.')
-    for field in ('name', 'object'):
-        if field in payload:
-            value = str(payload.get(field, '')).strip()
-            if not value:
-                raise HTTPException(status_code=400, detail=f'{field} cannot be blank.')
-            rule[field] = value
-    if 'min_confidence' in payload or not partial:
-        try:
-            value = float(payload.get('min_confidence', 0.5))
-        except (TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail='min_confidence must be a number.') from exc
-        if not 0 <= value <= 1:
-            raise HTTPException(status_code=400, detail='min_confidence must be between 0 and 1.')
-        rule['min_confidence'] = value
-    if 'cooldown_seconds' in payload or not partial:
-        try:
-            value = int(payload.get('cooldown_seconds', 60))
-        except (TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail='cooldown_seconds must be an integer.') from exc
-        if value < 0:
-            raise HTTPException(status_code=400, detail='cooldown_seconds cannot be negative.')
-        rule['cooldown_seconds'] = value
-    if 'enabled' in payload or not partial:
-        rule['enabled'] = bool(payload.get('enabled', True))
-    if 'email_enabled' in payload or not partial:
-        rule['email_enabled'] = bool(payload.get('email_enabled', False))
-    if 'push_enabled' in payload or not partial:
-        rule['push_enabled'] = bool(payload.get('push_enabled', False))
-    if 'email_recipients' in payload or not partial:
-        raw_recipients = payload.get('email_recipients', [])
-        if isinstance(raw_recipients, str):
-            recipients = [value.strip() for value in raw_recipients.split(',') if value.strip()]
-        elif isinstance(raw_recipients, list):
-            recipients = [str(value).strip() for value in raw_recipients if str(value).strip()]
-        else:
-            raise HTTPException(status_code=400, detail='email_recipients must be a list or comma-separated string.')
-        for recipient in recipients:
-            if '@' not in recipient:
-                raise HTTPException(status_code=400, detail='Email recipients must be valid email addresses.')
-        rule['email_recipients'] = recipients
-    for field in ('active_start', 'active_end'):
-        if field in payload:
-            value = payload.get(field) or None
-            if value is not None and not re.fullmatch(r'\d{2}:\d{2}', str(value)):
-                raise HTTPException(status_code=400, detail=f'{field} must use HH:MM format.')
-            rule[field] = value
-    return rule
 
 
 def validate_alert_email_settings(payload: dict[str, Any]) -> dict[str, Any]:
@@ -4036,11 +3965,6 @@ def test_ai_detector():
     return {'ok': ai_error is None, 'backend_used': ai_state['configured_backend'], 'detections': detections, 'status': ai_state, 'ai_error': ai_error}
 
 
-@app.get('/api/settings/alerts')
-def get_alert_rules():
-    return {'rules': database.list_alert_rules(), 'available_labels': available_labels()}
-
-
 @app.get('/api/settings/alert-email')
 def get_alert_email_settings():
     return effective_email_alert_settings()
@@ -4266,38 +4190,6 @@ async def update_auth_settings(request: Request):
     auth.apply_config(settings)
     write_audit_log(request, 'update', 'settings.auth')
     return settings
-
-
-@app.post('/api/settings/alerts')
-async def create_alert_rule(request: Request):
-    require_admin(request)
-    payload = await request.json()
-    rule = database.create_alert_rule(validate_alert_rule(payload), utc_now())
-    alerts.rules = effective_alert_rules()
-    write_audit_log(request, 'create', 'alert_rule', rule['id'], {'name': rule.get('name'), 'object': rule.get('object')})
-    return rule
-
-
-@app.put('/api/settings/alerts/{rule_id}')
-async def update_alert_rule(rule_id: int, request: Request):
-    require_admin(request)
-    payload = await request.json()
-    rule = database.update_alert_rule(rule_id, validate_alert_rule(payload, partial=True), utc_now())
-    if rule is None:
-        raise HTTPException(status_code=404, detail='Alert rule not found')
-    alerts.rules = effective_alert_rules()
-    write_audit_log(request, 'update', 'alert_rule', rule_id, {'name': rule.get('name')})
-    return rule
-
-
-@app.delete('/api/settings/alerts/{rule_id}')
-def delete_alert_rule(rule_id: int, request: Request):
-    require_admin(request)
-    if not database.delete_alert_rule(rule_id):
-        raise HTTPException(status_code=404, detail='Alert rule not found')
-    alerts.rules = effective_alert_rules()
-    write_audit_log(request, 'delete', 'alert_rule', rule_id)
-    return {'ok': True}
 
 
 def _current_version() -> str:

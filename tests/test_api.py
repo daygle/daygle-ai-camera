@@ -531,7 +531,7 @@ def test_setup_login_success_session_validation_and_protected_routes(tmp_path, m
 
         with sqlite3.connect(database_path) as db:
             tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-        assert {"users", "user_sessions", "login_attempts", "app_settings", "alert_rules", "vehicle_plates", "plate_events", "plate_alert_rules"}.issubset(tables)
+        assert {"users", "user_sessions", "login_attempts", "app_settings", "vehicle_plates", "plate_events", "plate_alert_rules"}.issubset(tables)
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -689,7 +689,7 @@ def test_admin_ai_settings_viewer_denied_and_db_override(tmp_path, monkeypatch):
         assert status == 200
         viewer_client = LocalClient(base_url)
         viewer_csrf = _login(viewer_client, viewer["username"], "Viewer123!")
-        assert viewer_client.request("/api/settings/alerts")[0] == 200
+        assert viewer_client.request("/api/settings/alert-email")[0] == 200
         status, _headers, body = viewer_client.request(
             "/api/settings/ai",
             method="PUT",
@@ -698,85 +698,6 @@ def test_admin_ai_settings_viewer_denied_and_db_override(tmp_path, monkeypatch):
         )
         assert status == 403
         assert body["detail"] == "Admin access required"
-    finally:
-        server.should_exit = True
-        thread.join(timeout=5)
-
-
-def test_admin_alert_rule_crud_and_alert_engine_uses_db_rules(tmp_path, monkeypatch):
-    app, _database_path = _load_app(tmp_path, monkeypatch)
-    server, thread, base_url = _server(app)
-    client = LocalClient(base_url)
-    try:
-        _setup_admin(client)
-        csrf = _login(client)
-        status, _headers, alert_page = client.request("/settings")
-        assert status == 200
-        assert 'id="testEmailRecipient"' in alert_page
-        assert 'id="testEmailBtn"' in alert_page
-        assert 'Email delivery' in alert_page
-        assert 'Object-specific alert rules are configured on the Zones page.' in alert_page
-        assert 'id="newAlertRuleBtn"' not in alert_page
-
-        initial = client.request("/api/settings/alerts")[2]
-        assert "person" in initial["available_labels"]
-        for rule in initial["rules"]:
-            client.request(f"/api/settings/alerts/{rule['id']}", method="DELETE", headers={"X-CSRF-Token": csrf})
-
-        status, _headers, rule = client.request(
-            "/api/settings/alerts",
-            method="POST",
-            json_body={"name": "Person DB", "object": "person", "min_confidence": 0.1, "cooldown_seconds": 0, "enabled": True},
-            headers={"X-CSRF-Token": csrf},
-        )
-        assert status == 200
-        assert rule["object"] == "person"
-
-        status, _headers, second_rule = client.request(
-            "/api/settings/alerts",
-            method="POST",
-            json_body={"name": "Car DB", "object": "car", "min_confidence": 0.3, "cooldown_seconds": 10, "enabled": True},
-            headers={"X-CSRF-Token": csrf},
-        )
-        assert status == 200
-        assert second_rule["id"] != rule["id"]
-
-        status, _headers, motion_rule = client.request(
-            "/api/settings/alerts",
-            method="POST",
-            json_body={"name": "Motion DB", "object": "motion", "min_confidence": 0.1, "cooldown_seconds": 0, "enabled": True},
-            headers={"X-CSRF-Token": csrf},
-        )
-        assert status == 200
-        assert motion_rule["object"] == "motion"
-
-        rules = client.request("/api/settings/alerts")[2]["rules"]
-        assert {rule["name"] for rule in rules} == {"Person DB", "Car DB", "Motion DB"}
-
-        status, _headers, edited = client.request(
-            f"/api/settings/alerts/{rule['id']}",
-            method="PUT",
-            json_body={"min_confidence": 0.2, "enabled": True},
-            headers={"X-CSRF-Token": csrf},
-        )
-        assert status == 200
-        assert edited["min_confidence"] == 0.2
-
-        main_module = sys.modules["app.main"]
-        main_module.alerts.rules = main_module.effective_alert_rules()
-        triggered = main_module.alerts.process([{"label": "person", "confidence": 0.9}, {"label": "motion", "confidence": 0.8, "motion_event": True}])
-        assert any(alert["rule_name"] == "Person DB" for alert in triggered)
-        assert any(alert["rule_name"] == "Motion DB" for alert in triggered)
-
-        status, _headers, deleted = client.request(f"/api/settings/alerts/{rule['id']}", method="DELETE", headers={"X-CSRF-Token": csrf})
-        assert status == 200
-        assert deleted["ok"] is True
-        status, _headers, deleted = client.request(f"/api/settings/alerts/{second_rule['id']}", method="DELETE", headers={"X-CSRF-Token": csrf})
-        assert status == 200
-        assert deleted["ok"] is True
-        status, _headers, deleted = client.request(f"/api/settings/alerts/{motion_rule['id']}", method="DELETE", headers={"X-CSRF-Token": csrf})
-        assert status == 200
-        assert deleted["ok"] is True
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -812,113 +733,6 @@ def test_profile_update_and_password_change(tmp_path, monkeypatch):
         client.request("/logout", method="POST", headers={"X-CSRF-Token": csrf})
         new_client = LocalClient(base_url)
         _login(new_client, "admin", "Admin456!")
-    finally:
-        server.should_exit = True
-        thread.join(timeout=5)
-
-
-def test_email_alert_settings_and_delivery(tmp_path, monkeypatch):
-    sent: list[tuple[dict[str, object], int, list[str], bytes | None]] = []
-
-    class FakeEmailAlertService:
-        def __init__(self, settings):
-            self.settings = settings
-
-        def send_alert(self, alert, *, event_id, recipients, camera_name=None, camera_id=None, snapshot_bytes=None):
-            sent.append((alert, event_id, list(recipients), snapshot_bytes))
-
-    app, _database_path = _load_app(tmp_path, monkeypatch)
-    server, thread, base_url = _server(app)
-    client = LocalClient(base_url)
-    try:
-        _setup_admin(client)
-        csrf = _login(client)
-        main_module = sys.modules["app.main"]
-        monkeypatch.setattr(main_module, "EmailAlertService", FakeEmailAlertService)
-
-        status, _headers, email_settings = client.request(
-            "/api/settings/alert-email",
-            method="PUT",
-            json_body={
-                "enabled": True,
-                "host": "smtp.example.com",
-                "port": 587,
-                "from_address": "alerts@example.com",
-                "use_tls": True,
-                "use_ssl": False,
-            },
-            headers={"X-CSRF-Token": csrf},
-        )
-        assert status == 200
-        assert email_settings["enabled"] is True
-
-        for rule in client.request("/api/settings/alerts")[2]["rules"]:
-            client.request(f"/api/settings/alerts/{rule['id']}", method="DELETE", headers={"X-CSRF-Token": csrf})
-
-        status, _headers, rule = client.request(
-            "/api/settings/alerts",
-            method="POST",
-            json_body={
-                "name": "Cat email",
-                "object": "cat",
-                "min_confidence": 0.1,
-                "cooldown_seconds": 0,
-                "enabled": True,
-                "email_enabled": True,
-                "email_recipients": ["user@example.com"],
-            },
-            headers={"X-CSRF-Token": csrf},
-        )
-        assert status == 200
-        assert rule["email_recipients"] == ["user@example.com"]
-
-        detections = [{'label': 'cat', 'confidence': 0.9, 'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}}]
-        main_module.alerts.rules = main_module.effective_alert_rules()
-        triggered = main_module.alerts.process(detections)
-        event_time = datetime.now(timezone.utc).isoformat()
-        event_id = main_module.database.add_event(
-            created_at=event_time,
-            source='motion',
-            snapshot_path=None,
-            detections=detections,
-            alert_triggered=bool(triggered),
-            metadata={},
-        )
-        for alert in triggered:
-            main_module.database.add_alert(
-                created_at=datetime.now(timezone.utc).isoformat(),
-                rule_name=alert['rule_name'],
-                event_id=event_id,
-                label=alert['label'],
-                confidence=alert['confidence'],
-                message=alert['message'],
-            )
-        main_module.deliver_email_alerts(triggered, event_id)
-        assert sent
-        assert sent[0][1] == event_id
-        assert sent[0][2] == ["user@example.com"]
-        assert sent[0][3] is None  # no snapshot_path on this event
-
-        # Second pass: event with a real snapshot file — snapshot_bytes should be populated
-        import cv2
-        import numpy as np
-        snap_file = tmp_path / 'snap.jpg'
-        _, encoded = cv2.imencode('.jpg', np.zeros((10, 10, 3), dtype=np.uint8))
-        snap_file.write_bytes(encoded.tobytes())
-        sent.clear()
-        main_module.alerts.rules = main_module.effective_alert_rules()
-        triggered2 = main_module.alerts.process(detections)
-        event_id2 = main_module.database.add_event(
-            created_at=datetime.now(timezone.utc).isoformat(),
-            source='motion',
-            snapshot_path=str(snap_file),
-            detections=detections,
-            alert_triggered=bool(triggered2),
-            metadata={},
-        )
-        main_module.deliver_email_alerts(triggered2, event_id2)
-        assert sent
-        assert sent[0][3] is not None  # annotated snapshot bytes attached
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -1428,190 +1242,6 @@ def test_opencv_stream_camera_applies_ffmpeg_log_level_after_each_videocapture(m
     assert log_level_call_counts[1] == 2, "second call must see 2 VideoCapture instances"
 
 
-def test_live_stream_detection_triggers_email_alert(tmp_path, monkeypatch):
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
-    import app.main as main
-
-    sent: list[tuple[dict[str, object], int, list[str]]] = []
-
-    class FakeDetector:
-        backend = 'onnx'
-        available = True
-        unavailable_reason = None
-
-        def detect_image(self, image_bytes, confidence=None):
-            assert image_bytes == b'jpeg-frame'
-            return [
-                {
-                    'label': 'person',
-                    'confidence': 0.91,
-                    'box': {'x': 64, 'y': 72, 'width': 320, 'height': 360},
-                }
-            ]
-
-    class FakeEmailAlertService:
-        def __init__(self, settings):
-            self.settings = settings
-
-        def send_alert(self, alert, *, event_id, recipients, camera_name=None, camera_id=None, snapshot_bytes=None):
-            sent.append((alert, event_id, list(recipients)))
-
-    monkeypatch.setattr(main, 'detector', FakeDetector())
-    monkeypatch.setattr(main, 'EmailAlertService', FakeEmailAlertService)
-    main.live_detection_last_checked.clear()
-    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
-    main.database.set_setting(
-        'alert_email',
-        {'enabled': True, 'host': 'smtp.example.com', 'port': 587, 'from_address': 'alerts@example.com', 'use_tls': True, 'use_ssl': False},
-        main.utc_now(),
-    )
-    for rule in main.database.list_alert_rules():
-        main.database.delete_alert_rule(rule['id'])
-    main.database.create_alert_rule(
-        main.validate_alert_rule({
-            'name': 'Person live',
-            'object': 'person',
-            'min_confidence': 0.5,
-            'cooldown_seconds': 0,
-            'enabled': True,
-            'email_enabled': True,
-            'email_recipients': ['owner@example.com'],
-        }),
-        main.utc_now(),
-    )
-
-    event_id = main.process_live_stream_alerts(
-        b'jpeg-frame',
-        {'width': 1280, 'height': 720},
-        {
-            'id': 'camera-1',
-            'name': 'Front Door',
-            'detection': {
-                'zones': [
-                    {'id': 'porch', 'name': 'Porch', 'x': 0, 'y': 0, 'width': 1, 'height': 1, 'monitor_motion': True, 'monitor_objects': True, 'monitor_anpr': True},
-                ],
-            },
-        },
-    )
-
-    assert event_id is not None
-    event = main.database.get_event(event_id)
-    assert event['source'] == 'rtsp'
-    assert event['detections'][0]['label'] == 'person'
-    assert event['detections'][0]['x'] == 0.05
-    assert event['recording_status'] == 'linked'
-    assert event['recordings'][0]['source'] == 'rtsp'
-    assert event['recordings'][0]['camera_id'] == 'camera-1'
-    assert Path(event['recordings'][0]['file_path']).exists()
-    assert sent
-    assert sent[0][0]['rule_name'] == 'Person live'
-    assert sent[0][2] == ['owner@example.com']
-    status = main.live_detection_status_payload('camera-1')
-    assert status['state'] == 'alerted'
-    assert status['detected_labels'] == ['person']
-    assert status['email_attempted'] is True
-    assert status['recording_state'] == 'linked'
-    assert status['recording_id'] == event['recordings'][0]['id']
-
-
-def test_background_live_alert_monitor_triggers_cat_email_without_live_page(tmp_path, monkeypatch):
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
-    import app.main as main
-
-    sent: list[tuple[dict[str, object], int, list[str]]] = []
-
-    class FakeCamera:
-        def read_jpeg(self):
-            return b'jpeg-frame', {'width': 1280, 'height': 720}
-
-    class FakeDetector:
-        backend = 'onnx'
-        available = True
-        unavailable_reason = None
-
-        def detect_image(self, image_bytes, confidence=None):
-            assert image_bytes == b'jpeg-frame'
-            return [
-                {
-                    'label': 'cat',
-                    'confidence': 0.92,
-                    'box': {'x': 100, 'y': 100, 'width': 200, 'height': 220},
-                }
-            ]
-
-    class FakeEmailAlertService:
-        def __init__(self, settings):
-            self.settings = settings
-
-        def send_alert(self, alert, *, event_id, recipients, camera_name=None, camera_id=None, snapshot_bytes=None):
-            sent.append((alert, event_id, list(recipients)))
-
-    camera_settings = {
-        'id': 'camera-1',
-        'name': 'Front Door',
-        'backend': 'rtsp',
-        'stream_url': 'rtsp://camera.example/stream1',
-        'width': 1280,
-        'height': 720,
-        'fps': 15,
-        'detection': {
-            'zones': [
-                {
-                    'id': 'porch',
-                    'name': 'Porch',
-                    'x': 0,
-                    'y': 0,
-                    'width': 1,
-                    'height': 1,
-                    'monitor_motion': False,
-                    'monitor_objects': True,
-                    'object_labels': ['cat'],
-                    'monitor_anpr': False,
-                },
-            ],
-        },
-    }
-
-    monkeypatch.setattr(main, 'detector', FakeDetector())
-    monkeypatch.setattr(main, 'EmailAlertService', FakeEmailAlertService)
-    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
-    main.database.set_setting('live', {'detection_interval_seconds': 0.2, 'background_detection_enabled': True}, main.utc_now())
-    main.database.set_setting(
-        'alert_email',
-        {'enabled': True, 'host': 'smtp.example.com', 'port': 587, 'from_address': 'alerts@example.com', 'use_tls': True, 'use_ssl': False},
-        main.utc_now(),
-    )
-    main.database.set_setting('cameras', [camera_settings], main.utc_now())
-    main.apply_cameras_settings([main.normalize_camera_settings(camera_settings)])
-    main.camera_instances['camera-1'] = FakeCamera()
-    main.camera = main.camera_instances['camera-1']
-    main.live_detection_last_checked.clear()
-    for rule in main.database.list_alert_rules():
-        main.database.delete_alert_rule(rule['id'])
-    main.database.create_alert_rule(
-        main.validate_alert_rule({
-            'name': 'Cat live',
-            'object': 'cat',
-            'min_confidence': 0.5,
-            'cooldown_seconds': 0,
-            'enabled': True,
-            'email_enabled': True,
-            'email_recipients': ['owner@example.com'],
-        }),
-        main.utc_now(),
-    )
-
-    assert main.run_live_alert_monitor_once() == 1
-
-    status = main.live_detection_status_payload('camera-1')
-    assert status['state'] == 'alerted'
-    assert status['detected_labels'] == ['cat']
-    assert status['email_attempted'] is True
-    assert sent
-    assert sent[0][0]['rule_name'] == 'Cat live'
-    assert sent[0][2] == ['owner@example.com']
-
-
 def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
@@ -1805,8 +1435,6 @@ def test_live_stream_detection_without_alert_rule_does_not_record_by_default(tmp
     monkeypatch.setattr(main, 'detector', FakeDetector())
     main.live_detection_last_checked.clear()
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
-    for rule in main.database.list_alert_rules():
-        main.database.delete_alert_rule(rule['id'])
 
     event_id = main.process_live_stream_alerts(
         b'jpeg-frame',
@@ -1858,18 +1486,6 @@ def test_live_stream_detection_saves_only_allowed_zone_object_labels(tmp_path, m
     monkeypatch.setattr(main, 'detector', FakeDetector())
     main.live_detection_last_checked.clear()
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
-    for rule in main.database.list_alert_rules():
-        main.database.delete_alert_rule(rule['id'])
-    main.database.create_alert_rule(
-        main.validate_alert_rule({
-            'name': 'Person live',
-            'object': 'person',
-            'min_confidence': 0.5,
-            'cooldown_seconds': 0,
-            'enabled': True,
-        }),
-        main.utc_now(),
-    )
 
     event_id = main.process_live_stream_alerts(
         b'jpeg-frame',
@@ -1924,8 +1540,6 @@ def test_live_stream_camera_continuous_recording_records_without_alert_rule(tmp_
     monkeypatch.setattr(main, 'detector', FakeDetector())
     main.live_detection_last_checked.clear()
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
-    for rule in main.database.list_alert_rules():
-        main.database.delete_alert_rule(rule['id'])
 
     event_id = main.process_live_stream_alerts(
         b'jpeg-frame',
@@ -2141,30 +1755,22 @@ def test_rtsp_recording_capture_falls_back_on_stream_error(tmp_path, monkeypatch
     main.active_rtsp_recordings.clear()
 
 
-def test_alerted_only_event_and_recording_queries_use_enabled_rules(tmp_path):
+def test_alerted_only_event_and_recording_queries(tmp_path):
     from app.database import EventDatabase
 
     database = EventDatabase(str(tmp_path / 'events.sqlite3'))
     now = '2026-06-06T00:00:00+00:00'
-    enabled_rule = database.create_alert_rule(
-        {'name': 'Person alert', 'object': 'person', 'min_confidence': 0.5, 'cooldown_seconds': 0, 'enabled': True},
-        now,
-    )
-    disabled_rule = database.create_alert_rule(
-        {'name': 'Dog alert', 'object': 'dog', 'min_confidence': 0.5, 'cooldown_seconds': 0, 'enabled': False},
-        now,
-    )
     events = [
         database.add_event(
             created_at=f'2026-06-06T00:0{index}:00+00:00',
             source='camera',
             snapshot_path=None,
             detections=[{'label': label, 'confidence': 0.9, 'box': {'x': 0, 'y': 0, 'width': 1, 'height': 1}}],
-            alert_triggered=bool(rule),
+            alert_triggered=has_alert,
         )
-        for index, (label, rule) in enumerate([('cat', None), ('dog', disabled_rule), ('person', enabled_rule)], start=1)
+        for index, (label, has_alert) in enumerate([('cat', False), ('dog', True), ('person', True)], start=1)
     ]
-    for event_id, label, rule in zip(events, ['cat', 'dog', 'person'], [None, disabled_rule, enabled_rule]):
+    for event_id, label, has_alert in zip(events, ['cat', 'dog', 'person'], [False, True, True]):
         database.add_recording(
             event_id=event_id,
             camera_id='front',
@@ -2178,14 +1784,14 @@ def test_alerted_only_event_and_recording_queries_use_enabled_rules(tmp_path):
             trigger_type='object',
             trigger_label=label,
         )
-        if rule:
-            database.add_alert(now, rule['name'], event_id, label, 0.9, f'{label} matched')
+        if has_alert:
+            database.add_alert(now, f'zone__obj__{label}', event_id, label, 0.9, f'{label} matched')
 
     assert [event['id'] for event in database.search_events()] == list(reversed(events))
-    assert [event['id'] for event in database.search_events(alerted_only=True)] == [events[2]]
-    assert database.search_events(label='dog', alerted_only=True) == []
-    assert [event['id'] for event in database.search_events(label='person', alerted_only=True)] == [events[2]]
-    assert [recording['event_id'] for recording in database.list_recordings(alerted_only=True)] == [events[2]]
+    assert [event['id'] for event in database.search_events(alerted_only=True)] == [events[2], events[1]]
+    assert database.search_events(label='cat', alerted_only=True) == []
+    assert [event['id'] for event in database.search_events(label='dog', alerted_only=True)] == [events[1]]
+    assert [recording['event_id'] for recording in database.list_recordings(alerted_only=True)] == [events[2], events[1]]
     assert [recording['event_id'] for recording in database.list_recordings(label='person', alerted_only=True)] == [events[2]]
 
 
@@ -2832,69 +2438,6 @@ def test_detection_has_matching_record_rule(tmp_path, monkeypatch):
     assert main.detection_has_matching_record_rule({'label': '', 'confidence': 0.9}, rules) is False
 
 
-def test_live_stream_detection_records_during_alert_cooldown(tmp_path, monkeypatch):
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
-    import app.main as main
-
-    class FakeDetector:
-        backend = 'onnx'
-        available = True
-        unavailable_reason = None
-
-        def detect_image(self, image_bytes, confidence=None):
-            return [{'label': 'person', 'confidence': 0.91, 'box': {'x': 0, 'y': 0, 'width': 1, 'height': 1}}]
-
-    monkeypatch.setattr(main, 'detector', FakeDetector())
-    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
-    for rule in main.database.list_alert_rules():
-        main.database.delete_alert_rule(rule['id'])
-    main.database.create_alert_rule(
-        main.validate_alert_rule({
-            'name': 'Person alert',
-            'object': 'person',
-            'min_confidence': 0.5,
-            'cooldown_seconds': 3600,
-            'enabled': True,
-        }),
-        main.utc_now(),
-    )
-
-    camera_settings = {
-        'id': 'camera-1',
-        'name': 'Front Door',
-        'detection': {'zones': []},
-        'recording': {'enabled': True, 'record_on_alert': True, 'continuous': False},
-    }
-
-    # First detection: alert fires and recording is linked.
-    main.live_detection_last_checked.clear()
-    event_id1 = main.process_live_stream_alerts(
-        b'frame1',
-        {'width': 1280, 'height': 720},
-        camera_settings,
-        enforce_interval=False,
-    )
-    assert event_id1 is not None
-    assert main.database.get_event(event_id1)['recording_status'] == 'linked'
-
-    # Second detection: alert is in 1-hour cooldown. Clear debounce state so a new
-    # event is emitted, and verify that a recording is still created because the
-    # detection matches the rule — recordings must not depend on the alert firing.
-    main.live_event_last_emitted.pop('camera-1', None)
-    main.live_detection_last_checked.clear()
-    event_id2 = main.process_live_stream_alerts(
-        b'frame2',
-        {'width': 1280, 'height': 720},
-        camera_settings,
-        enforce_interval=False,
-    )
-    assert event_id2 is not None, "A new event should be created even during alert cooldown"
-    event2 = main.database.get_event(event_id2)
-    assert event2['recording_status'] == 'linked', (
-        "Recording must be linked when the detection matches an alert rule, regardless of cooldown"
-    )
-
-
 def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, monkeypatch):
     """Cat with record_on_detect=True but alert_on_detect=False must not be silently dropped
     when another label has an alert rule (which makes zone_rules non-empty and triggers
@@ -2912,8 +2455,6 @@ def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, m
 
     monkeypatch.setattr(main, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
-    for rule in main.database.list_alert_rules():
-        main.database.delete_alert_rule(rule['id'])
     main.live_detection_last_checked.clear()
 
     # Camera has a zone covering the whole frame:
