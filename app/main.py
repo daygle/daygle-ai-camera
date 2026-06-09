@@ -701,11 +701,16 @@ def point_on_segment(x: float, y: float, x1: float, y1: float, x2: float, y2: fl
 
 
 def filter_detections_for_camera(detections: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
+    detection_settings = settings.get('detection') or {}
+    if not detection_settings.get('object_detection_enabled', True):
+        return []
     return filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects')
 
 
 def zone_motion_detections(detections: list[dict[str, Any]], settings: dict[str, Any], frame_motion_confidence: float = 0.5) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
+    if not detection_settings.get('motion_enabled', True):
+        return []
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_motion', True)]
     if not zones:
         return []

@@ -2270,6 +2270,39 @@ def test_camera_object_labels_filter_without_monitoring_zones(tmp_path, monkeypa
     assert [detection['label'] for detection in filtered] == ['person']
 
 
+def test_object_detection_enabled_flag_gates_object_detections(tmp_path, monkeypatch):
+    """Setting object_detection_enabled=False must suppress all object detections."""
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    detections = [{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.3, 'y': 0.3, 'width': 0.1, 'height': 0.1}}]
+
+    enabled_settings = {'detection': {'object_detection_enabled': True, 'zones': []}}
+    disabled_settings = {'detection': {'object_detection_enabled': False, 'zones': []}}
+
+    assert main.filter_detections_for_camera(detections, enabled_settings) == detections
+    assert main.filter_detections_for_camera(detections, disabled_settings) == []
+
+
+def test_motion_enabled_flag_gates_motion_detections(tmp_path, monkeypatch):
+    """Setting motion_enabled=False must suppress all motion zone detections."""
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    zones = main.normalize_monitoring_zones([
+        {'id': 'z1', 'name': 'Zone 1', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
+         'monitor_motion': True, 'monitor_objects': False,
+         'object_rules': [{'label': 'motion', 'min_confidence': 0.3}]},
+    ])
+
+    enabled_settings = {'detection': {'motion_enabled': True, 'zones': zones}}
+    disabled_settings = {'detection': {'motion_enabled': False, 'zones': zones}}
+
+    # High-confidence motion frame
+    assert main.zone_motion_detections([], enabled_settings, frame_motion_confidence=0.9) != []
+    assert main.zone_motion_detections([], disabled_settings, frame_motion_confidence=0.9) == []
+
+
 def test_zone_spatial_filtering_blocks_detections_outside_zone(tmp_path, monkeypatch):
     """Objects outside the configured zone area must not trigger alerts."""
     _app, _database_path = _load_app(tmp_path, monkeypatch)
