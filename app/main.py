@@ -1269,13 +1269,22 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
     triggered = alerts.process(alert_detections)
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     triggered_labels = {str(alert.get('label') or '').lower() for alert in triggered}
+    # True when at least one zone has an enabled object rule (alert or record).
+    # When no rules exist, fall back to treating every matched detection as recordable
+    # so cameras without zone rules still produce recordings.
+    _has_zone_object_rules = bool(zone_rules) or any(
+        rule.get('enabled', True)
+        for zone in (settings.get('detection') or {}).get('zones', [])
+        if zone.get('enabled', True) and zone.get('monitor_objects', True)
+        for rule in (zone.get('object_rules') or [])
+    )
     recording_detections = [
         {
             **detection,
             'alert_matched': bool(zone_detection_alert_rule_names(settings, detection) & triggered_rule_names)
             if zone_rules else str(detection.get('label') or '').lower() in triggered_labels,
             'alert_triggered': zone_record_on_detect(detection, settings)
-            if zone_rules else detection_has_matching_record_rule(detection, alerts.rules),
+            if _has_zone_object_rules else True,
         }
         for detection in object_detections
     ]
