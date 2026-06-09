@@ -32,10 +32,15 @@
             <input id="overlayToggle" type="checkbox" checked />
             <span>Matched motion/object boxes</span>
           </label>
+          <label class="toggle-control" for="liveAiTrackToggle" id="liveAiTrackLabel">
+            <input id="liveAiTrackToggle" type="checkbox" />
+            <span>AI Track (per-frame)</span>
+          </label>
         </div>
       </header>
       <div class="live-frame-wrap" id="liveFrameWrap">
         <img id="liveFrame" class="live-frame" alt="Live camera footage" />
+        <canvas id="liveAiTrackCanvas" class="clip-overlay" aria-hidden="true"></canvas>
         <div id="liveStatus" class="live-status">Connecting to camera...</div>
       </div>
       <div id="cameraGrid" class="live-camera-grid" hidden></div>
