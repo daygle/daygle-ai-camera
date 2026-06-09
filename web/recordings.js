@@ -199,14 +199,23 @@ function clearOverlayTrackDetections() {
   overlayTrackLastRunMs = 0;
 }
 
+function recordingTrack() {
+  return Array.isArray(activeRecording?.track) && activeRecording.track.length ? activeRecording.track : null;
+}
+
+function overlayShouldAnimate() {
+  return overlayEnabled && Boolean(recordingTrack() || overlayTrackEnabled);
+}
+
 function startOverlayRaf() {
   if (overlayRafId !== null) return;
   function loop() {
-    if (!overlayTrackEnabled || !els.clipPlayer || els.clipPlayer.paused) {
+    if (!els.clipPlayer || els.clipPlayer.paused || !overlayShouldAnimate()) {
       overlayRafId = null;
       return;
     }
-    detectOverlayFrameDetections();
+    // Baked tracks need no inference — only the live AI-track fallback does.
+    if (overlayTrackEnabled && !recordingTrack()) detectOverlayFrameDetections();
     drawClipOverlay();
     overlayRafId = requestAnimationFrame(loop);
   }
@@ -287,6 +296,18 @@ function drawClipOverlay() {
   context.clearRect(0, 0, els.clipOverlay.width, els.clipOverlay.height);
   if (!overlayEnabled) return;
 
+  const playerTime = Number(els.clipPlayer.currentTime || 0);
+
+  // Prefer the baked detection track: it was computed across the whole clip at
+  // record time, so boxes follow objects smoothly with no playback-time
+  // inference. Falls through to the live AI-track / event box when absent.
+  const bakedTrack = recordingTrack();
+  if (bakedTrack) {
+    const tracked = filterByConfiguredLabels(sampleTrackAtTime(bakedTrack, playerTime));
+    if (tracked.length) drawDetectionBoxesOnCanvas(els.clipOverlay, tracked, els.clipPlayer);
+    return;
+  }
+
   if (overlayTrackEnabled && !overlayRafId) {
     detectOverlayFrameDetections();
   }
@@ -298,7 +319,6 @@ function drawClipOverlay() {
       ? allEventDetections.filter((d) => !GENERIC_TRIGGER_LABELS.has(String(d.label || '').toLowerCase()))
       : allEventDetections
   );
-  const playerTime = Number(els.clipPlayer.currentTime || 0);
   let rawTrackDetections = overlayTrackEnabled && Array.isArray(overlayTrackDetections) && overlayTrackDetections.length
     ? overlayTrackDetections : null;
   if (rawTrackDetections && overlayTrackPrevDetections) {
@@ -474,7 +494,7 @@ els.clipPlayer.addEventListener('error', () => {
 });
 
 els.clipPlayer.addEventListener('play', () => {
-  if (overlayTrackEnabled) startOverlayRaf();
+  if (overlayShouldAnimate()) startOverlayRaf();
   drawClipOverlay();
 });
 
@@ -497,6 +517,11 @@ if (els.clipOverlayToggle) {
   els.clipOverlayToggle.addEventListener('change', () => {
     overlayEnabled = Boolean(els.clipOverlayToggle.checked);
     localStorage.setItem(OVERLAY_TOGGLE_KEY, overlayEnabled ? '1' : '0');
+    if (els.clipPlayer && !els.clipPlayer.paused && overlayShouldAnimate()) {
+      startOverlayRaf();
+    } else if (!overlayEnabled) {
+      stopOverlayRaf();
+    }
     drawClipOverlay();
   });
 }
@@ -509,7 +534,7 @@ if (els.clipOverlayTrackToggle) {
     overlayTrackEnabled = Boolean(els.clipOverlayTrackToggle.checked);
     localStorage.setItem(OVERLAY_TRACK_KEY, overlayTrackEnabled ? '1' : '0');
     clearOverlayTrackDetections();
-    if (overlayTrackEnabled && els.clipPlayer && !els.clipPlayer.paused) {
+    if (els.clipPlayer && !els.clipPlayer.paused && overlayShouldAnimate()) {
       startOverlayRaf();
     } else {
       stopOverlayRaf();
