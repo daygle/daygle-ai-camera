@@ -2808,3 +2808,88 @@ def test_audit_log_records_admin_actions(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+def test_detection_has_matching_record_rule(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    main = sys.modules["app.main"]
+
+    rules = [
+        {'name': 'Person alert', 'object': 'person', 'min_confidence': 0.5, 'enabled': True},
+        {'name': 'Dog alert', 'object': 'dog', 'min_confidence': 0.7, 'enabled': True},
+        {'name': 'Disabled cat', 'object': 'cat', 'min_confidence': 0.5, 'enabled': False},
+        {'name': 'Motion alert', 'object': 'motion', 'min_confidence': 0.3, 'enabled': True},
+    ]
+
+    assert main.detection_has_matching_record_rule({'label': 'person', 'confidence': 0.8}, rules) is True
+    assert main.detection_has_matching_record_rule({'label': 'dog', 'confidence': 0.7}, rules) is True
+    assert main.detection_has_matching_record_rule({'label': 'dog', 'confidence': 0.69}, rules) is False
+    assert main.detection_has_matching_record_rule({'label': 'car', 'confidence': 0.9}, rules) is False
+    assert main.detection_has_matching_record_rule({'label': 'cat', 'confidence': 0.9}, rules) is False
+    assert main.detection_has_matching_record_rule({'label': 'human', 'confidence': 0.8}, rules) is True
+    assert main.detection_has_matching_record_rule({'label': 'motion', 'confidence': 0.4}, rules) is True
+    assert main.detection_has_matching_record_rule({'label': 'motion', 'confidence': 0.1}, rules) is False
+    assert main.detection_has_matching_record_rule({'label': '', 'confidence': 0.9}, rules) is False
+
+
+def test_live_stream_detection_records_during_alert_cooldown(tmp_path, monkeypatch):
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, image_bytes, confidence=None):
+            return [{'label': 'person', 'confidence': 0.91, 'box': {'x': 0, 'y': 0, 'width': 1, 'height': 1}}]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
+    for rule in main.database.list_alert_rules():
+        main.database.delete_alert_rule(rule['id'])
+    main.database.create_alert_rule(
+        main.validate_alert_rule({
+            'name': 'Person alert',
+            'object': 'person',
+            'min_confidence': 0.5,
+            'cooldown_seconds': 3600,
+            'enabled': True,
+        }),
+        main.utc_now(),
+    )
+
+    camera_settings = {
+        'id': 'camera-1',
+        'name': 'Front Door',
+        'detection': {'zones': []},
+        'recording': {'enabled': True, 'record_on_alert': True, 'continuous': False},
+    }
+
+    # First detection: alert fires and recording is linked.
+    main.live_detection_last_checked.clear()
+    event_id1 = main.process_live_stream_alerts(
+        b'frame1',
+        {'width': 1280, 'height': 720},
+        camera_settings,
+        enforce_interval=False,
+    )
+    assert event_id1 is not None
+    assert main.database.get_event(event_id1)['recording_status'] == 'linked'
+
+    # Second detection: alert is in 1-hour cooldown. Clear debounce state so a new
+    # event is emitted, and verify that a recording is still created because the
+    # detection matches the rule — recordings must not depend on the alert firing.
+    main.live_event_last_emitted.pop('camera-1', None)
+    main.live_detection_last_checked.clear()
+    event_id2 = main.process_live_stream_alerts(
+        b'frame2',
+        {'width': 1280, 'height': 720},
+        camera_settings,
+        enforce_interval=False,
+    )
+    assert event_id2 is not None, "A new event should be created even during alert cooldown"
+    event2 = main.database.get_event(event_id2)
+    assert event2['recording_status'] == 'linked', (
+        "Recording must be linked when the detection matches an alert rule, regardless of cooldown"
+    )

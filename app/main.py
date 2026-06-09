@@ -862,6 +862,33 @@ def zone_detection_alert_rule_names(settings: dict[str, Any], detection: dict[st
     return {zone_rule_name(settings, zone, rule) for zone, rule in zone_object_rule_matches(settings, detection, action='alert')}
 
 
+def detection_has_matching_record_rule(detection: dict[str, Any], rules: list[dict[str, Any]]) -> bool:
+    """Return True if any enabled alert rule covers this detection by label and confidence.
+
+    Cooldown and time-window are intentionally ignored so a recording is created on every
+    matching detection, not only when a new alert notification is emitted.
+    """
+    label = str(detection.get('label') or '').strip().lower()
+    label = _LABEL_ALIASES.get(label, label)
+    if not label:
+        return False
+    confidence = float(detection.get('confidence') or 0)
+    for rule in rules:
+        if not rule.get('enabled', True):
+            continue
+        rule_object = str(rule.get('object') or '').strip().lower()
+        rule_object = _LABEL_ALIASES.get(rule_object, rule_object)
+        if rule_object != label:
+            continue
+        try:
+            min_conf = float(rule.get('min_confidence', 0.0 if label == 'motion' else 0.5))
+        except (TypeError, ValueError):
+            min_conf = 0.0 if label == 'motion' else 0.5
+        if confidence >= min_conf:
+            return True
+    return False
+
+
 def filter_detections_for_camera_anpr(detections: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
     if not detection_settings.get('anpr_enabled', True):
@@ -1243,7 +1270,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             'alert_matched': bool(zone_detection_alert_rule_names(settings, detection) & triggered_rule_names)
             if zone_rules else str(detection.get('label') or '').lower() in triggered_labels,
             'alert_triggered': zone_record_on_detect(detection, settings)
-            if zone_rules else str(detection.get('label') or '').lower() in triggered_labels,
+            if zone_rules else detection_has_matching_record_rule(detection, alerts.rules),
         }
         for detection in object_detections
     ]
@@ -1254,7 +1281,8 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             'label': 'motion',
             'motion_event': True,
             'alert_matched': 'motion' in triggered_labels,
-            'alert_triggered': 'motion' in triggered_labels or _motion_record,
+            'alert_triggered': 'motion' in triggered_labels or _motion_record
+            or detection_has_matching_record_rule({**strongest_motion, 'label': 'motion'}, alerts.rules),
         })
     matched_labels = [str(detection.get('label')) for detection in alert_detections if detection.get('label')]
     camera_recording_config = camera_event_recording_config(settings)
