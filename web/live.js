@@ -43,10 +43,15 @@ let liveAiTrackEnabled = true;
 let liveAiTrackInFlight = false;
 let liveAiTrackDetections = null;
 let liveAiTrackPrevDetections = null;
-let liveAiTrackLastUpdateMs = 0;
+// Wall-clock time (ms) at which each sample's frame was captured, so the
+// overlay can be projected onto the frame currently on screen regardless of
+// how long detection took.
+let liveAiTrackCaptureMs = 0;
+let liveAiTrackPrevCaptureMs = 0;
+let liveRafId = null;
 const LIVE_AI_TRACK_MAX_WIDTH = 640;
 const LIVE_AI_TRACK_MAX_HEIGHT = 360;
-const LIVE_AI_TRACK_LERP_MS = 150;
+const LIVE_AI_TRACK_MAX_LEAD_MS = 1500;
 const liveAiTrackOffscreenCanvas = document.createElement('canvas');
 
 async function api(path, options = {}) {
@@ -104,16 +109,41 @@ function drawLiveOverlay() {
   if (!liveAiTrackEnabled || !liveAiTrackDetections?.length) return;
 
   let detections = liveAiTrackDetections;
-  if (liveAiTrackPrevDetections && liveAiTrackLastUpdateMs > 0) {
-    const elapsed = performance.now() - liveAiTrackLastUpdateMs;
-    const t = Math.min(1, elapsed / LIVE_AI_TRACK_LERP_MS);
-    detections = interpolateDetections(liveAiTrackPrevDetections, liveAiTrackDetections, t);
+  if (liveAiTrackPrevDetections && liveAiTrackPrevCaptureMs > 0) {
+    detections = projectDetections(
+      liveAiTrackPrevDetections,
+      liveAiTrackDetections,
+      liveAiTrackPrevCaptureMs,
+      liveAiTrackCaptureMs,
+      performance.now(),
+      LIVE_AI_TRACK_MAX_LEAD_MS,
+    );
   }
 
   if (configuredLabels) {
     detections = detections.filter((d) => configuredLabels.has(String(d.label || '').trim().toLowerCase()));
   }
   drawDetectionBoxesOnCanvas(liveEls.liveAiTrackCanvas, detections, liveEls.frame);
+}
+
+function startLiveRaf() {
+  if (liveRafId !== null) return;
+  function loop() {
+    if (!liveAiTrackEnabled || isAllCameraMode()) {
+      liveRafId = null;
+      return;
+    }
+    drawLiveOverlay();
+    liveRafId = requestAnimationFrame(loop);
+  }
+  liveRafId = requestAnimationFrame(loop);
+}
+
+function stopLiveRaf() {
+  if (liveRafId !== null) {
+    cancelAnimationFrame(liveRafId);
+    liveRafId = null;
+  }
 }
 
 async function detectLiveFrameDetections() {
@@ -131,6 +161,9 @@ async function detectLiveFrameDetections() {
     liveAiTrackOffscreenCanvas.height = fh;
     const ctx = liveAiTrackOffscreenCanvas.getContext('2d');
     if (!ctx) return;
+    // Anchor the result to the moment the frame is captured, not to when the
+    // (latency-delayed) response arrives.
+    const captureMs = performance.now();
     ctx.drawImage(liveEls.frame, 0, 0, fw, fh);
     const blob = await new Promise((resolve) => liveAiTrackOffscreenCanvas.toBlob((b) => resolve(b), 'image/jpeg', 0.8));
     if (!blob) return;
@@ -145,7 +178,8 @@ async function detectLiveFrameDetections() {
       return { ...det, box };
     }).filter(Boolean);
     liveAiTrackPrevDetections = liveAiTrackDetections;
-    liveAiTrackLastUpdateMs = performance.now();
+    liveAiTrackPrevCaptureMs = liveAiTrackCaptureMs;
+    liveAiTrackCaptureMs = captureMs;
     liveAiTrackDetections = newDetections;
     drawLiveOverlay();
   } catch (_err) {
@@ -431,6 +465,8 @@ function setSelectedCamera(cameraId) {
   selectedZoneIndex = null;
   liveAiTrackDetections = null;
   liveAiTrackPrevDetections = null;
+  liveAiTrackCaptureMs = 0;
+  liveAiTrackPrevCaptureMs = 0;
   clearLiveOverlay();
   if (liveEls.cameraSelect) liveEls.cameraSelect.value = selectedCamera.id;
   if (isZonesPage) {
@@ -812,6 +848,11 @@ liveEls.frame.addEventListener('load', () => {
     ? `${selectedCamera?.name || 'Camera'} - matched alert boxes on`
     : `${selectedCamera?.name || 'Camera'} - matched alert boxes off`;
   detectLiveFrameDetections();
+  if (liveAiTrackEnabled && !isAllCameraMode()) {
+    startLiveRaf();
+  } else {
+    stopLiveRaf();
+  }
 });
 
 liveEls.frame.addEventListener('error', () => {
@@ -831,7 +872,15 @@ if (liveEls.liveAiTrackToggle) {
     localStorage.setItem(LIVE_AI_TRACK_KEY, liveAiTrackEnabled ? '1' : '0');
     liveAiTrackDetections = null;
     liveAiTrackPrevDetections = null;
+    liveAiTrackCaptureMs = 0;
+    liveAiTrackPrevCaptureMs = 0;
     clearLiveOverlay();
+    if (liveAiTrackEnabled && !isAllCameraMode()) {
+      detectLiveFrameDetections();
+      startLiveRaf();
+    } else {
+      stopLiveRaf();
+    }
   });
 }
 

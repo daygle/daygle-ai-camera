@@ -42,8 +42,11 @@ let overlayTrackLastRunMs = 0;
 let overlayTrackInFlight = false;
 let overlayTrackDetections = null;
 let overlayTrackPrevDetections = null;
-let overlayTrackPrevUpdateMs = 0;
-let overlayTrackLastUpdateMs = 0;
+// Video currentTime (seconds) at which each sample's frame was captured, so
+// the overlay can be projected onto the frame currently on screen regardless
+// of how long detection took.
+let overlayTrackCaptureTime = 0;
+let overlayTrackPrevCaptureTime = 0;
 let overlayRafId = null;
 let configuredLabels = null; // null = no filter loaded yet
 
@@ -191,8 +194,8 @@ function clearClipOverlay() {
 function clearOverlayTrackDetections() {
   overlayTrackDetections = null;
   overlayTrackPrevDetections = null;
-  overlayTrackPrevUpdateMs = 0;
-  overlayTrackLastUpdateMs = 0;
+  overlayTrackCaptureTime = 0;
+  overlayTrackPrevCaptureTime = 0;
   overlayTrackLastRunMs = 0;
 }
 
@@ -238,6 +241,10 @@ async function detectOverlayFrameDetections() {
     overlayTrackCanvas.height = frameHeight;
     const context = overlayTrackCanvas.getContext('2d');
     if (!context) return;
+    // Capture the frame's position on the playback timeline before sending it
+    // off for inference; the result is anchored to this moment, not to when
+    // the (latency-delayed) response comes back.
+    const captureTime = Number(els.clipPlayer.currentTime || 0);
     context.drawImage(els.clipPlayer, 0, 0, frameWidth, frameHeight);
 
     const blob = await new Promise((resolve) => {
@@ -260,8 +267,8 @@ async function detectOverlayFrameDetections() {
       };
     }).filter(Boolean);
     overlayTrackPrevDetections = overlayTrackDetections;
-    overlayTrackPrevUpdateMs = overlayTrackLastUpdateMs;
-    overlayTrackLastUpdateMs = performance.now();
+    overlayTrackPrevCaptureTime = overlayTrackCaptureTime;
+    overlayTrackCaptureTime = captureTime;
     overlayTrackDetections = newDetections;
   } catch (_error) {
     // Keep the last successful overlay detections if transient frame inference fails.
@@ -291,16 +298,23 @@ function drawClipOverlay() {
       ? allEventDetections.filter((d) => !GENERIC_TRIGGER_LABELS.has(String(d.label || '').toLowerCase()))
       : allEventDetections
   );
+  const playerTime = Number(els.clipPlayer.currentTime || 0);
   let rawTrackDetections = overlayTrackEnabled && Array.isArray(overlayTrackDetections) && overlayTrackDetections.length
     ? overlayTrackDetections : null;
-  if (rawTrackDetections && overlayTrackPrevDetections && overlayTrackLastUpdateMs > 0) {
-    const elapsed = performance.now() - overlayTrackLastUpdateMs;
-    const t = Math.min(1, elapsed / overlayTrackIntervalMs);
-    rawTrackDetections = interpolateDetections(overlayTrackPrevDetections, rawTrackDetections, t);
+  if (rawTrackDetections && overlayTrackPrevDetections) {
+    const interval = overlayTrackCaptureTime - overlayTrackPrevCaptureTime;
+    const maxLead = Math.max(0.5, interval * 3);
+    rawTrackDetections = projectDetections(
+      overlayTrackPrevDetections,
+      rawTrackDetections,
+      overlayTrackPrevCaptureTime,
+      overlayTrackCaptureTime,
+      playerTime,
+      maxLead,
+    );
   }
   const detections = rawTrackDetections ? filterByConfiguredLabels(rawTrackDetections) : eventDetections;
   if (!detections.length) return;
-  const playerTime = Number(els.clipPlayer.currentTime || 0);
   if (!overlayTrackEnabled && !shouldRenderOverlayForTime(activeRecording, playerTime)) return;
 
   drawDetectionBoxesOnCanvas(els.clipOverlay, detections, els.clipPlayer);
