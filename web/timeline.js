@@ -775,7 +775,7 @@ async function loadTimeline({ preserveSelection = true } = {}) {
   els.timelineStatus.textContent = 'Loading timeline…';
   const timezoneOffsetMinutes = new Date().getTimezoneOffset();
   const payload = await api(
-    `/api/recordings/timeline?camera_id=${encodeURIComponent(cameraId)}&day=${encodeURIComponent(day)}&tz_offset_minutes=${encodeURIComponent(timezoneOffsetMinutes)}`,
+    `/api/recordings/timeline?camera_id=${encodeURIComponent(cameraId)}&day=${encodeURIComponent(day)}&tz_offset_minutes=${timezoneOffsetMinutes}`,
   );
   state.payload = payload;
   populateControls(payload);
