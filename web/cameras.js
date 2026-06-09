@@ -9,10 +9,6 @@ const modal = document.getElementById('cameraModal');
 const deleteModal = document.getElementById('deleteModal');
 const editForm = document.getElementById('cameraEditForm');
 
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c]));
-}
-
 function setMessage(text, isError = false) {
   messageEl.textContent = text;
   messageEl.className = isError ? 'error' : 'muted';
