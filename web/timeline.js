@@ -93,10 +93,6 @@ const SEGMENT_COLORS = [
 
 const GENERIC_TIMELINE_LABELS = new Set(['motion', 'alert', 'human', 'object', 'none', 'off', 'continuous']);
 
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
-}
-
 function filterByConfiguredLabels(detections) {
   if (!configuredLabels) return detections;
   return detections.filter((d) => {
@@ -135,24 +131,6 @@ function clearOverlayTrackDetections() {
   overlayTrackLastRunMs = 0;
 }
 
-function interpolateDetections(prev, cur, t) {
-  if (!prev || !cur || t >= 1) return cur;
-  return cur.map((curDet) => {
-    const prevDet = prev.find((p) => p.label === curDet.label);
-    if (!prevDet?.box) return curDet;
-    const lerp = (a, b) => a + (b - a) * t;
-    return {
-      ...curDet,
-      box: {
-        x: lerp(prevDet.box.x, curDet.box.x),
-        y: lerp(prevDet.box.y, curDet.box.y),
-        width: lerp(prevDet.box.width, curDet.box.width),
-        height: lerp(prevDet.box.height, curDet.box.height),
-      },
-    };
-  });
-}
-
 function startOverlayRaf() {
   if (overlayRafId !== null) return;
   function loop() {
@@ -172,25 +150,6 @@ function stopOverlayRaf() {
     cancelAnimationFrame(overlayRafId);
     overlayRafId = null;
   }
-}
-
-function normalizeDetectionBox(box, width, height) {
-  const rawX = Number(box?.x ?? 0);
-  const rawY = Number(box?.y ?? 0);
-  const rawWidth = Number(box?.width ?? 0);
-  const rawHeight = Number(box?.height ?? 0);
-  if (!Number.isFinite(rawX) || !Number.isFinite(rawY) || !Number.isFinite(rawWidth) || !Number.isFinite(rawHeight)) return null;
-  if (rawWidth <= 0 || rawHeight <= 0) return null;
-  if (rawX <= 1 && rawY <= 1 && rawWidth <= 1 && rawHeight <= 1) {
-    return { x: rawX, y: rawY, width: rawWidth, height: rawHeight };
-  }
-  if (width <= 0 || height <= 0) return null;
-  return {
-    x: Math.max(0, Math.min(1, rawX / width)),
-    y: Math.max(0, Math.min(1, rawY / height)),
-    width: Math.max(0, Math.min(1, rawWidth / width)),
-    height: Math.max(0, Math.min(1, rawHeight / height)),
-  };
 }
 
 async function detectOverlayFrameDetections() {
@@ -239,31 +198,14 @@ async function detectOverlayFrameDetections() {
   }
 }
 
-function resizeClipOverlay() {
-  if (!els.clipOverlay || !els.clipPlayer) return;
-  const width = Math.max(1, Math.round(els.clipPlayer.clientWidth));
-  const height = Math.max(1, Math.round(els.clipPlayer.clientHeight));
-  const dpr = window.devicePixelRatio || 1;
-  const targetWidth = Math.max(1, Math.round(width * dpr));
-  const targetHeight = Math.max(1, Math.round(height * dpr));
-  if (els.clipOverlay.width !== targetWidth || els.clipOverlay.height !== targetHeight) {
-    els.clipOverlay.width = targetWidth;
-    els.clipOverlay.height = targetHeight;
-  }
-}
-
 function drawClipOverlay() {
   if (!els.clipOverlay || !els.clipPlayer) return;
-  resizeClipOverlay();
+  resizeOverlayCanvas(els.clipOverlay, els.clipPlayer);
   const context = els.clipOverlay.getContext('2d');
   if (!context) return;
-  const cssWidth = Math.max(1, els.clipPlayer.clientWidth);
-  const cssHeight = Math.max(1, els.clipPlayer.clientHeight);
-  const dpr = window.devicePixelRatio || 1;
   context.setTransform(1, 0, 0, 1, 0, 0);
   context.clearRect(0, 0, els.clipOverlay.width, els.clipOverlay.height);
   if (!overlayEnabled) return;
-  context.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   if (overlayTrackEnabled && !overlayRafId) {
     detectOverlayFrameDetections();
@@ -288,45 +230,7 @@ function drawClipOverlay() {
   const playerTime = Number(els.clipPlayer.currentTime || 0);
   if (!overlayTrackEnabled && !shouldRenderOverlayForTime(activeRecording, playerTime)) return;
 
-  const videoWidth = Math.max(1, Number(els.clipPlayer.videoWidth || cssWidth));
-  const videoHeight = Math.max(1, Number(els.clipPlayer.videoHeight || cssHeight));
-  const scale = Math.min(cssWidth / videoWidth, cssHeight / videoHeight);
-  const renderWidth = videoWidth * scale;
-  const renderHeight = videoHeight * scale;
-  const offsetX = (cssWidth - renderWidth) / 2;
-  const offsetY = (cssHeight - renderHeight) / 2;
-
-  context.font = '12px Inter, ui-sans-serif, system-ui, sans-serif';
-  context.textBaseline = 'middle';
-  context.lineWidth = 2;
-
-  detections.forEach((detection) => {
-    const box = detection?.box || detection || {};
-    const x = clamp(Number(box.x ?? 0), 0, 1);
-    const y = clamp(Number(box.y ?? 0), 0, 1);
-    const width = clamp(Number(box.width ?? 0), 0, 1);
-    const height = clamp(Number(box.height ?? 0), 0, 1);
-    if (width <= 0 || height <= 0) return;
-    const drawX = offsetX + (x * renderWidth);
-    const drawY = offsetY + (y * renderHeight);
-    const drawWidth = width * renderWidth;
-    const drawHeight = height * renderHeight;
-    if (drawWidth < 2 || drawHeight < 2) return;
-
-    context.strokeStyle = '#49e6a3';
-    context.strokeRect(drawX, drawY, drawWidth, drawHeight);
-
-    const confidence = Math.round(Number(detection.confidence || 0) * 100);
-    const label = `${String(detection.label || 'object')} ${confidence}%`;
-    const textWidth = context.measureText(label).width;
-    const labelHeight = 20;
-    const labelWidth = textWidth + 12;
-    const labelY = drawY > labelHeight + 4 ? drawY - labelHeight - 4 : drawY + 4;
-    context.fillStyle = 'rgba(7, 11, 19, 0.86)';
-    context.fillRect(drawX, labelY, labelWidth, labelHeight);
-    context.fillStyle = '#49e6a3';
-    context.fillText(label, drawX + 6, labelY + (labelHeight / 2));
-  });
+  drawDetectionBoxesOnCanvas(els.clipOverlay, detections, els.clipPlayer);
 }
 
 async function api(path, options = {}) {

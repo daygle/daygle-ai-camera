@@ -68,94 +68,23 @@ function clearLiveOverlay() {
   ctx.clearRect(0, 0, liveEls.liveAiTrackCanvas.width, liveEls.liveAiTrackCanvas.height);
 }
 
-function resizeLiveOverlay() {
-  if (!liveEls.liveAiTrackCanvas || !liveEls.frame) return;
-  const dpr = window.devicePixelRatio || 1;
-  const w = Math.max(1, Math.round(liveEls.frame.clientWidth * dpr));
-  const h = Math.max(1, Math.round(liveEls.frame.clientHeight * dpr));
-  if (liveEls.liveAiTrackCanvas.width !== w || liveEls.liveAiTrackCanvas.height !== h) {
-    liveEls.liveAiTrackCanvas.width = w;
-    liveEls.liveAiTrackCanvas.height = h;
-  }
-}
-
-function liveOverlayInterpolate(prev, cur, t) {
-  if (!prev || !cur || t >= 1) return cur;
-  return cur.map((curDet) => {
-    const prevDet = prev.find((p) => p.label === curDet.label);
-    if (!prevDet?.box) return curDet;
-    const lerp = (a, b) => a + (b - a) * t;
-    return {
-      ...curDet,
-      box: {
-        x: lerp(prevDet.box.x, curDet.box.x),
-        y: lerp(prevDet.box.y, curDet.box.y),
-        width: lerp(prevDet.box.width, curDet.box.width),
-        height: lerp(prevDet.box.height, curDet.box.height),
-      },
-    };
-  });
-}
-
 function drawLiveOverlay() {
   if (!liveEls.liveAiTrackCanvas || !liveEls.frame) return;
-  resizeLiveOverlay();
+  resizeOverlayCanvas(liveEls.liveAiTrackCanvas, liveEls.frame);
   const ctx = liveEls.liveAiTrackCanvas.getContext('2d');
   if (!ctx) return;
-  const dpr = window.devicePixelRatio || 1;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, liveEls.liveAiTrackCanvas.width, liveEls.liveAiTrackCanvas.height);
   if (!liveAiTrackEnabled || !liveAiTrackDetections?.length) return;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   let detections = liveAiTrackDetections;
   if (liveAiTrackPrevDetections && liveAiTrackLastUpdateMs > 0) {
     const elapsed = performance.now() - liveAiTrackLastUpdateMs;
     const t = Math.min(1, elapsed / LIVE_AI_TRACK_LERP_MS);
-    detections = liveOverlayInterpolate(liveAiTrackPrevDetections, liveAiTrackDetections, t);
+    detections = interpolateDetections(liveAiTrackPrevDetections, liveAiTrackDetections, t);
   }
 
-  const cssWidth = Math.max(1, liveEls.frame.clientWidth);
-  const cssHeight = Math.max(1, liveEls.frame.clientHeight);
-  const natW = Math.max(1, liveEls.frame.naturalWidth || cssWidth);
-  const natH = Math.max(1, liveEls.frame.naturalHeight || cssHeight);
-  const scale = Math.min(cssWidth / natW, cssHeight / natH);
-  const renderWidth = natW * scale;
-  const renderHeight = natH * scale;
-  const offsetX = (cssWidth - renderWidth) / 2;
-  const offsetY = (cssHeight - renderHeight) / 2;
-
-  ctx.font = '12px Inter, ui-sans-serif, system-ui, sans-serif';
-  ctx.textBaseline = 'middle';
-  ctx.lineWidth = 2;
-
-  detections.forEach((det) => {
-    const box = det?.box || {};
-    const x = clamp(Number(box.x ?? 0));
-    const y = clamp(Number(box.y ?? 0));
-    const w = clamp(Number(box.width ?? 0));
-    const h = clamp(Number(box.height ?? 0));
-    if (w <= 0 || h <= 0) return;
-    const dx = offsetX + x * renderWidth;
-    const dy = offsetY + y * renderHeight;
-    const dw = w * renderWidth;
-    const dh = h * renderHeight;
-    if (dw < 2 || dh < 2) return;
-
-    ctx.strokeStyle = '#49e6a3';
-    ctx.strokeRect(dx, dy, dw, dh);
-
-    const confidence = Math.round(Number(det.confidence || 0) * 100);
-    const label = `${String(det.label || 'object')} ${confidence}%`;
-    const textWidth = ctx.measureText(label).width;
-    const labelHeight = 20;
-    const labelWidth = textWidth + 12;
-    const labelY = dy > labelHeight + 4 ? dy - labelHeight - 4 : dy + 4;
-    ctx.fillStyle = 'rgba(7, 11, 19, 0.86)';
-    ctx.fillRect(dx, labelY, labelWidth, labelHeight);
-    ctx.fillStyle = '#49e6a3';
-    ctx.fillText(label, dx + 6, labelY + labelHeight / 2);
-  });
+  drawDetectionBoxesOnCanvas(liveEls.liveAiTrackCanvas, detections, liveEls.frame);
 }
 
 async function detectLiveFrameDetections() {
@@ -182,12 +111,8 @@ async function detectLiveFrameDetections() {
       body: blob,
     });
     const newDetections = (Array.isArray(payload?.detections) ? payload.detections : []).map((det) => {
-      const b = det?.box || {};
-      const rawX = Number(b.x ?? 0), rawY = Number(b.y ?? 0), rawW = Number(b.width ?? 0), rawH = Number(b.height ?? 0);
-      if (rawW <= 0 || rawH <= 0) return null;
-      const box = (rawX <= 1 && rawY <= 1 && rawW <= 1 && rawH <= 1)
-        ? { x: rawX, y: rawY, width: rawW, height: rawH }
-        : { x: clamp(rawX / fw), y: clamp(rawY / fh), width: clamp(rawW / fw), height: clamp(rawH / fh) };
+      const box = normalizeDetectionBox(det?.box || {}, fw, fh);
+      if (!box) return null;
       return { ...det, box };
     }).filter(Boolean);
     liveAiTrackPrevDetections = liveAiTrackDetections;
