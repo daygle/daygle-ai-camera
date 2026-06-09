@@ -534,6 +534,7 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
                 'cooldown_seconds': 60,
                 'email_enabled': False,
                 'email_recipients': [],
+                'push_enabled': False,
                 'active_start': None,
                 'active_end': None,
             })
@@ -1885,21 +1886,32 @@ def deliver_push_notifications(triggered: list[dict[str, Any]], event_id: int, r
         return
     push_settings = effective_push_notification_settings()
     if not push_settings.get('enabled'):
+        logger.debug('Push notifications disabled globally; skipping event %s', event_id)
         return
     event = database.get_event(event_id) or {}
     metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
     camera_name = str(metadata.get('camera_name') or '').strip() or None
     camera_id = str(metadata.get('camera_id') or '').strip() or None
-    rules_by_name = {str(rule.get('name')): rule for rule in (rules or effective_alert_rules())}
+    # Build lookup: zone rules come last so they overwrite global DB rules on name collision.
+    # Caller passes zone_rules + global_rules; we rebuild with global first, zone second.
+    zone_rules = [r for r in (rules or []) if r.get('zone_id')]
+    global_rules = [r for r in (rules or effective_alert_rules()) if not r.get('zone_id')]
+    rules_by_name = {str(rule.get('name')): rule for rule in global_rules + zone_rules}
     notifier = PushNotificationService(push_settings)
     for alert in triggered:
-        rule = rules_by_name.get(str(alert.get('rule_name')))
-        if not rule or not rule.get('push_enabled'):
+        rule_name = str(alert.get('rule_name') or '')
+        rule = rules_by_name.get(rule_name)
+        if not rule:
+            logger.debug('Push skipped for event %s: no rule found for %r', event_id, rule_name)
+            continue
+        if not rule.get('push_enabled'):
+            logger.debug('Push skipped for event %s rule %r: push_enabled is False', event_id, rule_name)
             continue
         try:
             notifier.send_alert(alert, event_id=event_id, camera_name=camera_name, camera_id=camera_id)
+            logger.info('Push notification sent for event %s rule %r', event_id, rule_name)
         except PushNotificationError as exc:
-            logger.warning('Failed to send push notification for event %s rule %s: %s', event_id, alert.get('rule_name'), exc)
+            logger.error('Failed to send push notification for event %s rule %r: %s', event_id, rule_name, exc)
 
 
 plate_alert_last_triggered: dict[str, float] = {}

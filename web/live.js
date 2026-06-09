@@ -39,7 +39,7 @@ let zoneDrag = null;
 let configuredLabels = null;
 
 const LIVE_AI_TRACK_KEY = 'daygle.live.overlay.track.enabled';
-let liveAiTrackEnabled = false;
+let liveAiTrackEnabled = true;
 let liveAiTrackInFlight = false;
 let liveAiTrackDetections = null;
 let liveAiTrackPrevDetections = null;
@@ -830,7 +830,7 @@ window.addEventListener('resize', drawLiveOverlay);
 
 if (liveEls.liveAiTrackToggle) {
   const savedTrack = localStorage.getItem(LIVE_AI_TRACK_KEY);
-  liveAiTrackEnabled = savedTrack === '1';
+  liveAiTrackEnabled = savedTrack !== '0';
   liveEls.liveAiTrackToggle.checked = liveAiTrackEnabled;
   liveEls.liveAiTrackToggle.addEventListener('change', () => {
     liveAiTrackEnabled = Boolean(liveEls.liveAiTrackToggle.checked);

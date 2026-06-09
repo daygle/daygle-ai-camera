@@ -22,19 +22,25 @@ function normalizeDetectionBox(box, frameWidth, frameHeight) {
   };
 }
 
+// Extrapolates detections forward from cur using the velocity (cur - prev).
+// t=0 returns cur exactly; t=1 projects one full interval ahead.
+// This keeps the box on top of a moving object between inference updates
+// rather than lagging behind it.
 function interpolateDetections(prev, cur, t) {
-  if (!prev || !cur || t >= 1) return cur;
+  if (!prev || !cur) return cur;
+  const tClamped = Math.min(1, Math.max(0, t));
+  if (tClamped === 0) return cur;
   return cur.map((curDet) => {
     const prevDet = prev.find((p) => p.label === curDet.label);
     if (!prevDet?.box) return curDet;
-    const lerp = (a, b) => a + (b - a) * t;
+    const extrapolate = (a, b) => Math.max(0, Math.min(1, b + (b - a) * tClamped));
     return {
       ...curDet,
       box: {
-        x: lerp(prevDet.box.x, curDet.box.x),
-        y: lerp(prevDet.box.y, curDet.box.y),
-        width: lerp(prevDet.box.width, curDet.box.width),
-        height: lerp(prevDet.box.height, curDet.box.height),
+        x: extrapolate(prevDet.box.x, curDet.box.x),
+        y: extrapolate(prevDet.box.y, curDet.box.y),
+        width: extrapolate(prevDet.box.width, curDet.box.width),
+        height: extrapolate(prevDet.box.height, curDet.box.height),
       },
     };
   });

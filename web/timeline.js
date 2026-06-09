@@ -36,8 +36,8 @@ let activeRecording = null;
 
 const OVERLAY_TOGGLE_KEY = 'daygle.timeline.overlay.enabled';
 const OVERLAY_TRACK_KEY = 'daygle.timeline.overlay.track.enabled';
-let overlayEnabled = false;
-let overlayTrackEnabled = false;
+let overlayEnabled = true;
+let overlayTrackEnabled = true;
 let overlayTrackIntervalMs = 300;
 const OVERLAY_TRACK_MAX_WIDTH = 640;
 const OVERLAY_TRACK_MAX_HEIGHT = 360;
@@ -48,7 +48,6 @@ let overlayTrackDetections = null;
 let overlayTrackPrevDetections = null;
 let overlayTrackPrevUpdateMs = 0;
 let overlayTrackLastUpdateMs = 0;
-const OVERLAY_TRACK_LERP_MS = 150;
 let overlayRafId = null;
 let overlayResizeObserver = null;
 
@@ -222,7 +221,7 @@ function drawClipOverlay() {
     ? overlayTrackDetections : null;
   if (rawTrackDetections && overlayTrackPrevDetections && overlayTrackLastUpdateMs > 0) {
     const elapsed = performance.now() - overlayTrackLastUpdateMs;
-    const t = Math.min(1, elapsed / OVERLAY_TRACK_LERP_MS);
+    const t = Math.min(1, elapsed / overlayTrackIntervalMs);
     rawTrackDetections = interpolateDetections(overlayTrackPrevDetections, rawTrackDetections, t);
   }
   const detections = rawTrackDetections ? filterByConfiguredLabels(rawTrackDetections) : eventDetections;
@@ -917,7 +916,7 @@ if ('ResizeObserver' in window && els.clipPlayer) {
 
 if (els.clipOverlayToggle) {
   const savedValue = localStorage.getItem(OVERLAY_TOGGLE_KEY);
-  overlayEnabled = savedValue === '1';
+  overlayEnabled = savedValue !== '0';
   els.clipOverlayToggle.checked = overlayEnabled;
   els.clipOverlayToggle.addEventListener('change', () => {
     overlayEnabled = Boolean(els.clipOverlayToggle.checked);
@@ -928,7 +927,7 @@ if (els.clipOverlayToggle) {
 
 if (els.clipOverlayTrackToggle) {
   const savedTrackValue = localStorage.getItem(OVERLAY_TRACK_KEY);
-  overlayTrackEnabled = savedTrackValue === '1';
+  overlayTrackEnabled = savedTrackValue !== '0';
   els.clipOverlayTrackToggle.checked = overlayTrackEnabled;
   els.clipOverlayTrackToggle.addEventListener('change', () => {
     overlayTrackEnabled = Boolean(els.clipOverlayTrackToggle.checked);

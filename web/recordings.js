@@ -24,7 +24,7 @@ let overlayResizeObserver = null;
 const OVERLAY_TOGGLE_KEY = 'daygle.recordings.overlay.enabled';
 const OVERLAY_TRACK_KEY = 'daygle.recordings.overlay.track.enabled';
 let overlayEnabled = true;
-let overlayTrackEnabled = false;
+let overlayTrackEnabled = true;
 const GENERIC_TRIGGER_LABELS = new Set(['motion', 'alert', 'human', 'object', 'none', 'off', 'continuous']);
 
 function filterByConfiguredLabels(detections) {
@@ -44,7 +44,6 @@ let overlayTrackDetections = null;
 let overlayTrackPrevDetections = null;
 let overlayTrackPrevUpdateMs = 0;
 let overlayTrackLastUpdateMs = 0;
-const OVERLAY_TRACK_LERP_MS = 150;
 let overlayRafId = null;
 let configuredLabels = null; // null = no filter loaded yet
 
@@ -296,7 +295,7 @@ function drawClipOverlay() {
     ? overlayTrackDetections : null;
   if (rawTrackDetections && overlayTrackPrevDetections && overlayTrackLastUpdateMs > 0) {
     const elapsed = performance.now() - overlayTrackLastUpdateMs;
-    const t = Math.min(1, elapsed / OVERLAY_TRACK_LERP_MS);
+    const t = Math.min(1, elapsed / overlayTrackIntervalMs);
     rawTrackDetections = interpolateDetections(overlayTrackPrevDetections, rawTrackDetections, t);
   }
   const detections = rawTrackDetections ? filterByConfiguredLabels(rawTrackDetections) : eventDetections;
@@ -499,7 +498,7 @@ if (els.clipOverlayToggle) {
 
 if (els.clipOverlayTrackToggle) {
   const savedTrackValue = localStorage.getItem(OVERLAY_TRACK_KEY);
-  overlayTrackEnabled = savedTrackValue === '1';
+  overlayTrackEnabled = savedTrackValue !== '0';
   els.clipOverlayTrackToggle.checked = overlayTrackEnabled;
   els.clipOverlayTrackToggle.addEventListener('change', () => {
     overlayTrackEnabled = Boolean(els.clipOverlayTrackToggle.checked);
