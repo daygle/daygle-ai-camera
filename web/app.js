@@ -202,7 +202,7 @@ async function loadConfiguredLabels() {
     for (const camera of (settings?.cameras || [])) {
       for (const zone of (camera?.detection?.zones || [])) {
         for (const rule of (zone?.object_rules || [])) {
-          if (rule.enabled !== false) {
+          if (rule.enabled !== false && (rule.alert_on_detect !== false || rule.record_on_detect !== false)) {
             const label = String(rule.label || '').trim().toLowerCase();
             setMin(label, Number(rule.min_confidence ?? 0.5));
           }

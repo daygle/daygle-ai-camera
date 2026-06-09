@@ -36,6 +36,8 @@ let drawingMode = false;
 let draftPolygon = null;
 let zoneDrag = null;
 
+let configuredLabels = null;
+
 const LIVE_AI_TRACK_KEY = 'daygle.live.overlay.track.enabled';
 let liveAiTrackEnabled = false;
 let liveAiTrackInFlight = false;
@@ -58,6 +60,36 @@ async function api(path, options = {}) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.detail || `Request failed: ${response.status}`);
   return payload;
+}
+
+async function loadConfiguredLabels() {
+  try {
+    const [settings, alertData] = await Promise.all([api('/api/settings/system'), api('/api/settings/alerts')]);
+    const labels = new Map([['motion', 0.45]]);
+    const setMin = (label, conf) => {
+      if (!label) return;
+      if (!labels.has(label) || conf < labels.get(label)) labels.set(label, conf);
+    };
+    for (const rule of (alertData?.rules || [])) {
+      if (rule.enabled !== false) {
+        const label = String(rule.label || rule.object || '').trim().toLowerCase();
+        setMin(label, Number(rule.min_confidence ?? 0.5));
+      }
+    }
+    for (const camera of (settings?.cameras || [])) {
+      for (const zone of (camera?.detection?.zones || [])) {
+        for (const rule of (zone?.object_rules || [])) {
+          if (rule.enabled !== false && (rule.alert_on_detect !== false || rule.record_on_detect !== false)) {
+            const label = String(rule.label || '').trim().toLowerCase();
+            setMin(label, Number(rule.min_confidence ?? 0.5));
+          }
+        }
+      }
+    }
+    configuredLabels = labels;
+  } catch {
+    // Show all labels if settings unavailable.
+  }
 }
 
 function clearLiveOverlay() {
@@ -84,6 +116,9 @@ function drawLiveOverlay() {
     detections = interpolateDetections(liveAiTrackPrevDetections, liveAiTrackDetections, t);
   }
 
+  if (configuredLabels) {
+    detections = detections.filter((d) => configuredLabels.has(String(d.label || '').trim().toLowerCase()));
+  }
   drawDetectionBoxesOnCanvas(liveEls.liveAiTrackCanvas, detections, liveEls.frame);
 }
 
@@ -336,19 +371,20 @@ function syncViewMode() {
 function formatDetectionStatus(payload) {
   if (!payload) return 'Live AI status unavailable.';
 
-  // Build "label (XX%)" strings, deduplicating by highest confidence
+  // Build "label (XX%)" strings, deduplicating by highest confidence, filtering to active rules only
   const confMap = new Map();
   for (const d of (payload.detections || [])) {
     const label = String(d.label || '').trim().toLowerCase();
     const conf = Number(d.confidence || 0);
     if (!label) continue;
+    if (configuredLabels && !configuredLabels.has(label)) continue;
     if (!confMap.has(label) || conf > confMap.get(label)) confMap.set(label, conf);
   }
-  // Fall back to plain detected_labels if detections had no usable entries
+  // Fall back to detected_labels filtered to active rules
   if (confMap.size === 0) {
     for (const label of (payload.detected_labels || [])) {
       const l = String(label || '').trim().toLowerCase();
-      if (l) confMap.set(l, 0);
+      if (l && (!configuredLabels || configuredLabels.has(l))) confMap.set(l, 0);
     }
   }
   const labelStr = confMap.size
@@ -873,6 +909,7 @@ async function init() {
       availableLabels = [];
     }
   }
+  await loadConfiguredLabels();
   const payload = await api('/api/cameras');
   cameras = payload.cameras || [];
   renderCameraOptions();
