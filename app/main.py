@@ -358,6 +358,13 @@ def normalize_bool_setting(value: Any, default: bool = False) -> bool:
     return str(value).strip().lower() in {'1', 'true', 'yes', 'on', 'enabled'}
 
 
+_LABEL_ALIASES: dict[str, str] = {
+    'human': 'person',
+    'people': 'person',
+    'pedestrian': 'person',
+}
+
+
 def normalize_label_list(value: Any) -> list[str]:
     if isinstance(value, str):
         raw_labels = value.split(',')
@@ -368,7 +375,7 @@ def normalize_label_list(value: Any) -> list[str]:
     labels: list[str] = []
     seen: set[str] = set()
     for raw_label in raw_labels:
-        label = str(raw_label).strip().lower()
+        label = _LABEL_ALIASES.get(str(raw_label).strip().lower(), str(raw_label).strip().lower())
         if label and label not in seen:
             labels.append(label)
             seen.add(label)
@@ -631,9 +638,8 @@ def detection_overlap_ratio_with_zone_rect(detection: dict[str, Any], zone: dict
 def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any], *, min_overlap_ratio: float = 0.2) -> bool:
     if detection_center_in_zone(detection, zone):
         return True
-    points = zone.get('points') or []
-    if isinstance(points, list) and len(points) >= 3:
-        return False
+    # Fall back to bounding-rect overlap for both polygon and rectangular zones so that
+    # large objects straddling the zone boundary are not silently dropped.
     return detection_overlap_ratio_with_zone_rect(detection, zone) >= min_overlap_ratio
 
 
