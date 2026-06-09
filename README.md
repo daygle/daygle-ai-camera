@@ -109,13 +109,6 @@ apt update && apt install -y --no-install-recommends git python3 python3-pip pyt
    DAYGLE_CONFIG=config.yaml uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
    ```
 
-   On Windows PowerShell:
-
-   ```powershell
-   $env:DAYGLE_CONFIG="config.yaml"
-   python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8080
-   ```
-
 6. Open <http://127.0.0.1:8080/>.
 
 7. Complete first-run setup:
