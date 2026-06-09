@@ -281,9 +281,9 @@ _frame_motion_lock = threading.Lock()
 
 _MOTION_FRAME_W = 160
 _MOTION_FRAME_H = 120
-_MOTION_PIXEL_THRESHOLD = 20    # intensity change per pixel (0–255) to count as changed
+_MOTION_PIXEL_THRESHOLD = 30    # intensity change per pixel (0–255) to count as changed; 30 filters IR/night-vision sensor noise
 _MOTION_GATE_FRACTION = 0.003   # 0.3% of pixels must change before any motion is reported
-_MOTION_SCALE_FRACTION = 0.05   # 5% of pixels changed maps to confidence 1.0
+_MOTION_SCALE_FRACTION = 0.10   # 10% of pixels changed maps to confidence 1.0 (less sensitive than 5% for IR cameras)
 _MOTION_BACKGROUND_ALPHA = 0.05 # background learning rate; stationary objects absorbed in ~30s
 live_alert_monitor_stop = threading.Event()
 live_alert_monitor_thread: threading.Thread | None = None
@@ -677,20 +677,31 @@ def zone_motion_detections(detections: list[dict[str, Any]], settings: dict[str,
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_motion', True)]
     if not zones:
         return []
-    seen: set[int] = set()
+    seen_zones: set[str] = set()
     result: list[dict[str, Any]] = []
-    for i, detection in enumerate(detections):
-        for zone in zones:
-            if detection_matches_zone(detection, zone):
-                conf_threshold = zone_motion_min_confidence(zone)
-                # Compare pixel-diff motion confidence (not YOLO object confidence) against
-                # the threshold, and stamp the detection with the actual motion confidence so
-                # the overlay never shows a parked car as "motion 98%" just because YOLO is
-                # highly confident it is a car.
-                if frame_motion_confidence >= conf_threshold and i not in seen:
-                    seen.add(i)
-                    result.append({**detection, 'confidence': frame_motion_confidence})
-                    break
+    for zone in zones:
+        zone_id = str(zone.get('id') or zone.get('name') or id(zone))
+        if zone_id in seen_zones:
+            continue
+        conf_threshold = zone_motion_min_confidence(zone)
+        if frame_motion_confidence < conf_threshold:
+            continue
+        # Require at least one YOLO-detected object in the zone to confirm motion is
+        # happening in a monitored area (not just open-sky noise outside all zones).
+        if not any(detection_matches_zone(detection, zone) for detection in detections):
+            continue
+        seen_zones.add(zone_id)
+        # Use the zone's own bounding box so the overlay shows where the motion zone is,
+        # not which YOLO object happens to be parked inside it.
+        result.append({
+            'confidence': frame_motion_confidence,
+            'box': {
+                'x': float(zone.get('x', 0)),
+                'y': float(zone.get('y', 0)),
+                'width': float(zone.get('width', 1)),
+                'height': float(zone.get('height', 1)),
+            },
+        })
     return result
 
 
