@@ -1153,7 +1153,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             reason='No detections matched this camera and its monitoring areas.',
             detected_labels=raw_labels,
             matched_labels=[],
-            detections=object_detections,
+            detections=[{**d, 'alert_matched': False, 'alert_triggered': False} for d in object_detections],
             anpr_detections=[],
         )
         return None
@@ -2010,7 +2010,7 @@ def render_live_snapshot_jpeg_overlay(image_bytes: bytes, detections: list[dict[
         return image_bytes
     height, width = image.shape[:2]
     for detection in detections:
-        if detection.get('alert_matched', detection.get('alert_triggered')) is False:
+        if detection.get('alert_matched') is False and detection.get('alert_triggered') is False:
             continue
         box = detection.get('box') or {}
         x = int(max(0, min(1, float(box.get('x') or 0))) * width)
