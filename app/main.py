@@ -284,6 +284,7 @@ _MOTION_FRAME_H = 120
 _MOTION_PIXEL_THRESHOLD = 20    # intensity change per pixel (0–255) to count as changed
 _MOTION_GATE_FRACTION = 0.003   # 0.3% of pixels must change before any motion is reported
 _MOTION_SCALE_FRACTION = 0.05   # 5% of pixels changed maps to confidence 1.0
+_MOTION_BACKGROUND_ALPHA = 0.05 # background learning rate; stationary objects absorbed in ~30s
 live_alert_monitor_stop = threading.Event()
 live_alert_monitor_thread: threading.Thread | None = None
 
@@ -859,8 +860,11 @@ def detection_label_set(detections: list[dict[str, Any]]) -> set[str]:
 
 
 def detect_frame_motion(camera_id: str, image_bytes: bytes) -> tuple[bool, float]:
-    """Frame-differencing motion gate. Returns (has_motion, confidence 0-1).
-    Compares current frame to previous; fails open so object rules are never blocked."""
+    """Adaptive-background motion gate. Returns (has_motion, confidence 0-1).
+    Maintains a per-camera exponential moving average background so stationary
+    objects (parked cars, fixed furniture) are absorbed into the background model
+    over time and no longer trigger motion. Fails open so object rules are never
+    blocked."""
     try:
         import numpy as _np
         from PIL import Image as _Image
@@ -869,11 +873,15 @@ def detect_frame_motion(camera_id: str, image_bytes: bytes) -> tuple[bool, float
         )
         current = _np.array(img, dtype=_np.float32)
         with _frame_motion_lock:
-            prev = _frame_motion_prev.get(camera_id)
-            _frame_motion_prev[camera_id] = current
-        if prev is None:
-            return False, 0.0
-        changed_fraction = float(_np.mean(_np.abs(current - prev) > _MOTION_PIXEL_THRESHOLD))
+            background = _frame_motion_prev.get(camera_id)
+            if background is None:
+                _frame_motion_prev[camera_id] = current
+                return False, 0.0
+            # Update background model before comparing so the diff reflects
+            # deviation from the learned scene, not just the previous frame.
+            updated_bg = (1.0 - _MOTION_BACKGROUND_ALPHA) * background + _MOTION_BACKGROUND_ALPHA * current
+            _frame_motion_prev[camera_id] = updated_bg
+        changed_fraction = float(_np.mean(_np.abs(current - background) > _MOTION_PIXEL_THRESHOLD))
         if changed_fraction < _MOTION_GATE_FRACTION:
             return False, 0.0
         return True, round(min(1.0, changed_fraction / _MOTION_SCALE_FRACTION), 3)
