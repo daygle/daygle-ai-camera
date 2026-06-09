@@ -968,7 +968,7 @@ def detect_frame_motion(camera_id: str, image_bytes: bytes) -> tuple[bool, float
             return False, 0.0
         return True, round(min(1.0, changed_fraction / _MOTION_SCALE_FRACTION), 3)
     except Exception:
-        return True, 0.5  # fail open: allow motion if comparison unavailable
+        return True, 0.4  # fail open: allow motion if comparison unavailable
 
 
 def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: float) -> bool:
@@ -1269,22 +1269,12 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
     triggered = alerts.process(alert_detections)
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     triggered_labels = {str(alert.get('label') or '').lower() for alert in triggered}
-    # True when at least one zone has an enabled object rule (alert or record).
-    # When no rules exist, fall back to treating every matched detection as recordable
-    # so cameras without zone rules still produce recordings.
-    _has_zone_object_rules = bool(zone_rules) or any(
-        rule.get('enabled', True)
-        for zone in (settings.get('detection') or {}).get('zones', [])
-        if zone.get('enabled', True) and zone.get('monitor_objects', True)
-        for rule in (zone.get('object_rules') or [])
-    )
     recording_detections = [
         {
             **detection,
             'alert_matched': bool(zone_detection_alert_rule_names(settings, detection) & triggered_rule_names)
             if zone_rules else str(detection.get('label') or '').lower() in triggered_labels,
-            'alert_triggered': zone_record_on_detect(detection, settings)
-            if _has_zone_object_rules else True,
+            'alert_triggered': zone_record_on_detect(detection, settings),
         }
         for detection in object_detections
     ]
@@ -2890,6 +2880,7 @@ def runtime_config():
         'ai': {
             'enabled': effective_ai_config().get('enabled'),
             'backend': effective_ai_config().get('backend'),
+            'confidence': effective_ai_config().get('confidence'),
             'iou_threshold': effective_ai_config().get('iou_threshold'),
             'input_size': effective_ai_config().get('input_size'),
             'model_path': effective_ai_config().get('model_path'),
@@ -3352,7 +3343,7 @@ def delete_plate_alert(rule_id: int, request: Request):
 
 def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_ai_config()
-    allowed = {'enabled', 'backend', 'iou_threshold', 'input_size', 'model_path', 'labels_path'}
+    allowed = {'enabled', 'backend', 'confidence', 'iou_threshold', 'input_size', 'model_path', 'labels_path'}
     updated = {key: current.get(key) for key in allowed if key in current}
     for key, value in payload.items():
         if key in allowed:
@@ -3366,7 +3357,7 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if backend != 'onnx':
         raise HTTPException(status_code=400, detail='AI backend must be onnx.')
     updated['backend'] = backend
-    for field in ('iou_threshold',):
+    for field in ('confidence', 'iou_threshold'):
         try:
             updated[field] = float(updated.get(field, 0.45))
         except (TypeError, ValueError) as exc:
@@ -3816,6 +3807,10 @@ def export_yolo_onnx(model_name: str, destination: Path) -> int:
         destination.unlink(missing_ok=True)
         raise RuntimeError('Exported model file is empty.')
     return destination.stat().st_size
+
+
+def export_yolov8n_onnx(destination: Path) -> int:
+    return export_yolo_onnx('yolov8n', destination)
 
 
 def _do_download_model(model_name: str, switch_active: bool = True) -> dict[str, Any]:

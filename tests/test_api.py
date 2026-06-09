@@ -2492,3 +2492,188 @@ def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, m
     event = main.database.get_event(event_id)
     assert any(d['label'] == 'cat' for d in event['detections']), "Cat must appear in event detections"
     assert event['recording_status'] == 'linked', "Recording must be linked for record-only zone rule"
+
+
+def _zone_camera_settings(zone_rules: list) -> dict:
+    """Return minimal camera settings dict with a full-frame zone using the given rules."""
+    return {
+        'id': 'camera-1',
+        'name': 'Front Door',
+        'detection': {
+            'zones': [
+                {
+                    'id': 'full-frame',
+                    'name': 'Full Frame',
+                    'x': 0, 'y': 0, 'width': 1, 'height': 1,
+                    'monitor_motion': False,
+                    'monitor_objects': True,
+                    'object_rules': zone_rules,
+                },
+            ],
+        },
+        'recording': {'enabled': True, 'record_on_alert': True, 'continuous': False},
+    }
+
+
+def test_person_detection_in_zone_creates_alert_and_recording(tmp_path, monkeypatch):
+    """Person detected inside a zone that has a person alert+record rule must produce a
+    saved event with recording_status='linked' and an alert history entry."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _bytes, confidence=None):
+            return [{'label': 'person', 'confidence': 0.91, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.3, 'height': 0.5}}]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    main.live_detection_last_checked.clear()
+    main.alerts.last_triggered.clear()
+
+    settings = _zone_camera_settings([
+        {'label': 'person', 'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
+    ])
+    event_id = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+
+    assert event_id is not None
+    event = main.database.get_event(event_id)
+    assert any(d['label'] == 'person' for d in event['detections'])
+    assert event['recording_status'] == 'linked'
+    assert event['recordings'][0]['trigger_label'] == 'person'
+    alerts = main.database.alerts(limit=10)
+    assert any(a['label'] == 'person' for a in alerts)
+
+
+def test_cat_detection_in_zone_creates_alert_and_recording(tmp_path, monkeypatch):
+    """Cat detected inside a zone that has a cat alert+record rule must produce a saved
+    event, a recording with trigger_label='cat', and an alert history entry."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _bytes, confidence=None):
+            return [{'label': 'cat', 'confidence': 0.82, 'box': {'x': 0.2, 'y': 0.2, 'width': 0.2, 'height': 0.2}}]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    main.live_detection_last_checked.clear()
+    main.alerts.last_triggered.clear()
+
+    settings = _zone_camera_settings([
+        {'label': 'cat', 'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
+    ])
+    event_id = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+
+    assert event_id is not None
+    event = main.database.get_event(event_id)
+    assert any(d['label'] == 'cat' for d in event['detections'])
+    assert event['recording_status'] == 'linked'
+    assert event['recordings'][0]['trigger_label'] == 'cat'
+    alerts = main.database.alerts(limit=10)
+    assert any(a['label'] == 'cat' for a in alerts)
+
+
+def test_person_and_cat_in_zone_each_create_independent_events(tmp_path, monkeypatch):
+    """Two successive detections — first person, then cat — in the same zone each produce
+    their own event and recording when both have zero cooldown."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    labels_sequence = iter([
+        [{'label': 'person', 'confidence': 0.90, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.3, 'height': 0.5}}],
+        [{'label': 'cat',    'confidence': 0.85, 'box': {'x': 0.5, 'y': 0.4, 'width': 0.2, 'height': 0.2}}],
+    ])
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _bytes, confidence=None):
+            return next(labels_sequence)
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    main.live_detection_last_checked.clear()
+    main.alerts.last_triggered.clear()
+
+    settings = _zone_camera_settings([
+        {'label': 'person', 'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
+        {'label': 'cat',    'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
+    ])
+
+    person_event_id = main.process_live_stream_alerts(b'frame1', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    cat_event_id    = main.process_live_stream_alerts(b'frame2', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+
+    assert person_event_id is not None
+    assert cat_event_id is not None
+    assert person_event_id != cat_event_id
+
+    person_event = main.database.get_event(person_event_id)
+    cat_event    = main.database.get_event(cat_event_id)
+    assert any(d['label'] == 'person' for d in person_event['detections'])
+    assert any(d['label'] == 'cat'    for d in cat_event['detections'])
+    assert person_event['recording_status'] == 'linked'
+    assert cat_event['recording_status']    == 'linked'
+    assert person_event['recordings'][0]['trigger_label'] == 'person'
+    assert cat_event['recordings'][0]['trigger_label']    == 'cat'
+
+
+def test_coco_labels_load_person_and_cat_at_correct_indices(tmp_path):
+    """Verify coco.names resolves COCO class IDs 0→'person' and 15→'cat'."""
+    from app.detector import load_labels
+    labels = load_labels('models/coco.names')
+    assert len(labels) >= 80, "coco.names must contain at least 80 labels"
+    assert labels[0] == 'person', "COCO class 0 must be 'person'"
+    assert labels[15] == 'cat',   "COCO class 15 must be 'cat'"
+
+
+def test_object_outside_zone_does_not_create_recording(tmp_path, monkeypatch):
+    """A person detected entirely outside the configured zone must not create a recording."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _bytes, confidence=None):
+            # Object is in the right half of the frame (x=0.6..0.9)
+            return [{'label': 'person', 'confidence': 0.88, 'box': {'x': 0.6, 'y': 0.1, 'width': 0.3, 'height': 0.5}}]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    main.live_detection_last_checked.clear()
+
+    # Zone covers only the left half of the frame
+    settings = {
+        'id': 'camera-1',
+        'name': 'Front Door',
+        'detection': {
+            'zones': [
+                {
+                    'id': 'left-half',
+                    'name': 'Left Half',
+                    'x': 0, 'y': 0, 'width': 0.5, 'height': 1,
+                    'monitor_motion': False,
+                    'monitor_objects': True,
+                    'object_rules': [
+                        {'label': 'person', 'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5},
+                    ],
+                },
+            ],
+        },
+        'recording': {'enabled': True, 'record_on_alert': True, 'continuous': False},
+    }
+    event_id = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+
+    assert event_id is None, "Person outside the zone must not produce any event"
