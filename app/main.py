@@ -140,7 +140,7 @@ def compute_minimum_rule_confidence(fallback: float = 0.05) -> float:
     """Return the lowest min_confidence across all enabled object rules so YOLO's floor never silently suppresses per-rule thresholds."""
     min_conf: float | None = None
     for camera in effective_cameras_config():
-        for zone in camera.get('zones', []):
+        for zone in camera.get('detection', {}).get('zones', []):
             for rule in zone.get('object_rules', []):
                 if not rule.get('enabled', True):
                     continue
