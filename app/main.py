@@ -167,6 +167,17 @@ def compute_minimum_rule_confidence(fallback: float = 0.05) -> float:
                         min_conf = conf
                 except (TypeError, ValueError):
                     pass
+    for rule in effective_alert_rules():
+        if not rule.get('enabled', True):
+            continue
+        if str(rule.get('object') or '').strip().lower() == 'motion':
+            continue
+        try:
+            conf = float(rule.get('min_confidence', fallback))
+            if min_conf is None or conf < min_conf:
+                min_conf = conf
+        except (TypeError, ValueError):
+            pass
     result = min_conf if min_conf is not None else fallback
     _min_rule_confidence_cache = (result, time.time())
     return result
@@ -221,10 +232,7 @@ def camera_event_recording_config(settings: dict[str, Any]) -> dict[str, Any]:
         'enabled': camera_recording['enabled'],
         'continuous': camera_recording['continuous'],
         'record_on_alert': camera_recording['record_on_alert'],
-        'mode': 'continuous' if camera_recording['continuous'] else 'motion',
-        'record_on_motion': False,
-        'record_on_human': False,
-        'record_on_objects': [],
+        'mode': 'continuous' if camera_recording['continuous'] else base.get('mode', 'motion'),
     })
     return base
 
@@ -362,7 +370,7 @@ def default_camera_detection_settings() -> dict[str, Any]:
 def default_camera_recording_settings() -> dict[str, Any]:
     return {
         'enabled': True,
-        'record_on_alert': True,
+        'record_on_alert': False,
         'continuous': False,
     }
 
@@ -471,7 +479,7 @@ def normalize_camera_recording_settings(settings: Any) -> dict[str, Any]:
     if isinstance(settings, dict):
         recording.update(settings)
     recording['enabled'] = normalize_bool_setting(recording.get('enabled'), True)
-    recording['record_on_alert'] = normalize_bool_setting(recording.get('record_on_alert'), True)
+    recording['record_on_alert'] = normalize_bool_setting(recording.get('record_on_alert'), False)
     recording['continuous'] = normalize_bool_setting(recording.get('continuous'), False)
     return recording
 

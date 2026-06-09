@@ -88,6 +88,9 @@ class RecordingService:
                 return True, 'alert', alert_labels[0]
             return False, 'none', None
         if (mode == 'motion' or bool(config.get('record_on_motion', True))) and labels:
+            specific_label = preferred_label(detections)
+            if specific_label:
+                return True, 'object', specific_label
             return True, 'motion', 'motion'
         if (mode == 'human' or bool(config.get('record_on_human', True))) and 'person' in labels:
             return True, 'human', 'person'
