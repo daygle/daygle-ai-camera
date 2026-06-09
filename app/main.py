@@ -672,7 +672,7 @@ def filter_detections_for_camera(detections: list[dict[str, Any]], settings: dic
     return filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects')
 
 
-def zone_motion_detections(detections: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
+def zone_motion_detections(detections: list[dict[str, Any]], settings: dict[str, Any], frame_motion_confidence: float = 0.5) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_motion', True)]
     if not zones:
@@ -683,9 +683,13 @@ def zone_motion_detections(detections: list[dict[str, Any]], settings: dict[str,
         for zone in zones:
             if detection_matches_zone(detection, zone):
                 conf_threshold = zone_motion_min_confidence(zone)
-                if float(detection.get('confidence', 0)) >= conf_threshold and i not in seen:
+                # Compare pixel-diff motion confidence (not YOLO object confidence) against
+                # the threshold, and stamp the detection with the actual motion confidence so
+                # the overlay never shows a parked car as "motion 98%" just because YOLO is
+                # highly confident it is a car.
+                if frame_motion_confidence >= conf_threshold and i not in seen:
                     seen.add(i)
-                    result.append(detection)
+                    result.append({**detection, 'confidence': frame_motion_confidence})
                     break
     return result
 
@@ -1141,7 +1145,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
     detections = normalize_detection_boxes_for_frame(detections, frame)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     frame_has_motion, frame_motion_confidence = detect_frame_motion(camera_id, image_bytes)
-    motion_detections = zone_motion_detections(detections, settings) if frame_has_motion else []
+    motion_detections = zone_motion_detections(detections, settings, frame_motion_confidence) if frame_has_motion else []
     object_detections = filter_detections_for_camera(detections, settings)
     anpr_detections = filter_detections_for_camera_anpr(detections, settings)
     zone_rules = zone_object_alert_rules(settings)
