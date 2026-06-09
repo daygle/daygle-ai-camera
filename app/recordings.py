@@ -9,7 +9,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 logger = logging.getLogger('daygle.ai')
@@ -33,6 +33,8 @@ class RecordingService:
         self.prebuffer_dir.mkdir(parents=True, exist_ok=True)
         self._prebuffer_lock = threading.Lock()
         self._prebuffer_workers: dict[str, dict[str, Any]] = {}
+        self._continuous_lock = threading.Lock()
+        self._continuous_workers: dict[str, dict[str, Any]] = {}
 
     @property
     def enabled(self) -> bool:
@@ -80,7 +82,8 @@ class RecordingService:
             alert_labels = [str(detection.get('label') or '').lower() for detection in alert_detections]
             if alert_labels:
                 if alert_labels[0] == 'motion':
-                    specific_label = preferred_label(alert_detections)
+                    # Search all detections for a more specific label (e.g. person in frame when motion fires).
+                    specific_label = preferred_label(detections)
                     return True, 'alert', specific_label or 'motion'
                 return True, 'alert', alert_labels[0]
             return False, 'none', None
@@ -197,6 +200,152 @@ class RecordingService:
             if isinstance(thread, threading.Thread):
                 thread.join(timeout=2)
 
+    def start_continuous_chunk_recording(
+        self,
+        *,
+        stream_url: str,
+        camera_id: str,
+        recording_config: dict[str, Any] | None = None,
+        on_chunk_complete: Callable[[str, Path], None] | None = None,
+    ) -> bool:
+        config = recording_config or self.recording_config
+        if not self.enabled_for(config):
+            return False
+        chunk_seconds = max(60, int(config.get('chunk_duration_seconds', 3600)))
+        camera_key = self._camera_key(camera_id)
+        chunks_dir = self.recordings_dir / f'continuous-{camera_key}'
+        chunks_dir.mkdir(parents=True, exist_ok=True)
+        self._ensure_continuous_chunk_worker(camera_key, stream_url, chunks_dir, chunk_seconds, on_chunk_complete)
+        return True
+
+    def stop_continuous_chunk_recording(self, camera_id: str) -> None:
+        camera_key = self._camera_key(camera_id)
+        with self._continuous_lock:
+            worker = self._continuous_workers.pop(camera_key, None)
+        if not worker:
+            return
+        stop_event = worker.get('stop_event')
+        thread = worker.get('thread')
+        if isinstance(stop_event, threading.Event):
+            stop_event.set()
+        if isinstance(thread, threading.Thread):
+            thread.join(timeout=5)
+
+    def stop_all_continuous_recordings(self) -> None:
+        with self._continuous_lock:
+            workers = list(self._continuous_workers.items())
+            self._continuous_workers = {}
+        for _camera_key, worker in workers:
+            stop_event = worker.get('stop_event')
+            thread = worker.get('thread')
+            if isinstance(stop_event, threading.Event):
+                stop_event.set()
+            if isinstance(thread, threading.Thread):
+                thread.join(timeout=3)
+
+    def _ensure_continuous_chunk_worker(
+        self,
+        camera_key: str,
+        stream_url: str,
+        chunks_dir: Path,
+        chunk_seconds: int,
+        on_chunk_complete: Callable[[str, Path], None] | None,
+    ) -> None:
+        with self._continuous_lock:
+            existing = self._continuous_workers.get(camera_key)
+            if existing and existing.get('stream_url') == stream_url and existing.get('chunk_seconds') == chunk_seconds:
+                thread = existing.get('thread')
+                if isinstance(thread, threading.Thread) and thread.is_alive():
+                    return
+            if existing and isinstance(existing.get('stop_event'), threading.Event):
+                existing['stop_event'].set()
+
+            stop_event = threading.Event()
+            thread = threading.Thread(
+                target=self._run_continuous_chunk_worker,
+                args=(camera_key, stream_url, chunks_dir, chunk_seconds, on_chunk_complete, stop_event),
+                name=f'continuous-recorder-{camera_key}',
+                daemon=True,
+            )
+            self._continuous_workers[camera_key] = {
+                'thread': thread,
+                'stop_event': stop_event,
+                'stream_url': stream_url,
+                'chunk_seconds': chunk_seconds,
+            }
+            thread.start()
+
+    def _run_continuous_chunk_worker(
+        self,
+        camera_key: str,
+        stream_url: str,
+        chunks_dir: Path,
+        chunk_seconds: int,
+        on_chunk_complete: Callable[[str, Path], None] | None,
+        stop_event: threading.Event,
+    ) -> None:
+        ffmpeg = shutil.which('ffmpeg')
+        if not ffmpeg:
+            logger.warning('ffmpeg is required for continuous chunk recording of %s but is not installed.', camera_key)
+            return
+        chunks_dir.mkdir(parents=True, exist_ok=True)
+        output_pattern = chunks_dir / f'continuous_{camera_key}_%Y%m%dT%H%M%S.mp4'
+        list_file = chunks_dir / '.segment_list.txt'
+
+        while not stop_event.is_set():
+            list_file.unlink(missing_ok=True)
+            command = [
+                ffmpeg,
+                '-nostdin',
+                '-hide_banner',
+                '-loglevel', 'error',
+                '-rtsp_transport', 'tcp',
+                '-fflags', '+discardcorrupt',
+                '-err_detect', 'ignore_err',
+                '-i', stream_url,
+                '-an',
+                '-c:v', 'copy',
+                '-f', 'segment',
+                '-segment_time', str(chunk_seconds),
+                '-segment_format', 'mp4',
+                '-reset_timestamps', '1',
+                '-strftime', '1',
+                '-segment_list', str(list_file),
+                '-segment_list_type', 'flat',
+                str(output_pattern),
+            ]
+            process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            seen_count = 0
+            try:
+                while process.poll() is None and not stop_event.is_set():
+                    if list_file.exists():
+                        try:
+                            lines = list_file.read_text(encoding='utf-8').splitlines()
+                        except OSError:
+                            lines = []
+                        for line in lines[seen_count:]:
+                            segment_name = line.strip()
+                            if not segment_name:
+                                continue
+                            segment_path = chunks_dir / segment_name
+                            try:
+                                if segment_path.exists() and segment_path.stat().st_size > 0 and on_chunk_complete:
+                                    on_chunk_complete(camera_key, segment_path)
+                            except Exception as exc:
+                                logger.warning('Continuous chunk callback failed for %s/%s: %s', camera_key, segment_name, exc)
+                        seen_count = len(lines)
+                    time.sleep(1)
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+            if not stop_event.is_set():
+                logger.info('Continuous recorder for %s restarting after ffmpeg exit.', camera_key)
+                time.sleep(2)
+
     def prime_rtsp_prebuffer(
         self,
         *,
@@ -289,8 +438,10 @@ class RecordingService:
             f'{max_duration_seconds:.3f}',
             str(tmp_path),
         ]
-        result = subprocess.run(command, capture_output=True, text=True, timeout=max(60, int(max_duration_seconds) + 45), check=False)
-        list_path.unlink(missing_ok=True)
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=max(60, int(max_duration_seconds) + 45), check=False)
+        finally:
+            list_path.unlink(missing_ok=True)
         if result.returncode != 0 or not tmp_path.exists() or tmp_path.stat().st_size <= 0:
             tmp_path.unlink(missing_ok=True)
             logger.warning('Failed to render clip from prebuffer for %s; falling back to direct RTSP capture.', camera_key)
