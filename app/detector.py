@@ -145,14 +145,15 @@ class OnnxYoloDetector:
     def available(self) -> bool:
         return self.session is not None and self.input_name is not None
 
-    def detect_image(self, image_bytes: bytes) -> list[dict[str, Any]]:
+    def detect_image(self, image_bytes: bytes, confidence: float | None = None) -> list[dict[str, Any]]:
         if not self.available:
             raise DetectorUnavailableError(self.unavailable_reason or "ONNX detector is not available")
 
+        effective_confidence = confidence if confidence is not None else self.confidence
         image = self._decode_image(image_bytes)
         input_tensor, scale, pad_x, pad_y, original_width, original_height = self._preprocess(image)
         outputs = self.session.run(self.output_names, {self.input_name: input_tensor})  # type: ignore[union-attr,index]
-        return self._postprocess(outputs[0], scale, pad_x, pad_y, original_width, original_height)
+        return self._postprocess(outputs[0], scale, pad_x, pad_y, original_width, original_height, effective_confidence)
 
     def _decode_image(self, image_bytes: bytes) -> np.ndarray:
         np = _require_numpy()
@@ -198,7 +199,10 @@ class OnnxYoloDetector:
         pad_y: float,
         original_width: int,
         original_height: int,
+        confidence: float | None = None,
     ) -> list[dict[str, Any]]:
+        if confidence is None:
+            confidence = self.confidence
         predictions = np.squeeze(output)
         if predictions.ndim != 2:
             raise ValueError(f"Unsupported YOLO output shape: {output.shape}")
@@ -221,7 +225,7 @@ class OnnxYoloDetector:
 
             class_id = int(np.argmax(class_scores))
             score = float(class_scores[class_id]) * objectness
-            if score < self.confidence:
+            if score < confidence:
                 continue
 
             cx, cy, width, height = map(float, row[:4])

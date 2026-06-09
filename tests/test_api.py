@@ -1439,7 +1439,7 @@ def test_live_stream_detection_triggers_email_alert(tmp_path, monkeypatch):
         available = True
         unavailable_reason = None
 
-        def detect_image(self, image_bytes):
+        def detect_image(self, image_bytes, confidence=None):
             assert image_bytes == b'jpeg-frame'
             return [
                 {
@@ -1529,7 +1529,7 @@ def test_background_live_alert_monitor_triggers_cat_email_without_live_page(tmp_
         available = True
         unavailable_reason = None
 
-        def detect_image(self, image_bytes):
+        def detect_image(self, image_bytes, confidence=None):
             assert image_bytes == b'jpeg-frame'
             return [
                 {
@@ -1621,7 +1621,7 @@ def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypat
         available = True
         unavailable_reason = None
 
-        def detect_image(self, _image_bytes):
+        def detect_image(self, _image_bytes, confidence=None):
             return [
                 {
                     'label': 'person',
@@ -1755,7 +1755,7 @@ def test_live_stream_detection_queue_runs_in_background_and_deduplicates(tmp_pat
         unavailable_reason = None
         calls = 0
 
-        def detect_image(self, _image_bytes):
+        def detect_image(self, _image_bytes, confidence=None):
             self.calls += 1
             started.set()
             release.wait(timeout=2)
@@ -1793,7 +1793,7 @@ def test_live_stream_detection_without_alert_rule_does_not_record_by_default(tmp
         available = True
         unavailable_reason = None
 
-        def detect_image(self, image_bytes):
+        def detect_image(self, image_bytes, confidence=None):
             return [
                 {
                     'label': 'person',
@@ -1841,7 +1841,7 @@ def test_live_stream_detection_saves_only_allowed_zone_object_labels(tmp_path, m
         available = True
         unavailable_reason = None
 
-        def detect_image(self, image_bytes):
+        def detect_image(self, image_bytes, confidence=None):
             return [
                 {
                     'label': 'person',
@@ -1912,7 +1912,7 @@ def test_live_stream_camera_continuous_recording_records_without_alert_rule(tmp_
         available = True
         unavailable_reason = None
 
-        def detect_image(self, image_bytes):
+        def detect_image(self, image_bytes, confidence=None):
             return [
                 {
                     'label': 'person',
@@ -2198,7 +2198,7 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         available = True
         unavailable_reason = None
 
-        def detect_image(self, _image_bytes):
+        def detect_image(self, _image_bytes, confidence=None):
             return [{'label': 'cat', 'confidence': 0.91, 'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}}]
 
     monkeypatch.setattr(main, 'detector', FakeDetector())
@@ -2287,7 +2287,7 @@ def test_recording_retention_purge_deletes_metadata_and_files(tmp_path, monkeypa
         available = True
         unavailable_reason = None
 
-        def detect_image(self, _image_bytes):
+        def detect_image(self, _image_bytes, confidence=None):
             return [{'label': 'cat', 'confidence': 0.91, 'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}}]
 
     monkeypatch.setattr(main, 'detector', FakeDetector())

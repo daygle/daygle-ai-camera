@@ -136,8 +136,22 @@ def effective_ai_config() -> dict[str, Any]:
     return settings
 
 
+_min_rule_confidence_cache: tuple[float, float] | None = None  # (value, timestamp)
+_MIN_RULE_CONFIDENCE_TTL = 5.0  # seconds; short enough to pick up user edits promptly
+
+
 def compute_minimum_rule_confidence(fallback: float = 0.05) -> float:
-    """Return the lowest min_confidence across all enabled object rules so YOLO's floor never silently suppresses per-rule thresholds."""
+    """Return the lowest min_confidence across all enabled object rules so YOLO's floor never silently suppresses per-rule thresholds.
+
+    Result is cached for _MIN_RULE_CONFIDENCE_TTL seconds to avoid a database
+    read on every detection frame (called at ~4 Hz per camera from the hot path).
+    """
+    global _min_rule_confidence_cache
+    if _min_rule_confidence_cache is not None:
+        cached_value, cached_at = _min_rule_confidence_cache
+        if time.time() - cached_at < _MIN_RULE_CONFIDENCE_TTL:
+            return cached_value
+
     min_conf: float | None = None
     for camera in effective_cameras_config():
         for zone in camera.get('detection', {}).get('zones', []):
@@ -152,7 +166,9 @@ def compute_minimum_rule_confidence(fallback: float = 0.05) -> float:
                         min_conf = conf
                 except (TypeError, ValueError):
                     pass
-    return min_conf if min_conf is not None else fallback
+    result = min_conf if min_conf is not None else fallback
+    _min_rule_confidence_cache = (result, time.time())
+    return result
 
 
 def effective_camera_config() -> dict[str, Any]:
@@ -638,8 +654,13 @@ def detection_overlap_ratio_with_zone_rect(detection: dict[str, Any], zone: dict
 def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any], *, min_overlap_ratio: float = 0.2) -> bool:
     if detection_center_in_zone(detection, zone):
         return True
-    # Fall back to bounding-rect overlap for both polygon and rectangular zones so that
-    # large objects straddling the zone boundary are not silently dropped.
+    # For polygon zones the center-in-polygon test is authoritative; bounding-rect
+    # overlap would match objects outside the polygon but inside its bounding box.
+    points = zone.get('points') or []
+    if isinstance(points, list) and len(points) >= 3:
+        return False
+    # For rectangular zones fall back to bounding-rect overlap so large objects
+    # straddling the edge are not silently dropped.
     return detection_overlap_ratio_with_zone_rect(detection, zone) >= min_overlap_ratio
 
 
@@ -691,10 +712,6 @@ def zone_motion_detections(detections: list[dict[str, Any]], settings: dict[str,
             continue
         conf_threshold = zone_motion_min_confidence(zone)
         if frame_motion_confidence < conf_threshold:
-            continue
-        # Require at least one YOLO-detected object in the zone to confirm motion is
-        # happening in a monitored area (not just open-sky noise outside all zones).
-        if not any(detection_matches_zone(detection, zone) for detection in detections):
             continue
         seen_zones.add(zone_id)
         # Use the zone's own bounding box so the overlay shows where the motion zone is,
@@ -783,7 +800,8 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
                 'cooldown_seconds': rule.get('cooldown_seconds', 60),
                 'enabled': True,
                 'email_enabled': bool(rule.get('email_enabled', False)),
-                'email_recipients': rule.get('email_recipients', []),
+                'email_recipients': normalize_email_recipients(rule.get('email_recipients', [])),
+                'push_enabled': bool(rule.get('push_enabled', False)),
                 'active_start': rule.get('active_start'),
                 'active_end': rule.get('active_end'),
             })
@@ -817,6 +835,25 @@ def zone_alert_detections(settings: dict[str, Any], detections: list[dict[str, A
 
 def zone_record_on_detect(detection: dict[str, Any], settings: dict[str, Any]) -> bool:
     return bool(zone_object_rule_matches(settings, detection, action='record'))
+
+
+def zone_motion_record_on_detect(settings: dict[str, Any]) -> bool:
+    """Return True if any enabled motion-monitoring zone has a motion rule with record_on_detect=True.
+
+    zone_record_on_detect / zone_object_rule_matches filter by monitor_objects=True and therefore
+    skip motion-only zones (monitor_objects=False, monitor_motion=True). This helper checks the
+    correct monitor_motion axis so motion-only zones are not silently excluded from recording.
+    """
+    detection_settings = settings.get('detection') or {}
+    for zone in detection_settings.get('zones', []):
+        if not zone.get('enabled', True) or not zone.get('monitor_motion', True):
+            continue
+        for rule in (zone.get('object_rules') or []):
+            if not rule.get('enabled', True):
+                continue
+            if str(rule.get('label') or '').strip().lower() == 'motion' and rule.get('record_on_detect', True):
+                return True
+    return False
 
 
 def zone_detection_alert_rule_names(settings: dict[str, Any], detection: dict[str, Any]) -> set[str]:
@@ -1152,8 +1189,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         return None
 
     try:
-        detector.confidence = compute_minimum_rule_confidence()
-        detections = detector.detect_image(image_bytes)
+        detections = detector.detect_image(image_bytes, confidence=compute_minimum_rule_confidence())
     except (DetectorUnavailableError, ValueError) as exc:
         logger.warning('Live detection skipped for camera %s: %s', camera_id, exc)
         update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state, detections=[])
@@ -1202,8 +1238,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         for detection in object_detections
     ]
     if motion_detections:
-        _motion_synthetic = {**strongest_motion, 'label': 'motion'}
-        _motion_record = zone_record_on_detect(_motion_synthetic, settings)
+        _motion_record = zone_motion_record_on_detect(settings)
         recording_detections.append({
             **strongest_motion,
             'label': 'motion',
@@ -1211,19 +1246,6 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             'alert_matched': 'motion' in triggered_labels,
             'alert_triggered': 'motion' in triggered_labels or _motion_record,
         })
-        _generic_labels = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous'}
-        _orig_label = str(strongest_motion.get('label') or '').strip().lower()
-        if _orig_label and _orig_label not in _generic_labels:
-            _already_in_objects = any(
-                str(d.get('label') or '').strip().lower() == _orig_label
-                for d in object_detections
-            )
-            if not _already_in_objects:
-                recording_detections.append({
-                    **strongest_motion,
-                    'alert_matched': False,
-                    'alert_triggered': False,
-                })
     matched_labels = [str(detection.get('label')) for detection in alert_detections if detection.get('label')]
     camera_recording_config = camera_event_recording_config(settings)
     should_record_event, _trigger_type, _trigger_label = recording_service.should_record(recording_detections, camera_recording_config)
@@ -2685,8 +2707,7 @@ async def detect_frame(request: Request):
     min_confidence = compute_minimum_rule_confidence()
 
     def _run_detection() -> list:
-        detector.confidence = min_confidence
-        return detector.detect_image(image_bytes)
+        return detector.detect_image(image_bytes, confidence=min_confidence)
 
     try:
         detections = await asyncio.get_event_loop().run_in_executor(None, _run_detection)
