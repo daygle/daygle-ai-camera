@@ -34,13 +34,18 @@ function filterByConfiguredLabels(detections) {
     return configuredLabels.has(label) || configuredLabels.has('motion') && label === 'motion';
   });
 }
-let overlayTrackIntervalMs = 420;
+let overlayTrackIntervalMs = 300;
 const OVERLAY_TRACK_MAX_WIDTH = 640;
 const OVERLAY_TRACK_MAX_HEIGHT = 360;
 const overlayTrackCanvas = document.createElement('canvas');
 let overlayTrackLastRunMs = 0;
 let overlayTrackInFlight = false;
 let overlayTrackDetections = null;
+let overlayTrackPrevDetections = null;
+let overlayTrackPrevUpdateMs = 0;
+let overlayTrackLastUpdateMs = 0;
+const OVERLAY_TRACK_LERP_MS = 150;
+let overlayRafId = null;
 let configuredLabels = null; // null = no filter loaded yet
 
 async function api(path, options = {}) {
@@ -190,7 +195,49 @@ function clearClipOverlay() {
 
 function clearOverlayTrackDetections() {
   overlayTrackDetections = null;
+  overlayTrackPrevDetections = null;
+  overlayTrackPrevUpdateMs = 0;
+  overlayTrackLastUpdateMs = 0;
   overlayTrackLastRunMs = 0;
+}
+
+function interpolateDetections(prev, cur, t) {
+  if (!prev || !cur || t >= 1) return cur;
+  return cur.map((curDet) => {
+    const prevDet = prev.find((p) => p.label === curDet.label);
+    if (!prevDet?.box) return curDet;
+    const lerp = (a, b) => a + (b - a) * t;
+    return {
+      ...curDet,
+      box: {
+        x: lerp(prevDet.box.x, curDet.box.x),
+        y: lerp(prevDet.box.y, curDet.box.y),
+        width: lerp(prevDet.box.width, curDet.box.width),
+        height: lerp(prevDet.box.height, curDet.box.height),
+      },
+    };
+  });
+}
+
+function startOverlayRaf() {
+  if (overlayRafId !== null) return;
+  function loop() {
+    if (!overlayTrackEnabled || !els.clipPlayer || els.clipPlayer.paused) {
+      overlayRafId = null;
+      return;
+    }
+    detectOverlayFrameDetections();
+    drawClipOverlay();
+    overlayRafId = requestAnimationFrame(loop);
+  }
+  overlayRafId = requestAnimationFrame(loop);
+}
+
+function stopOverlayRaf() {
+  if (overlayRafId !== null) {
+    cancelAnimationFrame(overlayRafId);
+    overlayRafId = null;
+  }
 }
 
 function normalizeDetectionBox(box, width, height) {
@@ -249,7 +296,7 @@ async function detectOverlayFrameDetections() {
       body: blob,
     });
     const detections = Array.isArray(payload?.detections) ? payload.detections : [];
-    overlayTrackDetections = detections.map((detection) => {
+    const newDetections = detections.map((detection) => {
       const normalizedBox = normalizeDetectionBox(detection?.box || {}, frameWidth, frameHeight);
       if (!normalizedBox) return null;
       return {
@@ -257,11 +304,15 @@ async function detectOverlayFrameDetections() {
         box: normalizedBox,
       };
     }).filter(Boolean);
+    overlayTrackPrevDetections = overlayTrackDetections;
+    overlayTrackPrevUpdateMs = overlayTrackLastUpdateMs;
+    overlayTrackLastUpdateMs = performance.now();
+    overlayTrackDetections = newDetections;
   } catch (_error) {
     // Keep the last successful overlay detections if transient frame inference fails.
   } finally {
     overlayTrackInFlight = false;
-    drawClipOverlay();
+    if (!overlayRafId) drawClipOverlay();
   }
 }
 
@@ -291,7 +342,7 @@ function drawClipOverlay() {
   if (!overlayEnabled) return;
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-  if (overlayTrackEnabled) {
+  if (overlayTrackEnabled && !overlayRafId) {
     detectOverlayFrameDetections();
   }
 
@@ -302,9 +353,14 @@ function drawClipOverlay() {
       ? allEventDetections.filter((d) => !GENERIC_TRIGGER_LABELS.has(String(d.label || '').toLowerCase()))
       : allEventDetections
   );
-  const detections = overlayTrackEnabled && Array.isArray(overlayTrackDetections) && overlayTrackDetections.length
-    ? filterByConfiguredLabels(overlayTrackDetections)
-    : eventDetections;
+  let rawTrackDetections = overlayTrackEnabled && Array.isArray(overlayTrackDetections) && overlayTrackDetections.length
+    ? overlayTrackDetections : null;
+  if (rawTrackDetections && overlayTrackPrevDetections && overlayTrackLastUpdateMs > 0) {
+    const elapsed = performance.now() - overlayTrackLastUpdateMs;
+    const t = Math.min(1, elapsed / OVERLAY_TRACK_LERP_MS);
+    rawTrackDetections = interpolateDetections(overlayTrackPrevDetections, rawTrackDetections, t);
+  }
+  const detections = rawTrackDetections ? filterByConfiguredLabels(rawTrackDetections) : eventDetections;
   if (!detections.length) return;
   const playerTime = Number(els.clipPlayer.currentTime || 0);
   if (!overlayTrackEnabled && !shouldRenderOverlayForTime(activeRecording, playerTime)) return;
@@ -362,6 +418,7 @@ function closeVideoModal() {
   els.videoModal.hidden = true;
   document.body.style.overflow = '';
   els.clipPlayer.pause();
+  stopOverlayRaf();
   els.clipPlayer.removeAttribute('src');
   els.clipPlayer.load();
   els.videoModalDownload.hidden = true;
@@ -509,8 +566,18 @@ els.clipPlayer.addEventListener('error', () => {
   els.clipPlayerStatus.textContent = messages[error?.code] || 'Unable to play this recording.';
 });
 
-['loadedmetadata', 'loadeddata', 'play', 'pause', 'seeked', 'timeupdate'].forEach((eventName) => {
+['loadedmetadata', 'loadeddata', 'pause', 'seeked', 'timeupdate'].forEach((eventName) => {
   els.clipPlayer.addEventListener(eventName, drawClipOverlay);
+});
+
+els.clipPlayer.addEventListener('play', () => {
+  if (overlayTrackEnabled) startOverlayRaf();
+  drawClipOverlay();
+});
+
+els.clipPlayer.addEventListener('pause', () => {
+  stopOverlayRaf();
+  drawClipOverlay();
 });
 
 window.addEventListener('resize', drawClipOverlay);
@@ -539,6 +606,11 @@ if (els.clipOverlayTrackToggle) {
     overlayTrackEnabled = Boolean(els.clipOverlayTrackToggle.checked);
     localStorage.setItem(OVERLAY_TRACK_KEY, overlayTrackEnabled ? '1' : '0');
     clearOverlayTrackDetections();
+    if (overlayTrackEnabled && els.clipPlayer && !els.clipPlayer.paused) {
+      startOverlayRaf();
+    } else {
+      stopOverlayRaf();
+    }
     drawClipOverlay();
   });
 }
