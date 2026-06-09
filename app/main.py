@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import asyncio
 import copy
 import importlib.util
 import io
@@ -2652,9 +2653,14 @@ async def detect_frame(request: Request):
     ai_settings = effective_ai_config()
     ai_state = ai_status_payload(ai_settings)
     ai_error: str | None = None
+    min_confidence = compute_minimum_rule_confidence()
+
+    def _run_detection() -> list:
+        detector.confidence = min_confidence
+        return detector.detect_image(image_bytes)
+
     try:
-        detector.confidence = compute_minimum_rule_confidence()
-        detections = detector.detect_image(image_bytes)
+        detections = await asyncio.get_event_loop().run_in_executor(None, _run_detection)
     except DetectorUnavailableError as exc:
         detections = []
         ai_error = str(exc) or ai_state.get('last_detector_error') or ai_state.get('error') or 'Detector unavailable.'
