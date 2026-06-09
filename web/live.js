@@ -4,6 +4,9 @@ const liveEls = {
   status: document.getElementById('liveStatus'),
   detectionStatus: document.getElementById('liveDetectionStatus'),
   overlayToggle: document.getElementById('overlayToggle'),
+  liveAiTrackToggle: document.getElementById('liveAiTrackToggle'),
+  liveAiTrackLabel: document.getElementById('liveAiTrackLabel'),
+  liveAiTrackCanvas: document.getElementById('liveAiTrackCanvas'),
   cameraSelect: document.getElementById('cameraSelect'),
   viewModeSelect: document.getElementById('viewModeSelect'),
   cameraGrid: document.getElementById('cameraGrid'),
@@ -33,6 +36,17 @@ let drawingMode = false;
 let draftPolygon = null;
 let zoneDrag = null;
 
+const LIVE_AI_TRACK_KEY = 'daygle.live.overlay.track.enabled';
+let liveAiTrackEnabled = false;
+let liveAiTrackInFlight = false;
+let liveAiTrackDetections = null;
+let liveAiTrackPrevDetections = null;
+let liveAiTrackLastUpdateMs = 0;
+const LIVE_AI_TRACK_MAX_WIDTH = 640;
+const LIVE_AI_TRACK_MAX_HEIGHT = 360;
+const LIVE_AI_TRACK_LERP_MS = 150;
+const liveAiTrackOffscreenCanvas = document.createElement('canvas');
+
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
   if (csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((options.method || 'GET').toUpperCase())) {
@@ -44,6 +58,72 @@ async function api(path, options = {}) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.detail || `Request failed: ${response.status}`);
   return payload;
+}
+
+function clearLiveOverlay() {
+  if (!liveEls.liveAiTrackCanvas) return;
+  const ctx = liveEls.liveAiTrackCanvas.getContext('2d');
+  if (!ctx) return;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, liveEls.liveAiTrackCanvas.width, liveEls.liveAiTrackCanvas.height);
+}
+
+function drawLiveOverlay() {
+  if (!liveEls.liveAiTrackCanvas || !liveEls.frame) return;
+  resizeOverlayCanvas(liveEls.liveAiTrackCanvas, liveEls.frame);
+  const ctx = liveEls.liveAiTrackCanvas.getContext('2d');
+  if (!ctx) return;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, liveEls.liveAiTrackCanvas.width, liveEls.liveAiTrackCanvas.height);
+  if (!liveAiTrackEnabled || !liveAiTrackDetections?.length) return;
+
+  let detections = liveAiTrackDetections;
+  if (liveAiTrackPrevDetections && liveAiTrackLastUpdateMs > 0) {
+    const elapsed = performance.now() - liveAiTrackLastUpdateMs;
+    const t = Math.min(1, elapsed / LIVE_AI_TRACK_LERP_MS);
+    detections = interpolateDetections(liveAiTrackPrevDetections, liveAiTrackDetections, t);
+  }
+
+  drawDetectionBoxesOnCanvas(liveEls.liveAiTrackCanvas, detections, liveEls.frame);
+}
+
+async function detectLiveFrameDetections() {
+  if (!liveAiTrackEnabled || !liveEls.frame || isAllCameraMode()) return;
+  if (!liveEls.frame.complete || liveEls.frame.naturalWidth <= 0) return;
+  if (liveAiTrackInFlight) return;
+  liveAiTrackInFlight = true;
+  try {
+    const srcW = liveEls.frame.naturalWidth;
+    const srcH = liveEls.frame.naturalHeight;
+    const scale = Math.min(1, LIVE_AI_TRACK_MAX_WIDTH / srcW, LIVE_AI_TRACK_MAX_HEIGHT / srcH);
+    const fw = Math.max(1, Math.round(srcW * scale));
+    const fh = Math.max(1, Math.round(srcH * scale));
+    liveAiTrackOffscreenCanvas.width = fw;
+    liveAiTrackOffscreenCanvas.height = fh;
+    const ctx = liveAiTrackOffscreenCanvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(liveEls.frame, 0, 0, fw, fh);
+    const blob = await new Promise((resolve) => liveAiTrackOffscreenCanvas.toBlob((b) => resolve(b), 'image/jpeg', 0.8));
+    if (!blob) return;
+    const payload = await api('/api/detect/frame', {
+      method: 'POST',
+      headers: { 'Content-Type': 'image/jpeg' },
+      body: blob,
+    });
+    const newDetections = (Array.isArray(payload?.detections) ? payload.detections : []).map((det) => {
+      const box = normalizeDetectionBox(det?.box || {}, fw, fh);
+      if (!box) return null;
+      return { ...det, box };
+    }).filter(Boolean);
+    liveAiTrackPrevDetections = liveAiTrackDetections;
+    liveAiTrackLastUpdateMs = performance.now();
+    liveAiTrackDetections = newDetections;
+    drawLiveOverlay();
+  } catch (_err) {
+    // Retain last successful detections on transient failure.
+  } finally {
+    liveAiTrackInFlight = false;
+  }
 }
 
 function cameraDetection() {
@@ -245,7 +325,11 @@ function syncViewMode() {
   if (liveEls.frameWrap) liveEls.frameWrap.hidden = allMode;
   if (liveEls.cameraGrid) liveEls.cameraGrid.hidden = !allMode;
   if (liveEls.cameraSelect?.closest('label')) liveEls.cameraSelect.closest('label').hidden = allMode;
-  if (allMode) renderCameraGrid();
+  if (liveEls.liveAiTrackLabel) liveEls.liveAiTrackLabel.hidden = allMode;
+  if (allMode) {
+    clearLiveOverlay();
+    renderCameraGrid();
+  }
   refreshDetectionStatus();
 }
 
@@ -315,6 +399,9 @@ function setSelectedCamera(cameraId) {
   selectedCamera = cameras.find((camera) => camera.id === cameraId) || cameras[0];
   if (!selectedCamera) return;
   selectedZoneIndex = null;
+  liveAiTrackDetections = null;
+  liveAiTrackPrevDetections = null;
+  clearLiveOverlay();
   if (liveEls.cameraSelect) liveEls.cameraSelect.value = selectedCamera.id;
   if (isZonesPage) {
     renderZones();
@@ -694,12 +781,29 @@ liveEls.frame.addEventListener('load', () => {
   liveEls.status.textContent = liveEls.overlayToggle.checked
     ? `${selectedCamera?.name || 'Camera'} - matched alert boxes on`
     : `${selectedCamera?.name || 'Camera'} - matched alert boxes off`;
+  detectLiveFrameDetections();
 });
 
 liveEls.frame.addEventListener('error', () => {
   liveEls.frame.dataset.loading = 'false';
+  clearLiveOverlay();
   liveEls.status.textContent = 'Unable to load live footage. Retrying...';
 });
+
+window.addEventListener('resize', drawLiveOverlay);
+
+if (liveEls.liveAiTrackToggle) {
+  const savedTrack = localStorage.getItem(LIVE_AI_TRACK_KEY);
+  liveAiTrackEnabled = savedTrack === '1';
+  liveEls.liveAiTrackToggle.checked = liveAiTrackEnabled;
+  liveEls.liveAiTrackToggle.addEventListener('change', () => {
+    liveAiTrackEnabled = Boolean(liveEls.liveAiTrackToggle.checked);
+    localStorage.setItem(LIVE_AI_TRACK_KEY, liveAiTrackEnabled ? '1' : '0');
+    liveAiTrackDetections = null;
+    liveAiTrackPrevDetections = null;
+    clearLiveOverlay();
+  });
+}
 
 liveEls.overlayToggle.addEventListener('change', refreshFrame);
 liveEls.cameraSelect.addEventListener('change', () => setSelectedCamera(liveEls.cameraSelect.value));

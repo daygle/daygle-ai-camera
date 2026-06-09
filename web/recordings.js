@@ -34,13 +34,18 @@ function filterByConfiguredLabels(detections) {
     return configuredLabels.has(label) || configuredLabels.has('motion') && label === 'motion';
   });
 }
-let overlayTrackIntervalMs = 420;
+let overlayTrackIntervalMs = 300;
 const OVERLAY_TRACK_MAX_WIDTH = 640;
 const OVERLAY_TRACK_MAX_HEIGHT = 360;
 const overlayTrackCanvas = document.createElement('canvas');
 let overlayTrackLastRunMs = 0;
 let overlayTrackInFlight = false;
 let overlayTrackDetections = null;
+let overlayTrackPrevDetections = null;
+let overlayTrackPrevUpdateMs = 0;
+let overlayTrackLastUpdateMs = 0;
+const OVERLAY_TRACK_LERP_MS = 150;
+let overlayRafId = null;
 let configuredLabels = null; // null = no filter loaded yet
 
 async function api(path, options = {}) {
@@ -161,10 +166,6 @@ function renderRecordingDetails(recording) {
   `;
 }
 
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
-}
-
 function detectionAnchorSeconds(recording) {
   const startedAt = Date.parse(recording?.started_at || '');
   const eventAt = Date.parse(recording?.event?.created_at || '');
@@ -190,29 +191,31 @@ function clearClipOverlay() {
 
 function clearOverlayTrackDetections() {
   overlayTrackDetections = null;
+  overlayTrackPrevDetections = null;
+  overlayTrackPrevUpdateMs = 0;
+  overlayTrackLastUpdateMs = 0;
   overlayTrackLastRunMs = 0;
 }
 
-function normalizeDetectionBox(box, width, height) {
-  const rawX = Number(box?.x ?? 0);
-  const rawY = Number(box?.y ?? 0);
-  const rawWidth = Number(box?.width ?? 0);
-  const rawHeight = Number(box?.height ?? 0);
-  if (!Number.isFinite(rawX) || !Number.isFinite(rawY) || !Number.isFinite(rawWidth) || !Number.isFinite(rawHeight)) {
-    return null;
+function startOverlayRaf() {
+  if (overlayRafId !== null) return;
+  function loop() {
+    if (!overlayTrackEnabled || !els.clipPlayer || els.clipPlayer.paused) {
+      overlayRafId = null;
+      return;
+    }
+    detectOverlayFrameDetections();
+    drawClipOverlay();
+    overlayRafId = requestAnimationFrame(loop);
   }
-  if (rawWidth <= 0 || rawHeight <= 0) return null;
-  // Detector returns [0,1] normalized coords; only divide if clearly pixel-space.
-  if (rawX <= 1 && rawY <= 1 && rawWidth <= 1 && rawHeight <= 1) {
-    return { x: rawX, y: rawY, width: rawWidth, height: rawHeight };
+  overlayRafId = requestAnimationFrame(loop);
+}
+
+function stopOverlayRaf() {
+  if (overlayRafId !== null) {
+    cancelAnimationFrame(overlayRafId);
+    overlayRafId = null;
   }
-  if (width <= 0 || height <= 0) return null;
-  return {
-    x: Math.max(0, Math.min(1, rawX / width)),
-    y: Math.max(0, Math.min(1, rawY / height)),
-    width: Math.max(0, Math.min(1, rawWidth / width)),
-    height: Math.max(0, Math.min(1, rawHeight / height)),
-  };
 }
 
 async function detectOverlayFrameDetections() {
@@ -249,7 +252,7 @@ async function detectOverlayFrameDetections() {
       body: blob,
     });
     const detections = Array.isArray(payload?.detections) ? payload.detections : [];
-    overlayTrackDetections = detections.map((detection) => {
+    const newDetections = detections.map((detection) => {
       const normalizedBox = normalizeDetectionBox(detection?.box || {}, frameWidth, frameHeight);
       if (!normalizedBox) return null;
       return {
@@ -257,41 +260,28 @@ async function detectOverlayFrameDetections() {
         box: normalizedBox,
       };
     }).filter(Boolean);
+    overlayTrackPrevDetections = overlayTrackDetections;
+    overlayTrackPrevUpdateMs = overlayTrackLastUpdateMs;
+    overlayTrackLastUpdateMs = performance.now();
+    overlayTrackDetections = newDetections;
   } catch (_error) {
     // Keep the last successful overlay detections if transient frame inference fails.
   } finally {
     overlayTrackInFlight = false;
-    drawClipOverlay();
-  }
-}
-
-function resizeClipOverlay() {
-  if (!els.clipOverlay || !els.clipPlayer) return;
-  const width = Math.max(1, Math.round(els.clipPlayer.clientWidth));
-  const height = Math.max(1, Math.round(els.clipPlayer.clientHeight));
-  const dpr = window.devicePixelRatio || 1;
-  const targetWidth = Math.max(1, Math.round(width * dpr));
-  const targetHeight = Math.max(1, Math.round(height * dpr));
-  if (els.clipOverlay.width !== targetWidth || els.clipOverlay.height !== targetHeight) {
-    els.clipOverlay.width = targetWidth;
-    els.clipOverlay.height = targetHeight;
+    if (!overlayRafId) drawClipOverlay();
   }
 }
 
 function drawClipOverlay() {
   if (!els.clipOverlay || !els.clipPlayer) return;
-  resizeClipOverlay();
+  resizeOverlayCanvas(els.clipOverlay, els.clipPlayer);
   const context = els.clipOverlay.getContext('2d');
   if (!context) return;
-  const cssWidth = Math.max(1, els.clipPlayer.clientWidth);
-  const cssHeight = Math.max(1, els.clipPlayer.clientHeight);
-  const dpr = window.devicePixelRatio || 1;
   context.setTransform(1, 0, 0, 1, 0, 0);
   context.clearRect(0, 0, els.clipOverlay.width, els.clipOverlay.height);
   if (!overlayEnabled) return;
-  context.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-  if (overlayTrackEnabled) {
+  if (overlayTrackEnabled && !overlayRafId) {
     detectOverlayFrameDetections();
   }
 
@@ -302,54 +292,19 @@ function drawClipOverlay() {
       ? allEventDetections.filter((d) => !GENERIC_TRIGGER_LABELS.has(String(d.label || '').toLowerCase()))
       : allEventDetections
   );
-  const detections = overlayTrackEnabled && Array.isArray(overlayTrackDetections) && overlayTrackDetections.length
-    ? filterByConfiguredLabels(overlayTrackDetections)
-    : eventDetections;
+  let rawTrackDetections = overlayTrackEnabled && Array.isArray(overlayTrackDetections) && overlayTrackDetections.length
+    ? overlayTrackDetections : null;
+  if (rawTrackDetections && overlayTrackPrevDetections && overlayTrackLastUpdateMs > 0) {
+    const elapsed = performance.now() - overlayTrackLastUpdateMs;
+    const t = Math.min(1, elapsed / OVERLAY_TRACK_LERP_MS);
+    rawTrackDetections = interpolateDetections(overlayTrackPrevDetections, rawTrackDetections, t);
+  }
+  const detections = rawTrackDetections ? filterByConfiguredLabels(rawTrackDetections) : eventDetections;
   if (!detections.length) return;
   const playerTime = Number(els.clipPlayer.currentTime || 0);
   if (!overlayTrackEnabled && !shouldRenderOverlayForTime(activeRecording, playerTime)) return;
 
-  const videoWidth = Math.max(1, Number(els.clipPlayer.videoWidth || cssWidth));
-  const videoHeight = Math.max(1, Number(els.clipPlayer.videoHeight || cssHeight));
-  const scale = Math.min(cssWidth / videoWidth, cssHeight / videoHeight);
-  const renderWidth = videoWidth * scale;
-  const renderHeight = videoHeight * scale;
-  const offsetX = (cssWidth - renderWidth) / 2;
-  const offsetY = (cssHeight - renderHeight) / 2;
-
-  context.font = '12px Inter, ui-sans-serif, system-ui, sans-serif';
-  context.textBaseline = 'middle';
-  context.lineWidth = 2;
-
-  detections.forEach((detection) => {
-    const box = detection?.box || detection || {};
-    const x = clamp(Number(box.x ?? 0), 0, 1);
-    const y = clamp(Number(box.y ?? 0), 0, 1);
-    const width = clamp(Number(box.width ?? 0), 0, 1);
-    const height = clamp(Number(box.height ?? 0), 0, 1);
-    if (width <= 0 || height <= 0) return;
-
-    const drawX = offsetX + (x * renderWidth);
-    const drawY = offsetY + (y * renderHeight);
-    const drawWidth = width * renderWidth;
-    const drawHeight = height * renderHeight;
-    if (drawWidth < 2 || drawHeight < 2) return;
-
-    context.strokeStyle = '#49e6a3';
-    context.strokeRect(drawX, drawY, drawWidth, drawHeight);
-
-    const confidence = Math.round(Number(detection.confidence || 0) * 100);
-    const label = `${String(detection.label || 'object')} ${confidence}%`;
-    const textWidth = context.measureText(label).width;
-    const labelHeight = 20;
-    const labelWidth = textWidth + 12;
-    const labelY = drawY > labelHeight + 4 ? drawY - labelHeight - 4 : drawY + 4;
-
-    context.fillStyle = 'rgba(7, 11, 19, 0.86)';
-    context.fillRect(drawX, labelY, labelWidth, labelHeight);
-    context.fillStyle = '#49e6a3';
-    context.fillText(label, drawX + 6, labelY + (labelHeight / 2));
-  });
+  drawDetectionBoxesOnCanvas(els.clipOverlay, detections, els.clipPlayer);
 }
 
 function openVideoModal() {
@@ -362,6 +317,7 @@ function closeVideoModal() {
   els.videoModal.hidden = true;
   document.body.style.overflow = '';
   els.clipPlayer.pause();
+  stopOverlayRaf();
   els.clipPlayer.removeAttribute('src');
   els.clipPlayer.load();
   els.videoModalDownload.hidden = true;
@@ -509,8 +465,18 @@ els.clipPlayer.addEventListener('error', () => {
   els.clipPlayerStatus.textContent = messages[error?.code] || 'Unable to play this recording.';
 });
 
-['loadedmetadata', 'loadeddata', 'play', 'pause', 'seeked', 'timeupdate'].forEach((eventName) => {
+['loadedmetadata', 'loadeddata', 'pause', 'seeked', 'timeupdate'].forEach((eventName) => {
   els.clipPlayer.addEventListener(eventName, drawClipOverlay);
+});
+
+els.clipPlayer.addEventListener('play', () => {
+  if (overlayTrackEnabled) startOverlayRaf();
+  drawClipOverlay();
+});
+
+els.clipPlayer.addEventListener('pause', () => {
+  stopOverlayRaf();
+  drawClipOverlay();
 });
 
 window.addEventListener('resize', drawClipOverlay);
@@ -539,6 +505,11 @@ if (els.clipOverlayTrackToggle) {
     overlayTrackEnabled = Boolean(els.clipOverlayTrackToggle.checked);
     localStorage.setItem(OVERLAY_TRACK_KEY, overlayTrackEnabled ? '1' : '0');
     clearOverlayTrackDetections();
+    if (overlayTrackEnabled && els.clipPlayer && !els.clipPlayer.paused) {
+      startOverlayRaf();
+    } else {
+      stopOverlayRaf();
+    }
     drawClipOverlay();
   });
 }
