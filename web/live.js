@@ -33,10 +33,6 @@ let drawingMode = false;
 let draftPolygon = null;
 let zoneDrag = null;
 
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
-}
-
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
   if (csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((options.method || 'GET').toUpperCase())) {

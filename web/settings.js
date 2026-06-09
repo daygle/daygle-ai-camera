@@ -263,10 +263,6 @@ enhanceFormFieldLabels();
 ensureRecordingExtensionStepField();
 enhanceFormFieldLabels();
 
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
-}
-
 const emailForm = document.getElementById('emailSettingsForm');
 const testEmailRecipient = document.getElementById('testEmailRecipient');
 const testEmailBtn = document.getElementById('testEmailBtn');

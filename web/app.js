@@ -43,21 +43,6 @@ async function api(path, options = {}) {
   return response.json();
 }
 
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>'"]/g, (char) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    "'": '&#39;',
-    '"': '&quot;',
-  })[char]);
-}
-
-function formatDate(value) {
-  if (!value) return 'Unknown time';
-  return new Date(value).toLocaleString();
-}
-
 function cameraLabel(cameraName, cameraId) {
   const name = String(cameraName || '').trim();
   const id = String(cameraId || '').trim();
