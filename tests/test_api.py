@@ -2704,18 +2704,23 @@ def test_person_and_cat_in_zone_each_create_independent_events(tmp_path, monkeyp
     _load_app(tmp_path, monkeypatch)
     import app.main as main
 
-    labels_sequence = iter([
-        [{'label': 'person', 'confidence': 0.90, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.3, 'height': 0.5}}],
-        [{'label': 'cat',    'confidence': 0.85, 'box': {'x': 0.5, 'y': 0.4, 'width': 0.2, 'height': 0.2}}],
-    ])
+    # Key detections off the frame bytes rather than call order. The finalized clip is
+    # re-scanned on a background thread (schedule_recording_detection_track) to bake a
+    # detection track, which calls detect_image with the recorded frame bytes. A one-shot
+    # iterator would be exhausted by those extra calls and raise StopIteration into the
+    # second live call, so the fake must answer deterministically per frame.
+    labels_by_frame = {
+        b'frame1': [{'label': 'person', 'confidence': 0.90, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.3, 'height': 0.5}}],
+        b'frame2': [{'label': 'cat',    'confidence': 0.85, 'box': {'x': 0.5, 'y': 0.4, 'width': 0.2, 'height': 0.2}}],
+    }
 
     class FakeDetector:
         backend = 'onnx'
         available = True
         unavailable_reason = None
 
-        def detect_image(self, _bytes, confidence=None):
-            return next(labels_sequence)
+        def detect_image(self, image_bytes, confidence=None):
+            return labels_by_frame.get(image_bytes, [])
 
     monkeypatch.setattr(main, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
@@ -2794,6 +2799,124 @@ def test_object_outside_zone_does_not_create_recording(tmp_path, monkeypatch):
     event_id = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
 
     assert event_id is None, "Person outside the zone must not produce any event"
+
+
+def _email_alert_capture(main, monkeypatch):
+    """Configure global SMTP settings and capture every message the mailer would deliver.
+
+    Returns the list that receives one dict per delivered message ({'To', 'Subject', 'Body'}).
+    SMTP transport is stubbed so no network connection is attempted.
+    """
+    main.database.set_setting(
+        'alert_email',
+        {
+            'enabled': True,
+            'host': 'smtp.example.com',
+            'port': 587,
+            'username': 'user',
+            'password': 'secret',
+            'from_address': 'camera@example.com',
+            'use_tls': True,
+            'use_ssl': False,
+        },
+        main.utc_now(),
+    )
+    sent: list[dict[str, str]] = []
+
+    def fake_deliver(self, message):
+        sent.append({
+            'To': message['To'],
+            'Subject': message['Subject'],
+        })
+
+    monkeypatch.setattr(main.EmailAlertService, '_deliver', fake_deliver)
+    return sent
+
+
+def _zone_camera_settings_with_email(label: str):
+    """Full-frame zone with a single alert+email rule for the given object label."""
+    return _zone_camera_settings([
+        {
+            'label': label,
+            'record_on_detect': True,
+            'alert_on_detect': True,
+            'min_confidence': 0.5,
+            'cooldown_seconds': 0,
+            'email_enabled': True,
+            'email_recipients': ['glenbday82@gmail.com'],
+        },
+    ])
+
+
+@pytest.mark.parametrize('label', ['person', 'cat'])
+def test_object_detection_with_email_rule_delivers_email(tmp_path, monkeypatch, label):
+    """A person/cat detected in a zone whose rule has email_enabled and a recipient must
+    deliver an email to that recipient with the object in the subject line.
+
+    This locks in the end-to-end alerting goal: object detected in footage -> email sent.
+    """
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _bytes, confidence=None):
+            return [{'label': label, 'confidence': 0.9, 'box': {'x': 0.2, 'y': 0.2, 'width': 0.2, 'height': 0.2}}]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    main.live_detection_last_checked.clear()
+    main.alerts.last_triggered.clear()
+
+    sent = _email_alert_capture(main, monkeypatch)
+    settings = _zone_camera_settings_with_email(label)
+    event_id = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+
+    assert event_id is not None
+    assert len(sent) == 1, f'exactly one email should be sent for a {label} detection'
+    assert sent[0]['To'] == 'glenbday82@gmail.com'
+    assert label in sent[0]['Subject'].lower()
+
+
+def test_object_detection_without_global_email_enabled_sends_nothing(tmp_path, monkeypatch):
+    """A per-rule email_enabled flag must not deliver mail when global SMTP is disabled.
+
+    EmailAlertService.configured() gates on the global settings, so the event/alert are
+    still recorded but no message is delivered. This guards against silently emailing when
+    the operator has not finished SMTP setup."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _bytes, confidence=None):
+            return [{'label': 'cat', 'confidence': 0.9, 'box': {'x': 0.2, 'y': 0.2, 'width': 0.2, 'height': 0.2}}]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    main.live_detection_last_checked.clear()
+    main.alerts.last_triggered.clear()
+
+    # Global email left disabled; only the per-rule flag is on.
+    main.database.set_setting(
+        'alert_email',
+        {'enabled': False, 'host': '', 'from_address': '', 'port': 587, 'use_tls': True, 'use_ssl': False},
+        main.utc_now(),
+    )
+    delivered: list[object] = []
+    monkeypatch.setattr(main.EmailAlertService, '_deliver', lambda self, message: delivered.append(message))
+
+    settings = _zone_camera_settings_with_email('cat')
+    event_id = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+
+    assert event_id is not None, 'event/alert should still be recorded even without email configured'
+    assert delivered == [], 'no email should be delivered while global SMTP is disabled'
 
 
 def test_compute_minimum_rule_confidence_falls_back_to_global_ai_confidence(tmp_path, monkeypatch):
