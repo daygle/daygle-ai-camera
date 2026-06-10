@@ -22,31 +22,57 @@ function normalizeDetectionBox(box, frameWidth, frameHeight) {
   };
 }
 
+// Intersection-over-union of two normalized boxes. Returns 0 when they don't
+// overlap. Used to correspond detections across samples by actual overlap
+// rather than center proximity, which is more stable when boxes change size.
+function boxIoU(a, b) {
+  if (!a || !b) return 0;
+  const ax2 = a.x + a.width;
+  const ay2 = a.y + a.height;
+  const bx2 = b.x + b.width;
+  const by2 = b.y + b.height;
+  const ix = Math.max(0, Math.min(ax2, bx2) - Math.max(a.x, b.x));
+  const iy = Math.max(0, Math.min(ay2, by2) - Math.max(a.y, b.y));
+  const inter = ix * iy;
+  if (inter <= 0) return 0;
+  const union = a.width * a.height + b.width * b.height - inter;
+  return union > 0 ? inter / union : 0;
+}
+
 // Finds the detection in `candidates` that best corresponds to `target`:
-// same label, then nearest box center. This keeps velocity estimates stable
-// when several objects of the same label are present, instead of always
-// matching the first one in the list.
+// same label, then highest box overlap (IoU). When nothing overlaps — e.g. a
+// fast-moving object whose boxes don't intersect between samples — it falls
+// back to the nearest box center. This keeps the correspondence (and velocity
+// estimates) stable when several objects of the same label are present, instead
+// of always matching the first one in the list.
 function matchDetection(candidates, target) {
   if (!Array.isArray(candidates) || !candidates.length) return null;
   const targetLabel = String(target?.label || '').toLowerCase();
   const targetBox = target?.box;
   let best = null;
-  let bestDist = Infinity;
+  let bestIoU = 0;
+  let nearest = null;
+  let nearestDist = Infinity;
   for (const candidate of candidates) {
     if (String(candidate?.label || '').toLowerCase() !== targetLabel) continue;
     if (!candidate?.box || !targetBox) {
-      if (!best) best = candidate;
+      if (!nearest) nearest = candidate;
       continue;
+    }
+    const iou = boxIoU(candidate.box, targetBox);
+    if (iou > bestIoU) {
+      bestIoU = iou;
+      best = candidate;
     }
     const dx = (candidate.box.x + candidate.box.width / 2) - (targetBox.x + targetBox.width / 2);
     const dy = (candidate.box.y + candidate.box.height / 2) - (targetBox.y + targetBox.height / 2);
     const dist = dx * dx + dy * dy;
-    if (dist < bestDist) {
-      bestDist = dist;
-      best = candidate;
+    if (dist < nearestDist) {
+      nearestDist = dist;
+      nearest = candidate;
     }
   }
-  return best;
+  return best || nearest;
 }
 
 // Projects detections from where they were observed (`curTime`) to a target
