@@ -1149,21 +1149,25 @@ def run_live_alert_monitor_once() -> int:
                 continue
             live_detection_last_checked[camera_id] = now
             active_live_detection_cameras.add(camera_id)
-        try:
-            selected_camera = get_camera_instance(camera_id)
-            if not hasattr(selected_camera, 'read_jpeg'):
-                update_live_detection_status(camera_id, state='skipped', reason='Background alerts require a camera that can read JPEG frames.', detections=[])
-                continue
-            image_bytes, frame = selected_camera.read_jpeg()
-            clear_live_camera_backoff(camera_id)
-            process_live_stream_alerts(image_bytes, frame, copy.deepcopy(selected_config), enforce_interval=False)
-            processed += 1
-        except Exception as exc:
-            logger.warning('Background live alert check failed for camera %s: %s', camera_id, exc)
-            schedule_live_camera_backoff(camera_id, str(exc))
-        finally:
-            with live_detection_worker_lock:
-                active_live_detection_cameras.discard(camera_id)
+
+        def _detect_bg(cid: str = camera_id, cfg: dict[str, Any] = copy.deepcopy(selected_config)) -> None:
+            try:
+                cam = get_camera_instance(cid)
+                if not hasattr(cam, 'read_jpeg'):
+                    update_live_detection_status(cid, state='skipped', reason='Background alerts require a camera that can read JPEG frames.', detections=[])
+                    return
+                image_bytes, frame = cam.read_jpeg()
+                clear_live_camera_backoff(cid)
+                process_live_stream_alerts(image_bytes, frame, cfg, enforce_interval=False)
+            except Exception as exc:
+                logger.warning('Background live alert check failed for camera %s: %s', cid, exc)
+                schedule_live_camera_backoff(cid, str(exc))
+            finally:
+                with live_detection_worker_lock:
+                    active_live_detection_cameras.discard(cid)
+
+        threading.Thread(target=_detect_bg, name=f'live-detection-{camera_id}', daemon=True).start()
+        processed += 1
     return processed
 
 
