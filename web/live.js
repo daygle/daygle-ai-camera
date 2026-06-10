@@ -49,9 +49,24 @@ let liveAiTrackPrevDetections = null;
 let liveAiTrackCaptureMs = 0;
 let liveAiTrackPrevCaptureMs = 0;
 let liveRafId = null;
+// Latest object detections from the server-side background monitor (already
+// computed for alerts/recording). The live overlay reuses these instead of
+// running a second, redundant inference per frame on the same camera, which
+// halves detector load while the live view is open. serverTrackMs is the client
+// receipt time so freshness is measured on one clock.
+let serverTrackDetections = null;
+let serverTrackMs = 0;
+const SERVER_TRACK_FRESH_MS = 1200;
+const OVERLAY_STATUS_REFRESH_MS = 600;
 const LIVE_AI_TRACK_MAX_WIDTH = 640;
 const LIVE_AI_TRACK_MAX_HEIGHT = 360;
 const LIVE_AI_TRACK_MAX_LEAD_MS = 1500;
+// Stop drawing a detection once its source sample is older than this. Under CPU
+// load a new (empty) inference result can take a while to arrive, so without an
+// expiry the last box lingers — and projectDetections extrapolates it forward —
+// long after the object has left the frame. Bounding the age makes the overlay
+// clear promptly instead of trailing reality.
+const LIVE_AI_TRACK_STALE_MS = 900;
 const liveAiTrackOffscreenCanvas = document.createElement('canvas');
 
 async function api(path, options = {}) {
@@ -108,6 +123,14 @@ function drawLiveOverlay() {
   ctx.clearRect(0, 0, liveEls.liveAiTrackCanvas.width, liveEls.liveAiTrackCanvas.height);
   if (!liveAiTrackEnabled || !liveAiTrackDetections?.length) return;
 
+  // Drop boxes whose source sample has gone stale (slow/stalled inference) so the
+  // overlay clears instead of trailing the object after it has left the frame.
+  if (liveAiTrackCaptureMs > 0 && performance.now() - liveAiTrackCaptureMs > LIVE_AI_TRACK_STALE_MS) {
+    liveAiTrackDetections = null;
+    liveAiTrackPrevDetections = null;
+    return;
+  }
+
   let detections = liveAiTrackDetections;
   if (liveAiTrackPrevDetections && liveAiTrackPrevCaptureMs > 0) {
     detections = projectDetections(
@@ -149,6 +172,18 @@ function stopLiveRaf() {
 async function detectLiveFrameDetections() {
   if (!liveAiTrackEnabled || !liveEls.frame || isAllCameraMode()) return;
   if (!liveEls.frame.complete || liveEls.frame.naturalWidth <= 0) return;
+  // Prefer the background monitor's detections (already computed server-side for
+  // alerts/recording). When they are fresh, render those and skip a second,
+  // redundant client-side inference on the same camera. Falls through to live
+  // inference only when the server data is stale (monitor idle/backed off).
+  if (serverTrackMs > 0 && performance.now() - serverTrackMs < SERVER_TRACK_FRESH_MS) {
+    liveAiTrackPrevDetections = liveAiTrackDetections;
+    liveAiTrackPrevCaptureMs = liveAiTrackCaptureMs;
+    liveAiTrackCaptureMs = serverTrackMs;
+    liveAiTrackDetections = serverTrackDetections;
+    drawLiveOverlay();
+    return;
+  }
   if (liveAiTrackInFlight) return;
   liveAiTrackInFlight = true;
   try {
@@ -393,6 +428,7 @@ function syncViewMode() {
     clearLiveOverlay();
     renderCameraGrid();
   }
+  if (typeof detectionStatusTimer !== 'undefined') restartDetectionStatusTimer();
   refreshDetectionStatus();
 }
 
@@ -444,6 +480,29 @@ function formatDetectionStatus(payload) {
   return `Live AI: ${payload.state || 'waiting'} - ${payload.reason || payload.ai_error || 'waiting for frames'}`;
 }
 
+// Capture the background monitor's object detections from a status payload so
+// the overlay can reuse them. Only cycles that actually ran inference recently
+// ('checked'/'alerted') are trusted; 'error'/'skipped'/'waiting' leave the cache
+// untouched so detectLiveFrameDetections falls back to live client inference.
+function ingestServerTrackDetections(payload) {
+  if (!liveAiTrackEnabled || !payload || !['checked', 'alerted'].includes(payload.state)) return;
+  serverTrackDetections = (payload.detections || [])
+    .filter((d) => d && d.box && !d.motion_event && String(d.label || '').trim().toLowerCase() !== 'motion')
+    .map((d) => ({ label: d.label, confidence: d.confidence, box: d.box }));
+  serverTrackMs = performance.now();
+}
+
+function detectionStatusInterval() {
+  return liveAiTrackEnabled && !isAllCameraMode()
+    ? Math.min(detectionStatusRefreshMs, OVERLAY_STATUS_REFRESH_MS)
+    : detectionStatusRefreshMs;
+}
+
+function restartDetectionStatusTimer() {
+  if (detectionStatusTimer) clearInterval(detectionStatusTimer);
+  detectionStatusTimer = setInterval(refreshDetectionStatus, detectionStatusInterval());
+}
+
 async function refreshDetectionStatus() {
   if (!liveEls.detectionStatus) return;
   if (isAllCameraMode()) {
@@ -453,7 +512,9 @@ async function refreshDetectionStatus() {
   if (!selectedCamera) return;
   try {
     const cameraId = encodeURIComponent(selectedCamera.id);
-    liveEls.detectionStatus.textContent = formatDetectionStatus(await api(`/api/live/detection-status?camera_id=${cameraId}`));
+    const payload = await api(`/api/live/detection-status?camera_id=${cameraId}`);
+    ingestServerTrackDetections(payload);
+    liveEls.detectionStatus.textContent = formatDetectionStatus(payload);
   } catch (error) {
     liveEls.detectionStatus.textContent = `Live AI status unavailable: ${error.message}`;
   }
@@ -467,6 +528,8 @@ function setSelectedCamera(cameraId) {
   liveAiTrackPrevDetections = null;
   liveAiTrackCaptureMs = 0;
   liveAiTrackPrevCaptureMs = 0;
+  serverTrackDetections = null;
+  serverTrackMs = 0;
   clearLiveOverlay();
   if (liveEls.cameraSelect) liveEls.cameraSelect.value = selectedCamera.id;
   if (isZonesPage) {
@@ -874,7 +937,10 @@ if (liveEls.liveAiTrackToggle) {
     liveAiTrackPrevDetections = null;
     liveAiTrackCaptureMs = 0;
     liveAiTrackPrevCaptureMs = 0;
+    serverTrackDetections = null;
+    serverTrackMs = 0;
     clearLiveOverlay();
+    restartDetectionStatusTimer();
     if (liveAiTrackEnabled && !isAllCameraMode()) {
       detectLiveFrameDetections();
       startLiveRaf();
@@ -959,7 +1025,7 @@ async function init() {
   bindZoneDrawing();
   syncViewMode();
   refreshTimer = setInterval(refreshFrame, snapshotRefreshMs);
-  detectionStatusTimer = setInterval(refreshDetectionStatus, detectionStatusRefreshMs);
+  restartDetectionStatusTimer();
 }
 
 init().catch((error) => { liveEls.status.textContent = error.message; });

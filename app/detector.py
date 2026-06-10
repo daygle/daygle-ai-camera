@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -105,6 +107,8 @@ class OnnxYoloDetector:
         confidence: float = 0.45,
         iou_threshold: float = 0.45,
         categories: list[str] | None = None,
+        num_threads: int | None = None,
+        max_concurrency: int | None = None,
     ) -> None:
         self.model_path = Path(model_path)
         self.labels = load_labels(labels_path, categories)
@@ -115,6 +119,15 @@ class OnnxYoloDetector:
         self.input_name: str | None = None
         self.output_names: list[str] = []
         self.unavailable_reason: str | None = None
+
+        cpu_count = os.cpu_count() or 1
+        # Let each inference use multiple cores so it finishes fast, then cap how
+        # many inferences run at once. Running many single-threaded inferences in
+        # parallel (one per camera + the live overlay) thrashed the CPU and made
+        # every detection slow; serialising fast inferences keeps latency low.
+        self._num_threads = num_threads if (num_threads and num_threads > 0) else max(1, min(4, cpu_count))
+        self._max_concurrency = max_concurrency if (max_concurrency and max_concurrency > 0) else 1
+        self._inference_semaphore = threading.Semaphore(self._max_concurrency)
 
         if not self.model_path.exists():
             self.unavailable_reason = f"ONNX model not found: {self.model_path}"
@@ -133,7 +146,7 @@ class OnnxYoloDetector:
         try:
             providers = ["CPUExecutionProvider"]
             session_options = ort.SessionOptions()
-            session_options.intra_op_num_threads = 1
+            session_options.intra_op_num_threads = self._num_threads
             session_options.inter_op_num_threads = 1
             self.session = ort.InferenceSession(str(self.model_path), sess_options=session_options, providers=providers)
             self.input_name = self.session.get_inputs()[0].name
@@ -152,7 +165,10 @@ class OnnxYoloDetector:
         effective_confidence = confidence if confidence is not None else self.confidence
         image = self._decode_image(image_bytes)
         input_tensor, scale, pad_x, pad_y, original_width, original_height = self._preprocess(image)
-        outputs = self.session.run(self.output_names, {self.input_name: input_tensor})  # type: ignore[union-attr,index]
+        # Cap concurrent inferences so parallel callers (per-camera background
+        # detection + live overlay) don't oversubscribe the CPU and slow each other.
+        with self._inference_semaphore:
+            outputs = self.session.run(self.output_names, {self.input_name: input_tensor})  # type: ignore[union-attr,index]
         return self._postprocess(outputs[0], scale, pad_x, pad_y, original_width, original_height, effective_confidence)
 
     def _decode_image(self, image_bytes: bytes) -> np.ndarray:
@@ -275,6 +291,13 @@ def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
     backend = str(ai_config.get("backend", "onnx")).lower()
     if backend != "onnx":
         raise ValueError(f"Unsupported ai.backend '{backend}'. Expected 'onnx'.")
+    def _optional_int(key: str) -> int | None:
+        value = ai_config.get(key)
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
     return OnnxYoloDetector(
         model_path=ai_config.get("model_path", "models/model.onnx"),
         labels_path=ai_config.get("labels_path", "models/coco.names"),
@@ -282,4 +305,6 @@ def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
         confidence=float(ai_config.get("confidence", 0.45)),
         iou_threshold=float(ai_config.get("iou_threshold", 0.45)),
         categories=ai_config.get("categories", []),
+        num_threads=_optional_int("inference_threads"),
+        max_concurrency=_optional_int("max_concurrent_inferences"),
     )
