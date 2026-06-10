@@ -609,9 +609,7 @@ input[type="file"] { padding: 10px; }
 .compact-empty { padding: 6px 0; }
 .compact-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
 .button-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
-@media (max-width: 1280px) {
-  .zone-object-rule { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
+
 @media (max-width: 760px) {
   .zone-row-main, .zone-object-rule { grid-template-columns: 1fr; }
   .zone-object-rules-header { align-items: stretch; flex-direction: column; }
