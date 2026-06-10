@@ -43,6 +43,11 @@ let overlayTrackLastRunMs = 0;
 let overlayTrackInFlight = false;
 let overlayTrackDetections = null;
 let overlayTrackPrevDetections = null;
+// True once live frame inference has localized at least one object for this
+// clip. Distinguishes "inference returned empty" (object not detectable on the
+// downscaled frame — keep the static event box) from "inference is tracking the
+// object" (suppress the static box so a panning camera doesn't double-draw).
+let overlayTrackEverDetected = false;
 // Video currentTime (seconds) at which each sample's frame was captured, so
 // the overlay can be projected onto the frame currently on screen regardless
 // of how long detection took.
@@ -125,6 +130,7 @@ function clearClipOverlay() {
 function clearOverlayTrackDetections() {
   overlayTrackDetections = null;
   overlayTrackPrevDetections = null;
+  overlayTrackEverDetected = false;
   overlayTrackCaptureTime = 0;
   overlayTrackPrevCaptureTime = 0;
   overlayTrackLastRunMs = 0;
@@ -202,6 +208,7 @@ async function detectOverlayFrameDetections() {
     overlayTrackPrevCaptureTime = overlayTrackCaptureTime;
     overlayTrackCaptureTime = captureTime;
     overlayTrackDetections = newDetections;
+    if (newDetections.length) overlayTrackEverDetected = true;
   } catch (_error) {
     // Keep last successful overlay detections on transient failure.
   } finally {
@@ -256,16 +263,19 @@ function drawClipOverlay() {
       maxLead,
     );
   }
-  // Once live inference has run at all (overlayTrackDetections is an array, even if empty),
-  // never fall back to the static event boxes — doing so causes the fixed event-position
-  // boxes to reappear whenever a frame briefly returns no detections, producing the visual
-  // effect of two overlapping overlays as the camera pans away from the original event position.
+  // Once live inference is actively tracking the object, never fall back to the
+  // static event boxes — doing so causes the fixed event-position boxes to
+  // reappear whenever a frame briefly returns no detections, producing the visual
+  // effect of two overlapping overlays as the camera pans away from the original
+  // event position. But if live inference has never localized anything (object
+  // too small/distant to detect on the downscaled frame), keep showing the static
+  // event box rather than leaving playback with no overlay at all.
   const detections = rawTrackDetections
     ? filterByConfiguredLabels(rawTrackDetections)
-    : overlayTrackDetections === null ? eventDetections : [];
+    : overlayTrackEverDetected ? [] : eventDetections;
   if (!detections.length) return;
   // The static event box is only meaningful from the event moment onward.
-  if (overlayTrackDetections === null && !shouldRenderOverlayForTime(activeRecording, playerTime)) return;
+  if (!overlayTrackEverDetected && !shouldRenderOverlayForTime(activeRecording, playerTime)) return;
 
   drawDetectionBoxesOnCanvas(els.clipOverlay, detections, els.clipPlayer);
 }
