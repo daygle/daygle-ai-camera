@@ -2759,11 +2759,9 @@ def test_person_and_cat_in_zone_each_create_independent_events(tmp_path, monkeyp
     _load_app(tmp_path, monkeypatch)
     import app.main as main
 
-    # Key detections off the frame bytes rather than call order. The finalized clip is
-    # re-scanned on a background thread (schedule_recording_detection_track) to bake a
-    # detection track, which calls detect_image with the recorded frame bytes. A one-shot
-    # iterator would be exhausted by those extra calls and raise StopIteration into the
-    # second live call, so the fake must answer deterministically per frame.
+    # Key detections off the frame bytes rather than call order, so each live
+    # call answers deterministically for its own frame regardless of how many
+    # times the detector is invoked.
     labels_by_frame = {
         b'frame1': [{'label': 'person', 'confidence': 0.90, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.3, 'height': 0.5}}],
         b'frame2': [{'label': 'cat',    'confidence': 0.85, 'box': {'x': 0.5, 'y': 0.4, 'width': 0.2, 'height': 0.2}}],
@@ -3134,46 +3132,42 @@ def test_empty_detection_track_is_marker_only(tmp_path, monkeypatch):
     assert loaded is not None and len(loaded) == 2
 
 
-def _write_tiny_mp4(path: Path, frames: int = 20, fps: int = 10) -> bool:
-    """Write a small mp4 with OpenCV or ffmpeg; returns False when neither encoder
-    is available."""
-    try:
-        import cv2
-        import numpy as np
-    except ImportError:
-        cv2 = None
-    if cv2 is not None:
-        writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*'mp4v'), fps, (64, 48))
-        if writer.isOpened():
-            try:
-                for index in range(frames):
-                    frame = np.zeros((48, 64, 3), dtype=np.uint8)
-                    frame[:, : (index * 3) % 64] = 200
-                    writer.write(frame)
-            finally:
-                writer.release()
-            return path.exists() and path.stat().st_size > 0
-    ffmpeg = shutil.which('ffmpeg')
-    if not ffmpeg:
-        return False
-    result = subprocess.run(
-        [ffmpeg, '-y', '-loglevel', 'error',
-         '-f', 'lavfi', '-i', f'testsrc2=s=64x48:r={fps}:d={frames / fps:.3f}',
-         '-pix_fmt', 'yuv420p', str(path)],
-        capture_output=True, timeout=60, check=False,
-    )
-    return result.returncode == 0 and path.exists() and path.stat().st_size > 0
-
-
-def test_build_recording_detection_track_decodes_real_clip(tmp_path, monkeypatch):
-    """The bake must produce ascending timestamped samples from a real clip using
-    whichever decoder is available (ffmpeg preferred, OpenCV fallback)."""
+def test_build_track_from_live_history_slices_capture_window(tmp_path, monkeypatch):
+    """Recording tracks are sliced from the live monitor's in-memory detection
+    history — no clip decoding, no re-inference — with timestamps rebased onto
+    the capture window."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
 
-    clip = tmp_path / 'event_clip.mp4'
-    if not _write_tiny_mp4(clip):
-        pytest.skip('No mp4 encoder available in this environment')
+    now = time.time()
+    box = {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}
+    main.live_detection_history['camera-1'] = main.deque(
+        [
+            (now - 10.0, [{'label': 'person', 'confidence': 0.9, 'box': box}]),   # before window
+            (now - 4.0, [{'label': 'person', 'confidence': 0.91, 'box': box}]),
+            (now - 2.0, []),                                                       # empty cycle inside window
+            (now + 5.0, [{'label': 'cat', 'confidence': 0.8, 'box': box}]),        # after window
+        ],
+        maxlen=main.LIVE_DETECTION_HISTORY_MAXLEN,
+    )
+
+    track = main.build_track_from_live_history('camera-1', now - 5.0, now)
+    assert track is not None
+    assert [sample['t'] for sample in track] == [1.0, 3.0]
+    assert track[0]['detections'][0]['label'] == 'person'
+    # Empty cycles are kept so playback clears boxes after the object leaves.
+    assert track[1]['detections'] == []
+
+    assert main.build_track_from_live_history('camera-1', now + 100, now + 110) is None
+    assert main.build_track_from_live_history('other-camera', now - 5.0, now) is None
+    assert main.build_track_from_live_history(None, now - 5.0, now) is None
+
+
+def test_live_monitor_populates_detection_history(tmp_path, monkeypatch):
+    """Every live monitor cycle must append its detections to the per-camera
+    history that recording tracks are sliced from."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
 
     class FakeDetector:
         backend = 'onnx'
@@ -3184,62 +3178,75 @@ def test_build_recording_detection_track_decodes_real_clip(tmp_path, monkeypatch
             return [{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}}]
 
     monkeypatch.setattr(main, 'detector', FakeDetector())
-    track = main.build_recording_detection_track(clip)
-    assert track, 'expected a non-empty detection track'
-    times = [sample['t'] for sample in track]
-    assert times == sorted(times)
-    assert all(sample['detections'] for sample in track)
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    main.live_detection_last_checked.clear()
+    main.alerts.last_triggered.clear()
+
+    settings = _zone_camera_settings([
+        {'label': 'person', 'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
+    ])
+    before = time.time()
+    main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+
+    history = main.live_detection_history.get('camera-1')
+    assert history, 'monitor cycle must be recorded in the detection history'
+    sample_ts, sample_detections = history[-1]
+    assert sample_ts >= before
+    assert sample_detections[0]['label'] == 'person'
+    assert sample_detections[0]['box']['width'] == pytest.approx(0.2)
 
 
-def test_erroring_detector_does_not_persist_empty_track_marker(tmp_path, monkeypatch):
-    """Per-frame detector errors must not produce an all-empty track: persisting it
-    as the 'nothing localized' marker would permanently disable the backfill and
-    lock playback into the static event box."""
+def test_recording_detail_backfills_track_from_live_history(tmp_path, monkeypatch):
+    """Opening a recording without a track sidecar fills it synchronously from
+    the live monitor's history while the history still covers the clip's
+    window. The clip itself is never decoded or re-analyzed."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
 
-    clip = tmp_path / 'event_clip.mp4'
-    if not _write_tiny_mp4(clip):
-        pytest.skip('No mp4 encoder available in this environment')
+    clip = tmp_path / 'data' / 'recordings' / 'event_99.mp4'
+    clip.parent.mkdir(parents=True, exist_ok=True)
+    clip.write_bytes(b'not-decoded')
 
-    class ErroringDetector:
-        backend = 'onnx'
-        available = True
-        unavailable_reason = None
+    started = datetime.now(timezone.utc) - timedelta(seconds=12)
+    ended = started + timedelta(seconds=8)
+    box = {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}
+    main.live_detection_history['camera-1'] = main.deque(
+        [
+            (started.timestamp() + 2.0, [{'label': 'person', 'confidence': 0.9, 'box': box}]),
+            (started.timestamp() + 4.0, []),
+        ],
+        maxlen=main.LIVE_DETECTION_HISTORY_MAXLEN,
+    )
 
-        def detect_image(self, _bytes, confidence=None):
-            raise RuntimeError('transient inference failure')
+    event_id = main.database.add_event(
+        created_at=main.utc_now(), source='rtsp', snapshot_path=None,
+        detections=[{'label': 'person', 'confidence': 0.9, 'box': box}],
+        alert_triggered=True, metadata={},
+    )
+    recording_id = main.database.add_recording(
+        event_id=event_id, camera_id='camera-1',
+        started_at=started.isoformat(), ended_at=ended.isoformat(), duration_seconds=8.0,
+        file_path=str(clip), thumbnail_path=None, source='rtsp',
+        created_at=main.utc_now(), trigger_type='object', trigger_label='person',
+    )
 
-    monkeypatch.setattr(main, 'detector', ErroringDetector())
-    assert main.build_recording_detection_track(clip) is None
-
-    main.schedule_recording_detection_track(901, clip)
-    deadline = time.time() + 10
-    while time.time() < deadline and main._track_generation_inflight:
-        time.sleep(0.05)
-    assert not main.recording_track_sidecar_path(clip).exists(), 'failed bake must stay retryable'
+    detail = main.recording_detail(recording_id)
+    assert main.recording_track_sidecar_path(clip).exists(), 'backfill must write the track sidecar'
+    assert detail['track'], 'detail view must return the backfilled track'
+    assert detail['track'][0]['t'] == pytest.approx(2.0, abs=0.01)
+    assert detail['track'][0]['detections'][0]['label'] == 'person'
 
 
-def test_recording_detail_reports_track_pending(tmp_path, monkeypatch):
-    """While a recording has no sidecar yet, the detail endpoint must say the track
-    is pending; once the empty marker exists it is not pending (nothing was found)."""
+def test_recording_detail_without_history_coverage_has_no_track(tmp_path, monkeypatch):
+    """A clip whose capture window is not covered by the in-memory history gets
+    no track and is never decoded; playback falls back to the static event box."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
 
     clip = tmp_path / 'data' / 'recordings' / 'event_77.mp4'
     clip.parent.mkdir(parents=True, exist_ok=True)
-    if not _write_tiny_mp4(clip):
-        pytest.skip('No mp4 encoder available in this environment')
+    clip.write_bytes(b'not-decoded')
 
-    class EmptyDetector:
-        backend = 'onnx'
-        available = True
-        unavailable_reason = None
-
-        def detect_image(self, _bytes, confidence=None):
-            return []
-
-    monkeypatch.setattr(main, 'detector', EmptyDetector())
     event_id = main.database.add_event(
         created_at=main.utc_now(), source='rtsp', snapshot_path=None,
         detections=[{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}}],
@@ -3254,59 +3261,8 @@ def test_recording_detail_reports_track_pending(tmp_path, monkeypatch):
 
     detail = main.recording_detail(recording_id)
     assert detail['track'] is None
-    assert detail['track_pending'] is True
+    assert not main.recording_track_sidecar_path(clip).exists()
 
-    deadline = time.time() + 10
-    while time.time() < deadline and not main.recording_track_sidecar_path(clip).exists():
-        time.sleep(0.1)
-    assert main.recording_track_sidecar_path(clip).exists()
-
+    # Repeat views stay cheap and consistent.
     detail = main.recording_detail(recording_id)
-    assert detail['track'] is None  # empty marker: analyzed, nothing localized
-    assert detail['track_pending'] is False
-
-
-def test_recording_detail_backfills_missing_track(tmp_path, monkeypatch):
-    """Opening an event recording without a baked track must schedule generation in the
-    background so the overlay can follow objects on the next playback."""
-    _load_app(tmp_path, monkeypatch)
-    import app.main as main
-
-    clip = tmp_path / 'data' / 'recordings' / 'event_99.mp4'
-    clip.parent.mkdir(parents=True, exist_ok=True)
-    if not _write_tiny_mp4(clip):
-        pytest.skip('No mp4 encoder available in this environment')
-
-    class FakeDetector:
-        backend = 'onnx'
-        available = True
-        unavailable_reason = None
-
-        def detect_image(self, _bytes, confidence=None):
-            return [{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}}]
-
-    monkeypatch.setattr(main, 'detector', FakeDetector())
-
-    event_id = main.database.add_event(
-        created_at=main.utc_now(), source='rtsp', snapshot_path=None,
-        detections=[{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}}],
-        alert_triggered=True, metadata={},
-    )
-    recording_id = main.database.add_recording(
-        event_id=event_id, camera_id='camera-1',
-        started_at=main.utc_now(), ended_at=main.utc_now(), duration_seconds=2.0,
-        file_path=str(clip), thumbnail_path=None, source='rtsp',
-        created_at=main.utc_now(), trigger_type='object', trigger_label='person',
-    )
-
-    detail = main.recording_detail(recording_id)
-    assert detail['track'] is None  # not baked yet; backfill scheduled in background
-
-    deadline = time.time() + 10
-    while time.time() < deadline and not main.recording_track_sidecar_path(clip).exists():
-        time.sleep(0.1)
-    assert main.recording_track_sidecar_path(clip).exists(), 'backfill must write the track sidecar'
-
-    detail = main.recording_detail(recording_id)
-    assert detail['track'], 'second detail view must return the baked track'
-    assert all(sample['detections'] for sample in detail['track'])
+    assert detail['track'] is None
