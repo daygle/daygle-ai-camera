@@ -1309,6 +1309,26 @@ input[type="file"] { padding: 10px; }
 .timeline-recording-link:hover {
   text-decoration: underline;
 }
+.timeline-recording-confidence-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+.timeline-recording-confidence {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(139,92,246,.16);
+  color: #c9b8ff;
+  font-size: 11px;
+  font-weight: 700;
+}
+.timeline-recording-confidence strong {
+  color: #b4a0f5;
+}
 
 @media (max-width: 900px) {
   .timeline-controls {

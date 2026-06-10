@@ -375,6 +375,29 @@ function recordingDetectionLabels(recording) {
   return specificLabels.length ? specificLabels : uniqueLabels;
 }
 
+/**
+ * Returns an array of { label, confidence } sorted by confidence descending,
+ * filtered to non-generic labels that pass the configuredLabels threshold.
+ */
+function recordingDetectionSummary(recording) {
+  const best = new Map();
+  for (const d of (recording.detections || [])) {
+    const label = String(d.label || '').trim().toLowerCase();
+    if (!label) continue;
+    const conf = Number(d.confidence || 0);
+    if (configuredLabels && (!configuredLabels.has(label) || conf < (configuredLabels.get(label) ?? 0))) continue;
+    if (!best.has(label) || conf > best.get(label)) best.set(label, conf);
+  }
+  const triggerLabel = recordingTriggerLabel(recording);
+  if (triggerLabel && (!configuredLabels || configuredLabels.has(triggerLabel)) && !best.has(triggerLabel)) {
+    best.set(triggerLabel, 0);
+  }
+  return Array.from(best.entries())
+    .sort((a, b) => b[1] - a[1])
+    .filter(([label]) => !GENERIC_TIMELINE_LABELS.has(label))
+    .map(([label, confidence]) => ({ label, confidence }));
+}
+
 function recordingTypeLabel(recording) {
   const triggerType = recordingTriggerType(recording);
   const triggerLabel = recordingTriggerLabel(recording);
@@ -639,7 +662,7 @@ function renderTimeline(payload) {
         class="timeline-segment${activeClass}${compactClass}${tinyClass}"
         type="button"
         data-recording-id="${recording.id}"
-        title="${escapeHtml(`${recordingTriggerSummary(recording)} · ${formatClock(origStart)} · ${formatDuration(recording.duration_seconds)}`)}"
+        title="${escapeHtml(`${recordingTriggerSummary(recording)} · ${formatClock(origStart)} · ${formatDuration(recording.duration_seconds)}${recordingDetectionSummary(recording).filter((d) => d.confidence > 0).map((d) => ` · ${titleCase(d.label)} ${Math.round(d.confidence * 100)}%`).join('')}`)}"
         style="left:${left}%;width:${width}%;top:${recording.rowIndex * TIMELINE_ROW_HEIGHT + 8}px;--segment-color:${color};"
       >
         <span class="timeline-segment-label">${escapeHtml(recordingTypeLabel(recording))}</span>
@@ -662,12 +685,18 @@ function renderRecordingList(recordings) {
     const end = formatClock(recording.timeline_end_seconds || 0);
     const duration = formatDuration(recording.duration_seconds);
     const camera = escapeHtml(cameraLabel(recording));
+    const detections = recordingDetectionSummary(recording);
+    const confidenceBadges = detections
+      .filter((d) => d.confidence > 0)
+      .map((d) => `<span class="timeline-recording-confidence" title="${escapeHtml(titleCase(d.label))} confidence">${escapeHtml(titleCase(d.label))} <strong>${Math.round(d.confidence * 100)}%</strong></span>`)
+      .join('');
     return `
       <button class="timeline-recording-item${activeClass}" type="button" data-recording-id="${recording.id}">
         <span class="timeline-recording-color" style="background:${color}"></span>
         <span class="timeline-recording-main">
           <strong>${escapeHtml(label)}</strong>
           <span>${escapeHtml(start)} - ${escapeHtml(end)}</span>
+          ${confidenceBadges ? `<span class="timeline-recording-confidence-row">${confidenceBadges}</span>` : ''}
         </span>
         <span class="timeline-recording-meta">
           <span>${escapeHtml(duration)}</span>
