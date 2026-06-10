@@ -2225,6 +2225,7 @@ def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
             playback_paths = [
                 recording_playback_sidecar_path(file_path),
                 recording_track_sidecar_path(file_path),
+                file_path.with_name(f'{file_path.stem}.playback.failed'),
                 file_path.with_name(f'{file_path.stem}.browser.mp4'),
                 file_path.with_name(f'{file_path.stem}.playback.mp4'),
             ]
@@ -2266,11 +2267,26 @@ def recording_stream_path(file_path: Path) -> Path:
     playback_path = recording_playback_sidecar_path(file_path)
     if playback_path.exists() and file_path.exists() and playback_path.stat().st_mtime >= file_path.stat().st_mtime:
         return playback_path
+    # If a previous transcode attempt failed and the source hasn't changed
+    # since, skip retrying — every browser range request would otherwise
+    # re-run a doomed ffmpeg process and flood the logs.
+    failed_marker = file_path.with_name(f'{file_path.stem}.playback.failed')
+    if (
+        failed_marker.exists()
+        and file_path.exists()
+        and failed_marker.stat().st_mtime >= file_path.stat().st_mtime
+    ):
+        return file_path
     try:
         transcode_recording_to_mp4(file_path, playback_path)
     except Exception as exc:
         logger.warning('Recording playback conversion failed for %s: %s', file_path, exc)
+        try:
+            failed_marker.write_bytes(b'')
+        except OSError:
+            pass
         return file_path
+    failed_marker.unlink(missing_ok=True)
     return playback_path if playback_path.exists() else file_path
 
 

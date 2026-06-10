@@ -275,9 +275,6 @@ function drawClipOverlay() {
     ? filterByConfiguredLabels(rawTrackDetections)
     : overlayTrackEverDetected ? [] : eventDetections;
   if (!detections.length) return;
-  // The static event box is only meaningful from the event moment onward.
-  if (!overlayTrackEverDetected && !shouldRenderOverlayForTime(activeRecording, playerTime)) return;
-
   drawDetectionBoxesOnCanvas(els.clipOverlay, detections, els.clipPlayer);
 }
 
