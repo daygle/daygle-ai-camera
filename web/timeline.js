@@ -662,7 +662,7 @@ function renderTimeline(payload) {
         class="timeline-segment${activeClass}${compactClass}${tinyClass}"
         type="button"
         data-recording-id="${recording.id}"
-        title="${escapeHtml(`${recordingTriggerSummary(recording)} · ${formatClock(origStart)} · ${formatDuration(recording.duration_seconds)}${recordingDetectionSummary(recording).filter((d) => d.confidence > 0).map((d) => ` · ${titleCase(d.label)} ${Math.round(d.confidence * 100)}%`).join('')}`)}"
+        title="${escapeHtml(`${recordingTriggerSummary(recording)} · ${formatClock(origStart)} · ${formatDuration(recording.duration_seconds)}${recordingConfidenceText(recording)}`)}"
         style="left:${left}%;width:${width}%;top:${recording.rowIndex * TIMELINE_ROW_HEIGHT + 8}px;--segment-color:${color};"
       >
         <span class="timeline-segment-label">${escapeHtml(recordingTypeLabel(recording))}</span>
@@ -707,19 +707,18 @@ function renderRecordingList(recordings) {
   }).join('');
 }
 
+function recordingConfidenceText(recording) {
+  return recordingDetectionSummary(recording)
+    .filter((d) => d.confidence > 0)
+    .map((d) => ` · ${titleCase(d.label)} ${Math.round(d.confidence * 100)}%`)
+    .join('');
+}
+
 function renderRecordingDetails(recording) {
-  const seen = new Map();
-  for (const d of (recording.detections || [])) {
-    const label = String(d.label || '').trim().toLowerCase();
-    if (!label) continue;
-    const conf = Number(d.confidence || 0);
-    if (configuredLabels && (!configuredLabels.has(label) || conf < (configuredLabels.get(label) ?? 0))) continue;
-    if (!seen.has(label) || conf > seen.get(label)) seen.set(label, conf);
-  }
-  const detectionBadges = seen.size
-    ? Array.from(seen.entries())
-        .sort((a, b) => b[1] - a[1])
-        .map(([label, conf]) => `<span class="detection">${escapeHtml(titleCase(label))} (${Math.round(conf * 100)}%)</span>`)
+  const detections = recordingDetectionSummary(recording);
+  const detectionBadges = detections.length
+    ? detections
+        .map((d) => `<span class="detection">${escapeHtml(titleCase(d.label))} (${Math.round(d.confidence * 100)}%)</span>`)
         .join(' ')
     : 'none';
   els.recordingDetails.innerHTML = `
