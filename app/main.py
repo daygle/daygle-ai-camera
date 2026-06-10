@@ -1295,8 +1295,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         )
         return None
 
-    alerts.rules = zone_rules
-    triggered = alerts.process(alert_detections)
+    triggered = alerts.process(alert_detections, rules=zone_rules)
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     triggered_labels = {str(alert.get('label') or '').lower() for alert in triggered}
     recording_detections = [
