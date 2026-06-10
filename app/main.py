@@ -2278,10 +2278,12 @@ def recording_track_sidecar_path(file_path: Path) -> Path:
 # Detection-track sampling: decode the finalized clip at this many frames per
 # second and run object detection on each sample, so the overlay can follow
 # objects during playback without re-running inference in the browser. Playback
-# interpolates between samples, so 3/s stays smooth while keeping the bake cost
-# tolerable on low-power hardware (clips can now run to max_clip_seconds).
-TRACK_SAMPLE_FPS = 3.0
-TRACK_MAX_SAMPLES = 900
+# interpolates between samples; 5/s keeps boxes tracking moving objects more
+# tightly than 3/s (shorter gaps for the interpolator to bridge) while keeping
+# the bake cost tolerable on low-power hardware. TRACK_MAX_SAMPLES is raised in
+# step so the covered span (samples / fps ≈ 300s) is unchanged for long clips.
+TRACK_SAMPLE_FPS = 5.0
+TRACK_MAX_SAMPLES = 1500
 TRACK_FRAME_MAX_WIDTH = 640
 TRACK_FRAME_MAX_HEIGHT = 360
 
