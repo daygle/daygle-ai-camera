@@ -349,6 +349,16 @@ class RecordingService:
                 logger.info('Continuous recorder for %s restarting after ffmpeg exit.', camera_key)
                 time.sleep(2)
 
+    def prebuffer_window_seconds(self, recording_config: dict[str, Any] | None = None) -> int:
+        """Rolling prebuffer span. Must cover the longest possible event clip
+        (pre + max_clip ceiling), not just pre+post: extended captures render the
+        clip from these segments, and an undersized buffer would silently drop the
+        start of the event."""
+        config = recording_config or self.recording_config
+        pre_seconds = max(0, int(config.get('pre_event_seconds', 0)))
+        max_clip_seconds = max(1, int(config.get('max_clip_seconds', 60)))
+        return max(pre_seconds + max_clip_seconds + 5, pre_seconds + 10, 15)
+
     def prime_rtsp_prebuffer(
         self,
         *,
@@ -360,12 +370,10 @@ class RecordingService:
         if not self.enabled_for(config):
             return False
         pre_seconds = max(0, int(config.get('pre_event_seconds', 0)))
-        post_seconds = max(0, int(config.get('post_event_seconds', 0)))
         if pre_seconds <= 0:
             return False
-        buffer_seconds = max(pre_seconds + post_seconds + 5, pre_seconds + 10, 15)
         camera_key = self._camera_key(camera_id)
-        self._ensure_prebuffer_worker(camera_key, stream_url, buffer_seconds)
+        self._ensure_prebuffer_worker(camera_key, stream_url, self.prebuffer_window_seconds(config))
         return True
 
     def write_rtsp_clip_with_prebuffer(
@@ -378,6 +386,7 @@ class RecordingService:
         pre_seconds: int,
         post_seconds: int,
         max_duration_seconds: float,
+        buffer_seconds: int | None = None,
     ) -> None:
         pre_seconds = max(0, int(pre_seconds))
         post_seconds = max(0, int(post_seconds))
@@ -387,7 +396,11 @@ class RecordingService:
             self.write_rtsp_clip(stream_url, file_path, max_duration_seconds)
             return
 
-        buffer_seconds = max(pre_seconds + post_seconds + 5, pre_seconds + 10, 15)
+        # Use the same window the priming path computed, so re-ensuring the worker
+        # here never restarts it mid-capture over a mismatched buffer size.
+        if buffer_seconds is None:
+            buffer_seconds = self.prebuffer_window_seconds()
+        buffer_seconds = max(int(buffer_seconds), pre_seconds + post_seconds + 5, pre_seconds + 10, 15)
         camera_key = self._camera_key(camera_id)
         self._ensure_prebuffer_worker(camera_key, stream_url, buffer_seconds)
 

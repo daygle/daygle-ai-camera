@@ -15,6 +15,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -995,13 +996,23 @@ def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: 
     elapsed = time.time() - float(previous.get('timestamp', 0))
     if elapsed > debounce_seconds:
         return False
+    # Generic motion right after any event on this camera is the trailing edge of
+    # the same physical activity (e.g. the background model re-settling after an
+    # object left), not a new occurrence — suppress it regardless of label overlap.
+    if labels <= {'motion'}:
+        return True
     previous_labels = {str(label).strip().lower() for label in previous.get('labels', []) if str(label).strip()}
     return bool(previous_labels & labels)
 
 
-def remember_live_event(camera_id: str, labels: set[str]) -> None:
+def remember_live_event(camera_id: str, labels: set[str], *, merge: bool = False) -> None:
     if not labels:
         return
+    if merge:
+        previous = live_event_last_emitted.get(camera_id) or {}
+        labels = labels | {
+            str(label).strip().lower() for label in previous.get('labels', []) if str(label).strip()
+        }
     live_event_last_emitted[camera_id] = {
         'timestamp': time.time(),
         'labels': sorted(labels),
@@ -1333,6 +1344,11 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             recording_config=camera_recording_config,
             detections=recording_detections,
         )
+        # Refresh the debounce window while the same activity continues, so a new
+        # event/recording requires a quiet gap of debounce_seconds. Without this
+        # the window was anchored to the original event and continuing or trailing
+        # activity spawned a fresh event+recording every debounce_seconds.
+        remember_live_event(camera_id, debounced_labels, merge=True)
         update_live_detection_status(
             camera_id,
             state='checked',
@@ -1801,7 +1817,11 @@ def start_rtsp_recording_capture(
 
     start_capture_ts = triggered_at.timestamp() - pre_seconds
     initial_deadline_ts = triggered_at.timestamp() + post_seconds
-    max_deadline_ts = start_capture_ts + duration_seconds
+    # Ongoing detections may extend the capture deadline up to the configured
+    # clip ceiling — not just pre+post, which made extensions a no-op and forced
+    # continuing activity to spill into brand-new recordings.
+    max_clip_seconds = max(1, int((recording_config or effective_recording_config()).get('max_clip_seconds', 60)))
+    max_deadline_ts = start_capture_ts + max(duration_seconds, float(max_clip_seconds))
 
     if camera_id:
         with active_rtsp_recordings_lock:
@@ -1843,6 +1863,7 @@ def start_rtsp_recording_capture(
                     pre_seconds=pre_seconds,
                     post_seconds=dynamic_post_seconds,
                     max_duration_seconds=final_duration_seconds,
+                    buffer_seconds=recording_service.prebuffer_window_seconds(recording_config),
                 )
             else:
                 recording_service.write_rtsp_clip(stream_url, file_path, final_duration_seconds)
@@ -2260,37 +2281,72 @@ TRACK_FRAME_MAX_WIDTH = 640
 TRACK_FRAME_MAX_HEIGHT = 360
 
 
-def build_recording_detection_track(
+def _extract_track_frames_ffmpeg(
     file_path: Path,
-    *,
-    sample_fps: float = TRACK_SAMPLE_FPS,
-    min_confidence: float | None = None,
-) -> list[dict[str, Any]] | None:
-    """Decode a finalized clip and run detection across sampled frames.
+    sample_fps: float,
+    max_samples: int,
+) -> list[tuple[float, bytes]] | None:
+    """Sample clip frames as JPEGs with ffmpeg. Returns [(t_seconds, jpeg_bytes)].
 
-    Returns a time-series ``[{"t": seconds_from_start, "detections": [...]}]``
-    where each detection matches the detector's output (normalized box). Returns
-    ``None`` when OpenCV is missing, the clip cannot be decoded, or the detector
-    is unavailable, so callers can simply skip writing a track.
+    ffmpeg is preferred over cv2.VideoCapture because it is already a hard
+    dependency for writing the clips, while headless/ARM OpenCV builds often
+    cannot decode H.264 at all. Returns None when ffmpeg is missing or fails.
     """
+    ffmpeg = shutil.which('ffmpeg')
+    if not ffmpeg:
+        return None
+    with tempfile.TemporaryDirectory(prefix='daygle-track-') as tmp_dir:
+        pattern = Path(tmp_dir) / 'frame-%05d.jpg'
+        command = [
+            ffmpeg,
+            '-y',
+            '-nostdin',
+            '-hide_banner',
+            '-loglevel', 'error',
+            '-fflags', '+discardcorrupt',
+            '-err_detect', 'ignore_err',
+            '-i', str(file_path),
+            '-vf', f'fps={sample_fps:g},scale={TRACK_FRAME_MAX_WIDTH}:-2',
+            '-frames:v', str(max_samples),
+            '-q:v', '4',
+            str(pattern),
+        ]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.warning('Detection track frame extraction failed for %s: %s', file_path.name, exc)
+            return None
+        frame_paths = sorted(Path(tmp_dir).glob('frame-*.jpg'))
+        if result.returncode != 0 and not frame_paths:
+            logger.warning(
+                'ffmpeg could not sample frames from %s: %s',
+                file_path.name,
+                RecordingService.redact_stream_credentials(str(result.stderr or '')[-500:]),
+            )
+            return None
+        # The fps filter emits frame N at timestamp N / sample_fps.
+        return [(index / sample_fps, frame.read_bytes()) for index, frame in enumerate(frame_paths)]
+
+
+def _extract_track_frames_opencv(
+    file_path: Path,
+    sample_fps: float,
+    max_samples: int,
+) -> list[tuple[float, bytes]] | None:
     try:
         import cv2
     except ImportError:
-        return None
-    if not file_path.exists():
         return None
     capture = cv2.VideoCapture(str(file_path))
     if not capture.isOpened():
         capture.release()
         return None
-    confidence = min_confidence if min_confidence is not None else compute_minimum_rule_confidence()
-    sample_fps = max(1.0, float(sample_fps))
     try:
         source_fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
         step = max(1, round(source_fps / sample_fps)) if source_fps > 0 else 1
-        track: list[dict[str, Any]] = []
+        frames: list[tuple[float, bytes]] = []
         frame_index = 0
-        while len(track) < TRACK_MAX_SAMPLES:
+        while len(frames) < max_samples:
             if not capture.grab():
                 break
             if frame_index % step == 0:
@@ -2311,17 +2367,46 @@ def build_recording_detection_track(
                         )
                     encoded, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                     if encoded:
-                        try:
-                            detections = detector.detect_image(buffer.tobytes(), confidence=confidence)
-                        except DetectorUnavailableError:
-                            return None
-                        except Exception:
-                            detections = []
-                        track.append({'t': round(t_seconds, 3), 'detections': detections})
+                        frames.append((t_seconds, buffer.tobytes()))
             frame_index += 1
-        return track
+        return frames
     finally:
         capture.release()
+
+
+def build_recording_detection_track(
+    file_path: Path,
+    *,
+    sample_fps: float = TRACK_SAMPLE_FPS,
+    min_confidence: float | None = None,
+) -> list[dict[str, Any]] | None:
+    """Decode a finalized clip and run detection across sampled frames.
+
+    Returns a time-series ``[{"t": seconds_from_start, "detections": [...]}]``
+    where each detection matches the detector's output (normalized box). Returns
+    ``None`` when the clip cannot be decoded or the detector is unavailable, so
+    callers can simply skip writing a track.
+    """
+    if not file_path.exists():
+        return None
+    sample_fps = max(1.0, float(sample_fps))
+    frames = _extract_track_frames_ffmpeg(file_path, sample_fps, TRACK_MAX_SAMPLES)
+    if frames is None:
+        frames = _extract_track_frames_opencv(file_path, sample_fps, TRACK_MAX_SAMPLES)
+    if frames is None:
+        logger.warning('Detection track skipped for %s: no decoder could sample frames.', file_path.name)
+        return None
+    confidence = min_confidence if min_confidence is not None else compute_minimum_rule_confidence()
+    track: list[dict[str, Any]] = []
+    for t_seconds, jpeg_bytes in frames:
+        try:
+            detections = detector.detect_image(jpeg_bytes, confidence=confidence)
+        except DetectorUnavailableError:
+            return None
+        except Exception:
+            detections = []
+        track.append({'t': round(t_seconds, 3), 'detections': detections})
+    return track
 
 
 def write_recording_detection_track(file_path: Path, track: list[dict[str, Any]]) -> None:
@@ -2336,24 +2421,49 @@ def load_recording_detection_track(file_path: Path) -> list[dict[str, Any]] | No
         data = json.loads(sidecar.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return None
-    return data if isinstance(data, list) else None
+    if not isinstance(data, list):
+        return None
+    # An all-empty track is just a "nothing was localized" marker; report it as
+    # missing so playback falls back to the static event box.
+    if not any(isinstance(sample, dict) and sample.get('detections') for sample in data):
+        return None
+    return data
+
+
+_track_generation_inflight: set[str] = set()
+_track_generation_lock = threading.Lock()
 
 
 def schedule_recording_detection_track(recording_id: int | None, file_path: Path) -> None:
     """Generate a detection track for a finalized clip on a background thread."""
-    if not str(file_path):
+    key = str(file_path)
+    if not key:
         return
+    with _track_generation_lock:
+        if key in _track_generation_inflight:
+            return
+        _track_generation_inflight.add(key)
 
     def worker() -> None:
         try:
             track = build_recording_detection_track(file_path)
-            # Only persist a track that actually localized something; an all-empty
-            # track would otherwise suppress the static event box on playback.
-            if track and any(sample.get('detections') for sample in track):
+            if track is None:
+                logger.warning('No detection track generated for recording %s (%s).', recording_id, file_path.name)
+            else:
+                # Persist even an all-empty track: it marks the clip as analyzed so
+                # it is not re-decoded on every detail view, while the loader still
+                # reports it as missing so the static event box keeps showing.
                 write_recording_detection_track(file_path, track)
-                logger.info('Generated detection track for recording %s (%d samples).', recording_id, len(track))
+                localized = sum(1 for sample in track if sample.get('detections'))
+                logger.info(
+                    'Generated detection track for recording %s (%d samples, %d with detections).',
+                    recording_id, len(track), localized,
+                )
         except Exception as exc:
             logger.warning('Detection track generation failed for recording %s: %s', recording_id, exc)
+        finally:
+            with _track_generation_lock:
+                _track_generation_inflight.discard(key)
 
     threading.Thread(target=worker, name=f'track-gen-{recording_id or "rec"}', daemon=True).start()
 
@@ -3161,7 +3271,19 @@ def recording_detail(recording_id: int):
     recording = database.get_recording(recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail='Recording not found')
-    recording['track'] = load_recording_detection_track(Path(str(recording.get('file_path') or '')))
+    file_path = Path(str(recording.get('file_path') or ''))
+    recording['track'] = load_recording_detection_track(file_path)
+    # Backfill: event recordings made before track baking existed (or whose bake
+    # failed) get a track generated on first view; it will be used on the next
+    # playback. The empty-track marker prevents re-analyzing barren clips.
+    if (
+        recording['track'] is None
+        and recording.get('event_id')
+        and str(file_path)
+        and file_path.exists()
+        and not recording_track_sidecar_path(file_path).exists()
+    ):
+        schedule_recording_detection_track(recording_id, file_path)
     return recording
 
 
