@@ -1315,7 +1315,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
             'motion_event': True,
             'alert_matched': 'motion' in triggered_labels,
             'alert_triggered': 'motion' in triggered_labels or _motion_record
-            or detection_has_matching_record_rule({**strongest_motion, 'label': 'motion'}, alerts.rules),
+            or detection_has_matching_record_rule({**strongest_motion, 'label': 'motion'}, zone_rules),
         })
     matched_labels = [str(detection.get('label')) for detection in alert_detections if detection.get('label')]
     camera_recording_config = camera_event_recording_config(settings)
