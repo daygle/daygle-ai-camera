@@ -12,12 +12,13 @@ class AlertEngine:
         self.last_triggered: dict[str, float] = {}
         self._lock = threading.Lock()
 
-    def process(self, detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def process(self, detections: list[dict[str, Any]], rules: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+        effective_rules = rules if rules is not None else self.rules
         alerts: list[dict[str, Any]] = []
         motion_detections = [detection for detection in detections if detection.get('motion_event')]
         if motion_detections:
             strongest_motion = max(motion_detections, key=lambda detection: float(detection.get('confidence', 0)))
-            self._append_motion_alerts(alerts, strongest_motion)
+            self._append_motion_alerts(alerts, strongest_motion, effective_rules)
 
         for detection in detections:
             label_value = detection.get('label')
@@ -27,7 +28,7 @@ class AlertEngine:
             label_key = self._normalize_object_label(label)
             confidence = float(detection.get('confidence', 0))
 
-            for rule in self.rules:
+            for rule in effective_rules:
                 if not rule.get('enabled', True):
                     continue
 
@@ -67,9 +68,9 @@ class AlertEngine:
 
         return alerts
 
-    def _append_motion_alerts(self, alerts: list[dict[str, Any]], detection: dict[str, Any]) -> None:
+    def _append_motion_alerts(self, alerts: list[dict[str, Any]], detection: dict[str, Any], rules: list[dict[str, Any]] | None = None) -> None:
         confidence = float(detection.get('confidence', 0))
-        for rule in self.rules:
+        for rule in (rules if rules is not None else self.rules):
             if not rule.get('enabled', True) or not self._is_motion_rule(rule):
                 continue
             if not self._is_active_now(rule):
