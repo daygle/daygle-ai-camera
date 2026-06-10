@@ -2274,8 +2274,10 @@ def recording_track_sidecar_path(file_path: Path) -> Path:
 
 # Detection-track sampling: decode the finalized clip at this many frames per
 # second and run object detection on each sample, so the overlay can follow
-# objects during playback without re-running inference in the browser.
-TRACK_SAMPLE_FPS = 5.0
+# objects during playback without re-running inference in the browser. Playback
+# interpolates between samples, so 3/s stays smooth while keeping the bake cost
+# tolerable on low-power hardware (clips can now run to max_clip_seconds).
+TRACK_SAMPLE_FPS = 3.0
 TRACK_MAX_SAMPLES = 900
 TRACK_FRAME_MAX_WIDTH = 640
 TRACK_FRAME_MAX_HEIGHT = 360
@@ -2324,6 +2326,15 @@ def _extract_track_frames_ffmpeg(
                 RecordingService.redact_stream_credentials(str(result.stderr or '')[-500:]),
             )
             return None
+        if result.returncode != 0:
+            # Partial extraction (e.g. a corrupt clip tail) still yields a usable
+            # track for the decoded span; playback stops drawing past its end.
+            logger.warning(
+                'ffmpeg sampled only %d frames from %s before failing: %s',
+                len(frame_paths),
+                file_path.name,
+                RecordingService.redact_stream_credentials(str(result.stderr or '')[-300:]),
+            )
         # The fps filter emits frame N at timestamp N / sample_fps.
         return [(index / sample_fps, frame.read_bytes()) for index, frame in enumerate(frame_paths)]
 
@@ -2398,6 +2409,7 @@ def build_recording_detection_track(
         return None
     confidence = min_confidence if min_confidence is not None else compute_minimum_rule_confidence()
     track: list[dict[str, Any]] = []
+    error_count = 0
     for t_seconds, jpeg_bytes in frames:
         try:
             detections = detector.detect_image(jpeg_bytes, confidence=confidence)
@@ -2405,7 +2417,17 @@ def build_recording_detection_track(
             return None
         except Exception:
             detections = []
+            error_count += 1
         track.append({'t': round(t_seconds, 3), 'detections': detections})
+    # An all-empty track is persisted as a permanent "nothing localized" marker,
+    # so it must only come from a healthy detector. If the detector errored and
+    # localized nothing, discard the result so the backfill can retry later.
+    if error_count and not any(sample['detections'] for sample in track):
+        logger.warning(
+            'Detection track for %s discarded: %d/%d samples errored and nothing was localized; will retry on next view.',
+            file_path.name, error_count, len(track),
+        )
+        return None
     return track
 
 
@@ -3276,6 +3298,9 @@ def recording_detail(recording_id: int):
     # Backfill: event recordings made before track baking existed (or whose bake
     # failed) get a track generated on first view; it will be used on the next
     # playback. The empty-track marker prevents re-analyzing barren clips.
+    # track_pending tells the UI the bake is still running (capture-end bakes can
+    # take a while on low-power hardware), as opposed to "analyzed, nothing found".
+    recording['track_pending'] = False
     if (
         recording['track'] is None
         and recording.get('event_id')
@@ -3284,6 +3309,7 @@ def recording_detail(recording_id: int):
         and not recording_track_sidecar_path(file_path).exists()
     ):
         schedule_recording_detection_track(recording_id, file_path)
+        recording['track_pending'] = True
     return recording
 
 

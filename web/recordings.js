@@ -10,7 +10,6 @@ const els = {
   deleteAllRecordingsBtn: document.getElementById('deleteAllRecordingsBtn'),
   clipOverlay: document.getElementById('clipOverlay'),
   clipOverlayToggle: document.getElementById('clipOverlayToggle'),
-  clipOverlayTrackToggle: document.getElementById('clipOverlayTrackToggle'),
   videoModal: document.getElementById('videoModal'),
   videoModalClose: document.getElementById('videoModalClose'),
   videoModalDownload: document.getElementById('videoModalDownload'),
@@ -22,9 +21,7 @@ let recordingRefreshTimer = null;
 let activeRecording = null;
 let overlayResizeObserver = null;
 const OVERLAY_TOGGLE_KEY = 'daygle.recordings.overlay.enabled';
-const OVERLAY_TRACK_KEY = 'daygle.recordings.overlay.track.enabled';
 let overlayEnabled = true;
-let overlayTrackEnabled = true;
 const GENERIC_TRIGGER_LABELS = new Set(['motion', 'alert', 'human', 'object', 'none', 'off', 'continuous']);
 
 function filterByConfiguredLabels(detections) {
@@ -204,7 +201,7 @@ function recordingTrack() {
 }
 
 function overlayShouldAnimate() {
-  return overlayEnabled && Boolean(recordingTrack() || overlayTrackEnabled);
+  return overlayEnabled;
 }
 
 function startOverlayRaf() {
@@ -215,7 +212,7 @@ function startOverlayRaf() {
       return;
     }
     // Baked tracks need no inference — only the live AI-track fallback does.
-    if (overlayTrackEnabled && !recordingTrack()) detectOverlayFrameDetections();
+    if (!recordingTrack()) detectOverlayFrameDetections();
     drawClipOverlay();
     overlayRafId = requestAnimationFrame(loop);
   }
@@ -230,7 +227,7 @@ function stopOverlayRaf() {
 }
 
 async function detectOverlayFrameDetections() {
-  if (!overlayTrackEnabled || !activeRecording || !els.clipPlayer) return;
+  if (!overlayEnabled || !activeRecording || !els.clipPlayer) return;
   if (els.clipPlayer.readyState < 2 || els.clipPlayer.videoWidth <= 0 || els.clipPlayer.videoHeight <= 0) return;
 
   const now = performance.now();
@@ -308,7 +305,7 @@ function drawClipOverlay() {
     return;
   }
 
-  if (overlayTrackEnabled && !overlayRafId) {
+  if (!overlayRafId) {
     detectOverlayFrameDetections();
   }
 
@@ -319,7 +316,7 @@ function drawClipOverlay() {
       ? allEventDetections.filter((d) => !GENERIC_TRIGGER_LABELS.has(String(d.label || '').toLowerCase()))
       : allEventDetections
   );
-  let rawTrackDetections = overlayTrackEnabled && Array.isArray(overlayTrackDetections) && overlayTrackDetections.length
+  let rawTrackDetections = Array.isArray(overlayTrackDetections) && overlayTrackDetections.length
     ? overlayTrackDetections : null;
   if (rawTrackDetections && overlayTrackPrevDetections) {
     const interval = overlayTrackCaptureTime - overlayTrackPrevCaptureTime;
@@ -335,7 +332,8 @@ function drawClipOverlay() {
   }
   const detections = rawTrackDetections ? filterByConfiguredLabels(rawTrackDetections) : eventDetections;
   if (!detections.length) return;
-  if (!overlayTrackEnabled && !shouldRenderOverlayForTime(activeRecording, playerTime)) return;
+  // The static event box is only meaningful from the event moment onward.
+  if (!rawTrackDetections && !shouldRenderOverlayForTime(activeRecording, playerTime)) return;
 
   drawDetectionBoxesOnCanvas(els.clipOverlay, detections, els.clipPlayer);
 }
@@ -381,10 +379,13 @@ async function playRecording(id) {
   els.clipPlayer.src = `/api/recordings/${id}/stream?t=${Date.now()}`;
   drawClipOverlay();
   els.clipPlayerStatus.textContent = `Loading recording #${id}...`;
+  const trackNote = recording.track_pending
+    ? ' AI track is still being generated; boxes are analyzed live until it is ready.'
+    : '';
   try {
     els.clipPlayer.load();
     await els.clipPlayer.play();
-    els.clipPlayerStatus.textContent = `Playing recording #${id}.`;
+    els.clipPlayerStatus.textContent = `Playing recording #${id}.${trackNote}`;
   } catch (error) {
     if (['AbortError', 'NotAllowedError'].includes(error?.name)) {
       els.clipPlayerStatus.textContent = `Recording #${id} loaded. Press play to start.`;
@@ -525,24 +526,6 @@ if (els.clipOverlayToggle) {
     drawClipOverlay();
   });
 }
-
-if (els.clipOverlayTrackToggle) {
-  const savedTrackValue = localStorage.getItem(OVERLAY_TRACK_KEY);
-  overlayTrackEnabled = savedTrackValue !== '0';
-  els.clipOverlayTrackToggle.checked = overlayTrackEnabled;
-  els.clipOverlayTrackToggle.addEventListener('change', () => {
-    overlayTrackEnabled = Boolean(els.clipOverlayTrackToggle.checked);
-    localStorage.setItem(OVERLAY_TRACK_KEY, overlayTrackEnabled ? '1' : '0');
-    clearOverlayTrackDetections();
-    if (els.clipPlayer && !els.clipPlayer.paused && overlayShouldAnimate()) {
-      startOverlayRaf();
-    } else {
-      stopOverlayRaf();
-    }
-    drawClipOverlay();
-  });
-}
-
 
 els.cameraFilter?.addEventListener('change', () => loadRecordings(els.recordingFilter.value.trim(), els.cameraFilter.value));
 els.recordingSearchBtn.addEventListener('click', () => loadRecordings(els.recordingFilter.value.trim(), els.cameraFilter?.value || ''));

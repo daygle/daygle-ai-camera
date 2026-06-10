@@ -3,6 +3,7 @@
 import importlib
 import json
 import os
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -3080,23 +3081,34 @@ def test_empty_detection_track_is_marker_only(tmp_path, monkeypatch):
 
 
 def _write_tiny_mp4(path: Path, frames: int = 20, fps: int = 10) -> bool:
-    """Write a small mp4 with OpenCV; returns False when no encoder is available."""
+    """Write a small mp4 with OpenCV or ffmpeg; returns False when neither encoder
+    is available."""
     try:
         import cv2
         import numpy as np
     except ImportError:
+        cv2 = None
+    if cv2 is not None:
+        writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*'mp4v'), fps, (64, 48))
+        if writer.isOpened():
+            try:
+                for index in range(frames):
+                    frame = np.zeros((48, 64, 3), dtype=np.uint8)
+                    frame[:, : (index * 3) % 64] = 200
+                    writer.write(frame)
+            finally:
+                writer.release()
+            return path.exists() and path.stat().st_size > 0
+    ffmpeg = shutil.which('ffmpeg')
+    if not ffmpeg:
         return False
-    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*'mp4v'), fps, (64, 48))
-    if not writer.isOpened():
-        return False
-    try:
-        for index in range(frames):
-            frame = np.zeros((48, 64, 3), dtype=np.uint8)
-            frame[:, : (index * 3) % 64] = 200
-            writer.write(frame)
-    finally:
-        writer.release()
-    return path.exists() and path.stat().st_size > 0
+    result = subprocess.run(
+        [ffmpeg, '-y', '-loglevel', 'error',
+         '-f', 'lavfi', '-i', f'testsrc2=s=64x48:r={fps}:d={frames / fps:.3f}',
+         '-pix_fmt', 'yuv420p', str(path)],
+        capture_output=True, timeout=60, check=False,
+    )
+    return result.returncode == 0 and path.exists() and path.stat().st_size > 0
 
 
 def test_build_recording_detection_track_decodes_real_clip(tmp_path, monkeypatch):
@@ -3123,6 +3135,81 @@ def test_build_recording_detection_track_decodes_real_clip(tmp_path, monkeypatch
     times = [sample['t'] for sample in track]
     assert times == sorted(times)
     assert all(sample['detections'] for sample in track)
+
+
+def test_erroring_detector_does_not_persist_empty_track_marker(tmp_path, monkeypatch):
+    """Per-frame detector errors must not produce an all-empty track: persisting it
+    as the 'nothing localized' marker would permanently disable the backfill and
+    lock playback into the static event box."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    clip = tmp_path / 'event_clip.mp4'
+    if not _write_tiny_mp4(clip):
+        pytest.skip('No mp4 encoder available in this environment')
+
+    class ErroringDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _bytes, confidence=None):
+            raise RuntimeError('transient inference failure')
+
+    monkeypatch.setattr(main, 'detector', ErroringDetector())
+    assert main.build_recording_detection_track(clip) is None
+
+    main.schedule_recording_detection_track(901, clip)
+    deadline = time.time() + 10
+    while time.time() < deadline and main._track_generation_inflight:
+        time.sleep(0.05)
+    assert not main.recording_track_sidecar_path(clip).exists(), 'failed bake must stay retryable'
+
+
+def test_recording_detail_reports_track_pending(tmp_path, monkeypatch):
+    """While a recording has no sidecar yet, the detail endpoint must say the track
+    is pending; once the empty marker exists it is not pending (nothing was found)."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    clip = tmp_path / 'data' / 'recordings' / 'event_77.mp4'
+    clip.parent.mkdir(parents=True, exist_ok=True)
+    if not _write_tiny_mp4(clip):
+        pytest.skip('No mp4 encoder available in this environment')
+
+    class EmptyDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _bytes, confidence=None):
+            return []
+
+    monkeypatch.setattr(main, 'detector', EmptyDetector())
+    event_id = main.database.add_event(
+        created_at=main.utc_now(), source='rtsp', snapshot_path=None,
+        detections=[{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}}],
+        alert_triggered=True, metadata={},
+    )
+    recording_id = main.database.add_recording(
+        event_id=event_id, camera_id='camera-1',
+        started_at=main.utc_now(), ended_at=main.utc_now(), duration_seconds=2.0,
+        file_path=str(clip), thumbnail_path=None, source='rtsp',
+        created_at=main.utc_now(), trigger_type='object', trigger_label='person',
+    )
+
+    detail = main.recording_detail(recording_id)
+    assert detail['track'] is None
+    assert detail['track_pending'] is True
+
+    deadline = time.time() + 10
+    while time.time() < deadline and not main.recording_track_sidecar_path(clip).exists():
+        time.sleep(0.1)
+    assert main.recording_track_sidecar_path(clip).exists()
+
+    detail = main.recording_detail(recording_id)
+    assert detail['track'] is None  # empty marker: analyzed, nothing localized
+    assert detail['track_pending'] is False
 
 
 def test_recording_detail_backfills_missing_track(tmp_path, monkeypatch):
