@@ -2880,6 +2880,50 @@ def test_person_detection_in_zone_creates_alert_and_recording(tmp_path, monkeypa
     assert any(a['label'] == 'person' for a in alerts)
 
 
+def test_live_history_samples_are_stamped_with_frame_capture_time(tmp_path, monkeypatch):
+    """Detection history samples must be stamped with when the frame was
+    CAPTURED, not when inference finished: recording tracks are sliced from
+    this history and replayed against the video, and a completion-time stamp
+    shifts every box late by the inference duration, so playback overlays
+    trail moving objects."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _bytes, confidence=None):
+            return [{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}}]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    main.live_detection_last_checked.clear()
+    main.live_detection_history.clear()
+
+    settings = _zone_camera_settings([])
+    camera_id = str(settings['id'])
+
+    capture_ts = time.time() - 2.5  # camera read happened 2.5s before "inference finished"
+    main.process_live_stream_alerts(
+        b'frame', {'width': 1280, 'height': 720, 'timestamp': capture_ts}, settings, enforce_interval=False,
+    )
+    sample_ts, sample = list(main.live_detection_history[camera_id])[-1]
+    assert sample_ts == pytest.approx(capture_ts, abs=0.05)
+    assert sample[0]['label'] == 'person'
+
+    # A missing or bogus frame timestamp (epoch 0, stream-relative seconds)
+    # falls back to a wall-clock stamp taken before inference runs.
+    before = time.time()
+    main.process_live_stream_alerts(
+        b'frame', {'width': 1280, 'height': 720, 'timestamp': 12.5}, settings, enforce_interval=False,
+    )
+    after = time.time()
+    fallback_ts, _ = list(main.live_detection_history[camera_id])[-1]
+    assert before <= fallback_ts <= after
+
+
 def test_cat_detection_in_zone_creates_alert_and_recording(tmp_path, monkeypatch):
     """Cat detected inside a zone that has a cat alert+record rule must produce a saved
     event, a recording with trigger_label='cat', and an alert history entry."""

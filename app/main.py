@@ -959,8 +959,13 @@ def update_live_detection_status(camera_id: str, **updates: Any) -> None:
     }
 
 
-def record_live_detection_history(camera_id: str, detections: list[dict[str, Any]]) -> None:
+def record_live_detection_history(camera_id: str, detections: list[dict[str, Any]], sample_ts: float | None = None) -> None:
     """Append one monitor cycle's detections to the camera's rolling history.
+
+    ``sample_ts`` must be when the analyzed frame was CAPTURED, not when
+    inference finished: tracks sliced from this history are replayed against
+    the recorded video, and stamping at completion shifts every box late by
+    the inference duration — the playback overlay then trails moving objects.
 
     Empty cycles are recorded too: a recording track sliced from the history
     needs "nothing in frame" samples so playback overlays clear when an object
@@ -970,12 +975,14 @@ def record_live_detection_history(camera_id: str, detections: list[dict[str, Any
         for detection in detections
         if isinstance(detection.get('box'), dict)
     ]
+    if sample_ts is None:
+        sample_ts = time.time()
     with live_detection_history_lock:
         history = live_detection_history.get(camera_id)
         if history is None:
             history = deque(maxlen=LIVE_DETECTION_HISTORY_MAXLEN)
             live_detection_history[camera_id] = history
-        history.append((time.time(), sample))
+        history.append((sample_ts, sample))
 
 
 def build_track_from_live_history(camera_id: str | None, start_ts: float, end_ts: float) -> list[dict[str, Any]] | None:
@@ -1297,6 +1304,18 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         update_live_detection_status(camera_id, state='skipped', reason=ai_state['last_detector_error'] or 'ONNX detector is not loaded.', ai=ai_state, detections=[])
         return None
 
+    # Resolve the frame's capture time BEFORE running inference. The history
+    # sample must be stamped with when the frame was captured — detect_image
+    # can take hundreds of ms (seconds on SBC CPUs), and a completion-time
+    # stamp makes every baked playback overlay lag the video by that much.
+    now = time.time()
+    try:
+        frame_capture_ts = float(frame.get('timestamp') or 0.0)
+    except (TypeError, ValueError):
+        frame_capture_ts = 0.0
+    if not (now - 300 <= frame_capture_ts <= now + 1):
+        frame_capture_ts = now
+
     try:
         detections = detector.detect_image(image_bytes, confidence=compute_minimum_rule_confidence())
     except (DetectorUnavailableError, ValueError) as exc:
@@ -1305,7 +1324,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         return None
 
     detections = normalize_detection_boxes_for_frame(detections, frame)
-    record_live_detection_history(camera_id, detections)
+    record_live_detection_history(camera_id, detections, sample_ts=frame_capture_ts)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     frame_has_motion, frame_motion_confidence = detect_frame_motion(camera_id, image_bytes)
     motion_detections = zone_motion_detections(detections, settings, frame_motion_confidence) if frame_has_motion else []
