@@ -390,14 +390,21 @@ class RecordingService:
         post_seconds: int,
         max_duration_seconds: float,
         buffer_seconds: int | None = None,
-    ) -> None:
+    ) -> tuple[float, float]:
+        """Write the clip and return ``(content_start_ts, content_seconds)``:
+        the wall-clock timestamp where the written media actually begins and
+        its duration. Prebuffer segments split on keyframes, so the rendered
+        clip rarely starts exactly at ``triggered_at - pre_seconds``; callers
+        must anchor stored timing and the detection track to the returned
+        window or playback overlays drift against the video."""
         pre_seconds = max(0, int(pre_seconds))
         post_seconds = max(0, int(post_seconds))
         max_duration_seconds = max(1.0, float(max_duration_seconds))
 
         if pre_seconds <= 0:
+            content_start_ts = time.time()
             self.write_rtsp_clip(stream_url, file_path, max_duration_seconds)
-            return
+            return content_start_ts, max_duration_seconds
 
         # Use the same window the priming path computed, so re-ensuring the worker
         # here never restarts it mid-capture over a mismatched buffer size.
@@ -414,16 +421,26 @@ class RecordingService:
 
         start_ts = triggered_at.timestamp() - pre_seconds
         end_ts = end_capture_at
-        segments = self._collect_prebuffer_segments(camera_key, start_ts, end_ts)
+        segments, content_start_ts = self._collect_prebuffer_segments(camera_key, start_ts, end_ts)
         if not segments:
             logger.info('No prebuffer segments available for %s; falling back to direct RTSP clip capture.', camera_key)
+            fallback_start_ts = time.time()
             self.write_rtsp_clip(stream_url, file_path, max_duration_seconds)
-            return
+            return fallback_start_ts, max_duration_seconds
 
         ffmpeg = shutil.which('ffmpeg')
         if not ffmpeg:
+            fallback_start_ts = time.time()
             self.write_rtsp_clip(stream_url, file_path, max_duration_seconds)
-            return
+            return fallback_start_ts, max_duration_seconds
+
+        if content_start_ts is None:
+            content_start_ts = start_ts
+        # Render exactly the footage between where the first selected segment
+        # starts and the capture deadline. The keyframe-aligned lead before
+        # start_ts is kept (and reported via content_start_ts) rather than
+        # silently eating the same amount off the end of the clip.
+        content_seconds = max(1.0, min(end_ts - content_start_ts, max_duration_seconds + 10.0))
 
         list_path = file_path.with_name(f'{file_path.stem}.concat.txt')
         tmp_path = file_path.with_name(f'{file_path.stem}.prebuffer.tmp{file_path.suffix}')
@@ -454,7 +471,7 @@ class RecordingService:
             '-movflags',
             '+faststart',
             '-t',
-            f'{max_duration_seconds:.3f}',
+            f'{content_seconds:.3f}',
             str(tmp_path),
         ]
         try:
@@ -465,7 +482,7 @@ class RecordingService:
                 command,
                 capture_output=True,
                 text=True,
-                timeout=max(120, int(max_duration_seconds) * 3 + 60),
+                timeout=max(120, int(content_seconds) * 3 + 60),
                 check=False,
             )
         except subprocess.TimeoutExpired:
@@ -484,9 +501,11 @@ class RecordingService:
         ):
             tmp_path.unlink(missing_ok=True)
             logger.warning('Failed to render clip from prebuffer for %s; falling back to direct RTSP capture.', camera_key)
+            fallback_start_ts = time.time()
             self.write_rtsp_clip(stream_url, file_path, max_duration_seconds)
-            return
+            return fallback_start_ts, max_duration_seconds
         tmp_path.replace(file_path)
+        return content_start_ts, content_seconds
 
     @staticmethod
     def _camera_key(camera_id: str) -> str:
@@ -581,29 +600,39 @@ class RecordingService:
             except OSError:
                 continue
 
-    def _collect_prebuffer_segments(self, camera_key: str, start_ts: float, end_ts: float) -> list[Path]:
+    def _collect_prebuffer_segments(self, camera_key: str, start_ts: float, end_ts: float) -> tuple[list[Path], float | None]:
+        """Return the segments whose footage overlaps [start_ts, end_ts] plus
+        the wall-clock timestamp where the first segment's content begins.
+
+        A segment's mtime marks when ffmpeg finished writing it — its content
+        END. Its content START is the previous segment's mtime while the
+        stream is continuous (segments split on keyframes, so they can exceed
+        the nominal 1s). Selecting by content overlap keeps footage from
+        before the requested window out of the clip, and the returned start
+        lets the caller align stored timing and the detection track with what
+        the rendered video actually shows."""
         camera_dir = self.prebuffer_dir / camera_key
         if not camera_dir.exists():
-            return []
-        selected: list[Path] = []
+            return [], None
+        timed: list[tuple[Path, float, float]] = []
+        prev_end: float | None = None
         for segment in sorted(camera_dir.glob('segment-*.ts')):
             try:
-                modified = segment.stat().st_mtime
+                end = segment.stat().st_mtime
             except OSError:
                 continue
-            if modified < start_ts - 2:
-                continue
-            if modified > end_ts + 2:
-                continue
-            selected.append(segment)
-        if selected:
-            return selected
-        # Fallback to most recent segments covering the requested span.
-        segment_list = sorted(camera_dir.glob('segment-*.ts'))
-        if not segment_list:
-            return []
-        window_seconds = max(1, int(end_ts - start_ts))
-        return segment_list[-window_seconds:]
+            # After a gap (worker restart) fall back to the nominal 1s length.
+            start = prev_end if prev_end is not None and 0 < end - prev_end <= 10 else end - 1.0
+            timed.append((segment, start, end))
+            prev_end = end
+        if not timed:
+            return [], None
+        selected = [item for item in timed if item[2] > start_ts and item[1] < end_ts]
+        if not selected:
+            # Fallback to most recent segments covering the requested span.
+            window_seconds = max(1, int(end_ts - start_ts))
+            selected = timed[-window_seconds:]
+        return [item[0] for item in selected], selected[0][1]
 
     @staticmethod
     def redact_stream_credentials(message: str) -> str:
