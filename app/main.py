@@ -209,7 +209,10 @@ def effective_live_config() -> dict[str, Any]:
     settings = {
         'snapshot_refresh_ms': 500,
         'detection_status_refresh_ms': 2000,
-        'detection_interval_seconds': 0.25,
+        # 0.5s (2 Hz/camera) instead of 0.25s halves continuous YOLO load while
+        # still catching walking subjects. Tunable in Settings (0.1-10s); raise
+        # further to cut CPU more on low-power hardware.
+        'detection_interval_seconds': 0.5,
         'event_debounce_seconds': 10.0,
         'background_detection_enabled': True,
         'overlay_track_interval_ms': 450,

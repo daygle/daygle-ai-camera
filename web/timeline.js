@@ -34,7 +34,8 @@ let configuredLabels = null;
 let activeRecording = null;
 
 const OVERLAY_TOGGLE_KEY = 'daygle.timeline.overlay.enabled';
-let overlayEnabled = true;
+// Off by default to save CPU; users opt in per-browser via the toggle.
+let overlayEnabled = false;
 let overlayTrackIntervalMs = 300;
 const OVERLAY_TRACK_MAX_WIDTH = 640;
 const OVERLAY_TRACK_MAX_HEIGHT = 360;
@@ -758,7 +759,7 @@ async function playRecording(recordingId, updateHistory = true) {
   els.clipPlayer.src = `/api/recordings/${recording.id}/stream?t=${Date.now()}`;
   drawClipOverlay();
   els.clipPlayerStatus.textContent = `Loading recording #${recording.id}...`;
-  const trackNote = recording.track_pending
+  const trackNote = recording.track_pending && overlayEnabled
     ? ' AI track is still being generated; boxes are analyzed live until it is ready.'
     : '';
   try {
@@ -961,7 +962,7 @@ if ('ResizeObserver' in window && els.clipPlayer) {
 
 if (els.clipOverlayToggle) {
   const savedValue = localStorage.getItem(OVERLAY_TOGGLE_KEY);
-  overlayEnabled = savedValue !== '0';
+  overlayEnabled = savedValue === '1';
   els.clipOverlayToggle.checked = overlayEnabled;
   els.clipOverlayToggle.addEventListener('change', () => {
     overlayEnabled = Boolean(els.clipOverlayToggle.checked);
