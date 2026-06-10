@@ -98,8 +98,14 @@ function projectDetections(prevDetections, curDetections, prevTime, curTime, tar
 function sampleTrackAtTime(track, t) {
   if (!Array.isArray(track) || !track.length) return [];
   const time = Number.isFinite(t) ? t : 0;
-  if (time <= track[0].t) return track[0].detections || [];
   const last = track[track.length - 1];
+  // A truncated track (decode stopped before the end of the clip) must not
+  // freeze its final box on screen for the rest of playback: hold the last
+  // sample for ~a few sample intervals only, then stop drawing.
+  const spacing = track.length > 1 ? (last.t - track[0].t) / (track.length - 1) : 0;
+  const maxHold = Math.max(1, spacing * 3);
+  if (time > last.t + maxHold) return [];
+  if (time <= track[0].t) return track[0].detections || [];
   if (time >= last.t) return last.detections || [];
   let lo = 0;
   let hi = track.length - 1;

@@ -455,10 +455,21 @@ class RecordingService:
             str(tmp_path),
         ]
         try:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=max(60, int(max_duration_seconds) + 45), check=False)
+            # Re-encoding an extended clip (up to max_clip_seconds) can run slower
+            # than realtime on low-power boards; an undersized timeout here would
+            # discard the captured event and fall through to a too-late re-capture.
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=max(120, int(max_duration_seconds) * 3 + 60),
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            result = None
         finally:
             list_path.unlink(missing_ok=True)
-        if result.returncode != 0 or not tmp_path.exists() or tmp_path.stat().st_size <= 0:
+        if result is None or result.returncode != 0 or not tmp_path.exists() or tmp_path.stat().st_size <= 0:
             tmp_path.unlink(missing_ok=True)
             logger.warning('Failed to render clip from prebuffer for %s; falling back to direct RTSP capture.', camera_key)
             self.write_rtsp_clip(stream_url, file_path, max_duration_seconds)

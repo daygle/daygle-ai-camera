@@ -56,14 +56,10 @@
       <div class="clip-overlay-controls">
         <label class="toggle-control clip-overlay-toggle" for="clipOverlayToggle">
           <input id="clipOverlayToggle" type="checkbox" checked />
-          <span>Show event detection box</span>
-        </label>
-        <label class="toggle-control clip-overlay-toggle" for="clipOverlayTrackToggle">
-          <input id="clipOverlayTrackToggle" type="checkbox" checked />
-          <span>AI Track (per-frame)</span>
+          <span>Show detection boxes</span>
         </label>
       </div>
-      <p class="muted clip-overlay-note">Enable AI Track for true frame-by-frame observation (higher CPU usage). When disabled, boxes are event snapshots only.</p>
+      <p class="muted clip-overlay-note">Boxes replay the recording's saved AI track. If a recording has no track yet, frames are analyzed live during playback (higher CPU usage).</p>
       <p id="clipPlayerStatus" class="muted"></p>
       <div id="recordingDetails" class="status-panel"></div>
     </div>
