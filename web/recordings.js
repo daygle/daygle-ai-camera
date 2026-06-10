@@ -330,10 +330,16 @@ function drawClipOverlay() {
       maxLead,
     );
   }
-  const detections = rawTrackDetections ? filterByConfiguredLabels(rawTrackDetections) : eventDetections;
+  // Once live inference has run at all (overlayTrackDetections is an array, even if empty),
+  // never fall back to the static event boxes — doing so causes the fixed event-position
+  // boxes to reappear whenever a frame briefly returns no detections, producing the visual
+  // effect of two overlapping overlays as the camera pans away from the original event position.
+  const detections = rawTrackDetections
+    ? filterByConfiguredLabels(rawTrackDetections)
+    : overlayTrackDetections === null ? eventDetections : [];
   if (!detections.length) return;
   // The static event box is only meaningful from the event moment onward.
-  if (!rawTrackDetections && !shouldRenderOverlayForTime(activeRecording, playerTime)) return;
+  if (overlayTrackDetections === null && !shouldRenderOverlayForTime(activeRecording, playerTime)) return;
 
   drawDetectionBoxesOnCanvas(els.clipOverlay, detections, els.clipPlayer);
 }
