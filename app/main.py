@@ -15,11 +15,11 @@ import shutil
 import sqlite3
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import urllib.error
 import urllib.request
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from html import escape
@@ -215,7 +215,6 @@ def effective_live_config() -> dict[str, Any]:
         'detection_interval_seconds': 0.5,
         'event_debounce_seconds': 10.0,
         'background_detection_enabled': True,
-        'overlay_track_interval_ms': 450,
     }
     config_live = config.get('live', {})
     if isinstance(config_live, dict):
@@ -293,6 +292,14 @@ last_detector_error: str | None = getattr(detector, 'unavailable_reason', None)
 alerts = AlertEngine([])
 live_detection_last_checked: dict[str, float] = {}
 live_detection_status: dict[str, dict[str, Any]] = {}
+# Rolling per-camera history of the background monitor's detections. Recording
+# detection tracks are sliced out of this history when a clip finalizes, so
+# playback overlays cost no extra decoding or inference: every box was already
+# computed live for alerts. At one detection cycle per ~0.5s the cap covers
+# roughly the last 40 minutes per camera.
+LIVE_DETECTION_HISTORY_MAXLEN = 4800
+live_detection_history: dict[str, deque] = {}
+live_detection_history_lock = threading.Lock()
 live_event_last_emitted: dict[str, dict[str, Any]] = {}
 live_detection_retry_after: dict[str, float] = {}
 live_detection_failure_count: dict[str, int] = {}
@@ -952,6 +959,43 @@ def update_live_detection_status(camera_id: str, **updates: Any) -> None:
     }
 
 
+def record_live_detection_history(camera_id: str, detections: list[dict[str, Any]]) -> None:
+    """Append one monitor cycle's detections to the camera's rolling history.
+
+    Empty cycles are recorded too: a recording track sliced from the history
+    needs "nothing in frame" samples so playback overlays clear when an object
+    leaves instead of holding the last box."""
+    sample = [
+        {'label': detection.get('label'), 'confidence': detection.get('confidence'), 'box': detection.get('box')}
+        for detection in detections
+        if isinstance(detection.get('box'), dict)
+    ]
+    with live_detection_history_lock:
+        history = live_detection_history.get(camera_id)
+        if history is None:
+            history = deque(maxlen=LIVE_DETECTION_HISTORY_MAXLEN)
+            live_detection_history[camera_id] = history
+        history.append((time.time(), sample))
+
+
+def build_track_from_live_history(camera_id: str | None, start_ts: float, end_ts: float) -> list[dict[str, Any]] | None:
+    """Slice the monitor's detection history into a clip-relative track.
+
+    Returns ``[{"t": seconds_from_start, "detections": [...]}]`` or ``None``
+    when the history has no samples inside the window (camera idle, monitor
+    disabled, or the clip predates the in-memory history)."""
+    if not camera_id or end_ts <= start_ts:
+        return None
+    with live_detection_history_lock:
+        samples = list(live_detection_history.get(str(camera_id), ()))
+    track = [
+        {'t': round(sample_ts - start_ts, 3), 'detections': sample_detections}
+        for sample_ts, sample_detections in samples
+        if start_ts <= sample_ts <= end_ts
+    ]
+    return track or None
+
+
 def detection_label_set(detections: list[dict[str, Any]]) -> set[str]:
     return {
         str(detection.get('label') or '').strip().lower()
@@ -1261,6 +1305,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         return None
 
     detections = normalize_detection_boxes_for_frame(detections, frame)
+    record_live_detection_history(camera_id, detections)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     frame_has_motion, frame_motion_confidence = detect_frame_motion(camera_id, image_bytes)
     motion_detections = zone_motion_detections(detections, settings, frame_motion_confidence) if frame_has_motion else []
@@ -1733,7 +1778,7 @@ def _make_continuous_chunk_callback(camera_id: str) -> Any:
             if started_at_dt is None:
                 started_at_dt = ended_at_dt - timedelta(seconds=effective_recording_config().get('chunk_duration_seconds', 3600))
             duration_seconds = max(1.0, (ended_at_dt - started_at_dt).total_seconds())
-            database.add_recording(
+            recording_id = database.add_recording(
                 event_id=None,
                 camera_id=camera_id,
                 started_at=started_at_dt.isoformat(),
@@ -1745,6 +1790,9 @@ def _make_continuous_chunk_callback(camera_id: str) -> Any:
                 created_at=utc_now(),
                 trigger_type='continuous',
                 trigger_label=None,
+            )
+            write_live_history_detection_track(
+                recording_id, file_path, camera_id, started_at_dt.timestamp(), ended_at_dt.timestamp(),
             )
             purge_recordings_by_policy()
         except Exception as exc:
@@ -1789,9 +1837,13 @@ def attach_event_recording(
             recording_config=recording_config,
         )
     else:
-        # The clip was written synchronously above; bake its detection track now
-        # so playback overlays can follow objects without per-frame inference.
-        schedule_recording_detection_track(recording_id, Path(str(metadata.get('file_path') or '')))
+        # The clip was written synchronously above; save the monitor's detections
+        # over its window so playback overlays can follow objects for free.
+        window = _recording_capture_window(metadata)
+        if window:
+            write_live_history_detection_track(
+                recording_id, Path(str(metadata.get('file_path') or '')), camera_id, window[0], window[1],
+            )
     purge_recordings_by_policy()
     return recording_id
 
@@ -1880,11 +1932,15 @@ def start_rtsp_recording_capture(
                 ended_at=ended_at,
                 duration_seconds=final_duration_seconds,
             )
-            schedule_recording_detection_track(recording_id, file_path)
+            write_live_history_detection_track(
+                recording_id, file_path, camera_id, start_capture_ts, start_capture_ts + final_duration_seconds,
+            )
         except Exception as exc:
             logger.warning('RTSP recording capture failed for event %s, writing generated fallback: %s', event_id, exc)
             write_generated_fallback()
-            schedule_recording_detection_track(recording_id, file_path)
+            write_live_history_detection_track(
+                recording_id, file_path, camera_id, start_capture_ts, start_capture_ts + duration_seconds,
+            )
         finally:
             if camera_id:
                 with active_rtsp_recordings_lock:
@@ -2294,167 +2350,6 @@ def recording_track_sidecar_path(file_path: Path) -> Path:
     return file_path.with_name(f'{file_path.stem}.track.json')
 
 
-# Detection-track sampling: decode the finalized clip at this many frames per
-# second and run object detection on each sample, so the overlay can follow
-# objects during playback without re-running inference in the browser. Playback
-# interpolates between samples; 5/s keeps boxes tracking moving objects more
-# tightly than 3/s (shorter gaps for the interpolator to bridge) while keeping
-# the bake cost tolerable on low-power hardware. TRACK_MAX_SAMPLES is raised in
-# step so the covered span (samples / fps ≈ 300s) is unchanged for long clips.
-TRACK_SAMPLE_FPS = 5.0
-TRACK_MAX_SAMPLES = 1500
-TRACK_FRAME_MAX_WIDTH = 640
-TRACK_FRAME_MAX_HEIGHT = 360
-
-
-def _extract_track_frames_ffmpeg(
-    file_path: Path,
-    sample_fps: float,
-    max_samples: int,
-) -> list[tuple[float, bytes]] | None:
-    """Sample clip frames as JPEGs with ffmpeg. Returns [(t_seconds, jpeg_bytes)].
-
-    ffmpeg is preferred over cv2.VideoCapture because it is already a hard
-    dependency for writing the clips, while headless/ARM OpenCV builds often
-    cannot decode H.264 at all. Returns None when ffmpeg is missing or fails.
-    """
-    ffmpeg = shutil.which('ffmpeg')
-    if not ffmpeg:
-        return None
-    with tempfile.TemporaryDirectory(prefix='daygle-track-') as tmp_dir:
-        pattern = Path(tmp_dir) / 'frame-%05d.jpg'
-        command = [
-            ffmpeg,
-            '-y',
-            '-nostdin',
-            '-hide_banner',
-            '-loglevel', 'error',
-            '-fflags', '+discardcorrupt',
-            '-err_detect', 'ignore_err',
-            '-i', str(file_path),
-            '-vf', f'fps={sample_fps:g},scale={TRACK_FRAME_MAX_WIDTH}:-2',
-            '-frames:v', str(max_samples),
-            '-q:v', '4',
-            str(pattern),
-        ]
-        try:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
-        except (OSError, subprocess.SubprocessError) as exc:
-            logger.warning('Detection track frame extraction failed for %s: %s', file_path.name, exc)
-            return None
-        frame_paths = sorted(Path(tmp_dir).glob('frame-*.jpg'))
-        if result.returncode != 0 and not frame_paths:
-            logger.warning(
-                'ffmpeg could not sample frames from %s: %s',
-                file_path.name,
-                RecordingService.redact_stream_credentials(str(result.stderr or '')[-500:]),
-            )
-            return None
-        if result.returncode != 0:
-            # Partial extraction (e.g. a corrupt clip tail) still yields a usable
-            # track for the decoded span; playback stops drawing past its end.
-            logger.warning(
-                'ffmpeg sampled only %d frames from %s before failing: %s',
-                len(frame_paths),
-                file_path.name,
-                RecordingService.redact_stream_credentials(str(result.stderr or '')[-300:]),
-            )
-        # The fps filter emits frame N at timestamp N / sample_fps.
-        return [(index / sample_fps, frame.read_bytes()) for index, frame in enumerate(frame_paths)]
-
-
-def _extract_track_frames_opencv(
-    file_path: Path,
-    sample_fps: float,
-    max_samples: int,
-) -> list[tuple[float, bytes]] | None:
-    try:
-        import cv2
-    except ImportError:
-        return None
-    capture = cv2.VideoCapture(str(file_path))
-    if not capture.isOpened():
-        capture.release()
-        return None
-    try:
-        source_fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
-        step = max(1, round(source_fps / sample_fps)) if source_fps > 0 else 1
-        frames: list[tuple[float, bytes]] = []
-        frame_index = 0
-        while len(frames) < max_samples:
-            if not capture.grab():
-                break
-            if frame_index % step == 0:
-                ok, frame = capture.retrieve()
-                if ok and frame is not None:
-                    position_ms = float(capture.get(cv2.CAP_PROP_POS_MSEC) or 0.0)
-                    if position_ms > 0:
-                        t_seconds = position_ms / 1000.0
-                    else:
-                        t_seconds = frame_index / (source_fps if source_fps > 0 else sample_fps)
-                    height, width = frame.shape[:2]
-                    scale = min(1.0, TRACK_FRAME_MAX_WIDTH / max(1, width), TRACK_FRAME_MAX_HEIGHT / max(1, height))
-                    if scale < 1.0:
-                        frame = cv2.resize(
-                            frame,
-                            (max(1, int(width * scale)), max(1, int(height * scale))),
-                            interpolation=cv2.INTER_AREA,
-                        )
-                    encoded, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-                    if encoded:
-                        frames.append((t_seconds, buffer.tobytes()))
-            frame_index += 1
-        return frames
-    finally:
-        capture.release()
-
-
-def build_recording_detection_track(
-    file_path: Path,
-    *,
-    sample_fps: float = TRACK_SAMPLE_FPS,
-    min_confidence: float | None = None,
-) -> list[dict[str, Any]] | None:
-    """Decode a finalized clip and run detection across sampled frames.
-
-    Returns a time-series ``[{"t": seconds_from_start, "detections": [...]}]``
-    where each detection matches the detector's output (normalized box). Returns
-    ``None`` when the clip cannot be decoded or the detector is unavailable, so
-    callers can simply skip writing a track.
-    """
-    if not file_path.exists():
-        return None
-    sample_fps = max(1.0, float(sample_fps))
-    frames = _extract_track_frames_ffmpeg(file_path, sample_fps, TRACK_MAX_SAMPLES)
-    if frames is None:
-        frames = _extract_track_frames_opencv(file_path, sample_fps, TRACK_MAX_SAMPLES)
-    if frames is None:
-        logger.warning('Detection track skipped for %s: no decoder could sample frames.', file_path.name)
-        return None
-    confidence = min_confidence if min_confidence is not None else compute_minimum_rule_confidence()
-    track: list[dict[str, Any]] = []
-    error_count = 0
-    for t_seconds, jpeg_bytes in frames:
-        try:
-            detections = detector.detect_image(jpeg_bytes, confidence=confidence)
-        except DetectorUnavailableError:
-            return None
-        except Exception:
-            detections = []
-            error_count += 1
-        track.append({'t': round(t_seconds, 3), 'detections': detections})
-    # An all-empty track is persisted as a permanent "nothing localized" marker,
-    # so it must only come from a healthy detector. If the detector errored and
-    # localized nothing, discard the result so the backfill can retry later.
-    if error_count and not any(sample['detections'] for sample in track):
-        logger.warning(
-            'Detection track for %s discarded: %d/%d samples errored and nothing was localized; will retry on next view.',
-            file_path.name, error_count, len(track),
-        )
-        return None
-    return track
-
-
 def write_recording_detection_track(file_path: Path, track: list[dict[str, Any]]) -> None:
     recording_track_sidecar_path(file_path).write_text(json.dumps(track), encoding='utf-8')
 
@@ -2476,42 +2371,59 @@ def load_recording_detection_track(file_path: Path) -> list[dict[str, Any]] | No
     return data
 
 
-_track_generation_inflight: set[str] = set()
-_track_generation_lock = threading.Lock()
+def write_live_history_detection_track(
+    recording_id: int | None,
+    file_path: Path,
+    camera_id: str | None,
+    start_ts: float,
+    end_ts: float,
+) -> bool:
+    """Persist the monitor's detections over the capture window as the clip's track.
+
+    This replaces the old post-recording "bake" that re-decoded the clip and ran
+    detection on every sampled frame: the background monitor already analyzed
+    these frames live, so slicing its history costs nothing. An all-empty slice
+    is still written — it marks the clip as analyzed while the loader keeps
+    reporting it as missing so playback falls back to the static event boxes.
+    """
+    if not str(file_path):
+        return False
+    track = build_track_from_live_history(camera_id, start_ts, end_ts)
+    if track is None:
+        logger.debug('No live detection history covers recording %s (%s); no track written.', recording_id, file_path.name)
+        return False
+    try:
+        write_recording_detection_track(file_path, track)
+    except OSError as exc:
+        logger.warning('Could not write detection track for recording %s: %s', recording_id, exc)
+        return False
+    localized = sum(1 for sample in track if sample.get('detections'))
+    logger.info(
+        'Saved detection track for recording %s from live history (%d samples, %d with detections).',
+        recording_id, len(track), localized,
+    )
+    return True
 
 
-def schedule_recording_detection_track(recording_id: int | None, file_path: Path) -> None:
-    """Generate a detection track for a finalized clip on a background thread."""
-    key = str(file_path)
-    if not key:
-        return
-    with _track_generation_lock:
-        if key in _track_generation_inflight:
-            return
-        _track_generation_inflight.add(key)
-
-    def worker() -> None:
-        try:
-            track = build_recording_detection_track(file_path)
-            if track is None:
-                logger.warning('No detection track generated for recording %s (%s).', recording_id, file_path.name)
-            else:
-                # Persist even an all-empty track: it marks the clip as analyzed so
-                # it is not re-decoded on every detail view, while the loader still
-                # reports it as missing so the static event box keeps showing.
-                write_recording_detection_track(file_path, track)
-                localized = sum(1 for sample in track if sample.get('detections'))
-                logger.info(
-                    'Generated detection track for recording %s (%d samples, %d with detections).',
-                    recording_id, len(track), localized,
-                )
-        except Exception as exc:
-            logger.warning('Detection track generation failed for recording %s: %s', recording_id, exc)
-        finally:
-            with _track_generation_lock:
-                _track_generation_inflight.discard(key)
-
-    threading.Thread(target=worker, name=f'track-gen-{recording_id or "rec"}', daemon=True).start()
+def _recording_capture_window(recording: dict[str, Any]) -> tuple[float, float] | None:
+    """Return the recording's (start_ts, end_ts) from its stored timing."""
+    try:
+        started_at = datetime.fromisoformat(str(recording.get('started_at') or ''))
+    except ValueError:
+        return None
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    start_ts = started_at.timestamp()
+    try:
+        ended_at = datetime.fromisoformat(str(recording.get('ended_at') or ''))
+        if ended_at.tzinfo is None:
+            ended_at = ended_at.replace(tzinfo=timezone.utc)
+        end_ts = ended_at.timestamp()
+    except ValueError:
+        end_ts = start_ts + max(1.0, float(recording.get('duration_seconds') or 0))
+    if end_ts <= start_ts:
+        return None
+    return start_ts, end_ts
 
 
 def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
@@ -3051,7 +2963,10 @@ def live_detection_status_api(camera_id: str | None = None):
 
 
 @app.get('/api/live/snapshot')
-def live_snapshot(overlay: bool = Query(True), camera_id: str | None = None):
+def live_snapshot(camera_id: str | None = None):
+    # Snapshots are served exactly as read from the camera. Detection boxes are
+    # drawn client-side on a canvas from /api/live/detection-status data, so no
+    # per-request JPEG decode/draw/re-encode happens on the server.
     selected_camera = get_camera_instance(camera_id)
     selected_config = get_camera_config(camera_id)
     if hasattr(selected_camera, 'read_jpeg'):
@@ -3060,10 +2975,6 @@ def live_snapshot(overlay: bool = Query(True), camera_id: str | None = None):
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         queue_live_stream_alerts(image_bytes, frame, copy.deepcopy(selected_config))
-        if overlay:
-            camera_key = str(selected_config.get('id') or 'camera')
-            detections = live_detection_status.get(camera_key, {}).get('detections') or []
-            image_bytes = render_live_snapshot_jpeg_overlay(image_bytes, detections)
         return Response(content=image_bytes, media_type='image/jpeg')
     raise HTTPException(status_code=503, detail='Live snapshots require an ONVIF/RTSP camera backend.')
 
@@ -3319,21 +3230,22 @@ def recording_detail(recording_id: int):
         raise HTTPException(status_code=404, detail='Recording not found')
     file_path = Path(str(recording.get('file_path') or ''))
     recording['track'] = load_recording_detection_track(file_path)
-    # Backfill: event recordings made before track baking existed (or whose bake
-    # failed) get a track generated on first view; it will be used on the next
-    # playback. The empty-track marker prevents re-analyzing barren clips.
-    # track_pending tells the UI the bake is still running (capture-end bakes can
-    # take a while on low-power hardware), as opposed to "analyzed, nothing found".
-    recording['track_pending'] = False
+    # Backfill from the live monitor's in-memory history while it still covers
+    # the clip's window (e.g. a recording finalized before this feature, viewed
+    # shortly after capture). Older clips simply have no track and playback
+    # falls back to the static event boxes — clips are never decoded or
+    # re-analyzed for overlays.
     if (
         recording['track'] is None
-        and recording.get('event_id')
         and str(file_path)
         and file_path.exists()
         and not recording_track_sidecar_path(file_path).exists()
     ):
-        schedule_recording_detection_track(recording_id, file_path)
-        recording['track_pending'] = True
+        window = _recording_capture_window(recording)
+        if window and write_live_history_detection_track(
+            recording_id, file_path, str(recording.get('camera_id') or '') or None, window[0], window[1],
+        ):
+            recording['track'] = load_recording_detection_track(file_path)
     return recording
 
 
@@ -3984,14 +3896,12 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail='event_debounce_seconds must be a number.') from exc
     if event_debounce_seconds < 0 or event_debounce_seconds > 300:
         raise HTTPException(status_code=400, detail='event_debounce_seconds must be between 0 and 300.')
-    overlay_track_interval_ms = _int_field(merged, 'overlay_track_interval_ms', 450, 100, 5000)
     return {
         'snapshot_refresh_ms': snapshot_refresh_ms,
         'detection_status_refresh_ms': detection_status_refresh_ms,
         'detection_interval_seconds': detection_interval_seconds,
         'event_debounce_seconds': event_debounce_seconds,
         'background_detection_enabled': background_detection_enabled,
-        'overlay_track_interval_ms': overlay_track_interval_ms,
     }
 
 

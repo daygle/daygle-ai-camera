@@ -3,7 +3,6 @@ const liveEls = {
   frameWrap: document.getElementById('liveFrameWrap'),
   status: document.getElementById('liveStatus'),
   detectionStatus: document.getElementById('liveDetectionStatus'),
-  overlayToggle: document.getElementById('overlayToggle'),
   liveAiTrackToggle: document.getElementById('liveAiTrackToggle'),
   liveAiTrackLabel: document.getElementById('liveAiTrackLabel'),
   liveAiTrackCanvas: document.getElementById('liveAiTrackCanvas'),
@@ -39,36 +38,28 @@ let zoneDrag = null;
 let configuredLabels = null;
 
 const LIVE_AI_TRACK_KEY = 'daygle.live.overlay.track.enabled';
-// Off by default to save CPU; users opt in per-browser via the toggle.
+// Off by default; users opt in per-browser via the toggle. The overlay only
+// replays the background monitor's detections (already computed server-side
+// for alerts/recording), so it never runs its own inference and adds no
+// detector load — just the detection-status JSON poll and canvas drawing.
 let liveAiTrackEnabled = false;
-let liveAiTrackInFlight = false;
 let liveAiTrackDetections = null;
 let liveAiTrackPrevDetections = null;
-// Wall-clock time (ms) at which each sample's frame was captured, so the
-// overlay can be projected onto the frame currently on screen regardless of
-// how long detection took.
+// Wall-clock time (ms) at which each sample was received, so the overlay can
+// be projected onto the frame currently on screen.
 let liveAiTrackCaptureMs = 0;
 let liveAiTrackPrevCaptureMs = 0;
+// updated_at of the last ingested monitor sample, so polling faster than the
+// monitor's detection interval does not re-ingest the same cycle (which would
+// zero out the projection velocity).
+let lastServerTrackUpdatedAt = null;
 let liveRafId = null;
-// Latest object detections from the server-side background monitor (already
-// computed for alerts/recording). The live overlay reuses these instead of
-// running a second, redundant inference per frame on the same camera, which
-// halves detector load while the live view is open. serverTrackMs is the client
-// receipt time so freshness is measured on one clock.
-let serverTrackDetections = null;
-let serverTrackMs = 0;
-const SERVER_TRACK_FRESH_MS = 1200;
 const OVERLAY_STATUS_REFRESH_MS = 600;
-const LIVE_AI_TRACK_MAX_WIDTH = 640;
-const LIVE_AI_TRACK_MAX_HEIGHT = 360;
 const LIVE_AI_TRACK_MAX_LEAD_MS = 1500;
-// Stop drawing a detection once its source sample is older than this. Under CPU
-// load a new (empty) inference result can take a while to arrive, so without an
-// expiry the last box lingers — and projectDetections extrapolates it forward —
-// long after the object has left the frame. Bounding the age makes the overlay
-// clear promptly instead of trailing reality.
-const LIVE_AI_TRACK_STALE_MS = 900;
-const liveAiTrackOffscreenCanvas = document.createElement('canvas');
+// Stop drawing once the monitor stops reporting (camera backoff, detector
+// stalled) so the last box does not linger after the object has left. The
+// window is a few monitor cycles wide; an empty cycle clears boxes sooner.
+const LIVE_AI_TRACK_STALE_MS = 3000;
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -167,61 +158,6 @@ function stopLiveRaf() {
   if (liveRafId !== null) {
     cancelAnimationFrame(liveRafId);
     liveRafId = null;
-  }
-}
-
-async function detectLiveFrameDetections() {
-  if (!liveAiTrackEnabled || !liveEls.frame || isAllCameraMode()) return;
-  if (!liveEls.frame.complete || liveEls.frame.naturalWidth <= 0) return;
-  // Prefer the background monitor's detections (already computed server-side for
-  // alerts/recording). When they are fresh, render those and skip a second,
-  // redundant client-side inference on the same camera. Falls through to live
-  // inference only when the server data is stale (monitor idle/backed off).
-  if (serverTrackMs > 0 && performance.now() - serverTrackMs < SERVER_TRACK_FRESH_MS) {
-    liveAiTrackPrevDetections = liveAiTrackDetections;
-    liveAiTrackPrevCaptureMs = liveAiTrackCaptureMs;
-    liveAiTrackCaptureMs = serverTrackMs;
-    liveAiTrackDetections = serverTrackDetections;
-    drawLiveOverlay();
-    return;
-  }
-  if (liveAiTrackInFlight) return;
-  liveAiTrackInFlight = true;
-  try {
-    const srcW = liveEls.frame.naturalWidth;
-    const srcH = liveEls.frame.naturalHeight;
-    const scale = Math.min(1, LIVE_AI_TRACK_MAX_WIDTH / srcW, LIVE_AI_TRACK_MAX_HEIGHT / srcH);
-    const fw = Math.max(1, Math.round(srcW * scale));
-    const fh = Math.max(1, Math.round(srcH * scale));
-    liveAiTrackOffscreenCanvas.width = fw;
-    liveAiTrackOffscreenCanvas.height = fh;
-    const ctx = liveAiTrackOffscreenCanvas.getContext('2d');
-    if (!ctx) return;
-    // Anchor the result to the moment the frame is captured, not to when the
-    // (latency-delayed) response arrives.
-    const captureMs = performance.now();
-    ctx.drawImage(liveEls.frame, 0, 0, fw, fh);
-    const blob = await new Promise((resolve) => liveAiTrackOffscreenCanvas.toBlob((b) => resolve(b), 'image/jpeg', 0.8));
-    if (!blob) return;
-    const payload = await api('/api/detect/frame', {
-      method: 'POST',
-      headers: { 'Content-Type': 'image/jpeg' },
-      body: blob,
-    });
-    const newDetections = (Array.isArray(payload?.detections) ? payload.detections : []).map((det) => {
-      const box = normalizeDetectionBox(det?.box || {}, fw, fh);
-      if (!box) return null;
-      return { ...det, box };
-    }).filter(Boolean);
-    liveAiTrackPrevDetections = liveAiTrackDetections;
-    liveAiTrackPrevCaptureMs = liveAiTrackCaptureMs;
-    liveAiTrackCaptureMs = captureMs;
-    liveAiTrackDetections = newDetections;
-    drawLiveOverlay();
-  } catch (_err) {
-    // Retain last successful detections on transient failure.
-  } finally {
-    liveAiTrackInFlight = false;
   }
 }
 
@@ -381,9 +317,8 @@ function syncZoneOverlayToImage() {
 }
 
 function snapshotUrl(camera = selectedCamera) {
-  const overlay = liveEls.overlayToggle?.checked ? '1' : '0';
   const cameraId = encodeURIComponent(camera?.id || '');
-  return `/api/live/snapshot?overlay=${overlay}&camera_id=${cameraId}&t=${Date.now()}`;
+  return `/api/live/snapshot?camera_id=${cameraId}&t=${Date.now()}`;
 }
 
 function isAllCameraMode() {
@@ -481,16 +416,21 @@ function formatDetectionStatus(payload) {
   return `Live AI: ${payload.state || 'waiting'} - ${payload.reason || payload.ai_error || 'waiting for frames'}`;
 }
 
-// Capture the background monitor's object detections from a status payload so
-// the overlay can reuse them. Only cycles that actually ran inference recently
-// ('checked'/'alerted') are trusted; 'error'/'skipped'/'waiting' leave the cache
-// untouched so detectLiveFrameDetections falls back to live client inference.
+// Feed the background monitor's object detections from a status payload into
+// the overlay. Only cycles that actually ran inference ('checked'/'alerted')
+// are trusted; 'error'/'skipped'/'waiting' leave the current boxes in place
+// until the stale guard clears them.
 function ingestServerTrackDetections(payload) {
   if (!liveAiTrackEnabled || !payload || !['checked', 'alerted'].includes(payload.state)) return;
-  serverTrackDetections = (payload.detections || [])
+  if (payload.updated_at && payload.updated_at === lastServerTrackUpdatedAt) return;
+  lastServerTrackUpdatedAt = payload.updated_at || null;
+  liveAiTrackPrevDetections = liveAiTrackDetections;
+  liveAiTrackPrevCaptureMs = liveAiTrackCaptureMs;
+  liveAiTrackDetections = (payload.detections || [])
     .filter((d) => d && d.box && !d.motion_event && String(d.label || '').trim().toLowerCase() !== 'motion')
     .map((d) => ({ label: d.label, confidence: d.confidence, box: d.box }));
-  serverTrackMs = performance.now();
+  liveAiTrackCaptureMs = performance.now();
+  drawLiveOverlay();
 }
 
 function detectionStatusInterval() {
@@ -529,8 +469,7 @@ function setSelectedCamera(cameraId) {
   liveAiTrackPrevDetections = null;
   liveAiTrackCaptureMs = 0;
   liveAiTrackPrevCaptureMs = 0;
-  serverTrackDetections = null;
-  serverTrackMs = 0;
+  lastServerTrackUpdatedAt = null;
   clearLiveOverlay();
   if (liveEls.cameraSelect) liveEls.cameraSelect.value = selectedCamera.id;
   if (isZonesPage) {
@@ -908,10 +847,7 @@ function bindZoneDrawing() {
 liveEls.frame.addEventListener('load', () => {
   liveEls.frame.dataset.loading = 'false';
   syncZoneOverlayToImage();
-  liveEls.status.textContent = liveEls.overlayToggle.checked
-    ? `${selectedCamera?.name || 'Camera'} - matched alert boxes on`
-    : `${selectedCamera?.name || 'Camera'} - matched alert boxes off`;
-  detectLiveFrameDetections();
+  liveEls.status.textContent = `${selectedCamera?.name || 'Camera'} - live`;
   if (liveAiTrackEnabled && !isAllCameraMode()) {
     startLiveRaf();
   } else {
@@ -938,12 +874,11 @@ if (liveEls.liveAiTrackToggle) {
     liveAiTrackPrevDetections = null;
     liveAiTrackCaptureMs = 0;
     liveAiTrackPrevCaptureMs = 0;
-    serverTrackDetections = null;
-    serverTrackMs = 0;
+    lastServerTrackUpdatedAt = null;
     clearLiveOverlay();
     restartDetectionStatusTimer();
     if (liveAiTrackEnabled && !isAllCameraMode()) {
-      detectLiveFrameDetections();
+      refreshDetectionStatus();
       startLiveRaf();
     } else {
       stopLiveRaf();
@@ -951,7 +886,6 @@ if (liveEls.liveAiTrackToggle) {
   });
 }
 
-liveEls.overlayToggle.addEventListener('change', refreshFrame);
 liveEls.cameraSelect.addEventListener('change', () => setSelectedCamera(liveEls.cameraSelect.value));
 liveEls.viewModeSelect?.addEventListener('change', syncViewMode);
 liveEls.addZoneBtn?.addEventListener('click', () => {
