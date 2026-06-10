@@ -1756,6 +1756,60 @@ def test_rtsp_recording_capture_falls_back_on_stream_error(tmp_path, monkeypatch
     main.active_rtsp_recordings.clear()
 
 
+def test_write_rtsp_clip_rejects_videoless_output(tmp_path, monkeypatch):
+    # ffmpeg can exit 0 while discarding every corrupt frame, leaving a non-empty
+    # file with no video stream. write_rtsp_clip must reject it (so the caller
+    # falls back to a playable clip) rather than saving an unplayable recording.
+    import app.recordings as recordings_module
+    from app.recordings import RecordingService
+
+    service = RecordingService({
+        'storage': {'recordings_dir': str(tmp_path / 'recordings')},
+        'recording': {'enabled': True, 'mode': 'motion', 'format': 'mp4'},
+    })
+
+    def fake_run(command, *_args, **_kwargs):
+        # The output path is the last positional arg in the ffmpeg command.
+        Path(command[-1]).write_bytes(b'not-a-real-video')
+        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+    monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _path: False))
+
+    file_path = tmp_path / 'recordings' / 'event_videoless.mp4'
+    with pytest.raises(RuntimeError, match='no decodable video stream'):
+        service.write_rtsp_clip('rtsp://example/stream', file_path, 5.0)
+
+    # Neither the final clip nor the temp file should survive a videoless capture.
+    assert not file_path.exists()
+    assert not file_path.with_name(f'{file_path.stem}.recording.tmp{file_path.suffix}').exists()
+
+
+def test_write_rtsp_clip_keeps_clip_with_video_stream(tmp_path, monkeypatch):
+    import app.recordings as recordings_module
+    from app.recordings import RecordingService
+
+    service = RecordingService({
+        'storage': {'recordings_dir': str(tmp_path / 'recordings')},
+        'recording': {'enabled': True, 'mode': 'motion', 'format': 'mp4'},
+    })
+
+    def fake_run(command, *_args, **_kwargs):
+        Path(command[-1]).write_bytes(b'valid-video-bytes')
+        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+    monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _path: True))
+
+    file_path = tmp_path / 'recordings' / 'event_ok.mp4'
+    service.write_rtsp_clip('rtsp://example/stream', file_path, 5.0)
+
+    assert file_path.exists()
+    assert not file_path.with_name(f'{file_path.stem}.recording.tmp{file_path.suffix}').exists()
+
+
 def test_alerted_only_event_and_recording_queries(tmp_path):
     from app.database import EventDatabase
 

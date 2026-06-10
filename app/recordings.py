@@ -189,6 +189,9 @@ class RecordingService:
             raise RuntimeError(f'ffmpeg failed to record RTSP clip: {error_detail}')
         if not tmp_path.exists():
             raise RuntimeError('ffmpeg did not create an RTSP recording file.')
+        if not self.clip_has_video_stream(tmp_path):
+            tmp_path.unlink(missing_ok=True)
+            raise RuntimeError('Recorded RTSP clip contains no decodable video stream.')
         tmp_path.replace(file_path)
 
     def stop_prebuffer_workers(self) -> None:
@@ -469,7 +472,16 @@ class RecordingService:
             result = None
         finally:
             list_path.unlink(missing_ok=True)
-        if result is None or result.returncode != 0 or not tmp_path.exists() or tmp_path.stat().st_size <= 0:
+        # clip_has_video_stream (ffprobe) is checked last so it only runs once the
+        # cheap return-code/size checks have passed — i.e. when ffmpeg claims success
+        # but may have discarded all corrupt frames into a videoless output.
+        if (
+            result is None
+            or result.returncode != 0
+            or not tmp_path.exists()
+            or tmp_path.stat().st_size <= 0
+            or not self.clip_has_video_stream(tmp_path)
+        ):
             tmp_path.unlink(missing_ok=True)
             logger.warning('Failed to render clip from prebuffer for %s; falling back to direct RTSP capture.', camera_key)
             self.write_rtsp_clip(stream_url, file_path, max_duration_seconds)
@@ -596,6 +608,34 @@ class RecordingService:
     @staticmethod
     def redact_stream_credentials(message: str) -> str:
         return re.sub(r'(rtsps?://[^:\s/@]+):[^@\s/]+@', r'\1:***@', message)
+
+    @staticmethod
+    def clip_has_video_stream(file_path: Path) -> bool:
+        """True if the clip actually contains a decodable video stream.
+
+        ffmpeg can exit 0 while discarding every corrupt video frame (we pass
+        +discardcorrupt / ignore_err to survive flaky RTSP), leaving a non-empty
+        file with no video stream. Such a clip is unplayable, so callers verify
+        the output rather than trusting the return code alone."""
+        if not file_path.exists() or file_path.stat().st_size <= 0:
+            return False
+        ffprobe = shutil.which('ffprobe')
+        if not ffprobe:
+            # Can't verify without ffprobe; assume the non-empty file is usable.
+            return True
+        command = [
+            ffprobe,
+            '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=codec_name',
+            '-of', 'csv=p=0',
+            str(file_path),
+        ]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return True
+        return result.returncode == 0 and bool(result.stdout.strip())
 
     def recording_format(self) -> str:
         configured = str(self.recording_config.get('format', self.PLAYBACK_FORMAT)).strip().lstrip('.').lower()
