@@ -131,6 +131,11 @@ function sampleTrackAtTime(track, t) {
   const spacing = track.length > 1 ? (last.t - track[0].t) / (track.length - 1) : 0;
   const maxHold = Math.max(1, spacing * 3);
   if (time > last.t + maxHold) return [];
+  // Symmetrically, a track whose first sample falls mid-clip (the monitor only
+  // sampled around the event) must not back-fill that box over the whole
+  // pre-roll: hold it for ~a few sample intervals before its time, then
+  // nothing — those earlier frames were never analyzed.
+  if (time < track[0].t - maxHold) return [];
   if (time <= track[0].t) return track[0].detections || [];
   if (time >= last.t) return last.detections || [];
   let lo = 0;

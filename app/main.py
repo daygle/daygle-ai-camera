@@ -1913,7 +1913,7 @@ def start_rtsp_recording_capture(
             dynamic_post_seconds = max(0, int(round(final_deadline_ts - triggered_at.timestamp())))
 
             if camera_id and pre_seconds > 0:
-                recording_service.write_rtsp_clip_with_prebuffer(
+                content_start_ts, content_seconds = recording_service.write_rtsp_clip_with_prebuffer(
                     stream_url=stream_url,
                     camera_id=camera_id,
                     file_path=file_path,
@@ -1924,16 +1924,25 @@ def start_rtsp_recording_capture(
                     buffer_seconds=recording_service.prebuffer_window_seconds(recording_config),
                 )
             else:
+                # Without a prebuffer the capture records live from this moment,
+                # not from start_capture_ts; the stored window must say so.
+                content_start_ts = time.time()
                 recording_service.write_rtsp_clip(stream_url, file_path, final_duration_seconds)
+                content_seconds = final_duration_seconds
 
-            ended_at = datetime.fromtimestamp(start_capture_ts + final_duration_seconds, tz=timezone.utc).isoformat()
+            # Anchor the stored timing and the detection track to the window the
+            # written media actually covers — keyframe-aligned prebuffer segments
+            # and fallback captures rarely start exactly at start_capture_ts, and
+            # any mismatch here shows up as overlay boxes drifting against the
+            # video during playback.
             database.update_recording_timing(
                 recording_id,
-                ended_at=ended_at,
-                duration_seconds=final_duration_seconds,
+                started_at=datetime.fromtimestamp(content_start_ts, tz=timezone.utc).isoformat(),
+                ended_at=datetime.fromtimestamp(content_start_ts + content_seconds, tz=timezone.utc).isoformat(),
+                duration_seconds=content_seconds,
             )
             write_live_history_detection_track(
-                recording_id, file_path, camera_id, start_capture_ts, start_capture_ts + final_duration_seconds,
+                recording_id, file_path, camera_id, content_start_ts, content_start_ts + content_seconds,
             )
         except Exception as exc:
             logger.warning('RTSP recording capture failed for event %s, writing generated fallback: %s', event_id, exc)
