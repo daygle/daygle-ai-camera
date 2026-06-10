@@ -32,24 +32,6 @@ function filterByConfiguredLabels(detections) {
     return configuredLabels.has(label) || configuredLabels.has('motion') && label === 'motion';
   });
 }
-let overlayTrackIntervalMs = 300;
-const OVERLAY_TRACK_MAX_WIDTH = 640;
-const OVERLAY_TRACK_MAX_HEIGHT = 360;
-const overlayTrackCanvas = document.createElement('canvas');
-let overlayTrackLastRunMs = 0;
-let overlayTrackInFlight = false;
-let overlayTrackDetections = null;
-let overlayTrackPrevDetections = null;
-// True once live frame inference has localized at least one object for this
-// clip. Distinguishes "inference returned empty" (object not detectable on the
-// downscaled frame — keep the static event box) from "inference is tracking the
-// object" (suppress the static box so a panning camera doesn't double-draw).
-let overlayTrackEverDetected = false;
-// Video currentTime (seconds) at which each sample's frame was captured, so
-// the overlay can be projected onto the frame currently on screen regardless
-// of how long detection took.
-let overlayTrackCaptureTime = 0;
-let overlayTrackPrevCaptureTime = 0;
 let overlayRafId = null;
 let configuredLabels = null; // null = no filter loaded yet
 
@@ -194,15 +176,6 @@ function clearClipOverlay() {
   context.clearRect(0, 0, els.clipOverlay.width, els.clipOverlay.height);
 }
 
-function clearOverlayTrackDetections() {
-  overlayTrackDetections = null;
-  overlayTrackPrevDetections = null;
-  overlayTrackEverDetected = false;
-  overlayTrackCaptureTime = 0;
-  overlayTrackPrevCaptureTime = 0;
-  overlayTrackLastRunMs = 0;
-}
-
 function recordingTrack() {
   return Array.isArray(activeRecording?.track) && activeRecording.track.length ? activeRecording.track : null;
 }
@@ -218,8 +191,6 @@ function startOverlayRaf() {
       overlayRafId = null;
       return;
     }
-    // Baked tracks need no inference — only the live AI-track fallback does.
-    if (!recordingTrack()) detectOverlayFrameDetections();
     drawClipOverlay();
     overlayRafId = requestAnimationFrame(loop);
   }
@@ -230,65 +201,6 @@ function stopOverlayRaf() {
   if (overlayRafId !== null) {
     cancelAnimationFrame(overlayRafId);
     overlayRafId = null;
-  }
-}
-
-async function detectOverlayFrameDetections() {
-  if (!overlayEnabled || !activeRecording || !els.clipPlayer) return;
-  if (els.clipPlayer.readyState < 2 || els.clipPlayer.videoWidth <= 0 || els.clipPlayer.videoHeight <= 0) return;
-
-  const now = performance.now();
-  if (overlayTrackInFlight || now - overlayTrackLastRunMs < overlayTrackIntervalMs) return;
-  overlayTrackLastRunMs = now;
-  overlayTrackInFlight = true;
-
-  try {
-    const sourceWidth = Number(els.clipPlayer.videoWidth || 0);
-    const sourceHeight = Number(els.clipPlayer.videoHeight || 0);
-    if (sourceWidth <= 0 || sourceHeight <= 0) return;
-    const scale = Math.min(1, OVERLAY_TRACK_MAX_WIDTH / sourceWidth, OVERLAY_TRACK_MAX_HEIGHT / sourceHeight);
-    const frameWidth = Math.max(1, Math.round(sourceWidth * scale));
-    const frameHeight = Math.max(1, Math.round(sourceHeight * scale));
-
-    overlayTrackCanvas.width = frameWidth;
-    overlayTrackCanvas.height = frameHeight;
-    const context = overlayTrackCanvas.getContext('2d');
-    if (!context) return;
-    // Capture the frame's position on the playback timeline before sending it
-    // off for inference; the result is anchored to this moment, not to when
-    // the (latency-delayed) response comes back.
-    const captureTime = Number(els.clipPlayer.currentTime || 0);
-    context.drawImage(els.clipPlayer, 0, 0, frameWidth, frameHeight);
-
-    const blob = await new Promise((resolve) => {
-      overlayTrackCanvas.toBlob((value) => resolve(value), 'image/jpeg', 0.8);
-    });
-    if (!blob) return;
-
-    const payload = await api('/api/detect/frame', {
-      method: 'POST',
-      headers: { 'Content-Type': 'image/jpeg' },
-      body: blob,
-    });
-    const detections = Array.isArray(payload?.detections) ? payload.detections : [];
-    const newDetections = detections.map((detection) => {
-      const normalizedBox = normalizeDetectionBox(detection?.box || {}, frameWidth, frameHeight);
-      if (!normalizedBox) return null;
-      return {
-        ...detection,
-        box: normalizedBox,
-      };
-    }).filter(Boolean);
-    overlayTrackPrevDetections = overlayTrackDetections;
-    overlayTrackPrevCaptureTime = overlayTrackCaptureTime;
-    overlayTrackCaptureTime = captureTime;
-    overlayTrackDetections = newDetections;
-    if (newDetections.length) overlayTrackEverDetected = true;
-  } catch (_error) {
-    // Keep the last successful overlay detections if transient frame inference fails.
-  } finally {
-    overlayTrackInFlight = false;
-    if (!overlayRafId) drawClipOverlay();
   }
 }
 
@@ -303,18 +215,14 @@ function drawClipOverlay() {
 
   const playerTime = Number(els.clipPlayer.currentTime || 0);
 
-  // Prefer the baked detection track: it was computed across the whole clip at
-  // record time, so boxes follow objects smoothly with no playback-time
-  // inference. Falls through to the live AI-track / event box when absent.
-  const bakedTrack = recordingTrack();
-  if (bakedTrack) {
-    const tracked = filterByConfiguredLabels(sampleTrackAtTime(bakedTrack, playerTime));
+  // The saved detection track replays the boxes the live monitor computed
+  // while the clip recorded, so playback never runs inference. Clips without
+  // a track fall back to the event's static boxes.
+  const track = recordingTrack();
+  if (track) {
+    const tracked = filterByConfiguredLabels(sampleTrackAtTime(track, playerTime));
     if (tracked.length) drawDetectionBoxesOnCanvas(els.clipOverlay, tracked, els.clipPlayer);
     return;
-  }
-
-  if (!overlayRafId) {
-    detectOverlayFrameDetections();
   }
 
   const allEventDetections = Array.isArray(activeRecording?.detections) ? activeRecording.detections : [];
@@ -324,32 +232,8 @@ function drawClipOverlay() {
       ? allEventDetections.filter((d) => !GENERIC_TRIGGER_LABELS.has(String(d.label || '').toLowerCase()))
       : allEventDetections
   );
-  let rawTrackDetections = Array.isArray(overlayTrackDetections) && overlayTrackDetections.length
-    ? overlayTrackDetections : null;
-  if (rawTrackDetections && overlayTrackPrevDetections) {
-    const interval = overlayTrackCaptureTime - overlayTrackPrevCaptureTime;
-    const maxLead = Math.max(0.5, interval * 3);
-    rawTrackDetections = projectDetections(
-      overlayTrackPrevDetections,
-      rawTrackDetections,
-      overlayTrackPrevCaptureTime,
-      overlayTrackCaptureTime,
-      playerTime,
-      maxLead,
-    );
-  }
-  // Once live inference is actively tracking the object, never fall back to the
-  // static event boxes — doing so causes the fixed event-position boxes to
-  // reappear whenever a frame briefly returns no detections, producing the visual
-  // effect of two overlapping overlays as the camera pans away from the original
-  // event position. But if live inference has never localized anything (object
-  // too small/distant to detect on the downscaled frame), keep showing the static
-  // event box rather than leaving playback with no overlay at all.
-  const detections = rawTrackDetections
-    ? filterByConfiguredLabels(rawTrackDetections)
-    : overlayTrackEverDetected ? [] : eventDetections;
-  if (!detections.length) return;
-  drawDetectionBoxesOnCanvas(els.clipOverlay, detections, els.clipPlayer);
+  if (!eventDetections.length) return;
+  drawDetectionBoxesOnCanvas(els.clipOverlay, eventDetections, els.clipPlayer);
 }
 
 function openVideoModal() {
@@ -368,7 +252,6 @@ function closeVideoModal() {
   els.videoModalDownload.hidden = true;
   els.videoModalDownload.removeAttribute('href');
   clearClipOverlay();
-  clearOverlayTrackDetections();
   activeRecording = null;
   els.clipPlayerStatus.textContent = '';
   els.recordingDetails.innerHTML = '';
@@ -377,7 +260,6 @@ function closeVideoModal() {
 async function playRecording(id) {
   const recording = await api(`/api/recordings/${id}`);
   activeRecording = recording;
-  clearOverlayTrackDetections();
   renderRecordingDetails(recording);
   openVideoModal();
   if (recording.media_ready === false) {
@@ -393,13 +275,10 @@ async function playRecording(id) {
   els.clipPlayer.src = `/api/recordings/${id}/stream?t=${Date.now()}`;
   drawClipOverlay();
   els.clipPlayerStatus.textContent = `Loading recording #${id}...`;
-  const trackNote = recording.track_pending && overlayEnabled
-    ? ' AI track is still being generated; boxes are analyzed live until it is ready.'
-    : '';
   try {
     els.clipPlayer.load();
     await els.clipPlayer.play();
-    els.clipPlayerStatus.textContent = `Playing recording #${id}.${trackNote}`;
+    els.clipPlayerStatus.textContent = `Playing recording #${id}.`;
   } catch (error) {
     if (['AbortError', 'NotAllowedError'].includes(error?.name)) {
       els.clipPlayerStatus.textContent = `Recording #${id} loaded. Press play to start.`;
@@ -444,9 +323,6 @@ async function loadAuth() {
 async function loadLiveSettings() {
   try {
     const settings = await api('/api/settings/system');
-
-    const intervalMs = Number(settings?.live?.overlay_track_interval_ms);
-    if (Number.isFinite(intervalMs) && intervalMs >= 100) overlayTrackIntervalMs = intervalMs;
 
     const labels = new Map([['motion', 0.45]]);
     const setMin = (label, conf) => {

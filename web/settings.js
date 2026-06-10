@@ -168,7 +168,6 @@ function createLiveSettingsSection() {
       <label><span>Detection Status Refresh</span><input name="detection_status_refresh_ms" type="number" min="500" max="15000" step="100" placeholder="2000" /><span class="field-help">How often the live detection summary updates.</span></label>
       <label><span>Detection Interval</span><input name="detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="0.25" /><span class="field-help">How often AI checks each camera for motion and objects.</span></label>
       <label><span>Fallback Event Merge (s)</span><input name="event_debounce_seconds" type="number" min="0" max="300" step="1" placeholder="10" /><span class="field-help">Fallback merge window for detections with no matching zone rule. Per-object merge windows are controlled by each object's Cooldown on the Zones page.</span></label>
-      <label><span>AI Track Interval (ms)</span><input name="overlay_track_interval_ms" type="number" min="100" max="5000" step="50" placeholder="450" /><span class="field-help">How often the playback AI tracker refreshes detection boxes. Lower is smoother but uses more CPU.</span></label>
       <label><span>Background Alerts</span><select name="background_detection_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
       <button type="submit">Save Live Settings</button>
     </form>
@@ -310,7 +309,7 @@ function payloadFor(form) {
   for (const key of ['width', 'height', 'fps', 'port', 'pre_event_seconds', 'post_event_seconds', 'extension_step_seconds', 'max_clip_seconds', 'retention_days', 'max_storage_gb', 'max_login_attempts', 'lockout_minutes']) {
     if (key in data && data[key] !== '') data[key] = Number.parseInt(data[key], 10);
   }
-  for (const key of ['snapshot_refresh_ms', 'detection_status_refresh_ms', 'overlay_track_interval_ms']) {
+  for (const key of ['snapshot_refresh_ms', 'detection_status_refresh_ms']) {
     if (key in data && data[key] !== '') data[key] = Number.parseInt(data[key], 10);
   }
   if ('detection_interval_seconds' in data && data.detection_interval_seconds !== '') data.detection_interval_seconds = Number(data.detection_interval_seconds);
