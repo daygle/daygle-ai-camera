@@ -2994,3 +2994,178 @@ def test_compute_minimum_rule_confidence_ignores_motion_rules(tmp_path, monkeypa
     # Motion rule (0.10) must be ignored; person rule (0.55) > global (0.50) so global wins
     # (zone rules with higher thresholds must not raise YOLO's detection floor above global)
     assert main.compute_minimum_rule_confidence() == pytest.approx(0.50)
+
+
+def test_trailing_motion_after_object_event_is_debounced(tmp_path, monkeypatch):
+    """Generic motion right after any event on the camera is the trailing edge of the
+    same activity (background model re-settling) and must be suppressed even though
+    'motion' does not overlap the remembered object labels."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    main.live_event_last_emitted.clear()
+    main.remember_live_event('camera-1', {'person'})
+    assert main.live_event_is_debounced('camera-1', {'motion'}, 10.0) is True
+    # A different concrete object is genuinely new activity and must NOT be debounced.
+    assert main.live_event_is_debounced('camera-1', {'cat'}, 10.0) is False
+
+
+def test_debounce_window_refreshes_while_activity_continues(tmp_path, monkeypatch):
+    """Continuing detections must refresh the debounce window so a new event/recording
+    requires a quiet gap, instead of re-firing every debounce_seconds while the same
+    activity persists (which produced back-to-back duplicate recordings)."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _bytes, confidence=None):
+            return [{'label': 'person', 'confidence': 0.91, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.3, 'height': 0.5}}]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    main.live_detection_last_checked.clear()
+    main.live_event_last_emitted.clear()
+    main.alerts.last_triggered.clear()
+
+    settings = _zone_camera_settings([
+        {'label': 'person', 'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 30},
+    ])
+
+    first_event = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    assert first_event is not None
+
+    # Simulate the original event being 25s old (still inside the 30s window) when
+    # another scan sees the same person: it must be suppressed AND refresh the window.
+    main.live_event_last_emitted['camera-1']['timestamp'] = time.time() - 25
+    suppressed = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    assert suppressed is None
+    refreshed_ts = main.live_event_last_emitted['camera-1']['timestamp']
+    assert time.time() - refreshed_ts < 5, 'suppressed detection must refresh the debounce window'
+
+    # 25s later again (would be 50s after the original event — past the old anchor)
+    # the same ongoing activity must STILL be suppressed thanks to the refresh.
+    main.live_event_last_emitted['camera-1']['timestamp'] = time.time() - 25
+    still_suppressed = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    assert still_suppressed is None
+
+    # Only after a quiet gap longer than the window does a new event get created.
+    main.live_event_last_emitted['camera-1']['timestamp'] = time.time() - 31
+    new_event = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    assert new_event is not None
+    assert new_event != first_event
+
+
+def test_empty_detection_track_is_marker_only(tmp_path, monkeypatch):
+    """An all-empty baked track marks the clip as analyzed (so it is not re-decoded)
+    but must load as None so playback falls back to the static event box."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    clip = tmp_path / 'clip.mp4'
+    clip.write_bytes(b'')
+    main.write_recording_detection_track(clip, [{'t': 0.0, 'detections': []}, {'t': 0.2, 'detections': []}])
+    assert main.recording_track_sidecar_path(clip).exists()
+    assert main.load_recording_detection_track(clip) is None
+
+    main.write_recording_detection_track(clip, [
+        {'t': 0.0, 'detections': []},
+        {'t': 0.2, 'detections': [{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}}]},
+    ])
+    loaded = main.load_recording_detection_track(clip)
+    assert loaded is not None and len(loaded) == 2
+
+
+def _write_tiny_mp4(path: Path, frames: int = 20, fps: int = 10) -> bool:
+    """Write a small mp4 with OpenCV; returns False when no encoder is available."""
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return False
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*'mp4v'), fps, (64, 48))
+    if not writer.isOpened():
+        return False
+    try:
+        for index in range(frames):
+            frame = np.zeros((48, 64, 3), dtype=np.uint8)
+            frame[:, : (index * 3) % 64] = 200
+            writer.write(frame)
+    finally:
+        writer.release()
+    return path.exists() and path.stat().st_size > 0
+
+
+def test_build_recording_detection_track_decodes_real_clip(tmp_path, monkeypatch):
+    """The bake must produce ascending timestamped samples from a real clip using
+    whichever decoder is available (ffmpeg preferred, OpenCV fallback)."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    clip = tmp_path / 'event_clip.mp4'
+    if not _write_tiny_mp4(clip):
+        pytest.skip('No mp4 encoder available in this environment')
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _bytes, confidence=None):
+            return [{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}}]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    track = main.build_recording_detection_track(clip)
+    assert track, 'expected a non-empty detection track'
+    times = [sample['t'] for sample in track]
+    assert times == sorted(times)
+    assert all(sample['detections'] for sample in track)
+
+
+def test_recording_detail_backfills_missing_track(tmp_path, monkeypatch):
+    """Opening an event recording without a baked track must schedule generation in the
+    background so the overlay can follow objects on the next playback."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    clip = tmp_path / 'data' / 'recordings' / 'event_99.mp4'
+    clip.parent.mkdir(parents=True, exist_ok=True)
+    if not _write_tiny_mp4(clip):
+        pytest.skip('No mp4 encoder available in this environment')
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _bytes, confidence=None):
+            return [{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}}]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+
+    event_id = main.database.add_event(
+        created_at=main.utc_now(), source='rtsp', snapshot_path=None,
+        detections=[{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}}],
+        alert_triggered=True, metadata={},
+    )
+    recording_id = main.database.add_recording(
+        event_id=event_id, camera_id='camera-1',
+        started_at=main.utc_now(), ended_at=main.utc_now(), duration_seconds=2.0,
+        file_path=str(clip), thumbnail_path=None, source='rtsp',
+        created_at=main.utc_now(), trigger_type='object', trigger_label='person',
+    )
+
+    detail = main.recording_detail(recording_id)
+    assert detail['track'] is None  # not baked yet; backfill scheduled in background
+
+    deadline = time.time() + 10
+    while time.time() < deadline and not main.recording_track_sidecar_path(clip).exists():
+        time.sleep(0.1)
+    assert main.recording_track_sidecar_path(clip).exists(), 'backfill must write the track sidecar'
+
+    detail = main.recording_detail(recording_id)
+    assert detail['track'], 'second detail view must return the baked track'
+    assert all(sample['detections'] for sample in detail['track'])
