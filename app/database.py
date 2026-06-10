@@ -273,12 +273,18 @@ class EventDatabase:
             row = db.execute("SELECT * FROM recordings WHERE id = ?", (recording_id,)).fetchone()
             return self._recording_with_event(db, row) if row else None
 
-    def update_recording_timing(self, recording_id: int, *, ended_at: str, duration_seconds: float) -> bool:
+    def update_recording_timing(self, recording_id: int, *, ended_at: str, duration_seconds: float, started_at: str | None = None) -> bool:
         with self.connect() as db:
-            cursor = db.execute(
-                "UPDATE recordings SET ended_at = ?, duration_seconds = ? WHERE id = ?",
-                (ended_at, float(duration_seconds), recording_id),
-            )
+            if started_at is not None:
+                cursor = db.execute(
+                    "UPDATE recordings SET started_at = ?, ended_at = ?, duration_seconds = ? WHERE id = ?",
+                    (started_at, ended_at, float(duration_seconds), recording_id),
+                )
+            else:
+                cursor = db.execute(
+                    "UPDATE recordings SET ended_at = ?, duration_seconds = ? WHERE id = ?",
+                    (ended_at, float(duration_seconds), recording_id),
+                )
             return cursor.rowcount > 0
 
     def update_recording_trigger(self, recording_id: int, *, trigger_type: str, trigger_label: str | None) -> bool:

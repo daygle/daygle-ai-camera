@@ -1756,6 +1756,166 @@ def test_rtsp_recording_capture_falls_back_on_stream_error(tmp_path, monkeypatch
     main.active_rtsp_recordings.clear()
 
 
+def test_collect_prebuffer_segments_selects_by_content_overlap(tmp_path):
+    """A prebuffer segment's mtime marks when its content ENDS; selection must
+    keep only segments whose footage overlaps the capture window and report
+    where the first one's content starts, so the rendered clip's time 0 lines
+    up with the detection track instead of leading it by a few seconds."""
+    from app.recordings import RecordingService
+
+    service = RecordingService({
+        'storage': {'recordings_dir': str(tmp_path / 'recordings')},
+        'recording': {'enabled': True, 'mode': 'motion', 'format': 'mp4'},
+    })
+    camera_dir = service.prebuffer_dir / 'camera-1'
+    camera_dir.mkdir(parents=True, exist_ok=True)
+
+    now = time.time()
+    segments = []
+    for offset in range(7):  # contiguous 1s segments ending at now-6 .. now
+        end_ts = now - 6 + offset
+        segment = camera_dir / f'segment-{offset:02d}.ts'
+        segment.write_bytes(b'ts')
+        os.utime(segment, (end_ts, end_ts))
+        segments.append(segment)
+
+    selected, content_start = service._collect_prebuffer_segments('camera-1', now - 4.0, now - 1.0)
+
+    # Footage entirely before the window (ends at or before start_ts) is out,
+    # and a segment starting exactly at end_ts contributes nothing either.
+    assert selected == segments[3:6]
+    # The first selected segment's content starts where the previous one ended.
+    assert content_start == pytest.approx(now - 4.0, abs=0.05)
+
+    # No overlap at all falls back to the most recent segments for the span.
+    fallback, fallback_start = service._collect_prebuffer_segments('camera-1', now + 100, now + 103)
+    assert fallback == segments[-3:]
+    assert fallback_start == pytest.approx(now - 3.0, abs=0.05)
+
+
+def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, monkeypatch):
+    """The rendered clip starts at the first selected segment's content start
+    (keyframe-aligned, so usually before triggered_at - pre_seconds) and runs
+    to the capture deadline. The returned window must describe that media so
+    the caller can align stored timing and the detection track with it."""
+    import app.recordings as recordings_module
+    from app.recordings import RecordingService
+
+    service = RecordingService({
+        'storage': {'recordings_dir': str(tmp_path / 'recordings')},
+        'recording': {'enabled': True, 'mode': 'motion', 'format': 'mp4'},
+    })
+    camera_dir = service.prebuffer_dir / 'cam'
+    camera_dir.mkdir(parents=True, exist_ok=True)
+
+    now = time.time()
+    for offset in range(17):  # contiguous 1s segments ending at now-16.5 .. now-0.5
+        end_ts = now - 16.5 + offset
+        segment = camera_dir / f'segment-{offset:02d}.ts'
+        segment.write_bytes(b'ts')
+        os.utime(segment, (end_ts, end_ts))
+
+    commands = []
+
+    def fake_run(command, *_args, **_kwargs):
+        commands.append(command)
+        Path(command[-1]).write_bytes(b'clip-bytes')
+        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+
+    monkeypatch.setattr(RecordingService, '_ensure_prebuffer_worker', lambda self, *a, **k: None)
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+    monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _path: True))
+
+    file_path = tmp_path / 'recordings' / 'event_window.mp4'
+    triggered_at = datetime.fromtimestamp(now - 10, tz=timezone.utc)
+    content_start, content_seconds = service.write_rtsp_clip_with_prebuffer(
+        stream_url='rtsp://example/stream',
+        camera_id='cam',
+        file_path=file_path,
+        triggered_at=triggered_at,
+        pre_seconds=5,
+        post_seconds=10,
+        max_duration_seconds=15.0,
+    )
+
+    assert file_path.exists()
+    # Window start now-15 selects segments from the one ending now-14.5, whose
+    # content starts at the previous segment's end: now-15.5.
+    assert content_start == pytest.approx(now - 15.5, abs=0.1)
+    assert content_seconds == pytest.approx(15.5, abs=0.1)
+    render_seconds = float(commands[0][commands[0].index('-t') + 1])
+    assert render_seconds == pytest.approx(content_seconds, abs=0.01)
+
+
+def test_rtsp_capture_anchors_timing_and_track_to_actual_media_window(tmp_path, monkeypatch):
+    """After capture, the recording's stored started_at/ended_at and the baked
+    detection track must describe the window the written media actually covers,
+    not the nominal triggered_at - pre_seconds — any mismatch shows up as
+    overlay boxes drifting against the video during playback."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    now = time.time()
+    actual_start = now - 12.0
+    clip = tmp_path / 'data' / 'recordings' / 'event_anchor.mp4'
+
+    class FakeRecordingService:
+        def prebuffer_window_seconds(self, _config=None):
+            return 70
+
+        def write_rtsp_clip_with_prebuffer(self, **kwargs):
+            path = Path(kwargs['file_path'])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'clip')
+            return actual_start, 15.0
+
+    monkeypatch.setattr(main, 'recording_service', FakeRecordingService())
+    main.active_rtsp_recordings.clear()
+    box = {'x': 0.2, 'y': 0.2, 'width': 0.3, 'height': 0.3}
+    main.live_detection_history['camera-1'] = main.deque(
+        [(actual_start + 1.0, [{'label': 'person', 'confidence': 0.9, 'box': box}])],
+        maxlen=main.LIVE_DETECTION_HISTORY_MAXLEN,
+    )
+
+    triggered_iso = datetime.fromtimestamp(now - 11, tz=timezone.utc).isoformat()
+    recording_id = main.database.add_recording(
+        event_id=None,
+        camera_id='camera-1',
+        started_at=datetime.fromtimestamp(now - 16, tz=timezone.utc).isoformat(),
+        ended_at=datetime.fromtimestamp(now - 1, tz=timezone.utc).isoformat(),
+        duration_seconds=15.0,
+        file_path=str(clip),
+        thumbnail_path=None,
+        source='rtsp',
+        created_at=main.utc_now(),
+    )
+    main.start_rtsp_recording_capture(
+        'rtsp://example/stream',
+        {'file_path': str(clip), 'duration_seconds': 15, 'trigger_type': 'motion'},
+        1,
+        [],
+        recording_id=recording_id,
+        camera_id='camera-1',
+        event_time=triggered_iso,
+        recording_config={'pre_event_seconds': 5, 'post_event_seconds': 10, 'max_clip_seconds': 60},
+    )
+
+    sidecar = main.recording_track_sidecar_path(clip)
+    deadline = time.time() + 3
+    while not sidecar.exists() and time.time() < deadline:
+        time.sleep(0.05)
+
+    recording = main.database.get_recording(recording_id)
+    assert datetime.fromisoformat(recording['started_at']).timestamp() == pytest.approx(actual_start, abs=0.01)
+    assert recording['duration_seconds'] == pytest.approx(15.0)
+    track = json.loads(sidecar.read_text(encoding='utf-8'))
+    # The history sample 1s into the actual media window must land at t=1.0.
+    assert track[0]['t'] == pytest.approx(1.0, abs=0.01)
+    assert track[0]['detections'][0]['label'] == 'person'
+    main.active_rtsp_recordings.clear()
+
+
 def test_write_rtsp_clip_rejects_videoless_output(tmp_path, monkeypatch):
     # ffmpeg can exit 0 while discarding every corrupt frame, leaving a non-empty
     # file with no video stream. write_rtsp_clip must reject it (so the caller
@@ -2718,6 +2878,50 @@ def test_person_detection_in_zone_creates_alert_and_recording(tmp_path, monkeypa
     assert event['recordings'][0]['trigger_label'] == 'person'
     alerts = main.database.alerts(limit=10)
     assert any(a['label'] == 'person' for a in alerts)
+
+
+def test_live_history_samples_are_stamped_with_frame_capture_time(tmp_path, monkeypatch):
+    """Detection history samples must be stamped with when the frame was
+    CAPTURED, not when inference finished: recording tracks are sliced from
+    this history and replayed against the video, and a completion-time stamp
+    shifts every box late by the inference duration, so playback overlays
+    trail moving objects."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _bytes, confidence=None):
+            return [{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}}]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    main.live_detection_last_checked.clear()
+    main.live_detection_history.clear()
+
+    settings = _zone_camera_settings([])
+    camera_id = str(settings['id'])
+
+    capture_ts = time.time() - 2.5  # camera read happened 2.5s before "inference finished"
+    main.process_live_stream_alerts(
+        b'frame', {'width': 1280, 'height': 720, 'timestamp': capture_ts}, settings, enforce_interval=False,
+    )
+    sample_ts, sample = list(main.live_detection_history[camera_id])[-1]
+    assert sample_ts == pytest.approx(capture_ts, abs=0.05)
+    assert sample[0]['label'] == 'person'
+
+    # A missing or bogus frame timestamp (epoch 0, stream-relative seconds)
+    # falls back to a wall-clock stamp taken before inference runs.
+    before = time.time()
+    main.process_live_stream_alerts(
+        b'frame', {'width': 1280, 'height': 720, 'timestamp': 12.5}, settings, enforce_interval=False,
+    )
+    after = time.time()
+    fallback_ts, _ = list(main.live_detection_history[camera_id])[-1]
+    assert before <= fallback_ts <= after
 
 
 def test_cat_detection_in_zone_creates_alert_and_recording(tmp_path, monkeypatch):

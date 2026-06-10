@@ -225,6 +225,10 @@ function drawClipOverlay() {
     return;
   }
 
+  // Static event boxes describe the trigger moment, which sits after the
+  // clip's pre-roll; drawing them from time 0 puts a frozen box over footage
+  // recorded before the detection existed.
+  if (!shouldRenderOverlayForTime(activeRecording, playerTime)) return;
   const allEventDetections = Array.isArray(activeRecording?.detections) ? activeRecording.detections : [];
   const hasSpecificEvent = allEventDetections.some((d) => !GENERIC_TRIGGER_LABELS.has(String(d.label || '').toLowerCase()));
   const eventDetections = filterByConfiguredLabels(
