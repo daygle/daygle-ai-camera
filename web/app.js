@@ -105,7 +105,7 @@ function groupAlertsByEvent(alerts) {
   // card, so reviewers see every label that triggered (e.g. "Cat, Person")
   // instead of one row per matching rule. Rows without an event_id stay
   // standalone so legacy / orphaned alerts are still visible.
-  const order: number[] = [];
+  const order = [];
   const groups = new Map();
   for (const alert of alerts) {
     const key = alert.event_id !== null && alert.event_id !== undefined ? `event-${alert.event_id}` : `alert-${alert.id}`;
