@@ -1336,7 +1336,6 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         return None
 
     detections = normalize_detection_boxes_for_frame(detections, frame)
-    record_live_detection_history(camera_id, detections, sample_ts=frame_capture_ts)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     frame_has_motion, frame_motion_confidence = detect_frame_motion(camera_id, image)
     motion_detections = zone_motion_detections(detections, settings, frame_motion_confidence) if frame_has_motion else []
@@ -1351,6 +1350,14 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     record_only_detections = (
         [d for d in object_detections if zone_record_on_detect(d, settings) and not zone_object_rule_matches(settings, d, action='alert')]
         if zone_rules else []
+    )
+
+    # Record history only with detections that passed confidence thresholds so playback
+    # overlays don't show below-threshold boxes as if they were real alert detections.
+    record_live_detection_history(
+        camera_id,
+        list(object_alert_detections) + record_only_detections,
+        sample_ts=frame_capture_ts,
     )
 
     alert_detections = list(object_alert_detections) + record_only_detections
@@ -1368,13 +1375,22 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             reason='No detections matched this camera and its monitoring areas.',
             detected_labels=raw_labels,
             matched_labels=[],
-            detections=[{**d, 'alert_matched': False, 'alert_triggered': False} for d in object_detections],
+            detections=[],
         )
         return None
 
     triggered = alerts.process(alert_detections, rules=zone_rules)
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     triggered_labels = {str(alert.get('label') or '').lower() for alert in triggered}
+    # Filter to only detections that passed a zone rule's min_confidence threshold.
+    # Sub-threshold detections must not trigger recordings or appear in the live
+    # status panel as matched objects. When no alert rules exist every in-zone
+    # detection is already treated as a match, so skip filtering in that case.
+    _confident_object_detections = (
+        [d for d in object_detections
+         if zone_object_rule_matches(settings, d, action='alert') or zone_record_on_detect(d, settings)]
+        if zone_rules else list(object_detections)
+    )
     recording_detections = [
         {
             **detection,
@@ -1382,7 +1398,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             if zone_rules else str(detection.get('label') or '').lower() in triggered_labels,
             'alert_triggered': zone_record_on_detect(detection, settings),
         }
-        for detection in object_detections
+        for detection in _confident_object_detections
     ]
     if motion_detections:
         _motion_record = zone_motion_record_on_detect(settings)
@@ -2093,6 +2109,7 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
             if snap_path.exists():
                 raw_bytes = snap_path.read_bytes()
                 db_detections = event.get('detections') or []
+                _email_min_conf = compute_minimum_rule_confidence()
                 overlay_detections = [
                     {
                         'label': d.get('label'),
@@ -2100,6 +2117,7 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
                         'box': {'x': d.get('x', 0), 'y': d.get('y', 0), 'width': d.get('width', 0), 'height': d.get('height', 0)},
                     }
                     for d in db_detections
+                    if float(d.get('confidence') or 0) >= _email_min_conf
                 ]
                 snapshot_bytes = render_live_snapshot_jpeg_overlay(raw_bytes, overlay_detections)
         except Exception as exc:
