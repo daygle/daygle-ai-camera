@@ -368,7 +368,7 @@ class EventDatabase:
 
             params.append(limit)
             rows = db.execute(sql, params).fetchall()
-            return [self._recording_with_event(db, row) for row in rows]
+            return self._assemble_recordings(db, rows)
 
     def list_recordings_for_camera_day(self, camera_id: str, day_start: str, day_end: str) -> list[dict[str, Any]]:
         with self.connect() as db:
@@ -390,7 +390,7 @@ class EventDatabase:
                 """,
                 (camera_id, f'%"camera_id": "{camera_id}"%', day_end, day_start),
             ).fetchall()
-            return [self._recording_with_event(db, row) for row in rows]
+            return self._assemble_recordings(db, rows)
 
     def get_recording(self, recording_id: int) -> dict[str, Any] | None:
         with self.connect() as db:
@@ -711,6 +711,46 @@ class EventDatabase:
             event["recordings"] = []
         event["recording_status"] = "linked" if recordings else "none"
         return event
+
+    def _assemble_recordings(self, db: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+        """Assemble recordings with labels, events, and detections using batch IN-clause queries."""
+        if not rows:
+            return []
+        recordings = [self._recording_row(row) for row in rows]
+        recording_ids = [int(r['id']) for r in recordings]
+
+        labels_map = self._fetch_labels_for_recordings(db, recording_ids)
+
+        event_ids = [int(r['event_id']) for r in recordings if r.get('event_id') is not None]
+        events_map: dict[int, Any] = {}
+        detections_map: dict[int, list[dict[str, Any]]] = {}
+        if event_ids:
+            placeholders = ','.join('?' * len(event_ids))
+            event_rows = db.execute(
+                f"SELECT * FROM events WHERE id IN ({placeholders})",
+                event_ids,
+            ).fetchall()
+            for event_row in event_rows:
+                event = dict(event_row)
+                event['metadata'] = json.loads(event.get('metadata') or '{}')
+                events_map[int(event['id'])] = event
+            det_rows = db.execute(
+                f"SELECT * FROM detections WHERE event_id IN ({placeholders}) ORDER BY confidence DESC",
+                event_ids,
+            ).fetchall()
+            for det_row in det_rows:
+                eid = int(det_row['event_id'])
+                detections_map.setdefault(eid, []).append(dict(det_row))
+
+        for recording in recordings:
+            recording['labels'] = labels_map.get(int(recording['id']), [])
+            recording['event'] = None
+            recording['detections'] = []
+            if recording.get('event_id') is not None:
+                eid = int(recording['event_id'])
+                recording['event'] = events_map.get(eid)
+                recording['detections'] = detections_map.get(eid, [])
+        return recordings
 
     @staticmethod
     def _fetch_labels_for_recordings(db: sqlite3.Connection, recording_ids: list[int]) -> dict[int, list[str]]:
