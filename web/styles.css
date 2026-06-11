@@ -197,8 +197,9 @@ body {
   background: rgba(255,255,255,.06);
 }
 .nav-dropdown-item.active {
-  color: var(--accent);
-  background: rgba(71, 214, 255, 0.08);
+  border-color: var(--border);
+  color: var(--text);
+  background: rgba(255,255,255,.06);
 }
 
 /* Account dropdown: align menu to the right so it doesn't overflow off-screen */
