@@ -402,7 +402,7 @@ function formatDetectionStatus(payload) {
   }
 
   if (payload.state === 'checked') {
-    if (!labelStr) return 'Live AI: scan complete - no detections.';
+    if (!labelStr) return 'Matched Objects: No detections found';
     const reason = String(payload.reason || '');
     let suffix;
     if (/debounce|suppressed/i.test(reason)) suffix = 'event suppressed (debounce active)';
@@ -514,7 +514,7 @@ function objectRuleOptions(selectedLabel) {
   const labels = [...new Set([...availableLabels, selectedLabel].filter((l) => Boolean(l) && l !== 'motion'))];
   const coco = labels.map((label) => `<option value="${escapeHtml(label)}" ${label === selectedLabel ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
   const motionSelected = selectedLabel === 'motion';
-  return `<option value="">Object...</option><option value="motion" ${motionSelected ? 'selected' : ''}>motion</option>${coco}`;
+  return `<option value="">Add Object...</option><option value="motion" ${motionSelected ? 'selected' : ''}>motion</option>${coco}`;
 }
 
 function renderObjectRules(zone, zoneIndex) {
@@ -528,13 +528,13 @@ function renderObjectRules(zone, zoneIndex) {
       <label><span>Rule</span><select data-zone-rule-enabled="${zoneIndex}:${ruleIndex}"><option value="true" ${rule.enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${rule.enabled === false ? 'selected' : ''}>Disabled</option></select></label>
       <label><span>Record</span><select data-zone-rule-record="${zoneIndex}:${ruleIndex}"><option value="true" ${rule.record_on_detect !== false ? 'selected' : ''}>On detect</option><option value="false" ${rule.record_on_detect === false ? 'selected' : ''}>Off</option></select></label>
       <label><span>Alert</span><select data-zone-rule-alert="${zoneIndex}:${ruleIndex}"><option value="true" ${rule.alert_on_detect !== false ? 'selected' : ''}>On detect</option><option value="false" ${rule.alert_on_detect === false ? 'selected' : ''}>Off</option></select></label>
-      <label><span>Min confidence</span><input data-zone-rule-confidence="${zoneIndex}:${ruleIndex}" type="number" min="0" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" /></label>
+      <label><span>Min Confidence</span><input data-zone-rule-confidence="${zoneIndex}:${ruleIndex}" type="number" min="0" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" /></label>
       <label><span>Cooldown</span><input data-zone-rule-cooldown="${zoneIndex}:${ruleIndex}" type="number" min="0" step="1" value="${escapeHtml(rule.cooldown_seconds)}" /></label>
       <label><span>Email</span><select data-zone-rule-email="${zoneIndex}:${ruleIndex}"><option value="false" ${rule.email_enabled !== true ? 'selected' : ''}>Off</option><option value="true" ${rule.email_enabled === true ? 'selected' : ''}>On</option></select></label>
       <input data-zone-rule-recipients="${zoneIndex}:${ruleIndex}" value="${escapeHtml(rule.email_recipients.join(', '))}" placeholder="Email recipients" />
       <label><span>Push</span><select data-zone-rule-push="${zoneIndex}:${ruleIndex}"><option value="false" ${rule.push_enabled !== true ? 'selected' : ''}>Off</option><option value="true" ${rule.push_enabled === true ? 'selected' : ''}>On</option></select></label>
-      <label><span>Active start</span><input data-zone-rule-active-start="${zoneIndex}:${ruleIndex}" type="time" value="${escapeHtml(rule.active_start || '')}" /></label>
-      <label><span>Active end</span><input data-zone-rule-active-end="${zoneIndex}:${ruleIndex}" type="time" value="${escapeHtml(rule.active_end || '')}" /></label>
+      <label><span>Active Start</span><input data-zone-rule-active-start="${zoneIndex}:${ruleIndex}" type="time" value="${escapeHtml(rule.active_start || '')}" /></label>
+      <label><span>Active End</span><input data-zone-rule-active-end="${zoneIndex}:${ruleIndex}" type="time" value="${escapeHtml(rule.active_end || '')}" /></label>
       <button class="secondary" type="button" data-delete-zone-rule="${zoneIndex}:${ruleIndex}">Remove</button>
     </div>
   `).join('');
@@ -554,7 +554,7 @@ function renderZones() {
     <div class="item zone-row ${index === selectedZoneIndex ? 'selected' : ''}${zone.enabled === false ? ' disabled' : ''}" data-select-zone="${index}">
       <div class="zone-row-main">
         <input data-zone-name="${index}" value="${escapeHtml(zone.name || `Zone ${index + 1}`)}" />
-        <label><span>Zone</span><select data-zone-enabled="${index}"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Displayed</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
+        <label><span>Zone</span><select data-zone-enabled="${index}"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Shown</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
         <button class="secondary" type="button" data-delete-zone="${index}">Remove</button>
       </div>
       <div class="zone-object-rules">
@@ -663,7 +663,7 @@ function renderCameraRecordingControls() {
   const detection = cameraDetection();
   liveEls.cameraRecordingControls.innerHTML = `
     <label><span>Recording</span><select data-camera-recording="enabled"><option value="true" ${recording.enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${recording.enabled === false ? 'selected' : ''}>Disabled</option></select></label>
-    <label><span>Alert clips</span><select data-camera-recording="record_on_alert"><option value="true" ${recording.record_on_alert !== false ? 'selected' : ''}>Enabled</option><option value="false" ${recording.record_on_alert === false ? 'selected' : ''}>Disabled</option></select></label>
+    <label><span>Alert Clips</span><select data-camera-recording="record_on_alert"><option value="true" ${recording.record_on_alert !== false ? 'selected' : ''}>Enabled</option><option value="false" ${recording.record_on_alert === false ? 'selected' : ''}>Disabled</option></select></label>
     <label><span>Continuous</span><select data-camera-recording="continuous"><option value="false" ${recording.continuous !== true ? 'selected' : ''}>Disabled</option><option value="true" ${recording.continuous === true ? 'selected' : ''}>Enabled</option></select></label>
     <label><span>Motion Email Alerts</span><select data-camera-detection="motion_email_enabled"><option value="true" ${detection.motion_email_enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${detection.motion_email_enabled === false ? 'selected' : ''}>Disabled</option></select></label>
   `;
@@ -845,7 +845,9 @@ function bindZoneDrawing() {
 liveEls.frame.addEventListener('load', () => {
   liveEls.frame.dataset.loading = 'false';
   syncZoneOverlayToImage();
-  liveEls.status.textContent = `${selectedCamera?.name || 'Camera'} - live`;
+  liveEls.status.textContent = selectedCamera?.name || 'Camera';
+  liveEls.status.classList.add('live-status-online');
+  liveEls.status.classList.remove('live-status-offline');
   if (liveAiTrackEnabled && !isAllCameraMode()) {
     startLiveRaf();
   } else {
@@ -856,7 +858,11 @@ liveEls.frame.addEventListener('load', () => {
 liveEls.frame.addEventListener('error', () => {
   liveEls.frame.dataset.loading = 'false';
   clearLiveOverlay();
-  liveEls.status.textContent = 'Unable to load live footage. Retrying...';
+  liveEls.status.textContent = selectedCamera?.name
+    ? `${selectedCamera.name} - Unable to load live footage. Retrying...`
+    : 'Unable to load live footage. Retrying...';
+  liveEls.status.classList.add('live-status-offline');
+  liveEls.status.classList.remove('live-status-online');
 });
 
 window.addEventListener('resize', drawLiveOverlay);

@@ -93,10 +93,10 @@ function recordingDisplayTrigger(recording) {
   const hasDetections = detectionLabels.length > 0;
 
   if (triggerType === 'motion' || triggerType === 'alert' || triggerType === 'human') {
-    if (firstSpecificDetection) return `motion · ${firstSpecificDetection}`;
+    if (firstSpecificDetection) return `${triggerType} · ${firstSpecificDetection}`;
     // If detections exist and none are specific, trust the detection set and keep this as motion.
-    if (!hasDetections && triggerLabel && !GENERIC_TRIGGER_LABELS.has(triggerLabel)) return `motion · ${triggerLabel}`;
-    return 'motion';
+    if (!hasDetections && triggerLabel && !GENERIC_TRIGGER_LABELS.has(triggerLabel)) return `${triggerType} · ${triggerLabel}`;
+    return triggerType;
   }
 
   if (triggerType === 'continuous' || triggerType === 'none' || triggerType === 'off') {
@@ -141,7 +141,28 @@ function renderRecordings(recordings) {
   bindRecordingButtons();
 }
 
+function recordingDetectionSummary(recording) {
+  const best = new Map();
+  for (const d of (recording.detections || [])) {
+    const label = String(d.label || '').trim().toLowerCase();
+    if (!label) continue;
+    const conf = Number(d.confidence || 0);
+    if (configuredLabels && (!configuredLabels.has(label) || conf < (configuredLabels.get(label) ?? 0))) continue;
+    if (!best.has(label) || conf > best.get(label)) best.set(label, conf);
+  }
+  return Array.from(best.entries())
+    .sort((a, b) => b[1] - a[1])
+    .filter(([label]) => !GENERIC_TRIGGER_LABELS.has(label))
+    .map(([label, confidence]) => ({ label, confidence }));
+}
+
 function renderRecordingDetails(recording) {
+  const detections = recordingDetectionSummary(recording);
+  const detectionBadges = detections.length
+    ? detections
+        .map((d) => `<span class="detection">${escapeHtml(d.label)} (${Math.round(d.confidence * 100)}%)</span>`)
+        .join(' ')
+    : 'none';
   els.recordingDetails.innerHTML = `
     <div><span>Recording</span><strong>#${recording.id}</strong></div>
     <div><span>Event</span><strong>${recording.event_id || 'none'}</strong></div>
@@ -149,7 +170,7 @@ function renderRecordingDetails(recording) {
     <div><span>Trigger</span><strong>${escapeHtml(recordingDisplayTrigger(recording))}</strong></div>
     <div><span>Started</span><strong>${formatDate(recording.started_at)}</strong></div>
     <div><span>Duration</span><strong>${Number(recording.duration_seconds || 0).toFixed(1)}s</strong></div>
-    <div class="wide"><span>Detections</span><strong>${(recording.detections || []).filter((d) => { const label = String(d.label || '').trim().toLowerCase(); return label && (!configuredLabels || (configuredLabels.has(label) && Number(d.confidence || 0) >= (configuredLabels.get(label) ?? 0))); }).map((d) => escapeHtml(`${String(d.label || '').trim().toLowerCase()} (${Math.round(Number(d.confidence || 0) * 100)}%)`)).join(', ') || 'none'}</strong></div>
+    <div class="wide"><span>Detections</span><strong>${detectionBadges}</strong></div>
   `;
 }
 

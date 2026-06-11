@@ -494,12 +494,34 @@ input[type="file"] { padding: 10px; }
   position: absolute;
   left: 18px;
   bottom: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: rgba(7,11,19,.72);
   color: var(--text);
   padding: 10px 13px;
   font-weight: 850;
+}
+.live-status::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--muted);
+  box-shadow: 0 0 0 0 transparent;
+  transition: background-color 0.18s ease, box-shadow 0.18s ease;
+  flex-shrink: 0;
+}
+.live-status.live-status-online::before {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(73, 230, 163, 0.22);
+}
+.live-status.live-status-offline::before {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgba(255, 92, 138, 0.22);
 }
 .live-detection-status {
   border: 1px solid var(--border);
