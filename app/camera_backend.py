@@ -113,11 +113,12 @@ class OpenCvStreamCamera:
     to pull snapshots for the live view.
     """
 
-    def __init__(self, stream_url: str, width: int = 1280, height: int = 720, fps: int = 15) -> None:
+    def __init__(self, stream_url: str, width: int = 1280, height: int = 720, fps: int = 15, stale_frame_grabs: int | None = None) -> None:
         self.stream_url = stream_url
         self.width = width
         self.height = height
         self.fps = fps
+        self._stale_frame_grabs_configured = stale_frame_grabs
         self.frame_number = 0
         self.started_at = time.time()
         self.last_error: str | None = None
@@ -169,6 +170,36 @@ class OpenCvStreamCamera:
             self._capture.release()
             self._capture = None
 
+    def read_frame(self) -> tuple[Any, dict[str, Any]]:
+        """Read the latest frame as a raw BGR numpy array, skipping JPEG encoding.
+
+        This avoids the encode→decode round-trip when the caller (e.g.
+        the ONNX detector) works on numpy arrays directly, saving ~30-90 ms
+        per detection cycle.
+        """
+        with self._lock:
+            capture = self._open_capture()
+            import cv2
+
+            capture_ts = time.time()
+            ok, image = self._read_latest_frame(capture, self._stale_frame_grabs())
+            if not ok or image is None:
+                self._release_capture()
+                capture = self._open_capture()
+                ok, image = self._read_latest_frame(capture, self._stale_frame_grabs())
+
+            if not ok or image is None:
+                self._release_capture()
+                self.last_error = "Unable to read a frame from the ONVIF/RTSP stream."
+                raise RuntimeError(self.last_error)
+
+            height, width = image.shape[:2]
+            self.width = int(width)
+            self.height = int(height)
+            self.frame_number += 1
+        self.last_error = None
+        return image, self.get_frame(capture_ts)
+
     def read_jpeg(self) -> tuple[bytes, dict[str, Any]]:
         with self._lock:
             capture = self._open_capture()
@@ -203,7 +234,14 @@ class OpenCvStreamCamera:
         return encoded.tobytes(), self.get_frame(capture_ts)
 
     def _stale_frame_grabs(self) -> int:
-        return max(2, min(12, int(self.fps / 2)))
+        if self._stale_frame_grabs_configured is not None:
+            return max(0, self._stale_frame_grabs_configured)
+        # Default: grab ~25% of a second worth of frames to drain the RTSP
+        # buffer and land on the latest one.  The old formula used 50%
+        # (fps/2), which at 15 fps meant 7 grabs (~467 ms of latency).
+        # Dropping to 25% (fps/4) halves that to ~233 ms while still
+        # discarding enough stale frames on typical IP cameras.
+        return max(1, min(8, int(self.fps / 4)))
 
     @staticmethod
     def _read_latest_frame(capture, stale_frame_grabs: int) -> tuple[bool, Any]:

@@ -1201,8 +1201,8 @@ def test_opencv_stream_camera_reuses_rtsp_capture(monkeypatch):
     assert second_frame['frame_number'] == 2
     assert len(FakeCapture.instances) == 1
     assert FakeCapture.instances[0].buffer_size == (FakeCv2.CAP_PROP_BUFFERSIZE, 1)
-    assert camera._stale_frame_grabs() == 7
-    assert FakeCapture.instances[0].grab_count == 14
+    assert camera._stale_frame_grabs() == 3
+    assert FakeCapture.instances[0].grab_count == 6
     assert FakeCapture.instances[0].release_count == 0
     assert 'rtsp_transport;tcp' in os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS']
     assert 'fflags;discardcorrupt' in os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS']

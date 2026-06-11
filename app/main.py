@@ -582,6 +582,8 @@ def normalize_camera_settings(settings: dict[str, Any], index: int = 1) -> dict[
     camera_settings['width'] = int(camera_settings.get('width') or 1280)
     camera_settings['height'] = int(camera_settings.get('height') or 720)
     camera_settings['fps'] = int(camera_settings.get('fps') or 15)
+    raw_stale = camera_settings.get('stale_frame_grabs')
+    camera_settings['stale_frame_grabs'] = int(raw_stale) if raw_stale is not None else None
     detection = default_camera_detection_settings()
     if isinstance(camera_settings.get('detection'), dict):
         detection.update(camera_settings['detection'])
@@ -1011,19 +1013,29 @@ def detection_label_set(detections: list[dict[str, Any]]) -> set[str]:
     }
 
 
-def detect_frame_motion(camera_id: str, image_bytes: bytes) -> tuple[bool, float]:
+def detect_frame_motion(camera_id: str, image: Any) -> tuple[bool, float]:
     """Adaptive-background motion gate. Returns (has_motion, confidence 0-1).
-    Maintains a per-camera exponential moving average background so stationary
-    objects (parked cars, fixed furniture) are absorbed into the background model
-    over time and no longer trigger motion. Fails open so object rules are never
-    blocked."""
+
+    ``image`` may be a BGR numpy array (from ``read_frame``) or JPEG bytes
+    (legacy callers).  When a numpy array is provided the PIL decode is
+    skipped, saving ~5-15 ms per cycle.
+    """
     try:
         import numpy as _np
-        from PIL import Image as _Image
-        img = _Image.open(io.BytesIO(image_bytes)).convert('L').resize(
-            (_MOTION_FRAME_W, _MOTION_FRAME_H), _Image.NEAREST
-        )
-        current = _np.array(img, dtype=_np.float32)
+        if hasattr(image, 'shape') and hasattr(image, 'dtype'):
+            # Fast path: already a numpy BGR array — convert to grayscale
+            # using OpenCV (faster than PIL for large frames).
+            import cv2
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            resized = cv2.resize(gray, (_MOTION_FRAME_W, _MOTION_FRAME_H),
+                                 interpolation=cv2.INTER_NEAREST)
+            current = _np.array(resized, dtype=_np.float32)
+        else:
+            from PIL import Image as _Image
+            img = _Image.open(io.BytesIO(image)).convert('L').resize(
+                (_MOTION_FRAME_W, _MOTION_FRAME_H), _Image.NEAREST
+            )
+            current = _np.array(img, dtype=_np.float32)
         with _frame_motion_lock:
             background = _frame_motion_prev.get(camera_id)
             if background is None:
@@ -1207,12 +1219,12 @@ def run_live_alert_monitor_once() -> int:
         def _detect_bg(cid: str = camera_id, cfg: dict[str, Any] = copy.deepcopy(selected_config)) -> None:
             try:
                 cam = get_camera_instance(cid)
-                if not hasattr(cam, 'read_jpeg'):
-                    update_live_detection_status(cid, state='skipped', reason='Background alerts require a camera that can read JPEG frames.', detections=[])
+                if not hasattr(cam, 'read_frame'):
+                    update_live_detection_status(cid, state='skipped', reason='Background alerts require a camera that can read frames.', detections=[])
                     return
-                image_bytes, frame = cam.read_jpeg()
+                image, frame = cam.read_frame()
                 clear_live_camera_backoff(cid)
-                process_live_stream_alerts(image_bytes, frame, cfg, enforce_interval=False)
+                process_live_stream_alerts(image, frame, cfg, enforce_interval=False)
             except Exception as exc:
                 logger.warning('Background live alert check failed for camera %s: %s', cid, exc)
                 schedule_live_camera_backoff(cid, str(exc))
@@ -1285,7 +1297,7 @@ def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings
     threading.Thread(target=detect, name=f'live-detection-{camera_id}', daemon=True).start()
 
 
-def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any], *, enforce_interval: bool = True) -> int | None:
+def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict[str, Any], *, enforce_interval: bool = True) -> int | None:
     camera_id = str(settings.get('id') or 'camera')
     live_settings = effective_live_config()
     detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 0.25))
@@ -1304,6 +1316,9 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         update_live_detection_status(camera_id, state='skipped', reason=ai_state['last_detector_error'] or 'ONNX detector is not loaded.', ai=ai_state, detections=[])
         return None
 
+    # Determine whether we received a numpy frame or JPEG bytes.
+    frame_is_numpy = hasattr(image, 'shape') and hasattr(image, 'dtype')
+
     # Resolve the frame's capture time BEFORE running inference. The history
     # sample must be stamped with when the frame was captured — detect_image
     # can take hundreds of ms (seconds on SBC CPUs), and a completion-time
@@ -1317,7 +1332,10 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         frame_capture_ts = now
 
     try:
-        detections = detector.detect_image(image_bytes, confidence=compute_minimum_rule_confidence())
+        if frame_is_numpy and hasattr(detector, 'detect_frame'):
+            detections = detector.detect_frame(image, confidence=compute_minimum_rule_confidence())
+        else:
+            detections = detector.detect_image(image, confidence=compute_minimum_rule_confidence())
     except (DetectorUnavailableError, ValueError) as exc:
         logger.warning('Live detection skipped for camera %s: %s', camera_id, exc)
         update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state, detections=[])
@@ -1326,7 +1344,7 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
     detections = normalize_detection_boxes_for_frame(detections, frame)
     record_live_detection_history(camera_id, detections, sample_ts=frame_capture_ts)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
-    frame_has_motion, frame_motion_confidence = detect_frame_motion(camera_id, image_bytes)
+    frame_has_motion, frame_motion_confidence = detect_frame_motion(camera_id, image)
     motion_detections = zone_motion_detections(detections, settings, frame_motion_confidence) if frame_has_motion else []
     object_detections = filter_detections_for_camera(detections, settings)
     anpr_detections = filter_detections_for_camera_anpr(detections, settings)
@@ -1436,6 +1454,11 @@ def process_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settin
         return None
 
     event_time = datetime.now(timezone.utc).isoformat()
+    # Lazily encode to JPEG only when we need to save a snapshot (~5% of cycles).
+    if frame_is_numpy:
+        image_bytes = _encode_frame_jpeg(image)
+    else:
+        image_bytes = image
     snapshot_path = storage.save_image_snapshot(image_bytes, f'{camera_id}.jpg')
     event_id = database.add_event(
         created_at=event_time,
@@ -1513,7 +1536,8 @@ def create_camera(settings: dict[str, Any]):
     width = int(settings.get('width', 1280))
     height = int(settings.get('height', 720))
     fps = int(settings.get('fps', 15))
-    return OpenCvStreamCamera(build_stream_url(settings), width=width, height=height, fps=fps)
+    stale = settings.get("stale_frame_grabs")
+    return OpenCvStreamCamera(build_stream_url(settings), width=width, height=height, fps=fps, stale_frame_grabs=stale)
 
 
 def create_camera_instances(settings_list: list[dict[str, Any]]) -> dict[str, Any]:

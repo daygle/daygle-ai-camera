@@ -114,6 +114,7 @@
             <label><span>Width (px)</span><input id="editWidth" name="width" type="number" min="160" max="7680" placeholder="1280" /></label>
             <label><span>Height (px)</span><input id="editHeight" name="height" type="number" min="90" max="4320" placeholder="720" /></label>
             <label><span>FPS</span><input id="editFps" name="fps" type="number" min="1" max="120" placeholder="15" /></label>
+            <label><span>Frame Buffer Drains</span><input id="editStaleFrameGrabs" name="stale_frame_grabs" type="number" min="0" max="20" placeholder="Auto" /><span class="field-help">Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4).</span></label>
           </div>
           <p class="form-help muted">These values are hints passed to the stream decoder. Leave at defaults unless your camera requires specific dimensions.</p>
 

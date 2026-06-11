@@ -180,6 +180,8 @@ function fillModal(camera, index) {
   document.getElementById('editWidth').value = camera.width || 1280;
   document.getElementById('editHeight').value = camera.height || 720;
   document.getElementById('editFps').value = camera.fps || 15;
+  const staleVal = camera.stale_frame_grabs;
+  document.getElementById('editStaleFrameGrabs').value = staleVal != null ? staleVal : '';
   document.getElementById('editRecordingEnabled').value = String(camera.recording?.enabled !== false);
   document.getElementById('editRecordOnAlert').value = String(camera.recording?.record_on_alert !== false);
   document.getElementById('editContinuous').value = String(camera.recording?.continuous === true);
@@ -215,6 +217,9 @@ function collectModalData() {
     width: parseInt(document.getElementById('editWidth').value || '1280', 10),
     height: parseInt(document.getElementById('editHeight').value || '720', 10),
     fps: parseInt(document.getElementById('editFps').value || '15', 10),
+    stale_frame_grabs: document.getElementById('editStaleFrameGrabs').value.trim() !== ''
+      ? parseInt(document.getElementById('editStaleFrameGrabs').value, 10)
+      : null,
     recording: {
       enabled: document.getElementById('editRecordingEnabled').value === 'true',
       record_on_alert: document.getElementById('editRecordOnAlert').value === 'true',
