@@ -1039,7 +1039,10 @@ def test_opencv_stream_camera_reuses_rtsp_capture(monkeypatch):
     assert len(FakeCapture.instances) == 1
     assert FakeCapture.instances[0].buffer_size == (FakeCv2.CAP_PROP_BUFFERSIZE, 1)
     assert camera._stale_frame_grabs() == 3
-    assert FakeCapture.instances[0].grab_count == 6
+    # The drain is adaptive: it discards at least _stale_frame_grabs() frames
+    # per read and keeps draining while grabs return instantly (as the fake
+    # always does), so the count is at least 3 per read rather than exactly 3.
+    assert FakeCapture.instances[0].grab_count >= 6
     assert FakeCapture.instances[0].release_count == 0
     assert 'rtsp_transport;tcp' in os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS']
     assert 'fflags;discardcorrupt' in os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS']
@@ -3001,6 +3004,7 @@ def test_object_detection_with_email_rule_delivers_email(tmp_path, monkeypatch, 
     sent = _email_alert_capture(main, monkeypatch)
     settings = _zone_camera_settings_with_email(label)
     event_id = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    main.wait_for_pending_alert_notifications()
 
     assert event_id is not None
     assert len(sent) == 1, f'exactly one email should be sent for a {label} detection'
@@ -3041,6 +3045,7 @@ def test_object_detection_without_global_email_enabled_sends_nothing(tmp_path, m
 
     settings = _zone_camera_settings_with_email('cat')
     event_id = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    main.wait_for_pending_alert_notifications()
 
     assert event_id is not None, 'event/alert should still be recorded even without email configured'
     assert delivered == [], 'no email should be delivered while global SMTP is disabled'

@@ -1133,7 +1133,9 @@ def schedule_live_camera_backoff(camera_id: str, message: str) -> float:
 
 def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any]:
     selected_config = get_camera_config(camera_id)
-    camera_key = str(selected_config.get('id') or 'camera')
+    # Fall back to the requested id so status written under that key (e.g. by
+    # process_live_stream_alerts before any camera is persisted) is still found.
+    camera_key = str(selected_config.get('id') or camera_id or 'camera')
     ai_state = ai_status_payload()
     return {
         'camera_id': camera_key,
@@ -1404,10 +1406,14 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
                 label_cooldowns[_lbl] = _cd
     _matching = [label_cooldowns[_lbl] for _lbl in debounced_labels if _lbl in label_cooldowns]
     debounce_seconds = max(_matching) if _matching else global_debounce
+    # Anchor event timing to when the analyzed frame was captured, not when
+    # inference finished: on slow CPUs inference adds hundreds of ms and the
+    # recording window (pre/post roll) would start that much late.
+    frame_capture_time = datetime.fromtimestamp(frame_capture_ts, tz=timezone.utc).isoformat()
     if should_record_event and live_event_is_debounced(camera_id, debounced_labels, debounce_seconds):
         extended_recording_id = extend_active_rtsp_recording(
             camera_id=camera_id,
-            event_time=datetime.now(timezone.utc).isoformat(),
+            event_time=frame_capture_time,
             recording_config=camera_recording_config,
             detections=recording_detections,
         )
@@ -1431,7 +1437,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         )
         return None
 
-    event_time = datetime.now(timezone.utc).isoformat()
+    event_time = frame_capture_time
     # Lazily encode to JPEG only when we need to save a snapshot (~5% of cycles).
     if frame_is_numpy:
         image_bytes = _encode_frame_jpeg(image)
@@ -1477,8 +1483,21 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         alert for alert in triggered
         if motion_email_enabled or str(alert.get('label') or '').strip().lower() != 'motion'
     ]
-    deliver_email_alerts(email_triggered, event_id, rules=zone_rules)
-    deliver_push_notifications(triggered, event_id, rules=zone_rules)
+    # Deliver notifications off the detection thread: SMTP/ntfy calls block for
+    # up to their 10s timeouts, and this thread holds the camera's detection
+    # slot — a slow mail server would stall monitoring (and history sampling,
+    # which playback overlays are sliced from) for that whole time.
+    if email_triggered or triggered:
+        notify_thread = threading.Thread(
+            target=_deliver_alert_notifications,
+            args=(email_triggered, triggered, event_id, zone_rules),
+            name=f'alert-notify-{event_id}',
+            daemon=True,
+        )
+        with _notification_threads_lock:
+            _notification_threads[:] = [thread for thread in _notification_threads if thread.is_alive()]
+            _notification_threads.append(notify_thread)
+        notify_thread.start()
     email_rules = [
         rule for rule in zone_rules
         if rule.get('enabled', True) and rule.get('email_enabled') and str(rule.get('name') or '') in {
@@ -1783,7 +1802,11 @@ def _parse_chunk_start_time(file_path: Path) -> datetime | None:
     if len(parts) != 2:
         return None
     try:
-        return datetime.strptime(parts[1], '%Y%m%dT%H%M%S').replace(tzinfo=timezone.utc)
+        # ffmpeg's segment muxer expands -strftime patterns with localtime(),
+        # so the filename timestamp is in the server's local timezone. Parsing
+        # it as UTC shifted every continuous recording (and its overlay track
+        # window) by the UTC offset on non-UTC servers.
+        return datetime.strptime(parts[1], '%Y%m%dT%H%M%S').astimezone(timezone.utc)
     except ValueError:
         return None
 
@@ -1990,6 +2013,35 @@ def recording_skip_reason(detections: list[dict[str, Any]], recording_config: di
     labels = ', '.join(str(detection.get('label')) for detection in detections if detection.get('label')) or 'none'
     mode = recording_service.mode_for(recording_config)
     return f'Recording policy skipped this event. Detected labels: {labels}. Mode: {mode}.'
+
+
+_notification_threads_lock = threading.Lock()
+_notification_threads: list[threading.Thread] = []
+
+
+def wait_for_pending_alert_notifications(timeout: float = 10.0) -> None:
+    """Block until in-flight alert email/push deliveries finish (used by tests)."""
+    deadline = time.time() + max(0.0, timeout)
+    with _notification_threads_lock:
+        pending = [thread for thread in _notification_threads if thread.is_alive()]
+    for thread in pending:
+        thread.join(timeout=max(0.0, deadline - time.time()))
+
+
+def _deliver_alert_notifications(
+    email_triggered: list[dict[str, Any]],
+    triggered: list[dict[str, Any]],
+    event_id: int,
+    rules: list[dict[str, Any]] | None,
+) -> None:
+    try:
+        deliver_email_alerts(email_triggered, event_id, rules=rules)
+    except Exception as exc:
+        logger.warning('Email alert delivery failed for event %s: %s', event_id, exc)
+    try:
+        deliver_push_notifications(triggered, event_id, rules=rules)
+    except Exception as exc:
+        logger.warning('Push notification delivery failed for event %s: %s', event_id, exc)
 
 
 def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: list[dict[str, Any]] | None = None) -> None:
@@ -2301,6 +2353,11 @@ def recording_stream_path(file_path: Path) -> Path:
     playback_path = recording_playback_sidecar_path(file_path)
     if playback_path.exists() and file_path.exists() and playback_path.stat().st_mtime >= file_path.stat().st_mtime:
         return playback_path
+    # Event clips and prebuffer renders are already written as H.264/faststart
+    # MP4 — serve them directly. Re-encoding those again doubled storage and
+    # delayed first playback by the whole transcode.
+    if file_path.suffix.lower() == '.mp4' and probe_video_codec(file_path) == 'h264':
+        return file_path
     # If a previous transcode attempt failed and the source hasn't changed
     # since, skip retrying — every browser range request would otherwise
     # re-run a doomed ffmpeg process and flood the logs.
@@ -2404,6 +2461,47 @@ def _recording_capture_window(recording: dict[str, Any]) -> tuple[float, float] 
     return start_ts, end_ts
 
 
+def probe_video_codec(file_path: Path) -> str | None:
+    """Return the first video stream's codec name (e.g. 'h264', 'hevc'), or None."""
+    if not file_path.exists() or file_path.stat().st_size <= 0:
+        return None
+    ffprobe = shutil.which('ffprobe')
+    if not ffprobe:
+        return None
+    command = [
+        ffprobe,
+        '-v', 'error',
+        '-select_streams', 'v:0',
+        '-show_entries', 'stream=codec_name',
+        '-of', 'default=noprint_wrappers=1:nokey=1',
+        str(file_path),
+    ]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    codec = (result.stdout or '').strip().lower()
+    return codec or None if result.returncode == 0 else None
+
+
+def probe_video_duration(file_path: Path) -> float | None:
+    ffprobe = shutil.which('ffprobe')
+    if not ffprobe or not file_path.exists():
+        return None
+    command = [
+        ffprobe,
+        '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1',
+        str(file_path),
+    ]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+        return float((result.stdout or '').strip()) if result.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
 def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
     ffmpeg = shutil.which('ffmpeg')
     if not ffmpeg:
@@ -2437,7 +2535,12 @@ def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
         '+faststart',
         str(tmp_path),
     ]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
+    # Long continuous chunks (up to an hour) can take far longer than the old
+    # fixed 120s ceiling to re-encode on low-power hardware; scale the timeout
+    # with the source duration so they convert instead of erroring out.
+    duration = probe_video_duration(source_path) or 0.0
+    timeout_seconds = max(120, int(duration * 3) + 60)
+    result = subprocess.run(command, capture_output=True, text=True, timeout=timeout_seconds, check=False)
     if not tmp_path.exists():
         raise RuntimeError('MP4 conversion did not create an output file.')
     if result.returncode != 0 and not mp4_has_video_stream(tmp_path):
@@ -2894,6 +2997,24 @@ async def change_profile_password(request: Request):
 
 @app.get('/api/status')
 def status(camera_id: str | None = None):
+    if not cameras_config:
+        # Clean install: no cameras configured yet, but the app itself is up.
+        ai_state = ai_status_payload()
+        return {
+            'status': 'online',
+            'mode': None,
+            'camera_id': None,
+            'camera_name': None,
+            'camera_detection': {},
+            'ai_backend': ai_state['active_backend'],
+            'ai_available': ai_state['inference_available'],
+            'ai_error': ai_state['error'],
+            'ai_mode': ai_state['mode'],
+            'live_detection': live_detection_status_payload(camera_id),
+            'frame_number': 0,
+            'uptime_seconds': 0,
+            'resolution': {'width': 0, 'height': 0},
+        }
     selected_camera = get_camera_instance(camera_id)
     selected_config = get_camera_config(camera_id)
     frame = selected_camera.get_frame()
@@ -3129,13 +3250,16 @@ def recordings_timeline(
         }
         for index, camera_settings in enumerate(effective_cameras_config(), start=1)
     ]
-    if not cameras:
+    if not cameras and not camera_id:
         raise HTTPException(status_code=404, detail='No cameras configured')
 
     selected_camera_id = normalize_camera_id(camera_id or cameras[0]['id'])
     selected_camera = next((camera for camera in cameras if camera['id'] == selected_camera_id), None)
     if selected_camera is None:
-        raise HTTPException(status_code=404, detail='Camera not found')
+        # Recordings outlive camera configuration: keep an explicitly requested
+        # camera's timeline viewable even after the camera entry is removed.
+        selected_camera = {'id': selected_camera_id, 'name': selected_camera_id}
+        cameras = [*cameras, selected_camera]
 
     if day:
         try:
@@ -4088,7 +4212,14 @@ async def update_camera(camera_id: str, request: Request):
             apply_cameras_settings(settings_list)
             write_audit_log(request, 'update', 'settings.camera', normalized, {'camera_name': settings_list[index].get('name')})
             return settings_list[index]
-    raise HTTPException(status_code=404, detail='Camera not found')
+    # Upsert: a PUT to an unknown id creates the camera (there is no default
+    # camera on a clean install anymore).
+    created = validate_camera_settings({**payload, 'id': normalized}, index=len(settings_list) + 1)
+    settings_list.append(created)
+    database.set_setting('cameras', settings_list, utc_now())
+    apply_cameras_settings(settings_list)
+    write_audit_log(request, 'create', 'settings.camera', normalized, {'camera_name': created.get('name')})
+    return created
 
 
 @app.put('/api/settings/system/live')
