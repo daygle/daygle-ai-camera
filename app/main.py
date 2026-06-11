@@ -1832,6 +1832,20 @@ def _make_continuous_chunk_callback(camera_id: str) -> Any:
             if started_at_dt is None:
                 started_at_dt = ended_at_dt - timedelta(seconds=effective_recording_config().get('chunk_duration_seconds', 3600))
             duration_seconds = max(1.0, (ended_at_dt - started_at_dt).total_seconds())
+            # Seed recording_labels from live history: continuous chunks have
+            # no event_id, so add_recording's fallback can't seed labels for them.
+            chunk_track = build_track_from_live_history(
+                camera_id, started_at_dt.timestamp(), ended_at_dt.timestamp()
+            )
+            chunk_labels: list[str] = []
+            if chunk_track:
+                _seen: set[str] = set()
+                for _sample in chunk_track:
+                    for _det in (_sample.get('detections') or []):
+                        _lbl = str(_det.get('label') or '').strip().lower()
+                        if _lbl and _lbl not in _seen:
+                            _seen.add(_lbl)
+                            chunk_labels.append(_lbl)
             recording_id = database.add_recording(
                 event_id=None,
                 camera_id=camera_id,
@@ -1844,6 +1858,7 @@ def _make_continuous_chunk_callback(camera_id: str) -> Any:
                 created_at=utc_now(),
                 trigger_type='continuous',
                 trigger_label=None,
+                labels=chunk_labels or None,
             )
             write_live_history_detection_track(
                 recording_id, file_path, camera_id, started_at_dt.timestamp(), ended_at_dt.timestamp(),
