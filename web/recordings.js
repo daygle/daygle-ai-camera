@@ -85,6 +85,15 @@ function recordingTriggerLabel(recording) {
 }
 
 function recordingDetectionLabels(recording) {
+  // Prefer the server-side `labels` array (one row per unique object detected
+  // inside the recording, joined via recording_labels). Fall back to deriving
+  // from the per-event detections when the join table is empty (e.g. very old
+  // recordings that pre-date the multi-label upgrade).
+  if (Array.isArray(recording.labels) && recording.labels.length) {
+    return recording.labels
+      .map((label) => String(label || '').trim().toLowerCase())
+      .filter((label) => label && !GENERIC_TRIGGER_LABELS.has(label));
+  }
   const all = Array.from(new Set((recording.detections || [])
     .filter((d) => {
       const label = String(d.label || '').trim().toLowerCase();
@@ -199,6 +208,12 @@ function renderRecordings(recordings) {
     const mediaReady = recording.media_ready !== false;
     const trigger = recordingDisplayTrigger(recording);
     const triggerPillClass = triggerBadgeClass(trigger);
+    const allLabels = recordingDetectionLabels(recording);
+    const labelChips = allLabels.length
+      ? `<div class="recording-label-chips" aria-label="Detected object labels">${
+          allLabels.map((label) => `<span class="recording-label-chip">${escapeHtml(label)}</span>`).join('')
+        }</div>`
+      : '';
     return `
       <div class="item recording-row" data-recording-row="${recording.id}">
         <div class="recording-row-main">
@@ -230,6 +245,7 @@ function renderRecordings(recordings) {
               <span class="recording-meta-value recording-meta-filename">${escapeHtml(fileName || 'unknown')}</span>
             </div>
           </div>
+          ${labelChips}
           <div class="recording-row-badges">${detectionBadges(recording.detections)}</div>
         </div>
         <div class="recording-row-actions">
@@ -286,6 +302,10 @@ function renderRecordingDetails(recording) {
         .map((d) => `<span class="detection">${escapeHtml(d.label)} (${Math.round(d.confidence * 100)}%)</span>`)
         .join(' ')
     : 'none';
+  const allLabels = recordingDetectionLabels(recording);
+  const labelChips = allLabels.length
+    ? allLabels.map((label) => `<span class="recording-label-chip">${escapeHtml(label)}</span>`).join('')
+    : 'none';
   els.recordingDetails.innerHTML = `
     <div><span>Recording</span><strong>#${recording.id}</strong></div>
     <div><span>Event</span><strong>${recording.event_id || 'none'}</strong></div>
@@ -293,6 +313,7 @@ function renderRecordingDetails(recording) {
     <div><span>Trigger</span><strong>${escapeHtml(recordingDisplayTrigger(recording))}</strong></div>
     <div><span>Started</span><strong>${escapeHtml(formatDateTime(recording.started_at))}</strong></div>
     <div><span>Duration</span><strong>${Number(recording.duration_seconds || 0).toFixed(1)}s</strong></div>
+    <div class="wide"><span>Labels</span><strong class="recording-label-chips">${labelChips}</strong></div>
     <div class="wide"><span>Detections</span><strong>${detectionBadges}</strong></div>
   `;
 }

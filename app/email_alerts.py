@@ -29,6 +29,7 @@ class EmailAlertService:
         camera_name: str | None = None,
         camera_id: str | None = None,
         snapshot_bytes: bytes | None = None,
+        triggered_labels: list[str] | None = None,
     ) -> None:
         recipients = [recipient.strip() for recipient in recipients if recipient and recipient.strip()]
         if not recipients or not self.configured():
@@ -40,29 +41,66 @@ class EmailAlertService:
         camera_line = ' / '.join(camera_bits) if camera_bits else 'Unknown camera'
         subject_suffix = f" ({camera_line})" if camera_bits else ""
 
-        subject = f"Daygle alert: {alert.get('label', 'object')} detected{subject_suffix}"
-        plain_text = "\n".join([
+        # Surface the full label set in the subject so a multi-object event
+        # (e.g. cat + person in one clip) reads as "Cat, Person detected".
+        # Falls back to the single alert label for back-compat.
+        ordered_labels: list[str] = []
+        if triggered_labels:
+            seen: set[str] = set()
+            for raw in triggered_labels:
+                label = str(raw or '').strip()
+                if not label:
+                    continue
+                key = label.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                ordered_labels.append(label)
+        primary_label = str(alert.get('label', 'object') or 'object').strip() or 'object'
+        # Title-case for display (e.g. "Cat, Person") while keeping the original
+        # label strings intact for any downstream lookups.
+        display_labels = [label.title() for label in ordered_labels]
+        display_primary = primary_label.title() if primary_label else 'Object'
+        subject_label = ', '.join(display_labels) if display_labels else display_primary
+        subject = f"Daygle alert: {subject_label} detected{subject_suffix}"
+        headline = subject_label.title() if subject_label else 'Object'
+        if ordered_labels and len(ordered_labels) > 1:
+            headline = f"{headline} detected"
+        all_triggers_line = (
+            f"All triggers: {subject_label}" if ordered_labels and len(ordered_labels) > 1 else None
+        )
+        plain_lines = [
             str(alert.get("message") or "Alert triggered."),
             "",
             f"Camera: {camera_line}",
             f"Rule: {alert.get('rule_name')}",
+        ]
+        if all_triggers_line:
+            plain_lines.append(all_triggers_line)
+        plain_lines.extend([
             f"Trigger: {alert.get('label')}",
             f"Confidence: {float(alert.get('confidence', 0)):.2%}",
             f"Event ID: {event_id}",
         ])
+        plain_text = "\n".join(plain_lines)
 
         cid = f"snapshot_{event_id}"
         img_tag = (
             f'<img src="cid:{cid}" style="max-width:100%;border-radius:8px;margin-top:16px;display:block" alt="Detection snapshot" />'
             if snapshot_bytes else ''
         )
+        all_triggers_row = (
+            f'<tr><td style="padding:4px 0;color:#888">All triggers</td><td style="padding:4px 0">{escape(subject_label)}</td></tr>'
+            if all_triggers_line else ''
+        )
         html_content = (
             '<!DOCTYPE html><html><body style="font-family:sans-serif;color:#333;max-width:600px;margin:0 auto;padding:16px">'
-            f'<h2 style="margin-top:0">{escape(str(alert.get("label", "object")).title())} detected</h2>'
+            f'<h2 style="margin-top:0">{escape(headline)}</h2>'
             f'<p>{escape(str(alert.get("message") or "Alert triggered."))}</p>'
             '<table style="border-collapse:collapse;width:100%;margin:12px 0">'
             f'<tr><td style="padding:4px 0;color:#888;width:120px">Camera</td><td style="padding:4px 0">{escape(camera_line)}</td></tr>'
             f'<tr><td style="padding:4px 0;color:#888">Rule</td><td style="padding:4px 0">{escape(str(alert.get("rule_name") or ""))}</td></tr>'
+            f'{all_triggers_row}'
             f'<tr><td style="padding:4px 0;color:#888">Trigger</td><td style="padding:4px 0">{escape(str(alert.get("label") or ""))}</td></tr>'
             f'<tr><td style="padding:4px 0;color:#888">Confidence</td><td style="padding:4px 0">{float(alert.get("confidence", 0)):.2%}</td></tr>'
             f'<tr><td style="padding:4px 0;color:#888">Event ID</td><td style="padding:4px 0">{event_id}</td></tr>'

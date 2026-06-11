@@ -1098,7 +1098,33 @@ def extend_active_rtsp_recording(
                     trigger_type='alert' if trigger_type in {'motion', 'human', 'object'} else trigger_type,
                     trigger_label=candidate_label,
                 )
+                database.add_recording_labels(
+                    recording_id,
+                    detection_label_strings(detections or []) + [candidate_label],
+                    source='extension',
+                )
     return recording_id
+
+
+def detection_label_strings(detections: list[dict[str, Any]]) -> list[str]:
+    """Return the sorted, de-duplicated, non-generic labels from a detections list.
+
+    Used to seed the recording_labels join table so a recording's "labels" field
+    reflects every object that appeared inside it, not just the trigger_label.
+    """
+    if not detections:
+        return []
+    generic = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous', ''}
+    seen: set[str] = set()
+    out: list[str] = []
+    for detection in detections:
+        label = str(detection.get('label') or '').strip().lower()
+        if not label or label in generic or label in seen:
+            continue
+        seen.add(label)
+        out.append(label)
+    out.sort()
+    return out
 
 
 def schedule_live_camera_backoff(camera_id: str, message: str) -> float:
@@ -1852,7 +1878,8 @@ def attach_event_recording(
         return None
     if camera_id:
         metadata['camera_id'] = camera_id
-    recording_id = database.add_recording(created_at=utc_now(), **metadata)
+    detection_labels = detection_label_strings(detections)
+    recording_id = database.add_recording(created_at=utc_now(), labels=detection_labels or None, **metadata)
     if stream_url:
         start_rtsp_recording_capture(
             stream_url,
@@ -2064,6 +2091,14 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
             logger.debug('Failed to annotate snapshot for email alert event %s: %s', event_id, exc)
 
     mailer = EmailAlertService(effective_email_alert_settings())
+    # Collect every label that triggered an alert in this event so the email
+    # subject/body can show the full set (e.g. "Cat, Person detected") instead
+    # of just the single label of the alert currently being delivered.
+    all_triggered_labels = sorted({
+        str(alert.get('label') or '').strip()
+        for alert in triggered
+        if str(alert.get('label') or '').strip()
+    })
     for alert in triggered:
         rule = rules_by_name.get(str(alert.get('rule_name')))
         if not rule or not rule.get('email_enabled'):
@@ -2076,6 +2111,7 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
                 camera_name=camera_name,
                 camera_id=camera_id,
                 snapshot_bytes=snapshot_bytes,
+                triggered_labels=all_triggered_labels,
             )
         except EmailAlertError as exc:
             logger.warning('Failed to send email alert for event %s rule %s: %s', event_id, alert.get('rule_name'), exc)
@@ -2094,6 +2130,14 @@ def deliver_push_notifications(triggered: list[dict[str, Any]], event_id: int, r
     camera_id = str(metadata.get('camera_id') or '').strip() or None
     rules_by_name = {str(rule.get('name')): rule for rule in (rules or [])}
     notifier = PushNotificationService(push_settings)
+    # Collect every label that triggered an alert in this event so the push
+    # title/body can show the full set (e.g. "Cat, Person detected") instead
+    # of just the single label of the alert currently being delivered.
+    all_triggered_labels = sorted({
+        str(alert.get('label') or '').strip()
+        for alert in triggered
+        if str(alert.get('label') or '').strip()
+    })
     for alert in triggered:
         rule_name = str(alert.get('rule_name') or '')
         rule = rules_by_name.get(rule_name)

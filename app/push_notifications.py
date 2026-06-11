@@ -24,6 +24,7 @@ class PushNotificationService:
         event_id: int,
         camera_name: str | None = None,
         camera_id: str | None = None,
+        triggered_labels: list[str] | None = None,
     ) -> None:
         if not self.configured():
             return
@@ -33,13 +34,36 @@ class PushNotificationService:
         camera_bits = [bit for bit in (camera_name, camera_id) if bit]
         camera_line = ' / '.join(camera_bits) if camera_bits else 'Unknown camera'
 
-        title = f"Daygle alert: {alert.get('label', 'object')} detected"
-        body = "\n".join([
+        # Surface the full label set in the title so a multi-object event
+        # (e.g. cat + person in one clip) reads as "Cat, Person detected".
+        # Falls back to the single alert label for back-compat.
+        ordered_labels: list[str] = []
+        if triggered_labels:
+            seen: set[str] = set()
+            for raw in triggered_labels:
+                label = str(raw or '').strip()
+                if not label:
+                    continue
+                key = label.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                ordered_labels.append(label)
+        primary_label = str(alert.get('label', 'object') or 'object').strip() or 'object'
+        display_labels = [label.title() for label in ordered_labels]
+        display_primary = primary_label.title() if primary_label else 'Object'
+        subject_label = ', '.join(display_labels) if display_labels else display_primary
+        title = f"Daygle alert: {subject_label} detected"
+
+        body_lines = [
             str(alert.get("message") or "Alert triggered."),
             f"Camera: {camera_line}",
             f"Rule: {alert.get('rule_name')}",
-            f"Confidence: {float(alert.get('confidence', 0)):.2%}",
-        ])
+        ]
+        if display_labels and len(display_labels) > 1:
+            body_lines.append(f"All triggers: {subject_label}")
+        body_lines.append(f"Confidence: {float(alert.get('confidence', 0)):.2%}")
+        body = "\n".join(body_lines)
         self._deliver(title, body)
 
     def send_test(self) -> None:

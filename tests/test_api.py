@@ -1886,6 +1886,327 @@ def test_alerted_only_event_and_recording_queries(tmp_path):
     assert [recording['event_id'] for recording in database.list_recordings(label='person', alerted_only=True)] == [events[2]]
 
 
+def test_push_notification_title_lists_all_triggered_labels(monkeypatch):
+    """A cat+person event must produce TWO push notifications (one per matching
+    rule), each with the title "Daygle alert: Cat, Person detected" and a body
+    that lists every triggered label."""
+    from app.push_notifications import PushNotificationService
+    import urllib.request
+
+    captured: list[dict] = []
+
+    class FakeResponse:
+        def __init__(self, *_a, **_k): pass
+        def __enter__(self): return self
+        def __exit__(self, *_a): return False
+
+    def fake_urlopen(request, timeout=10):
+        captured.append({
+            'url': request.full_url,
+            'title': request.headers.get('Title'),
+            'body': request.data.decode('utf-8') if request.data else '',
+        })
+        return FakeResponse()
+
+    monkeypatch.setattr(urllib.request, 'urlopen', fake_urlopen)
+
+    service = PushNotificationService({
+        'enabled': True,
+        'server_url': 'https://ntfy.sh',
+        'topic': 'daygle-test',
+    })
+
+    all_triggered_labels = ['cat', 'person']
+    for label in all_triggered_labels:
+        service.send_alert(
+            {'label': label, 'rule_name': f'{label.title()} alert', 'confidence': 0.9,
+             'message': f'{label.title()} matched'},
+            event_id=42,
+            camera_name='Front Door',
+            triggered_labels=all_triggered_labels,
+        )
+
+    assert len(captured) == 2, 'expected one push per matching rule'
+    for entry in captured:
+        assert entry['title'] == 'Daygle alert: Cat, Person detected'
+        assert 'All triggers: Cat, Person' in entry['body']
+        assert 'Camera: Front Door' in entry['body']
+
+
+def test_email_alert_subject_lists_all_triggered_labels():
+    """A single event whose detections include both cat and person must produce
+    TWO alert emails (one per rule), each citing "Cat, Person detected" in the
+    subject and body, so recipients see the full label set at a glance.
+    """
+    from app.email_alerts import EmailAlertService
+    import smtplib
+
+    sent_messages: list = []
+
+    class FakeSMTP:
+        def __init__(self, *_a, **_k): pass
+        def __enter__(self): return self
+        def __exit__(self, *_a): return False
+        def starttls(self): pass
+        def login(self, *_a, **_k): pass
+        def send_message(self, message): sent_messages.append(message)
+
+    smtplib.SMTP = FakeSMTP
+    smtplib.SMTP_SSL = FakeSMTP
+
+    service = EmailAlertService({
+        'enabled': True,
+        'host': 'smtp.example.test',
+        'port': 587,
+        'from_address': 'alerts@example.test',
+        'use_tls': True,
+        'use_ssl': False,
+    })
+
+    all_triggered_labels = ['cat', 'person']
+    # Two rules, two alerts — one per label — both with email enabled.
+    for label in all_triggered_labels:
+        service.send_alert(
+            {'label': label, 'rule_name': f'{label.title()} alert', 'confidence': 0.9,
+             'message': f'{label.title()} matched'},
+            event_id=42,
+            recipients=['owner@example.test'],
+            camera_name='Front Door',
+            triggered_labels=all_triggered_labels,
+        )
+
+    assert len(sent_messages) == 2, 'expected one email per matching rule'
+    for message in sent_messages:
+        assert message['Subject'] == 'Daygle alert: Cat, Person detected (Front Door)'
+        # Walk the multipart tree to find the html part. get_payload() may
+        # return a flat list of parts (multipart/alternative) or a nested
+        # Message with its own walk() (multipart/related).
+        def _iter_parts(message):
+            payload = message.get_payload()
+            if isinstance(payload, list):
+                for part in payload:
+                    yield from _iter_parts(part)
+            else:
+                yield message
+        html_part = None
+        for part in _iter_parts(message):
+            if part.get_content_type() == 'text/html':
+                html_part = part.get_payload(decode=True).decode('utf-8', 'ignore')
+                break
+        assert html_part is not None, 'expected an html part'
+        assert 'Cat, Person' in html_part, 'html body must list every triggered label'
+        assert 'All triggers' in html_part, 'html body must include an All triggers row'
+    smtplib.SMTP = smtplib.SMTP
+    smtplib.SMTP_SSL = smtplib.SMTP_SSL
+
+
+def test_alerts_endpoint_exposes_event_id_for_grouping(tmp_path):
+    """The /api/alerts payload must include event_id on every row so the
+    dashboard can collapse multiple rules that fired for the same event into
+    a single card with a label chip set."""
+    from app.database import EventDatabase
+
+    database = EventDatabase(str(tmp_path / 'alerts.sqlite3'))
+    event_id = database.add_event(
+        created_at='2026-06-07T00:00:00+00:00',
+        source='camera',
+        snapshot_path=None,
+        detections=[{'label': 'cat', 'confidence': 0.9, 'box': {'x': 0, 'y': 0, 'width': 1, 'height': 1}}],
+        alert_triggered=True,
+    )
+    # Two alert rules fire for the same event (cat + person).
+    for label in ('cat', 'person'):
+        database.add_alert(
+            created_at='2026-06-07T00:00:01+00:00',
+            rule_name=f'Front Door / Zone / {label}',
+            event_id=event_id,
+            label=label,
+            confidence=0.9,
+            message=f'{label} matched',
+        )
+
+    # Mirror the join the /api/alerts endpoint performs.
+    from collections import namedtuple
+    Row = namedtuple('Row', ['id', 'event_id', 'rule_name', 'label', 'confidence', 'message', 'recording_id', 'created_at'])
+    with database.connect() as db:
+        rows = db.execute(
+            "SELECT ah.*, r.id AS recording_id FROM alert_history ah "
+            "LEFT JOIN recordings r ON r.id = ah.recording_id "
+            "ORDER BY ah.created_at DESC LIMIT 25"
+        ).fetchall()
+    alerts = [dict(row) for row in rows]
+    assert len(alerts) == 2
+    for alert in alerts:
+        assert alert['event_id'] == event_id, 'alerts must carry event_id for frontend grouping'
+
+    # Frontend grouping: collapse by event_id, collect unique labels.
+    groups = {}
+    for alert in alerts:
+        groups.setdefault(alert['event_id'], set()).add(alert['label'])
+    assert groups == {event_id: {'cat', 'person'}}
+
+
+def test_recording_labels_join_table_round_trip(tmp_path):
+    from app.database import EventDatabase
+
+    database = EventDatabase(str(tmp_path / 'events.sqlite3'))
+    now = '2026-06-06T00:00:00+00:00'
+    # A single event whose detections include BOTH cat and person. The
+    # recording's trigger_label is the first alert-triggered detection (cat),
+    # but recording_labels must carry every label that appeared inside the clip.
+    event_id = database.add_event(
+        created_at=now,
+        source='camera',
+        snapshot_path=None,
+        detections=[
+            {'label': 'cat', 'confidence': 0.9, 'box': {'x': 0, 'y': 0, 'width': 1, 'height': 1}},
+            {'label': 'person', 'confidence': 0.8, 'box': {'x': 0.1, 'y': 0.1, 'width': 1, 'height': 1}},
+        ],
+        alert_triggered=True,
+    )
+    recording_id = database.add_recording(
+        event_id=event_id,
+        camera_id='front',
+        started_at='2026-06-06T00:10:00+00:00',
+        ended_at='2026-06-06T00:10:05+00:00',
+        duration_seconds=5,
+        file_path=str(tmp_path / 'cat-person.mp4'),
+        thumbnail_path=None,
+        source='camera',
+        created_at=now,
+        trigger_type='alert',
+        trigger_label='cat',
+        labels=['cat', 'person'],
+    )
+
+    # Multi-label set is returned via the list endpoint.
+    recordings = database.list_recordings()
+    assert len(recordings) == 1
+    assert recordings[0]['trigger_label'] == 'cat'
+    assert recordings[0]['labels'] == ['cat', 'person']
+
+    # The Object Label filter should now match a recording on EITHER of its
+    # labels, not just the trigger_label.
+    assert [r['id'] for r in database.list_recordings(label='cat')] == [recording_id]
+    assert [r['id'] for r in database.list_recordings(label='person')] == [recording_id]
+    assert database.list_recordings(label='dog') == []
+
+    # add_recording_labels merges (no duplicates) and tracks the source.
+    new_total = database.add_recording_labels(recording_id, ['person', 'dog', '  Cat  '], source='extension')
+    assert new_total == 1  # 'dog' was new; 'person' and 'cat' (re-cased) were already present
+    recordings = database.list_recordings()
+    assert recordings[0]['labels'] == ['cat', 'dog', 'person']
+
+    # Deleting the recording cascades to recording_labels.
+    database.delete_recording(recording_id)
+    assert database.list_recordings() == []
+
+
+def test_recording_labels_api_filter_matches_any_recorded_label(tmp_path, monkeypatch):
+    """Confirm /api/recordings?label=... matches any label persisted in recording_labels,
+    not just the single trigger_label column."""
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+        def detect_image(self, _image_bytes, confidence=None):
+            return []
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    server, thread, base_url = _server(app)
+    admin = LocalClient(base_url)
+    try:
+        _setup_admin(admin)
+        admin_csrf = _login(admin)
+        event_time = datetime.now(timezone.utc).isoformat()
+        snapshot_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'test.png')
+        # Footage-style event: detections include BOTH cat and person, but the
+        # recording's trigger_label is 'cat' (first alert-triggered detection).
+        detections = [
+            {'label': 'cat', 'confidence': 0.9, 'box': {'x': 0.0, 'y': 0.0, 'width': 0.5, 'height': 0.5}},
+            {'label': 'person', 'confidence': 0.8, 'box': {'x': 0.2, 'y': 0.2, 'width': 0.5, 'height': 0.5}},
+        ]
+        event_id = main.database.add_event(
+            created_at=event_time,
+            source='motion',
+            snapshot_path=snapshot_path,
+            detections=detections,
+            alert_triggered=True,
+            metadata={'camera_id': 'front', 'camera_name': 'Front'},
+        )
+        recording_id = main.attach_event_recording(event_id, event_time, 'upload', detections)
+        assert recording_id is not None
+
+        # The recording was tagged 'cat' as the trigger, but the join table
+        # also contains 'person'. The /api/recordings?label= filter must
+        # surface the recording when filtering by EITHER label.
+        status, _, all_recordings = admin.request('/api/recordings')
+        assert status == 200
+        assert len(all_recordings) == 1
+        assert all_recordings[0]['trigger_label'] == 'cat'
+        assert sorted(all_recordings[0]['labels']) == ['cat', 'person']
+
+        status, _, cat_filter = admin.request('/api/recordings?label=cat')
+        assert status == 200
+        assert [r['id'] for r in cat_filter] == [recording_id]
+
+        status, _, person_filter = admin.request('/api/recordings?label=person')
+        assert status == 200
+        assert [r['id'] for r in person_filter] == [recording_id]
+
+        status, _, dog_filter = admin.request('/api/recordings?label=dog')
+        assert status == 200
+        assert dog_filter == []
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_recording_labels_backfill_seeds_existing_recordings(tmp_path):
+    from app.database import EventDatabase
+
+    # Build a DB that mimics a pre-multi-label install: detection rows but no
+    # recording_labels entries. EventDatabase.init() should backfill them from
+    # the detections + trigger_label columns on first open.
+    database = EventDatabase(str(tmp_path / 'legacy.sqlite3'))
+    event_id = database.add_event(
+        created_at='2026-06-06T00:00:00+00:00',
+        source='camera',
+        snapshot_path=None,
+        detections=[
+            {'label': 'cat', 'confidence': 0.9, 'box': {'x': 0, 'y': 0, 'width': 1, 'height': 1}},
+            {'label': 'person', 'confidence': 0.85, 'box': {'x': 0.1, 'y': 0.1, 'width': 1, 'height': 1}},
+        ],
+        alert_triggered=True,
+    )
+    # Mimic an old install by inserting the recording row without labels, then
+    # nuking any auto-created recording_labels so the backfill has work to do.
+    recording_id = database.add_recording(
+        event_id=event_id,
+        camera_id='front',
+        started_at='2026-06-06T00:10:00+00:00',
+        ended_at='2026-06-06T00:10:05+00:00',
+        duration_seconds=5,
+        file_path=str(tmp_path / 'legacy.mp4'),
+        thumbnail_path=None,
+        source='camera',
+        created_at='2026-06-06T00:00:00+00:00',
+        trigger_type='alert',
+        trigger_label='cat',
+    )
+    with database.connect() as db:
+        db.execute("DELETE FROM recording_labels WHERE recording_id = ?", (recording_id,))
+
+    # Re-open the database — init() should re-seed recording_labels from the
+    # existing detections and trigger_label.
+    reopened = EventDatabase(str(tmp_path / 'legacy.sqlite3'))
+    recording = reopened.list_recordings()[0]
+    assert recording['labels'] == ['cat', 'person']
+
+
 def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(tmp_path, monkeypatch):
     app, database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main

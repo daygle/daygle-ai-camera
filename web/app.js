@@ -100,23 +100,85 @@ function renderEvents(events) {
   `).join('');
 }
 
+function groupAlertsByEvent(alerts) {
+  // Collapse multiple alert rows that fired for the same event into a single
+  // card, so reviewers see every label that triggered (e.g. "Cat, Person")
+  // instead of one row per matching rule. Rows without an event_id stay
+  // standalone so legacy / orphaned alerts are still visible.
+  const order: number[] = [];
+  const groups = new Map();
+  for (const alert of alerts) {
+    const key = alert.event_id !== null && alert.event_id !== undefined ? `event-${alert.event_id}` : `alert-${alert.id}`;
+    if (!groups.has(key)) {
+      order.push(key);
+      groups.set(key, {
+        key,
+        eventId: alert.event_id ?? null,
+        firstAlertId: alert.id,
+        ruleNames: [],
+        labels: new Set(),
+        detections: [],   // [{label, confidence}]
+        maxConfidence: 0,
+        latestAt: alert.created_at,
+        earliestAt: alert.created_at,
+        recordingId: alert.recording_id ?? null,
+        message: alert.message,
+      });
+    }
+    const group = groups.get(key);
+    if (alert.rule_name && !group.ruleNames.includes(alert.rule_name)) {
+      group.ruleNames.push(alert.rule_name);
+    }
+    const label = String(alert.label || '').trim().toLowerCase();
+    if (label) group.labels.add(label);
+    group.detections.push({ label: label || String(alert.label || ''), confidence: Number(alert.confidence || 0) });
+    if (Number(alert.confidence || 0) > group.maxConfidence) group.maxConfidence = Number(alert.confidence || 0);
+    if (alert.created_at && (!group.latestAt || String(alert.created_at) > String(group.latestAt))) {
+      group.latestAt = alert.created_at;
+    }
+    if (alert.created_at && (!group.earliestAt || String(alert.created_at) < String(group.earliestAt))) {
+      group.earliestAt = alert.created_at;
+    }
+    if (alert.recording_id && !group.recordingId) group.recordingId = alert.recording_id;
+  }
+  return order.map((key) => {
+    const group = groups.get(key);
+    return { ...group, labels: Array.from(group.labels) };
+  });
+}
+
 function renderAlerts(alerts) {
   if (!alerts.length) {
     els.alerts.innerHTML = '<div class="empty">No alerts triggered yet.</div>';
     return;
   }
 
-  els.alerts.innerHTML = alerts.map((alert) => `
-    <div class="item alert-row">
-      <div class="item-title">
-        <span>${escapeHtml(alert.rule_name)}</span>
-        <span>${formatDate(alert.created_at)}</span>
+  const groups = groupAlertsByEvent(alerts);
+  els.alerts.innerHTML = groups.map((group) => {
+    const titleSuffix = group.ruleNames.length > 1 ? ` (${group.ruleNames.length} rules)` : '';
+    const ruleLabel = group.ruleNames.join(', ') || 'Alert';
+    const labelChips = group.labels.length
+      ? `<div class="alert-label-chips" aria-label="All labels that triggered for this event">${
+          group.labels.map((label) => `<span class="alert-label-chip">${escapeHtml(label)}</span>`).join('')
+        }</div>`
+      : '';
+    const eventTag = group.eventId !== null
+      ? `<span class="muted">Event #${escapeHtml(String(group.eventId))}</span>`
+      : '';
+    return `
+      <div class="item alert-row" data-alert-event-id="${escapeHtml(String(group.eventId ?? ''))}">
+        <div class="item-title">
+          <span>${escapeHtml(ruleLabel)}${titleSuffix}</span>
+          <span>${formatDate(group.latestAt)}</span>
+        </div>
+        ${eventTag}
+        <p class="muted alert-row-meta">${escapeHtml(group.message || 'Alert triggered.')}</p>
+        ${labelChips}
+        <div class="alert-row-badges">${detectionBadges(group.detections)}</div>
+        ${group.recordingId ? `<a class="button-link secondary-link" href="/recordings?recording_id=${encodeURIComponent(group.recordingId)}">View Footage</a>` : ''}
       </div>
-      <p class="muted alert-row-meta">${escapeHtml(alert.message)}</p>
-      <div class="alert-row-badges"><span class="detection">${escapeHtml(alert.label)} · ${Math.round(alert.confidence * 100)}%</span></div>
-      ${alert.recording_id ? `<a class="button-link secondary-link" href="/recordings?recording_id=${encodeURIComponent(alert.recording_id)}">View Footage</a>` : ''}
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 function bindDeleteButtons() {

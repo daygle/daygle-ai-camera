@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -94,6 +95,18 @@ class EventDatabase:
                 CREATE INDEX IF NOT EXISTS idx_recordings_started_at ON recordings(started_at);
                 CREATE INDEX IF NOT EXISTS idx_recordings_source ON recordings(source);
 
+                CREATE TABLE IF NOT EXISTS recording_labels (
+                    recording_id INTEGER NOT NULL,
+                    label TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'detection',
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (recording_id, label),
+                    FOREIGN KEY(recording_id) REFERENCES recordings(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_recording_labels_label ON recording_labels(label);
+                CREATE INDEX IF NOT EXISTS idx_recording_labels_recording ON recording_labels(recording_id);
+
                 CREATE TABLE IF NOT EXISTS app_settings (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL,
@@ -119,6 +132,9 @@ class EventDatabase:
                 CREATE INDEX IF NOT EXISTS idx_audit_log_resource ON audit_log(resource);
                 """
             )
+
+            # Seed recording_labels for installs upgrading from a pre-multi-label schema.
+            self.backfill_recording_labels(db)
 
     def add_event(
         self,
@@ -174,6 +190,7 @@ class EventDatabase:
         created_at: str,
         trigger_type: str = "motion",
         trigger_label: str | None = None,
+        labels: list[str] | None = None,
     ) -> int:
         with self.connect() as db:
             cursor = db.execute(
@@ -185,7 +202,126 @@ class EventDatabase:
             )
             if cursor.lastrowid is None:
                 raise RuntimeError("Failed to create recording row")
-            return cursor.lastrowid
+            recording_id = cursor.lastrowid
+            # When no explicit labels are provided, seed recording_labels from
+            # the linked event's detections and the trigger_label so the join
+            # table filter is robust for recordings created without labels=[...].
+            if labels is None and event_id is not None:
+                detection_labels = [
+                    str(row['label']).strip().lower()
+                    for row in db.execute(
+                        "SELECT DISTINCT label FROM detections WHERE event_id = ?",
+                        (int(event_id),),
+                    ).fetchall()
+                ]
+                normalized_trigger = str(trigger_label or '').strip().lower()
+                labels = list(dict.fromkeys(detection_labels + ([normalized_trigger] if normalized_trigger else [])))
+            if labels:
+                self._insert_recording_labels(db, recording_id, labels, source='detection')
+            return recording_id
+
+    @staticmethod
+    def _insert_recording_labels(
+        db: sqlite3.Connection,
+        recording_id: int,
+        labels: list[str],
+        *,
+        source: str = 'detection',
+    ) -> None:
+        """Insert unique non-generic labels for a recording.
+
+        Existing rows for the same (recording_id, label) pair are left untouched
+        (the primary key is the composite) so callers can call this freely
+        from extension / trigger-update paths without duplicating entries.
+        """
+        if not labels:
+            return
+        seen: set[str] = set()
+        rows: list[tuple[int, str, str, str]] = []
+        for raw in labels:
+            label = str(raw or '').strip().lower()
+            if not label or label in seen:
+                continue
+            seen.add(label)
+            rows.append((int(recording_id), label, source, datetime.now(timezone.utc).isoformat()))
+        if not rows:
+            return
+        db.executemany(
+            "INSERT OR IGNORE INTO recording_labels (recording_id, label, source, created_at) VALUES (?, ?, ?, ?)",
+            rows,
+        )
+
+    def add_recording_labels(self, recording_id: int, labels: list[str], *, source: str = 'detection') -> int:
+        """Append unique labels to a recording's label set.
+
+        Returns the number of rows newly inserted (existing labels are skipped).
+        Safe to call from extension / trigger-update paths.
+        """
+        with self.connect() as db:
+            existing = {
+                str(row['label'])
+                for row in db.execute(
+                    "SELECT label FROM recording_labels WHERE recording_id = ?",
+                    (int(recording_id),),
+                ).fetchall()
+            }
+            new_labels = [
+                str(raw or '').strip().lower()
+                for raw in labels
+                if str(raw or '').strip() and str(raw or '').strip().lower() not in existing
+            ]
+            if not new_labels:
+                return 0
+            self._insert_recording_labels(db, int(recording_id), new_labels, source=source)
+            return len(new_labels)
+
+    def backfill_recording_labels(self, db: sqlite3.Connection | None = None) -> int:
+        """One-shot migration: seed recording_labels from existing detections
+        and trigger_label columns for installs upgrading from a pre-multi-label
+        schema. Safe to call on every init() — does nothing if the join table
+        is already populated for a recording.
+        """
+        own = db is None
+        if own:
+            with self.connect() as conn:
+                return self.backfill_recording_labels(conn)
+        assert db is not None
+        rows = db.execute(
+            """
+            SELECT r.id AS recording_id,
+                   r.trigger_label,
+                   (SELECT GROUP_CONCAT(DISTINCT lower(d.label))
+                      FROM detections d
+                     WHERE d.event_id = r.event_id) AS detection_labels
+            FROM recordings r
+            """
+        ).fetchall()
+        total = 0
+        generic = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous', ''}
+        for row in rows:
+            recording_id = int(row['recording_id'])
+            existing = {
+                str(existing_row['label'])
+                for existing_row in db.execute(
+                    "SELECT label FROM recording_labels WHERE recording_id = ?",
+                    (recording_id,),
+                ).fetchall()
+            }
+            if existing:
+                continue
+            labels: list[str] = []
+            if row['detection_labels']:
+                for label in str(row['detection_labels']).split(','):
+                    normalized = label.strip().lower()
+                    if normalized and normalized not in generic:
+                        labels.append(normalized)
+            trigger_label = str(row['trigger_label'] or '').strip().lower()
+            if trigger_label and trigger_label not in generic and trigger_label not in labels:
+                labels.append(trigger_label)
+            if labels:
+                self._insert_recording_labels(db, recording_id, labels, source='backfill')
+                total += len(labels)
+        return total
 
     def list_recordings(
         self,
@@ -202,7 +338,10 @@ class EventDatabase:
             params: list[Any] = []
 
             if label:
-                conditions.append("d.label = ?")
+                # Join against recording_labels (the authoritative "labels that
+                # appeared in this recording" table) rather than detections, so
+                # labels added by extension / trigger updates still match.
+                conditions.append("rl.label = ?")
                 params.append(label)
             if camera_id:
                 conditions.append("r.camera_id = ?")
@@ -229,7 +368,7 @@ class EventDatabase:
             order_by = 'r.started_at DESC' if sort_normalized == 'newest' else 'r.started_at ASC'
 
             if label:
-                sql = f"SELECT DISTINCT r.* FROM recordings r LEFT JOIN detections d ON d.event_id = r.event_id {where} ORDER BY {order_by}, r.id DESC LIMIT ?"
+                sql = f"SELECT DISTINCT r.* FROM recordings r LEFT JOIN recording_labels rl ON rl.recording_id = r.id {where} ORDER BY {order_by}, r.id DESC LIMIT ?"
             else:
                 sql = f"SELECT r.* FROM recordings r {where} ORDER BY {order_by}, r.id DESC LIMIT ?"
 
@@ -570,8 +709,28 @@ class EventDatabase:
         event["metadata"] = json.loads(event.get("metadata") or "{}")
         event["detections"] = [dict(detection) for detection in detections]
         event["recordings"] = [self._recording_row(recording) for recording in recordings]
+        if event["recordings"]:
+            label_map = self._fetch_labels_for_recordings(db, [int(rec["id"]) for rec in event["recordings"]])
+            for recording in event["recordings"]:
+                recording["labels"] = label_map.get(int(recording["id"]), [])
+        else:
+            event["recordings"] = []
         event["recording_status"] = "linked" if recordings else "none"
         return event
+
+    @staticmethod
+    def _fetch_labels_for_recordings(db: sqlite3.Connection, recording_ids: list[int]) -> dict[int, list[str]]:
+        if not recording_ids:
+            return {}
+        placeholders = ','.join('?' * len(recording_ids))
+        rows = db.execute(
+            f"SELECT recording_id, label FROM recording_labels WHERE recording_id IN ({placeholders}) ORDER BY label ASC",
+            [int(rid) for rid in recording_ids],
+        ).fetchall()
+        grouped: dict[int, list[str]] = {int(rid): [] for rid in recording_ids}
+        for row in rows:
+            grouped.setdefault(int(row['recording_id']), []).append(str(row['label']))
+        return grouped
 
     def _recording_row(self, row: sqlite3.Row) -> dict[str, Any]:
         recording = dict(row)
@@ -583,6 +742,11 @@ class EventDatabase:
         recording = self._recording_row(row)
         recording["event"] = None
         recording["detections"] = []
+        label_rows = db.execute(
+            "SELECT label, source FROM recording_labels WHERE recording_id = ? ORDER BY label ASC",
+            (recording["id"],),
+        ).fetchall()
+        recording["labels"] = [str(label_row["label"]) for label_row in label_rows]
         if recording.get("event_id") is not None:
             event_row = db.execute("SELECT * FROM events WHERE id = ?", (recording["event_id"],)).fetchone()
             detections = db.execute(
