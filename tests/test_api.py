@@ -243,6 +243,45 @@ def test_anpr_pipeline_extracts_vehicle_plate(tmp_path):
     assert Path(results[0]['image_path']).exists()
 
 
+def test_easyocr_backend_survives_crashed_worker(monkeypatch):
+    """A failed OCR worker (e.g. a SIGILL on incompatible hardware) must degrade
+    gracefully instead of propagating and taking the service down."""
+    from app import anpr
+
+    # Pass the install guard so the worker process is actually spawned. The real
+    # worker then fails to import easyocr (not installed in CI), which mimics the
+    # worker dying: the parent must observe it and disable ANPR, not raise.
+    monkeypatch.setattr(anpr.importlib.util, "find_spec", lambda name: object())
+    backend = anpr.EasyOcrBackend(call_timeout=30.0)
+    try:
+        result = backend.read_plate("/nonexistent.jpg", event_id=1, detection={}, index=0)
+        assert result == ("", 0.0)
+        assert backend._failed is True
+        assert backend.available is False
+        # Subsequent calls keep returning cleanly without re-raising.
+        assert backend.read_plate("/another.jpg", event_id=2, detection={}, index=0) == ("", 0.0)
+    finally:
+        backend.close()
+
+
+def test_anpr_pipeline_disabled_when_backend_unavailable():
+    """When the OCR backend cannot be created, the pipeline stays usable and
+    simply returns no plates instead of raising."""
+    from app.anpr import AnprPipeline
+
+    pipeline = AnprPipeline({'enabled': True, 'backend': 'no-such-backend', 'vehicle_labels': ['car']})
+    assert pipeline.ocr is None
+    assert pipeline.unavailable_reason
+    results = pipeline.process_event(
+        event_id=1,
+        detections=[{'label': 'car', 'confidence': 0.9, 'box': {}}],
+        image_path=None,
+        storage=object(),
+    )
+    assert results == []
+    pipeline.close()
+
+
 def test_onnx_missing_model_returns_clear_api_error(tmp_path, monkeypatch):
     app, _database_path = _load_app(
         tmp_path,

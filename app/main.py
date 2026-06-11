@@ -3969,7 +3969,10 @@ def apply_storage_and_recording_settings() -> None:
 
 def apply_anpr_settings() -> None:
     global anpr_pipeline
+    previous = anpr_pipeline
     anpr_pipeline = AnprPipeline(effective_anpr_config())
+    if previous is not None:
+        previous.close()
 
 
 @app.get('/api/settings/ai')
