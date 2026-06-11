@@ -87,12 +87,15 @@ class RecordingService:
                     return True, 'alert', specific_label or 'motion'
                 return True, 'alert', alert_labels[0]
             return False, 'none', None
-        if (mode == 'motion' or bool(config.get('record_on_motion', True))) and labels:
+        # The record_on_* flags default from the configured mode; defaulting them
+        # to True regardless of mode made the motion branch swallow every event
+        # so 'human' and 'objects' modes never applied their own filters.
+        if (mode == 'motion' or bool(config.get('record_on_motion', mode == 'motion'))) and labels:
             specific_label = preferred_label(detections)
             if specific_label:
                 return True, 'object', specific_label
             return True, 'motion', 'motion'
-        if (mode == 'human' or bool(config.get('record_on_human', True))) and 'person' in labels:
+        if (mode == 'human' or bool(config.get('record_on_human', mode == 'human'))) and 'person' in labels:
             return True, 'human', 'person'
         for label in labels:
             if label in object_labels or (mode == 'objects' and not object_labels):
