@@ -517,6 +517,7 @@ The SQLite database contains all events, detections, recordings metadata, settin
 
 - Plate crop extraction is a modular placeholder in uploaded-image workflows; camera backends can replace it with real image crops.
 - EasyOCR is included as a dependency and may require additional platform packages on some systems.
+- EasyOCR (PyTorch) runs in an isolated worker process. On hardware that lacks the CPU instructions the prebuilt PyTorch wheel expects, inference can die with a fatal `SIGILL` (illegal instruction). Because the worker is isolated, such a crash only disables ANPR at runtime — the main service keeps running instead of being killed and restart-looped by systemd. Check the service log for `ANPR OCR disabled at runtime` to confirm this is happening.
 - Plate alerts are stored and matched in-process for cooldown behavior; persistent alert history can be added later if needed.
 
 ## Updating an Existing Install
