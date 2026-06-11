@@ -9,6 +9,11 @@ const liveEls = {
   detectionStatus: document.getElementById('liveDetectionStatus'),
   detectionChips: document.getElementById('liveDetectionChips'),
   detectionState: document.getElementById('liveDetectionState'),
+  // Zones-page stats
+  statZoneCount: document.getElementById('statZoneCount'),
+  statRuleCount: document.getElementById('statRuleCount'),
+  statRecording: document.getElementById('statRecording'),
+  statCameraName: document.getElementById('statCameraName'),
   liveAiTrackToggle: document.getElementById('liveAiTrackToggle'),
   liveAiTrackGroup: document.getElementById('liveAiTrackGroup'),
   liveAiTrackCanvas: document.getElementById('liveAiTrackCanvas'),
@@ -414,6 +419,26 @@ function updateEmptyState() {
   }
 }
 
+// Recompute the zones-page stats card values from the currently selected
+// camera. Safe to call on the live page (no-op when the stat elements are
+// absent).
+function updateZonesStats() {
+  if (!isZonesPage) return;
+  if (!selectedCamera) return;
+  const detection = cameraDetection();
+  const recording = cameraRecording();
+  const zones = detection.zones || [];
+  const ruleCount = zones.reduce((sum, zone) => sum + (zone.object_rules?.length || 0), 0);
+  if (liveEls.statZoneCount) liveEls.statZoneCount.textContent = String(zones.length);
+  if (liveEls.statRuleCount) liveEls.statRuleCount.textContent = String(ruleCount);
+  if (liveEls.statRecording) {
+    liveEls.statRecording.textContent = recording.enabled !== false ? 'Enabled' : 'Disabled';
+  }
+  if (liveEls.statCameraName) {
+    liveEls.statCameraName.textContent = selectedCamera.name || selectedCamera.id || '—';
+  }
+}
+
 // Build a structured summary of the monitor's latest cycle so the renderer
 // can split the visual into a state chip, per-label chips, and a status line.
 function summarizeDetectionStatus(payload) {
@@ -567,6 +592,7 @@ function setSelectedCamera(cameraId) {
   clearLiveOverlay();
   if (liveEls.cameraSelect) liveEls.cameraSelect.value = selectedCamera.id;
   updateFrameHeader(selectedCamera);
+  updateZonesStats();
   if (isZonesPage) {
     renderZones();
     renderCameraRecordingControls();
@@ -641,6 +667,7 @@ function renderZones() {
   const zones = cameraDetection().zones;
   zones.forEach(normalizeZone);
   liveEls.zoneOverlay.innerHTML = zones.map((zone, index) => (zone.enabled === false ? '' : renderZoneBox(zone, index))).join('');
+  updateZonesStats();
   if (!zones.length) {
     liveEls.zoneList.innerHTML = '<div class="empty">No monitoring areas yet. Click "Draw area", place corner dots on the footage, then click the first dot to close the area.</div>';
     return;
@@ -762,6 +789,7 @@ function renderCameraRecordingControls() {
     <label><span>Continuous</span><select data-camera-recording="continuous"><option value="false" ${recording.continuous !== true ? 'selected' : ''}>Disabled</option><option value="true" ${recording.continuous === true ? 'selected' : ''}>Enabled</option></select></label>
     <label><span>Motion Email Alerts</span><select data-camera-detection="motion_email_enabled"><option value="true" ${detection.motion_email_enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${detection.motion_email_enabled === false ? 'selected' : ''}>Disabled</option></select></label>
   `;
+  updateZonesStats();
   liveEls.cameraRecordingControls.querySelectorAll('[data-camera-recording]').forEach((select) => {
     select.addEventListener('change', () => {
       cameraRecording()[select.dataset.cameraRecording] = select.value === 'true';

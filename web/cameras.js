@@ -9,6 +9,20 @@ const modal = document.getElementById('cameraModal');
 const deleteModal = document.getElementById('deleteModal');
 const editForm = document.getElementById('cameraEditForm');
 
+// Stats + filter state
+const stats = {
+  total: document.getElementById('statTotalCameras'),
+  recording: document.getElementById('statRecordingOn'),
+  zones: document.getElementById('statWithZones'),
+  backends: document.getElementById('statBackends'),
+};
+const filter = {
+  text: document.getElementById('cameraFilter'),
+  backend: document.getElementById('cameraBackendFilter'),
+  reset: document.getElementById('cameraFilterResetBtn'),
+  form: document.getElementById('camerasFilterForm'),
+};
+
 function setMessage(text, isError = false) {
   messageEl.textContent = text;
   messageEl.className = isError ? 'error' : 'muted';
@@ -31,7 +45,22 @@ async function api(path, options = {}) {
 function cameraStatusBadge(camera) {
   const url = buildDisplayUrl(camera);
   if (!url && !camera.host) return '<span class="cam-badge cam-badge-warn">Not configured</span>';
-  return '<span class="cam-badge cam-badge-idle">Configured</span>';
+  return '<span class="cam-badge cam-badge-idle"><span class="cam-badge-dot"></span>Configured</span>';
+}
+
+function cameraRecordingChips(camera) {
+  const recEnabled = camera.recording?.enabled !== false;
+  const continuous = camera.recording?.continuous === true;
+  const alertClips = camera.recording?.record_on_alert !== false;
+  const chips = [];
+  if (recEnabled) {
+    chips.push('<span class="chip chip-green">Recording on</span>');
+    if (alertClips) chips.push('<span class="chip">Alert clips</span>');
+    if (continuous) chips.push('<span class="chip">Continuous</span>');
+  } else {
+    chips.push('<span class="chip chip-dim">Recording off</span>');
+  }
+  return chips.join('');
 }
 
 function buildDisplayUrl(camera) {
@@ -48,11 +77,9 @@ function renderCameraCard(camera, index) {
   const name = escapeHtml(camera.name || camera.id || `Camera ${index + 1}`);
   const url = escapeHtml(displayUrl);
   const backend = camera.backend === 'rtsp' ? 'RTSP' : 'ONVIF';
-  const recEnabled = camera.recording?.enabled !== false;
-  const continuous = camera.recording?.continuous === true;
-  const alertClips = camera.recording?.record_on_alert !== false;
   const res = `${camera.width || 1280}×${camera.height || 720}`;
   const fps = camera.fps || 15;
+  const zoneCount = (camera.detection?.zones || []).length;
 
   return `
     <article class="cam-card" data-camera-index="${index}">
@@ -88,16 +115,16 @@ function renderCameraCard(camera, index) {
         </div>
         <div class="cam-meta-row">
           <span class="cam-meta-label">Recording</span>
+          <span class="cam-meta-value">${cameraRecordingChips(camera)}</span>
+        </div>
+        <div class="cam-meta-row">
+          <span class="cam-meta-label">Zones</span>
           <span class="cam-meta-value">
-            ${recEnabled ? `<span class="chip chip-green">On</span>` : `<span class="chip chip-dim">Off</span>`}
-            ${recEnabled && alertClips ? `<span class="chip">Alert clips</span>` : ''}
-            ${recEnabled && continuous ? `<span class="chip">Continuous</span>` : ''}
+            ${zoneCount > 0
+              ? `<span class="chip chip-green">${zoneCount} configured</span>`
+              : `<span class="chip chip-warn">No zones</span>`}
           </span>
         </div>
-        ${(camera.detection?.zones || []).length > 0 ? `<div class="cam-meta-row">
-          <span class="cam-meta-label">Zones</span>
-          <span class="cam-meta-value">${camera.detection.zones.length} configured</span>
-        </div>` : ''}
       </div>
 
       <div class="cam-card-footer">
@@ -108,14 +135,57 @@ function renderCameraCard(camera, index) {
   `;
 }
 
+function currentFilterValues() {
+  return {
+    text: (filter.text?.value || '').trim().toLowerCase(),
+    backend: filter.backend?.value || '',
+  };
+}
+
+function applyFilter(list) {
+  const { text, backend } = currentFilterValues();
+  return list.filter((camera) => {
+    if (backend && (camera.backend || 'onvif') !== backend) return false;
+    if (!text) return true;
+    const haystack = `${camera.name || ''} ${camera.id || ''}`.toLowerCase();
+    return haystack.includes(text);
+  });
+}
+
+function updateFilterHint(filteredCount) {
+  const { text, backend } = currentFilterValues();
+  const parts = [];
+  if (text) parts.push(`matching “${text}”`);
+  if (backend === 'onvif') parts.push('using ONVIF');
+  else if (backend === 'rtsp') parts.push('using RTSP');
+  if (!parts.length) {
+    messageEl.textContent = cameras.length
+      ? `Showing all ${cameras.length} cameras.`
+      : '';
+    return;
+  }
+  messageEl.textContent = `Showing ${filteredCount} of ${cameras.length} cameras ${parts.join(' and ')}.`;
+}
+
 function renderGrid() {
+  const filtered = applyFilter(cameras);
   if (cameras.length === 0) {
     gridEl.innerHTML = '';
     emptyEl.hidden = false;
+    updateFilterHint(0);
     return;
   }
   emptyEl.hidden = true;
-  gridEl.innerHTML = cameras.map((cam, i) => renderCameraCard(cam, i)).join('');
+  if (filtered.length === 0) {
+    gridEl.innerHTML = '<div class="camera-empty-state"><div class="camera-empty-icon" aria-hidden="true"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div><h2>No cameras match these filters</h2><p class="muted">Try clearing the search or selecting a different backend.</p></div>';
+    updateFilterHint(0);
+    return;
+  }
+  gridEl.innerHTML = filtered.map((cam) => {
+    const realIndex = cameras.indexOf(cam);
+    return renderCameraCard(cam, realIndex);
+  }).join('');
+  updateFilterHint(filtered.length);
 
   gridEl.querySelectorAll('.cam-edit-btn').forEach((btn) => {
     btn.addEventListener('click', () => openEditModal(Number(btn.dataset.index)));
@@ -123,6 +193,23 @@ function renderGrid() {
   gridEl.querySelectorAll('.cam-remove-btn').forEach((btn) => {
     btn.addEventListener('click', () => openDeleteModal(Number(btn.dataset.index)));
   });
+}
+
+function updateStats() {
+  if (stats.total) stats.total.textContent = String(cameras.length);
+  if (stats.recording) {
+    const on = cameras.filter((c) => c.recording?.enabled !== false).length;
+    stats.recording.textContent = String(on);
+  }
+  if (stats.zones) {
+    const withZones = cameras.filter((c) => (c.detection?.zones || []).length > 0).length;
+    stats.zones.textContent = String(withZones);
+  }
+  if (stats.backends) {
+    const onvif = cameras.filter((c) => (c.backend || 'onvif') === 'onvif').length;
+    const rtsp = cameras.filter((c) => c.backend === 'rtsp').length;
+    stats.backends.textContent = `${onvif} / ${rtsp}`;
+  }
 }
 
 // ─── Modal helpers ────────────────────────────────────────────────────────────
@@ -241,6 +328,7 @@ editForm.addEventListener('submit', async (e) => {
   try {
     const result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras }) });
     cameras = result.cameras || cameras;
+    updateStats();
     renderGrid();
     closeModal(modal);
     setMessage(index === null ? 'Camera added.' : 'Camera updated.');
@@ -254,7 +342,8 @@ editForm.addEventListener('submit', async (e) => {
 
 function openDeleteModal(index) {
   pendingDeleteIndex = index;
-  const name = cameras[index]?.name || cameras[index]?.id || `Camera ${index + 1}`;
+  const camera = cameras[index];
+  const name = camera?.name || camera?.id || `Camera ${index + 1}`;
   document.getElementById('deleteModalBody').textContent =
     `Remove "${name}" from your configuration? Existing recordings are kept.`;
   openModal(deleteModal);
@@ -266,6 +355,7 @@ document.getElementById('deleteConfirmBtn').addEventListener('click', async () =
   try {
     const result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras }) });
     cameras = result.cameras || cameras;
+    updateStats();
     renderGrid();
     setMessage('Camera removed.');
   } catch (err) {
@@ -297,6 +387,19 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// ─── Filter handlers ──────────────────────────────────────────────────────────
+
+filter.text?.addEventListener('input', () => renderGrid());
+filter.backend?.addEventListener('change', () => renderGrid());
+filter.reset?.addEventListener('click', () => {
+  setTimeout(() => renderGrid(), 0);
+});
+filter.form?.addEventListener('submit', (e) => e.preventDefault());
+
+// Re-render when the user's date_format / time_format changes (no-op here,
+// but keeps the page consistent with the rest of the app).
+window.daygleDatePrefsChanged = function daygleDatePrefsChanged() { /* no-op */ };
+
 // ─── Load ─────────────────────────────────────────────────────────────────────
 
 async function loadCameras() {
@@ -304,8 +407,8 @@ async function loadCameras() {
   csrfToken = me.csrf_token;
   const settings = await api('/api/settings/system');
   cameras = settings.cameras || (settings.camera ? [settings.camera] : []);
+  updateStats();
   renderGrid();
-  setMessage('');
 }
 
 loadCameras().catch((err) => setMessage(err.message, true));

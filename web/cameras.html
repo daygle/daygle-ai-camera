@@ -16,20 +16,108 @@
         <p class="muted">Manage RTSP and ONVIF camera connections. Configure motion detection and object alerts for your cameras.</p>
       </div>
       <div class="cam-hero-action">
-        <button id="addCameraBtn" type="button">+ Add Camera</button>
+        <a class="button-link secondary-link hero-action-link" href="/live">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          View Live
+        </a>
+        <a class="button-link secondary-link hero-action-link" href="/recordings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          Recordings
+        </a>
+        <button id="addCameraBtn" class="hero-primary-btn" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add Camera
+        </button>
       </div>
     </header>
 
-    <div id="cameraMessage" class="muted"></div>
-    <div id="cameraGrid" class="camera-page-grid"></div>
-    <div id="cameraEmpty" class="camera-empty-state" hidden>
-      <div class="camera-empty-icon">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+    <section class="grid stats-grid cameras-stats">
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Total Cameras</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          </span>
+        </div>
+        <strong id="statTotalCameras" class="stat-card-value">0</strong>
+        <small class="muted stat-card-sub">Connected and configured</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Recording On</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+          </span>
+        </div>
+        <strong id="statRecordingOn" class="stat-card-value">0</strong>
+        <small class="muted stat-card-sub">Capturing alert or continuous clips</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">With Zones</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+          </span>
+        </div>
+        <strong id="statWithZones" class="stat-card-value">0</strong>
+        <small class="muted stat-card-sub">Have at least one monitoring area</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Backends</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+          </span>
+        </div>
+        <strong id="statBackends" class="stat-card-value">0 / 0</strong>
+        <small class="muted stat-card-sub">ONVIF / RTSP manual</small>
+      </article>
+    </section>
+
+    <section class="card cameras-list-card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🎥</div>
+        <div>
+          <h2>Connected Cameras</h2>
+          <p class="settings-section-subtitle">Browse, edit, and remove camera connections. Add zones from the Zones page to define monitored areas.</p>
+        </div>
       </div>
-      <h2>No cameras yet</h2>
-      <p class="muted">Add your first camera to start monitoring.</p>
-      <button id="addCameraEmptyBtn" type="button">+ Add Camera</button>
-    </div>
+
+      <form id="camerasFilterForm" class="form-grid cameras-filter-grid" onsubmit="return false;">
+        <label>
+          <span>Search</span>
+          <input id="cameraFilter" placeholder="Filter by name or ID" aria-label="Filter cameras" />
+          <span class="field-help">Type to filter by camera name or ID. Default: show all</span>
+        </label>
+        <label>
+          <span>Backend</span>
+          <select id="cameraBackendFilter" aria-label="Filter by backend">
+            <option value="">All backends</option>
+            <option value="onvif">ONVIF / RTSP auto</option>
+            <option value="rtsp">RTSP manual</option>
+          </select>
+          <span class="field-help">Limit by connection type. Default: every backend</span>
+        </label>
+        <label class="cameras-filter-actions">
+          <span>&nbsp;</span>
+          <div class="button-row">
+            <button id="cameraFilterResetBtn" class="secondary" type="reset">Reset Filters</button>
+          </div>
+        </label>
+      </form>
+
+      <p id="cameraMessage" class="muted cameras-list-status" aria-live="polite"></p>
+
+      <div id="cameraGrid" class="camera-page-grid"></div>
+      <div id="cameraEmpty" class="camera-empty-state" hidden>
+        <div class="camera-empty-icon" aria-hidden="true">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+        </div>
+        <h2>No cameras yet</h2>
+        <p class="muted">Add your first camera to start monitoring.</p>
+        <button id="addCameraEmptyBtn" type="button">+ Add Camera</button>
+      </div>
+    </section>
   </main>
 
   <!-- Edit / Add Camera Modal -->
