@@ -38,7 +38,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "anpr": {
         "enabled": True,
-        "backend": "paddleocr",
+        "backend": "easyocr",
         "min_confidence": 0.75,
         "vehicle_labels": ["car", "truck", "bus", "motorcycle"],
     },
