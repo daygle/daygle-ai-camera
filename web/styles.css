@@ -1495,10 +1495,6 @@ input[type="file"] { padding: 10px; }
 }
 
 /* ─── Timeline & video modal ─────────────────────────────────────────────── */
-.timeline-shell {
-  width: min(1600px, calc(100% - 32px));
-}
-
 .recording-timeline-layout {
   display: block;
 }
