@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Daygle AI Camera</title>
+  <title>Dashboard - Daygle AI Camera</title>
   <link rel="icon" href="/favicon.ico" type="image/svg+xml" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
@@ -15,27 +15,114 @@
         <h1>Dashboard</h1>
         <p class="muted">Monitor camera health, recent detections, and alerts from one place.</p>
       </div>
+      <div class="cam-hero-action">
+        <a class="button-link secondary-link hero-action-link" href="/live">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          View Live
+        </a>
+        <a class="button-link secondary-link hero-action-link" href="/recordings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          Recordings
+        </a>
+      </div>
     </header>
 
     <section class="grid stats-grid">
-      <article class="card"><span>Status</span><strong id="statusText">Loading...</strong><small id="cameraDetail" class="muted">Checking camera...</small></article>
-      <article class="card ai-status-card"><span>AI Backend</span><strong id="aiModeText" class="ai-mode">Loading...</strong><small id="aiStatusDetail" class="muted">Checking detector...</small></article>
-      <article class="card"><span>Object Detections</span><strong id="totalEvents">0</strong></article>
-      <article class="card"><span>Alerts Triggered</span><strong id="totalAlerts">0</strong></article>
-      <article class="card"><span>Uptime</span><strong id="uptimeText">-</strong></article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Camera Status</span>
+          <span class="stat-card-icon" id="statusIcon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          </span>
+        </div>
+        <strong id="statusText" class="stat-card-value">Loading…</strong>
+        <small id="cameraDetail" class="muted stat-card-sub">Checking camera…</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">AI Backend</span>
+          <span class="stat-card-icon" id="aiStatusIcon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </span>
+        </div>
+        <strong id="aiModeText" class="stat-card-value ai-mode">Loading…</strong>
+        <small id="aiStatusDetail" class="muted stat-card-sub">Checking detector…</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Object Detections</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg>
+          </span>
+        </div>
+        <strong id="totalEvents" class="stat-card-value">0</strong>
+        <small class="muted stat-card-sub">Matched object events</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Alerts Triggered</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+          </span>
+        </div>
+        <strong id="totalAlerts" class="stat-card-value">0</strong>
+        <small class="muted stat-card-sub">Rule-based notifications</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Uptime</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </span>
+        </div>
+        <strong id="uptimeText" class="stat-card-value">-</strong>
+        <small class="muted stat-card-sub">Since last restart</small>
+      </article>
     </section>
 
-    <section class="grid main-grid">
-      <article class="card">
-        <div class="section-header"><h2>Recent Events</h2><button id="deleteAllEventsBtn" class="secondary delete-btn" type="button" hidden>Delete All</button></div>
-        <div id="events" class="list"></div>
-      </article>
-      <article class="card">
-        <div class="section-header"><h2>Alert History</h2><button id="deleteAllAlertsBtn" class="secondary delete-btn" type="button" hidden>Delete All</button></div>
-        <div id="alerts" class="list"></div>
-      </article>
+    <section class="card activity-card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">📡</div>
+        <div>
+          <h2>Activity Feed</h2>
+          <p class="settings-section-subtitle">Recent detections and alerts across your cameras. Click a recording to review it.</p>
+        </div>
+        <div class="button-row activity-toolbar-actions">
+          <button id="deleteAllEventsBtn" class="secondary delete-btn" type="button" hidden>Clear Events</button>
+          <button id="deleteAllAlertsBtn" class="secondary delete-btn" type="button" hidden>Clear Alerts</button>
+        </div>
+      </div>
+
+      <div class="activity-filter-row">
+        <div class="activity-filter-group" role="tablist" aria-label="Filter activity">
+          <button class="activity-filter-pill active" data-filter="all" type="button" role="tab" aria-selected="true">All</button>
+          <button class="activity-filter-pill" data-filter="detections" type="button" role="tab" aria-selected="false">Detections</button>
+          <button class="activity-filter-pill" data-filter="alerts" type="button" role="tab" aria-selected="false">Alerts</button>
+        </div>
+        <p id="listStatus" class="muted activity-status" aria-live="polite"></p>
+      </div>
+
+      <div id="activityFeed" class="list activity-list" aria-live="polite"></div>
     </section>
   </main>
+
+  <!-- Delete confirmation modal -->
+  <div id="deleteModal" class="modal-backdrop" hidden aria-modal="true" role="dialog" aria-labelledby="deleteModalTitle">
+    <div class="modal-panel modal-panel-sm">
+      <div class="modal-header">
+        <h2 id="deleteModalTitle">Confirm deletion</h2>
+        <button class="modal-close" id="deleteModalCloseBtn" type="button" aria-label="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <p class="muted" id="deleteModalBody">Are you sure?</p>
+      <div class="modal-footer">
+        <button class="secondary" id="deleteCancelBtn" type="button">Cancel</button>
+        <button class="delete-btn" id="deleteConfirmBtn" type="button">Delete</button>
+      </div>
+    </div>
+  </div>
+
   <script src="/static/nav.js"></script>
   <script src="/static/utils.js"></script>
   <script src="/static/app.js"></script>

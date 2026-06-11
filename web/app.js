@@ -1,20 +1,35 @@
+// ─── DOM handles ────────────────────────────────────────────────────────────
 const els = {
   statusText: document.getElementById('statusText'),
+  statusIcon: document.getElementById('statusIcon'),
   cameraDetail: document.getElementById('cameraDetail'),
   aiModeText: document.getElementById('aiModeText'),
+  aiStatusIcon: document.getElementById('aiStatusIcon'),
   aiStatusDetail: document.getElementById('aiStatusDetail'),
   totalEvents: document.getElementById('totalEvents'),
   totalAlerts: document.getElementById('totalAlerts'),
   uptimeText: document.getElementById('uptimeText'),
-  events: document.getElementById('events'),
-  alerts: document.getElementById('alerts'),
+  activityFeed: document.getElementById('activityFeed'),
+  listStatus: document.getElementById('listStatus'),
   deleteAllEventsBtn: document.getElementById('deleteAllEventsBtn'),
   deleteAllAlertsBtn: document.getElementById('deleteAllAlertsBtn'),
+  deleteModal: document.getElementById('deleteModal'),
+  deleteModalBody: document.getElementById('deleteModalBody'),
+  deleteModalCloseBtn: document.getElementById('deleteModalCloseBtn'),
+  deleteCancelBtn: document.getElementById('deleteCancelBtn'),
+  deleteConfirmBtn: document.getElementById('deleteConfirmBtn'),
+  filterPills: document.querySelectorAll('.activity-filter-pill'),
 };
 
+// ─── State ──────────────────────────────────────────────────────────────────
 let authState = { user: null, csrfToken: null };
 let configuredLabels = null;
+let events = [];
+let alertGroups = [];
+let activeFilter = 'all';
+let pendingDelete = null; // { kind: 'event'|'events'|'alerts', id?: number }
 
+// ─── API helper (shared pattern with cameras.js / recordings.js) ───────────
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
   if (authState.csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((options.method || 'GET').toUpperCase())) {
@@ -25,19 +40,12 @@ async function api(path, options = {}) {
     window.location.href = '/login';
     throw new Error('Authentication required');
   }
-  if (!response.ok) {
-    let detail = `Request failed: ${response.status}`;
-    try {
-      const errorBody = await response.json();
-      detail = errorBody.detail || detail;
-    } catch {
-      // Keep the generic status message when the response body is not JSON.
-    }
-    throw new Error(detail);
-  }
-  return response.json();
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.detail || `Request failed: ${response.status}`);
+  return payload;
 }
 
+// ─── Small utilities (kept local to avoid touching utils.js) ────────────────
 function cameraLabel(cameraName, cameraId) {
   const name = String(cameraName || '').trim();
   const id = String(cameraId || '').trim();
@@ -64,6 +72,22 @@ function formatUptime(seconds) {
   return `${m}m`;
 }
 
+function timeAgo(isoString) {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return '';
+  const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (diff < 5) return 'just now';
+  if (diff < 60) return `${diff}s ago`;
+  const minutes = Math.floor(diff / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return formatDate(isoString);
+}
+
 function detectionBadges(detections = []) {
   if (!detections.length) return '<span class="muted">No detections</span>';
   const normalized = detections
@@ -73,38 +97,8 @@ function detectionBadges(detections = []) {
   return normalized.map((d) => `<span class="detection">${escapeHtml(d.label)} · ${Math.round(d.confidence * 100)}%</span>`).join('');
 }
 
-function recordingLink(recordings = []) {
-  if (!recordings.length) return '<span class="muted">Recording: none</span>';
-  return recordings.map((recording) => `<a class="link-button" href="/recordings?recording_id=${recording.id}">Recording #${recording.id}</a>`).join('');
-}
-
-function renderEvents(events) {
-  if (!events.length) {
-    els.events.innerHTML = '<div class="empty">No recorded events yet.</div>';
-    return;
-  }
-
-  els.events.innerHTML = events.map((event) => `
-    <div class="item event-row">
-      <div class="item-title">
-        <span>Event #${event.id}</span>
-        <span>${formatDate(event.created_at)}</span>
-      </div>
-      <div class="event-row-badges">${detectionBadges(event.detections)}</div>
-      <p class="muted event-row-meta">Camera: ${escapeHtml(eventSourceLabel(event))} · ${escapeHtml(event.recording_status || 'none')}</p>
-      <div class="event-row-footer">
-        <div>${recordingLink(event.recordings)}</div>
-        <button class="secondary delete-btn" data-delete-event="${event.id}">Delete</button>
-      </div>
-    </div>
-  `).join('');
-}
-
+// ─── Alert grouping (consolidates multiple alerts for the same event) ──────
 function groupAlertsByEvent(alerts) {
-  // Collapse multiple alert rows that fired for the same event into a single
-  // card, so reviewers see every label that triggered (e.g. "Cat, Person")
-  // instead of one row per matching rule. Rows without an event_id stay
-  // standalone so legacy / orphaned alerts are still visible.
   const order = [];
   const groups = new Map();
   for (const alert of alerts) {
@@ -114,11 +108,9 @@ function groupAlertsByEvent(alerts) {
       groups.set(key, {
         key,
         eventId: alert.event_id ?? null,
-        firstAlertId: alert.id,
         ruleNames: [],
         labels: new Set(),
-        detections: [],   // [{label, confidence}]
-        maxConfidence: 0,
+        detections: [],
         latestAt: alert.created_at,
         earliestAt: alert.created_at,
         recordingId: alert.recording_id ?? null,
@@ -132,7 +124,6 @@ function groupAlertsByEvent(alerts) {
     const label = String(alert.label || '').trim().toLowerCase();
     if (label) group.labels.add(label);
     group.detections.push({ label: label || String(alert.label || ''), confidence: Number(alert.confidence || 0) });
-    if (Number(alert.confidence || 0) > group.maxConfidence) group.maxConfidence = Number(alert.confidence || 0);
     if (alert.created_at && (!group.latestAt || String(alert.created_at) > String(group.latestAt))) {
       group.latestAt = alert.created_at;
     }
@@ -147,53 +138,254 @@ function groupAlertsByEvent(alerts) {
   });
 }
 
-function renderAlerts(alerts) {
-  if (!alerts.length) {
-    els.alerts.innerHTML = '<div class="empty">No alerts triggered yet.</div>';
-    return;
-  }
+// ─── Unified activity feed rendering ───────────────────────────────────────
+//
+// Each item is one of:
+//   { type: 'event',  id, createdAt, camera, detections, recordingId, source }
+//   { type: 'alert',  id, latestAt,  eventId, camera, ruleNames, labels, detections, recordingId, message }
+//
+// Items are merged, sorted newest-first, filtered by `activeFilter`, and
+// rendered as `.activity-item` rows. The single template keeps the visual
+// language consistent between detections and alerts (one icon + main + actions
+// column) without duplicating structure across two renderers.
 
-  const groups = groupAlertsByEvent(alerts);
-  els.alerts.innerHTML = groups.map((group) => {
-    const titleSuffix = group.ruleNames.length > 1 ? ` (${group.ruleNames.length} rules)` : '';
-    const ruleLabel = group.ruleNames.join(', ') || 'Alert';
-    const labelChips = group.labels.length
-      ? `<div class="alert-label-chips" aria-label="All labels that triggered for this event">${
-          group.labels.map((label) => `<span class="alert-label-chip">${escapeHtml(label)}</span>`).join('')
-        }</div>`
-      : '';
-    const eventTag = group.eventId !== null
-      ? `<span class="muted">Event #${escapeHtml(String(group.eventId))}</span>`
-      : '';
-    return `
-      <div class="item alert-row" data-alert-event-id="${escapeHtml(String(group.eventId ?? ''))}">
-        <div class="item-title">
-          <span>${escapeHtml(ruleLabel)}${titleSuffix}</span>
-          <span>${formatDate(group.latestAt)}</span>
-        </div>
-        ${eventTag}
-        <p class="muted alert-row-meta">${escapeHtml(group.message || 'Alert triggered.')}</p>
-        ${labelChips}
-        <div class="alert-row-badges">${detectionBadges(group.detections)}</div>
-        ${group.recordingId ? `<a class="button-link secondary-link" href="/recordings?recording_id=${encodeURIComponent(group.recordingId)}">View Footage</a>` : ''}
-      </div>
-    `;
-  }).join('');
+function buildActivityItems() {
+  const eventItems = events.map((event) => ({
+    type: 'event',
+    id: event.id,
+    createdAt: event.created_at,
+    camera: eventSourceLabel(event),
+    detections: event.detections || [],
+    recordingId: event.recordings?.[0]?.id ?? null,
+    recordingStatus: event.recording_status || 'none',
+  }));
+  const alertItems = alertGroups.map((group) => ({
+    type: 'alert',
+    id: group.key,
+    createdAt: group.latestAt,
+    eventId: group.eventId,
+    camera: group.camera, // populated below
+    ruleNames: group.ruleNames,
+    labels: group.labels,
+    detections: group.detections,
+    recordingId: group.recordingId,
+    message: group.message,
+  }));
+  // Alerts don't carry a camera name in the grouping step; try to surface it
+  // from the event's `metadata.camera_name` if we can match by event id.
+  const eventsById = new Map(events.map((e) => [e.id, e]));
+  for (const item of alertItems) {
+    if (item.camera) continue;
+    const ev = item.eventId !== null ? eventsById.get(item.eventId) : null;
+    item.camera = ev ? eventSourceLabel(ev) : '';
+  }
+  return [...eventItems, ...alertItems]
+    .filter((item) => item.createdAt)
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 }
 
-function bindDeleteButtons() {
-  document.querySelectorAll('[data-delete-event]').forEach((button) => {
-    button.addEventListener('click', async () => {
-      if (!confirm(`Delete event #${button.dataset.deleteEvent}? This cannot be undone.`)) return;
-      try {
-        await api(`/api/events/${button.dataset.deleteEvent}`, { method: 'DELETE' });
-        await Promise.all([loadStats(), loadEvents()]);
-        bindDeleteButtons();
-      } catch (error) {
-        alert(`Failed to delete event: ${error.message}`);
-      }
+function applyFilter(items) {
+  if (activeFilter === 'detections') return items.filter((i) => i.type === 'event');
+  if (activeFilter === 'alerts') return items.filter((i) => i.type === 'alert');
+  return items;
+}
+
+function eventIcon() {
+  return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg>';
+}
+
+function alertIcon() {
+  return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
+}
+
+function recordingLink(recordingId, label) {
+  if (!recordingId) return '';
+  return `<a class="button-link secondary-link activity-item-action" href="/recordings?recording_id=${encodeURIComponent(recordingId)}">${escapeHtml(label)}</a>`;
+}
+
+function renderActivityItem(item) {
+  const isEvent = item.type === 'event';
+  const icon = isEvent ? eventIcon() : alertIcon();
+  const typeClass = isEvent ? 'activity-item-event' : 'activity-item-alert';
+  const typeLabel = isEvent ? 'Detection' : 'Alert';
+  const title = isEvent
+    ? `Event #${item.id}`
+    : (item.ruleNames?.join(', ') || 'Alert');
+  const titleSuffix = !isEvent && item.ruleNames?.length > 1 ? ` <span class="muted">(${item.ruleNames.length} rules)</span>` : '';
+  const cameraLine = item.camera ? `Camera: ${escapeHtml(item.camera)}` : 'Camera: unknown';
+  const metaLine = isEvent
+    ? `${cameraLine} · ${escapeHtml(item.recordingStatus || 'none')}`
+    : (item.message ? `${cameraLine} · ${escapeHtml(item.message)}` : cameraLine);
+  const labelChips = !isEvent && item.labels?.length
+    ? `<div class="alert-label-chips">${item.labels.map((label) => `<span class="alert-label-chip">${escapeHtml(label)}</span>`).join('')}</div>`
+    : '';
+  const actions = [];
+  if (isEvent && item.recordingId) {
+    actions.push(recordingLink(item.recordingId, 'View Recording'));
+  } else if (!isEvent && item.recordingId) {
+    actions.push(recordingLink(item.recordingId, 'View Footage'));
+  }
+  if (isEvent) {
+    actions.push(`<button class="secondary delete-btn activity-item-action" data-delete-event="${item.id}" type="button">Delete</button>`);
+  }
+  return `
+    <article class="item activity-item ${typeClass}" data-activity-id="${escapeHtml(String(item.id))}" data-activity-type="${item.type}">
+      <div class="activity-item-icon">${icon}</div>
+      <div class="activity-item-main">
+        <div class="activity-item-header">
+          <div class="activity-item-title">
+            <span class="activity-item-type">${typeLabel}</span>
+            <span class="activity-item-name">${title}${titleSuffix}</span>
+          </div>
+          <div class="activity-item-when">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span title="${escapeHtml(formatDate(item.createdAt))}">${escapeHtml(timeAgo(item.createdAt))}</span>
+          </div>
+        </div>
+        <p class="muted activity-item-meta">${metaLine}</p>
+        ${labelChips}
+        <div class="activity-item-badges">${detectionBadges(item.detections)}</div>
+      </div>
+      ${actions.length ? `<div class="activity-item-actions">${actions.join('')}</div>` : ''}
+    </article>
+  `;
+}
+
+function renderEmptyState() {
+  const messages = {
+    all: { title: 'No activity yet', subtitle: 'Detections and alerts will appear here as your cameras report them.' },
+    detections: { title: 'No detections yet', subtitle: 'Detected objects will show up here once the AI starts seeing events.' },
+    alerts: { title: 'No alerts yet', subtitle: 'Alerts from your zone rules will appear here when they fire.' },
+  };
+  const { title, subtitle } = messages[activeFilter] || messages.all;
+  return `
+    <div class="activity-empty-state">
+      <div class="activity-empty-icon" aria-hidden="true">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+      </div>
+      <h2>${title}</h2>
+      <p class="muted">${subtitle}</p>
+    </div>
+  `;
+}
+
+function renderActivityFeed() {
+  const items = applyFilter(buildActivityItems());
+  if (!items.length) {
+    els.activityFeed.innerHTML = renderEmptyState();
+    updateListStatus(0);
+    return;
+  }
+  els.activityFeed.innerHTML = items.map(renderActivityItem).join('');
+  updateListStatus(items.length);
+  bindActivityActions();
+}
+
+function updateListStatus(count) {
+  if (!els.listStatus) return;
+  const labels = { all: 'activity items', detections: 'detections', alerts: 'alerts' };
+  const label = labels[activeFilter] || 'items';
+  if (count === 0) {
+    els.listStatus.textContent = '';
+  } else {
+    els.listStatus.textContent = `Showing ${count} ${label}`;
+  }
+}
+
+function bindActivityActions() {
+  els.activityFeed.querySelectorAll('[data-delete-event]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = button.dataset.deleteEvent;
+      openDeleteModal({
+        kind: 'event',
+        id,
+        body: `Delete event #${id}? This cannot be undone.`,
+        onConfirm: async () => {
+          await api(`/api/events/${id}`, { method: 'DELETE' });
+          window.showToast?.(`Deleted event #${id}.`);
+          await Promise.all([loadStats(), loadEvents()]);
+          renderActivityFeed();
+        },
+      });
     });
   });
+}
+
+// ─── Status cards ───────────────────────────────────────────────────────────
+function setStatusIconState(iconEl, state) {
+  if (!iconEl) return;
+  iconEl.classList.remove('stat-card-icon-ok', 'stat-card-icon-warn', 'stat-card-icon-error');
+  if (state) iconEl.classList.add(`stat-card-icon-${state}`);
+}
+
+function loadStatus() {
+  return api('/api/status').then((status) => {
+    els.statusText.textContent = status.status;
+    const cameraName = status.camera_name ? ` · ${status.camera_name}` : '';
+    els.cameraDetail.textContent = `${status.mode}${cameraName}`;
+    els.uptimeText.textContent = formatUptime(status.uptime_seconds);
+    const isOnline = String(status.status || '').toLowerCase() === 'online' || String(status.status || '').toLowerCase() === 'active';
+    setStatusIconState(els.statusIcon, isOnline ? 'ok' : 'warn');
+  }).catch((error) => {
+    els.statusText.textContent = 'offline';
+    els.cameraDetail.textContent = '';
+    els.uptimeText.textContent = '-';
+    setStatusIconState(els.statusIcon, 'error');
+    window.showToast?.(error.message, true);
+  });
+}
+
+function loadAiStatus() {
+  return api('/api/status/ai').then((aiStatus) => {
+    const modelLabel = aiStatus.model_name || aiStatus.active_backend || 'unknown';
+    els.aiModeText.textContent = modelLabel;
+    els.aiModeText.className = `stat-card-value ai-mode ${String(aiStatus.mode || '').toLowerCase().replace(/\s+/g, '-')}`;
+    const loadedText = aiStatus.model_loaded ? 'loaded' : 'not loaded';
+    const errorText = aiStatus.error ? ` · ${aiStatus.error}` : '';
+    els.aiStatusDetail.textContent = `${aiStatus.mode} · ${loadedText}${errorText}`;
+    if (aiStatus.model_loaded) setStatusIconState(els.aiStatusIcon, 'ok');
+    else if (aiStatus.error) setStatusIconState(els.aiStatusIcon, 'error');
+    else setStatusIconState(els.aiStatusIcon, 'warn');
+  }).catch((error) => {
+    els.aiModeText.textContent = 'unknown';
+    els.aiModeText.className = 'stat-card-value ai-mode model-failed';
+    els.aiStatusDetail.textContent = error.message;
+    setStatusIconState(els.aiStatusIcon, 'error');
+  });
+}
+
+// ─── Stats + activity data loaders ──────────────────────────────────────────
+async function loadStats() {
+  try {
+    const stats = await api('/api/stats');
+    els.totalEvents.textContent = stats.matched_object_events ?? stats.total_events ?? 0;
+    els.totalAlerts.textContent = stats.total_alerts ?? 0;
+  } catch (error) {
+    window.showToast?.(error.message, true);
+  }
+}
+
+async function loadEvents() {
+  try {
+    events = await api('/api/events?with_recording=true');
+  } catch (error) {
+    events = [];
+    window.showToast?.(error.message, true);
+  }
+}
+
+async function loadAlerts() {
+  try {
+    const alerts = await api('/api/alerts');
+    alertGroups = groupAlertsByEvent(alerts);
+    if (els.deleteAllAlertsBtn) {
+      const canManage = authState.user?.role === 'admin';
+      els.deleteAllAlertsBtn.hidden = !(canManage && alerts.length > 0);
+    }
+  } catch (error) {
+    alertGroups = [];
+    window.showToast?.(error.message, true);
+  }
 }
 
 async function loadConfiguredLabels() {
@@ -216,111 +408,121 @@ async function loadConfiguredLabels() {
     }
     configuredLabels = labels;
   } catch {
-    // Show all labels if settings unavailable.
+    // Show all labels if settings are unavailable.
   }
 }
 
+// ─── Auth & admin-only controls ─────────────────────────────────────────────
 async function loadAuth() {
   const authInfo = await api('/api/auth/me');
   authState = { user: authInfo.user, csrfToken: authInfo.csrf_token };
-  if (authInfo.user.role !== 'admin') {
-    if (els.deleteAllEventsBtn) els.deleteAllEventsBtn.hidden = true;
-    if (els.deleteAllAlertsBtn) els.deleteAllAlertsBtn.hidden = true;
-  } else {
-    if (els.deleteAllEventsBtn) {
-      els.deleteAllEventsBtn.hidden = false;
-      els.deleteAllEventsBtn.addEventListener('click', async () => {
-        if (!confirm('Delete ALL events? This cannot be undone.')) return;
-        try {
-          await api('/api/events', { method: 'DELETE' });
-          await Promise.all([loadStats(), loadEvents()]);
-          bindDeleteButtons();
-        } catch (error) {
-          alert(`Failed to delete events: ${error.message}`);
-        }
+  const isAdmin = authInfo.user?.role === 'admin';
+  if (els.deleteAllEventsBtn) {
+    els.deleteAllEventsBtn.hidden = !isAdmin;
+    if (isAdmin) {
+      els.deleteAllEventsBtn.addEventListener('click', () => {
+        openDeleteModal({
+          kind: 'events',
+          body: 'Delete ALL events? This cannot be undone.',
+          onConfirm: async () => {
+            await api('/api/events', { method: 'DELETE' });
+            window.showToast?.('All events cleared.');
+            await Promise.all([loadStats(), loadEvents()]);
+            renderActivityFeed();
+          },
+        });
       });
     }
-    if (els.deleteAllAlertsBtn) {
-      els.deleteAllAlertsBtn.hidden = false;
-      els.deleteAllAlertsBtn.addEventListener('click', async () => {
-        if (!confirm('Delete ALL alert history? This cannot be undone.')) return;
-        try {
+  }
+  if (els.deleteAllAlertsBtn && isAdmin) {
+    els.deleteAllAlertsBtn.addEventListener('click', () => {
+      openDeleteModal({
+        kind: 'alerts',
+        body: 'Delete ALL alert history? This cannot be undone.',
+        onConfirm: async () => {
           await api('/api/alerts', { method: 'DELETE' });
+          window.showToast?.('All alerts cleared.');
           await Promise.all([loadAlerts(), loadStats()]);
-        } catch (error) {
-          alert(`Failed to delete alert history: ${error.message}`);
-        }
+          renderActivityFeed();
+        },
       });
-    }
+    });
   }
 }
 
-async function loadStatus() {
+// ─── Delete confirmation modal (mirrors cameras.js / recordings.js) ────────
+function openDeleteModal({ kind, id, body, onConfirm }) {
+  pendingDelete = { kind, id, onConfirm };
+  els.deleteModalBody.textContent = body;
+  els.deleteModal.hidden = false;
+  document.body.classList.add('modal-open');
+  els.deleteConfirmBtn.focus();
+}
+
+function closeDeleteModal() {
+  els.deleteModal.hidden = true;
+  document.body.classList.remove('modal-open');
+  pendingDelete = null;
+}
+
+els.deleteModalCloseBtn?.addEventListener('click', closeDeleteModal);
+els.deleteCancelBtn?.addEventListener('click', closeDeleteModal);
+els.deleteModal?.addEventListener('click', (e) => {
+  if (e.target === els.deleteModal) closeDeleteModal();
+});
+els.deleteConfirmBtn?.addEventListener('click', async () => {
+  if (!pendingDelete?.onConfirm) {
+    closeDeleteModal();
+    return;
+  }
+  const { onConfirm } = pendingDelete;
+  closeDeleteModal();
   try {
-    const [status, aiStatus] = await Promise.all([api('/api/status'), api('/api/status/ai')]);
-    els.statusText.textContent = status.status;
-    const cameraName = status.camera_name ? ` · ${status.camera_name}` : '';
-    els.cameraDetail.textContent = `${status.mode}${cameraName}`;
-    els.uptimeText.textContent = formatUptime(status.uptime_seconds);
-    const modelLabel = aiStatus.model_name || aiStatus.active_backend;
-    els.aiModeText.textContent = modelLabel;
-    els.aiModeText.className = `ai-mode ${aiStatus.mode.toLowerCase().replace(/\s+/g, '-')}`;
-    const loadedText = aiStatus.model_loaded ? 'loaded' : 'not loaded';
-    const errorText = aiStatus.error ? ` · ${aiStatus.error}` : '';
-    els.aiStatusDetail.textContent = `${aiStatus.mode} · ${loadedText}${errorText}`;
+    await onConfirm();
   } catch (error) {
-    els.statusText.textContent = 'offline';
-    els.cameraDetail.textContent = '';
-    els.uptimeText.textContent = '-';
-    els.aiModeText.textContent = 'unknown';
-    els.aiModeText.className = 'ai-mode model-failed';
-    els.aiStatusDetail.textContent = error.message;
+    window.showToast?.(error.message, true);
   }
-}
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !els.deleteModal.hidden) closeDeleteModal();
+});
 
-async function loadStats() {
-  try {
-    const stats = await api('/api/stats');
-    els.totalEvents.textContent = stats.matched_object_events ?? stats.total_events;
-    els.totalAlerts.textContent = stats.total_alerts;
-  } catch {
-    // Keep last values on failure.
-  }
-}
+// ─── Filter pills ───────────────────────────────────────────────────────────
+els.filterPills.forEach((pill) => {
+  pill.addEventListener('click', () => {
+    activeFilter = pill.dataset.filter;
+    els.filterPills.forEach((other) => {
+      const active = other === pill;
+      other.classList.toggle('active', active);
+      other.setAttribute('aria-selected', String(active));
+    });
+    renderActivityFeed();
+  });
+});
 
-async function loadEvents() {
-  try {
-    renderEvents(await api('/api/events?with_recording=true'));
-  } catch {
-    els.events.innerHTML = '<div class="empty">Could not load events.</div>';
-  }
-}
-
-async function loadAlerts() {
-  try {
-    const alerts = await api('/api/alerts');
-    renderAlerts(alerts);
-    if (els.deleteAllAlertsBtn && authState.user?.role === 'admin') {
-      els.deleteAllAlertsBtn.hidden = alerts.length === 0;
-    }
-  } catch {
-    els.alerts.innerHTML = '<div class="empty">Could not load alerts.</div>';
-  }
-}
-
+// ─── Refresh orchestration ──────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([loadStatus(), loadStats(), loadEvents(), loadAlerts()]);
-  bindDeleteButtons();
+  await Promise.all([loadStatus(), loadAiStatus(), loadStats(), loadEvents(), loadAlerts()]);
+  renderActivityFeed();
 }
 
-loadAuth().then(async () => { await loadConfiguredLabels(); await refreshAll(); }).catch(() => {});
-setInterval(loadStatus, 3000);
-setInterval(() => loadStats().catch(() => {}), 10000);
-
-// Re-render the dashboard's status / stats / events / alerts when the
-// user's date_format / time_format changes in another tab. The 3s/10s
-// polling timers will keep these fresh on their own; this hook just makes
-// the change feel instant instead of waiting for the next tick.
+// Re-render when the user's date_format / time_format changes in another tab
+// (driven by utils.js daygleDatePrefsChanged hook). 5s status / 30s activity
+// polls keep things fresh in the meantime.
 window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
-  if (typeof refreshAll === 'function') refreshAll().catch(() => {});
+  renderActivityFeed();
 };
+
+loadAuth()
+  .then(async () => {
+    await loadConfiguredLabels();
+    await refreshAll();
+  })
+  .catch((error) => window.showToast?.(error.message, true));
+
+setInterval(() => { loadStatus(); loadAiStatus(); }, 5000);
+setInterval(() => { loadStats().catch(() => {}); }, 10000);
+setInterval(() => {
+  loadEvents().then(renderActivityFeed).catch(() => {});
+  loadAlerts().then(renderActivityFeed).catch(() => {});
+}, 30000);

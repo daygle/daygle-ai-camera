@@ -1863,3 +1863,318 @@ input[type="file"] { padding: 10px; }
   border-radius: 999px;
 }
 
+/* ─── Dashboard ────────────────────────────────────────────────────────── */
+.hero-action-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.hero-action-link:hover {
+  border-color: rgba(71, 214, 255, 0.45);
+  color: var(--accent);
+}
+
+/* Stat cards: override the global `.stats-grid .card span/strong/small`
+   rules so the new head + value + sub layout renders correctly. The icon
+   span gets its own styling so the muted/uppercase label rule doesn't
+   leak into it via the SVG's `currentColor`. */
+.stats-grid .stat-card { display: grid; gap: 2px; }
+.stat-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.stat-card-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.stat-card-icon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: rgba(71, 214, 255, 0.08);
+  color: var(--accent);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.stat-card-icon-ok {
+  border-color: rgba(73, 230, 163, 0.3);
+  background: rgba(73, 230, 163, 0.1);
+  color: var(--success);
+}
+.stat-card-icon-warn {
+  border-color: rgba(248, 197, 93, 0.3);
+  background: rgba(248, 197, 93, 0.1);
+  color: #f8c55d;
+}
+.stat-card-icon-error {
+  border-color: rgba(255, 92, 138, 0.3);
+  background: rgba(255, 92, 138, 0.1);
+  color: var(--danger);
+}
+.stat-card-value {
+  display: block;
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: -.01em;
+  line-height: 1.1;
+  margin-top: 8px;
+}
+.stat-card-value.ai-mode {
+  font-size: 22px;
+  letter-spacing: .04em;
+  margin-top: 10px;
+}
+.stat-card-sub {
+  display: block;
+  margin-top: 6px;
+  line-height: 1.4;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Activity feed card + filter pills */
+.activity-card { display: grid; gap: 16px; }
+.activity-toolbar-actions {
+  flex-shrink: 0;
+  margin: 0 0 0 auto;
+  padding: 0;
+  border-top: 0;
+  justify-content: flex-end;
+}
+.activity-filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.activity-filter-group {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 4px;
+  gap: 2px;
+}
+.activity-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.activity-filter-pill:hover { color: var(--text); }
+.activity-filter-pill.active {
+  background: linear-gradient(135deg, var(--accent), var(--success));
+  color: #04111c;
+}
+.activity-status {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  min-height: 1em;
+}
+
+/* Activity list (overrides the global `.list` max-height so the feed
+   can grow with the viewport) */
+.activity-list {
+  gap: 10px;
+  max-height: calc(100vh - 320px);
+}
+
+/* Activity item: 3-column layout (icon | main | actions) modeled on
+   the recordings page's `.recording-row` for visual consistency. */
+.activity-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 16px;
+}
+.activity-item-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  flex-shrink: 0;
+  border: 1px solid;
+}
+.activity-item-event .activity-item-icon {
+  border-color: rgba(71, 214, 255, 0.3);
+  background: rgba(71, 214, 255, 0.08);
+  color: var(--accent);
+}
+.activity-item-alert .activity-item-icon {
+  border-color: rgba(139, 92, 246, 0.3);
+  background: rgba(139, 92, 246, 0.12);
+  color: #c9b8ff;
+}
+.activity-item-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.activity-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.activity-item-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.activity-item-type {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(71, 214, 255, 0.12);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid rgba(71, 214, 255, 0.3);
+  flex-shrink: 0;
+}
+.activity-item-alert .activity-item-type {
+  background: rgba(139, 92, 246, 0.14);
+  color: #c9b8ff;
+  border-color: rgba(139, 92, 246, 0.35);
+}
+.activity-item-name {
+  font-weight: 900;
+  font-size: 14px;
+}
+.activity-item-when {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.activity-item-when svg { opacity: 0.7; }
+.activity-item-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.activity-item-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  line-height: 1.2;
+}
+.activity-item .detection {
+  margin: 4px 6px 0 0;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+.activity-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.activity-item-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 11px;
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* Empty state (mirrors recordings-empty-state) */
+.activity-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 56px 20px;
+  gap: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--muted);
+}
+.activity-empty-state h2 {
+  margin: 0;
+  font-size: 17px;
+  color: var(--text);
+  font-weight: 800;
+}
+.activity-empty-state p {
+  margin: 0;
+  font-size: 13px;
+  max-width: 38ch;
+}
+.activity-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: rgba(71, 214, 255, 0.06);
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+@media (max-width: 760px) {
+  .activity-item {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "icon main"
+      "actions actions";
+  }
+  .activity-item-icon { grid-area: icon; }
+  .activity-item-main { grid-area: main; }
+  .activity-item-actions {
+    grid-area: actions;
+    justify-content: stretch;
+  }
+  .activity-item-action { flex: 1; }
+  .activity-filter-row { flex-direction: column; align-items: stretch; }
+  .activity-filter-group { align-self: flex-start; }
+  .hero .cam-hero-action { flex-wrap: wrap; }
+  .hero-action-link { flex: 1 1 140px; justify-content: center; }
+}
+
