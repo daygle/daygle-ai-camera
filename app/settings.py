@@ -12,20 +12,6 @@ CONFIG_ENV_VAR = "DAYGLE_CONFIG"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "server": {"host": "0.0.0.0", "port": 8080},
-    "camera": {
-        "backend": "onvif",
-        "device": "rtsp",
-        "width": 1280,
-        "height": 720,
-        "fps": 15,
-        "flip": "none",
-        "stream_url": "",
-        "host": "",
-        "port": 554,
-        "path": "stream1",
-        "username": "",
-        "password": "",
-    },
     "ai": {
         "enabled": True,
         "backend": "onnx",

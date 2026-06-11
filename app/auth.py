@@ -102,10 +102,6 @@ class AuthService:
                 """
             )
             db.execute("DELETE FROM user_sessions WHERE expires_at <= ?", (utc_now(),))
-            existing_cols = {row[1] for row in db.execute("PRAGMA table_info(users)").fetchall()}
-            for col in ("first_name", "last_name", "email"):
-                if col not in existing_cols:
-                    db.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
 
     def users_exist(self) -> bool:
         with self.connect() as db:
