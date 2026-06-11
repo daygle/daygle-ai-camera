@@ -170,11 +170,11 @@ function createLiveSettingsSection() {
   section.innerHTML = `
     <div class="settings-section-header"><div class="settings-section-icon">⚡</div><div><h2>Live performance</h2><p class="settings-section-subtitle">Tune refresh rates and detection frequency to balance responsiveness with resource usage.</p></div></div>
     <form id="liveSettingsForm" class="form-grid">
-      <label><span>Snapshot Refresh</span><input name="snapshot_refresh_ms" type="number" min="150" max="5000" step="10" placeholder="500" /><span class="field-help">How often the live camera image updates. Lower = more responsive, higher = less bandwidth.</span></label>
-      <label><span>Detection Status Refresh</span><input name="detection_status_refresh_ms" type="number" min="500" max="15000" step="100" placeholder="2000" /><span class="field-help">How often the detection summary panel updates with new object counts.</span></label>
-      <label><span>Detection Interval</span><input name="detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="0.25" /><span class="field-help">How often AI checks each camera for motion and objects. Lower = faster alerts, higher CPU.</span></label>
-      <label><span>Fallback Event Merge (s)</span><input name="event_debounce_seconds" type="number" min="0" max="300" step="1" placeholder="10" /><span class="field-help">Merges detections within this window into one event. Per-object cooldowns on the Zones page override this.</span></label>
-      <label><span>Background Alerts</span><select name="background_detection_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select><span class="field-help">Keep checking cameras even when no Live Cameras page is open.</span></label>
+      <label><span>Snapshot Refresh</span><input name="snapshot_refresh_ms" type="number" min="150" max="5000" step="10" placeholder="500" /><span class="field-help">How often the live camera image updates. Lower = more responsive, higher = less bandwidth. Default: 500ms</span></label>
+      <label><span>Detection Status Refresh</span><input name="detection_status_refresh_ms" type="number" min="500" max="15000" step="100" placeholder="2000" /><span class="field-help">How often the detection summary panel updates with new object counts. Default: 2000ms</span></label>
+      <label><span>Detection Interval</span><input name="detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="0.25" /><span class="field-help">How often AI checks each camera for motion and objects. Lower = faster alerts, higher CPU. Default: 0.5s</span></label>
+      <label><span>Fallback Event Merge (s)</span><input name="event_debounce_seconds" type="number" min="0" max="300" step="1" placeholder="10" /><span class="field-help">Merges detections within this window into one event. Per-object cooldowns on the Zones page override this. Default: 10s</span></label>
+      <label><span>Background Alerts</span><select name="background_detection_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select><span class="field-help">Keep checking cameras even when no Live Cameras page is open. Default: Enabled</span></label>
       <button type="submit">Save Live Settings</button>
     </form>
   `;
@@ -211,11 +211,11 @@ function createPushNotificationSection() {
   section.innerHTML = `
     <div class="settings-section-header"><div class="settings-section-icon">🔔</div><div><h2>Push notifications</h2><p class="settings-section-subtitle">Get instant alerts on your Android device via the ntfy app. Per-rule push toggles are on the Zones page.</p></div></div>
     <form id="pushSettingsForm" class="form-grid">
-      <label><span>Push Alerts</span><select name="enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select><span class="field-help">Master toggle for push notifications.</span></label>
-      <label><span>Server URL</span><input name="server_url" placeholder="https://ntfy.sh" /><span class="field-help">NTFY server address. Use <code>https://ntfy.sh</code> for the free hosted service.</span></label>
-      <label><span>Topic Name</span><input name="topic" placeholder="my-camera-alerts" /><span class="field-help">Subscribe your phone to this exact topic name to receive alerts.</span></label>
-      <label><span>Priority</span><select name="priority"><option value="default">Default</option><option value="min">Min</option><option value="low">Low</option><option value="high">High</option><option value="urgent">Urgent</option></select><span class="field-help">Controls how the notification is presented on your device.</span></label>
-      <label><span>Username</span><input name="username" placeholder="Optional" autocomplete="off" /><span class="field-help">Required only if your NTFY server requires authentication.</span></label>
+      <label><span>Push Alerts</span><select name="enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select><span class="field-help">Master toggle for push notifications. Default: Disabled</span></label>
+      <label><span>Server URL</span><input name="server_url" placeholder="https://ntfy.sh" /><span class="field-help">NTFY server address. Use <code>https://ntfy.sh</code> for the free hosted service. Default: https://ntfy.sh</span></label>
+      <label><span>Topic Name</span><input name="topic" placeholder="my-camera-alerts" /><span class="field-help">Subscribe your phone to this exact topic name to receive alerts. Default: (none)</span></label>
+      <label><span>Priority</span><select name="priority"><option value="default">Default</option><option value="min">Min</option><option value="low">Low</option><option value="high">High</option><option value="urgent">Urgent</option></select><span class="field-help">Controls how the notification is presented on your device. Default: Default</span></label>
+      <label><span>Username</span><input name="username" placeholder="Optional" autocomplete="off" /><span class="field-help">Required only if your NTFY server requires authentication. Default: (none)</span></label>
       <label><span>Password</span><input name="password" type="password" placeholder="Optional" autocomplete="new-password" /><span class="field-help">Required only if your NTFY server requires authentication.</span></label>
       <button type="submit">Save Push Settings</button>
       <button id="testPushBtn" class="secondary" type="button">Send Test Notification</button>
@@ -237,14 +237,14 @@ function createEmailDeliverySection() {
   section.innerHTML = `
     <div class="settings-section-header"><div class="settings-section-icon">✉️</div><div><h2>Email delivery</h2><p class="settings-section-subtitle">Configure your SMTP mail server to send alert emails. Per-rule email toggles are on the Zones page.</p></div></div>
     <form id="emailSettingsForm" class="form-grid">
-      <label><span>Email Alerts</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select><span class="field-help">Master toggle for email notifications.</span></label>
-      <label><span>SMTP Host</span><input name="host" placeholder="smtp.gmail.com" /><span class="field-help">Your mail server hostname (e.g. smtp.gmail.com, smtp-mail.outlook.com).</span></label>
-      <label><span>SMTP Port</span><input name="port" type="number" min="1" max="65535" placeholder="587" /><span class="field-help">Common ports: 587 (STARTTLS), 465 (SSL), 25 (unencrypted).</span></label>
-      <label><span>From Address</span><input name="from_address" type="email" placeholder="alerts@example.com" /><span class="field-help">The sender address that appears in outgoing alert emails.</span></label>
-      <label><span>SMTP Username</span><input name="username" placeholder="Your login" /><span class="field-help">Authentication username for your mail server.</span></label>
-      <label><span>SMTP Password</span><input name="password" type="password" placeholder="Your password" autocomplete="new-password" /><span class="field-help">Authentication password or app password for your mail server.</span></label>
-      <label><span>STARTTLS</span><select name="use_tls"><option value="true">Enabled</option><option value="false">Disabled</option></select><span class="field-help">Encrypts the connection using STARTTLS (recommended for port 587).</span></label>
-      <label><span>SSL</span><select name="use_ssl"><option value="false">Disabled</option><option value="true">Enabled</option></select><span class="field-help">Encrypts the connection using implicit SSL (recommended for port 465).</span></label>
+      <label><span>Email Alerts</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select><span class="field-help">Master toggle for email notifications. Default: Disabled</span></label>
+      <label><span>SMTP Host</span><input name="host" placeholder="smtp.gmail.com" /><span class="field-help">Your mail server hostname (e.g. smtp.gmail.com, smtp-mail.outlook.com). Default: (none)</span></label>
+      <label><span>SMTP Port</span><input name="port" type="number" min="1" max="65535" placeholder="587" /><span class="field-help">Common ports: 587 (STARTTLS), 465 (SSL), 25 (unencrypted). Default: 587</span></label>
+      <label><span>From Address</span><input name="from_address" type="email" placeholder="alerts@example.com" /><span class="field-help">The sender address that appears in outgoing alert emails. Default: (none)</span></label>
+      <label><span>SMTP Username</span><input name="username" placeholder="Your login" /><span class="field-help">Authentication username for your mail server. Default: (none)</span></label>
+      <label><span>SMTP Password</span><input name="password" type="password" placeholder="Your password" autocomplete="new-password" /><span class="field-help">Authentication password or app password for your mail server. Default: (none)</span></label>
+      <label><span>STARTTLS</span><select name="use_tls"><option value="true">Enabled</option><option value="false">Disabled</option></select><span class="field-help">Encrypts the connection using STARTTLS (recommended for port 587). Default: Enabled</span></label>
+      <label><span>SSL</span><select name="use_ssl"><option value="false">Disabled</option><option value="true">Enabled</option></select><span class="field-help">Encrypts the connection using implicit SSL (recommended for port 465). Default: Disabled</span></label>
       <button type="submit">Save Mail Server</button>
       <label><span>Test Recipient</span><input id="testEmailRecipient" type="email" placeholder="you@example.com" /><span class="field-help">Enter an address to send a test email to.</span></label>
       <button id="testEmailBtn" class="secondary" type="button">Send Test Email</button>
