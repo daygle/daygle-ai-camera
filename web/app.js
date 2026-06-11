@@ -429,6 +429,9 @@ async function loadAuth() {
       });
     }
   }
+  if (els.deleteAllAlertsBtn) {
+    els.deleteAllAlertsBtn.hidden = !isAdmin;
+  }
   if (els.deleteAllAlertsBtn && isAdmin) {
     els.deleteAllAlertsBtn.addEventListener('click', () => {
       openDeleteModal({
@@ -518,6 +521,5 @@ loadAuth()
 setInterval(() => { loadStatus(); loadAiStatus(); }, 5000);
 setInterval(() => { loadStats().catch(() => {}); }, 10000);
 setInterval(() => {
-  loadEvents().then(renderActivityFeed).catch(() => {});
-  loadAlerts().then(renderActivityFeed).catch(() => {});
+  Promise.all([loadEvents(), loadAlerts()]).then(renderActivityFeed).catch(() => {});
 }, 30000);

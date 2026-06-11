@@ -294,21 +294,15 @@ class EventDatabase:
                       FROM detections d
                      WHERE d.event_id = r.event_id) AS detection_labels
             FROM recordings r
+            WHERE NOT EXISTS (
+                SELECT 1 FROM recording_labels rl WHERE rl.recording_id = r.id
+            )
             """
         ).fetchall()
         total = 0
         generic = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous', ''}
         for row in rows:
             recording_id = int(row['recording_id'])
-            existing = {
-                str(existing_row['label'])
-                for existing_row in db.execute(
-                    "SELECT label FROM recording_labels WHERE recording_id = ?",
-                    (recording_id,),
-                ).fetchall()
-            }
-            if existing:
-                continue
             labels: list[str] = []
             if row['detection_labels']:
                 for label in str(row['detection_labels']).split(','):
@@ -348,7 +342,7 @@ class EventDatabase:
                 params.append(camera_id)
             if alerted_only:
                 conditions.append(
-                    "EXISTS (SELECT 1 FROM alert_history ah WHERE ah.event_id = r.event_id)"
+                    "EXISTS (SELECT 1 FROM alert_history ah WHERE ah.recording_id = r.id OR (r.event_id IS NOT NULL AND ah.event_id = r.event_id))"
                 )
             if started_after:
                 conditions.append("r.started_at >= ?")
@@ -729,7 +723,7 @@ class EventDatabase:
         ).fetchall()
         grouped: dict[int, list[str]] = {int(rid): [] for rid in recording_ids}
         for row in rows:
-            grouped.setdefault(int(row['recording_id']), []).append(str(row['label']))
+            grouped[int(row['recording_id'])].append(str(row['label']))
         return grouped
 
     def _recording_row(self, row: sqlite3.Row) -> dict[str, Any]:

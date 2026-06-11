@@ -63,7 +63,7 @@ class AlertEngine:
                     'rule_name': rule_name,
                     'label': label,
                     'confidence': confidence,
-                    'message': f'Alert triggered (confidence {confidence:.2%})'
+                    'message': f'Alert triggered: {label} detected ({confidence:.2%})'
                 })
 
         return alerts
