@@ -2109,6 +2109,7 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
             if snap_path.exists():
                 raw_bytes = snap_path.read_bytes()
                 db_detections = event.get('detections') or []
+                _email_min_conf = compute_minimum_rule_confidence()
                 overlay_detections = [
                     {
                         'label': d.get('label'),
@@ -2116,6 +2117,7 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
                         'box': {'x': d.get('x', 0), 'y': d.get('y', 0), 'width': d.get('width', 0), 'height': d.get('height', 0)},
                     }
                     for d in db_detections
+                    if float(d.get('confidence') or 0) >= _email_min_conf
                 ]
                 snapshot_bytes = render_live_snapshot_jpeg_overlay(raw_bytes, overlay_detections)
         except Exception as exc:
