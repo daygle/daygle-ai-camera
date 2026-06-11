@@ -78,7 +78,6 @@ storage:
   snapshots_dir: ${DATA_DIR}/snapshots
   events_dir: ${DATA_DIR}/events
   recordings_dir: ${DATA_DIR}/recordings
-  plates_dir: ${DATA_DIR}/plates
 EOF
 fi
 

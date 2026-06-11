@@ -1,6 +1,6 @@
 # Daygle AI Camera
 
-Daygle AI Camera is a self-hosted AI camera platform with a FastAPI backend, SQLite storage, session authentication, a browser dashboard, multi-camera ONVIF/RTSP support, monitoring zones, ONNX YOLO object detection, ANPR, push notifications, and an audit log.
+Daygle AI Camera is a self-hosted AI camera platform with a FastAPI backend, SQLite storage, session authentication, a browser dashboard, multi-camera ONVIF/RTSP support, monitoring zones, ONNX YOLO object detection, push notifications, and an audit log.
 
 The app is designed to be configured entirely from the web UI. `config.yaml` is only a small bootstrap file for settings the app must know before the database and dashboard can load.
 
@@ -11,9 +11,8 @@ The app is designed to be configured entirely from the web UI. `config.yaml` is 
 - Admin/viewer roles with admin-only settings and user management.
 - Profile page for timezone, date/time format, and password changes.
 - **Multi-camera management**: add, configure, and monitor multiple RTSP/ONVIF cameras from the web UI.
-- **Monitoring zones**: draw polygon zones on the live view and assign per-zone object rules, motion rules, cooldowns, email recipients, and ANPR areas.
+- **Monitoring zones**: draw polygon zones on the live view and assign per-zone object rules, motion rules, cooldowns, and email recipients.
 - Web-managed AI settings for ONNX detection. Supports YOLOv8 Nano through Extra-Large (n/s/m/l/x).
-- Modular ANPR/ALPR pipeline for vehicle detections, plate OCR, plate search, and plate alerts.
 - Web-managed alert rules with optional SMTP email delivery and push notification delivery (ntfy-compatible).
 - **Push notifications**: send alerts to any ntfy-compatible server with optional authentication and priority.
 - Web-managed system settings for recording policy, retention, storage directories, and login security.
@@ -33,7 +32,6 @@ The app is designed to be configured entirely from the web UI. `config.yaml` is 
 - `pip` and optionally `python3-venv`.
 - A modern browser.
 - Optional: an ONNX YOLO model file for object detection.
-- EasyOCR for ANPR OCR (included in `requirements.txt`).
 
 ### Debian Server Deployment
 
@@ -203,7 +201,7 @@ Add and manage multiple RTSP/ONVIF cameras. Each camera can have:
 
 - Name, backend (`onvif` / `rtsp`), stream URL or ONVIF credentials, width, height, and FPS.
 - Per-camera motion detection toggle and email notification toggle.
-- Per-camera object detection and ANPR enable/disable.
+- Per-camera object detection enable/disable.
 - Per-camera recording policy (alert-triggered or continuous).
 
 After saving cameras, configure per-camera monitoring areas from the Zones page.
@@ -217,7 +215,6 @@ Draw polygon monitoring zones directly on the live camera view. For each zone yo
 - Zone name and enable/disable state.
 - Motion monitoring: minimum confidence and cooldown.
 - Object rules per label: enable/disable, record on detect, alert on detect, minimum confidence, cooldown, email recipients, and active time window.
-- ANPR monitoring enable/disable.
 
 Zone-based rules replace the global single-camera alert rules when zones are configured for a camera.
 
@@ -246,10 +243,9 @@ Route: `/settings`
 
 - Email delivery: SMTP host, port, username, password, from address, STARTTLS, and SSL.
 - Push notifications: ntfy-compatible server URL, topic, priority, and optional username/password.
-- ANPR: enable/disable, OCR backend, confidence threshold, and vehicle labels.
 - Recording clips: pre-event seconds, post-event seconds, extension step, max clip seconds, and file format.
 - Retention: auto purge, retention days, max storage GB, and manual purge.
-- Storage: data, snapshots, events, recordings, and plates directories.
+- Storage: data, snapshots, events, and recordings directories.
 - Login security: session timeout, max login attempts, lockout minutes.
 - Software updates: check for new releases and apply updates from GitHub directly from the browser.
 - Database: download a SQLite backup or restore from a previously downloaded backup file.
@@ -264,40 +260,6 @@ Most ONVIF-compatible cameras expose the video itself as an RTSP stream. Open `/
 - enter `host`, `username`, `password`, optional `port` (default `554`), and `path` so Daygle can build the RTSP URL.
 
 Then open `/live`; `/api/live/snapshot` will return a JPEG pulled from the stream.
-
-### ANPR
-
-Route: `/anpr`
-
-ANPR runs as a separate pipeline after object detection:
-
-```text
-Camera/Image -> YOLO Object Detection -> Vehicle Detection -> Plate Detection -> Plate OCR -> Plate Event -> Search / Alerts
-```
-
-Vehicle labels are configurable and default to `car`, `truck`, `bus`, and `motorcycle`. When one is detected, the ANPR pipeline writes a plate crop artifact, runs OCR, stores a plate event, and links it back to the original event and any recording.
-
-ANPR can be enabled or disabled per camera and per monitoring zone from the Cameras and Zones pages.
-
-Supported OCR backends:
-
-- `easyocr`: EasyOCR backend (default, included in `requirements.txt`).
-
-Search examples:
-
-```text
-ABC123
-1ABC2D
-XYZ999
-```
-
-Plate alert examples:
-
-- Specific plate: `ABC123`
-- Unknown plate: any plate that is not whitelisted or blacklisted.
-- Blacklisted plate: any plate marked blacklisted.
-
-Admins can whitelist or blacklist plates and add notes such as `Family Car`, `Delivery Driver`, or `Blacklisted`.
 
 ### Audit Log
 
@@ -361,7 +323,6 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `GET` | `/users` | Admin user management |
 | `GET` | `/ai` | Admin AI settings |
 | `GET` | `/settings` | Admin system settings (email, push, recording, storage, updates, backup) |
-| `GET` | `/anpr` | Plate search, history, details, and alert rules |
 | `GET` | `/audit` | Admin audit log |
 | `GET` | `/recordings` | Recordings list |
 | `GET` | `/recordings/timeline` | Day-view recording timeline |
@@ -379,13 +340,6 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `GET` | `/api/recordings` | List recordings |
 | `GET` | `/api/recordings/{id}/stream` | Stream recording media |
 | `POST` | `/api/recordings/purge` | Admin purge using retention settings |
-| `GET` | `/api/plates` | Recent vehicle plates |
-| `GET` | `/api/plates/{id}` | Plate details and history |
-| `GET` | `/api/plates/search` | Search plate events |
-| `POST` | `/api/plates/whitelist` | Admin whitelist plate |
-| `POST` | `/api/plates/blacklist` | Admin blacklist plate |
-| `GET/POST` | `/api/plate-alerts` | View/create plate alert rules |
-| `PUT/DELETE` | `/api/plate-alerts/{id}` | Edit/delete plate alert rules |
 | `GET/POST` | `/api/users` | Admin list/create users |
 | `PATCH` | `/api/users/{id}` | Admin role/status/password updates |
 | `GET/PUT` | `/api/settings/ai` | Admin AI settings |
@@ -403,7 +357,6 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `GET` | `/api/settings/system/database/backup` | Download SQLite backup |
 | `POST` | `/api/settings/system/database/restore` | Restore from a SQLite backup |
 | `PUT` | `/api/settings/system/camera` | Admin single-camera settings (legacy) |
-| `GET/PUT` | `/api/settings/anpr` | Admin ANPR settings |
 | `PUT` | `/api/settings/system/live` | Admin live detection settings |
 | `PUT` | `/api/settings/system/recording` | Admin recording settings |
 | `PUT` | `/api/settings/system/storage` | Admin storage settings |
@@ -426,9 +379,6 @@ Core tables:
 - `detections`
 - `alert_history`
 - `recordings`
-- `vehicle_plates`
-- `plate_events`
-- `plate_alert_rules`
 - `audit_log`
 
 Useful `app_settings` keys:
@@ -438,7 +388,6 @@ Useful `app_settings` keys:
 - `alert_push`
 - `camera`
 - `cameras`
-- `anpr`
 - `live`
 - `recording`
 - `storage`
@@ -512,13 +461,6 @@ The SQLite database contains all events, detections, recordings metadata, settin
 
 - **Backup**: open `/settings` → **Database** → **Download Backup** to download a timestamped SQLite file.
 - **Restore**: upload a previously downloaded backup to replace the live database. A safety backup of the current database is created automatically before the restore completes.
-
-## ANPR Limitations
-
-- Plate crop extraction is a modular placeholder in uploaded-image workflows; camera backends can replace it with real image crops.
-- EasyOCR is included as a dependency and may require additional platform packages on some systems.
-- EasyOCR (PyTorch) runs in an isolated worker process. On hardware that lacks the CPU instructions the prebuilt PyTorch wheel expects, inference can die with a fatal `SIGILL` (illegal instruction). Because the worker is isolated, such a crash only disables ANPR at runtime — the main service keeps running instead of being killed and restart-looped by systemd. Check the service log for `ANPR OCR disabled at runtime` to confirm this is happening.
-- Plate alerts are stored and matched in-process for cooldown behavior; persistent alert history can be added later if needed.
 
 ## Updating an Existing Install
 

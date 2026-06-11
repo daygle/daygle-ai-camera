@@ -8,14 +8,8 @@ const els = {
   uptimeText: document.getElementById('uptimeText'),
   events: document.getElementById('events'),
   alerts: document.getElementById('alerts'),
-  plateFilter: document.getElementById('plateFilter'),
-  plateSearchBtn: document.getElementById('plateSearchBtn'),
-  plateClearBtn: document.getElementById('plateClearBtn'),
-  plates: document.getElementById('plates'),
-  plateSightings: document.getElementById('plateSightings'),
   deleteAllEventsBtn: document.getElementById('deleteAllEventsBtn'),
   deleteAllAlertsBtn: document.getElementById('deleteAllAlertsBtn'),
-  deleteAllPlatesBtn: document.getElementById('deleteAllPlatesBtn'),
 };
 
 let authState = { user: null, csrfToken: null };
@@ -79,11 +73,6 @@ function detectionBadges(detections = []) {
   return normalized.map((d) => `<span class="detection">${escapeHtml(d.label)} · ${Math.round(d.confidence * 100)}%</span>`).join('');
 }
 
-function plateBadges(plateEvents = []) {
-  if (!plateEvents.length) return '';
-  return plateEvents.map((p) => `<span class="detection">${escapeHtml(p.plate_number)} ${Math.round((p.confidence || 0) * 100)}%</span>`).join('');
-}
-
 function recordingLink(recordings = []) {
   if (!recordings.length) return '<span class="muted">Recording: none</span>';
   return recordings.map((recording) => `<a class="link-button" href="/recordings?recording_id=${recording.id}">Recording #${recording.id}</a>`).join('');
@@ -101,7 +90,7 @@ function renderEvents(events) {
         <span>Event #${event.id}</span>
         <span>${formatDate(event.created_at)}</span>
       </div>
-      <div class="event-row-badges">${detectionBadges(event.detections)}${plateBadges(event.plate_events)}</div>
+      <div class="event-row-badges">${detectionBadges(event.detections)}</div>
       <p class="muted event-row-meta">Camera: ${escapeHtml(eventSourceLabel(event))} · ${escapeHtml(event.recording_status || 'none')}</p>
       <div class="event-row-footer">
         <div>${recordingLink(event.recordings)}</div>
@@ -130,35 +119,6 @@ function renderAlerts(alerts) {
   `).join('');
 }
 
-function renderPlates(plates = []) {
-  if (!plates.length) {
-    els.plates.innerHTML = '<div class="empty">No plates seen yet.</div>';
-    return;
-  }
-  els.plates.innerHTML = plates.map((plate) => `
-    <div class="item">
-      <div class="item-title"><span>${escapeHtml(plate.plate_number)}</span><span>${plate.sighting_count} sighting(s)</span></div>
-      <p class="muted">First seen: ${formatDate(plate.first_seen)} · Last seen: ${formatDate(plate.last_seen)}</p>
-      <p class="muted">${plate.is_blacklisted ? 'Blacklisted' : plate.is_whitelisted ? 'Whitelisted' : 'Unknown'} ${plate.notes ? `· ${escapeHtml(plate.notes)}` : ''}</p>
-      <button class="secondary delete-btn" data-delete-plate="${plate.id}">Delete</button>
-    </div>
-  `).join('');
-}
-
-function renderPlateSightings(events = []) {
-  if (!events.length) {
-    els.plateSightings.innerHTML = '<div class="empty">No plate sightings match.</div>';
-    return;
-  }
-  els.plateSightings.innerHTML = events.map((event) => `
-    <div class="item">
-      <div class="item-title"><span>${escapeHtml(event.plate_number)}</span><span>${Math.round(event.confidence * 100)}%</span></div>
-      <p class="muted">${formatDate(event.created_at)} · Event #${event.event_id}</p>
-      <div>${recordingLink(event.event?.recordings || [])}</div>
-    </div>
-  `).join('');
-}
-
 function bindDeleteButtons() {
   document.querySelectorAll('[data-delete-event]').forEach((button) => {
     button.addEventListener('click', async () => {
@@ -169,18 +129,6 @@ function bindDeleteButtons() {
         bindDeleteButtons();
       } catch (error) {
         alert(`Failed to delete event: ${error.message}`);
-      }
-    });
-  });
-  document.querySelectorAll('[data-delete-plate]').forEach((button) => {
-    button.addEventListener('click', async () => {
-      if (!confirm(`Delete plate #${button.dataset.deletePlate}? This cannot be undone.`)) return;
-      try {
-        await api(`/api/plates/${button.dataset.deletePlate}`, { method: 'DELETE' });
-        await Promise.all([loadPlates(), searchPlateSightings(els.plateFilter.value.trim())]);
-        bindDeleteButtons();
-      } catch (error) {
-        alert(`Failed to delete plate: ${error.message}`);
       }
     });
   });
@@ -216,7 +164,6 @@ async function loadAuth() {
   if (authInfo.user.role !== 'admin') {
     if (els.deleteAllEventsBtn) els.deleteAllEventsBtn.hidden = true;
     if (els.deleteAllAlertsBtn) els.deleteAllAlertsBtn.hidden = true;
-    if (els.deleteAllPlatesBtn) els.deleteAllPlatesBtn.hidden = true;
   } else {
     if (els.deleteAllEventsBtn) {
       els.deleteAllEventsBtn.hidden = false;
@@ -240,19 +187,6 @@ async function loadAuth() {
           await Promise.all([loadAlerts(), loadStats()]);
         } catch (error) {
           alert(`Failed to delete alert history: ${error.message}`);
-        }
-      });
-    }
-    if (els.deleteAllPlatesBtn) {
-      els.deleteAllPlatesBtn.hidden = false;
-      els.deleteAllPlatesBtn.addEventListener('click', async () => {
-        if (!confirm('Delete ALL plates and sightings? This cannot be undone.')) return;
-        try {
-          await api('/api/plates', { method: 'DELETE' });
-          await Promise.all([loadPlates(), searchPlateSightings(els.plateFilter.value.trim())]);
-          bindDeleteButtons();
-        } catch (error) {
-          alert(`Failed to delete plates: ${error.message}`);
         }
       });
     }
@@ -312,38 +246,10 @@ async function loadAlerts() {
   }
 }
 
-async function loadPlates() {
-  try {
-    const plates = await api('/api/plates');
-    renderPlates(plates);
-    if (els.deleteAllPlatesBtn && authState.user?.role === 'admin') {
-      els.deleteAllPlatesBtn.hidden = plates.length === 0;
-    }
-  } catch {
-    els.plates.innerHTML = '<div class="empty">Could not load plates.</div>';
-  }
-}
-
-async function searchPlateSightings(query = '') {
-  try {
-    const q = query ? encodeURIComponent(query) : '';
-    renderPlateSightings(await api(`/api/plates/search?q=${q}`));
-  } catch {
-    els.plateSightings.innerHTML = '<div class="empty">Could not load plate sightings.</div>';
-  }
-}
-
 async function refreshAll() {
-  await Promise.all([loadStatus(), loadStats(), loadEvents(), loadAlerts(), loadPlates(), searchPlateSightings()]);
+  await Promise.all([loadStatus(), loadStats(), loadEvents(), loadAlerts()]);
   bindDeleteButtons();
 }
-
-els.plateSearchBtn.addEventListener('click', () => searchPlateSightings(els.plateFilter.value.trim()));
-els.plateClearBtn.addEventListener('click', () => {
-  els.plateFilter.value = '';
-  loadPlates();
-  searchPlateSightings();
-});
 
 loadAuth().then(async () => { await loadConfiguredLabels(); await refreshAll(); }).catch(() => {});
 setInterval(loadStatus, 3000);

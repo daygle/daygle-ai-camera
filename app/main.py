@@ -32,7 +32,6 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 
 from app.alerts import AlertEngine
-from app.anpr import AnprPipeline, normalize_plate, plate_matches
 from app.auth import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, AuthError, AuthService
 from app.database import EventDatabase
 from app.detector import DetectorUnavailableError, create_detector, load_labels
@@ -189,14 +188,6 @@ def effective_camera_config() -> dict[str, Any]:
     return settings
 
 
-def effective_anpr_config() -> dict[str, Any]:
-    settings = copy.deepcopy(config.get('anpr', {}))
-    override = database.get_setting('anpr')
-    if isinstance(override, dict):
-        settings.update(override)
-    return settings
-
-
 def effective_recording_config() -> dict[str, Any]:
     settings = copy.deepcopy(config.get('recording', {}))
     override = database.get_setting('recording')
@@ -283,7 +274,6 @@ camera = None
 
 storage = Storage({**config, 'storage': effective_storage_config()})
 recording_service = RecordingService({**config, 'storage': effective_storage_config(), 'recording': effective_recording_config()})
-anpr_pipeline = AnprPipeline(effective_anpr_config())
 auth = AuthService(config['storage']['database'], effective_auth_config())
 SESSION_COOKIE_NAME = str(effective_auth_config().get('cookie_name', SESSION_COOKIE))
 
@@ -369,7 +359,6 @@ def default_camera_detection_settings() -> dict[str, Any]:
         'motion_enabled': True,
         'motion_email_enabled': True,
         'object_detection_enabled': True,
-        'anpr_enabled': True,
         'zones': [],
     }
 
@@ -570,7 +559,6 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
             'monitor_objects': bool(zone.get('monitor_objects', True)),
             'object_labels': [rule['label'] for rule in object_rules if str(rule.get('label') or '').strip().lower() != 'motion'],
             'object_rules': object_rules,
-            'monitor_anpr': bool(zone.get('monitor_anpr', True)),
         })
     return normalized
 
@@ -588,7 +576,7 @@ def normalize_camera_settings(settings: dict[str, Any], index: int = 1) -> dict[
     detection = default_camera_detection_settings()
     if isinstance(camera_settings.get('detection'), dict):
         detection.update(camera_settings['detection'])
-    for key in ('motion_enabled', 'motion_email_enabled', 'object_detection_enabled', 'anpr_enabled'):
+    for key in ('motion_enabled', 'motion_email_enabled', 'object_detection_enabled'):
         detection[key] = bool(detection.get(key, True))
     detection['object_labels'] = normalize_label_list(detection.get('object_labels', []))
     detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
@@ -911,16 +899,6 @@ def detection_has_matching_record_rule(detection: dict[str, Any], rules: list[di
         if confidence >= min_conf:
             return True
     return False
-
-
-def filter_detections_for_camera_anpr(detections: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
-    detection_settings = settings.get('detection') or {}
-    if not detection_settings.get('anpr_enabled', True):
-        return []
-    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_anpr', True)]
-    if not zones:
-        return []
-    return [detection for detection in detections if any(detection_matches_zone(detection, zone) for zone in zones)]
 
 
 def normalize_detection_boxes_for_frame(detections: list[dict[str, Any]], frame: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1358,7 +1336,6 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     frame_has_motion, frame_motion_confidence = detect_frame_motion(camera_id, image)
     motion_detections = zone_motion_detections(detections, settings, frame_motion_confidence) if frame_has_motion else []
     object_detections = filter_detections_for_camera(detections, settings)
-    anpr_detections = filter_detections_for_camera_anpr(detections, settings)
     zone_rules = zone_object_alert_rules(settings)
     object_alert_detections = zone_alert_detections(settings, object_detections) if zone_rules else list(object_detections)
 
@@ -1379,7 +1356,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             'label': 'motion',
             'motion_event': True,
         })
-    if not alert_detections and not anpr_detections:
+    if not alert_detections:
         update_live_detection_status(
             camera_id,
             state='checked',
@@ -1387,7 +1364,6 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             detected_labels=raw_labels,
             matched_labels=[],
             detections=[{**d, 'alert_matched': False, 'alert_triggered': False} for d in object_detections],
-            anpr_detections=[],
         )
         return None
 
@@ -1459,7 +1435,6 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             detected_labels=raw_labels,
             matched_labels=matched_labels,
             detections=recording_detections,
-            anpr_detections=anpr_detections,
             recording_id=extended_recording_id,
         )
         return None
@@ -1475,7 +1450,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         created_at=event_time,
         source='rtsp',
         snapshot_path=snapshot_path,
-        detections=recording_detections or anpr_detections,
+        detections=recording_detections,
         alert_triggered=bool(triggered),
         metadata={
             'camera_id': settings.get('id'),
@@ -1495,7 +1470,6 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     )
     if recording_id is not None:
         remember_live_event(camera_id, debounced_labels)
-    process_anpr_for_event(event_id, anpr_detections, snapshot_path, event_time)
 
     for alert in triggered:
         database.add_alert(
@@ -1530,7 +1504,6 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         detected_labels=raw_labels,
         matched_labels=matched_labels,
         detections=recording_detections,
-        anpr_detections=anpr_detections,
         triggered_alerts=triggered,
         event_id=event_id,
         recording_id=recording_id,
@@ -1680,7 +1653,7 @@ async def authentication_middleware(request: Request, call_next):
     request.state.session = session
     request.state.user = session['user']
 
-    admin_required = path in ADMIN_PATHS or path.startswith('/api/users') or path.startswith('/api/settings/ai') or path.startswith('/api/settings/anpr') or path.startswith('/api/settings/system') or path.startswith('/api/update/') or (path.startswith('/api/cameras') and request.method in MUTATING_METHODS) or (
+    admin_required = path in ADMIN_PATHS or path.startswith('/api/users') or path.startswith('/api/settings/ai') or path.startswith('/api/settings/system') or path.startswith('/api/update/') or (path.startswith('/api/cameras') and request.method in MUTATING_METHODS) or (
         path.startswith('/api/settings/alert-email') and request.method in MUTATING_METHODS
     ) or (
         path.startswith('/api/settings/alert-push') and request.method in MUTATING_METHODS
@@ -2107,8 +2080,6 @@ def deliver_push_notifications(triggered: list[dict[str, Any]], event_id: int, r
             logger.error('Failed to send push notification for event %s rule %r: %s', event_id, rule_name, exc)
 
 
-plate_alert_last_triggered: dict[str, float] = {}
-
 GITHUB_REPO = 'daygle/daygle-ai-camera'
 MODELS_MANIFEST_URL = f'https://raw.githubusercontent.com/{GITHUB_REPO}/main/models-manifest.json'
 _update_in_progress = False
@@ -2152,54 +2123,6 @@ def _fetch_models_manifest() -> dict[str, Any]:
     )
     with urllib.request.urlopen(req, timeout=10) as response:
         return json.loads(response.read())
-_plate_alert_lock = threading.Lock()
-
-
-def process_anpr_for_event(event_id: int, detections: list[dict[str, Any]], image_path: str | None, created_at: str) -> list[dict[str, Any]]:
-    plate_results = anpr_pipeline.process_event(event_id=event_id, detections=detections, image_path=image_path, storage=storage)
-    stored: list[dict[str, Any]] = []
-    for result in plate_results:
-        plate = database.upsert_plate(result['plate_number'], created_at)
-        plate_event = database.add_plate_event(
-            event_id=event_id,
-            plate_id=plate['id'],
-            plate_number=result['plate_number'],
-            confidence=float(result['confidence']),
-            image_path=result.get('image_path'),
-            created_at=created_at,
-        )
-        stored.append(plate_event)
-    trigger_plate_alerts(stored)
-    return stored
-
-
-def trigger_plate_alerts(plate_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    triggered: list[dict[str, Any]] = []
-    rules = database.list_plate_alert_rules()
-    for plate_event in plate_events:
-        plate = plate_event.get('plate') or {}
-        for rule in rules:
-            if not rule.get('enabled', True):
-                continue
-            rule_key = f"{rule['id']}:{plate_event['plate_number']}"
-            rule_type = str(rule.get('rule_type'))
-            matched = False
-            if rule_type == 'plate':
-                matched = plate_matches(rule.get('plate_pattern'), plate_event['plate_number'])
-            elif rule_type == 'unknown':
-                matched = not plate.get('is_whitelisted') and not plate.get('is_blacklisted')
-            elif rule_type == 'blacklisted':
-                matched = bool(plate.get('is_blacklisted'))
-            if not matched:
-                continue
-            now = time.time()
-            cooldown = int(rule.get('cooldown_seconds', 60))
-            with _plate_alert_lock:
-                if now - plate_alert_last_triggered.get(rule_key, 0) < cooldown:
-                    continue
-                plate_alert_last_triggered[rule_key] = now
-            triggered.append({'rule_name': rule['rule_name'], 'plate_number': plate_event['plate_number'], 'plate_event_id': plate_event['id']})
-    return triggered
 
 
 def render_live_snapshot_svg(
@@ -2604,7 +2527,6 @@ def refresh_runtime_after_database_restore() -> None:
     auth.init()
     apply_cameras_settings(effective_cameras_config())
     apply_storage_and_recording_settings()
-    apply_anpr_settings()
     auth.apply_config(effective_auth_config())
 
 
@@ -2836,13 +2758,6 @@ def profile_page():
     return root()
 
 
-@app.get('/anpr')
-def anpr_page():
-    return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" /><title>ANPR · Daygle AI Camera</title>
-<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack"><header class="hero"><div><p class="eyebrow">Recognition</p><h1>ANPR</h1><p class="muted">Search plates, review sightings, and manage plate alerts.</p></div></header><section class="card anpr-search-card"><h2>Plate search</h2><div id="anprMessage" class="muted"></div><div class="search-row anpr-search-row"><select id="anprCameraFilter" aria-label="Filter by camera"><option value="">All cameras</option></select><input id="plateSearchInput" placeholder="ABC123, 1ABC2D, XYZ999..." /><button id="plateSearchBtn">Search</button><button id="plateClearBtn" class="secondary">Recent</button></div><div id="plateResults" class="list"></div></section><section class="grid main-grid"><article class="card"><div class="section-header"><h2>Recent plates</h2><button id="deleteAllPlatesBtn" class="secondary delete-btn" type="button" hidden>Delete All</button></div><div id="recentPlates" class="list"></div></article><article class="card"><div class="section-header"><h2>Plate details</h2></div><div id="plateDetails" class="list"></div></article></section><section class="card"><h2>Plate alert rules</h2><form id="plateAlertRuleForm" class="form-grid"><input type="hidden" name="id" /><input name="rule_name" placeholder="Rule name" required /><label><span>Type</span><select name="rule_type"><option value="plate">Specific Plate</option><option value="unknown">Unknown Plate</option><option value="blacklisted">Blacklisted Plate</option></select></label><input name="plate_pattern" placeholder="Plate pattern" /><input name="cooldown_seconds" type="number" min="0" placeholder="Cooldown seconds" value="60" /><label><span>Enabled</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><button type="submit">Save Rule</button><button id="cancelPlateRuleEdit" class="secondary" type="button">Cancel Edit</button></form><div id="plateAlertRules" class="list"></div></section></main><script src="/static/utils.js"></script><script src="/static/anpr.js"></script></body></html>""")
-
-
 def _settings_section_update() -> str:
     version_file = BASE_DIR / 'VERSION'
     current_version = version_file.read_text(encoding='utf-8').strip() if version_file.exists() else 'unknown'
@@ -2856,20 +2771,6 @@ def _settings_section_update() -> str:
         f'</div>'
         f'<pre id="updateOutput" class="update-output" style="display:none"></pre>'
         f'</section>'
-    )
-
-
-def _settings_section_anpr() -> str:
-    return (
-        '<section class="card">'
-        '<div class="settings-section-header"><div class="settings-section-icon">🚗</div><div><h2>ANPR</h2><p class="settings-section-subtitle">Automatic Number Plate Recognition settings. Enable per camera and per monitoring area from Live Cameras.</p></div></div>'
-        '<form id="anprSettingsForm" class="form-grid">'
-        '<label><span>OCR Backend</span><select name="backend"><option value="paddleocr">PaddleOCR</option><option value="easyocr">EasyOCR</option></select><span class="field-help">PaddleOCR is faster; EasyOCR may be more accurate for some plate styles. Default: PaddleOCR</span></label>'
-        '<label><span>Min Confidence</span><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="0.6" /><span class="field-help">Minimum plate detection confidence (0–1). Higher = fewer false reads. Default: 0.75</span></label>'
-        '<label><span>Vehicle Labels</span><input name="vehicle_labels" placeholder="car, truck, bus, motorcycle" /><span class="field-help">Comma-separated list of object labels that trigger ANPR processing. Default: car, truck, bus, motorcycle</span></label>'
-        '</form>'
-        '<div class="button-row"><button type="submit" form="anprSettingsForm">Save ANPR</button></div>'
-        '</section>'
     )
 
 
@@ -2912,7 +2813,6 @@ def _settings_section_storage() -> str:
         '<label><span>Snapshots Directory</span><input name="snapshots_dir" placeholder="/opt/daygle/data/snapshots" /><span class="field-help">Where event snapshot images are saved. Default: data/snapshots</span></label>'
         '<label><span>Events Directory</span><input name="events_dir" placeholder="/opt/daygle/data/events" /><span class="field-help">Where event clip videos are saved. Default: data/events</span></label>'
         '<label><span>Recordings Directory</span><input name="recordings_dir" placeholder="/opt/daygle/data/recordings" /><span class="field-help">Where continuous recordings are saved. Default: data/recordings</span></label>'
-        '<label><span>Plate Images Directory</span><input name="plates_dir" placeholder="/opt/daygle/data/plates" /><span class="field-help">Where cropped plate images from ANPR are saved. Default: data/plates</span></label>'
         '</form>'
         '<div class="button-row"><button type="submit" form="storageSettingsForm">Save Storage</button></div>'
         '</section>'
@@ -2937,7 +2837,6 @@ def _settings_section_auth() -> str:
 def system_settings_page():
     sections = ''.join([
         _settings_section_update(),
-        _settings_section_anpr(),
         _settings_section_recording(),
         _settings_section_retention(),
         _settings_section_storage(),
@@ -3164,7 +3063,6 @@ def runtime_config():
             'error': ai_state['error'],
             'categories': effective_ai_config().get('categories', []),
         },
-        'anpr': effective_anpr_config(),
         'alerts': config.get('alerts', {}),
         'auth': {
             'enabled': auth_enabled,
@@ -3176,7 +3074,6 @@ def runtime_config():
             'database': effective_storage_config().get('database'),
             'snapshots_dir': effective_storage_config().get('snapshots_dir'),
             'recordings_dir': effective_storage_config().get('recordings_dir'),
-            'plates_dir': effective_storage_config().get('plates_dir'),
         },
         'live': effective_live_config(),
         'recording': effective_recording_config(),
@@ -3425,11 +3322,9 @@ def delete_runtime_data(request: Request):
     deleted_events = database.delete_all_events()
     deleted_alerts = database.delete_all_alerts()
     deleted_objects = database.delete_all_objects()
-    deleted_plates = database.delete_all_plates()
     storage_config = effective_storage_config()
     deleted_snapshots = clear_runtime_media_directory(storage_config.get('snapshots_dir'))
     deleted_event_artifacts = clear_runtime_media_directory(storage_config.get('events_dir'))
-    deleted_plate_artifacts = clear_runtime_media_directory(storage_config.get('plates_dir'))
     with active_rtsp_recordings_lock:
         active_rtsp_recordings.clear()
     result = {
@@ -3439,10 +3334,8 @@ def delete_runtime_data(request: Request):
             'events': deleted_events,
             'alerts': deleted_alerts,
             'objects': deleted_objects,
-            'plates': deleted_plates,
             'snapshot_files': deleted_snapshots,
             'event_artifacts': deleted_event_artifacts,
-            'plate_artifacts': deleted_plate_artifacts,
         },
         'preserved': ['settings', 'users', 'sessions', 'rules'],
     }
@@ -3492,143 +3385,6 @@ async def update_user(user_id: int, request: Request):
         return user
     except AuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-def _event_camera_id_from_plate_event(plate_event: dict[str, Any]) -> str | None:
-    event = plate_event.get('event') if isinstance(plate_event, dict) else None
-    if not isinstance(event, dict):
-        return None
-    metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
-    raw_camera_id = metadata.get('camera_id') or event.get('camera_id')
-    return normalize_camera_id(raw_camera_id) if raw_camera_id else None
-
-
-def _filter_plate_events_by_camera(events: list[dict[str, Any]], camera_id: str | None) -> list[dict[str, Any]]:
-    if not camera_id:
-        return events
-    target = normalize_camera_id(camera_id)
-    return [event for event in events if _event_camera_id_from_plate_event(event) == target]
-
-
-def _apply_camera_filter_to_plate(plate: dict[str, Any], camera_id: str | None) -> dict[str, Any]:
-    if not camera_id:
-        return plate
-    filtered_events = _filter_plate_events_by_camera(plate.get('events', []), camera_id)
-    filtered = dict(plate)
-    filtered['events'] = filtered_events
-    filtered['sighting_count'] = len(filtered_events)
-    timestamps = [str(event.get('created_at') or '') for event in filtered_events if event.get('created_at')]
-    if timestamps:
-        filtered['first_seen'] = min(timestamps)
-        filtered['last_seen'] = max(timestamps)
-    else:
-        filtered['first_seen'] = None
-        filtered['last_seen'] = None
-    return filtered
-
-
-@app.get('/api/plates')
-def list_plates(limit: int = Query(50, ge=1, le=200), camera_id: str | None = None):
-    if not camera_id:
-        return database.list_plates(limit=limit)
-    plates = database.list_plates(limit=200)
-    filtered: list[dict[str, Any]] = []
-    for plate in plates:
-        detailed = database.get_plate(int(plate['id']))
-        if detailed is None:
-            continue
-        camera_filtered = _apply_camera_filter_to_plate(detailed, camera_id)
-        if camera_filtered.get('sighting_count', 0) <= 0:
-            continue
-        camera_filtered.pop('events', None)
-        filtered.append(camera_filtered)
-        if len(filtered) >= limit:
-            break
-    return filtered
-
-
-@app.get('/api/plates/search')
-def search_plates(q: str = '', limit: int = Query(50, ge=1, le=200), camera_id: str | None = None):
-    events = database.search_plates(normalize_plate(q), limit=limit)
-    return _filter_plate_events_by_camera(events, camera_id)
-
-
-@app.post('/api/plates/whitelist')
-async def whitelist_plate(request: Request):
-    require_admin(request)
-    payload = await request.json()
-    plate_number = normalize_plate(payload.get('plate_number') or '')
-    if not plate_number:
-        raise HTTPException(status_code=400, detail='plate_number is required.')
-    return database.update_plate_status(plate_number, notes=payload.get('notes'), is_whitelisted=True, is_blacklisted=False)
-
-
-@app.post('/api/plates/blacklist')
-async def blacklist_plate(request: Request):
-    require_admin(request)
-    payload = await request.json()
-    plate_number = normalize_plate(payload.get('plate_number') or '')
-    if not plate_number:
-        raise HTTPException(status_code=400, detail='plate_number is required.')
-    return database.update_plate_status(plate_number, notes=payload.get('notes'), is_whitelisted=False, is_blacklisted=True)
-
-
-@app.get('/api/plates/{plate_id}')
-def get_plate(plate_id: int, camera_id: str | None = None):
-    plate = database.get_plate(plate_id)
-    if plate is None:
-        raise HTTPException(status_code=404, detail='Plate not found')
-    return _apply_camera_filter_to_plate(plate, camera_id)
-
-
-@app.delete('/api/plates/{plate_id}')
-def delete_plate(plate_id: int, request: Request):
-    require_admin(request)
-    plate = database.delete_plate(plate_id)
-    if plate is None:
-        raise HTTPException(status_code=404, detail='Plate not found')
-    write_audit_log(request, 'delete', 'plate', plate_id, {'plate_number': plate.get('plate_number')})
-    return {'ok': True}
-
-
-@app.delete('/api/plates')
-def delete_all_plates(request: Request):
-    require_admin(request)
-    deleted = database.delete_all_plates()
-    write_audit_log(request, 'delete_all', 'plates', details={'count': deleted})
-    return {'ok': True, 'deleted': deleted}
-
-
-@app.get('/api/plate-alerts')
-def list_plate_alerts():
-    return database.list_plate_alert_rules()
-
-
-@app.post('/api/plate-alerts')
-async def create_plate_alert(request: Request):
-    require_admin(request)
-    rule = database.create_plate_alert_rule(validate_plate_alert_rule(await request.json()), utc_now())
-    write_audit_log(request, 'create', 'plate_alert_rule', rule['id'], {'rule_name': rule.get('rule_name')})
-    return rule
-
-
-@app.put('/api/plate-alerts/{rule_id}')
-async def update_plate_alert(rule_id: int, request: Request):
-    require_admin(request)
-    rule = database.update_plate_alert_rule(rule_id, validate_plate_alert_rule(await request.json(), partial=True), utc_now())
-    if rule is None:
-        raise HTTPException(status_code=404, detail='Plate alert rule not found')
-    write_audit_log(request, 'update', 'plate_alert_rule', rule_id, {'rule_name': rule.get('rule_name')})
-    return rule
-
-
-@app.delete('/api/plate-alerts/{rule_id}')
-def delete_plate_alert(rule_id: int, request: Request):
-    require_admin(request)
-    if not database.delete_plate_alert_rule(rule_id):
-        raise HTTPException(status_code=404, detail='Plate alert rule not found')
-    write_audit_log(request, 'delete', 'plate_alert_rule', rule_id)
-    return {'ok': True}
 
 
 def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
@@ -3739,32 +3495,6 @@ def validate_push_notification_settings(payload: dict[str, Any]) -> dict[str, An
     return updated
 
 
-def validate_plate_alert_rule(payload: dict[str, Any], *, partial: bool = False) -> dict[str, Any]:
-    rule: dict[str, Any] = {}
-    if not partial and not str(payload.get('rule_name', '')).strip():
-        raise HTTPException(status_code=400, detail='rule_name is required.')
-    if 'rule_name' in payload:
-        value = str(payload.get('rule_name') or '').strip()
-        if not value:
-            raise HTTPException(status_code=400, detail='rule_name cannot be blank.')
-        rule['rule_name'] = value
-    if 'rule_type' in payload or not partial:
-        rule_type = str(payload.get('rule_type', 'plate')).lower()
-        if rule_type not in {'plate', 'unknown', 'blacklisted'}:
-            raise HTTPException(status_code=400, detail='rule_type must be plate, unknown, or blacklisted.')
-        rule['rule_type'] = rule_type
-    if 'plate_pattern' in payload or not partial:
-        pattern = normalize_plate(payload.get('plate_pattern') or '')
-        if rule.get('rule_type', payload.get('rule_type')) == 'plate' and not pattern:
-            raise HTTPException(status_code=400, detail='plate_pattern is required for specific plate rules.')
-        rule['plate_pattern'] = pattern or None
-    if 'enabled' in payload or not partial:
-        rule['enabled'] = _bool_value(payload.get('enabled', True))
-    if 'cooldown_seconds' in payload or not partial:
-        rule['cooldown_seconds'] = _int_field(payload, 'cooldown_seconds', 60, 0, 86400)
-    return rule
-
-
 def _bool_value(value: Any) -> bool:
     return value.lower() in {'1', 'true', 'yes', 'on'} if isinstance(value, str) else bool(value)
 
@@ -3826,7 +3556,6 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     detection.update(payload_detection)
     detection['motion_enabled'] = _bool_value(detection.get('motion_enabled', True))
     detection['object_detection_enabled'] = _bool_value(detection.get('object_detection_enabled', True))
-    detection['anpr_enabled'] = _bool_value(detection.get('anpr_enabled', True))
     detection['object_labels'] = normalize_label_list(detection.get('object_labels', []))
     detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
     updated['detection'] = detection
@@ -3856,33 +3585,6 @@ def validate_cameras_settings(payload: Any) -> list[dict[str, Any]]:
         seen.add(camera_settings['id'])
         validated.append(camera_settings)
     return validated
-
-def validate_anpr_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    current = effective_anpr_config()
-    merged = {**current, **payload}
-    backend = str(merged.get('backend', 'paddleocr')).lower()
-    if backend not in {'paddleocr', 'easyocr'}:
-        raise HTTPException(status_code=400, detail='ANPR backend must be paddleocr or easyocr.')
-    try:
-        min_confidence = float(merged.get('min_confidence', 0.75))
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail='ANPR min_confidence must be a number.') from exc
-    if not 0 <= min_confidence <= 1:
-        raise HTTPException(status_code=400, detail='ANPR min_confidence must be between 0 and 1.')
-    raw_labels = merged.get('vehicle_labels', [])
-    if isinstance(raw_labels, str):
-        vehicle_labels = [label.strip().lower() for label in raw_labels.split(',') if label.strip()]
-    elif isinstance(raw_labels, list):
-        vehicle_labels = [str(label).strip().lower() for label in raw_labels if str(label).strip()]
-    else:
-        raise HTTPException(status_code=400, detail='vehicle_labels must be a list or comma-separated string.')
-    return {
-        'enabled': _bool_value(merged.get('enabled', True)),
-        'backend': backend,
-        'min_confidence': min_confidence,
-        'vehicle_labels': vehicle_labels or ['car', 'truck', 'bus', 'motorcycle'],
-    }
-
 
 def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_recording_config()
@@ -3923,8 +3625,8 @@ def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 def validate_storage_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_storage_config()
-    updated = {key: str(current.get(key) or '') for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir', 'plates_dir', 'database')}
-    for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir', 'plates_dir'):
+    updated = {key: str(current.get(key) or '') for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir', 'database')}
+    for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir'):
         if key in payload:
             value = str(payload.get(key) or '').strip()
             if not value:
@@ -4007,14 +3709,6 @@ def apply_storage_and_recording_settings() -> None:
             old_service.stop_all_continuous_recordings()
         except Exception:
             pass
-
-
-def apply_anpr_settings() -> None:
-    global anpr_pipeline
-    previous = anpr_pipeline
-    anpr_pipeline = AnprPipeline(effective_anpr_config())
-    if previous is not None:
-        previous.close()
 
 
 @app.get('/api/settings/ai')
@@ -4328,7 +4022,6 @@ def get_system_settings():
     return {
         'camera': get_camera_config(None),
         'cameras': effective_cameras_config(),
-        'anpr': effective_anpr_config(),
         'live': effective_live_config(),
         'recording': effective_recording_config(),
         'storage': effective_storage_config(),
@@ -4434,26 +4127,6 @@ async def update_camera(camera_id: str, request: Request):
             write_audit_log(request, 'update', 'settings.camera', normalized, {'camera_name': settings_list[index].get('name')})
             return settings_list[index]
     raise HTTPException(status_code=404, detail='Camera not found')
-
-
-@app.get('/api/settings/anpr')
-def get_anpr_settings():
-    return effective_anpr_config()
-
-
-@app.put('/api/settings/anpr')
-async def update_anpr_settings(request: Request):
-    require_admin(request)
-    settings = validate_anpr_settings(await request.json())
-    database.set_setting('anpr', settings, utc_now())
-    apply_anpr_settings()
-    write_audit_log(request, 'update', 'settings.anpr')
-    return settings
-
-
-@app.put('/api/settings/system/anpr')
-async def update_system_anpr_settings(request: Request):
-    return await update_anpr_settings(request)
 
 
 @app.put('/api/settings/system/live')

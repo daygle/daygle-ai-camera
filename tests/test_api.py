@@ -225,63 +225,6 @@ def test_detector_backend_selection(tmp_path):
     )
 
 
-def test_anpr_pipeline_extracts_vehicle_plate(tmp_path):
-    from app.anpr import AnprPipeline
-    from app.storage import Storage
-
-    storage = Storage({'storage': {'data_dir': str(tmp_path), 'plates_dir': str(tmp_path / 'plates')}})
-    pipeline = AnprPipeline({'enabled': True, 'backend': 'paddleocr', 'min_confidence': 0.75, 'vehicle_labels': ['car']})
-    results = pipeline.process_event(
-        event_id=42,
-        detections=[{'label': 'car', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.2}}],
-        image_path=None,
-        storage=storage,
-    )
-    assert len(results) == 1
-    assert results[0]['plate_number'].isalnum()
-    assert results[0]['confidence'] >= 0.75
-    assert Path(results[0]['image_path']).exists()
-
-
-def test_easyocr_backend_survives_crashed_worker(monkeypatch):
-    """A failed OCR worker (e.g. a SIGILL on incompatible hardware) must degrade
-    gracefully instead of propagating and taking the service down."""
-    from app import anpr
-
-    # Pass the install guard so the worker process is actually spawned. The real
-    # worker then fails to import easyocr (not installed in CI), which mimics the
-    # worker dying: the parent must observe it and disable ANPR, not raise.
-    monkeypatch.setattr(anpr.importlib.util, "find_spec", lambda name: object())
-    backend = anpr.EasyOcrBackend(call_timeout=30.0)
-    try:
-        result = backend.read_plate("/nonexistent.jpg", event_id=1, detection={}, index=0)
-        assert result == ("", 0.0)
-        assert backend._failed is True
-        assert backend.available is False
-        # Subsequent calls keep returning cleanly without re-raising.
-        assert backend.read_plate("/another.jpg", event_id=2, detection={}, index=0) == ("", 0.0)
-    finally:
-        backend.close()
-
-
-def test_anpr_pipeline_disabled_when_backend_unavailable():
-    """When the OCR backend cannot be created, the pipeline stays usable and
-    simply returns no plates instead of raising."""
-    from app.anpr import AnprPipeline
-
-    pipeline = AnprPipeline({'enabled': True, 'backend': 'no-such-backend', 'vehicle_labels': ['car']})
-    assert pipeline.ocr is None
-    assert pipeline.unavailable_reason
-    results = pipeline.process_event(
-        event_id=1,
-        detections=[{'label': 'car', 'confidence': 0.9, 'box': {}}],
-        image_path=None,
-        storage=object(),
-    )
-    assert results == []
-    pipeline.close()
-
-
 def test_onnx_missing_model_returns_clear_api_error(tmp_path, monkeypatch):
     app, _database_path = _load_app(
         tmp_path,
@@ -566,12 +509,11 @@ def test_setup_login_success_session_validation_and_protected_routes(tmp_path, m
         assert client.request("/api/alerts")[0] == 200
         assert client.request("/api/stats")[2]["total_events"] == 0
         assert client.request("/api/config")[2]["auth"]["enabled"] is True
-        assert client.request("/api/config")[2]["anpr"]["enabled"] is True
         assert client.request("/static/app.js")[0] == 200
 
         with sqlite3.connect(database_path) as db:
             tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-        assert {"users", "user_sessions", "login_attempts", "app_settings", "vehicle_plates", "plate_events", "plate_alert_rules"}.issubset(tables)
+        assert {"users", "user_sessions", "login_attempts", "app_settings"}.issubset(tables)
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -834,101 +776,6 @@ def test_admin_can_send_test_alert_email(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
-def test_anpr_event_search_alerts_and_plate_status_api(tmp_path, monkeypatch):
-    app, _database_path = _load_app(tmp_path, monkeypatch)
-    server, thread, base_url = _server(app)
-    admin = LocalClient(base_url)
-    try:
-        _setup_admin(admin)
-        admin_csrf = _login(admin)
-        main_module = sys.modules["app.main"]
-        detections = [{'label': 'car', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.2}}]
-        event_time = datetime.now(timezone.utc).isoformat()
-        event_id = main_module.database.add_event(
-            created_at=event_time,
-            source='motion',
-            snapshot_path=None,
-            detections=detections,
-            alert_triggered=False,
-            metadata={},
-        )
-        plate_events = main_module.process_anpr_for_event(event_id, detections, None, event_time)
-        assert plate_events
-        plate_number = plate_events[0]['plate_number']
-
-        status, _headers, plates = admin.request('/api/plates')
-        assert status == 200
-        assert plates[0]['plate_number'] == plate_number
-        assert plates[0]['sighting_count'] == 1
-
-        status, _headers, search = admin.request(f'/api/plates/search?q={plate_number}')
-        assert status == 200
-        assert search[0]['event']['id'] == event_id
-
-        event = admin.request(f"/api/events/{event_id}")[2]
-        assert event['plate_events'][0]['plate_number'] == plate_number
-
-        status, _headers, whitelisted = admin.request(
-            '/api/plates/whitelist',
-            method='POST',
-            json_body={'plate_number': plate_number, 'notes': 'Family Car'},
-            headers={'X-CSRF-Token': admin_csrf},
-        )
-        assert status == 200
-        assert whitelisted['is_whitelisted'] is True
-        assert whitelisted['notes'] == 'Family Car'
-
-        status, _headers, blacklisted = admin.request(
-            '/api/plates/blacklist',
-            method='POST',
-            json_body={'plate_number': 'BAD001', 'notes': 'Blacklisted'},
-            headers={'X-CSRF-Token': admin_csrf},
-        )
-        assert status == 200
-        assert blacklisted['is_blacklisted'] is True
-
-        status, _headers, rule = admin.request(
-            '/api/plate-alerts',
-            method='POST',
-            json_body={'rule_name': 'Watch plate', 'rule_type': 'plate', 'plate_pattern': plate_number, 'enabled': True, 'cooldown_seconds': 0},
-            headers={'X-CSRF-Token': admin_csrf},
-        )
-        assert status == 200
-        assert rule['plate_pattern'] == plate_number
-        assert any(alert['rule_name'] == 'Watch plate' for alert in main_module.trigger_plate_alerts(plate_events))
-
-        status, _headers, edited = admin.request(
-            f"/api/plate-alerts/{rule['id']}",
-            method='PUT',
-            json_body={'enabled': False},
-            headers={'X-CSRF-Token': admin_csrf},
-        )
-        assert status == 200
-        assert edited['enabled'] is False
-        assert admin.request(f"/api/plate-alerts/{rule['id']}", method='DELETE', headers={'X-CSRF-Token': admin_csrf})[2]['ok'] is True
-
-        status, _headers, viewer = admin.request(
-            '/api/users',
-            method='POST',
-            json_body={'username': 'plateviewer', 'password': 'Viewer123!', 'role': 'viewer'},
-            headers={'X-CSRF-Token': admin_csrf},
-        )
-        assert status == 200
-        viewer_client = LocalClient(base_url)
-        viewer_csrf = _login(viewer_client, viewer['username'], 'Viewer123!')
-        assert viewer_client.request('/api/plates')[0] == 200
-        denied = viewer_client.request(
-            '/api/plates/blacklist',
-            method='POST',
-            json_body={'plate_number': 'NOPE123'},
-            headers={'X-CSRF-Token': viewer_csrf},
-        )
-        assert denied[0] == 403
-    finally:
-        server.should_exit = True
-        thread.join(timeout=5)
-
-
 def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
     app, _database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
@@ -946,15 +793,6 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
         assert status == 200
         assert camera["width"] == 640
         assert client.request("/api/status")[2]["resolution"] == {"width": 640, "height": 360}
-
-        status, _headers, anpr = client.request(
-            "/api/settings/anpr",
-            method="PUT",
-            json_body={"enabled": True, "backend": "paddleocr", "min_confidence": 0.8, "vehicle_labels": ["car", "truck"]},
-            headers={"X-CSRF-Token": csrf},
-        )
-        assert status == 200
-        assert anpr["vehicle_labels"] == ["car", "truck"]
 
         status, _headers, recording = client.request(
             "/api/settings/system/recording",
@@ -1001,7 +839,6 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
 
         system_settings = client.request("/api/settings/system")[2]
         assert system_settings["camera"]["width"] == 640
-        assert system_settings["anpr"]["min_confidence"] == 0.8
         assert system_settings["recording"]["format"] == "mp4"
         assert system_settings["auth"]["lockout_minutes"] == 10
     finally:
@@ -1317,7 +1154,6 @@ def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypat
                     'width': 1,
                     'height': 1,
                     'object_rules': [{'label': 'motion', 'min_confidence': 0.45}],
-                    'monitor_anpr': False,
                 },
             ],
         },
@@ -1345,7 +1181,6 @@ def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypat
                     'width': 1,
                     'height': 1,
                     'object_rules': [{'label': 'motion', 'min_confidence': 0.35}],
-                    'monitor_anpr': False,
                 },
             ],
         },
@@ -1484,7 +1319,7 @@ def test_live_stream_detection_without_alert_rule_does_not_record_by_default(tmp
             'name': 'Front Door',
             'detection': {
                 'zones': [
-                    {'id': 'porch', 'name': 'Porch', 'x': 0, 'y': 0, 'width': 1, 'height': 1, 'monitor_motion': True, 'monitor_objects': True, 'monitor_anpr': True},
+                    {'id': 'porch', 'name': 'Porch', 'x': 0, 'y': 0, 'width': 1, 'height': 1, 'monitor_motion': True, 'monitor_objects': True},
                 ],
             },
             'recording': {'enabled': True, 'record_on_alert': True, 'continuous': False},
@@ -1545,7 +1380,6 @@ def test_live_stream_detection_saves_only_allowed_zone_object_labels(tmp_path, m
                         'monitor_motion': False,
                         'monitor_objects': True,
                         'object_labels': ['person', 'cat'],
-                        'monitor_anpr': False,
                     },
                 ],
             },
@@ -1589,7 +1423,7 @@ def test_live_stream_camera_continuous_recording_records_without_alert_rule(tmp_
             'name': 'Front Door',
             'detection': {
                 'zones': [
-                    {'id': 'porch', 'name': 'Porch', 'x': 0, 'y': 0, 'width': 1, 'height': 1, 'monitor_motion': True, 'monitor_objects': True, 'monitor_anpr': True},
+                    {'id': 'porch', 'name': 'Porch', 'x': 0, 'y': 0, 'width': 1, 'height': 1, 'monitor_motion': True, 'monitor_objects': True},
                 ],
             },
             'recording': {'enabled': True, 'record_on_alert': True, 'continuous': True},
@@ -2304,10 +2138,9 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
                 'detection': {
                     'motion_enabled': True,
                     'object_detection_enabled': True,
-                    'anpr_enabled': True,
                     'object_labels': ['person', 'cat'],
                     'zones': [
-                        {'id': 'porch', 'name': 'Porch', 'x': 0.0, 'y': 0.0, 'width': 0.5, 'height': 0.5, 'monitor_motion': True, 'monitor_objects': True, 'object_labels': ['person'], 'monitor_anpr': True}
+                        {'id': 'porch', 'name': 'Porch', 'x': 0.0, 'y': 0.0, 'width': 0.5, 'height': 0.5, 'monitor_motion': True, 'monitor_objects': True, 'object_labels': ['person']}
                     ],
                 },
             },
@@ -2319,7 +2152,7 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
                 'width': 640,
                 'height': 480,
                 'fps': 10,
-                'detection': {'motion_enabled': False, 'object_detection_enabled': False, 'anpr_enabled': False, 'zones': []},
+                'detection': {'motion_enabled': False, 'object_detection_enabled': False, 'zones': []},
             },
         ]
         status, _headers, payload = client.request('/api/cameras', method='PUT', json_body={'cameras': cameras}, headers={'X-CSRF-Token': csrf})
@@ -2347,7 +2180,7 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
                 'detection': {
                     **listed['cameras'][0]['detection'],
                     'zones': [
-                        {'id': 'driveway', 'name': 'Driveway', 'x': 0.25, 'y': 0.25, 'width': 0.5, 'height': 0.5, 'monitor_motion': True, 'monitor_objects': False, 'object_labels': 'cat, person, cat', 'monitor_anpr': False}
+                        {'id': 'driveway', 'name': 'Driveway', 'x': 0.25, 'y': 0.25, 'width': 0.5, 'height': 0.5, 'monitor_motion': True, 'monitor_objects': False, 'object_labels': 'cat, person, cat'}
                     ],
                 },
             },
@@ -2357,7 +2190,6 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
         assert updated['detection']['zones'][0]['id'] == 'driveway'
         assert updated['detection']['zones'][0]['monitor_objects'] is False
         assert updated['detection']['zones'][0]['object_labels'] == ['cat', 'person']
-        assert updated['detection']['zones'][0]['monitor_anpr'] is False
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -2376,7 +2208,6 @@ def test_polygon_monitoring_zones_are_normalized_and_filter_by_shape(tmp_path, m
         ],
         'monitor_motion': True,
         'monitor_objects': True,
-        'monitor_anpr': True,
     }
 
     zones = main.normalize_monitoring_zones([triangle])

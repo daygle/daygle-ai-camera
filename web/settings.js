@@ -12,7 +12,6 @@ function titleCaseWords(value) {
       const normalized = word.toLowerCase();
       const acronyms = {
         ai: 'AI',
-        anpr: 'ANPR',
         api: 'API',
         fps: 'FPS',
         id: 'ID',
@@ -43,12 +42,10 @@ const FIELD_LABELS = {
   snapshots_dir: 'Snapshots Directory',
   events_dir: 'Events Directory',
   recordings_dir: 'Recordings Directory',
-  plates_dir: 'Plate Images Directory',
   session_timeout_hours: 'Session Timeout Hours',
   max_login_attempts: 'Max Login Attempts',
   lockout_minutes: 'Lockout Minutes',
   min_confidence: 'Min Confidence',
-  vehicle_labels: 'Vehicle Labels',
   from_address: 'From Address',
   use_tls: 'STARTTLS',
   use_ssl: 'SSL',
@@ -79,7 +76,6 @@ const FIELD_LABELS = {
   record_on_objects: 'Record on Objects',
   rule_name: 'Rule Name',
   rule_type: 'Rule Type',
-  plate_pattern: 'Plate Pattern',
   cooldown_seconds: 'Cooldown Seconds',
   timezone: 'Timezone',
 };
@@ -155,7 +151,7 @@ function createRuntimeResetSection() {
         <p class="settings-section-subtitle">Start clean removes all operational data so you can begin fresh.</p>
       </div>
     </div>
-    <p class="muted">This action deletes <strong>events, recordings, alert history, and ANPR plate history/files</strong>.</p>
+    <p class="muted">This action deletes <strong>events, recordings, and alert history</strong>.</p>
     <p class="muted danger-zone-warning"><strong>Settings, users, sessions, and alert rules are preserved.</strong> This action cannot be undone.</p>
     <p class="danger-zone-confirm-hint">Confirmation required: type START CLEAN when prompted.</p>
     <div class="button-row"><button id="startCleanBtn" class="secondary delete-btn" type="button">Start Clean</button></div>
@@ -280,7 +276,6 @@ const testPushBtn = document.getElementById('testPushBtn');
 const startCleanBtn = document.getElementById('startCleanBtn');
 
 const forms = {
-  anpr: document.getElementById('anprSettingsForm'),
   live: document.getElementById('liveSettingsForm'),
   recording: document.getElementById('recordingSettingsForm'),
   retention: document.getElementById('retentionSettingsForm'),
@@ -371,11 +366,7 @@ async function loadSettings() {
     api('/api/settings/alert-email'),
     api('/api/settings/alert-push'),
   ]);
-  fillForm(forms.anpr, settings.anpr);
   fillForm(forms.live, settings.live);
-  if (forms.anpr.elements.vehicle_labels) {
-    forms.anpr.elements.vehicle_labels.value = (settings.anpr.vehicle_labels || []).join(', ');
-  }
   fillForm(forms.recording, settings.recording);
   fillForm(forms.retention, settings.recording);
   if (forms.recording.elements.record_on_objects) {
@@ -402,7 +393,6 @@ function bindForm(name, label, endpointName = name) {
   });
 }
 
-bindForm('anpr', 'ANPR');
 bindForm('live', 'Live');
 bindForm('recording', 'Recording');
 bindForm('retention', 'Retention', 'recording');
@@ -578,7 +568,7 @@ function initSoftwareUpdateSection() {
 initSoftwareUpdateSection();
 
 startCleanBtn?.addEventListener('click', async () => {
-  const confirmed = confirm('Start clean now? This permanently deletes events, recordings, alerts, and plates, while keeping settings and users.');
+  const confirmed = confirm('Start clean now? This permanently deletes events, recordings, and alerts, while keeping settings and users.');
   if (!confirmed) return;
 
   const phrase = prompt('Type START CLEAN to confirm this irreversible action.');
@@ -593,7 +583,7 @@ startCleanBtn?.addEventListener('click', async () => {
     const result = await api('/api/system/runtime-data', { method: 'DELETE' });
     const deleted = result?.deleted || {};
     setMessage(
-      `Clean start complete. Deleted ${Number(deleted.recordings || 0)} recordings, ${Number(deleted.events || 0)} events, ${Number(deleted.alerts || 0)} alerts, and ${Number(deleted.plates || 0)} plate records. Settings were preserved.`,
+      `Clean start complete. Deleted ${Number(deleted.recordings || 0)} recordings, ${Number(deleted.events || 0)} events, and ${Number(deleted.alerts || 0)} alerts. Settings were preserved.`,
     );
   } catch (error) {
     setMessage(error.message, true);

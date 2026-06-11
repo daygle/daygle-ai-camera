@@ -36,12 +36,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "labels_path": "models/coco.names",
         "categories": ["person", "cat", "dog", "car", "truck", "bus", "motorcycle", "bicycle", "bird", "suitcase", "backpack"],
     },
-    "anpr": {
-        "enabled": True,
-        "backend": "easyocr",
-        "min_confidence": 0.75,
-        "vehicle_labels": ["car", "truck", "bus", "motorcycle"],
-    },
     "alerts": {
         "enabled": True,
         "email": {
@@ -95,7 +89,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "snapshots_dir": "data/snapshots",
         "events_dir": "data/events",
         "recordings_dir": "data/recordings",
-        "plates_dir": "data/plates",
     },
 }
 

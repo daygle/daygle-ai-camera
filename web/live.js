@@ -743,7 +743,6 @@ function finishDraftPolygon() {
     enabled: true,
     object_labels: [],
     object_rules: [defaultObjectRule('motion')],
-    monitor_anpr: true,
   });
   selectedZoneIndex = zones.length - 1;
   normalizeZone(zones[selectedZoneIndex]);
@@ -769,7 +768,6 @@ function addFullFrameZone() {
     enabled: true,
     object_labels: [],
     object_rules: [defaultObjectRule('motion')],
-    monitor_anpr: true,
   });
   selectedZoneIndex = zones.length - 1;
   draftPolygon = null;

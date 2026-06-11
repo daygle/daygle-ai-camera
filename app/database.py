@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -85,45 +84,6 @@ class EventDatabase:
                 CREATE INDEX IF NOT EXISTS idx_recordings_started_at ON recordings(started_at);
                 CREATE INDEX IF NOT EXISTS idx_recordings_source ON recordings(source);
 
-                CREATE TABLE IF NOT EXISTS vehicle_plates (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    plate_number TEXT NOT NULL UNIQUE,
-                    first_seen TEXT NOT NULL,
-                    last_seen TEXT NOT NULL,
-                    sighting_count INTEGER NOT NULL DEFAULT 1,
-                    notes TEXT,
-                    is_whitelisted INTEGER NOT NULL DEFAULT 0,
-                    is_blacklisted INTEGER NOT NULL DEFAULT 0
-                );
-
-                CREATE TABLE IF NOT EXISTS plate_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event_id INTEGER NOT NULL,
-                    plate_id INTEGER,
-                    plate_number TEXT NOT NULL,
-                    confidence REAL NOT NULL,
-                    image_path TEXT,
-                    created_at TEXT NOT NULL,
-                    FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
-                    FOREIGN KEY(plate_id) REFERENCES vehicle_plates(id) ON DELETE SET NULL
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_vehicle_plates_number ON vehicle_plates(plate_number);
-                CREATE INDEX IF NOT EXISTS idx_plate_events_number ON plate_events(plate_number);
-                CREATE INDEX IF NOT EXISTS idx_plate_events_created ON plate_events(created_at);
-                CREATE INDEX IF NOT EXISTS idx_plate_events_event ON plate_events(event_id);
-
-                CREATE TABLE IF NOT EXISTS plate_alert_rules (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    rule_name TEXT NOT NULL,
-                    rule_type TEXT NOT NULL CHECK(rule_type IN ('plate', 'unknown', 'blacklisted')),
-                    plate_pattern TEXT,
-                    enabled INTEGER NOT NULL DEFAULT 1,
-                    cooldown_seconds INTEGER NOT NULL DEFAULT 60,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-
                 CREATE TABLE IF NOT EXISTS app_settings (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL,
@@ -147,8 +107,6 @@ class EventDatabase:
                 CREATE INDEX IF NOT EXISTS idx_audit_log_username ON audit_log(username);
                 CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action);
                 CREATE INDEX IF NOT EXISTS idx_audit_log_resource ON audit_log(resource);
-
-                CREATE INDEX IF NOT EXISTS idx_plate_alert_rules_type ON plate_alert_rules(rule_type);
                 """
             )
 
@@ -311,23 +269,6 @@ class EventDatabase:
             db.execute("DELETE FROM events")
             return int(count)
 
-    def delete_plate(self, plate_id: int) -> dict[str, Any] | None:
-        with self.connect() as db:
-            row = db.execute("SELECT * FROM vehicle_plates WHERE id = ?", (plate_id,)).fetchone()
-            if row is None:
-                return None
-            plate = self._plate_row(row)
-            db.execute("DELETE FROM plate_events WHERE plate_id = ?", (plate_id,))
-            db.execute("DELETE FROM vehicle_plates WHERE id = ?", (plate_id,))
-            return plate
-
-    def delete_all_plates(self) -> int:
-        with self.connect() as db:
-            count = db.execute("SELECT COUNT(*) AS count FROM vehicle_plates").fetchone()["count"]
-            db.execute("DELETE FROM plate_events")
-            db.execute("DELETE FROM vehicle_plates")
-            return int(count)
-
     def delete_all_recordings(self) -> list[dict[str, Any]]:
         with self.connect() as db:
             rows = db.execute("SELECT * FROM recordings").fetchall()
@@ -366,125 +307,6 @@ class EventDatabase:
             rows = [row for row in candidates if int(row["id"]) in purge_ids]
             db.executemany("DELETE FROM recordings WHERE id = ?", [(row["id"],) for row in rows])
             return rows
-
-    def upsert_plate(self, plate_number: str, seen_at: str) -> dict[str, Any]:
-        plate_number = plate_number.upper()
-        with self.connect() as db:
-            row = db.execute("SELECT * FROM vehicle_plates WHERE plate_number = ?", (plate_number,)).fetchone()
-            if row:
-                db.execute(
-                    "UPDATE vehicle_plates SET last_seen = ?, sighting_count = sighting_count + 1 WHERE id = ?",
-                    (seen_at, row["id"]),
-                )
-                updated = db.execute("SELECT * FROM vehicle_plates WHERE id = ?", (row["id"],)).fetchone()
-                return self._plate_row(updated)
-            cursor = db.execute(
-                """
-                INSERT INTO vehicle_plates (plate_number, first_seen, last_seen, sighting_count)
-                VALUES (?, ?, ?, 1)
-                """,
-                (plate_number, seen_at, seen_at),
-            )
-            return self._plate_row(db.execute("SELECT * FROM vehicle_plates WHERE id = ?", (cursor.lastrowid,)).fetchone())
-
-    def add_plate_event(self, *, event_id: int, plate_id: int | None, plate_number: str, confidence: float, image_path: str | None, created_at: str) -> dict[str, Any]:
-        with self.connect() as db:
-            cursor = db.execute(
-                """
-                INSERT INTO plate_events (event_id, plate_id, plate_number, confidence, image_path, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (event_id, plate_id, plate_number.upper(), confidence, image_path, created_at),
-            )
-            return self._plate_event_with_context(db, db.execute("SELECT * FROM plate_events WHERE id = ?", (cursor.lastrowid,)).fetchone())
-
-    def list_plates(self, limit: int = 50) -> list[dict[str, Any]]:
-        with self.connect() as db:
-            rows = db.execute("SELECT * FROM vehicle_plates ORDER BY last_seen DESC LIMIT ?", (limit,)).fetchall()
-            return [self._plate_row(row) for row in rows]
-
-    def get_plate(self, plate_id: int) -> dict[str, Any] | None:
-        with self.connect() as db:
-            row = db.execute("SELECT * FROM vehicle_plates WHERE id = ?", (plate_id,)).fetchone()
-            if row is None:
-                return None
-            plate = self._plate_row(row)
-            events = db.execute("SELECT * FROM plate_events WHERE plate_id = ? ORDER BY created_at DESC", (plate_id,)).fetchall()
-            plate["events"] = [self._plate_event_with_context(db, event) for event in events]
-            return plate
-
-    def search_plates(self, query: str, limit: int = 50) -> list[dict[str, Any]]:
-        query = query.upper().strip()
-        with self.connect() as db:
-            rows = db.execute(
-                """
-                SELECT * FROM plate_events
-                WHERE plate_number LIKE ?
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
-                (f"%{query}%", limit),
-            ).fetchall()
-            return [self._plate_event_with_context(db, row) for row in rows]
-
-    def update_plate_status(self, plate_number: str, *, notes: str | None = None, is_whitelisted: bool | None = None, is_blacklisted: bool | None = None) -> dict[str, Any]:
-        plate = self.upsert_plate(plate_number, datetime.now(timezone.utc).isoformat())
-        updates: list[str] = []
-        params: list[Any] = []
-        if notes is not None:
-            updates.append("notes = ?")
-            params.append(notes)
-        if is_whitelisted is not None:
-            updates.append("is_whitelisted = ?")
-            params.append(int(is_whitelisted))
-        if is_blacklisted is not None:
-            updates.append("is_blacklisted = ?")
-            params.append(int(is_blacklisted))
-        if updates:
-            params.append(plate["id"])
-            with self.connect() as db:
-                db.execute(f"UPDATE vehicle_plates SET {', '.join(updates)} WHERE id = ?", params)
-        return self.get_plate(int(plate["id"])) or plate
-
-    def list_plate_alert_rules(self) -> list[dict[str, Any]]:
-        with self.connect() as db:
-            rows = db.execute("SELECT * FROM plate_alert_rules ORDER BY rule_name COLLATE NOCASE").fetchall()
-            return [self._plate_alert_rule(row) for row in rows]
-
-    def create_plate_alert_rule(self, rule: dict[str, Any], now: str) -> dict[str, Any]:
-        with self.connect() as db:
-            cursor = db.execute(
-                """
-                INSERT INTO plate_alert_rules (rule_name, rule_type, plate_pattern, enabled, cooldown_seconds, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (rule["rule_name"], rule["rule_type"], rule.get("plate_pattern"), int(bool(rule["enabled"])), int(rule["cooldown_seconds"]), now, now),
-            )
-            return self._plate_alert_rule(db.execute("SELECT * FROM plate_alert_rules WHERE id = ?", (cursor.lastrowid,)).fetchone())
-
-    def update_plate_alert_rule(self, rule_id: int, rule: dict[str, Any], now: str) -> dict[str, Any] | None:
-        updates: list[str] = []
-        params: list[Any] = []
-        for key in ("rule_name", "rule_type", "plate_pattern", "enabled", "cooldown_seconds"):
-            if key in rule:
-                updates.append(f"{key} = ?")
-                params.append(int(bool(rule[key])) if key == "enabled" else rule[key])
-        if not updates:
-            with self.connect() as db:
-                row = db.execute("SELECT * FROM plate_alert_rules WHERE id = ?", (rule_id,)).fetchone()
-                return self._plate_alert_rule(row) if row else None
-        updates.append("updated_at = ?")
-        params.extend([now, rule_id])
-        with self.connect() as db:
-            cursor = db.execute(f"UPDATE plate_alert_rules SET {', '.join(updates)} WHERE id = ?", params)
-            if cursor.rowcount == 0:
-                return None
-            return self._plate_alert_rule(db.execute("SELECT * FROM plate_alert_rules WHERE id = ?", (rule_id,)).fetchone())
-
-    def delete_plate_alert_rule(self, rule_id: int) -> bool:
-        with self.connect() as db:
-            cursor = db.execute("DELETE FROM plate_alert_rules WHERE id = ?", (rule_id,))
-            return cursor.rowcount > 0
 
     def add_alert(self, created_at: str, rule_name: str, event_id: int, label: str, confidence: float, message: str) -> None:
         with self.connect() as db:
@@ -715,8 +537,6 @@ class EventDatabase:
         event["metadata"] = json.loads(event.get("metadata") or "{}")
         event["detections"] = [dict(detection) for detection in detections]
         event["recordings"] = [self._recording_row(recording) for recording in recordings]
-        plate_events = db.execute("SELECT * FROM plate_events WHERE event_id = ? ORDER BY confidence DESC", (row["id"],)).fetchall()
-        event["plate_events"] = [self._plate_event_with_context(db, plate_event) for plate_event in plate_events]
         event["recording_status"] = "linked" if recordings else "none"
         return event
 
@@ -730,7 +550,6 @@ class EventDatabase:
         recording = self._recording_row(row)
         recording["event"] = None
         recording["detections"] = []
-        recording["plate_events"] = []
         if recording.get("event_id") is not None:
             event_row = db.execute("SELECT * FROM events WHERE id = ?", (recording["event_id"],)).fetchone()
             detections = db.execute(
@@ -741,35 +560,4 @@ class EventDatabase:
                 event["metadata"] = json.loads(event.get("metadata") or "{}")
                 recording["event"] = event
             recording["detections"] = [dict(detection) for detection in detections]
-            plate_events = db.execute("SELECT * FROM plate_events WHERE event_id = ? ORDER BY confidence DESC", (recording["event_id"],)).fetchall()
-            recording["plate_events"] = [self._plate_event_with_context(db, plate_event) for plate_event in plate_events]
         return recording
-
-    def _plate_row(self, row: sqlite3.Row) -> dict[str, Any]:
-        plate = dict(row)
-        plate["is_whitelisted"] = bool(plate["is_whitelisted"])
-        plate["is_blacklisted"] = bool(plate["is_blacklisted"])
-        return plate
-
-    def _plate_event_with_context(self, db: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
-        plate_event = dict(row)
-        plate_event["plate"] = None
-        if plate_event.get("plate_id") is not None:
-            plate_row = db.execute("SELECT * FROM vehicle_plates WHERE id = ?", (plate_event["plate_id"],)).fetchone()
-            if plate_row:
-                plate_event["plate"] = self._plate_row(plate_row)
-        event_row = db.execute("SELECT * FROM events WHERE id = ?", (plate_event["event_id"],)).fetchone()
-        if event_row:
-            event = dict(event_row)
-            event["metadata"] = json.loads(event.get("metadata") or "{}")
-            recordings = db.execute("SELECT * FROM recordings WHERE event_id = ? ORDER BY started_at DESC", (event["id"],)).fetchall()
-            event["recordings"] = [self._recording_row(recording) for recording in recordings]
-            plate_event["event"] = event
-        else:
-            plate_event["event"] = None
-        return plate_event
-
-    def _plate_alert_rule(self, row: sqlite3.Row) -> dict[str, Any]:
-        rule = dict(row)
-        rule["enabled"] = bool(rule["enabled"])
-        return rule
