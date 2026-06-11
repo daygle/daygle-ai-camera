@@ -3501,16 +3501,6 @@ def _int_field(payload: dict[str, Any], field: str, default: int, minimum: int, 
     return value
 
 
-def _float_field(payload: dict[str, Any], field: str, default: float, minimum: float, maximum: float) -> float:
-    try:
-        value = float(payload.get(field, default))
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=f'{field} must be a number.') from exc
-    if value < minimum or value > maximum:
-        raise HTTPException(status_code=400, detail=f'{field} must be between {minimum} and {maximum}.')
-    return value
-
-
 def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | None = None, index: int = 1) -> dict[str, Any]:
     current = current or {}
     updated = {
