@@ -581,7 +581,7 @@ def effective_cameras_config() -> list[dict[str, Any]]:
     override = database.get_setting('cameras')
     if isinstance(override, list) and override:
         return [normalize_camera_settings(camera_settings, index) for index, camera_settings in enumerate(override, start=1)]
-    return [normalize_camera_settings({}, 1)]
+    return []
 
 
 def get_camera_config(camera_id: str | None = None) -> dict[str, Any]:
@@ -1521,9 +1521,9 @@ def create_camera_instances(settings_list: list[dict[str, Any]]) -> dict[str, An
 
 
 cameras_config = effective_cameras_config()
-camera_config = cameras_config[0]
+camera_config = cameras_config[0] if cameras_config else {}
 camera_instances = create_camera_instances(cameras_config)
-camera = camera_instances[camera_config['id']]
+camera = camera_instances[camera_config['id']] if camera_config else None
 
 def config_file_path() -> Path:
     return Path(os.environ.get(CONFIG_ENV_VAR) or DEFAULT_CONFIG_PATH)
@@ -3552,8 +3552,6 @@ def validate_cameras_settings(payload: Any) -> list[dict[str, Any]]:
     raw_cameras = payload.get('cameras') if isinstance(payload, dict) else payload
     if not isinstance(raw_cameras, list):
         raise HTTPException(status_code=400, detail='cameras must be a list.')
-    if not raw_cameras:
-        raise HTTPException(status_code=400, detail='At least one camera is required.')
     validated: list[dict[str, Any]] = []
     seen: set[str] = set()
     current_by_id = {str(camera_settings.get('id')): camera_settings for camera_settings in cameras_config}
@@ -3671,9 +3669,9 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
 def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
     global camera, camera_config, cameras_config, camera_instances
     cameras_config = settings_list
-    camera_config = settings_list[0]
+    camera_config = settings_list[0] if settings_list else {}
     camera_instances = create_camera_instances(settings_list)
-    camera = camera_instances[camera_config['id']]
+    camera = camera_instances[camera_config['id']] if camera_config else None
 
 
 def apply_storage_and_recording_settings() -> None:
