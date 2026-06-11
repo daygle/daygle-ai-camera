@@ -48,7 +48,6 @@ window.showToast = function (message, isError) {
       admin: false,
       links: [
         { href: '/ai', match: '/ai', label: 'AI Settings' },
-        { href: '/anpr', match: '/anpr', label: 'ANPR' },
       ],
     },
     {

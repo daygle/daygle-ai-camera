@@ -117,18 +117,6 @@
             <label><span>Frame Buffer Drains</span><input id="editStaleFrameGrabs" name="stale_frame_grabs" type="number" min="0" max="20" placeholder="Auto" /><span class="field-help">Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4).</span></label>
           </div>
           <p class="form-help muted">These values are hints passed to the stream decoder. Leave at defaults unless your camera requires specific dimensions.</p>
-
-          <div class="form-group">
-            <p class="form-group-label">Detection</p>
-            <div class="form-grid">
-              <label><span>ANPR (Number Plate Recognition)</span>
-                <select id="editAnprEnabled" name="anpr_enabled">
-                  <option value="true">Enabled</option>
-                  <option value="false">Disabled</option>
-                </select>
-              </label>
-            </div>
-          </div>
         </div>
 
         <div class="modal-footer">

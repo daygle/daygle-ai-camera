@@ -263,8 +263,6 @@ textarea {
   outline: none;
 }
 .search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; margin-bottom: 16px; }
-.anpr-search-card h2 { margin-bottom: 12px; }
-.anpr-search-row { grid-template-columns: minmax(180px, 260px) minmax(0, 1fr) auto auto; }
 .chip {
   display: inline-flex;
   align-items: center;
@@ -438,8 +436,6 @@ input[type="file"] { padding: 10px; }
   /* Override custom search rows that wouldn't collapse from the base .search-row rule */
   .recordings-search-row { grid-template-columns: minmax(0, 1fr) auto auto; }
   .recordings-search-row select { grid-column: 1 / -1; }
-  .anpr-search-row { grid-template-columns: minmax(0, 1fr) auto auto; }
-  .anpr-search-row select { grid-column: 1 / -1; }
   .form-grid, .user-row, .status-panel { grid-template-columns: 1fr; }
 }
 .link-button {
@@ -660,33 +656,6 @@ input[type="file"] { padding: 10px; }
   line-height: 1.35;
 }
 
-#recentPlates .item,
-#plateResults .item,
-#plateDetails .item {
-  padding: 9px 11px;
-}
-#recentPlates .item-title,
-#plateResults .item-title,
-#plateDetails .item-title {
-  gap: 8px;
-}
-#recentPlates .item-title span:last-child,
-#plateResults .item-title span:last-child,
-#plateDetails .item-title span:last-child {
-  font-size: 12px;
-}
-#recentPlates .muted,
-#plateResults .muted,
-#plateDetails .muted {
-  margin: 2px 0 0;
-  font-size: 12px;
-  line-height: 1.3;
-}
-#plateResults .link-button,
-#plateDetails .link-button {
-  padding: 2px 0;
-}
-
 .zone-overlay { position: absolute; pointer-events: auto; z-index: 2; touch-action: none; }
 .monitor-zone-polygon { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .monitor-zone-polygon polygon,
@@ -855,13 +824,6 @@ input[type="file"] { padding: 10px; }
   .live-controls label:not(.toggle-control) { min-width: 0; }
 }
 
-@media (min-width: 901px) {
-  #recentPlates .item,
-  #plateResults .item,
-  #plateDetails .item {
-    padding: 8px 10px;
-  }
-}
 
 /* Small phones (≤600px): compact nav, tighter cards, section headers that wrap */
 @media (max-width: 600px) {
