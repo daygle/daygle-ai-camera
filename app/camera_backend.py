@@ -128,10 +128,10 @@ class OpenCvStreamCamera:
     def backend(self) -> str:
         return "onvif"
 
-    def get_frame(self) -> dict[str, Any]:
+    def get_frame(self, timestamp: float | None = None) -> dict[str, Any]:
         return {
             "frame_number": self.frame_number,
-            "timestamp": time.time(),
+            "timestamp": timestamp if timestamp is not None else time.time(),
             "width": self.width,
             "height": self.height,
             "uptime_seconds": round(time.time() - self.started_at, 1),
@@ -174,6 +174,12 @@ class OpenCvStreamCamera:
             capture = self._open_capture()
             import cv2
 
+            # Capture timestamp BEFORE reading the frame so detection track
+            # samples are stamped close to when the frame left the camera,
+            # not after stale-frame grabs + JPEG encoding which can lag by
+            # hundreds of milliseconds and shift every playback overlay box.
+            capture_ts = time.time()
+
             ok, image = self._read_latest_frame(capture, self._stale_frame_grabs())
             if not ok or image is None:
                 self._release_capture()
@@ -193,8 +199,8 @@ class OpenCvStreamCamera:
             if not ok:
                 self.last_error = "Unable to encode ONVIF/RTSP frame as JPEG."
                 raise RuntimeError(self.last_error)
-            self.last_error = None
-            return encoded.tobytes(), self.get_frame()
+        self.last_error = None
+        return encoded.tobytes(), self.get_frame(capture_ts)
 
     def _stale_frame_grabs(self) -> int:
         return max(2, min(12, int(self.fps / 2)))
