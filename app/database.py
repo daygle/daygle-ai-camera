@@ -25,6 +25,14 @@ class EventDatabase:
 
     def init(self) -> None:
         with self.connect() as db:
+            # Migration: add recording_id to alert_history if upgrading from a
+            # pre-video-link schema. New installs get it via the CREATE TABLE
+            # block below, so use ALTER TABLE for the upgrade path and swallow
+            # the "duplicate column" error that fires when the column exists.
+            try:
+                db.execute("ALTER TABLE alert_history ADD COLUMN recording_id INTEGER REFERENCES recordings(id) ON DELETE SET NULL")
+            except sqlite3.OperationalError:
+                pass
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS events (
@@ -57,7 +65,9 @@ class EventDatabase:
                     label TEXT NOT NULL,
                     confidence REAL NOT NULL,
                     message TEXT NOT NULL,
-                    FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
+                    recording_id INTEGER,
+                    FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
+                    FOREIGN KEY(recording_id) REFERENCES recordings(id) ON DELETE SET NULL
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
@@ -308,14 +318,14 @@ class EventDatabase:
             db.executemany("DELETE FROM recordings WHERE id = ?", [(row["id"],) for row in rows])
             return rows
 
-    def add_alert(self, created_at: str, rule_name: str, event_id: int, label: str, confidence: float, message: str) -> None:
+    def add_alert(self, created_at: str, rule_name: str, event_id: int, label: str, confidence: float, message: str, recording_id: int | None = None) -> None:
         with self.connect() as db:
             db.execute(
                 """
-                INSERT INTO alert_history (created_at, rule_name, event_id, label, confidence, message)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO alert_history (created_at, rule_name, event_id, label, confidence, message, recording_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (created_at, rule_name, event_id, label, confidence, message),
+                (created_at, rule_name, event_id, label, confidence, message, recording_id),
             )
 
     def search_events(self, label: str | None = None, limit: int = 50, alerted_only: bool = False, with_recording: bool = False) -> list[dict[str, Any]]:
@@ -410,7 +420,7 @@ class EventDatabase:
                 """
                 SELECT ah.*, r.id AS recording_id
                 FROM alert_history ah
-                LEFT JOIN recordings r ON r.event_id = ah.event_id
+                LEFT JOIN recordings r ON r.id = ah.recording_id
                 ORDER BY ah.created_at DESC
                 LIMIT ?
                 """,

@@ -1462,6 +1462,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             label=alert['label'],
             confidence=alert['confidence'],
             message=alert['message'],
+            recording_id=recording_id,
         )
     motion_email_enabled = normalize_bool_setting((settings.get('detection') or {}).get('motion_email_enabled'), True)
     email_triggered = [
