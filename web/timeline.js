@@ -873,3 +873,14 @@ loadAuth().then(async () => {
   els.timelineStatus.textContent = error.message;
   els.clipPlayerStatus.textContent = error.message;
 });
+
+// Re-render the timeline (ticks, segments, list, modal) when the user's
+// date_format / time_format changes in another tab. Preserves the
+// currently selected camera / day / filter / time range so the user keeps
+// what they were looking at — only the rendered formatting changes.
+window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
+  if (typeof loadTimeline !== 'function' || !state || !state.payload) return;
+  loadTimeline({ preserveSelection: true }).catch((error) => {
+    els.timelineStatus.textContent = error.message;
+  });
+};

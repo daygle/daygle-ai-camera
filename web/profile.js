@@ -51,7 +51,23 @@ profileForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const payload = Object.fromEntries(new FormData(profileForm).entries());
   try {
-    renderProfile(await api('/api/profile', { method: 'PUT', body: JSON.stringify(payload) }));
+    const updated = await api('/api/profile', { method: 'PUT', body: JSON.stringify(payload) });
+    renderProfile(updated);
+    // Apply the new display preferences locally so this tab's timestamps
+    // refresh immediately, then broadcast so every other open Daygle tab
+    // re-renders without a manual refresh.
+    if (typeof window.setDaygleDatePrefs === 'function') {
+      window.setDaygleDatePrefs({
+        date_format: updated.date_format,
+        time_format: updated.time_format,
+      });
+    }
+    if (typeof window.broadcastDaygleDatePrefs === 'function') {
+      window.broadcastDaygleDatePrefs({
+        dateFormat: updated.date_format,
+        timeFormat: updated.time_format,
+      });
+    }
     setMessage('Profile saved.');
   } catch (error) { setMessage(error.message, true); }
 });

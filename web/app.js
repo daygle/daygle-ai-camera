@@ -254,3 +254,11 @@ async function refreshAll() {
 loadAuth().then(async () => { await loadConfiguredLabels(); await refreshAll(); }).catch(() => {});
 setInterval(loadStatus, 3000);
 setInterval(() => loadStats().catch(() => {}), 10000);
+
+// Re-render the dashboard's status / stats / events / alerts when the
+// user's date_format / time_format changes in another tab. The 3s/10s
+// polling timers will keep these fresh on their own; this hook just makes
+// the change feel instant instead of waiting for the next tick.
+window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
+  if (typeof refreshAll === 'function') refreshAll().catch(() => {});
+};

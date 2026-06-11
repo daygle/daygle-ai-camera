@@ -24,6 +24,60 @@ function setDaygleDatePrefs(prefs) {
   }
 }
 
+// ─── Cross-tab broadcast (Profile page → every other open Daygle tab) ──────
+// Used after the user saves a new date_format / time_format on the Profile
+// page. BroadcastChannel gives instant in-tab delivery on modern browsers;
+// localStorage fires `storage` events on every other tab as a fallback so
+// the change still propagates on browsers without BroadcastChannel support
+// (and survives a quick page reload because the value is persisted).
+const DAYGLE_PREFS_CHANNEL = 'daygle-prefs';
+const DAYGLE_PREFS_STORAGE_KEY = 'daygle.datePrefs';
+const DAYGLE_PREFS_MESSAGE_TYPE = 'daygle-date-prefs';
+
+function broadcastDaygleDatePrefs(prefs) {
+  if (!prefs) return;
+  const payload = JSON.stringify({
+    type: DAYGLE_PREFS_MESSAGE_TYPE,
+    dateFormat: prefs.dateFormat || prefs.date_format || window.daygleDatePrefs.dateFormat,
+    timeFormat: prefs.timeFormat || prefs.time_format || window.daygleDatePrefs.timeFormat,
+  });
+  if (typeof BroadcastChannel === 'function') {
+    try {
+      const channel = new BroadcastChannel(DAYGLE_PREFS_CHANNEL);
+      channel.postMessage(payload);
+      channel.close();
+    } catch (_err) { /* ignore */ }
+  }
+  try { localStorage.setItem(DAYGLE_PREFS_STORAGE_KEY, payload); } catch (_err) { /* ignore */ }
+}
+
+function subscribeDaygleDatePrefs() {
+  function handleMessage(raw) {
+    let data = raw;
+    if (typeof raw === 'string') {
+      try { data = JSON.parse(raw); } catch (_err) { return; }
+    }
+    if (!data || data.type !== DAYGLE_PREFS_MESSAGE_TYPE) return;
+    setDaygleDatePrefs({
+      date_format: data.dateFormat,
+      time_format: data.timeFormat,
+    });
+  }
+  if (typeof BroadcastChannel === 'function') {
+    try {
+      const channel = new BroadcastChannel(DAYGLE_PREFS_CHANNEL);
+      channel.addEventListener('message', (event) => handleMessage(event.data));
+    } catch (_err) { /* ignore */ }
+  }
+  // The `storage` event only fires on OTHER tabs of the same origin, so it
+  // complements the BroadcastChannel above without double-firing locally.
+  window.addEventListener('storage', (event) => {
+    if (event.key === DAYGLE_PREFS_STORAGE_KEY) handleMessage(event.newValue);
+  });
+}
+
+subscribeDaygleDatePrefs();
+
 function formatUserDate(isoDateString) {
   if (!isoDateString) return '';
   const [year, month, day] = String(isoDateString).slice(0, 10).split('-');

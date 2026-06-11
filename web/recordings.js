@@ -136,7 +136,7 @@ function updateFilterStat(label, hint) {
   els.statFilterHint.textContent = hint;
 }
 
-function formatIsoDateForFilter(dateString, *, endOfDay = false) {
+function formatIsoDateForFilter(dateString, endOfDay = false) {
   if (!dateString) return '';
   // The browser returns YYYY-MM-DD without a timezone. Anchor from/to bounds
   // to the start/end of the day in local time so the filter feels intuitive
@@ -623,6 +623,25 @@ els.videoModal.addEventListener('click', (event) => {
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !els.videoModal.hidden) closeVideoModal();
 });
+
+// Re-render the recordings list (and any open modal's "Started" line)
+// when the user's date_format / time_format changes in another tab. Uses
+// loadRecordings() so the active filter inputs (camera, label, dates,
+// sort) are preserved — only the displayed formatting changes.
+window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
+  if (typeof loadRecordings !== 'function' || !els || !els.listStatus) return;
+  loadRecordings().catch((error) => { els.listStatus.textContent = error.message; });
+};
+
+// Re-render the timeline (ticks, segments, list, modal) when the user's
+// date_format / time_format changes in another tab. Preserves the
+// currently selected camera / day / filter / time range.
+window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
+  if (typeof loadTimeline !== 'function' || !state || !state.payload) return;
+  loadTimeline({ preserveSelection: true }).catch((error) => {
+    els.timelineStatus.textContent = error.message;
+  });
+};
 
 loadAuth().then(async () => {
   await Promise.all([loadCameras(), loadLiveSettings()]);
