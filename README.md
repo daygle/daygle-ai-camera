@@ -356,7 +356,6 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `GET` | `/api/settings/system` | Admin system settings summary |
 | `GET` | `/api/settings/system/database/backup` | Download SQLite backup |
 | `POST` | `/api/settings/system/database/restore` | Restore from a SQLite backup |
-| `PUT` | `/api/settings/system/camera` | Admin single-camera settings (legacy) |
 | `PUT` | `/api/settings/system/live` | Admin live detection settings |
 | `PUT` | `/api/settings/system/recording` | Admin recording settings |
 | `PUT` | `/api/settings/system/storage` | Admin storage settings |
@@ -386,7 +385,6 @@ Useful `app_settings` keys:
 - `ai`
 - `alert_email`
 - `alert_push`
-- `camera`
 - `cameras`
 - `live`
 - `recording`

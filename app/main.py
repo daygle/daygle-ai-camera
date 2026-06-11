@@ -180,14 +180,6 @@ def compute_minimum_rule_confidence(fallback: float | None = None) -> float:
     return result
 
 
-def effective_camera_config() -> dict[str, Any]:
-    settings = copy.deepcopy(config.get('camera', {}))
-    override = database.get_setting('camera')
-    if isinstance(override, dict):
-        settings.update(override)
-    return settings
-
-
 def effective_recording_config() -> dict[str, Any]:
     settings = copy.deepcopy(config.get('recording', {}))
     override = database.get_setting('recording')
@@ -267,7 +259,7 @@ def effective_push_notification_settings() -> dict[str, Any]:
 
 
 database = EventDatabase(config['storage']['database'])
-camera_config = effective_camera_config()
+camera_config: dict[str, Any] = {}
 cameras_config: list[dict[str, Any]] = []
 camera_instances: dict[str, Any] = {}
 camera = None
@@ -429,7 +421,7 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
     for rule in source_rules:
         if not isinstance(rule, dict):
             continue
-        labels = normalize_label_list(rule.get('label') or rule.get('object') or '')
+        labels = normalize_label_list(rule.get('label') or '')
         if not labels:
             continue
         label = labels[0]
@@ -3520,7 +3512,7 @@ def _float_field(payload: dict[str, Any], field: str, default: float, minimum: f
 
 
 def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | None = None, index: int = 1) -> dict[str, Any]:
-    current = current or effective_camera_config()
+    current = current or {}
     updated = {
         key: current.get(key)
         for key in ('id', 'name', 'backend', 'device', 'width', 'height', 'fps', 'flip', 'stream_url', 'host', 'port', 'path', 'username', 'password')
@@ -3692,10 +3684,6 @@ def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
     camera_config = settings_list[0]
     camera_instances = create_camera_instances(settings_list)
     camera = camera_instances[camera_config['id']]
-
-
-def apply_camera_settings(settings: dict[str, Any]) -> None:
-    apply_cameras_settings([settings])
 
 
 def apply_storage_and_recording_settings() -> None:
@@ -4084,17 +4072,6 @@ async def restore_database(request: Request, file: UploadFile = File(...)):
         await file.close()
 
 
-@app.put('/api/settings/system/camera')
-async def update_camera_settings(request: Request):
-    require_admin(request)
-    settings = validate_camera_settings(await request.json())
-    database.set_setting('camera', settings, utc_now())
-    database.set_setting('cameras', [settings], utc_now())
-    apply_camera_settings(settings)
-    write_audit_log(request, 'update', 'settings.camera', details={'camera_name': settings.get('name')})
-    return settings
-
-
 @app.get('/api/cameras')
 def list_cameras():
     return {'cameras': effective_cameras_config()}
@@ -4105,7 +4082,6 @@ async def update_cameras(request: Request):
     require_admin(request)
     settings = validate_cameras_settings(await request.json())
     database.set_setting('cameras', settings, utc_now())
-    database.set_setting('camera', settings[0], utc_now())
     apply_cameras_settings(settings)
     write_audit_log(request, 'update', 'settings.cameras', details={'count': len(settings)})
     return {'cameras': settings}
@@ -4121,8 +4097,6 @@ async def update_camera(camera_id: str, request: Request):
         if current.get('id') == normalized:
             settings_list[index] = validate_camera_settings({**payload, 'id': normalized}, current=current, index=index + 1)
             database.set_setting('cameras', settings_list, utc_now())
-            if index == 0:
-                database.set_setting('camera', settings_list[0], utc_now())
             apply_cameras_settings(settings_list)
             write_audit_log(request, 'update', 'settings.camera', normalized, {'camera_name': settings_list[index].get('name')})
             return settings_list[index]

@@ -785,7 +785,7 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
         csrf = _login(client)
 
         status, _headers, camera = client.request(
-            "/api/settings/system/camera",
+            "/api/cameras/camera-1",
             method="PUT",
             json_body={"backend": "rtsp", "width": 640, "height": 360, "fps": 12, "device": "rtsp", "flip": "none", "stream_url": "rtsp://127.0.0.1:554/stream1"},
             headers={"X-CSRF-Token": csrf},
@@ -1459,7 +1459,7 @@ def test_admin_can_backup_and_restore_database_from_api(tmp_path, monkeypatch):
         csrf = _login(client)
 
         status, _headers, camera = client.request(
-            '/api/settings/system/camera',
+            '/api/cameras/camera-1',
             method='PUT',
             json_body={'backend': 'rtsp', 'width': 640, 'height': 360, 'fps': 12, 'device': 'rtsp', 'flip': 'none', 'stream_url': 'rtsp://127.0.0.1:554/stream1'},
             headers={'X-CSRF-Token': csrf},
@@ -1475,7 +1475,7 @@ def test_admin_can_backup_and_restore_database_from_api(tmp_path, monkeypatch):
             assert db.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetchone()[0] == 1
 
         status, _headers, camera = client.request(
-            '/api/settings/system/camera',
+            '/api/cameras/camera-1',
             method='PUT',
             json_body={'backend': 'rtsp', 'width': 800, 'height': 450, 'fps': 20, 'device': 'rtsp', 'flip': 'none', 'stream_url': 'rtsp://127.0.0.1:554/stream1'},
             headers={'X-CSRF-Token': csrf},
