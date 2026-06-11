@@ -266,6 +266,10 @@ createRuntimeResetSection();
 ensureRecordingExtensionStepField();
 enhanceFormFieldLabels();
 
+document.querySelectorAll('.field-help').forEach((el) => {
+  if (!el.title) el.title = el.textContent;
+});
+
 const emailForm = document.getElementById('emailSettingsForm');
 const testEmailRecipient = document.getElementById('testEmailRecipient');
 const testEmailBtn = document.getElementById('testEmailBtn');
