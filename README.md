@@ -1,6 +1,6 @@
 # Daygle AI Camera
 
-Daygle AI Camera is an Orange Pi 3B / Armbian-friendly AI camera platform with a FastAPI backend, SQLite storage, session authentication, a browser dashboard, multi-camera ONVIF/RTSP support, monitoring zones, ONNX YOLO object detection, ANPR, push notifications, and an audit log.
+Daygle AI Camera is a self-hosted AI camera platform with a FastAPI backend, SQLite storage, session authentication, a browser dashboard, multi-camera ONVIF/RTSP support, monitoring zones, ONNX YOLO object detection, ANPR, push notifications, and an audit log.
 
 The app is designed to be configured entirely from the web UI. `config.yaml` is only a small bootstrap file for settings the app must know before the database and dashboard can load.
 
@@ -23,7 +23,7 @@ The app is designed to be configured entirely from the web UI. `config.yaml` is 
 - **Database backup & restore**: download a SQLite backup or upload a previous backup to restore from the browser.
 - **Timeline playback**: visual day-view timeline of recording clips by camera.
 - Background live AI alert checks continue polling configured RTSP/ONVIF cameras even when no Live Cameras page is open.
-- Debian and Armbian install scripts plus a systemd unit for Linux/Orange Pi deployment.
+- Debian install script plus a systemd unit for Linux server deployment.
 
 ## Requirements
 
@@ -35,10 +35,10 @@ The app is designed to be configured entirely from the web UI. `config.yaml` is 
 - Optional: an ONNX YOLO model file for object detection.
 - Optional: PaddleOCR or EasyOCR for ANPR OCR.
 
-### Debian / Orange Pi / Armbian Deployment
+### Debian Server Deployment
 
-- Orange Pi 3B or another Linux host running Debian/Armbian-like packages.
-- Root or `sudo` access. Both service installers must be run with `sudo` because they install packages, write under `/opt` and `/etc`, and register a systemd service.
+- A Linux server running Debian or a Debian-like distribution.
+- Root or `sudo` access. The service installer must be run with `sudo` because it installs packages, writes under `/opt` and `/etc`, and registers a systemd service.
 - Network access during installation for `apt` and `pip`.
 - Optional: HTTPS reverse proxy or VPN for devices exposed beyond a private LAN.
 
@@ -120,27 +120,23 @@ apt update && apt install -y --no-install-recommends git python3 python3-pip pyt
 
 ### Service Install
 
-Run the appropriate installer from the repository root. Both installers must be run as root via `sudo`:
+Run the installer from the repository root with `sudo`:
 
 ```bash
-# Debian 13 / generic Debian host
 sudo ./scripts/install_debian.sh
-
-# Armbian / Orange Pi host
-sudo ./scripts/install_armbian.sh
 ```
 
-By default, the installers use the same Python dependency helper as local installs: it installs CPU-only PyTorch first and passes `--no-cache-dir` to pip to reduce temporary disk pressure. Set `DAYGLE_TORCH_VARIANT=default` before running an installer only if you intentionally want pip to resolve the default PyTorch/CUDA wheels.
+By default, the installer uses the same Python dependency helper as local installs: it installs CPU-only PyTorch first and passes `--no-cache-dir` to pip to reduce temporary disk pressure. Set `DAYGLE_TORCH_VARIANT=default` before running the installer only if you intentionally want pip to resolve the default PyTorch/CUDA wheels.
 
-The installers will:
+The installer will:
 
 - Install required system packages.
 - Create a `daygle` maintenance user unless `DAYGLE_USER` overrides it.
 - Copy the app to `/opt/daygle-ai-camera` unless `DAYGLE_APP_DIR` overrides it.
 - Create `/etc/daygle-ai-camera/config.yaml` unless `DAYGLE_CONFIG_DIR` overrides it.
-- Store SQLite data and generated files under the configured data directory: `/opt/daygle-ai-camera/data` for Debian unless `DAYGLE_DATA_DIR` overrides it, and `/var/lib/daygle-ai-camera` for Armbian unless `DAYGLE_DATA_DIR` overrides it.
+- Store SQLite data and generated files under `/opt/daygle-ai-camera/data` unless `DAYGLE_DATA_DIR` overrides it.
 - Create `/opt/daygle-ai-camera/models` for downloaded/exported ONNX/PT models and preserve existing `*.onnx`/`*.pt` files during reinstall.
-- Install `daygle-ai-camera.service` as a root-running service for camera hardware/device access, with systemd write access to the config, data, and models directories.
+- Install `daygle-ai-camera.service` as a root-running service with systemd write access to the config, data, and models directories.
 - Keep app code/config root-owned while granting the `daygle` maintenance group write access to the data and models directories.
 - Create and start `daygle-ai-camera.service`.
 
@@ -154,7 +150,7 @@ sudo journalctl -u daygle-ai-camera -f
 Open:
 
 ```text
-http://<orange-pi-ip>:8080/
+http://<server-ip>:8080/
 ```
 
 Then create the first admin user and configure the app in the web UI.
@@ -338,7 +334,7 @@ pip install ultralytics onnx
 python scripts/download_yolov8n_onnx.py --output models/yolov8n.onnx
 ```
 
-For service installs, the dashboard download/export writes to `/opt/daygle-ai-camera/models/`. The Debian and Armbian installers create that directory, preserve existing `*.onnx` and `*.pt` files during reinstall, and allow the root-running service to write there.
+For service installs, the dashboard download/export writes to `/opt/daygle-ai-camera/models/`. The installer creates that directory, preserves existing `*.onnx` and `*.pt` files during reinstall, and allows the root-running service to write there.
 
 ## Users and Roles
 
@@ -551,12 +547,7 @@ pip install pytest
 ### Service Install
 
 ```bash
-# Debian 13 / generic Debian host
 sudo ./scripts/install_debian.sh
-sudo systemctl restart daygle-ai-camera
-
-# Armbian / Orange Pi host
-sudo ./scripts/install_armbian.sh
 sudo systemctl restart daygle-ai-camera
 ```
 
@@ -578,6 +569,6 @@ python -m pytest
 - **Email alerts do not send**: open `/settings`, check SMTP host/port/auth/from address, and confirm the alert rule has email enabled and recipients. Confirm **Background detection** is enabled in Live settings so rules continue checking when the Live Cameras page is closed.
 - **Push notifications not arriving**: open `/settings` → **Push Notifications**, verify server URL and topic, then send a test notification.
 - **Camera not connecting**: open `/cameras`, check the stream URL or ONVIF credentials, and verify the camera is reachable on the network.
-- **Service cannot write data or models**: check storage paths in `/settings`, then verify `/opt/daygle-ai-camera/models` and the configured data directory exist. The Debian and Armbian installers run the systemd service as root and grant write access to config, data, and models paths.
+- **Service cannot write data or models**: check storage paths in `/settings`, then verify `/opt/daygle-ai-camera/models` and the configured data directory exist. The installer runs the systemd service as root and grants write access to config, data, and models paths.
 - **Need service logs**: run `sudo journalctl -u daygle-ai-camera -f`.
 - **Need application logs**: the app writes rotating logs to `data/logs/app.log` (up to 10 MB × 5 files).

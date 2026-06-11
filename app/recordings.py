@@ -758,8 +758,7 @@ class RecordingService:
         fps = 10
         frame_count = max(10, min(120, int(duration_seconds * fps)))
         suffix = file_path.suffix.lower()
-        # Prefer MP4V for generated placeholder clips. Probing H264 codecs on
-        # ARM boards can trigger noisy hardware encoder failures (v4l2m2m).
+        # Prefer MP4V for generated placeholder clips.
         codec_candidates = ['mp4v'] if suffix == '.mp4' else ['MJPG']
         writer = None
         selected_codec = None
