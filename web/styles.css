@@ -229,6 +229,7 @@ h2 { margin: 0; font-size: 20px; }
 .stats-grid .card span { color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
 .stats-grid .card strong { display: block; margin-top: 10px; font-size: 32px; font-weight: 900; letter-spacing: -.01em; }
 
+.stats-grid .card small { display: block; margin-top: 6px; line-height: 1.4; }
 .ai-status-card small { display: block; margin-top: 6px; line-height: 1.4; }
 .ai-mode { font-size: 24px; letter-spacing: .04em; }
 .ai-mode.onnx-active { color: var(--success); }
