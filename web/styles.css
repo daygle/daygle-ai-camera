@@ -190,6 +190,7 @@ textarea {
   margin-top: 16px;
 }
 .form-grid label { display: grid; gap: 8px; min-width: 0; color: var(--muted); font-weight: 800; }
+.form-grid label > span:first-child { font-weight: 500; }
 .form-grid > input,
 .form-grid > select,
 .form-grid > textarea,
@@ -620,7 +621,7 @@ input[type="file"] { padding: 10px; }
 .compact-empty { padding: 6px 0; }
 .compact-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
 .button-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
-.page-stack .button-row { padding-top: 14px; border-top: 1px solid var(--border); }
+.page-stack .button-row { padding-top: 14px; border-top: 1px solid var(--border); justify-content: flex-end; }
 .settings-test-row {
   display: flex;
   align-items: flex-end;
@@ -630,13 +631,15 @@ input[type="file"] { padding: 10px; }
   border-top: 1px solid var(--border);
 }
 .settings-test-row label {
-  display: grid;
-  gap: 8px;
-  min-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
   color: var(--muted);
-  font-weight: 800;
+  font-weight: 500;
+  white-space: nowrap;
 }
-.settings-test-row label input { width: 100%; }
+.settings-test-row label input { width: 260px; flex-shrink: 0; }
 
 /* ─── Settings page ────────────────────────────────────────────────────── */
 .settings-section-header {

@@ -120,7 +120,7 @@ function createDatabaseRestoreSection() {
   const section = document.createElement('section');
   section.className = 'card';
   section.innerHTML = `
-    <div class="settings-section-header"><div class="settings-section-icon">💾</div><div><h2>Database backup & restore</h2><p class="settings-section-subtitle">Download a snapshot of your database or restore from a previous backup.</p></div></div>
+    <div class="settings-section-header"><div class="settings-section-icon">💾</div><div><h2>Database Backup & Restore</h2><p class="settings-section-subtitle">Download a snapshot of your database or restore from a previous backup.</p></div></div>
     <p class="muted">Restores replace events, users, settings, alert rules, and sessions with the backup contents.</p>
     <div class="button-row"><a class="button-link" href="/api/settings/system/database/backup">Download database backup</a></div>
     <form id="databaseRestoreForm" class="form-grid">
@@ -168,15 +168,15 @@ function createLiveSettingsSection() {
   const section = document.createElement('section');
   section.className = 'card';
   section.innerHTML = `
-    <div class="settings-section-header"><div class="settings-section-icon">⚡</div><div><h2>Live performance</h2><p class="settings-section-subtitle">Tune refresh rates and detection frequency to balance responsiveness with resource usage.</p></div></div>
+    <div class="settings-section-header"><div class="settings-section-icon">⚡</div><div><h2>Live Performance</h2><p class="settings-section-subtitle">Tune refresh rates and detection frequency to balance responsiveness with resource usage.</p></div></div>
     <form id="liveSettingsForm" class="form-grid">
       <label><span>Snapshot Refresh</span><input name="snapshot_refresh_ms" type="number" min="150" max="5000" step="10" placeholder="500" /><span class="field-help">How often the live camera image updates. Lower = more responsive, higher = less bandwidth. Default: 500ms</span></label>
       <label><span>Detection Status Refresh</span><input name="detection_status_refresh_ms" type="number" min="500" max="15000" step="100" placeholder="2000" /><span class="field-help">How often the detection summary panel updates with new object counts. Default: 2000ms</span></label>
       <label><span>Detection Interval</span><input name="detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="0.25" /><span class="field-help">How often AI checks each camera for motion and objects. Lower = faster alerts, higher CPU. Default: 0.5s</span></label>
       <label><span>Fallback Event Merge (s)</span><input name="event_debounce_seconds" type="number" min="0" max="300" step="1" placeholder="10" /><span class="field-help">Merges detections within this window into one event. Per-object cooldowns on the Zones page override this. Default: 10s</span></label>
       <label><span>Background Alerts</span><select name="background_detection_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select><span class="field-help">Keep checking cameras even when no Live Cameras page is open. Default: Enabled</span></label>
-      <button type="submit">Save Live Settings</button>
-    </form>
+      </form>
+    <div class="button-row"><button type="submit" form="liveSettingsForm">Save Live Settings</button></div>
   `;
   const camerasSection = document.querySelector('main > section');
   if (camerasSection) {
@@ -209,7 +209,7 @@ function createPushNotificationSection() {
   const section = document.createElement('section');
   section.className = 'card';
   section.innerHTML = `
-    <div class="settings-section-header"><div class="settings-section-icon">🔔</div><div><h2>Push notifications</h2><p class="settings-section-subtitle">Get instant alerts on your Android device via the ntfy app. Per-rule push toggles are on the Zones page.</p></div></div>
+    <div class="settings-section-header"><div class="settings-section-icon">🔔</div><div><h2>Push Notifications</h2><p class="settings-section-subtitle">Get instant alerts on your Android device via the ntfy app. Per-rule push toggles are on the Zones page.</p></div></div>
     <form id="pushSettingsForm" class="form-grid">
       <label><span>Push Alerts</span><select name="enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select><span class="field-help">Master toggle for push notifications. Default: Disabled</span></label>
       <label><span>Server URL</span><input name="server_url" placeholder="https://ntfy.sh" /><span class="field-help">NTFY server address. Use <code>https://ntfy.sh</code> for the free hosted service. Default: https://ntfy.sh</span></label>
@@ -234,7 +234,7 @@ function createEmailDeliverySection() {
   const section = document.createElement('section');
   section.className = 'card';
   section.innerHTML = `
-    <div class="settings-section-header"><div class="settings-section-icon">✉️</div><div><h2>Email delivery</h2><p class="settings-section-subtitle">Configure your SMTP mail server to send alert emails. Per-rule email toggles are on the Zones page.</p></div></div>
+    <div class="settings-section-header"><div class="settings-section-icon">✉️</div><div><h2>Email Delivery</h2><p class="settings-section-subtitle">Configure your SMTP mail server to send alert emails. Per-rule email toggles are on the Zones page.</p></div></div>
     <form id="emailSettingsForm" class="form-grid">
       <label><span>Email Alerts</span><select name="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select><span class="field-help">Master toggle for email notifications. Default: Disabled</span></label>
       <label><span>SMTP Host</span><input name="host" placeholder="smtp.gmail.com" /><span class="field-help">Your mail server hostname (e.g. smtp.gmail.com, smtp-mail.outlook.com). Default: (none)</span></label>
