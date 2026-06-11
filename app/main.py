@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import copy
@@ -518,22 +518,7 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
             points = rectangle_zone_points(x, y, width, height)
         x, y, width, height = zone_bounds(points)
         object_rules = normalize_zone_object_rules(zone)
-        had_monitor_motion = bool(zone.get('monitor_motion', True))
-        has_motion_rule = any(str(r.get('label') or '').strip().lower() == 'motion' for r in object_rules)
-        if had_monitor_motion and not has_motion_rule:
-            object_rules.insert(0, {
-                'label': 'motion',
-                'enabled': True,
-                'record_on_detect': True,
-                'alert_on_detect': True,
-                'min_confidence': 0.45,
-                'cooldown_seconds': 60,
-                'email_enabled': False,
-                'email_recipients': [],
-                'push_enabled': False,
-                'active_start': None,
-                'active_end': None,
-            })
+
         monitor_motion = any(
             str(r.get('label') or '').strip().lower() == 'motion' and r.get('enabled', True)
             for r in object_rules
