@@ -26,8 +26,6 @@ const state = {
   auth: { user: null, csrfToken: null },
   payload: null,
   activeRecordingId: null,
-  dateFormat: 'locale',
-  timeFormat: '24h',
 };
 
 let configuredLabels = null;
@@ -197,43 +195,8 @@ function titleCase(value) {
     .join(' ');
 }
 
-function formatDate(isoDateStr) {
-  if (!isoDateStr) return '';
-  const [year, month, day] = isoDateStr.split('-');
-  if (!year || !month || !day) return isoDateStr;
-  switch (state.dateFormat) {
-    case 'iso': return `${year}-${month}-${day}`;
-    case 'us': return `${month}/${day}/${year}`;
-    case 'au': return `${day}/${month}/${year}`;
-    default: return new Date(`${isoDateStr}T12:00:00`).toLocaleDateString();
-  }
-}
-
-function formatTime(totalMinutes) {
-  const h = Math.floor(totalMinutes / 60) % 24;
-  const m = totalMinutes % 60;
-  if (state.timeFormat === '12h') {
-    const period = h < 12 ? 'am' : 'pm';
-    const h12 = h % 12 || 12;
-    return `${h12}:${String(m).padStart(2, '0')} ${period}`;
-  }
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}
-
-function formatDateTime(value) {
-  if (!value) return 'Unknown';
-  const date = new Date(value);
-  const isoDate = date.toISOString().slice(0, 10);
-  const datePart = formatDate(isoDate);
-  const h = date.getHours();
-  const m = date.getMinutes();
-  const timePart = formatTime(h * 60 + m);
-  return `${datePart} ${timePart}`;
-}
-
 function formatClock(seconds) {
-  const totalMins = Math.floor(Math.max(0, seconds) / 60);
-  return formatTime(totalMins);
+  return formatUserClock(seconds);
 }
 
 function formatDuration(seconds) {
@@ -453,7 +416,7 @@ function renderSummary(payload, totalRecordingCount) {
   const clipLabel = totalRecordingCount > recordings.length ? `${recordings.length} of ${totalRecordingCount}` : `${recordings.length}`;
   els.timelineSummary.innerHTML = `
     <div><span>Camera</span><strong>${escapeHtml(payload.camera?.name || payload.camera?.id || 'Unknown')}</strong></div>
-    <div><span>Day</span><strong>${escapeHtml(formatDate(payload.day || ''))}</strong></div>
+    <div><span>Day</span><strong>${escapeHtml(formatUserDate(payload.day || ''))}</strong></div>
     <div><span>Clips</span><strong>${escapeHtml(clipLabel)}</strong></div>
     <div><span>Coverage</span><strong>${escapeHtml(formatDuration(totalSeconds))}</strong></div>
     <div class="wide"><span>Triggers</span><strong>${recordings.length ? escapeHtml(Array.from(uniqueTriggers).join(', ')) : 'none'}</strong></div>
@@ -710,7 +673,7 @@ async function renderFilteredTimeline({ preserveSelection = true } = {}) {
   renderRecordingList(recordings);
 
   if (!recordings.length) {
-    const formattedDay = formatDate(state.payload.day);
+    const formattedDay = formatUserDate(state.payload.day);
     els.timelineStatus.textContent = allRecordings.length
       ? `No recordings match the selected filter for ${state.payload.camera.name} on ${formattedDay}.`
       : `No recordings found for ${state.payload.camera.name} on ${formattedDay}.`;
@@ -722,9 +685,9 @@ async function renderFilteredTimeline({ preserveSelection = true } = {}) {
   const filterLabel = els.filterSelect.value ? ` matching ${titleCase(els.filterSelect.value)}` : '';
   const { fromSeconds, toSeconds } = getTimeRangeConfig();
   const timeRangeLabel = (fromSeconds > 0 || toSeconds < DAY_SECONDS)
-    ? ` from ${formatTime(fromSeconds / 60)} to ${formatTime(toSeconds / 60)}`
+    ? ` from ${formatUserClock(fromSeconds)} to ${formatUserClock(toSeconds)}`
     : '';
-  els.timelineStatus.textContent = `${recordings.length} clip${recordings.length === 1 ? '' : 's'}${filterLabel}${timeRangeLabel} for ${state.payload.camera.name} on ${formatDate(state.payload.day)}.`;
+  els.timelineStatus.textContent = `${recordings.length} clip${recordings.length === 1 ? '' : 's'}${filterLabel}${timeRangeLabel} for ${state.payload.camera.name} on ${formatUserDate(state.payload.day)}.`;
 
   const querySelection = Number(new URLSearchParams(window.location.search).get('recording_id')) || null;
   const requestedSelection = preserveSelection ? (state.activeRecordingId || querySelection) : null;
@@ -753,8 +716,8 @@ async function loadTimeline({ preserveSelection = true } = {}) {
 async function loadAuth() {
   const authInfo = await api('/api/auth/me');
   state.auth = { user: authInfo.user, csrfToken: authInfo.csrf_token };
-  state.dateFormat = authInfo.user?.date_format || 'locale';
-  state.timeFormat = authInfo.user?.time_format || '24h';
+  // Date/time display preferences are now global (set in nav.js from the
+  // same /api/auth/me response); nothing page-local to do here.
 }
 
 async function loadConfiguredLabels() {

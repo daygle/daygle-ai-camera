@@ -3180,8 +3180,24 @@ def runtime_config():
 
 
 @app.get('/api/recordings')
-def recordings(label: str | None = None, camera_id: str | None = None, limit: int = Query(50, ge=1, le=200), alerted_only: bool = False):
-    return database.list_recordings(label=label, camera_id=camera_id, limit=limit, alerted_only=alerted_only)
+def recordings(
+    label: str | None = None,
+    camera_id: str | None = None,
+    limit: int = Query(50, ge=1, le=500),
+    alerted_only: bool = False,
+    started_after: str | None = Query(None, description='ISO timestamp; include recordings started at or after this time.'),
+    started_before: str | None = Query(None, description='ISO timestamp; include recordings started at or before this time.'),
+    sort: str = Query('newest', pattern='^(newest|oldest)$', description='Sort order by started_at. Default: newest.'),
+):
+    return database.list_recordings(
+        label=label,
+        camera_id=camera_id,
+        limit=limit,
+        alerted_only=alerted_only,
+        started_after=started_after,
+        started_before=started_before,
+        sort=sort,
+    )
 
 
 def _parse_iso_datetime(value: Any) -> datetime | None:

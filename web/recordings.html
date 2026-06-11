@@ -17,36 +17,101 @@
       </div>
     </header>
 
-    <section>
-      <article class="card recordings-list-card">
-        <div class="section-header">
+    <div class="stats-grid recordings-stats">
+      <article class="card">
+        <span>Total Clips</span>
+        <strong id="statTotalClips">—</strong>
+        <small class="muted">All recordings on disk</small>
+      </article>
+      <article class="card">
+        <span>Captured Footage</span>
+        <strong id="statTotalDuration">—</strong>
+        <small class="muted">Combined clip length</small>
+      </article>
+      <article class="card">
+        <span>Cameras</span>
+        <strong id="statCameraCount">—</strong>
+        <small class="muted">With at least one recording</small>
+      </article>
+      <article class="card">
+        <span>Filters</span>
+        <strong id="statFilterStatus">All</strong>
+        <small class="muted" id="statFilterHint">Showing every clip</small>
+      </article>
+    </div>
+
+    <section class="card recordings-list-card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">🎬</div>
+        <div>
           <h2>Clip Library</h2>
-          <div class="button-row">
-            <button id="deleteAllRecordingsBtn" class="secondary delete-btn" type="button" hidden>Delete All Recordings</button>
-          </div>
+          <p class="settings-section-subtitle">Browse, play, and delete recorded clips. Use the filters to narrow down by camera or object label.</p>
         </div>
-        <p id="listStatus" class="muted"></p>
-        <div class="search-row recordings-search-row">
+        <div class="button-row recordings-toolbar-actions">
+          <button id="recordingClearBtn" class="secondary" type="button">Reset Filters</button>
+          <button id="deleteAllRecordingsBtn" class="secondary delete-btn" type="button" hidden>Delete All Recordings</button>
+        </div>
+      </div>
+
+      <p id="listStatus" class="muted recordings-list-status"></p>
+
+      <form id="recordingsFilterForm" class="form-grid recordings-filter-grid" onsubmit="return false;">
+        <label>
+          <span>Camera</span>
           <select id="cameraFilter" aria-label="Filter by camera">
             <option value="">All Cameras</option>
           </select>
-          <input id="recordingFilter" placeholder="Filter clips by object label..." />
-          <button id="recordingSearchBtn">Filter</button>
-          <button id="recordingClearBtn" class="secondary">All</button>
-        </div>
-        <div id="recordings" class="list recordings-list"></div>
-      </article>
+          <span class="field-help">Limit results to a specific camera. Default: every camera</span>
+        </label>
+        <label>
+          <span>Object Label</span>
+          <input id="recordingFilter" placeholder="e.g. person, car, dog" />
+          <span class="field-help">Type an object label to keep only clips that detected it. Default: all clips</span>
+        </label>
+        <label>
+          <span>From Date</span>
+          <input id="recordingDateFrom" type="date" aria-label="Filter by start date" />
+          <span class="field-help">Earliest capture date (inclusive). Default: any date</span>
+        </label>
+        <label>
+          <span>To Date</span>
+          <input id="recordingDateTo" type="date" aria-label="Filter by end date" />
+          <span class="field-help">Latest capture date (inclusive). Default: any date</span>
+        </label>
+        <label>
+          <span>Sort By</span>
+          <select id="recordingSort" aria-label="Sort order">
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+          </select>
+          <span class="field-help">Order of the list. Default: Newest first</span>
+        </label>
+        <label class="recordings-filter-actions">
+          <span>&nbsp;</span>
+          <div class="button-row">
+            <button id="recordingSearchBtn" type="submit">Apply Filters</button>
+          </div>
+        </label>
+      </form>
+
+      <div id="recordings" class="list recordings-list"></div>
     </section>
   </main>
 
   <div id="videoModal" class="video-modal" role="dialog" aria-modal="true" aria-label="Playback" hidden>
     <div class="video-modal-backdrop"></div>
     <div class="video-modal-content card">
-      <div class="video-modal-header">
-        <h2>Playback</h2>
-        <div class="button-row">
+      <div class="settings-section-header video-modal-header">
+        <div class="settings-section-icon">▶️</div>
+        <div>
+          <h2>Playback</h2>
+          <p class="settings-section-subtitle" id="videoModalSubtitle">Watch a recording and review its detection details.</p>
+        </div>
+        <div class="button-row video-modal-actions">
           <a id="videoModalDownload" class="secondary" download hidden>Download</a>
-          <button id="videoModalClose" class="secondary" type="button" aria-label="Close">✕</button>
+          <button id="videoModalClose" class="secondary modal-close" type="button" aria-label="Close">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
         </div>
       </div>
       <div class="clip-player-wrap">

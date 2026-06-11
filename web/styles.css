@@ -798,6 +798,232 @@ input[type="file"] { padding: 10px; }
 }
 .settings-test-row label input { width: 260px; flex-shrink: 0; }
 
+/* ─── Recordings page ──────────────────────────────────────────────────── */
+.recordings-stats {
+  margin-top: 4px;
+}
+.recordings-list-card {
+  display: grid;
+  gap: 18px;
+}
+.recordings-list-card .settings-section-header {
+  align-items: center;
+  gap: 14px;
+}
+.recordings-toolbar-actions {
+  flex-shrink: 0;
+  margin: 0 0 0 auto;
+  padding: 0;
+  border-top: 0;
+  justify-content: flex-end;
+}
+.recordings-list-status {
+  margin: 0;
+  min-height: 1.2em;
+}
+.recordings-filter-grid {
+  margin-top: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  align-items: end;
+}
+.recordings-filter-actions {
+  display: grid;
+  gap: 8px;
+}
+.recordings-filter-actions .button-row {
+  margin: 0;
+  padding: 0;
+  border-top: 0;
+  justify-content: flex-start;
+}
+.recordings-filter-actions > span:first-child {
+  display: block;
+  height: 0;
+  visibility: hidden;
+}
+.recordings-list {
+  gap: 10px;
+}
+.recording-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 18px;
+}
+.recording-row-main {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.recording-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.recording-row-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.recording-row-id {
+  font-weight: 900;
+  font-size: 15px;
+  color: var(--text);
+}
+.recording-row-trigger {
+  text-transform: capitalize;
+}
+.recording-row-when {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.recording-row-when svg { opacity: 0.7; }
+.recording-row-meta-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.recording-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,.04);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  max-width: 100%;
+  min-width: 0;
+}
+.recording-meta-pill-file {
+  max-width: 260px;
+}
+.recording-meta-label {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  font-size: 10px;
+  font-weight: 900;
+}
+.recording-meta-value {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+.recording-meta-filename {
+  font-family: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+.recording-row-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  line-height: 1.2;
+}
+.recording-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.recording-row-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 13px;
+  border-radius: 12px;
+  font-size: 13px;
+}
+.chip-info {
+  background: rgba(71, 214, 255, 0.1);
+  border-color: rgba(71, 214, 255, 0.3);
+  color: var(--accent);
+}
+.chip-warn {
+  background: rgba(248, 197, 93, 0.1);
+  border-color: rgba(248, 197, 93, 0.3);
+  color: #f8c55d;
+}
+.recordings-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 48px 20px;
+  gap: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 18px;
+  background: rgba(255,255,255,0.02);
+  color: var(--muted);
+}
+.recordings-empty-state h2 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text);
+}
+.recordings-empty-state p {
+  margin: 0;
+  font-size: 13px;
+}
+.recordings-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: rgba(71, 214, 255, 0.06);
+  color: var(--accent);
+  opacity: 0.8;
+}
+.video-modal-header {
+  margin-bottom: 0;
+  padding-bottom: 14px;
+}
+.video-modal-header .settings-section-subtitle {
+  margin-top: 2px;
+}
+.video-modal-actions {
+  margin: 0 0 0 auto;
+  padding: 0;
+  border-top: 0;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+.video-modal-actions a.secondary,
+.video-modal-actions button.secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+@media (max-width: 760px) {
+  .recording-row {
+    grid-template-columns: 1fr;
+  }
+  .recording-row-actions {
+    justify-content: stretch;
+  }
+  .recording-row-actions button { flex: 1; justify-content: center; }
+  .recordings-filter-grid { grid-template-columns: 1fr; }
+  .recordings-toolbar-actions { width: 100%; }
+  .recording-meta-pill-file { max-width: 100%; }
+  .recording-meta-value { max-width: 100%; }
+}
+
 /* ─── Settings page ────────────────────────────────────────────────────── */
 .settings-section-header {
   display: flex;

@@ -2,8 +2,12 @@ const els = {
   recordings: document.getElementById('recordings'),
   cameraFilter: document.getElementById('cameraFilter'),
   recordingFilter: document.getElementById('recordingFilter'),
+  recordingDateFrom: document.getElementById('recordingDateFrom'),
+  recordingDateTo: document.getElementById('recordingDateTo'),
+  recordingSort: document.getElementById('recordingSort'),
   recordingSearchBtn: document.getElementById('recordingSearchBtn'),
   recordingClearBtn: document.getElementById('recordingClearBtn'),
+  filterForm: document.getElementById('recordingsFilterForm'),
   clipPlayer: document.getElementById('clipPlayer'),
   clipPlayerStatus: document.getElementById('clipPlayerStatus'),
   recordingDetails: document.getElementById('recordingDetails'),
@@ -13,10 +17,18 @@ const els = {
   videoModal: document.getElementById('videoModal'),
   videoModalClose: document.getElementById('videoModalClose'),
   videoModalDownload: document.getElementById('videoModalDownload'),
+  videoModalSubtitle: document.getElementById('videoModalSubtitle'),
   listStatus: document.getElementById('listStatus'),
+  statTotalClips: document.getElementById('statTotalClips'),
+  statTotalDuration: document.getElementById('statTotalDuration'),
+  statCameraCount: document.getElementById('statCameraCount'),
+  statFilterStatus: document.getElementById('statFilterStatus'),
+  statFilterHint: document.getElementById('statFilterHint'),
 };
 
 let authState = { user: null, csrfToken: null };
+// Date/time display preferences are global (utils.daygleDatePrefs) and are
+// populated by nav.js from /api/auth/me — no page-local state to maintain.
 let recordingRefreshTimer = null;
 let activeRecording = null;
 let overlayResizeObserver = null;
@@ -107,38 +119,149 @@ function recordingDisplayTrigger(recording) {
   return triggerLabel || triggerType;
 }
 
+function formatDurationShort(totalSeconds) {
+  const seconds = Math.max(0, Math.round(Number(totalSeconds) || 0));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remSeconds = seconds % 60;
+  if (minutes < 60) return `${minutes}m ${remSeconds}s`;
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  return remMinutes ? `${hours}h ${remMinutes}m` : `${hours}h`;
+}
+
+function updateFilterStat(label, hint) {
+  if (!els.statFilterStatus || !els.statFilterHint) return;
+  els.statFilterStatus.textContent = label;
+  els.statFilterHint.textContent = hint;
+}
+
+function formatIsoDateForFilter(dateString, *, endOfDay = false) {
+  if (!dateString) return '';
+  // The browser returns YYYY-MM-DD without a timezone. Anchor from/to bounds
+  // to the start/end of the day in local time so the filter feels intuitive
+  // (a chosen "To" date should include recordings from that day).
+  const [year, month, day] = dateString.split('-').map((part) => Number.parseInt(part, 10));
+  if (!year || !month || !day) return '';
+  const date = new Date(year, month - 1, day, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0, 0);
+  return date.toISOString();
+}
+
+function currentFilterValues() {
+  return {
+    label: els.recordingFilter.value.trim(),
+    cameraId: els.cameraFilter?.value || '',
+    dateFrom: els.recordingDateFrom?.value || '',
+    dateTo: els.recordingDateTo?.value || '',
+    sort: els.recordingSort?.value || 'newest',
+  };
+}
+
+function describeFilters(filters) {
+  const parts = [];
+  if (filters.label) parts.push(`label “${filters.label}”`);
+  if (filters.cameraId) {
+    const cameraOption = Array.from(els.cameraFilter?.options || []).find((o) => o.value === filters.cameraId);
+    parts.push(`camera “${cameraOption?.textContent || filters.cameraId}”`);
+  }
+  if (filters.dateFrom) parts.push(`from ${formatUserDate(filters.dateFrom)}`);
+  if (filters.dateTo) parts.push(`through ${formatUserDate(filters.dateTo)}`);
+  return parts;
+}
+
+function renderStats(recordings) {
+  if (els.statTotalClips) els.statTotalClips.textContent = String(recordings.length);
+  if (els.statTotalDuration) {
+    const totalSeconds = recordings.reduce((sum, rec) => sum + (Number(rec.duration_seconds) || 0), 0);
+    els.statTotalDuration.textContent = formatDurationShort(totalSeconds);
+  }
+  if (els.statCameraCount) {
+    const cameras = new Set(recordings.map((rec) => cameraLabel(rec)).filter(Boolean));
+    els.statCameraCount.textContent = String(cameras.size);
+  }
+}
+
 function renderRecordings(recordings) {
+  renderStats(recordings);
   if (!recordings.length) {
-    els.recordings.innerHTML = '<div class="empty">No recordings yet.</div>';
+    els.recordings.innerHTML = `
+      <div class="recordings-empty-state">
+        <div class="recordings-empty-icon" aria-hidden="true">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+        </div>
+        <h2>No recordings match the current filters</h2>
+        <p class="muted">Try resetting the filters, or wait for a new event to be captured.</p>
+      </div>`;
     return;
   }
   els.recordings.innerHTML = recordings.map((recording) => {
     const fileName = (recording.file_path || '').split(/[\\/]/).pop();
     const mediaReady = recording.media_ready !== false;
+    const trigger = recordingDisplayTrigger(recording);
+    const triggerPillClass = triggerBadgeClass(trigger);
     return `
       <div class="item recording-row" data-recording-row="${recording.id}">
-        <div class="item-title">
-          <span>Recording #${recording.id}</span>
-          <span>${formatDate(recording.started_at)}</span>
+        <div class="recording-row-main">
+          <div class="recording-row-header">
+            <div class="recording-row-title">
+              <span class="recording-row-id">Recording #${recording.id}</span>
+              <span class="chip recording-row-trigger ${triggerPillClass}">${escapeHtml(trigger)}</span>
+            </div>
+            <div class="recording-row-when">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <span>${escapeHtml(formatDateTime(recording.started_at))}</span>
+            </div>
+          </div>
+          <div class="recording-row-meta-grid">
+            <div class="recording-meta-pill">
+              <span class="recording-meta-label">Camera</span>
+              <span class="recording-meta-value">${escapeHtml(cameraLabel(recording))}</span>
+            </div>
+            <div class="recording-meta-pill">
+              <span class="recording-meta-label">Duration</span>
+              <span class="recording-meta-value">${Number(recording.duration_seconds || 0).toFixed(1)}s</span>
+            </div>
+            <div class="recording-meta-pill">
+              <span class="recording-meta-label">Event</span>
+              <span class="recording-meta-value">#${escapeHtml(recording.event_id || 'none')}</span>
+            </div>
+            <div class="recording-meta-pill recording-meta-pill-file" title="${escapeHtml(fileName)}">
+              <span class="recording-meta-label">File</span>
+              <span class="recording-meta-value recording-meta-filename">${escapeHtml(fileName || 'unknown')}</span>
+            </div>
+          </div>
+          <div class="recording-row-badges">${detectionBadges(recording.detections)}</div>
         </div>
-        <div class="recording-row-badges">${detectionBadges(recording.detections)}</div>
-        <p class="muted recording-row-meta">Event #${recording.event_id || 'none'} · ${Number(recording.duration_seconds || 0).toFixed(1)}s · ${escapeHtml(cameraLabel(recording))}</p>
-        <p class="muted recording-row-meta">${escapeHtml(recordingDisplayTrigger(recording))} · ${escapeHtml(fileName)}</p>
-        <div class="button-row">
-          <button class="secondary" data-play-recording="${recording.id}" ${mediaReady ? '' : 'disabled'}>${mediaReady ? 'Play' : 'Preparing...'}</button>
-          <button class="secondary delete-btn" data-delete-recording="${recording.id}">Delete</button>
+        <div class="recording-row-actions">
+          <button class="secondary" data-play-recording="${recording.id}" ${mediaReady ? '' : 'disabled'}>
+            ${mediaReady
+              ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg> Play'
+              : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Preparing...'}
+          </button>
+          <button class="secondary delete-btn" data-delete-recording="${recording.id}" aria-label="Delete recording #${recording.id}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+            Delete
+          </button>
         </div>
       </div>
     `;
   }).join('');
   if (recordings.some((recording) => recording.media_ready === false)) {
     clearTimeout(recordingRefreshTimer);
-    recordingRefreshTimer = setTimeout(() => loadRecordings(els.recordingFilter.value.trim(), els.cameraFilter?.value || ''), 3000);
+    recordingRefreshTimer = setTimeout(() => loadRecordings(), 3000);
   } else {
     clearTimeout(recordingRefreshTimer);
     recordingRefreshTimer = null;
   }
   bindRecordingButtons();
+}
+
+function triggerBadgeClass(trigger) {
+  const t = String(trigger || '').toLowerCase();
+  if (t.startsWith('alert') || t.startsWith('human')) return 'chip-warn';
+  if (t.startsWith('motion')) return 'chip-info';
+  if (t === 'continuous' || t === 'none' || t === 'off') return 'chip-dim';
+  return 'chip-info';
 }
 
 function recordingDetectionSummary(recording) {
@@ -168,7 +291,7 @@ function renderRecordingDetails(recording) {
     <div><span>Event</span><strong>${recording.event_id || 'none'}</strong></div>
     <div><span>Camera</span><strong>${escapeHtml(cameraLabel(recording))}</strong></div>
     <div><span>Trigger</span><strong>${escapeHtml(recordingDisplayTrigger(recording))}</strong></div>
-    <div><span>Started</span><strong>${formatDate(recording.started_at)}</strong></div>
+    <div><span>Started</span><strong>${escapeHtml(formatDateTime(recording.started_at))}</strong></div>
     <div><span>Duration</span><strong>${Number(recording.duration_seconds || 0).toFixed(1)}s</strong></div>
     <div class="wide"><span>Detections</span><strong>${detectionBadges}</strong></div>
   `;
@@ -280,12 +403,22 @@ function closeVideoModal() {
   activeRecording = null;
   els.clipPlayerStatus.textContent = '';
   els.recordingDetails.innerHTML = '';
+  if (els.videoModalSubtitle) {
+    els.videoModalSubtitle.textContent = 'Watch a recording and review its detection details.';
+  }
 }
 
 async function playRecording(id) {
   const recording = await api(`/api/recordings/${id}`);
   activeRecording = recording;
   renderRecordingDetails(recording);
+  if (els.videoModalSubtitle) {
+    const started = formatDateTime(recording.started_at);
+    const camera = cameraLabel(recording);
+    els.videoModalSubtitle.textContent = started
+      ? `Recording from ${camera} captured ${started}.`
+      : `Recording from ${camera}.`;
+  }
   openVideoModal();
   if (recording.media_ready === false) {
     clearClipOverlay();
@@ -319,12 +452,14 @@ function bindRecordingButtons() {
   });
   document.querySelectorAll('[data-delete-recording]').forEach((button) => {
     button.addEventListener('click', async () => {
-      if (!confirm(`Delete recording #${button.dataset.deleteRecording}? This cannot be undone.`)) return;
+      const id = button.dataset.deleteRecording;
+      if (!confirm(`Delete recording #${id}? This cannot be undone.`)) return;
       try {
-        await api(`/api/recordings/${button.dataset.deleteRecording}`, { method: 'DELETE' });
-        await loadRecordings(els.recordingFilter.value.trim());
+        await api(`/api/recordings/${id}`, { method: 'DELETE' });
+        window.showToast?.(`Deleted recording #${id}.`);
+        await loadRecordings();
       } catch (error) {
-        alert(`Failed to delete recording: ${error.message}`);
+        window.showToast?.(`Failed to delete recording: ${error.message}`, true);
       }
     });
   });
@@ -333,14 +468,20 @@ function bindRecordingButtons() {
 async function loadAuth() {
   const authInfo = await api('/api/auth/me');
   authState = { user: authInfo.user, csrfToken: authInfo.csrf_token };
+  // Date/time display preferences are now set globally by nav.js from the
+  // same /api/auth/me response; nothing page-local to do here.
   if (authInfo.user.role === 'admin') {
     els.deleteAllRecordingsBtn.hidden = false;
     els.deleteAllRecordingsBtn.addEventListener('click', async () => {
       if (!confirm('Delete ALL recordings and media files? Settings, users, and rules will not be changed.')) return;
-      const result = await api('/api/recordings', { method: 'DELETE' });
-      await loadRecordings();
-      const deletedCount = Number(result?.deleted || 0);
-      els.listStatus.textContent = `Deleted ${deletedCount} recording${deletedCount === 1 ? '' : 's'}. Settings were not changed.`;
+      try {
+        const result = await api('/api/recordings', { method: 'DELETE' });
+        await loadRecordings();
+        const deletedCount = Number(result?.deleted || 0);
+        window.showToast?.(`Deleted ${deletedCount} recording${deletedCount === 1 ? '' : 's'}. Settings were not changed.`);
+      } catch (error) {
+        window.showToast?.(`Failed to delete recordings: ${error.message}`, true);
+      }
     });
   }
 }
@@ -386,11 +527,28 @@ async function loadCameras() {
   }
 }
 
-async function loadRecordings(label = '', cameraId = '') {
+async function loadRecordings(filters = {}) {
+  const resolved = typeof filters === 'string' || filters instanceof String
+    ? { label: String(filters), cameraId: '' }
+    : { ...currentFilterValues(), ...filters };
   const params = new URLSearchParams();
-  if (label) params.set('label', label);
-  if (cameraId) params.set('camera_id', cameraId);
-  renderRecordings(await api(`/api/recordings?${params.toString()}`));
+  if (resolved.label) params.set('label', resolved.label);
+  if (resolved.cameraId) params.set('camera_id', resolved.cameraId);
+  const startedAfter = formatIsoDateForFilter(resolved.dateFrom);
+  if (startedAfter) params.set('started_after', startedAfter);
+  const startedBefore = formatIsoDateForFilter(resolved.dateTo, { endOfDay: true });
+  if (startedBefore) params.set('started_before', startedBefore);
+  if (resolved.sort) params.set('sort', resolved.sort);
+  const queryString = params.toString();
+  const recordings = await api(`/api/recordings${queryString ? `?${queryString}` : ''}`);
+  const activeFilters = describeFilters(resolved);
+  if (activeFilters.length) {
+    updateFilterStat('Filtered', `Showing clips matching ${activeFilters.join(' and ')}.`);
+  } else {
+    updateFilterStat('All', 'Showing every clip');
+  }
+  renderRecordings(recordings);
+  return recordings;
 }
 
 els.clipPlayer.addEventListener('error', () => {
@@ -442,15 +600,18 @@ if (els.clipOverlayToggle) {
   });
 }
 
-els.cameraFilter?.addEventListener('change', () => loadRecordings(els.recordingFilter.value.trim(), els.cameraFilter.value));
-els.recordingSearchBtn.addEventListener('click', () => loadRecordings(els.recordingFilter.value.trim(), els.cameraFilter?.value || ''));
+els.cameraFilter?.addEventListener('change', () => loadRecordings());
+els.filterForm?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  loadRecordings();
+});
 els.recordingClearBtn.addEventListener('click', () => {
   els.recordingFilter.value = '';
   if (els.cameraFilter) els.cameraFilter.value = '';
+  if (els.recordingDateFrom) els.recordingDateFrom.value = '';
+  if (els.recordingDateTo) els.recordingDateTo.value = '';
+  if (els.recordingSort) els.recordingSort.value = 'newest';
   loadRecordings();
-});
-els.recordingFilter.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') loadRecordings(els.recordingFilter.value.trim(), els.cameraFilter?.value || '');
 });
 
 els.videoModalClose.addEventListener('click', () => closeVideoModal());
@@ -468,4 +629,7 @@ loadAuth().then(async () => {
   await loadRecordings();
   const selected = new URLSearchParams(window.location.search).get('recording_id');
   if (selected) playRecording(selected).catch((error) => { els.listStatus.textContent = error.message; });
-}).catch((error) => { els.listStatus.textContent = error.message; });
+}).catch((error) => {
+  if (els.listStatus) els.listStatus.textContent = error.message;
+  window.showToast?.(error.message, true);
+});

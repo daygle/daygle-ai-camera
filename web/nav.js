@@ -218,6 +218,16 @@ window.showToast = function (message, isError) {
     const payload = await response.json();
     const user = payload.user || {};
     const csrfToken = payload.csrf_token || '';
+    // Propagate display preferences so utils.formatDate honours the
+    // user's chosen date_format / time_format on every page (dashboard,
+    // events, alerts, recordings, etc.) — not just the ones that already
+    // implemented their own local formatters.
+    if (typeof window.setDaygleDatePrefs === 'function') {
+      window.setDaygleDatePrefs({
+        date_format: user.date_format || 'locale',
+        time_format: user.time_format || '24h',
+      });
+    }
     const navUser = document.getElementById('navUser');
     if (navUser && user.username) navUser.textContent = user.username;
     if (user.role !== 'admin') {

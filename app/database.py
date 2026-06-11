@@ -187,7 +187,16 @@ class EventDatabase:
                 raise RuntimeError("Failed to create recording row")
             return cursor.lastrowid
 
-    def list_recordings(self, label: str | None = None, camera_id: str | None = None, limit: int = 50, alerted_only: bool = False) -> list[dict[str, Any]]:
+    def list_recordings(
+        self,
+        label: str | None = None,
+        camera_id: str | None = None,
+        limit: int = 50,
+        alerted_only: bool = False,
+        started_after: str | None = None,
+        started_before: str | None = None,
+        sort: str = 'newest',
+    ) -> list[dict[str, Any]]:
         with self.connect() as db:
             conditions: list[str] = []
             params: list[Any] = []
@@ -202,13 +211,27 @@ class EventDatabase:
                 conditions.append(
                     "EXISTS (SELECT 1 FROM alert_history ah WHERE ah.event_id = r.event_id)"
                 )
+            if started_after:
+                conditions.append("r.started_at >= ?")
+                params.append(started_after)
+            if started_before:
+                conditions.append("r.started_at <= ?")
+                params.append(started_before)
 
             where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
+            # Sort must be a fixed allowlist — never inject user input into the
+            # ORDER BY clause. Whitelisting the column and direction keeps the
+            # query safe while still letting callers pick newest/oldest.
+            sort_normalized = (sort or 'newest').strip().lower()
+            if sort_normalized not in {'newest', 'oldest'}:
+                sort_normalized = 'newest'
+            order_by = 'r.started_at DESC' if sort_normalized == 'newest' else 'r.started_at ASC'
+
             if label:
-                sql = f"SELECT DISTINCT r.* FROM recordings r LEFT JOIN detections d ON d.event_id = r.event_id {where} ORDER BY r.started_at DESC LIMIT ?"
+                sql = f"SELECT DISTINCT r.* FROM recordings r LEFT JOIN detections d ON d.event_id = r.event_id {where} ORDER BY {order_by}, r.id DESC LIMIT ?"
             else:
-                sql = f"SELECT r.* FROM recordings r {where} ORDER BY r.started_at DESC LIMIT ?"
+                sql = f"SELECT r.* FROM recordings r {where} ORDER BY {order_by}, r.id DESC LIMIT ?"
 
             params.append(limit)
             rows = db.execute(sql, params).fetchall()
