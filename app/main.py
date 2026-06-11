@@ -1382,6 +1382,15 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     triggered = alerts.process(alert_detections, rules=zone_rules)
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     triggered_labels = {str(alert.get('label') or '').lower() for alert in triggered}
+    # Filter to only detections that passed a zone rule's min_confidence threshold.
+    # Sub-threshold detections must not trigger recordings or appear in the live
+    # status panel as matched objects. When no alert rules exist every in-zone
+    # detection is already treated as a match, so skip filtering in that case.
+    _confident_object_detections = (
+        [d for d in object_detections
+         if zone_object_rule_matches(settings, d, action='alert') or zone_record_on_detect(d, settings)]
+        if zone_rules else list(object_detections)
+    )
     recording_detections = [
         {
             **detection,
@@ -1389,7 +1398,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             if zone_rules else str(detection.get('label') or '').lower() in triggered_labels,
             'alert_triggered': zone_record_on_detect(detection, settings),
         }
-        for detection in object_detections
+        for detection in _confident_object_detections
     ]
     if motion_detections:
         _motion_record = zone_motion_record_on_detect(settings)
