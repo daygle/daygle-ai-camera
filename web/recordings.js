@@ -239,7 +239,7 @@ function renderRecordings(recordings) {
               <span class="recording-meta-value recording-meta-filename">${escapeHtml(fileName || 'unknown')}</span>
             </div>
           </div>
-          <div class="recording-row-badges">${detectionBadges(recording.detections)}</div>
+          <div class="recording-row-badges">${recordingDetectionSummary(recording).map((d) => `<span class="detection">${escapeHtml(d.label)} · ${Math.round(d.confidence * 100)}%</span>`).join('') || '<span class="muted">No detections</span>'}</div>
         </div>
         <div class="recording-row-actions">
           <button class="secondary" data-play-recording="${recording.id}" ${mediaReady ? '' : 'disabled'}>
@@ -274,18 +274,22 @@ function triggerBadgeClass(trigger) {
 }
 
 function recordingDetectionSummary(recording) {
+  // Build best-confidence map from all detections regardless of current config —
+  // this is historical data so we show everything that was actually recorded.
   const best = new Map();
   for (const d of (recording.detections || [])) {
     const label = String(d.label || '').trim().toLowerCase();
     if (!label) continue;
     const conf = Number(d.confidence || 0);
-    if (configuredLabels && (!configuredLabels.has(label) || conf < (configuredLabels.get(label) ?? 0))) continue;
     if (!best.has(label) || conf > best.get(label)) best.set(label, conf);
   }
-  return Array.from(best.entries())
-    .sort((a, b) => b[1] - a[1])
-    .filter(([label]) => !GENERIC_TRIGGER_LABELS.has(label))
-    .map(([label, confidence]) => ({ label, confidence }));
+  // Use recording.labels as the authoritative label list when available.
+  const authLabels = Array.isArray(recording.labels) && recording.labels.length
+    ? recording.labels.map((l) => String(l || '').trim().toLowerCase()).filter((l) => l && !GENERIC_TRIGGER_LABELS.has(l))
+    : Array.from(best.keys()).filter((l) => !GENERIC_TRIGGER_LABELS.has(l));
+  return authLabels
+    .map((label) => ({ label, confidence: best.get(label) ?? 0 }))
+    .sort((a, b) => b.confidence - a.confidence);
 }
 
 function renderRecordingDetails(recording) {
