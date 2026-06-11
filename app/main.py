@@ -1297,6 +1297,14 @@ def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings
     threading.Thread(target=detect, name=f'live-detection-{camera_id}', daemon=True).start()
 
 
+
+def _encode_frame_jpeg(image: Any) -> bytes:
+    """Encode a numpy BGR frame to JPEG bytes for snapshot storage."""
+    import cv2
+    _, buffer = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return buffer.tobytes()
+
+
 def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict[str, Any], *, enforce_interval: bool = True) -> int | None:
     camera_id = str(settings.get('id') or 'camera')
     live_settings = effective_live_config()
