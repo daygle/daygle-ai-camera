@@ -37,6 +37,7 @@ const FIELD_LABELS = {
   detection_status_refresh_ms: 'Detection Status Refresh',
   detection_interval_seconds: 'Detection Interval',
   event_debounce_seconds: 'Fallback Event Merge (s)',
+  detection_history_minutes: 'Detection History (min)',
   background_detection_enabled: 'Background Alerts',
   data_dir: 'Data Directory',
   snapshots_dir: 'Snapshots Directory',
@@ -175,6 +176,7 @@ function createLiveSettingsSection() {
       <label><span>Detection Interval</span><input name="detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="0.25" /><span class="field-help">How often AI checks each camera for motion and objects. Lower = faster alerts, higher CPU. Default: 0.5s</span></label>
       <label><span>Fallback Event Merge (s)</span><input name="event_debounce_seconds" type="number" min="0" max="300" step="1" placeholder="10" /><span class="field-help">Merges detections within this window into one event. Per-object cooldowns on the Zones page override this. Default: 10s</span></label>
       <label><span>Background Alerts</span><select name="background_detection_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select><span class="field-help">Keep checking cameras even when no Live Cameras page is open. Default: Enabled</span></label>
+      <label><span>Detection History (min)</span><input name="detection_history_minutes" type="number" min="1" max="120" step="1" placeholder="10" /><span class="field-help">How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min</span></label>
       </form>
     <div class="button-row"><button type="submit" form="liveSettingsForm">Save Live Settings</button></div>
   `;
@@ -322,6 +324,7 @@ function payloadFor(form) {
   }
   if ('detection_interval_seconds' in data && data.detection_interval_seconds !== '') data.detection_interval_seconds = Number(data.detection_interval_seconds);
   if ('event_debounce_seconds' in data && data.event_debounce_seconds !== '') data.event_debounce_seconds = Number(data.event_debounce_seconds);
+      if ('detection_history_minutes' in data && data.detection_history_minutes !== '') data.detection_history_minutes = Number(data.detection_history_minutes);
   if ('record_on_objects' in data) data.record_on_objects = data.record_on_objects.split(',').map((label) => label.trim()).filter(Boolean);
   if ('vehicle_labels' in data) data.vehicle_labels = data.vehicle_labels.split(',').map((label) => label.trim()).filter(Boolean);
   if ('min_confidence' in data && data.min_confidence !== '') data.min_confidence = Number(data.min_confidence);

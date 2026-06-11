@@ -215,6 +215,7 @@ def effective_live_config() -> dict[str, Any]:
         'detection_interval_seconds': 0.5,
         'event_debounce_seconds': 10.0,
         'background_detection_enabled': True,
+        'detection_history_minutes': 10,
     }
     config_live = config.get('live', {})
     if isinstance(config_live, dict):
@@ -297,7 +298,7 @@ live_detection_status: dict[str, dict[str, Any]] = {}
 # playback overlays cost no extra decoding or inference: every box was already
 # computed live for alerts. At one detection cycle per ~0.5s the cap covers
 # roughly the last 40 minutes per camera.
-LIVE_DETECTION_HISTORY_MAXLEN = 4800
+
 live_detection_history: dict[str, deque] = {}
 live_detection_history_lock = threading.Lock()
 live_event_last_emitted: dict[str, dict[str, Any]] = {}
@@ -982,7 +983,9 @@ def record_live_detection_history(camera_id: str, detections: list[dict[str, Any
     with live_detection_history_lock:
         history = live_detection_history.get(camera_id)
         if history is None:
-            history = deque(maxlen=LIVE_DETECTION_HISTORY_MAXLEN)
+            history_minutes = max(1, int(effective_live_config().get("detection_history_minutes", 10)))
+            history_maxlen = max(120, history_minutes * 120)
+            history = deque(maxlen=history_maxlen)
             live_detection_history[camera_id] = history
         history.append((sample_ts, sample))
 
@@ -3965,12 +3968,19 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail='event_debounce_seconds must be a number.') from exc
     if event_debounce_seconds < 0 or event_debounce_seconds > 300:
         raise HTTPException(status_code=400, detail='event_debounce_seconds must be between 0 and 300.')
+    try:
+        detection_history_minutes = int(float(merged.get('detection_history_minutes', 10)))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='detection_history_minutes must be a whole number.') from exc
+    if detection_history_minutes < 1 or detection_history_minutes > 120:
+        raise HTTPException(status_code=400, detail='detection_history_minutes must be between 1 and 120.')
     return {
         'snapshot_refresh_ms': snapshot_refresh_ms,
         'detection_status_refresh_ms': detection_status_refresh_ms,
         'detection_interval_seconds': detection_interval_seconds,
         'event_debounce_seconds': event_debounce_seconds,
         'background_detection_enabled': background_detection_enabled,
+        'detection_history_minutes': detection_history_minutes,
     }
 
 

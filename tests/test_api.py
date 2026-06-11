@@ -1914,7 +1914,7 @@ def test_rtsp_capture_anchors_timing_and_track_to_actual_media_window(tmp_path, 
     box = {'x': 0.2, 'y': 0.2, 'width': 0.3, 'height': 0.3}
     main.live_detection_history['camera-1'] = main.deque(
         [(actual_start + 1.0, [{'label': 'person', 'confidence': 0.9, 'box': box}])],
-        maxlen=main.LIVE_DETECTION_HISTORY_MAXLEN,
+        maxlen=1200,
     )
 
     triggered_iso = datetime.fromtimestamp(now - 11, tz=timezone.utc).isoformat()
@@ -3391,7 +3391,7 @@ def test_build_track_from_live_history_slices_capture_window(tmp_path, monkeypat
             (now - 2.0, []),                                                       # empty cycle inside window
             (now + 5.0, [{'label': 'cat', 'confidence': 0.8, 'box': box}]),        # after window
         ],
-        maxlen=main.LIVE_DETECTION_HISTORY_MAXLEN,
+        maxlen=1200,
     )
 
     track = main.build_track_from_live_history('camera-1', now - 5.0, now)
@@ -3458,7 +3458,7 @@ def test_recording_detail_backfills_track_from_live_history(tmp_path, monkeypatc
             (started.timestamp() + 2.0, [{'label': 'person', 'confidence': 0.9, 'box': box}]),
             (started.timestamp() + 4.0, []),
         ],
-        maxlen=main.LIVE_DETECTION_HISTORY_MAXLEN,
+        maxlen=1200,
     )
 
     event_id = main.database.add_event(
