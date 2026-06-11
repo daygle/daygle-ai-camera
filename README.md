@@ -33,7 +33,7 @@ The app is designed to be configured entirely from the web UI. `config.yaml` is 
 - `pip` and optionally `python3-venv`.
 - A modern browser.
 - Optional: an ONNX YOLO model file for object detection.
-- Optional: PaddleOCR or EasyOCR for ANPR OCR.
+- EasyOCR for ANPR OCR (included in `requirements.txt`).
 
 ### Debian Server Deployment
 
@@ -281,15 +281,7 @@ ANPR can be enabled or disabled per camera and per monitoring zone from the Came
 
 Supported OCR backends:
 
-- `paddleocr`: optional PaddleOCR backend.
-- `easyocr`: optional EasyOCR backend.
-
-Optional OCR installs:
-
-```bash
-pip install paddleocr
-pip install easyocr
-```
+- `easyocr`: EasyOCR backend (default, included in `requirements.txt`).
 
 Search examples:
 
@@ -524,7 +516,7 @@ The SQLite database contains all events, detections, recordings metadata, settin
 ## ANPR Limitations
 
 - Plate crop extraction is a modular placeholder in uploaded-image workflows; camera backends can replace it with real image crops.
-- PaddleOCR and EasyOCR are optional dependencies and may require additional platform packages.
+- EasyOCR is included as a dependency and may require additional platform packages on some systems.
 - Plate alerts are stored and matched in-process for cooldown behavior; persistent alert history can be added later if needed.
 
 ## Updating an Existing Install

@@ -71,31 +71,6 @@ class AnprPipeline:
         return results
 
 
-class PaddleOcrBackend:
-    def __init__(self) -> None:
-        try:
-            module = importlib.import_module("paddleocr")
-            self.reader = module.PaddleOCR(use_angle_cls=True, lang="en")
-        except Exception as exc:
-            raise AnprUnavailableError(f"PaddleOCR is not available: {exc}") from exc
-
-    def read_plate(self, image_path: str, *, event_id: int, detection: dict[str, Any], index: int) -> tuple[str, float]:
-        try:
-            result = self.reader.ocr(image_path, cls=True)
-        except Exception as exc:
-            logger.warning("PaddleOCR failed for %r: %s", image_path, exc)
-            return ("", 0.0)
-        candidates: list[tuple[str, float]] = []
-        for group in result or []:
-            for item in group or []:
-                try:
-                    text, confidence = item[1]
-                    candidates.append((str(text), float(confidence)))
-                except (TypeError, ValueError, IndexError):
-                    continue
-        return max(candidates, key=lambda item: item[1]) if candidates else ("", 0.0)
-
-
 class EasyOcrBackend:
     def __init__(self) -> None:
         try:
@@ -121,8 +96,6 @@ class EasyOcrBackend:
 
 def create_ocr_backend(backend: str) -> Any:
     backend = backend.lower()
-    if backend == "paddleocr":
-        return PaddleOcrBackend()
     if backend == "easyocr":
         return EasyOcrBackend()
     raise AnprUnavailableError(f"Unsupported ANPR backend: {backend}")
