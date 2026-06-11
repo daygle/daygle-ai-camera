@@ -560,6 +560,13 @@ class EventDatabase:
         with self.connect() as db:
             total_events = db.execute("SELECT COUNT(*) AS count FROM events").fetchone()["count"]
             total_alerts = db.execute("SELECT COUNT(*) AS count FROM alert_history").fetchone()["count"]
+            matched_object_events = db.execute(
+                """
+                SELECT COUNT(DISTINCT event_id) AS count
+                FROM detections
+                WHERE label != 'motion' AND confidence >= 0.5
+                """
+            ).fetchone()["count"]
             labels = db.execute(
                 """
                 SELECT label, COUNT(*) AS count, MAX(confidence) AS max_confidence
@@ -571,6 +578,7 @@ class EventDatabase:
             return {
                 "total_events": total_events,
                 "total_alerts": total_alerts,
+                "matched_object_events": matched_object_events,
                 "objects": [dict(row) for row in labels],
             }
 

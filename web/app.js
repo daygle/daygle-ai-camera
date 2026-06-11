@@ -1,5 +1,6 @@
 const els = {
   statusText: document.getElementById('statusText'),
+  cameraDetail: document.getElementById('cameraDetail'),
   aiModeText: document.getElementById('aiModeText'),
   aiStatusDetail: document.getElementById('aiStatusDetail'),
   totalEvents: document.getElementById('totalEvents'),
@@ -261,17 +262,21 @@ async function loadAuth() {
 async function loadStatus() {
   try {
     const [status, aiStatus] = await Promise.all([api('/api/status'), api('/api/status/ai')]);
-    els.statusText.textContent = `${status.status} · ${status.mode}`;
+    els.statusText.textContent = status.status;
+    const cameraName = status.camera_name ? ` · ${status.camera_name}` : '';
+    els.cameraDetail.textContent = `${status.mode}${cameraName}`;
     els.uptimeText.textContent = formatUptime(status.uptime_seconds);
-    els.aiModeText.textContent = aiStatus.mode;
+    const modelLabel = aiStatus.model_name || aiStatus.active_backend;
+    els.aiModeText.textContent = modelLabel;
     els.aiModeText.className = `ai-mode ${aiStatus.mode.toLowerCase().replace(/\s+/g, '-')}`;
+    const loadedText = aiStatus.model_loaded ? 'loaded' : 'not loaded';
     const errorText = aiStatus.error ? ` · ${aiStatus.error}` : '';
-    const modelText = aiStatus.model_name ? ` · ${aiStatus.model_name}` : '';
-    els.aiStatusDetail.textContent = `${aiStatus.active_backend}${modelText} · model loaded: ${aiStatus.model_loaded}${errorText}`;
+    els.aiStatusDetail.textContent = `${aiStatus.mode} · ${loadedText}${errorText}`;
   } catch (error) {
     els.statusText.textContent = 'offline';
+    els.cameraDetail.textContent = '';
     els.uptimeText.textContent = '-';
-    els.aiModeText.textContent = 'MODEL FAILED';
+    els.aiModeText.textContent = 'unknown';
     els.aiModeText.className = 'ai-mode model-failed';
     els.aiStatusDetail.textContent = error.message;
   }
@@ -280,7 +285,7 @@ async function loadStatus() {
 async function loadStats() {
   try {
     const stats = await api('/api/stats');
-    els.totalEvents.textContent = stats.total_events;
+    els.totalEvents.textContent = stats.matched_object_events ?? stats.total_events;
     els.totalAlerts.textContent = stats.total_alerts;
   } catch {
     // Keep last values on failure.
