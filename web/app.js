@@ -1,8 +1,7 @@
 // ─── DOM handles ────────────────────────────────────────────────────────────
 const els = {
-  statusText: document.getElementById('statusText'),
-  statusIcon: document.getElementById('statusIcon'),
-  cameraDetail: document.getElementById('cameraDetail'),
+  cameraCount: document.getElementById('cameraCount'),
+  cameraStatus: document.getElementById('cameraStatus'),
   aiModeText: document.getElementById('aiModeText'),
   aiStatusIcon: document.getElementById('aiStatusIcon'),
   aiStatusDetail: document.getElementById('aiStatusDetail'),
@@ -307,25 +306,23 @@ function bindActivityActions() {
 }
 
 // ─── Status cards ───────────────────────────────────────────────────────────
-function setStatusIconState(iconEl, state) {
-  if (!iconEl) return;
-  iconEl.classList.remove('stat-card-icon-ok', 'stat-card-icon-warn', 'stat-card-icon-error');
-  if (state) iconEl.classList.add(`stat-card-icon-${state}`);
-}
-
 function loadStatus() {
   return api('/api/status').then((status) => {
-    els.statusText.textContent = status.status;
-    const cameraName = status.camera_name ? ` · ${status.camera_name}` : '';
-    els.cameraDetail.textContent = `${status.mode}${cameraName}`;
     els.uptimeText.textContent = formatUptime(status.uptime_seconds);
-    const isOnline = String(status.status || '').toLowerCase() === 'online' || String(status.status || '').toLowerCase() === 'active';
-    setStatusIconState(els.statusIcon, isOnline ? 'ok' : 'warn');
+    const rawStatus = String(status.status || '').toLowerCase();
+    const displayStatus = rawStatus === 'online' || rawStatus === 'active' ? 'Online' : 'Offline';
+    if (els.cameraStatus) {
+      els.cameraStatus.textContent = displayStatus;
+      els.cameraStatus.className = 'chip';
+      if (displayStatus === 'Online') els.cameraStatus.classList.add('chip-green');
+      else els.cameraStatus.classList.add('chip-warn');
+    }
   }).catch((error) => {
-    els.statusText.textContent = 'offline';
-    els.cameraDetail.textContent = '';
     els.uptimeText.textContent = '-';
-    setStatusIconState(els.statusIcon, 'error');
+    if (els.cameraStatus) {
+      els.cameraStatus.textContent = 'Offline';
+      els.cameraStatus.className = 'chip chip-warn';
+    }
     window.showToast?.(error.message, true);
   });
 }
@@ -355,6 +352,7 @@ async function loadStats() {
     const stats = await api('/api/stats');
     els.totalEvents.textContent = stats.matched_object_events ?? stats.total_events ?? 0;
     els.totalAlerts.textContent = stats.total_alerts ?? 0;
+    els.cameraCount.textContent = stats.total_cameras ?? 0;
   } catch (error) {
     window.showToast?.(error.message, true);
   }

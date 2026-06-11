@@ -3174,7 +3174,9 @@ def delete_all_alert_history(request: Request):
 
 @app.get('/api/stats')
 def stats():
-    return database.stats()
+    result = database.stats()
+    result['total_cameras'] = len(cameras_config)
+    return result
 
 
 @app.delete('/api/objects')

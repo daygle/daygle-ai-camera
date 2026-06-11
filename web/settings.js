@@ -117,14 +117,11 @@ function createDatabaseRestoreSection() {
   const section = document.createElement('section');
   section.className = 'card';
   section.innerHTML = `
-    <div class="settings-section-header"><div class="settings-section-icon">💾</div><div><h2>Database Backup & Restore</h2><p class="settings-section-subtitle">Download a snapshot of your database or restore from a previous backup.</p></div></div>
-    <p class="muted">Restores replace events, users, settings, alert rules, and sessions with the backup contents.</p>
-    <div class="button-row"><a class="button-link" href="/api/settings/system/database/backup">Download Database Backup</a></div>
+    <div class="settings-section-header"><div class="settings-section-icon">💾</div><div><h2>Database Backup & Restore</h2><p class="settings-section-subtitle">Download a snapshot of your database or restore from a previous backup. A safety backup is automatically created before every restore.</p></div></div>
     <form id="databaseRestoreForm" class="form-grid">
-      <label><span>Restore backup file</span><input name="file" type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3,application/x-sqlite3" required /><span class="field-help">Select a previously downloaded .sqlite backup file to restore.</span></label>
+      <label><span>Restore backup file</span><input name="file" type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3,application/x-sqlite3" required /><span class="field-help">Select a previously downloaded .sqlite backup file to restore. Restores replace events, users, settings, alert rules, and sessions with the backup contents.</span></label>
     </form>
-    <div class="button-row"><button class="secondary" type="submit">Restore Database</button></div>
-    <p class="muted">A safety backup of the current database is automatically created before every restore.</p>
+    <div class="button-row"><a class="button-link" href="/api/settings/system/database/backup">Download Database Backup</a><button class="secondary" type="submit" form="databaseRestoreForm">Restore Database</button></div>
   `;
 
   const authSection = document.getElementById('authSettingsForm')?.closest('section');
@@ -207,7 +204,7 @@ function createPushNotificationSection() {
   const section = document.createElement('section');
   section.className = 'card';
   section.innerHTML = `
-    <div class="settings-section-header"><div class="settings-section-icon">🔔</div><div><h2>Push Notifications</h2><p class="settings-section-subtitle">Get instant alerts on your Android device via the ntfy app. Per-rule push toggles are on the Zones page.</p></div></div>
+    <div class="settings-section-header"><div class="settings-section-icon">🔔</div><div><h2>Push Notifications</h2><p class="settings-section-subtitle">Get instant alerts on your Android device via the ntfy app. Per-rule push toggles are on the Zones page. Install the <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy app</a> on your Android device and subscribe to your topic to receive alerts.</p></div></div>
     <form id="pushSettingsForm" class="form-grid">
       <label><span>Push Alerts</span><select name="enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select><span class="field-help">Master toggle for push notifications. Default: Disabled</span></label>
       <label><span>Server URL</span><input name="server_url" placeholder="https://ntfy.sh" /><span class="field-help">NTFY server address. Use <code>https://ntfy.sh</code> for the free hosted service. Default: https://ntfy.sh</span></label>
@@ -217,7 +214,6 @@ function createPushNotificationSection() {
       <label><span>Password</span><input name="password" type="password" placeholder="Optional" autocomplete="new-password" /><span class="field-help">Required only if your NTFY server requires authentication.</span></label>
     </form>
     <div class="button-row"><button type="submit" form="pushSettingsForm">Save Push Settings</button><button id="testPushBtn" class="secondary" type="button">Send Test Notification</button></div>
-    <p class="muted">Install the <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy app</a> on your Android device and subscribe to your topic to receive alerts.</p>
   `;
 
   const authSection = document.getElementById('authSettingsForm')?.closest('section');
@@ -242,12 +238,9 @@ function createEmailDeliverySection() {
       <label><span>SMTP Password</span><input name="password" type="password" placeholder="Your password" autocomplete="new-password" /><span class="field-help">Authentication password or app password for your mail server. Default: (none)</span></label>
       <label><span>STARTTLS</span><select name="use_tls"><option value="true">Enabled</option><option value="false">Disabled</option></select><span class="field-help">Encrypts the connection using STARTTLS (recommended for port 587). Default: Enabled</span></label>
       <label><span>SSL</span><select name="use_ssl"><option value="false">Disabled</option><option value="true">Enabled</option></select><span class="field-help">Encrypts the connection using implicit SSL (recommended for port 465). Default: Disabled</span></label>
-    </form>
-    <div class="button-row"><button type="submit" form="emailSettingsForm">Save Mail Server</button></div>
-    <div class="settings-test-row">
       <label><span>Test Recipient</span><input id="testEmailRecipient" type="email" placeholder="you@example.com" /><span class="field-help">Enter an address to send a test email to.</span></label>
-      <button id="testEmailBtn" class="secondary" type="button">Send Test Email</button>
-    </div>
+    </form>
+    <div class="button-row"><button id="testEmailBtn" class="secondary" type="button">Send Test Email</button><button type="submit" form="emailSettingsForm">Save Mail Server</button></div>
   `;
 
   const authSection = document.getElementById('authSettingsForm')?.closest('section');
