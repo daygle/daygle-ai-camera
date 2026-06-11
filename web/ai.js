@@ -249,6 +249,10 @@ async function runAction(buttonId, path, label) {
   }
 }
 
+document.querySelectorAll('.field-help').forEach((el) => {
+  if (!el.title) el.title = el.textContent;
+});
+
 aiForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {

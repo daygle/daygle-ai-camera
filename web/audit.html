@@ -87,9 +87,12 @@
     </header>
 
     <section class="card">
-      <div class="section-header">
-        <h2>Log entries</h2>
-        <button id="refreshBtn" class="secondary" type="button">Refresh</button>
+      <div class="settings-section-header">
+        <div class="settings-section-icon">📋</div>
+        <div>
+          <h2>Log Entries</h2>
+          <p class="settings-section-subtitle">Browse and filter the audit trail for all user actions and system events.</p>
+        </div>
       </div>
 
       <div class="audit-filters">
@@ -133,6 +136,10 @@
         <button id="prevBtn" class="secondary" type="button">Previous</button>
         <span id="pageInfo"></span>
         <button id="nextBtn" class="secondary" type="button">Next</button>
+      </div>
+
+      <div class="button-row">
+        <button id="refreshBtn" class="secondary" type="button">Refresh</button>
       </div>
     </section>
   </main>

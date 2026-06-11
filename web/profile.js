@@ -71,4 +71,8 @@ passwordForm.addEventListener('submit', async (event) => {
   } catch (error) { setMessage(error.message, true); }
 });
 
+document.querySelectorAll('.field-help').forEach((el) => {
+  if (!el.title) el.title = el.textContent;
+});
+
 loadProfile().catch((error) => setMessage(error.message, true));

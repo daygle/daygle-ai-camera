@@ -122,7 +122,7 @@ function createDatabaseRestoreSection() {
   section.innerHTML = `
     <div class="settings-section-header"><div class="settings-section-icon">💾</div><div><h2>Database Backup & Restore</h2><p class="settings-section-subtitle">Download a snapshot of your database or restore from a previous backup.</p></div></div>
     <p class="muted">Restores replace events, users, settings, alert rules, and sessions with the backup contents.</p>
-    <div class="button-row"><a class="button-link" href="/api/settings/system/database/backup">Download database backup</a></div>
+    <div class="button-row"><a class="button-link" href="/api/settings/system/database/backup">Download Database Backup</a></div>
     <form id="databaseRestoreForm" class="form-grid">
       <label><span>Restore backup file</span><input name="file" type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3,application/x-sqlite3" required /><span class="field-help">Select a previously downloaded .sqlite backup file to restore.</span></label>
     </form>

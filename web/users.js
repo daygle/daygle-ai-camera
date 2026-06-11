@@ -82,4 +82,8 @@ form.addEventListener('submit', async (event) => {
   await loadUsers();
 });
 
+document.querySelectorAll('.field-help').forEach((el) => {
+  if (!el.title) el.title = el.textContent;
+});
+
 loadUsers().catch((error) => setMessage(error.message, true));

@@ -18,15 +18,25 @@
     </header>
 
     <section class="card">
-      <div class="section-header">
-        <h2>Users</h2>
+      <div class="settings-section-header">
+        <div class="settings-section-icon">👥</div>
+        <div>
+          <h2>Users</h2>
+          <p class="settings-section-subtitle">All registered accounts. Change roles, enable/disable, or reset passwords from here.</p>
+        </div>
       </div>
       <div id="userMessage" class="muted"></div>
       <div id="users" class="list"></div>
     </section>
 
     <section class="card">
-      <h2>Create User</h2>
+      <div class="settings-section-header">
+        <div class="settings-section-icon">➕</div>
+        <div>
+          <h2>Create User</h2>
+          <p class="settings-section-subtitle">Add a new account. The temporary password should be changed on first login.</p>
+        </div>
+      </div>
       <form id="createUserForm" class="form-grid">
         <label>
           <span>First Name</span>
@@ -50,13 +60,17 @@
             <option value="viewer">Viewer</option>
             <option value="admin">Admin</option>
           </select>
+          <span class="field-help">Viewers can view live feeds and recordings. Admins have full access. Default: Viewer</span>
         </label>
         <label>
           <span>Temporary Password</span>
           <input name="password" type="password" placeholder="Temporary password" required />
+          <span class="field-help">The user should change this password after their first login.</span>
         </label>
-        <button type="submit">Create User</button>
       </form>
+      <div class="button-row">
+        <button type="submit" form="createUserForm">Create User</button>
+      </div>
     </section>
   </main>
   <script src="/static/nav.js"></script>

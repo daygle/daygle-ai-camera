@@ -18,36 +18,45 @@
     </header>
 
     <section class="card">
-      <div class="section-header">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">🔍</div>
         <div>
           <h2>AI Status</h2>
-        </div>
-        <div class="button-row">
-          <button id="checkModelBtn" class="secondary" type="button">Check Model</button>
-          <button id="reloadDetectorBtn" class="secondary" type="button">Reload Detector</button>
-          <button id="testDetectorBtn" class="secondary" type="button">Test Detector</button>
+          <p class="settings-section-subtitle">Current detector state, loaded model, and quick diagnostic actions.</p>
         </div>
       </div>
       <div id="settingsMessage" class="muted"></div>
       <div id="aiStatusPanel" class="status-panel"></div>
+      <div class="button-row">
+        <button id="checkModelBtn" class="secondary" type="button">Check Model</button>
+        <button id="reloadDetectorBtn" class="secondary" type="button">Reload Detector</button>
+        <button id="testDetectorBtn" class="secondary" type="button">Test Detector</button>
+      </div>
     </section>
 
     <section class="card">
-      <div class="section-header">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">📦</div>
         <div>
           <h2>Available Models</h2>
-          <p class="muted">Larger models detect objects more accurately but use more CPU. Download installs the model and switches to it immediately.</p>
-        </div>
-        <div class="button-row">
-          <button id="checkModelUpdatesBtn" class="secondary" type="button">Check for Updates</button>
+          <p class="settings-section-subtitle">Larger models detect objects more accurately but use more CPU. Download installs the model and switches to it immediately.</p>
         </div>
       </div>
       <div id="modelUpdatesMessage" class="muted" style="margin-bottom:8px"></div>
       <div id="modelList"></div>
+      <div class="button-row">
+        <button id="checkModelUpdatesBtn" class="secondary" type="button">Check for Updates</button>
+      </div>
     </section>
 
     <section class="card">
-      <h2>Settings</h2>
+      <div class="settings-section-header">
+        <div class="settings-section-icon">⚙️</div>
+        <div>
+          <h2>Detection Settings</h2>
+          <p class="settings-section-subtitle">Configure the AI detection engine, model path, and inference parameters.</p>
+        </div>
+      </div>
       <form id="aiSettingsForm" class="form-grid">
         <label>
           <span>AI Enabled</span>
@@ -55,31 +64,39 @@
             <option value="true">Enabled</option>
             <option value="false">Disabled</option>
           </select>
+          <span class="field-help">Master toggle for AI object detection. Default: Enabled</span>
         </label>
         <label>
           <span>Backend</span>
           <select name="backend">
             <option value="onnx">ONNX</option>
           </select>
+          <span class="field-help">Inference backend. ONNX Runtime is the recommended option. Default: ONNX</span>
         </label>
         <label>
           <span>IoU Threshold</span>
           <input name="iou_threshold" type="number" min="0" max="1" step="0.01" />
+          <span class="field-help">Intersection-over-union threshold for merging overlapping detections. Default: 0.45</span>
         </label>
         <label>
           <span>Input Size</span>
           <input name="input_size" type="number" min="32" max="2048" step="32" />
+          <span class="field-help">Image resolution fed to the model. Higher = more accurate, slower. Default: 640</span>
         </label>
         <label>
           <span>Model Path</span>
           <input name="model_path" />
+          <span class="field-help">Path to the ONNX model file. Use Download &amp; Install above, or set manually. Default: models/yolov8n.onnx</span>
         </label>
         <label>
           <span>Labels Path</span>
           <input name="labels_path" />
+          <span class="field-help">Path to the text file containing one object label per line. Default: models/coco.names</span>
         </label>
-        <button type="submit">Save AI Settings</button>
       </form>
+      <div class="button-row">
+        <button type="submit" form="aiSettingsForm">Save AI Settings</button>
+      </div>
     </section>
   </main>
   <script src="/static/nav.js"></script>

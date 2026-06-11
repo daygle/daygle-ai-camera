@@ -19,40 +19,200 @@ window.showToast = function (message, isError) {
   const currentPath = window.location.pathname;
   const nav = document.createElement('nav');
   nav.className = 'app-nav';
-  nav.innerHTML = `
+
+  /* ── Helper: detect if any link inside a dropdown matches the current path ── */
+  function dropdownIsActive(links) {
+    return links.some((l) => {
+      const m = l.match || '';
+      return (m === '/' && currentPath === '/') || (m !== '/' && currentPath.startsWith(m));
+    });
+  }
+
+  /* ── Define nav structure ── */
+  const primaryLinks = [
+    { href: '/', match: '/', label: 'Dashboard' },
+    { href: '/live', match: '/live', label: 'Live' },
+  ];
+
+  const dropdowns = [    { id: 'navMonitor',
+      label: 'Monitoring',
+      admin: false,
+      links: [
+        { href: '/zones', match: '/zones', label: 'Zones' },
+        { href: '/cameras', match: '/cameras', label: 'Cameras' },
+      ],
+    },
+    {
+      id: 'navIntel',
+      label: 'Intelligence',
+      admin: false,
+      links: [
+        { href: '/ai', match: '/ai', label: 'AI Settings' },
+        { href: '/anpr', match: '/anpr', label: 'ANPR' },
+      ],
+    },
+    {
+      id: 'navData',
+      label: 'Data',
+      admin: false,
+      links: [
+        { href: '/recordings', match: '/recordings', label: 'Recordings' },
+        { href: '/recordings/timeline', match: '/recordings/timeline', label: 'Timeline' },
+      ],
+    },
+    {
+      id: 'navAdmin',
+      label: 'Admin',
+      admin: true,
+      links: [
+        { href: '/settings', match: '/settings', label: 'Settings' },
+        { href: '/users', match: '/users', label: 'Users' },
+        { href: '/audit', match: '/audit', label: 'Audit Log' },
+      ],
+    },
+  ];
+
+  /* ── Determine active dropdown ── */
+  function findActiveDropdown() {
+    for (const dd of dropdowns) {
+      if (dropdownIsActive(dd.links)) return dd.id;
+    }
+    return null;
+  }
+  const activeDropdownId = findActiveDropdown();
+
+  /* ── Build HTML ── */
+  let html = `
     <a class="app-brand" href="/">
       <span class="brand-mark">D</span>
-      <span>Daygle AI Camera</span>
+      <span class="brand-text">Daygle</span>
     </a>
-    <div class="app-nav-links">
-      <a href="/" data-match="/">Dashboard</a>
-      <a href="/live" data-match="/live">Live</a>
-      <a href="/zones" data-match="/zones" data-admin="true">Zones</a>
-      <a href="/cameras" data-match="/cameras" data-admin="true">Cameras</a>
-      <a href="/anpr" data-match="/anpr">ANPR</a>
-      <a href="/recordings" data-match="/recordings">Recordings</a>
-      <a href="/recordings/timeline" data-match="/recordings/timeline">Timeline</a>
-      <a href="/ai" data-match="/ai" data-admin="true">AI</a>
-      <a href="/settings" data-match="/settings" data-admin="true">Settings</a>
-      <a href="/users" data-match="/users" data-admin="true">Users</a>
-      <a href="/audit" data-match="/audit" data-admin="true">Audit Log</a>
-    </div>
-    <div class="app-nav-account">
-      <a href="/profile" data-match="/profile" id="navUser">Profile</a>
-      <button class="nav-logout-btn" id="navLogoutBtn" type="button">Logout</button>
-    </div>
-  `;
+    <button class="app-nav-toggle" type="button" aria-label="Toggle navigation">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <div class="app-nav-body">
+      <div class="app-nav-links">`;
 
+  /* Primary links */
+  for (const link of primaryLinks) {
+    const isActive =
+      (link.match === '/' && currentPath === '/') ||
+      (link.match !== '/' && currentPath.startsWith(link.match));
+    html += `<a href="${link.href}" class="nav-item${isActive ? ' active' : ''}">${link.label}</a>`;
+  }
+
+  /* Dropdown groups */
+  for (const dd of dropdowns) {
+    const isActive = dd.id === activeDropdownId;
+    const adminAttr = dd.admin ? ' data-admin="true"' : '';
+    html += `
+        <div class="nav-dropdown${isActive ? ' active' : ''}" data-dropdown="${dd.id}"${adminAttr}>
+          <button type="button" class="nav-dropdown-trigger${isActive ? ' active' : ''}" aria-haspopup="true" aria-expanded="false">
+            <span class="nav-dropdown-label">${dd.label}</span>
+            <svg class="nav-dropdown-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="nav-dropdown-menu">`;
+    for (const link of dd.links) {
+      const linkActive =
+        (link.match === '/' && currentPath === '/') ||
+        (link.match !== '/' && currentPath.startsWith(link.match));
+      html += `<a href="${link.href}" class="nav-dropdown-item${linkActive ? ' active' : ''}">${link.label}</a>`;
+    }
+    html += `
+          </div>
+        </div>`;
+  }
+
+  html += `
+      </div>
+      <div class="app-nav-account">
+        <a href="/profile" data-match="/profile" id="navUser" class="nav-item">Profile</a>
+        <button class="nav-logout-btn" id="navLogoutBtn" type="button">Logout</button>
+      </div>
+    </div>`;
+
+  nav.innerHTML = html;
   document.body.prepend(nav);
 
-  const activeLink = Array.from(nav.querySelectorAll('[data-match]'))
-    .filter((link) => {
-      const match = String(link.getAttribute('data-match') || '');
-      return (match === '/' && currentPath === '/') || (match !== '/' && currentPath.startsWith(match));
-    })
-    .sort((left, right) => String(right.getAttribute('data-match') || '').length - String(left.getAttribute('data-match') || '').length)[0];
-  if (activeLink) activeLink.classList.add('active');
+  /* ── Dropdown interaction ── */
+  let openDropdown = null;
 
+  function closeAllDropdowns() {
+    nav.querySelectorAll('.nav-dropdown.open').forEach((el) => {
+      el.classList.remove('open');
+      const trigger = el.querySelector('.nav-dropdown-trigger');
+      if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    });
+    openDropdown = null;
+  }
+
+  nav.querySelectorAll('.nav-dropdown-trigger').forEach((trigger) => {
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const wrapper = trigger.closest('.nav-dropdown');
+      const isOpen = wrapper.classList.contains('open');
+      closeAllDropdowns();
+      if (!isOpen) {
+        wrapper.classList.add('open');
+        trigger.setAttribute('aria-expanded', 'true');
+        openDropdown = wrapper;
+      }
+    });
+  });
+
+  /* Close dropdowns on outside click */
+  document.addEventListener('click', (e) => {
+    if (openDropdown && !openDropdown.contains(e.target)) {
+      closeAllDropdowns();
+    }
+  });
+
+  /* Desktop: close dropdown on mouse-leave with small delay */
+  nav.querySelectorAll('.nav-dropdown').forEach((wrapper) => {
+    let leaveTimer = null;
+    wrapper.addEventListener('mouseenter', () => {
+      if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = null; }
+    });
+    wrapper.addEventListener('mouseleave', () => {
+      if (!wrapper.classList.contains('open')) return;
+      leaveTimer = setTimeout(() => {
+        wrapper.classList.remove('open');
+        const trigger = wrapper.querySelector('.nav-dropdown-trigger');
+        if (trigger) trigger.setAttribute('aria-expanded', 'false');
+        if (openDropdown === wrapper) openDropdown = null;
+      }, 200);
+    });
+  });
+
+  /* Close dropdowns on Escape */
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeAllDropdowns();
+  });
+
+  /* Close mobile menu when a link is clicked */
+  nav.querySelectorAll('.nav-item, .nav-dropdown-item').forEach((link) => {
+    link.addEventListener('click', () => {
+      nav.classList.remove('nav-open');
+    });
+  });
+
+  /* ── Mobile toggle ── */
+  const toggle = nav.querySelector('.app-nav-toggle');
+  if (toggle) {
+    toggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      nav.classList.toggle('nav-open');
+    });
+  }
+
+  /* Close mobile nav on outside click */
+  document.addEventListener('click', (e) => {
+    if (nav.classList.contains('nav-open') && !nav.contains(e.target)) {
+      nav.classList.remove('nav-open');
+    }
+  });
+
+  /* ── Auth ── */
   try {
     const response = await fetch('/api/auth/me');
     if (!response.ok) return;
@@ -62,8 +222,8 @@ window.showToast = function (message, isError) {
     const navUser = document.getElementById('navUser');
     if (navUser && user.username) navUser.textContent = user.username;
     if (user.role !== 'admin') {
-      nav.querySelectorAll('[data-admin="true"]').forEach((link) => {
-        link.hidden = true;
+      nav.querySelectorAll('[data-admin="true"]').forEach((el) => {
+        el.hidden = true;
       });
     }
     const logoutBtn = document.getElementById('navLogoutBtn');
