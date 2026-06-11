@@ -160,6 +160,9 @@ class RecordingService:
         tmp_path = file_path.with_name(f'{file_path.stem}.recording.tmp{file_path.suffix}')
         if tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
+        # stream_url may contain credentials (rtsp://user:pass@host/...). ffmpeg
+        # requires them inline in the -i URL; there is no other mechanism for RTSP
+        # auth. The command array is intentionally never logged for this reason.
         command = [
             ffmpeg,
             '-y',

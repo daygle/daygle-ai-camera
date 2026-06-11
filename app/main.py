@@ -139,6 +139,7 @@ def effective_ai_config() -> dict[str, Any]:
 
 _min_rule_confidence_cache: tuple[float, float] | None = None  # (value, timestamp)
 _MIN_RULE_CONFIDENCE_TTL = 5.0  # seconds; short enough to pick up user edits promptly
+_min_rule_confidence_lock = threading.Lock()
 
 
 def compute_minimum_rule_confidence(fallback: float | None = None) -> float:
@@ -151,33 +152,41 @@ def compute_minimum_rule_confidence(fallback: float | None = None) -> float:
     read on every detection frame (called at ~4 Hz per camera from the hot path).
     """
     global _min_rule_confidence_cache
-    if _min_rule_confidence_cache is not None:
-        cached_value, cached_at = _min_rule_confidence_cache
+    cached = _min_rule_confidence_cache
+    if cached is not None:
+        cached_value, cached_at = cached
         if time.time() - cached_at < _MIN_RULE_CONFIDENCE_TTL:
             return cached_value
 
-    if fallback is None:
-        fallback = float(effective_ai_config().get('confidence') or 0.45)
+    with _min_rule_confidence_lock:
+        cached = _min_rule_confidence_cache
+        if cached is not None:
+            cached_value, cached_at = cached
+            if time.time() - cached_at < _MIN_RULE_CONFIDENCE_TTL:
+                return cached_value
 
-    # Start at the global confidence floor so zone rules with higher thresholds
-    # never silently raise YOLO's detection threshold above the global setting.
-    min_conf: float = fallback
-    for camera in effective_cameras_config():
-        for zone in camera.get('detection', {}).get('zones', []):
-            for rule in zone.get('object_rules', []):
-                if not rule.get('enabled', True):
-                    continue
-                if str(rule.get('label') or '').strip().lower() == 'motion':
-                    continue
-                try:
-                    conf = float(rule.get('min_confidence', fallback))
-                    if conf < min_conf:
-                        min_conf = conf
-                except (TypeError, ValueError):
-                    pass
-    result = min_conf
-    _min_rule_confidence_cache = (result, time.time())
-    return result
+        if fallback is None:
+            fallback = float(effective_ai_config().get('confidence') or 0.45)
+
+        # Start at the global confidence floor so zone rules with higher thresholds
+        # never silently raise YOLO's detection threshold above the global setting.
+        min_conf: float = fallback
+        for camera in effective_cameras_config():
+            for zone in camera.get('detection', {}).get('zones', []):
+                for rule in zone.get('object_rules', []):
+                    if not rule.get('enabled', True):
+                        continue
+                    if str(rule.get('label') or '').strip().lower() == 'motion':
+                        continue
+                    try:
+                        conf = float(rule.get('min_confidence', fallback))
+                        if conf < min_conf:
+                            min_conf = conf
+                    except (TypeError, ValueError):
+                        pass
+        result = min_conf
+        _min_rule_confidence_cache = (result, time.time())
+        return result
 
 
 def effective_recording_config() -> dict[str, Any]:
@@ -286,6 +295,7 @@ live_detection_history_lock = threading.Lock()
 live_event_last_emitted: dict[str, dict[str, Any]] = {}
 live_detection_retry_after: dict[str, float] = {}
 live_detection_failure_count: dict[str, int] = {}
+_live_backoff_lock = threading.Lock()
 active_rtsp_recordings: dict[str, dict[str, Any]] = {}
 active_rtsp_recordings_lock = threading.Lock()
 live_detection_worker_lock = threading.Lock()
@@ -1044,8 +1054,9 @@ def remember_live_event(camera_id: str, labels: set[str], *, merge: bool = False
 
 
 def clear_live_camera_backoff(camera_id: str) -> None:
-    live_detection_retry_after.pop(camera_id, None)
-    live_detection_failure_count.pop(camera_id, None)
+    with _live_backoff_lock:
+        live_detection_retry_after.pop(camera_id, None)
+        live_detection_failure_count.pop(camera_id, None)
 
 
 def extend_active_rtsp_recording(
@@ -1128,11 +1139,12 @@ def detection_label_strings(detections: list[dict[str, Any]]) -> list[str]:
 
 
 def schedule_live_camera_backoff(camera_id: str, message: str) -> float:
-    failure_count = live_detection_failure_count.get(camera_id, 0) + 1
-    live_detection_failure_count[camera_id] = failure_count
-    backoff_seconds = min(300.0, max(10.0, 5.0 * (2 ** min(failure_count - 1, 5))))
-    retry_after = time.time() + backoff_seconds
-    live_detection_retry_after[camera_id] = retry_after
+    with _live_backoff_lock:
+        failure_count = live_detection_failure_count.get(camera_id, 0) + 1
+        live_detection_failure_count[camera_id] = failure_count
+        backoff_seconds = min(300.0, max(10.0, 5.0 * (2 ** min(failure_count - 1, 5))))
+        retry_after = time.time() + backoff_seconds
+        live_detection_retry_after[camera_id] = retry_after
     update_live_detection_status(
         camera_id,
         state='error',
@@ -1164,8 +1176,9 @@ def _camera_has_live_alert_stream(settings: dict[str, Any]) -> bool:
     return bool(build_stream_url(settings))
 
 
-def run_live_alert_monitor_once() -> int:
-    live_settings = effective_live_config()
+def run_live_alert_monitor_once(live_settings: dict[str, Any] | None = None) -> int:
+    if live_settings is None:
+        live_settings = effective_live_config()
     if not normalize_bool_setting(live_settings.get('background_detection_enabled'), True):
         return 0
 
@@ -1174,7 +1187,8 @@ def run_live_alert_monitor_once() -> int:
         camera_id = str(selected_config.get('id') or 'camera')
         if not _camera_has_live_alert_stream(selected_config):
             continue
-        retry_after = live_detection_retry_after.get(camera_id, 0)
+        with _live_backoff_lock:
+            retry_after = live_detection_retry_after.get(camera_id, 0)
         now = time.time()
         if retry_after and now < retry_after:
             continue
@@ -1225,8 +1239,9 @@ def run_live_alert_monitor_once() -> int:
 
 def live_alert_monitor_loop() -> None:
     while not live_alert_monitor_stop.is_set():
-        run_live_alert_monitor_once()
-        interval = max(0.1, float(effective_live_config().get('detection_interval_seconds', 0.25)))
+        live_settings = effective_live_config()
+        run_live_alert_monitor_once(live_settings)
+        interval = max(0.1, float(live_settings.get('detection_interval_seconds', 0.25)))
         live_alert_monitor_stop.wait(interval)
 
 
@@ -1336,7 +1351,6 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         return None
 
     detections = normalize_detection_boxes_for_frame(detections, frame)
-    record_live_detection_history(camera_id, detections, sample_ts=frame_capture_ts)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     frame_has_motion, frame_motion_confidence = detect_frame_motion(camera_id, image)
     motion_detections = zone_motion_detections(detections, settings, frame_motion_confidence) if frame_has_motion else []
@@ -1353,9 +1367,21 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         if zone_rules else []
     )
 
+    # Record history only with detections that passed confidence thresholds so playback
+    # overlays don't show below-threshold boxes as if they were real alert detections.
+    strongest_motion = (
+        max(motion_detections, key=lambda d: float(d.get('confidence', 0)))
+        if motion_detections else None
+    )
+    record_live_detection_history(
+        camera_id,
+        list(object_alert_detections) + record_only_detections
+        + ([{**strongest_motion, 'label': 'motion', 'motion_event': True}] if strongest_motion is not None else []),
+        sample_ts=frame_capture_ts,
+    )
+
     alert_detections = list(object_alert_detections) + record_only_detections
-    if motion_detections:
-        strongest_motion = max(motion_detections, key=lambda detection: float(detection.get('confidence', 0)))
+    if strongest_motion is not None:
         alert_detections.append({
             **strongest_motion,
             'label': 'motion',
@@ -1368,13 +1394,22 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             reason='No detections matched this camera and its monitoring areas.',
             detected_labels=raw_labels,
             matched_labels=[],
-            detections=[{**d, 'alert_matched': False, 'alert_triggered': False} for d in object_detections],
+            detections=[],
         )
         return None
 
     triggered = alerts.process(alert_detections, rules=zone_rules)
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     triggered_labels = {str(alert.get('label') or '').lower() for alert in triggered}
+    # Filter to only detections that passed a zone rule's min_confidence threshold.
+    # Sub-threshold detections must not trigger recordings or appear in the live
+    # status panel as matched objects. When no alert rules exist every in-zone
+    # detection is already treated as a match, so skip filtering in that case.
+    _confident_object_detections = (
+        [d for d in object_detections
+         if zone_object_rule_matches(settings, d, action='alert') or zone_record_on_detect(d, settings)]
+        if zone_rules else list(object_detections)
+    )
     recording_detections = [
         {
             **detection,
@@ -1382,7 +1417,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             if zone_rules else str(detection.get('label') or '').lower() in triggered_labels,
             'alert_triggered': zone_record_on_detect(detection, settings),
         }
-        for detection in object_detections
+        for detection in _confident_object_detections
     ]
     if motion_detections:
         _motion_record = zone_motion_record_on_detect(settings)
@@ -1613,7 +1648,6 @@ def ai_status_payload(ai_settings: dict[str, Any] | None = None) -> dict[str, An
         None,
     )
     return {
-        'current_backend': configured_backend,
         'active_backend': active_backend,
         'configured_backend': configured_backend,
         'mode': mode,
@@ -1654,7 +1688,7 @@ MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
 @app.middleware('http')
 async def authentication_middleware(request: Request, call_next):
-    if not auth_enabled:
+    if not effective_auth_config().get('enabled', True):
         return await call_next(request)
 
     path = request.url.path
@@ -1832,6 +1866,20 @@ def _make_continuous_chunk_callback(camera_id: str) -> Any:
             if started_at_dt is None:
                 started_at_dt = ended_at_dt - timedelta(seconds=effective_recording_config().get('chunk_duration_seconds', 3600))
             duration_seconds = max(1.0, (ended_at_dt - started_at_dt).total_seconds())
+            # Seed recording_labels from live history: continuous chunks have
+            # no event_id, so add_recording's fallback can't seed labels for them.
+            chunk_track = build_track_from_live_history(
+                camera_id, started_at_dt.timestamp(), ended_at_dt.timestamp()
+            )
+            chunk_labels: list[str] = []
+            if chunk_track:
+                _seen: set[str] = set()
+                for _sample in chunk_track:
+                    for _det in (_sample.get('detections') or []):
+                        _lbl = str(_det.get('label') or '').strip().lower()
+                        if _lbl and _lbl not in _seen:
+                            _seen.add(_lbl)
+                            chunk_labels.append(_lbl)
             recording_id = database.add_recording(
                 event_id=None,
                 camera_id=camera_id,
@@ -1844,6 +1892,7 @@ def _make_continuous_chunk_callback(camera_id: str) -> Any:
                 created_at=utc_now(),
                 trigger_type='continuous',
                 trigger_label=None,
+                labels=chunk_labels or None,
             )
             write_live_history_detection_track(
                 recording_id, file_path, camera_id, started_at_dt.timestamp(), ended_at_dt.timestamp(),
@@ -2078,6 +2127,7 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
             if snap_path.exists():
                 raw_bytes = snap_path.read_bytes()
                 db_detections = event.get('detections') or []
+                _email_min_conf = compute_minimum_rule_confidence()
                 overlay_detections = [
                     {
                         'label': d.get('label'),
@@ -2085,6 +2135,7 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
                         'box': {'x': d.get('x', 0), 'y': d.get('y', 0), 'width': d.get('width', 0), 'height': d.get('height', 0)},
                     }
                     for d in db_detections
+                    if float(d.get('confidence') or 0) >= _email_min_conf
                 ]
                 snapshot_bytes = render_live_snapshot_jpeg_overlay(raw_bytes, overlay_detections)
         except Exception as exc:
@@ -2799,7 +2850,9 @@ async def _read_uploaded_image(request: Request) -> tuple[bytes, str | None, str
             if line.lower().startswith('content-type:'):
                 uploaded_type = line.split(':', 1)[1].strip()
                 break
-        return payload.rstrip(b'\r\n-'), filename, uploaded_type
+        if payload.endswith(b'\r\n'):
+            payload = payload[:-2]
+        return payload, filename, uploaded_type
 
     raise HTTPException(status_code=400, detail='Multipart upload must include a file field named file')
 
@@ -3593,7 +3646,6 @@ def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
         **ai_settings,
         'active_backend': ai_status['active_backend'],
         'configured_backend': ai_status['configured_backend'],
-        'current_backend': ai_status['current_backend'],
         'mode': ai_status['mode'],
         'available': ai_status['inference_available'],
         'model_loaded': ai_status['model_loaded'],
@@ -3840,10 +3892,16 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
     global camera, camera_config, cameras_config, camera_instances
+    old_instances = camera_instances
     cameras_config = settings_list
     camera_config = settings_list[0] if settings_list else {}
     camera_instances = create_camera_instances(settings_list)
     camera = camera_instances[camera_config['id']] if camera_config else None
+    for old_cam in (old_instances or {}).values():
+        try:
+            old_cam.close()
+        except Exception:
+            pass
 
 
 def apply_storage_and_recording_settings() -> None:

@@ -89,11 +89,20 @@ function timeAgo(isoString) {
 
 function detectionBadges(detections = []) {
   if (!detections.length) return '<span class="muted">No detections</span>';
-  const normalized = detections
-    .map((d) => ({ label: String(d.label || '').trim().toLowerCase(), confidence: Number(d.confidence || 0) }))
-    .filter((d) => d.label && (!configuredLabels || (configuredLabels.has(d.label) && d.confidence >= (configuredLabels.get(d.label) ?? 0))));
-  if (!normalized.length) return '<span class="muted">No detections</span>';
-  return normalized.map((d) => `<span class="detection">${escapeHtml(d.label)} · ${Math.round(d.confidence * 100)}%</span>`).join('');
+  // Deduplicate by label, keep best confidence per label — no config filtering
+  // so historical data always shows everything that was actually detected.
+  const best = new Map();
+  for (const d of detections) {
+    const label = String(d.label || '').trim().toLowerCase();
+    if (!label) continue;
+    const conf = Number(d.confidence || 0);
+    if (!best.has(label) || conf > best.get(label)) best.set(label, conf);
+  }
+  if (!best.size) return '<span class="muted">No detections</span>';
+  return Array.from(best.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, conf]) => `<span class="detection">${escapeHtml(label)} · ${Math.round(conf * 100)}%</span>`)
+    .join('');
 }
 
 // ─── Alert grouping (consolidates multiple alerts for the same event) ──────
@@ -427,6 +436,9 @@ async function loadAuth() {
       });
     }
   }
+  if (els.deleteAllAlertsBtn) {
+    els.deleteAllAlertsBtn.hidden = !isAdmin;
+  }
   if (els.deleteAllAlertsBtn && isAdmin) {
     els.deleteAllAlertsBtn.addEventListener('click', () => {
       openDeleteModal({
@@ -516,6 +528,5 @@ loadAuth()
 setInterval(() => { loadStatus(); loadAiStatus(); }, 5000);
 setInterval(() => { loadStats().catch(() => {}); }, 10000);
 setInterval(() => {
-  loadEvents().then(renderActivityFeed).catch(() => {});
-  loadAlerts().then(renderActivityFeed).catch(() => {});
+  Promise.all([loadEvents(), loadAlerts()]).then(renderActivityFeed).catch(() => {});
 }, 30000);

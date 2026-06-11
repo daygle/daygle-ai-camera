@@ -294,21 +294,15 @@ class EventDatabase:
                       FROM detections d
                      WHERE d.event_id = r.event_id) AS detection_labels
             FROM recordings r
+            WHERE NOT EXISTS (
+                SELECT 1 FROM recording_labels rl WHERE rl.recording_id = r.id
+            )
             """
         ).fetchall()
         total = 0
         generic = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous', ''}
         for row in rows:
             recording_id = int(row['recording_id'])
-            existing = {
-                str(existing_row['label'])
-                for existing_row in db.execute(
-                    "SELECT label FROM recording_labels WHERE recording_id = ?",
-                    (recording_id,),
-                ).fetchall()
-            }
-            if existing:
-                continue
             labels: list[str] = []
             if row['detection_labels']:
                 for label in str(row['detection_labels']).split(','):
@@ -348,7 +342,7 @@ class EventDatabase:
                 params.append(camera_id)
             if alerted_only:
                 conditions.append(
-                    "EXISTS (SELECT 1 FROM alert_history ah WHERE ah.event_id = r.event_id)"
+                    "EXISTS (SELECT 1 FROM alert_history ah WHERE ah.recording_id = r.id OR (r.event_id IS NOT NULL AND ah.event_id = r.event_id))"
                 )
             if started_after:
                 conditions.append("r.started_at >= ?")
@@ -374,7 +368,7 @@ class EventDatabase:
 
             params.append(limit)
             rows = db.execute(sql, params).fetchall()
-            return [self._recording_with_event(db, row) for row in rows]
+            return self._assemble_recordings(db, rows)
 
     def list_recordings_for_camera_day(self, camera_id: str, day_start: str, day_end: str) -> list[dict[str, Any]]:
         with self.connect() as db:
@@ -396,7 +390,7 @@ class EventDatabase:
                 """,
                 (camera_id, f'%"camera_id": "{camera_id}"%', day_end, day_start),
             ).fetchall()
-            return [self._recording_with_event(db, row) for row in rows]
+            return self._assemble_recordings(db, rows)
 
     def get_recording(self, recording_id: int) -> dict[str, Any] | None:
         with self.connect() as db:
@@ -718,6 +712,46 @@ class EventDatabase:
         event["recording_status"] = "linked" if recordings else "none"
         return event
 
+    def _assemble_recordings(self, db: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+        """Assemble recordings with labels, events, and detections using batch IN-clause queries."""
+        if not rows:
+            return []
+        recordings = [self._recording_row(row) for row in rows]
+        recording_ids = [int(r['id']) for r in recordings]
+
+        labels_map = self._fetch_labels_for_recordings(db, recording_ids)
+
+        event_ids = [int(r['event_id']) for r in recordings if r.get('event_id') is not None]
+        events_map: dict[int, Any] = {}
+        detections_map: dict[int, list[dict[str, Any]]] = {}
+        if event_ids:
+            placeholders = ','.join('?' * len(event_ids))
+            event_rows = db.execute(
+                f"SELECT * FROM events WHERE id IN ({placeholders})",
+                event_ids,
+            ).fetchall()
+            for event_row in event_rows:
+                event = dict(event_row)
+                event['metadata'] = json.loads(event.get('metadata') or '{}')
+                events_map[int(event['id'])] = event
+            det_rows = db.execute(
+                f"SELECT * FROM detections WHERE event_id IN ({placeholders}) ORDER BY confidence DESC",
+                event_ids,
+            ).fetchall()
+            for det_row in det_rows:
+                eid = int(det_row['event_id'])
+                detections_map.setdefault(eid, []).append(dict(det_row))
+
+        for recording in recordings:
+            recording['labels'] = labels_map.get(int(recording['id']), [])
+            recording['event'] = None
+            recording['detections'] = []
+            if recording.get('event_id') is not None:
+                eid = int(recording['event_id'])
+                recording['event'] = events_map.get(eid)
+                recording['detections'] = detections_map.get(eid, [])
+        return recordings
+
     @staticmethod
     def _fetch_labels_for_recordings(db: sqlite3.Connection, recording_ids: list[int]) -> dict[int, list[str]]:
         if not recording_ids:
@@ -729,7 +763,7 @@ class EventDatabase:
         ).fetchall()
         grouped: dict[int, list[str]] = {int(rid): [] for rid in recording_ids}
         for row in rows:
-            grouped.setdefault(int(row['recording_id']), []).append(str(row['label']))
+            grouped[int(row['recording_id'])].append(str(row['label']))
         return grouped
 
     def _recording_row(self, row: sqlite3.Row) -> dict[str, Any]:

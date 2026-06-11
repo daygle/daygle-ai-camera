@@ -44,6 +44,7 @@ const OVERLAY_TOGGLE_KEY = 'daygle.timeline.overlay.enabled';
 // Off by default; users opt in per-browser via the toggle.
 let overlayEnabled = false;
 let overlayRafId = null;
+let overlayVfcHandle = null;
 let overlayResizeObserver = null;
 
 const DAY_SECONDS = 24 * 60 * 60;
@@ -126,16 +127,32 @@ function overlayShouldAnimate() {
 }
 
 function startOverlayRaf() {
-  if (overlayRafId !== null) return;
-  function loop() {
-    if (!els.clipPlayer || els.clipPlayer.paused || !overlayShouldAnimate()) {
-      overlayRafId = null;
-      return;
+  if (overlayRafId !== null || overlayVfcHandle !== null) return;
+  const video = els.clipPlayer;
+  if (!video) return;
+  if (typeof video.requestVideoFrameCallback === 'function') {
+    // requestVideoFrameCallback fires with the exact presentation timestamp of
+    // each decoded frame, eliminating the lag from reading currentTime in rAF.
+    function vfcLoop(now, metadata) {
+      if (!els.clipPlayer || els.clipPlayer.paused || !overlayShouldAnimate()) {
+        overlayVfcHandle = null;
+        return;
+      }
+      drawClipOverlay(metadata.mediaTime);
+      overlayVfcHandle = els.clipPlayer.requestVideoFrameCallback(vfcLoop);
     }
-    drawClipOverlay();
+    overlayVfcHandle = video.requestVideoFrameCallback(vfcLoop);
+  } else {
+    function loop() {
+      if (!els.clipPlayer || els.clipPlayer.paused || !overlayShouldAnimate()) {
+        overlayRafId = null;
+        return;
+      }
+      drawClipOverlay();
+      overlayRafId = requestAnimationFrame(loop);
+    }
     overlayRafId = requestAnimationFrame(loop);
   }
-  overlayRafId = requestAnimationFrame(loop);
 }
 
 function stopOverlayRaf() {
@@ -143,9 +160,13 @@ function stopOverlayRaf() {
     cancelAnimationFrame(overlayRafId);
     overlayRafId = null;
   }
+  if (overlayVfcHandle !== null && els.clipPlayer) {
+    els.clipPlayer.cancelVideoFrameCallback(overlayVfcHandle);
+    overlayVfcHandle = null;
+  }
 }
 
-function drawClipOverlay() {
+function drawClipOverlay(mediaTime) {
   if (!els.clipOverlay || !els.clipPlayer) return;
   resizeOverlayCanvas(els.clipOverlay, els.clipPlayer);
   const context = els.clipOverlay.getContext('2d');
@@ -154,7 +175,9 @@ function drawClipOverlay() {
   context.clearRect(0, 0, els.clipOverlay.width, els.clipOverlay.height);
   if (!overlayEnabled) return;
 
-  const playerTime = Number(els.clipPlayer.currentTime || 0);
+  // Prefer the frame-accurate presentation timestamp from requestVideoFrameCallback
+  // over currentTime, which lags the displayed frame by a pipeline stage or two.
+  const playerTime = mediaTime !== undefined ? mediaTime : Number(els.clipPlayer.currentTime || 0);
 
   // The saved detection track replays the boxes the live monitor computed
   // while the clip recorded, so playback never runs inference. Clips without
@@ -248,22 +271,21 @@ function recordingDetectionLabels(recording) {
  * filtered to non-generic labels that pass the configuredLabels threshold.
  */
 function recordingDetectionSummary(recording) {
+  // Build best-confidence map from all detections — historical data, no config filtering.
   const best = new Map();
   for (const d of (recording.detections || [])) {
     const label = String(d.label || '').trim().toLowerCase();
     if (!label) continue;
     const conf = Number(d.confidence || 0);
-    if (configuredLabels && (!configuredLabels.has(label) || conf < (configuredLabels.get(label) ?? 0))) continue;
     if (!best.has(label) || conf > best.get(label)) best.set(label, conf);
   }
-  const triggerLabel = recordingTriggerLabel(recording);
-  if (triggerLabel && (!configuredLabels || configuredLabels.has(triggerLabel)) && !best.has(triggerLabel)) {
-    best.set(triggerLabel, 0);
-  }
-  return Array.from(best.entries())
-    .sort((a, b) => b[1] - a[1])
-    .filter(([label]) => !GENERIC_TIMELINE_LABELS.has(label))
-    .map(([label, confidence]) => ({ label, confidence }));
+  // Use recording.labels as the authoritative label list when available.
+  const authLabels = Array.isArray(recording.labels) && recording.labels.length
+    ? recording.labels.map((l) => String(l || '').trim().toLowerCase()).filter((l) => l && !GENERIC_TIMELINE_LABELS.has(l))
+    : Array.from(best.keys()).filter((l) => !GENERIC_TIMELINE_LABELS.has(l));
+  return authLabels
+    .map((label) => ({ label, confidence: best.get(label) ?? 0 }))
+    .sort((a, b) => b.confidence - a.confidence);
 }
 
 function recordingTypeLabel(recording) {
