@@ -15,39 +15,125 @@
         <h1>Timeline</h1>
         <p class="muted">Choose a camera and day, then click a coloured segment to open and play that clip.</p>
       </div>
+      <div class="cam-hero-action">
+        <a class="button-link secondary-link hero-action-link" href="/live">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          View Live
+        </a>
+        <a class="button-link secondary-link hero-action-link" href="/recordings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          Recordings
+        </a>
+        <a class="button-link secondary-link hero-action-link" href="/cameras">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          Cameras
+        </a>
+      </div>
     </header>
+
+    <section class="grid stats-grid timeline-stats">
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Clips</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          </span>
+        </div>
+        <strong id="statClips" class="stat-card-value">0</strong>
+        <small class="muted stat-card-sub" id="statClipsSub">Matching the current filter</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Coverage</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </span>
+        </div>
+        <strong id="statCoverage" class="stat-card-value stat-card-value-text">0s</strong>
+        <small class="muted stat-card-sub">Total duration of matched clips</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Triggers</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          </span>
+        </div>
+        <strong id="statTriggers" class="stat-card-value stat-card-value-text">—</strong>
+        <small class="muted stat-card-sub">Distinct trigger types in the window</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Camera</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          </span>
+        </div>
+        <strong id="statCamera" class="stat-card-value stat-card-value-text">—</strong>
+        <small class="muted stat-card-sub" id="statCameraSub">Currently displayed timeline</small>
+      </article>
+    </section>
+
+    <section class="card timeline-controls-card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🎚️</div>
+        <div>
+          <h2>Timeline Controls</h2>
+          <p class="settings-section-subtitle">Pick a camera and day, narrow the time window, then load the clips.</p>
+        </div>
+        <div class="button-row timeline-controls-actions">
+          <button id="timelineNowBtn" class="secondary" type="button" title="Jump to today from 00:00 to the current time">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Now
+          </button>
+          <button id="timelineLoadBtn" type="button">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            Load Timeline
+          </button>
+        </div>
+      </div>
+      <form id="timelineFilterForm" class="form-grid timeline-filter-grid" onsubmit="return false;">
+        <label>
+          <span>Camera</span>
+          <select id="timelineCameraSelect" aria-label="Select camera"></select>
+          <span class="field-help">All timeline data is scoped to the selected camera. Default: first camera</span>
+        </label>
+        <label>
+          <span>Day</span>
+          <input id="timelineDate" type="date" aria-label="Timeline day" />
+          <span class="field-help">Pick the date to visualise. Default: today</span>
+        </label>
+        <label>
+          <span>From</span>
+          <input id="timelineFromTime" type="time" value="00:00" aria-label="Start time" />
+          <span class="field-help">Earliest time of day to include. Default: 00:00</span>
+        </label>
+        <label>
+          <span>To</span>
+          <input id="timelineToTime" type="time" value="23:59" aria-label="End time" />
+          <span class="field-help">Latest time of day to include. Default: 23:59</span>
+        </label>
+        <label>
+          <span>Filter</span>
+          <select id="timelineFilterSelect" aria-label="Filter by trigger type"></select>
+          <span class="field-help">Limit clips to a specific trigger or detected object. Default: all recordings</span>
+        </label>
+      </form>
+    </section>
 
     <section class="recording-timeline-layout">
       <article class="card timeline-card">
-        <div class="section-header">
-          <h2>Daily timeline</h2>
-          <p id="timelineStatus" class="muted">Loading timeline…</p>
+        <div class="settings-section-header">
+          <div class="settings-section-icon" aria-hidden="true">📊</div>
+          <div>
+            <h2>Daily Timeline</h2>
+            <p class="settings-section-subtitle">Click a coloured segment — or a row below — to open and play that clip.</p>
+          </div>
+          <div class="button-row timeline-card-status">
+            <span class="chip chip-dim" id="timelineStatusChip">Idle</span>
+          </div>
         </div>
-        <div class="timeline-controls">
-          <label>
-            <span>Camera</span>
-            <select id="timelineCameraSelect"></select>
-          </label>
-          <label>
-            <span>Day</span>
-            <input id="timelineDate" type="date" />
-          </label>
-          <label>
-            <span>From</span>
-            <input id="timelineFromTime" type="time" value="00:00" />
-          </label>
-          <label>
-            <span>To</span>
-            <input id="timelineToTime" type="time" value="23:59" />
-          </label>
-          <label>
-            <span>Filter</span>
-            <select id="timelineFilterSelect">
-              <option value="">All recordings</option>
-            </select>
-          </label>
-          <button id="timelineLoadBtn" type="button">Load Timeline</button>
-        </div>
+        <p id="timelineStatus" class="muted timeline-status-text" aria-live="polite">Loading timeline…</p>
         <div id="timelineSummary" class="status-panel timeline-summary"></div>
         <div id="timelineLegend" class="timeline-legend"></div>
         <div class="timeline-scroll">

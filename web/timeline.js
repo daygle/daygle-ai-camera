@@ -6,6 +6,7 @@ const els = {
   filterSelect: document.getElementById('timelineFilterSelect'),
   timelineLoadBtn: document.getElementById('timelineLoadBtn'),
   timelineStatus: document.getElementById('timelineStatus'),
+  timelineStatusChip: document.getElementById('timelineStatusChip'),
   timelineSummary: document.getElementById('timelineSummary'),
   timelineLegend: document.getElementById('timelineLegend'),
   timelineHours: document.getElementById('timelineHours'),
@@ -20,6 +21,14 @@ const els = {
   videoModal: document.getElementById('videoModal'),
   videoModalClose: document.getElementById('videoModalClose'),
   videoModalDownload: document.getElementById('videoModalDownload'),
+  timelineNowBtn: document.getElementById('timelineNowBtn'),
+  // Stats
+  statClips: document.getElementById('statClips'),
+  statClipsSub: document.getElementById('statClipsSub'),
+  statCoverage: document.getElementById('statCoverage'),
+  statTriggers: document.getElementById('statTriggers'),
+  statCamera: document.getElementById('statCamera'),
+  statCameraSub: document.getElementById('statCameraSub'),
 };
 
 const state = {
@@ -421,6 +430,45 @@ function renderSummary(payload, totalRecordingCount) {
     <div><span>Coverage</span><strong>${escapeHtml(formatDuration(totalSeconds))}</strong></div>
     <div class="wide"><span>Triggers</span><strong>${recordings.length ? escapeHtml(Array.from(uniqueTriggers).join(', ')) : 'none'}</strong></div>
   `;
+  // Also feed the top stats grid.
+  if (els.statClips) {
+    els.statClips.textContent = String(recordings.length);
+    if (els.statClipsSub) {
+      if (totalRecordingCount > recordings.length) {
+        els.statClipsSub.textContent = `${recordings.length} of ${totalRecordingCount} clips match the filter`;
+      } else {
+        els.statClipsSub.textContent = els.filterSelect.value
+          ? `Matching “${els.filterSelect.value}”`
+          : 'Matching the current filter';
+      }
+    }
+  }
+  if (els.statCoverage) {
+    els.statCoverage.textContent = formatDuration(totalSeconds);
+  }
+  if (els.statTriggers) {
+    els.statTriggers.textContent = recordings.length
+      ? Array.from(uniqueTriggers).map(titleCase).join(', ')
+      : 'none';
+  }
+  if (els.statCamera) {
+    els.statCamera.textContent = payload.camera?.name || payload.camera?.id || 'Unknown';
+  }
+  if (els.statCameraSub) {
+    const day = formatUserDate(payload.day || '');
+    els.statCameraSub.textContent = day ? `Showing ${day}` : 'Currently displayed timeline';
+  }
+}
+
+function setTimelineStatusChip(state) {
+  if (!els.timelineStatusChip) return;
+  els.timelineStatusChip.textContent = state.label;
+  els.timelineStatusChip.className = 'chip ' + (
+    state.kind === 'empty' ? 'chip-warn' :
+    state.kind === 'error' ? 'chip-warn' :
+    state.kind === 'filtered' ? 'chip-info' :
+    'chip-dim'
+  );
 }
 
 function renderLegend(recordings) {
@@ -677,6 +725,10 @@ async function renderFilteredTimeline({ preserveSelection = true } = {}) {
     els.timelineStatus.textContent = allRecordings.length
       ? `No recordings match the selected filter for ${state.payload.camera.name} on ${formattedDay}.`
       : `No recordings found for ${state.payload.camera.name} on ${formattedDay}.`;
+    setTimelineStatusChip({
+      kind: allRecordings.length ? 'empty' : 'empty',
+      label: allRecordings.length ? 'No matches' : 'No recordings',
+    });
     clearPlayback(false);
     replaceUrl(null);
     return;
@@ -688,6 +740,10 @@ async function renderFilteredTimeline({ preserveSelection = true } = {}) {
     ? ` from ${formatUserClock(fromSeconds)} to ${formatUserClock(toSeconds)}`
     : '';
   els.timelineStatus.textContent = `${recordings.length} clip${recordings.length === 1 ? '' : 's'}${filterLabel}${timeRangeLabel} for ${state.payload.camera.name} on ${formatUserDate(state.payload.day)}.`;
+  setTimelineStatusChip({
+    kind: els.filterSelect.value || (fromSeconds > 0 || toSeconds < DAY_SECONDS) ? 'filtered' : 'ready',
+    label: els.filterSelect.value ? 'Filtered' : (fromSeconds > 0 || toSeconds < DAY_SECONDS) ? 'Windowed' : 'Ready',
+  });
 
   const querySelection = Number(new URLSearchParams(window.location.search).get('recording_id')) || null;
   const requestedSelection = preserveSelection ? (state.activeRecordingId || querySelection) : null;
@@ -703,6 +759,7 @@ async function renderFilteredTimeline({ preserveSelection = true } = {}) {
 async function loadTimeline({ preserveSelection = true } = {}) {
   const { cameraId, day } = timelineParams();
   els.timelineStatus.textContent = 'Loading timeline…';
+  setTimelineStatusChip({ kind: 'idle', label: 'Loading' });
   const timezoneOffsetMinutes = new Date().getTimezoneOffset();
   const payload = await api(
     `/api/recordings/timeline?camera_id=${encodeURIComponent(cameraId)}&day=${encodeURIComponent(day)}&tz_offset_minutes=${timezoneOffsetMinutes}`,
@@ -747,36 +804,57 @@ async function loadConfiguredLabels() {
 els.timelineLoadBtn.addEventListener('click', () => {
   loadTimeline({ preserveSelection: false }).catch((error) => {
     els.timelineStatus.textContent = error.message;
+    setTimelineStatusChip({ kind: 'error', label: 'Error' });
+  });
+});
+
+// "Now" shortcut: set Day=today, From=00:00, To=current local time, then reload.
+els.timelineNowBtn?.addEventListener('click', () => {
+  const now = new Date();
+  const today = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  els.timelineDate.value = today;
+  els.fromTime.value = '00:00';
+  els.toTime.value = `${hh}:${mm}`;
+  loadTimeline({ preserveSelection: false }).catch((error) => {
+    els.timelineStatus.textContent = error.message;
+    setTimelineStatusChip({ kind: 'error', label: 'Error' });
   });
 });
 
 els.cameraSelect.addEventListener('change', () => {
   loadTimeline({ preserveSelection: false }).catch((error) => {
     els.timelineStatus.textContent = error.message;
+    setTimelineStatusChip({ kind: 'error', label: 'Error' });
   });
 });
 
 els.timelineDate.addEventListener('change', () => {
   loadTimeline({ preserveSelection: false }).catch((error) => {
     els.timelineStatus.textContent = error.message;
+    setTimelineStatusChip({ kind: 'error', label: 'Error' });
   });
 });
 
 els.filterSelect.addEventListener('change', () => {
   renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
     els.timelineStatus.textContent = error.message;
+    setTimelineStatusChip({ kind: 'error', label: 'Error' });
   });
 });
 
 els.fromTime.addEventListener('change', () => {
   renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
     els.timelineStatus.textContent = error.message;
+    setTimelineStatusChip({ kind: 'error', label: 'Error' });
   });
 });
 
 els.toTime.addEventListener('change', () => {
   renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
     els.timelineStatus.textContent = error.message;
+    setTimelineStatusChip({ kind: 'error', label: 'Error' });
   });
 });
 
@@ -867,11 +945,13 @@ loadAuth().then(async () => {
   if (queryFilter) els.filterSelect.innerHTML = `<option value="${escapeHtml(queryFilter)}" selected>${escapeHtml(titleCase(queryFilter))}</option>`;
   if (queryFromTime) els.fromTime.value = queryFromTime;
   if (queryToTime) els.toTime.value = queryToTime;
+  setTimelineStatusChip({ kind: 'idle', label: 'Loading' });
   await loadConfiguredLabels();
   await loadTimeline({ preserveSelection: true });
 }).catch((error) => {
   els.timelineStatus.textContent = error.message;
   els.clipPlayerStatus.textContent = error.message;
+  setTimelineStatusChip({ kind: 'error', label: 'Error' });
 });
 
 // Re-render the timeline (ticks, segments, list, modal) when the user's
@@ -882,5 +962,6 @@ window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
   if (typeof loadTimeline !== 'function' || !state || !state.payload) return;
   loadTimeline({ preserveSelection: true }).catch((error) => {
     els.timelineStatus.textContent = error.message;
+    setTimelineStatusChip({ kind: 'error', label: 'Error' });
   });
 };

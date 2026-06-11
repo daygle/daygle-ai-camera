@@ -447,7 +447,6 @@ input[type="file"] { padding: 10px; }
   cursor: pointer;
   text-decoration: underline;
 }
-.live-shell { width: min(1600px, calc(100% - 32px)); }
 .live-viewer-card {
   display: grid;
   gap: 18px;
@@ -932,46 +931,6 @@ input[type="file"] { padding: 10px; }
   flex-wrap: wrap;
   gap: 6px;
   line-height: 1.2;
-}
-.recording-label-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  line-height: 1.2;
-  align-items: center;
-}
-.recording-label-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(71, 214, 255, 0.35);
-  background: rgba(71, 214, 255, 0.12);
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: .01em;
-}
-.alert-label-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  line-height: 1.2;
-  align-items: center;
-}
-.alert-label-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(139, 92, 246, 0.35);
-  background: rgba(139, 92, 246, 0.14);
-  color: #c9b8ff;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: .01em;
 }
 .recording-row-actions {
   display: flex;
@@ -2179,7 +2138,6 @@ input[type="file"] { padding: 10px; }
 }
 
 /* ─── Live page ───────────────────────────────────────────────────────── */
-.live-shell { width: min(1600px, calc(100% - 32px)); }
 
 /* Controls card */
 .live-controls-card { padding: 16px 22px; }
@@ -2643,4 +2601,42 @@ input[type="file"] { padding: 10px; }
   .zones-control-actions { width: 100%; }
   .zones-control-actions button { flex: 1 1 120px; justify-content: center; }
 }
+
+/* ─── Timeline page ─────────────────────────────────────────────────────── */
+.timeline-stats { margin-top: 4px; }
+.timeline-controls-card { padding: 18px 22px 20px; }
+.timeline-controls-actions {
+  flex-shrink: 0;
+  margin: 0 0 0 auto;
+  padding: 0;
+  border-top: 0;
+  justify-content: flex-end;
+}
+.timeline-controls-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-size: 13px;
+}
+.timeline-filter-grid {
+  margin-top: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  align-items: end;
+}
+.timeline-card .settings-section-header { align-items: center; gap: 14px; }
+.timeline-card-status {
+  flex-shrink: 0;
+  margin: 0 0 0 auto;
+  padding: 0;
+  border-top: 0;
+  justify-content: flex-end;
+}
+.timeline-status-text {
+  margin: 0 0 4px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.timeline-card .status-panel { margin: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 

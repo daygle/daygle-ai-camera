@@ -157,7 +157,6 @@ function buildActivityItems() {
     camera: eventSourceLabel(event),
     detections: event.detections || [],
     recordingId: event.recordings?.[0]?.id ?? null,
-    recordingStatus: event.recording_status || 'none',
   }));
   const alertItems = alertGroups.map((group) => ({
     type: 'alert',
@@ -214,11 +213,8 @@ function renderActivityItem(item) {
   const titleSuffix = !isEvent && item.ruleNames?.length > 1 ? ` <span class="muted">(${item.ruleNames.length} rules)</span>` : '';
   const cameraLine = item.camera ? `Camera: ${escapeHtml(item.camera)}` : 'Camera: unknown';
   const metaLine = isEvent
-    ? `${cameraLine} · ${escapeHtml(item.recordingStatus || 'none')}`
+    ? cameraLine
     : (item.message ? `${cameraLine} · ${escapeHtml(item.message)}` : cameraLine);
-  const labelChips = !isEvent && item.labels?.length
-    ? `<div class="alert-label-chips">${item.labels.map((label) => `<span class="alert-label-chip">${escapeHtml(label)}</span>`).join('')}</div>`
-    : '';
   const actions = [];
   if (isEvent && item.recordingId) {
     actions.push(recordingLink(item.recordingId, 'View Recording'));
@@ -243,7 +239,6 @@ function renderActivityItem(item) {
           </div>
         </div>
         <p class="muted activity-item-meta">${metaLine}</p>
-        ${labelChips}
         <div class="activity-item-badges">${detectionBadges(item.detections)}</div>
       </div>
       ${actions.length ? `<div class="activity-item-actions">${actions.join('')}</div>` : ''}
