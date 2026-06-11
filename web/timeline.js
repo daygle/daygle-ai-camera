@@ -248,22 +248,21 @@ function recordingDetectionLabels(recording) {
  * filtered to non-generic labels that pass the configuredLabels threshold.
  */
 function recordingDetectionSummary(recording) {
+  // Build best-confidence map from all detections — historical data, no config filtering.
   const best = new Map();
   for (const d of (recording.detections || [])) {
     const label = String(d.label || '').trim().toLowerCase();
     if (!label) continue;
     const conf = Number(d.confidence || 0);
-    if (configuredLabels && (!configuredLabels.has(label) || conf < (configuredLabels.get(label) ?? 0))) continue;
     if (!best.has(label) || conf > best.get(label)) best.set(label, conf);
   }
-  const triggerLabel = recordingTriggerLabel(recording);
-  if (triggerLabel && (!configuredLabels || configuredLabels.has(triggerLabel)) && !best.has(triggerLabel)) {
-    best.set(triggerLabel, 0);
-  }
-  return Array.from(best.entries())
-    .sort((a, b) => b[1] - a[1])
-    .filter(([label]) => !GENERIC_TIMELINE_LABELS.has(label))
-    .map(([label, confidence]) => ({ label, confidence }));
+  // Use recording.labels as the authoritative label list when available.
+  const authLabels = Array.isArray(recording.labels) && recording.labels.length
+    ? recording.labels.map((l) => String(l || '').trim().toLowerCase()).filter((l) => l && !GENERIC_TIMELINE_LABELS.has(l))
+    : Array.from(best.keys()).filter((l) => !GENERIC_TIMELINE_LABELS.has(l));
+  return authLabels
+    .map((label) => ({ label, confidence: best.get(label) ?? 0 }))
+    .sort((a, b) => b.confidence - a.confidence);
 }
 
 function recordingTypeLabel(recording) {
