@@ -609,6 +609,23 @@ input[type="file"] { padding: 10px; }
 .compact-empty { padding: 6px 0; }
 .compact-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
 .button-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+.page-stack .button-row { padding-top: 14px; border-top: 1px solid var(--border); }
+.settings-test-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.settings-test-row label {
+  display: grid;
+  gap: 8px;
+  min-width: 220px;
+  color: var(--muted);
+  font-weight: 800;
+}
+.settings-test-row label input { width: 100%; }
 
 /* ─── Settings page ────────────────────────────────────────────────────── */
 .settings-section-header {

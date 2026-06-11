@@ -125,8 +125,8 @@ function createDatabaseRestoreSection() {
     <div class="button-row"><a class="button-link" href="/api/settings/system/database/backup">Download database backup</a></div>
     <form id="databaseRestoreForm" class="form-grid">
       <label><span>Restore backup file</span><input name="file" type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3,application/x-sqlite3" required /><span class="field-help">Select a previously downloaded .sqlite backup file to restore.</span></label>
-      <button class="secondary" type="submit">Restore Database</button>
     </form>
+    <div class="button-row"><button class="secondary" type="submit">Restore Database</button></div>
     <p class="muted">A safety backup of the current database is automatically created before every restore.</p>
   `;
 
@@ -217,9 +217,8 @@ function createPushNotificationSection() {
       <label><span>Priority</span><select name="priority"><option value="default">Default</option><option value="min">Min</option><option value="low">Low</option><option value="high">High</option><option value="urgent">Urgent</option></select><span class="field-help">Controls how the notification is presented on your device. Default: Default</span></label>
       <label><span>Username</span><input name="username" placeholder="Optional" autocomplete="off" /><span class="field-help">Required only if your NTFY server requires authentication. Default: (none)</span></label>
       <label><span>Password</span><input name="password" type="password" placeholder="Optional" autocomplete="new-password" /><span class="field-help">Required only if your NTFY server requires authentication.</span></label>
-      <button type="submit">Save Push Settings</button>
-      <button id="testPushBtn" class="secondary" type="button">Send Test Notification</button>
     </form>
+    <div class="button-row"><button type="submit" form="pushSettingsForm">Save Push Settings</button><button id="testPushBtn" class="secondary" type="button">Send Test Notification</button></div>
     <p class="muted">Install the <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy app</a> on your Android device and subscribe to your topic to receive alerts.</p>
   `;
 
@@ -245,10 +244,12 @@ function createEmailDeliverySection() {
       <label><span>SMTP Password</span><input name="password" type="password" placeholder="Your password" autocomplete="new-password" /><span class="field-help">Authentication password or app password for your mail server. Default: (none)</span></label>
       <label><span>STARTTLS</span><select name="use_tls"><option value="true">Enabled</option><option value="false">Disabled</option></select><span class="field-help">Encrypts the connection using STARTTLS (recommended for port 587). Default: Enabled</span></label>
       <label><span>SSL</span><select name="use_ssl"><option value="false">Disabled</option><option value="true">Enabled</option></select><span class="field-help">Encrypts the connection using implicit SSL (recommended for port 465). Default: Disabled</span></label>
-      <button type="submit">Save Mail Server</button>
+    </form>
+    <div class="button-row"><button type="submit" form="emailSettingsForm">Save Mail Server</button></div>
+    <div class="settings-test-row">
       <label><span>Test Recipient</span><input id="testEmailRecipient" type="email" placeholder="you@example.com" /><span class="field-help">Enter an address to send a test email to.</span></label>
       <button id="testEmailBtn" class="secondary" type="button">Send Test Email</button>
-    </form>
+    </div>
   `;
 
   const authSection = document.getElementById('authSettingsForm')?.closest('section');
