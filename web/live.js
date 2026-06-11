@@ -2,12 +2,18 @@ const liveEls = {
   frame: document.getElementById('liveFrame'),
   frameWrap: document.getElementById('liveFrameWrap'),
   status: document.getElementById('liveStatus'),
+  pulse: document.getElementById('livePulse'),
+  frameTitle: document.getElementById('liveFrameTitle'),
+  frameMeta: document.getElementById('liveFrameMeta'),
+  cameraEmpty: document.getElementById('liveCameraEmpty'),
   detectionStatus: document.getElementById('liveDetectionStatus'),
+  detectionChips: document.getElementById('liveDetectionChips'),
+  detectionState: document.getElementById('liveDetectionState'),
   liveAiTrackToggle: document.getElementById('liveAiTrackToggle'),
-  liveAiTrackLabel: document.getElementById('liveAiTrackLabel'),
+  liveAiTrackGroup: document.getElementById('liveAiTrackGroup'),
   liveAiTrackCanvas: document.getElementById('liveAiTrackCanvas'),
   cameraSelect: document.getElementById('cameraSelect'),
-  viewModeSelect: document.getElementById('viewModeSelect'),
+  cameraControlGroup: document.getElementById('cameraControlGroup'),
   cameraGrid: document.getElementById('cameraGrid'),
   zoneOverlay: document.getElementById('zoneOverlay'),
   zoneList: document.getElementById('zoneList'),
@@ -16,6 +22,10 @@ const liveEls = {
   fullFrameZoneBtn: document.getElementById('fullFrameZoneBtn'),
   saveZonesBtn: document.getElementById('saveZonesBtn'),
 };
+
+// View mode: 'single' (one camera at a time) or 'all' (grid of every camera).
+// Live-only; the zones page never enters 'all' mode.
+let viewMode = 'single';
 
 const pageMode = document.querySelector('[data-live-page]')?.dataset.livePage || 'live';
 const isZonesPage = pageMode === 'zones';
@@ -322,7 +332,7 @@ function snapshotUrl(camera = selectedCamera) {
 }
 
 function isAllCameraMode() {
-  return pageMode === 'live' && liveEls.viewModeSelect?.value === 'all';
+  return pageMode === 'live' && viewMode === 'all';
 }
 
 function refreshFrame() {
@@ -345,12 +355,22 @@ function renderCameraGridFrames() {
 
 function renderCameraGrid() {
   if (!liveEls.cameraGrid) return;
-  liveEls.cameraGrid.innerHTML = cameras.map((camera) => `
-    <article class="live-camera-tile">
-      <img data-camera-id="${escapeHtml(camera.id)}" alt="${escapeHtml(camera.name || camera.id)} live footage" />
-      <div class="live-status">${escapeHtml(camera.name || camera.id)}</div>
-    </article>
-  `).join('');
+  liveEls.cameraGrid.innerHTML = cameras.map((camera) => {
+    const res = `${camera.width || 1280}×${camera.height || 720}`;
+    const fps = camera.fps || 15;
+    return `
+      <article class="live-camera-tile">
+        <div class="live-camera-tile-image">
+          <img data-camera-id="${escapeHtml(camera.id)}" alt="${escapeHtml(camera.name || camera.id)} live footage" />
+          <div class="live-status live-status-online">LIVE</div>
+        </div>
+        <div class="live-camera-tile-info">
+          <div class="live-camera-tile-name">${escapeHtml(camera.name || camera.id)}</div>
+          <div class="live-camera-tile-meta">${escapeHtml(res)} · ${escapeHtml(fps)} fps</div>
+        </div>
+      </article>
+    `;
+  }).join('');
   renderCameraGridFrames();
 }
 
@@ -358,20 +378,50 @@ function syncViewMode() {
   const allMode = isAllCameraMode();
   if (liveEls.frameWrap) liveEls.frameWrap.hidden = allMode;
   if (liveEls.cameraGrid) liveEls.cameraGrid.hidden = !allMode;
-  if (liveEls.cameraSelect?.closest('label')) liveEls.cameraSelect.closest('label').hidden = allMode;
-  if (liveEls.liveAiTrackLabel) liveEls.liveAiTrackLabel.hidden = allMode;
+  if (liveEls.cameraControlGroup) liveEls.cameraControlGroup.hidden = allMode;
+  if (liveEls.liveAiTrackGroup) liveEls.liveAiTrackGroup.hidden = allMode;
   if (allMode) {
     clearLiveOverlay();
     renderCameraGrid();
   }
-  if (typeof detectionStatusTimer !== 'undefined') restartDetectionStatusTimer();
+  restartDetectionStatusTimer();
   refreshDetectionStatus();
 }
 
-function formatDetectionStatus(payload) {
-  if (!payload) return 'Live AI status unavailable.';
+function updateFrameHeader(camera) {
+  if (!camera) return;
+  if (liveEls.frameTitle) {
+    liveEls.frameTitle.textContent = camera.name || camera.id || 'Camera';
+  }
+  if (liveEls.frameMeta) {
+    const res = `${camera.width || 1280}×${camera.height || 720}`;
+    const fps = camera.fps || 15;
+    const backend = camera.backend === 'rtsp' ? 'RTSP' : 'ONVIF';
+    liveEls.frameMeta.textContent = `${backend} · ${res} · ${fps} fps`;
+  }
+}
 
-  // Build "label (XX%)" strings, deduplicating by highest confidence, filtering to active rules only
+function updateEmptyState() {
+  if (!liveEls.cameraEmpty) return;
+  if (cameras.length === 0) {
+    liveEls.cameraEmpty.hidden = false;
+    if (liveEls.frameWrap) liveEls.frameWrap.hidden = true;
+    if (liveEls.cameraGrid) liveEls.cameraGrid.hidden = true;
+    if (liveEls.cameraControlGroup) liveEls.cameraControlGroup.hidden = true;
+    if (liveEls.liveAiTrackGroup) liveEls.liveAiTrackGroup.hidden = true;
+  } else {
+    liveEls.cameraEmpty.hidden = true;
+  }
+}
+
+// Build a structured summary of the monitor's latest cycle so the renderer
+// can split the visual into a state chip, per-label chips, and a status line.
+function summarizeDetectionStatus(payload) {
+  if (!payload) {
+    return { state: 'idle', stateLabel: 'Idle', chips: [], message: 'Live AI status unavailable.' };
+  }
+
+  // Build a highest-confidence map of detected labels (filtered to active rules).
   const confMap = new Map();
   for (const d of (payload.detections || [])) {
     const label = String(d.label || '').trim().toLowerCase();
@@ -380,29 +430,31 @@ function formatDetectionStatus(payload) {
     if (configuredLabels && !configuredLabels.has(label)) continue;
     if (!confMap.has(label) || conf > confMap.get(label)) confMap.set(label, conf);
   }
-  // Fall back to detected_labels filtered to active rules
   if (confMap.size === 0) {
     for (const label of (payload.detected_labels || [])) {
       const l = String(label || '').trim().toLowerCase();
       if (l && (!configuredLabels || configuredLabels.has(l))) confMap.set(l, 0);
     }
   }
-  const labelStr = confMap.size
-    ? Array.from(confMap.entries())
-        .map(([label, conf]) => conf > 0 ? `${label} (${Math.round(conf * 100)}%)` : label)
-        .join(', ')
+  const chips = Array.from(confMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, confidence]) => ({ label, confidence }));
+  const labelStr = chips.length
+    ? chips.map((c) => c.confidence > 0 ? `${c.label} (${Math.round(c.confidence * 100)}%)` : c.label).join(', ')
     : null;
 
   if (payload.state === 'alerted') {
     const alerts = (payload.triggered_alerts || []).map((a) => a.rule_name).join(', ') || 'unknown rule';
-    const parts = [`Live AI: alert triggered - ${alerts}`];
+    const parts = [`Alert triggered — ${alerts}`];
     if (labelStr) parts.push(`detected ${labelStr}`);
     if (payload.recording_state) parts.push(`recording ${payload.recording_state}${payload.recording_id ? ` #${payload.recording_id}` : ''}`);
-    return `${parts.join('; ')}.`;
+    return { state: 'alerted', stateLabel: 'Alerted', chips, message: parts.join('; ') + '.' };
   }
 
   if (payload.state === 'checked') {
-    if (!labelStr) return 'Matched Objects: No detections found';
+    if (!labelStr) {
+      return { state: 'idle', stateLabel: 'Monitoring', chips: [], message: 'Matched Objects: No detections found' };
+    }
     const reason = String(payload.reason || '');
     let suffix;
     if (/debounce|suppressed/i.test(reason)) suffix = 'event suppressed (debounce active)';
@@ -410,10 +462,42 @@ function formatDetectionStatus(payload) {
     else if (/no alert rule|no matching|no new alert/i.test(reason)) suffix = 'no matching alert rule';
     else if (/no detections matched/i.test(reason)) suffix = 'outside monitored zones';
     else suffix = reason || 'no alert triggered';
-    return `Live AI: detected ${labelStr} - ${suffix}.`;
+    return { state: 'detected', stateLabel: 'Detected', chips, message: `Detected ${labelStr} — ${suffix}.` };
   }
 
-  return `Live AI: ${payload.state || 'waiting'} - ${payload.reason || payload.ai_error || 'waiting for frames'}`;
+  const fallback = String(payload.reason || payload.ai_error || 'waiting for frames');
+  return {
+    state: payload.state || 'idle',
+    stateLabel: payload.state ? payload.state[0].toUpperCase() + payload.state.slice(1) : 'Idle',
+    chips: [],
+    message: `Live AI: ${payload.state || 'waiting'} — ${fallback}`,
+  };
+}
+
+function renderDetectionStatus(summary) {
+  if (liveEls.detectionState) {
+    liveEls.detectionState.textContent = summary.stateLabel;
+    liveEls.detectionState.className = 'chip ' + (
+      summary.state === 'alerted' ? 'chip-warn' :
+      summary.state === 'detected' ? 'chip-info' :
+      summary.state === 'error' ? 'chip-warn' :
+      'chip-dim'
+    );
+  }
+  if (liveEls.detectionChips) {
+    if (!summary.chips.length) {
+      liveEls.detectionChips.innerHTML = '<span class="detection-chip detection-chip-empty">No active detections</span>';
+    } else {
+      liveEls.detectionChips.innerHTML = summary.chips.map((c) => {
+        const variant = summary.state === 'alerted' ? 'detection-chip-alert' : '';
+        const text = c.confidence > 0 ? `${c.label} · ${Math.round(c.confidence * 100)}%` : c.label;
+        return `<span class="detection-chip ${variant}">${escapeHtml(text)}</span>`;
+      }).join('');
+    }
+  }
+  if (liveEls.detectionStatus) {
+    liveEls.detectionStatus.textContent = summary.message;
+  }
 }
 
 // Feed the background monitor's object detections from a status payload into
@@ -447,7 +531,12 @@ function restartDetectionStatusTimer() {
 async function refreshDetectionStatus() {
   if (!liveEls.detectionStatus) return;
   if (isAllCameraMode()) {
-    liveEls.detectionStatus.textContent = 'Live AI: showing all cameras. Select one camera for detailed status.';
+    renderDetectionStatus({
+      state: 'idle',
+      stateLabel: 'All Cameras',
+      chips: [],
+      message: 'Live AI: showing all cameras. Select one camera for detailed status.',
+    });
     return;
   }
   if (!selectedCamera) return;
@@ -455,9 +544,14 @@ async function refreshDetectionStatus() {
     const cameraId = encodeURIComponent(selectedCamera.id);
     const payload = await api(`/api/live/detection-status?camera_id=${cameraId}`);
     ingestServerTrackDetections(payload);
-    liveEls.detectionStatus.textContent = formatDetectionStatus(payload);
+    renderDetectionStatus(summarizeDetectionStatus(payload));
   } catch (error) {
-    liveEls.detectionStatus.textContent = `Live AI status unavailable: ${error.message}`;
+    renderDetectionStatus({
+      state: 'error',
+      stateLabel: 'Error',
+      chips: [],
+      message: `Live AI status unavailable: ${error.message}`,
+    });
   }
 }
 
@@ -472,6 +566,7 @@ function setSelectedCamera(cameraId) {
   lastServerTrackUpdatedAt = null;
   clearLiveOverlay();
   if (liveEls.cameraSelect) liveEls.cameraSelect.value = selectedCamera.id;
+  updateFrameHeader(selectedCamera);
   if (isZonesPage) {
     renderZones();
     renderCameraRecordingControls();
@@ -848,6 +943,10 @@ liveEls.frame.addEventListener('load', () => {
   liveEls.status.textContent = selectedCamera?.name || 'Camera';
   liveEls.status.classList.add('live-status-online');
   liveEls.status.classList.remove('live-status-offline');
+  if (liveEls.pulse) {
+    liveEls.pulse.classList.add('online');
+    liveEls.pulse.classList.remove('offline');
+  }
   if (liveAiTrackEnabled && !isAllCameraMode()) {
     startLiveRaf();
   } else {
@@ -863,6 +962,10 @@ liveEls.frame.addEventListener('error', () => {
     : 'Unable to load live footage. Retrying...';
   liveEls.status.classList.add('live-status-offline');
   liveEls.status.classList.remove('live-status-online');
+  if (liveEls.pulse) {
+    liveEls.pulse.classList.add('offline');
+    liveEls.pulse.classList.remove('online');
+  }
 });
 
 window.addEventListener('resize', drawLiveOverlay);
@@ -891,7 +994,17 @@ if (liveEls.liveAiTrackToggle) {
 }
 
 liveEls.cameraSelect.addEventListener('change', () => setSelectedCamera(liveEls.cameraSelect.value));
-liveEls.viewModeSelect?.addEventListener('change', syncViewMode);
+document.querySelectorAll('[data-view-mode]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    viewMode = btn.dataset.viewMode;
+    document.querySelectorAll('[data-view-mode]').forEach((b) => {
+      const active = b === btn;
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-selected', String(active));
+    });
+    syncViewMode();
+  });
+});
 liveEls.addZoneBtn?.addEventListener('click', () => {
   if (drawingMode && draftPolygon?.points.length >= 3) {
     finishDraftPolygon();
@@ -960,6 +1073,7 @@ async function init() {
   await loadConfiguredLabels();
   const payload = await api('/api/cameras');
   cameras = payload.cameras || [];
+  updateEmptyState();
   renderCameraOptions();
   bindZoneDrawing();
   syncViewMode();

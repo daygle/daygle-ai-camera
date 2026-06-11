@@ -2178,3 +2178,342 @@ input[type="file"] { padding: 10px; }
   .hero-action-link { flex: 1 1 140px; justify-content: center; }
 }
 
+/* ─── Live page ───────────────────────────────────────────────────────── */
+.live-shell { width: min(1600px, calc(100% - 32px)); }
+
+/* Controls card */
+.live-controls-card { padding: 16px 22px; }
+.live-controls-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 22px;
+  flex-wrap: wrap;
+}
+.live-control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.live-control-camera { flex: 1 1 220px; }
+.live-control-toggle { align-self: flex-end; }
+.live-control-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.live-control-select {
+  display: block;
+  width: 100%;
+  min-width: 200px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  padding: 10px 14px;
+  outline: none;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+}
+.live-toggle-control { padding: 10px 14px; }
+
+/* View-mode segmented toggle (mirrors activity-filter-pill) */
+.view-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 4px;
+  gap: 2px;
+}
+.view-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.view-mode-btn:hover { color: var(--text); }
+.view-mode-btn.active {
+  background: linear-gradient(135deg, var(--accent), var(--success));
+  color: #04111c;
+}
+
+/* Frame card: header + frame, no internal padding so the frame fills the
+   card edge-to-edge while the rounded corners still apply. */
+.live-frame-card { padding: 0; overflow: hidden; }
+.live-frame-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 22px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.live-frame-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.live-frame-title h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.live-frame-meta {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+/* Animated LIVE pulse */
+.live-pulse {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--muted);
+  flex-shrink: 0;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+.live-pulse.online {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(73, 230, 163, 0.22);
+  animation: live-pulse-anim 2s ease-in-out infinite;
+}
+.live-pulse.offline {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgba(255, 92, 138, 0.22);
+}
+@keyframes live-pulse-anim {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(73, 230, 163, 0.22); }
+  50% { box-shadow: 0 0 0 6px rgba(73, 230, 163, 0.05); }
+}
+
+/* Frame wrap (no border — the card provides it) */
+.live-frame-wrap {
+  position: relative;
+  overflow: hidden;
+  background: #000;
+}
+.live-frame {
+  display: block;
+  width: 100%;
+  height: calc(100vh - 320px);
+  min-height: 420px;
+  object-fit: contain;
+  background: #000;
+}
+
+/* Status pill overlaid on the frame */
+.live-status-pill {
+  position: absolute;
+  right: 18px;
+  top: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(7, 11, 19, 0.72);
+  color: var(--text);
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  backdrop-filter: blur(8px);
+}
+.live-status-pill::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--muted);
+  transition: background 0.18s, box-shadow 0.18s;
+}
+.live-status-pill.live-status-online::before {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(73, 230, 163, 0.22);
+}
+.live-status-pill.live-status-offline::before {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgba(255, 92, 138, 0.22);
+}
+
+/* All-cameras grid + per-tile info footer */
+.live-camera-grid { padding: 16px; }
+.live-camera-tile {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: #000;
+  min-height: 280px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.live-camera-tile:hover {
+  border-color: rgba(71, 214, 255, 0.25);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+}
+.live-camera-tile-image {
+  position: relative;
+  flex: 1;
+  background: #000;
+  min-height: 200px;
+}
+.live-camera-tile-image img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  min-height: 200px;
+  object-fit: contain;
+  background: #000;
+}
+.live-camera-tile-image .live-status {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(7, 11, 19, 0.72);
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.live-camera-tile-image .live-status::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--success);
+  box-shadow: 0 0 0 2px rgba(73, 230, 163, 0.22);
+}
+.live-camera-tile-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: rgba(7, 11, 19, 0.7);
+}
+.live-camera-tile-name {
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.live-camera-tile-meta {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* Empty state (matches the cameras / recordings / dashboard pattern) */
+.live-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 64px 24px;
+  gap: 16px;
+}
+.live-empty-state h2 { margin: 0; font-size: 20px; }
+.live-empty-state p { margin: 0; font-size: 13px; max-width: 38ch; }
+.live-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: rgba(71, 214, 255, 0.06);
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+/* AI detection card: state chip + detection chips + message */
+.live-detection-card { display: grid; gap: 14px; }
+.live-detection-meta {
+  flex-shrink: 0;
+  margin: 0 0 0 auto;
+  padding: 0;
+  border-top: 0;
+  justify-content: flex-end;
+}
+.live-detection-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 32px;
+}
+.detection-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: rgba(71, 214, 255, 0.1);
+  border: 1px solid rgba(71, 214, 255, 0.3);
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 12px;
+}
+.detection-chip-alert {
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.35);
+  color: #ff8a8a;
+}
+.detection-chip-empty {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--border);
+  color: var(--muted);
+}
+.live-detection-message {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+@media (max-width: 760px) {
+  .live-frame { height: 50vh; min-height: 280px; }
+  .live-controls-row { gap: 14px; }
+  .live-control-camera { flex-basis: 100%; }
+  .live-control-toggle { align-self: flex-start; }
+  .live-frame-header { flex-wrap: wrap; }
+}
+
