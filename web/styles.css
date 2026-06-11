@@ -62,6 +62,22 @@ body {
 }
 .brand-text { font-size: 15px; }
 
+/* ── User avatar initial ── */
+.nav-avatar {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  color: #04111c;
+  background: linear-gradient(135deg, var(--accent), var(--success));
+  font-size: 12px;
+  font-weight: 900;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+
 /* ── Mobile toggle ── */
 .app-nav-toggle {
   display: none;
@@ -121,26 +137,6 @@ body {
   color: var(--text);
   background: rgba(255,255,255,.06);
 }
-.nav-logout-btn {
-  background: none;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  color: var(--muted);
-  cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 700;
-  padding: 8px 12px;
-  min-height: 36px;
-  display: inline-flex;
-  align-items: center;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
-}
-.nav-logout-btn:hover {
-  border-color: var(--border);
-  color: var(--text);
-  background: rgba(255,255,255,.06);
-}
 
 /* ── Dropdown ── */
 .nav-dropdown { position: relative; }
@@ -192,6 +188,7 @@ body {
   font-size: 13px;
   font-weight: 700;
   white-space: nowrap;
+  background: none;
   transition: border-color 0.12s, color 0.12s, background 0.12s;
 }
 .nav-dropdown-item:hover {
@@ -203,6 +200,10 @@ body {
   color: var(--accent);
   background: rgba(71, 214, 255, 0.08);
 }
+
+/* Account dropdown: align menu to the right so it doesn't overflow off-screen */
+.app-nav-account .nav-dropdown-menu { right: 0; left: auto; }
+
 .hero { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
 .eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: .18em; font-size: 12px; font-weight: 800; }
 h1 { font-size: clamp(34px, 5vw, 64px); margin: 0; line-height: 1; }
@@ -1958,7 +1959,7 @@ input[type="file"] { padding: 10px; }
    can grow with the viewport) */
 .activity-list {
   gap: 10px;
-  max-height: calc(100vh - 320px);
+  max-height: calc(100dvh - 320px);
 }
 
 /* Activity item: 3-column layout (icon | main | actions) modeled on

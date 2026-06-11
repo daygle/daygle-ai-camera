@@ -121,7 +121,7 @@ function createDatabaseRestoreSection() {
     <form id="databaseRestoreForm" class="form-grid">
       <label><span>Restore backup file</span><input name="file" type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3,application/x-sqlite3" required /><span class="field-help">Select a previously downloaded .sqlite backup file to restore. Restores replace events, users, settings, alert rules, and sessions with the backup contents.</span></label>
     </form>
-    <div class="button-row"><a class="button-link" href="/api/settings/system/database/backup">Download Database Backup</a><button class="secondary" type="submit" form="databaseRestoreForm">Restore Database</button></div>
+    <div class="button-row"><a class="secondary" href="/api/settings/system/database/backup">Download Database Backup</a><button class="secondary" type="submit" form="databaseRestoreForm">Restore Database</button></div>
   `;
 
   const authSection = document.getElementById('authSettingsForm')?.closest('section');

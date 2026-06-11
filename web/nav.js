@@ -125,8 +125,17 @@ window.showToast = function (message, isError) {
   html += `
       </div>
       <div class="app-nav-account">
-        <a href="/profile" data-match="/profile" id="navUser" class="nav-item">Profile</a>
-        <button class="nav-logout-btn" id="navLogoutBtn" type="button">Logout</button>
+        <div class="nav-dropdown" data-dropdown="account">
+          <button type="button" class="nav-dropdown-trigger" aria-haspopup="true" aria-expanded="false">
+            <span id="navAvatar" class="nav-avatar">?</span>
+            <span id="navUser" class="nav-dropdown-label">Profile</span>
+            <svg class="nav-dropdown-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="nav-dropdown-menu">
+            <a href="/profile" class="nav-dropdown-item">Profile</a>
+            <button id="navLogoutBtn" class="nav-dropdown-item" type="button">Logout</button>
+          </div>
+        </div>
       </div>
     </div>`;
 
@@ -229,7 +238,11 @@ window.showToast = function (message, isError) {
       });
     }
     const navUser = document.getElementById('navUser');
-    if (navUser && user.username) navUser.textContent = user.username;
+    const navAvatar = document.getElementById('navAvatar');
+    if (user.username) {
+      if (navUser) navUser.textContent = user.username;
+      if (navAvatar) navAvatar.textContent = user.username.charAt(0).toUpperCase();
+    }
     if (user.role !== 'admin') {
       nav.querySelectorAll('[data-admin="true"]').forEach((el) => {
         el.hidden = true;

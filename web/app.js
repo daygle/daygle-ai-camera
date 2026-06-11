@@ -314,6 +314,15 @@ function bindActivityActions() {
   });
 }
 
+// ─── Status icon helper ──────────────────────────────────────────────────────
+function setStatusIconState(el, state) {
+  if (!el) return;
+  el.className = 'stat-card-icon';
+  if (state === 'ok') el.classList.add('stat-card-icon-ok');
+  else if (state === 'warn') el.classList.add('stat-card-icon-warn');
+  else if (state === 'error') el.classList.add('stat-card-icon-error');
+}
+
 // ─── Status cards ───────────────────────────────────────────────────────────
 function loadStatus() {
   return api('/api/status').then((status) => {
