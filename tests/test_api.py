@@ -1888,7 +1888,7 @@ def test_alerted_only_event_and_recording_queries(tmp_path):
 
 def test_push_notification_title_lists_all_triggered_labels(monkeypatch):
     """A cat+person event must produce TWO push notifications (one per matching
-    rule), each with the title "Daygle alert: Cat, Person detected" and a body
+    rule), each with the title "Daygle AI Camera alert: Cat, Person detected" and a body
     that lists every triggered label."""
     from app.push_notifications import PushNotificationService
     import urllib.request
@@ -1928,7 +1928,7 @@ def test_push_notification_title_lists_all_triggered_labels(monkeypatch):
 
     assert len(captured) == 2, 'expected one push per matching rule'
     for entry in captured:
-        assert entry['title'] == 'Daygle alert: Cat, Person detected'
+        assert entry['title'] == 'Daygle AI Camera alert: Cat, Person detected'
         assert 'All triggers: Cat, Person' in entry['body']
         assert 'Camera: Front Door' in entry['body']
 
@@ -1977,7 +1977,7 @@ def test_email_alert_subject_lists_all_triggered_labels():
 
     assert len(sent_messages) == 2, 'expected one email per matching rule'
     for message in sent_messages:
-        assert message['Subject'] == 'Daygle alert: Cat, Person detected (Front Door)'
+        assert message['Subject'] == 'Daygle AI Camera alert: Cat, Person detected (Front Door)'
         # Walk the multipart tree to find the html part. get_payload() may
         # return a flat list of parts (multipart/alternative) or a nested
         # Message with its own walk() (multipart/related).

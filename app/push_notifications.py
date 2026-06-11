@@ -53,7 +53,7 @@ class PushNotificationService:
         display_labels = [label.title() for label in ordered_labels]
         display_primary = primary_label.title() if primary_label else 'Object'
         subject_label = ', '.join(display_labels) if display_labels else display_primary
-        title = f"Daygle alert: {subject_label} detected"
+        title = f"Daygle AI Camera alert: {subject_label} detected"
 
         body_lines = [
             str(alert.get("message") or "Alert triggered."),
@@ -69,7 +69,7 @@ class PushNotificationService:
     def send_test(self) -> None:
         if not self.configured():
             raise PushNotificationError("Push notifications are not configured.")
-        self._deliver("Daygle test notification", "If you received this, your push notification settings are working.")
+        self._deliver("Daygle AI Camera test notification", "If you received this, your push notification settings are working.")
 
     def _deliver(self, title: str, body: str) -> None:
         server_url = str(self.settings.get("server_url", "")).rstrip("/")
