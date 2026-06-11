@@ -144,8 +144,22 @@ function sampleTrackAtTime(track, t) {
     const mid = (lo + hi) >> 1;
     if (track[mid].t <= time) lo = mid; else hi = mid;
   }
-  const prev = track[lo];
-  const next = track[hi];
+  let prev = track[lo];
+  let next = track[hi];
+  // Detectors routinely miss an object for a single cycle. Without bridging,
+  // each empty sample blinks the box off and back on, which reads as the
+  // overlay "not following" the object. Bridge short gaps by interpolating
+  // straight across to the next sample that has detections again.
+  const bridgeWindow = Math.max(1.2, spacing * 3);
+  if (!(next.detections || []).length && (prev.detections || []).length) {
+    for (let k = hi + 1; k < track.length && track[k].t - prev.t <= bridgeWindow; k++) {
+      if ((track[k].detections || []).length) { next = track[k]; break; }
+    }
+  } else if (!(prev.detections || []).length && (next.detections || []).length) {
+    for (let k = lo - 1; k >= 0 && next.t - track[k].t <= bridgeWindow; k--) {
+      if ((track[k].detections || []).length) { prev = track[k]; break; }
+    }
+  }
   const span = next.t - prev.t;
   if (!(span > 0)) return next.detections || [];
   const factor = (time - prev.t) / span;

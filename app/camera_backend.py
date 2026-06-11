@@ -181,12 +181,11 @@ class OpenCvStreamCamera:
             capture = self._open_capture()
             import cv2
 
-            capture_ts = time.time()
-            ok, image = self._read_latest_frame(capture, self._stale_frame_grabs())
+            ok, image, capture_ts = self._read_latest_frame(capture, self._stale_frame_grabs(), self.fps)
             if not ok or image is None:
                 self._release_capture()
                 capture = self._open_capture()
-                ok, image = self._read_latest_frame(capture, self._stale_frame_grabs())
+                ok, image, capture_ts = self._read_latest_frame(capture, self._stale_frame_grabs(), self.fps)
 
             if not ok or image is None:
                 self._release_capture()
@@ -205,17 +204,11 @@ class OpenCvStreamCamera:
             capture = self._open_capture()
             import cv2
 
-            # Capture timestamp BEFORE reading the frame so detection track
-            # samples are stamped close to when the frame left the camera,
-            # not after stale-frame grabs + JPEG encoding which can lag by
-            # hundreds of milliseconds and shift every playback overlay box.
-            capture_ts = time.time()
-
-            ok, image = self._read_latest_frame(capture, self._stale_frame_grabs())
+            ok, image, capture_ts = self._read_latest_frame(capture, self._stale_frame_grabs(), self.fps)
             if not ok or image is None:
                 self._release_capture()
                 capture = self._open_capture()
-                ok, image = self._read_latest_frame(capture, self._stale_frame_grabs())
+                ok, image, capture_ts = self._read_latest_frame(capture, self._stale_frame_grabs(), self.fps)
 
             if not ok or image is None:
                 self._release_capture()
@@ -244,12 +237,49 @@ class OpenCvStreamCamera:
         return max(1, min(8, int(self.fps / 4)))
 
     @staticmethod
-    def _read_latest_frame(capture, stale_frame_grabs: int) -> tuple[bool, Any]:
-        if hasattr(capture, "grab"):
-            for _ in range(stale_frame_grabs):
-                if not capture.grab():
-                    break
-        return capture.read()
+    def _read_latest_frame(capture, stale_frame_grabs: int, fps: int = 15) -> tuple[bool, Any, float]:
+        """Drain buffered frames and decode the latest one.
+
+        Returns ``(ok, image, capture_ts)`` where ``capture_ts`` is taken at
+        the moment the decoded frame was pulled off the stream. The timestamp
+        matters: detection-track samples are stamped with it and replayed over
+        recordings, so a stale frame stamped "now" makes every playback
+        overlay box trail the object on screen.
+
+        The drain is adaptive rather than a fixed count: it always discards
+        ``stale_frame_grabs`` frames (the historical behaviour), then keeps
+        draining while grabs return faster than ~half a frame interval —
+        a fast grab means the frame came from the buffer, not the live edge.
+        Without the adaptive part the buffer grows without bound whenever
+        detection cycles run slower than the stream's frame rate, and the
+        analyzed frames (and therefore alerts and recordings) lag further and
+        further behind reality.
+        """
+        if not hasattr(capture, "grab") or stale_frame_grabs <= 0:
+            capture_ts = time.time()
+            ok, image = capture.read()
+            return ok, image, capture_ts
+
+        # A grab that had to wait roughly half a frame interval (or more)
+        # came from the live edge; faster grabs were buffered backlog.
+        live_edge_seconds = 0.5 / max(float(fps or 15), 5.0)
+        max_total_grabs = max(stale_frame_grabs, 64)
+        grabbed = False
+        for index in range(max_total_grabs):
+            started = time.monotonic()
+            if not capture.grab():
+                break
+            grabbed = True
+            waited = time.monotonic() - started
+            if index >= stale_frame_grabs - 1 and waited >= live_edge_seconds:
+                break
+        capture_ts = time.time()
+        if grabbed and hasattr(capture, "retrieve"):
+            ok, image = capture.retrieve()
+            if ok and image is not None:
+                return ok, image, capture_ts
+        ok, image = capture.read()
+        return ok, image, time.time()
 
     def snapshot(self) -> dict[str, Any]:
         _jpeg, frame = self.read_jpeg()
