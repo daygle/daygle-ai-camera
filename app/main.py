@@ -2813,8 +2813,7 @@ def _settings_section_update() -> str:
     current_version = version_file.read_text(encoding='utf-8').strip() if version_file.exists() else 'unknown'
     return (
         f'<section class="card" id="updateSection">'
-        f'<h2>Software Updates</h2>'
-        f'<p class="muted">Current version: <strong id="currentVersion">{escape(current_version)}</strong></p>'
+        f'<div class="settings-section-header"><div class="settings-section-icon">🔄</div><div><h2>Software Updates</h2><p class="settings-section-subtitle">Current version: <strong id="currentVersion">{escape(current_version)}</strong>. Check for and apply updates from GitHub.</p></div></div>'
         f'<div id="updateStatus" class="status-panel" style="display:none"></div>'
         f'<div class="button-row">'
         f'<button id="checkUpdateBtn" type="button">Check for Updates</button>'
@@ -2827,51 +2826,55 @@ def _settings_section_update() -> str:
 
 def _settings_section_anpr() -> str:
     return (
-        '<section class="card"><h2>ANPR</h2>'
+        '<section class="card">'
+        '<div class="settings-section-header"><div class="settings-section-icon">🚗</div><div><h2>ANPR</h2><p class="settings-section-subtitle">Automatic Number Plate Recognition settings. Enable per camera and per monitoring area from Live Cameras.</p></div></div>'
         '<form id="anprSettingsForm" class="form-grid">'
-        '<label><span>OCR Backend</span><select name="backend"><option value="paddleocr">PaddleOCR</option><option value="easyocr">EasyOCR</option></select></label>'
-        '<input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Min Confidence" />'
-        '<input name="vehicle_labels" placeholder="Vehicle labels: car, truck, bus, motorcycle" />'
+        '<label><span>OCR Backend</span><select name="backend"><option value="paddleocr">PaddleOCR</option><option value="easyocr">EasyOCR</option></select><span class="field-help">PaddleOCR is faster; EasyOCR may be more accurate for some plate styles.</span></label>'
+        '<label><span>Min Confidence</span><input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="0.6" /><span class="field-help">Minimum plate detection confidence (0–1). Higher = fewer false reads.</span></label>'
+        '<label><span>Vehicle Labels</span><input name="vehicle_labels" placeholder="car, truck, bus, motorcycle" /><span class="field-help">Comma-separated list of object labels that trigger ANPR processing.</span></label>'
         '<button type="submit">Save ANPR</button>'
-        '</form><p class="muted">Enable ANPR per camera and per monitoring area from Live Cameras.</p></section>'
+        '</form></section>'
     )
 
 
 def _settings_section_recording() -> str:
     return (
-        '<section class="card"><h2>Recording Clips</h2>'
+        '<section class="card">'
+        '<div class="settings-section-header"><div class="settings-section-icon">🎬</div><div><h2>Recording Clips</h2><p class="settings-section-subtitle">Control how event recordings are captured. Per-camera recording toggles are on the Live Cameras page.</p></div></div>'
         '<form id="recordingSettingsForm" class="form-grid">'
-        '<input name="pre_event_seconds" type="number" min="0" max="300" placeholder="10" />'
-        '<input name="post_event_seconds" type="number" min="0" max="300" placeholder="15" />'
-        '<input name="extension_step_seconds" type="number" min="0" max="300" placeholder="45" />'
-        '<input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="300" />'
-        '<input name="format" placeholder="Format: mp4" />'
+        '<label><span>Pre-Event Seconds</span><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="10" /><span class="field-help">Seconds of footage to include before the trigger event.</span></label>'
+        '<label><span>Post-Event Seconds</span><input name="post_event_seconds" type="number" min="0" max="300" placeholder="15" /><span class="field-help">Seconds to continue recording after the last detection.</span></label>'
+        '<label><span>Extend On Motion (s)</span><input name="extension_step_seconds" type="number" min="0" max="300" placeholder="10" /><span class="field-help">Each time motion continues, the recording is extended by this many seconds.</span></label>'
+        '<label><span>Max Clip Duration (s)</span><input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="300" /><span class="field-help">Maximum total clip length. Prevents extremely long recordings.</span></label>'
+        '<label><span>Format</span><input name="format" placeholder="mp4" /><span class="field-help">Video container format. mp4 is recommended for best compatibility.</span></label>'
         '<button type="submit">Save Clip Settings</button>'
-        '</form><p class="muted">Alert-triggered and continuous recording are configured per camera above or from Live Cameras.</p></section>'
+        '</form></section>'
     )
 
 
 def _settings_section_retention() -> str:
     return (
-        '<section class="card"><h2>Retention</h2>'
+        '<section class="card">'
+        '<div class="settings-section-header"><div class="settings-section-icon">🧹</div><div><h2>Retention</h2><p class="settings-section-subtitle">Automatically clean up old recordings and events to manage disk usage.</p></div></div>'
         '<form id="retentionSettingsForm" class="form-grid">'
-        '<label><span>Auto Purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>'
-        '<input name="retention_days" type="number" min="1" max="3650" placeholder="Retention days" />'
-        '<input name="max_storage_gb" type="number" min="1" max="100000" placeholder="Max storage GB" />'
+        '<label><span>Auto Purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select><span class="field-help">Automatically delete recordings and events that exceed retention limits.</span></label>'
+        '<label><span>Retention Days</span><input name="retention_days" type="number" min="1" max="3650" placeholder="30" /><span class="field-help">Delete recordings older than this many days.</span></label>'
+        '<label><span>Max Storage (GB)</span><input name="max_storage_gb" type="number" min="1" max="100000" placeholder="50" /><span class="field-help">Oldest recordings are deleted first when this limit is reached.</span></label>'
         '<button type="submit">Save Retention</button>'
-        '</form><button id="purgeRecordingsBtn" class="secondary" type="button">Run Purge Now</button></section>'
+        '</form><div class="button-row"><button id="purgeRecordingsBtn" class="secondary" type="button">Run Purge Now</button></div></section>'
     )
 
 
 def _settings_section_storage() -> str:
     return (
-        '<section class="card"><h2>Storage</h2>'
+        '<section class="card">'
+        '<div class="settings-section-header"><div class="settings-section-icon">📁</div><div><h2>Storage</h2><p class="settings-section-subtitle">Configure where Daygle stores data on disk. Changes take effect after saving.</p></div></div>'
         '<form id="storageSettingsForm" class="form-grid">'
-        '<input name="data_dir" placeholder="Data directory" />'
-        '<input name="snapshots_dir" placeholder="Snapshots directory" />'
-        '<input name="events_dir" placeholder="Events directory" />'
-        '<input name="recordings_dir" placeholder="Recordings directory" />'
-        '<input name="plates_dir" placeholder="Plate images directory" />'
+        '<label><span>Data Directory</span><input name="data_dir" placeholder="/opt/daygle/data" /><span class="field-help">Root directory for all application data.</span></label>'
+        '<label><span>Snapshots Directory</span><input name="snapshots_dir" placeholder="/opt/daygle/data/snapshots" /><span class="field-help">Where event snapshot images are saved.</span></label>'
+        '<label><span>Events Directory</span><input name="events_dir" placeholder="/opt/daygle/data/events" /><span class="field-help">Where event clip videos are saved.</span></label>'
+        '<label><span>Recordings Directory</span><input name="recordings_dir" placeholder="/opt/daygle/data/recordings" /><span class="field-help">Where continuous recordings are saved.</span></label>'
+        '<label><span>Plate Images Directory</span><input name="plates_dir" placeholder="/opt/daygle/data/plates" /><span class="field-help">Where cropped plate images from ANPR are saved.</span></label>'
         '<button type="submit">Save Storage</button>'
         '</form></section>'
     )
@@ -2879,11 +2882,12 @@ def _settings_section_storage() -> str:
 
 def _settings_section_auth() -> str:
     return (
-        '<section class="card"><h2>Login Security</h2>'
+        '<section class="card">'
+        '<div class="settings-section-header"><div class="settings-section-icon">🔒</div><div><h2>Login Security</h2><p class="settings-section-subtitle">Protect against brute-force attacks and manage session duration.</p></div></div>'
         '<form id="authSettingsForm" class="form-grid">'
-        '<input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="Session timeout hours" />'
-        '<input name="max_login_attempts" type="number" min="1" max="100" placeholder="Max login attempts" />'
-        '<input name="lockout_minutes" type="number" min="1" max="1440" placeholder="Lockout minutes" />'
+        '<label><span>Session Timeout (hours)</span><input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="12" /><span class="field-help">How long a user stays logged in before re-authentication is required.</span></label>'
+        '<label><span>Max Login Attempts</span><input name="max_login_attempts" type="number" min="1" max="100" placeholder="5" /><span class="field-help">Number of failed attempts before the account is temporarily locked.</span></label>'
+        '<label><span>Lockout Minutes</span><input name="lockout_minutes" type="number" min="1" max="1440" placeholder="15" /><span class="field-help">How long the account is locked after exceeding max login attempts.</span></label>'
         '<button type="submit">Save Login Security</button>'
         '</form></section>'
     )
