@@ -107,6 +107,9 @@ auth_enabled = bool(auth_config.get('enabled', True))
 
 @asynccontextmanager
 async def app_lifespan(_app: FastAPI):
+    removed = database.cleanup_incomplete_recordings()
+    if removed:
+        logger.info(f"Cleaned up {len(removed)} incomplete recording(s) from previous session")
     log_detector_initialization()
     start_live_alert_monitor()
     try:
