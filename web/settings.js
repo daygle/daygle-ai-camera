@@ -521,10 +521,19 @@ async function loadSoundStatus() {
   try {
     const s = await api('/api/sound/status');
     const state = s.detector_status || s.state || 'stopped';
+    const backend = s.backend;
     const confs = s.last_confidences || {};
     const topConf = Object.entries(confs).sort(([, a], [, b]) => b - a)[0];
-    const confStr = topConf ? ` · ${topConf[0]}: ${(topConf[1] * 100).toFixed(0)}%` : '';
-    badge.textContent = `Status: ${state}${confStr}`;
+    const confStr = topConf && topConf[1] > 0 ? ` · ${topConf[0].replace(/_/g, ' ')}: ${(topConf[1] * 100).toFixed(0)}%` : '';
+    const backendStr = backend === 'yamnet' ? ' · YAMNet' : backend === 'spectral' ? ' · spectral fallback' : backend === 'loading' ? ' · loading model…' : '';
+    badge.textContent = `${state}${backendStr}${confStr}`;
+    badge.className = 'chip ' + (
+      state === 'listening' && backend === 'yamnet' ? 'chip-green' :
+      state === 'listening' ? 'chip-info' :
+      state.startsWith('detected') ? 'chip-warn' :
+      state === 'disabled' ? 'chip-dim' :
+      'chip-dim'
+    );
   } catch (_) {}
 }
 

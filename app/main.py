@@ -318,7 +318,7 @@ live_alert_monitor_thread: threading.Thread | None = None
 # ── Sound detection state ────────────────────────────────────────────────
 _sound_detector: SoundDetector | None = None
 _sound_detector_lock = threading.Lock()
-_sound_status: dict[str, Any] = {'state': 'stopped', 'last_detected_at': None, 'last_confidence': 0.0}
+_sound_status: dict[str, Any] = {'state': 'stopped', 'last_detected_at': None, 'last_confidence': 0.0, 'backend': None}
 _sound_status_lock = threading.Lock()
 
 # ── Camera offline alert health tracking ─────────────────────────────────
@@ -1434,8 +1434,12 @@ def _on_sound_detected(class_id: str, rule_name: str, confidence: float, meta: d
         _sound_status['last_class'] = class_id
         _sound_status['last_class_label'] = class_label
         _sound_status['last_confidence'] = round(confidence, 3)
+        _sound_status['backend'] = meta.get('backend', 'unknown')
 
-    logger.info('Sound detected: %s (confidence=%.2f, source=%s)', class_label, confidence, meta.get('source'))
+    logger.info(
+        'Sound detected: %s (confidence=%.2f, source=%s, backend=%s)',
+        class_label, confidence, meta.get('source'), meta.get('backend'),
+    )
 
     sound_cfg = effective_sound_config()
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -1589,6 +1593,7 @@ def apply_sound_settings() -> None:
         _sound_detector.start()
         with _sound_status_lock:
             _sound_status['state'] = 'listening'
+            _sound_status['backend'] = _sound_detector.backend
         logger.info(
             'Sound monitor started (source=%s, active_rules=%s)',
             source,
