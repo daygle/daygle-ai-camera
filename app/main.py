@@ -284,6 +284,7 @@ last_detector_error: str | None = getattr(detector, 'unavailable_reason', None)
 alerts = AlertEngine([])
 live_detection_last_checked: dict[str, float] = {}
 live_detection_status: dict[str, dict[str, Any]] = {}
+live_detection_status_lock = threading.Lock()
 # Rolling per-camera history of the background monitor's detections. Recording
 # detection tracks are sliced out of this history when a clip finalizes, so
 # playback overlays cost no extra decoding or inference: every box was already
@@ -293,6 +294,7 @@ live_detection_status: dict[str, dict[str, Any]] = {}
 live_detection_history: dict[str, deque] = {}
 live_detection_history_lock = threading.Lock()
 live_event_last_emitted: dict[str, dict[str, Any]] = {}
+live_event_last_emitted_lock = threading.Lock()
 live_detection_retry_after: dict[str, float] = {}
 live_detection_failure_count: dict[str, int] = {}
 _live_backoff_lock = threading.Lock()
@@ -1045,12 +1047,13 @@ def normalize_detection_boxes_for_frame(detections: list[dict[str, Any]], frame:
 
 
 def update_live_detection_status(camera_id: str, **updates: Any) -> None:
-    live_detection_status[camera_id] = {
-        **live_detection_status.get(camera_id, {}),
-        **updates,
-        'camera_id': camera_id,
-        'updated_at': datetime.now(timezone.utc).isoformat(),
-    }
+    with live_detection_status_lock:
+        live_detection_status[camera_id] = {
+            **live_detection_status.get(camera_id, {}),
+            **updates,
+            'camera_id': camera_id,
+            'updated_at': datetime.now(timezone.utc).isoformat(),
+        }
 
 
 def record_live_detection_history(camera_id: str, detections: list[dict[str, Any]], sample_ts: float | None = None) -> None:
@@ -1150,7 +1153,8 @@ def detect_frame_motion(camera_id: str, image: Any) -> tuple[bool, float]:
 def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: float) -> bool:
     if debounce_seconds <= 0 or not labels:
         return False
-    previous = live_event_last_emitted.get(camera_id)
+    with live_event_last_emitted_lock:
+        previous = live_event_last_emitted.get(camera_id)
     if not previous:
         return False
     elapsed = time.time() - float(previous.get('timestamp', 0))
@@ -1168,15 +1172,16 @@ def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: 
 def remember_live_event(camera_id: str, labels: set[str], *, merge: bool = False) -> None:
     if not labels:
         return
-    if merge:
-        previous = live_event_last_emitted.get(camera_id) or {}
-        labels = labels | {
-            str(label).strip().lower() for label in previous.get('labels', []) if str(label).strip()
+    with live_event_last_emitted_lock:
+        if merge:
+            previous = live_event_last_emitted.get(camera_id) or {}
+            labels = labels | {
+                str(label).strip().lower() for label in previous.get('labels', []) if str(label).strip()
+            }
+        live_event_last_emitted[camera_id] = {
+            'timestamp': time.time(),
+            'labels': sorted(labels),
         }
-    live_event_last_emitted[camera_id] = {
-        'timestamp': time.time(),
-        'labels': sorted(labels),
-    }
 
 
 def clear_live_camera_backoff(camera_id: str) -> None:
@@ -1284,6 +1289,8 @@ def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any
     # process_live_stream_alerts before any camera is persisted) is still found.
     camera_key = str(selected_config.get('id') or camera_id or 'camera')
     ai_state = ai_status_payload()
+    with live_detection_status_lock:
+        status = live_detection_status.get(camera_key, {'state': 'waiting', 'reason': 'No live detection has run yet.'})
     return {
         'camera_id': camera_key,
         'camera_name': selected_config.get('name'),
@@ -1292,7 +1299,7 @@ def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any
         'ai_available': ai_state['inference_available'],
         'ai_mode': ai_state['mode'],
         'ai_error': ai_state['error'],
-        **live_detection_status.get(camera_key, {'state': 'waiting', 'reason': 'No live detection has run yet.'}),
+        **status,
     }
 
 
@@ -1441,9 +1448,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
 
     if enforce_interval:
         now = time.time()
-        if now - live_detection_last_checked.get(camera_id, 0) < detection_interval_seconds:
-            return None
-        live_detection_last_checked[camera_id] = now
+        with live_detection_worker_lock:
+            if now - live_detection_last_checked.get(camera_id, 0) < detection_interval_seconds:
+                return None
+            live_detection_last_checked[camera_id] = now
 
     ai_state = ai_status_payload()
     if not ai_state['detector_loaded']:
@@ -2810,7 +2818,8 @@ def create_database_backup(prefix: str = 'daygle-database') -> Path:
 
 def validate_restore_database(path: Path) -> None:
     try:
-        with sqlite3.connect(path) as db:
+        db = sqlite3.connect(path)
+        try:
             integrity = db.execute('PRAGMA integrity_check').fetchone()
             if not integrity or str(integrity[0]).lower() != 'ok':
                 raise HTTPException(status_code=400, detail='Uploaded database failed SQLite integrity check.')
@@ -2821,6 +2830,8 @@ def validate_restore_database(path: Path) -> None:
             admin_count = db.execute("SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1").fetchone()[0]
             if int(admin_count) < 1:
                 raise HTTPException(status_code=400, detail='Uploaded database must include at least one active administrator account.')
+        finally:
+            db.close()
     except sqlite3.DatabaseError as exc:
         raise HTTPException(status_code=400, detail='Uploaded file is not a valid SQLite database.') from exc
 
@@ -4415,7 +4426,25 @@ async def restore_database(request: Request, file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail='Uploaded database backup is empty.')
         validate_restore_database(restore_temp)
         safety_backup = create_database_backup(prefix='pre-restore-daygle-database')
-        shutil.move(str(restore_temp), database.database_path)
+        # Use the sqlite3 backup API to restore in-place rather than
+        # shutil.move, which fails on Windows when the database file is open
+        # (WAL mode keeps the file locked). This copies page-by-page into the
+        # existing file, then WAL data is automatically truncated on reconnect.
+        try:
+            source = sqlite3.connect(str(restore_temp))
+            try:
+                destination = sqlite3.connect(str(database.database_path))
+                try:
+                    source.backup(destination)
+                    checkpoint = destination.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
+                    if checkpoint and checkpoint[0] != 0:
+                        logger.warning('Database restore WAL checkpoint returned error code %s', checkpoint[0])
+                finally:
+                    destination.close()
+            finally:
+                source.close()
+        except sqlite3.Error as exc:
+            raise HTTPException(status_code=500, detail=f'Database restore failed: {exc}') from exc
         refresh_runtime_after_database_restore()
         write_audit_log(request, 'restore', 'database', details={'source_filename': filename, 'safety_backup': str(safety_backup)})
         return {

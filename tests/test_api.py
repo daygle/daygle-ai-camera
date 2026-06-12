@@ -1937,53 +1937,57 @@ def test_email_alert_subject_lists_all_triggered_labels():
         def login(self, *_a, **_k): pass
         def send_message(self, message): sent_messages.append(message)
 
-    smtplib.SMTP = FakeSMTP
-    smtplib.SMTP_SSL = FakeSMTP
+    _original_smtp = smtplib.SMTP
+    _original_smtp_ssl = smtplib.SMTP_SSL
+    try:
+        smtplib.SMTP = FakeSMTP
+        smtplib.SMTP_SSL = FakeSMTP
 
-    service = EmailAlertService({
-        'enabled': True,
-        'host': 'smtp.example.test',
-        'port': 587,
-        'from_address': 'alerts@example.test',
-        'use_tls': True,
-        'use_ssl': False,
-    })
+        service = EmailAlertService({
+            'enabled': True,
+            'host': 'smtp.example.test',
+            'port': 587,
+            'from_address': 'alerts@example.test',
+            'use_tls': True,
+            'use_ssl': False,
+        })
 
-    all_triggered_labels = ['cat', 'person']
-    # Two rules, two alerts — one per label — both with email enabled.
-    for label in all_triggered_labels:
-        service.send_alert(
-            {'label': label, 'rule_name': f'{label.title()} alert', 'confidence': 0.9,
-             'message': f'{label.title()} matched'},
-            event_id=42,
-            recipients=['owner@example.test'],
-            camera_name='Front Door',
-            triggered_labels=all_triggered_labels,
-        )
+        all_triggered_labels = ['cat', 'person']
+        # Two rules, two alerts — one per label — both with email enabled.
+        for label in all_triggered_labels:
+            service.send_alert(
+                {'label': label, 'rule_name': f'{label.title()} alert', 'confidence': 0.9,
+                 'message': f'{label.title()} matched'},
+                event_id=42,
+                recipients=['owner@example.test'],
+                camera_name='Front Door',
+                triggered_labels=all_triggered_labels,
+            )
 
-    assert len(sent_messages) == 2, 'expected one email per matching rule'
-    for message in sent_messages:
-        assert message['Subject'] == 'Daygle AI Camera alert: Cat, Person detected (Front Door)'
-        # Walk the multipart tree to find the html part. get_payload() may
-        # return a flat list of parts (multipart/alternative) or a nested
-        # Message with its own walk() (multipart/related).
-        def _iter_parts(message):
-            payload = message.get_payload()
-            if isinstance(payload, list):
-                for part in payload:
-                    yield from _iter_parts(part)
-            else:
-                yield message
-        html_part = None
-        for part in _iter_parts(message):
-            if part.get_content_type() == 'text/html':
-                html_part = part.get_payload(decode=True).decode('utf-8', 'ignore')
-                break
-        assert html_part is not None, 'expected an html part'
-        assert 'Cat, Person' in html_part, 'html body must list every triggered label'
-        assert 'All triggers' in html_part, 'html body must include an All triggers row'
-    smtplib.SMTP = smtplib.SMTP
-    smtplib.SMTP_SSL = smtplib.SMTP_SSL
+        assert len(sent_messages) == 2, 'expected one email per matching rule'
+        for message in sent_messages:
+            assert message['Subject'] == 'Daygle AI Camera alert: Cat, Person detected (Front Door)'
+            # Walk the multipart tree to find the html part. get_payload() may
+            # return a flat list of parts (multipart/alternative) or a nested
+            # Message with its own walk() (multipart/related).
+            def _iter_parts(message):
+                payload = message.get_payload()
+                if isinstance(payload, list):
+                    for part in payload:
+                        yield from _iter_parts(part)
+                else:
+                    yield message
+            html_part = None
+            for part in _iter_parts(message):
+                if part.get_content_type() == 'text/html':
+                    html_part = part.get_payload(decode=True).decode('utf-8', 'ignore')
+                    break
+            assert html_part is not None, 'expected an html part'
+            assert 'Cat, Person' in html_part, 'html body must list every triggered label'
+            assert 'All triggers' in html_part, 'html body must include an All triggers row'
+    finally:
+        smtplib.SMTP = _original_smtp
+        smtplib.SMTP_SSL = _original_smtp_ssl
 
 
 def test_alerts_endpoint_exposes_event_id_for_grouping(tmp_path):

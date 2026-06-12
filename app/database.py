@@ -18,6 +18,7 @@ class EventDatabase:
     def connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.database_path)
         connection.row_factory = sqlite3.Row
+        connection.execute('PRAGMA journal_mode=WAL;')
         try:
             yield connection
             connection.commit()
@@ -372,6 +373,8 @@ class EventDatabase:
 
     def list_recordings_for_camera_day(self, camera_id: str, day_start: str, day_end: str) -> list[dict[str, Any]]:
         with self.connect() as db:
+            # Escape LIKE wildcards in camera_id so % and _ in the id do not alter the pattern scope.
+            safe_camera_id = str(camera_id).replace('%', '\\%').replace('_', '\\_')
             rows = db.execute(
                 """
                 SELECT DISTINCT r.*
@@ -381,14 +384,14 @@ class EventDatabase:
                     r.camera_id = ?
                     OR (
                         r.camera_id IS NULL
-                        AND e.metadata LIKE ?
+                        AND e.metadata LIKE ? ESCAPE '\\'
                     )
                 )
                 AND r.started_at < ?
                 AND COALESCE(r.ended_at, r.started_at) >= ?
                 ORDER BY r.started_at ASC, r.id ASC
                 """,
-                (camera_id, f'%"camera_id": "{camera_id}"%', day_end, day_start),
+                (camera_id, f'%"camera_id": "{safe_camera_id}"%', day_end, day_start),
             ).fetchall()
             return self._assemble_recordings(db, rows)
 
@@ -439,14 +442,15 @@ class EventDatabase:
         """Delete recordings whose files were never written (e.g. service restarted mid-capture)."""
         with self.connect() as db:
             rows = db.execute("SELECT * FROM recordings").fetchall()
-            incomplete = [
-                dict(row) for row in rows
-                if not (
-                    row["file_path"]
-                    and Path(str(row["file_path"])).exists()
-                    and Path(str(row["file_path"])).stat().st_size > 0
-                )
-            ]
+            incomplete = []
+            for row in rows:
+                file_path = row["file_path"]
+                if not file_path:
+                    incomplete.append(dict(row))
+                    continue
+                path = Path(str(file_path))
+                if not (path.exists() and path.stat().st_size > 0):
+                    incomplete.append(dict(row))
             if incomplete:
                 ids = [int(r["id"]) for r in incomplete]
                 db.execute(f"DELETE FROM recordings WHERE id IN ({','.join('?' * len(ids))})", ids)
@@ -468,7 +472,15 @@ class EventDatabase:
 
     def purge_recordings(self, *, older_than: str | None = None, max_storage_bytes: int | None = None) -> list[dict[str, Any]]:
         with self.connect() as db:
-            candidates = [dict(row) for row in db.execute("SELECT * FROM recordings ORDER BY started_at ASC").fetchall()]
+            # When only age-based purge is needed, filter in the database.
+            # Size-based purge needs all rows to correctly identify oldest recordings.
+            if older_than and max_storage_bytes is None:
+                candidates = [dict(row) for row in db.execute(
+                    "SELECT * FROM recordings WHERE started_at < ? ORDER BY started_at ASC",
+                    (older_than,),
+                ).fetchall()]
+            else:
+                candidates = [dict(row) for row in db.execute("SELECT * FROM recordings ORDER BY started_at ASC").fetchall()]
             purge_ids: set[int] = set()
             if older_than:
                 purge_ids.update(int(row["id"]) for row in candidates if str(row["started_at"]) < older_than)

@@ -44,6 +44,7 @@ class AuthService:
     def connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.database_path)
         connection.row_factory = sqlite3.Row
+        connection.execute('PRAGMA journal_mode=WAL;')
         try:
             yield connection
             connection.commit()

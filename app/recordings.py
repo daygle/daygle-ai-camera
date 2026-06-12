@@ -637,7 +637,7 @@ class RecordingService:
 
     @staticmethod
     def redact_stream_credentials(message: str) -> str:
-        return re.sub(r'(rtsps?://[^:\s/@]+):[^@\s/]+@', r'\1:***@', message)
+        return re.sub(r'(rtsps?://[^:\s/@]+):[^@]+@', r'\1:***@', message)
 
     @staticmethod
     def clip_has_video_stream(file_path: Path) -> bool:
