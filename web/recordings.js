@@ -45,7 +45,6 @@ function filterByConfiguredLabels(detections) {
   });
 }
 let overlayRafId = null;
-let overlayVfcHandle = null;
 let configuredLabels = null; // null = no filter loaded yet
 
 async function api(path, options = {}) {
@@ -349,36 +348,22 @@ function overlayShouldAnimate() {
 }
 
 function startOverlayRaf() {
-  if (overlayRafId !== null || overlayVfcHandle !== null) return;
+  if (overlayRafId !== null) return;
   const video = els.clipPlayer;
   if (!video) return;
-  // Throttle counter: skip every other callback to draw at ~30fps.
-  // Interpolated bounding boxes move smoothly enough at this rate while
-  // halving the per-frame canvas work.
-  let frameCount = 0;
-  if (typeof video.requestVideoFrameCallback === 'function') {
-    // requestVideoFrameCallback fires with the exact presentation timestamp of
-    // each decoded frame, eliminating the lag from reading currentTime in rAF.
-    function vfcLoop(now, metadata) {
-      if (!els.clipPlayer || els.clipPlayer.paused || !overlayShouldAnimate()) {
-        overlayVfcHandle = null;
-        return;
-      }
-      if ((frameCount++ & 1) === 0) drawClipOverlay(metadata.mediaTime);
-      overlayVfcHandle = els.clipPlayer.requestVideoFrameCallback(vfcLoop);
+  // Uses requestAnimationFrame instead of requestVideoFrameCallback because
+  // rAF fires BEFORE compositing — the overlay is painted in the same frame
+  // as the video, avoiding the 1-frame VFC lag where the overlay would show
+  // data for the frame that was just displayed.
+  function loop() {
+    if (!els.clipPlayer || els.clipPlayer.paused || !overlayShouldAnimate()) {
+      overlayRafId = null;
+      return;
     }
-    overlayVfcHandle = video.requestVideoFrameCallback(vfcLoop);
-  } else {
-    function loop() {
-      if (!els.clipPlayer || els.clipPlayer.paused || !overlayShouldAnimate()) {
-        overlayRafId = null;
-        return;
-      }
-      if ((frameCount++ & 1) === 0) drawClipOverlay();
-      overlayRafId = requestAnimationFrame(loop);
-    }
+    drawClipOverlay();
     overlayRafId = requestAnimationFrame(loop);
   }
+  overlayRafId = requestAnimationFrame(loop);
 }
 
 function stopOverlayRaf() {
@@ -386,13 +371,9 @@ function stopOverlayRaf() {
     cancelAnimationFrame(overlayRafId);
     overlayRafId = null;
   }
-  if (overlayVfcHandle !== null && els.clipPlayer) {
-    els.clipPlayer.cancelVideoFrameCallback(overlayVfcHandle);
-    overlayVfcHandle = null;
-  }
 }
 
-function drawClipOverlay(mediaTime) {
+function drawClipOverlay() {
   if (!els.clipOverlay || !els.clipPlayer) return;
   if (!overlayEnabled) {
     clearClipOverlay();
@@ -404,9 +385,10 @@ function drawClipOverlay(mediaTime) {
   context.setTransform(1, 0, 0, 1, 0, 0);
   context.clearRect(0, 0, els.clipOverlay.width, els.clipOverlay.height);
 
-  // Prefer the frame-accurate presentation timestamp from requestVideoFrameCallback
-  // over currentTime, which lags the displayed frame by a pipeline stage or two.
-  const playerTime = mediaTime !== undefined ? mediaTime : Number(els.clipPlayer.currentTime || 0);
+  // Project currentTime forward by a small offset (~16ms ≈ 1 frame at 60fps)
+  // to compensate for the delay between when currentTime is sampled (start of
+  // the rAF frame) and when the overlay is actually composited on screen.
+  const playerTime = Number(els.clipPlayer.currentTime || 0) + 0.016;
 
   // The saved detection track replays the boxes the live monitor computed
   // while the clip recorded, so playback never runs inference. Clips without
