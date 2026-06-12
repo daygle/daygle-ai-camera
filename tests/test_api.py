@@ -161,13 +161,6 @@ recording:
   enabled: true
   mode: motion
   continuous: false
-  record_on_motion: true
-  record_on_human: true
-  record_on_objects:
-    - cat
-    - dog
-    - package
-    - parcel
   pre_event_seconds: 5
   post_event_seconds: 10
   max_clip_seconds: 60
@@ -801,9 +794,6 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
                 "enabled": True,
                 "mode": "objects",
                 "continuous": False,
-                "record_on_motion": False,
-                "record_on_human": True,
-                "record_on_objects": ["cat", "dog", "package"],
                 "pre_event_seconds": 2,
                 "post_event_seconds": 3,
                 "max_clip_seconds": 10,
@@ -816,7 +806,6 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
         )
         assert status == 200
         assert recording["mode"] == "objects"
-        assert recording["record_on_objects"] == ["cat", "dog", "package"]
 
         status, _headers, storage = client.request(
             "/api/settings/system/storage",
@@ -861,9 +850,6 @@ def test_runtime_data_reset_clears_operational_data_but_keeps_settings(tmp_path,
                 'enabled': True,
                 'mode': 'motion',
                 'continuous': False,
-                'record_on_motion': True,
-                'record_on_human': True,
-                'record_on_objects': ['cat'],
                 'pre_event_seconds': 5,
                 'post_event_seconds': 10,
                 'max_clip_seconds': 60,
