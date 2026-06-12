@@ -75,9 +75,10 @@ class RecordingService:
 
         if bool(config.get('continuous')) or mode == 'continuous':
             return True, 'continuous', labels[0] if labels else None
-        # Alert-triggered recording is always enabled (formerly controlled by
-        # record_on_alert, which was removed as it's handled per-zone via
-        # record_on_detect in object rules).
+        # Non-continuous recording is gated per detection: a detection records
+        # only when its zone/sound rule marked it alert_triggered (the rule's
+        # record_on_detect flag). Detections without a matching record rule
+        # must not start a recording.
         alert_detections = [detection for detection in detections if detection.get('alert_triggered') and detection.get('label')]
         alert_labels = [str(detection.get('label') or '').lower() for detection in alert_detections]
         if alert_labels:
@@ -85,16 +86,6 @@ class RecordingService:
                 specific_label = preferred_label(detections)
                 return True, 'alert', specific_label or 'motion'
             return True, 'alert', alert_labels[0]
-        if mode == 'motion' and labels:
-            specific_label = preferred_label(detections)
-            if specific_label:
-                return True, 'object', specific_label
-            return True, 'motion', 'motion'
-        if mode == 'human' and 'person' in labels:
-            return True, 'human', 'person'
-        if mode == 'objects' and labels:
-            specific_label = preferred_label(detections)
-            return True, 'object', specific_label or labels[0]
         return False, 'none', None
 
     def event_recording_metadata(

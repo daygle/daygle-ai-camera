@@ -505,12 +505,6 @@ def default_camera_detection_settings() -> dict[str, Any]:
     }
 
 
-def default_camera_recording_settings() -> dict[str, Any]:
-    return {
-        'continuous': False,
-    }
-
-
 def normalize_bool_setting(value: Any, default: bool = False) -> bool:
     if value is None:
         return default
@@ -611,11 +605,10 @@ def zone_motion_min_confidence(zone: dict[str, Any]) -> float:
 
 
 def normalize_camera_recording_settings(settings: Any) -> dict[str, Any]:
-    recording = default_camera_recording_settings()
-    if isinstance(settings, dict):
-        recording.update(settings)
-    recording['continuous'] = normalize_bool_setting(recording.get('continuous'), False)
-    return recording
+    raw = settings if isinstance(settings, dict) else {}
+    # Only 'continuous' remains; stale keys from older configs (enabled,
+    # record_on_alert) are intentionally dropped.
+    return {'continuous': normalize_bool_setting(raw.get('continuous'), False)}
 
 
 def normalize_zone_point(point: Any) -> dict[str, float] | None:
@@ -779,7 +772,15 @@ def normalize_camera_settings(settings: dict[str, Any], index: int = 1) -> dict[
     detection['object_labels'] = normalize_label_list(detection.get('object_labels', []))
     detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
     detection['sound'] = _normalize_camera_sound_settings(detection.get('sound'))
-    detection['motion'] = _normalize_camera_motion_settings(detection.get('motion'))
+    raw_motion = (camera_settings.get('detection') or {}).get('motion') if isinstance(camera_settings.get('detection'), dict) else None
+    if not isinstance(raw_motion, dict):
+        # Pre-migration cameras stored flat motion flags; seed the motion dict
+        # from them so disabling motion survives the upgrade.
+        raw_motion = {
+            'enabled': detection.get('motion_enabled', True),
+            'email_enabled': detection.get('motion_email_enabled', True),
+        }
+    detection['motion'] = _normalize_camera_motion_settings(raw_motion)
     camera_settings['detection'] = detection
     camera_settings['recording'] = normalize_camera_recording_settings(camera_settings.get('recording'))
     return camera_settings
@@ -1518,7 +1519,7 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
             'source': 'sound-detection',
             'sound_source': 'rtsp',
             'camera_id': camera_id,
-            'camera_name': str(cam_settings.get('name') or '').strip() or None,
+            'camera_name': str((cam_settings or {}).get('name') or '').strip() or None,
             'label': class_id,
             'class_label': class_label,
             'confidence': round(confidence, 3),
@@ -2484,11 +2485,8 @@ def recording_skip_reason(detections: list[dict[str, Any]], recording_config: di
         return f'Recording policy matched {trigger_type}{f" {trigger_label}" if trigger_label else ""}, but no recording was linked.'
     if not recording_service.enabled_for(recording_config):
         return 'Recording is disabled or recording mode is off.'
-    if recording_config and recording_config.get('record_on_alert'):
-        return 'Recording is waiting for an enabled alert rule to trigger for this camera.'
     labels = ', '.join(str(detection.get('label')) for detection in detections if detection.get('label')) or 'none'
-    mode = recording_service.mode_for(recording_config)
-    return f'Recording policy skipped this event. Detected labels: {labels}. Mode: {mode}.'
+    return f'Recording is waiting for an enabled alert rule to trigger for this camera. Detected labels: {labels}.'
 
 
 _notification_threads_lock = threading.Lock()

@@ -838,27 +838,6 @@ function bindZoneControls(zones) {
 }
 
 function bindRuleFields() {
-  // Select-based fields (old layout compatibility)
-  const selectBindings = [
-    ['zoneRuleLabel', 'label', (value) => value],
-    ['zoneRuleEnabled', 'enabled', (value) => value === 'true'],
-    ['zoneRuleRecord', 'record_on_detect', (value) => value === 'true'],
-    ['zoneRuleAlert', 'alert_on_detect', (value) => value === 'true'],
-    ['zoneRuleEmail', 'email_enabled', (value) => value === 'true'],
-    ['zoneRulePush', 'push_enabled', (value) => value === 'true'],
-  ];
-  selectBindings.forEach(([datasetKey, ruleKey, transform]) => {
-    document.querySelectorAll(`[data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((field) => {
-      field.addEventListener('change', () => {
-        const { zoneIndex, rule } = parseZoneRuleKey(field.dataset[datasetKey]);
-        if (!rule) return;
-        rule[ruleKey] = transform(field.value);
-        cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
-        if (ruleKey === 'label') renderZones();
-      });
-    });
-  });
-  // Checkbox-based fields (table layout)
   const checkboxBindings = [
     ['zoneRuleEnabled', 'enabled'],
     ['zoneRuleRecord', 'record_on_detect'],
@@ -876,7 +855,6 @@ function bindRuleFields() {
       });
     });
   });
-  // Number input fields (table layout)
   const numberBindings = [
     ['zoneRuleConfidence', 'min_confidence', (value) => clamp(Number(value || 0), 0, 1)],
     ['zoneRuleCooldown', 'cooldown_seconds', (value) => Math.max(0, Number.parseInt(value || 0, 10) || 0)],
@@ -888,27 +866,6 @@ function bindRuleFields() {
         if (!rule) return;
         rule[ruleKey] = transform(inp.value);
         cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
-      });
-    });
-  });
-  // Text input fields (email recipients)
-  document.querySelectorAll('[data-zone-rule-recipients]').forEach((inp) => {
-    inp.addEventListener('change', () => {
-      const { zoneIndex, rule } = parseZoneRuleKey(inp.dataset.zoneRuleRecipients);
-      if (!rule) return;
-      rule.email_recipients = normalizeEmailList(inp.value);
-      cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
-    });
-  });
-  // Time input fields (active start/end)
-  ['activeStart', 'activeEnd'].forEach((key) => {
-    const datasetKey = `zoneRule${key.charAt(0).toUpperCase() + key.slice(1)}`;
-    const dataAttr = `zone-rule-${key.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}`;
-    document.querySelectorAll(`[data-${dataAttr}]`).forEach((inp) => {
-      inp.addEventListener('change', () => {
-        const { rule } = parseZoneRuleKey(inp.dataset[datasetKey]);
-        if (!rule) return;
-        rule[key === 'activeStart' ? 'active_start' : 'active_end'] = inp.value || null;
       });
     });
   });
