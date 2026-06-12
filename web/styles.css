@@ -281,6 +281,7 @@ textarea {
 .item:hover { border-color: rgba(71, 214, 255, 0.2); background: rgba(71, 214, 255, 0.04); }
 .item-title { display: flex; justify-content: space-between; gap: 12px; font-weight: 900; font-size: 14px; }
 .detection { display: inline-flex; margin: 8px 8px 0 0; padding: 6px 9px; border-radius: 999px; background: rgba(139,92,246,.16); color: #c9b8ff; font-weight: 800; font-size: 12px; }
+.detection.detection-sound { background: rgba(168,85,247,.2); color: #a855f7; border: 1px solid rgba(168,85,247,.4); }
 .empty { color: var(--muted); padding: 12px; }
 
 .auth-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
@@ -923,6 +924,11 @@ input[type="file"] { padding: 10px; }
   background: rgba(248, 197, 93, 0.1);
   border-color: rgba(248, 197, 93, 0.3);
   color: #f8c55d;
+}
+.chip-sound {
+  background: rgba(168, 85, 247, 0.1);
+  border-color: rgba(168, 85, 247, 0.3);
+  color: #a855f7;
 }
 .recordings-empty-state {
   display: flex;
