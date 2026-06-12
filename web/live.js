@@ -190,9 +190,7 @@ function cameraMotion() {
 }
 
 function cameraRecording() {
-  selectedCamera.recording ||= { enabled: true, record_on_alert: true, continuous: false };
-  selectedCamera.recording.enabled ??= true;
-  selectedCamera.recording.record_on_alert ??= true;
+  selectedCamera.recording ||= { continuous: false };
   selectedCamera.recording.continuous ??= false;
   return selectedCamera.recording;
 }
@@ -438,7 +436,8 @@ function updateZonesStats() {
   if (liveEls.statZoneCount) liveEls.statZoneCount.textContent = String(zones.length);
   if (liveEls.statRuleCount) liveEls.statRuleCount.textContent = String(ruleCount);
   if (liveEls.statRecording) {
-    liveEls.statRecording.textContent = recording.enabled !== false ? 'Enabled' : 'Disabled';
+    const isContinuous = recording.continuous === true;
+    liveEls.statRecording.textContent = isContinuous ? 'Continuous' : 'On Alert';
   }
   if (liveEls.statCameraName) {
     liveEls.statCameraName.textContent = selectedCamera.name || selectedCamera.id || '—';

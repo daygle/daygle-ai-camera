@@ -44,13 +44,13 @@
       </article>
       <article class="card stat-card">
         <div class="stat-card-head">
-          <span class="stat-card-label">Recording On</span>
+          <span class="stat-card-label">Recording Mode</span>
           <span class="stat-card-icon" aria-hidden="true">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
           </span>
         </div>
         <strong id="statRecordingOn" class="stat-card-value">0</strong>
-        <small class="muted stat-card-sub">Capturing alert or continuous clips</small>
+        <small class="muted stat-card-sub">On alert / Continuous recording</small>
       </article>
       <article class="card stat-card">
         <div class="stat-card-head">
@@ -71,6 +71,16 @@
         </div>
         <strong id="statBackends" class="stat-card-value">0 / 0</strong>
         <small class="muted stat-card-sub">ONVIF / RTSP manual</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Camera Health</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          </span>
+        </div>
+        <strong id="statCameraHealth" class="stat-card-value">0</strong>
+        <small class="muted stat-card-sub">Online / Offline cameras</small>
       </article>
     </section>
 
@@ -175,18 +185,6 @@
         <!-- Recording Tab -->
         <div class="modal-tab-panel" data-panel="recording" hidden>
           <div class="form-grid">
-            <label><span>Recording</span>
-              <select id="editRecordingEnabled" name="recording_enabled">
-                <option value="true">Enabled</option>
-                <option value="false">Disabled</option>
-              </select>
-            </label>
-            <label><span>Alert Clips</span>
-              <select id="editRecordOnAlert" name="record_on_alert">
-                <option value="true">Enabled</option>
-                <option value="false">Disabled</option>
-              </select>
-            </label>
             <label><span>Continuous Recording</span>
               <select id="editContinuous" name="continuous">
                 <option value="false">Disabled</option>
@@ -194,7 +192,7 @@
               </select>
             </label>
           </div>
-          <p class="form-help muted">Alert clips record a short clip each time a detection event fires. Continuous recording writes an uninterrupted stream regardless of events.</p>
+          <p class="form-help muted">When enabled, the camera writes an uninterrupted stream regardless of events. Otherwise, clips are recorded per detection rule (configured on the Zones page per object).</p>
         </div>
 
         <!-- Sound Tab -->

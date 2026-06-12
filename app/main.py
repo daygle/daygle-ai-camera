@@ -226,9 +226,7 @@ def camera_event_recording_config(settings: dict[str, Any]) -> dict[str, Any]:
     base = effective_recording_config()
     camera_recording = normalize_camera_recording_settings(settings.get('recording'))
     base.update({
-        'enabled': camera_recording['enabled'],
         'continuous': camera_recording['continuous'],
-        'record_on_alert': camera_recording['record_on_alert'],
         'mode': 'continuous' if camera_recording['continuous'] else 'motion',
     })
     return base
@@ -509,8 +507,6 @@ def default_camera_detection_settings() -> dict[str, Any]:
 
 def default_camera_recording_settings() -> dict[str, Any]:
     return {
-        'enabled': True,
-        'record_on_alert': True,
         'continuous': False,
     }
 
@@ -618,8 +614,6 @@ def normalize_camera_recording_settings(settings: Any) -> dict[str, Any]:
     recording = default_camera_recording_settings()
     if isinstance(settings, dict):
         recording.update(settings)
-    recording['enabled'] = normalize_bool_setting(recording.get('enabled'), True)
-    recording['record_on_alert'] = normalize_bool_setting(recording.get('record_on_alert'), True)
     recording['continuous'] = normalize_bool_setting(recording.get('continuous'), False)
     return recording
 
@@ -1542,7 +1536,7 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
     if should_record and cam_settings:
         stream_url = build_stream_url(cam_settings)
         if stream_url:
-            cam_rec_config = {**camera_event_recording_config(cam_settings), 'record_on_alert': True}
+            cam_rec_config = camera_event_recording_config(cam_settings)
             if recording_service.enabled_for(cam_rec_config):
                 recording_service.prime_rtsp_prebuffer(
                     stream_url=stream_url,
@@ -4831,6 +4825,30 @@ async def restore_database(request: Request, file: UploadFile = File(...)):
 @app.get('/api/cameras')
 def list_cameras():
     return {'cameras': effective_cameras_config()}
+
+
+@app.get('/api/cameras/health')
+def cameras_health():
+    with _camera_health_lock:
+        states = dict(_camera_health_state)
+    online_count = 0
+    offline_count = 0
+    result = {}
+    for cam_id, state in states.items():
+        online = state.get('online', True)
+        result[cam_id] = {'online': online}
+        if online:
+            online_count += 1
+        else:
+            offline_count += 1
+    return {
+        'cameras': result,
+        'summary': {
+            'online': online_count,
+            'offline': offline_count,
+            'total': online_count + offline_count,
+        },
+    }
 
 
 @app.put('/api/cameras')

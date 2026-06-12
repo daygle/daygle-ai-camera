@@ -38,7 +38,7 @@ class RecordingService:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.recording_config.get('enabled', True)) and self.mode != 'off'
+        return self.mode != 'off'
 
     @property
     def mode(self) -> str:
@@ -46,9 +46,8 @@ class RecordingService:
         return mode if mode in self.VALID_MODES else 'motion'
 
     def enabled_for(self, recording_config: dict[str, Any] | None = None) -> bool:
-        config = recording_config or self.recording_config
-        mode = self.mode_for(config)
-        return bool(config.get('enabled', True)) and mode != 'off'
+        mode = self.mode_for(recording_config)
+        return mode != 'off'
 
     def mode_for(self, recording_config: dict[str, Any] | None = None) -> str:
         config = recording_config or self.recording_config
@@ -76,15 +75,16 @@ class RecordingService:
 
         if bool(config.get('continuous')) or mode == 'continuous':
             return True, 'continuous', labels[0] if labels else None
-        if bool(config.get('record_on_alert', False)):
-            alert_detections = [detection for detection in detections if detection.get('alert_triggered') and detection.get('label')]
-            alert_labels = [str(detection.get('label') or '').lower() for detection in alert_detections]
-            if alert_labels:
-                if alert_labels[0] == 'motion':
-                    specific_label = preferred_label(detections)
-                    return True, 'alert', specific_label or 'motion'
-                return True, 'alert', alert_labels[0]
-            return False, 'none', None
+        # Alert-triggered recording is always enabled (formerly controlled by
+        # record_on_alert, which was removed as it's handled per-zone via
+        # record_on_detect in object rules).
+        alert_detections = [detection for detection in detections if detection.get('alert_triggered') and detection.get('label')]
+        alert_labels = [str(detection.get('label') or '').lower() for detection in alert_detections]
+        if alert_labels:
+            if alert_labels[0] == 'motion':
+                specific_label = preferred_label(detections)
+                return True, 'alert', specific_label or 'motion'
+            return True, 'alert', alert_labels[0]
         if mode == 'motion' and labels:
             specific_label = preferred_label(detections)
             if specific_label:

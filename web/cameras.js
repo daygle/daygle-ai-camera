@@ -17,6 +17,7 @@ const stats = {
   recording: document.getElementById('statRecordingOn'),
   zones: document.getElementById('statWithZones'),
   backends: document.getElementById('statBackends'),
+  health: document.getElementById('statCameraHealth'),
 };
 const filter = {
   text: document.getElementById('cameraFilter'),
@@ -51,16 +52,12 @@ function cameraStatusBadge(camera) {
 }
 
 function cameraRecordingChips(camera) {
-  const recEnabled = camera.recording?.enabled !== false;
   const continuous = camera.recording?.continuous === true;
-  const alertClips = camera.recording?.record_on_alert !== false;
   const chips = [];
-  if (recEnabled) {
-    chips.push('<span class="chip chip-green">Recording On</span>');
-    if (alertClips) chips.push('<span class="chip">Alert Clips</span>');
-    if (continuous) chips.push('<span class="chip">Continuous</span>');
+  if (continuous) {
+    chips.push('<span class="chip chip-green">Recording On</span><span class="chip">Continuous</span>');
   } else {
-    chips.push('<span class="chip chip-dim">Recording Off</span>');
+    chips.push('<span class="chip chip-green">Recording On</span>');
   }
   return chips.join('');
 }
@@ -200,8 +197,9 @@ function renderGrid() {
 function updateStats() {
   if (stats.total) stats.total.textContent = String(cameras.length);
   if (stats.recording) {
-    const on = cameras.filter((c) => c.recording?.enabled !== false).length;
-    stats.recording.textContent = String(on);
+    const continuous = cameras.filter((c) => c.recording?.continuous === true).length;
+    const alertBased = cameras.length - continuous;
+    stats.recording.textContent = `${alertBased} / ${continuous}`;
   }
   if (stats.zones) {
     const withZones = cameras.filter((c) => (c.detection?.zones || []).length > 0).length;
@@ -266,8 +264,6 @@ function fillModal(camera, index) {
   document.getElementById('editFps').value = camera.fps || 15;
   const staleVal = camera.stale_frame_grabs;
   document.getElementById('editStaleFrameGrabs').value = staleVal != null ? staleVal : '';
-  document.getElementById('editRecordingEnabled').value = String(camera.recording?.enabled !== false);
-  document.getElementById('editRecordOnAlert').value = String(camera.recording?.record_on_alert !== false);
   document.getElementById('editContinuous').value = String(camera.recording?.continuous === true);
 
   const manual = camera.backend === 'rtsp';
@@ -285,7 +281,7 @@ function fillModal(camera, index) {
 
 function openEditModal(index) {
   const camera = index === null
-    ? { id: `camera-${cameras.length + 1}`, name: `Camera ${cameras.length + 1}`, backend: 'onvif', port: 554, path: 'stream1', width: 1280, height: 720, fps: 15, recording: { enabled: true, record_on_alert: true, continuous: false }, detection: { sound: { enabled: false, rules: [] } } }
+    ? { id: `camera-${cameras.length + 1}`, name: `Camera ${cameras.length + 1}`, backend: 'onvif', port: 554, path: 'stream1', width: 1280, height: 720, fps: 15, recording: { continuous: false }, detection: { sound: { enabled: false, rules: [] } } }
     : cameras[index];
   fillModal(camera, index);
   openModal(modal);
@@ -310,8 +306,6 @@ function collectModalData() {
       ? parseInt(document.getElementById('editStaleFrameGrabs').value, 10)
       : null,
     recording: {
-      enabled: document.getElementById('editRecordingEnabled').value === 'true',
-      record_on_alert: document.getElementById('editRecordOnAlert').value === 'true',
       continuous: document.getElementById('editContinuous').value === 'true',
     },
     detection: {
@@ -560,4 +554,26 @@ async function loadCameras() {
   renderGrid();
 }
 
+async function updateHealthStats() {
+  try {
+    const data = await api('/api/cameras/health');
+    const s = data.summary;
+    if (stats.health) {
+      const online = s.online || 0;
+      const offline = s.offline || 0;
+      stats.health.textContent = `${online} / ${offline}`;
+      // Color the stat based on health
+      if (offline > 0) {
+        stats.health.style.color = 'var(--danger-color, #e74c3c)';
+      } else if (online > 0) {
+        stats.health.style.color = 'var(--success-color, #2ecc71)';
+      }
+    }
+  } catch {
+    // silently ignore — health endpoint may not exist on older versions
+  }
+}
+
 loadCameras().catch((err) => setMessage(err.message, true));
+setInterval(updateHealthStats, 10000);
+updateHealthStats();
