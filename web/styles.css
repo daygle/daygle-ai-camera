@@ -2584,3 +2584,62 @@ input[type="file"] { padding: 10px; }
 }
 .timeline-card .status-panel { margin: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
+/* ─── Custom tooltip ──────────────────────────────────────────────────────── */
+[data-tooltip] {
+  position: relative;
+}
+
+.chip[data-tooltip] {
+  cursor: help;
+}
+
+[data-tooltip]:not([data-tooltip=""])::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background: rgba(18, 25, 42, 0.98);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.5;
+  white-space: pre-line;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 80;
+  min-width: max-content;
+  max-width: 280px;
+  text-transform: none;
+  letter-spacing: normal;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+}
+
+/* Small arrow / pointer below the tooltip bubble */
+[data-tooltip]:not([data-tooltip=""])::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 5px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: rgba(255, 255, 255, 0.12);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  z-index: 80;
+}
+
+[data-tooltip]:not([data-tooltip=""]):hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+[data-tooltip]:not([data-tooltip=""]):hover::before {
+  opacity: 1;
+}
+

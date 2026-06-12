@@ -115,8 +115,10 @@ function recordingDisplayTrigger(recording) {
   const hasDetections = detectionLabels.length > 0;
 
   if (triggerType === 'motion' || triggerType === 'alert' || triggerType === 'human' || triggerType === 'object') {
-    // Prefer concrete object labels over generic trigger type names.
-    if (firstSpecificDetection) return firstSpecificDetection;
+    // Show ALL concrete object labels joined by · on the pill (e.g. "Person · Cat · Dog").
+    if (detectionLabels.length) {
+      return detectionLabels.map((label) => titleCase(label)).join(' · ');
+    }
     // If detections exist and none are specific, trust the detection set and keep this as motion.
     if (!hasDetections && triggerLabel && !GENERIC_TRIGGER_LABELS.has(triggerLabel)) return `${triggerType} · ${triggerLabel}`;
     return triggerType;
@@ -210,13 +212,16 @@ function renderRecordings(recordings) {
     const mediaReady = recording.media_ready !== false;
     const trigger = recordingDisplayTrigger(recording);
     const triggerPillClass = triggerBadgeClass(trigger);
+    const triggerTooltip = recordingDetectionSummary(recording)
+      .map((d) => `${titleCase(d.label)} · ${Math.round(d.confidence * 100)}%`)
+      .join('\n');
     return `
       <div class="item recording-row" data-recording-row="${recording.id}">
         <div class="recording-row-main">
           <div class="recording-row-header">
             <div class="recording-row-title">
               <span class="recording-row-id">Recording #${recording.id}</span>
-              <span class="chip recording-row-trigger ${triggerPillClass}">${escapeHtml(titleCase(trigger))}</span>
+              <span class="chip recording-row-trigger ${triggerPillClass}" data-tooltip="${escapeHtml(triggerTooltip)}">${escapeHtml(titleCase(trigger))}</span>
             </div>
             <div class="recording-row-when">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>

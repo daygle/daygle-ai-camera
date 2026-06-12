@@ -3787,3 +3787,136 @@ def test_delete_event_endpoint(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+
+def test_multi_object_recording_labels_and_trigger_type(tmp_path, monkeypatch):
+    """Verify a recording with 3+ diverse object detections stores ALL labels
+    in recording_labels, returns them in list/detail/timeline API responses,
+    and maintains the correct trigger_type after the 'object' type change."""
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+        def detect_image(self, _image_bytes, confidence=None):
+            return []
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    server, thread, base_url = _server(app)
+    admin = LocalClient(base_url)
+    try:
+        _setup_admin(admin)
+        _login(admin)
+
+        # Create event with 3 diverse object detections
+        detections = [
+            {'label': 'person', 'confidence': 0.92, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.3, 'height': 0.4}},
+            {'label': 'cat', 'confidence': 0.78, 'box': {'x': 0.5, 'y': 0.5, 'width': 0.2, 'height': 0.2}},
+            {'label': 'dog', 'confidence': 0.45, 'box': {'x': 0.3, 'y': 0.3, 'width': 0.25, 'height': 0.3}},
+        ]
+        event_time = datetime.now(timezone.utc).isoformat()
+        snapshot_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'test.png')
+        event_id = main.database.add_event(
+            created_at=event_time,
+            source='motion',
+            snapshot_path=snapshot_path,
+            detections=detections,
+            alert_triggered=True,
+            metadata={'camera_id': 'front', 'camera_name': 'Front'},
+        )
+
+        # Attach recording - should store ALL labels in recording_labels
+        recording_id = main.attach_event_recording(event_id, event_time, 'upload', detections)
+        assert recording_id is not None
+
+        # Verify recording list endpoint
+        status, _, recordings = admin.request('/api/recordings')
+        assert status == 200
+        assert len(recordings) >= 1
+        recording = next(r for r in recordings if r['id'] == recording_id)
+
+        # trigger_label should be the highest-confidence detection (person at 0.92)
+        assert recording['trigger_label'] == 'person', f'Expected person, got {recording["trigger_label"]}'
+        # trigger_type should be 'object' (not 'alert') since mode is 'motion' with specific labels
+        assert recording['trigger_type'] == 'object', f'Expected object, got {recording["trigger_type"]}'
+        # labels must contain ALL non-generic detections
+        assert sorted(recording['labels']) == ['cat', 'dog', 'person'], f'Got {sorted(recording["labels"])}'
+
+        # Verify recording detail endpoint
+        status, _, detail = admin.request(f'/api/recordings/{recording_id}')
+        assert status == 200
+        assert sorted(detail['labels']) == ['cat', 'dog', 'person'], f'Got {sorted(detail["labels"])}'
+
+        # Verify filtering by EACH label works
+        for label in ('cat', 'dog', 'person'):
+            status, _, filtered = admin.request(f'/api/recordings?label={label}')
+            assert status == 200
+            assert any(r['id'] == recording_id for r in filtered), f'Recording should match label={label}'
+
+        # Verify filtering by non-existent label returns empty
+        status, _, unknown_filter = admin.request('/api/recordings?label=elephant')
+        assert status == 200
+        assert not any(r['id'] == recording_id for r in unknown_filter)
+
+        # Verify timeline endpoint returns correct color_key
+        target_day = event_time[:10]
+        status, _, timeline = admin.request(f'/api/recordings/timeline?camera_id=front&day={target_day}')
+        assert status == 200
+        timeline_segment = next((s for s in timeline.get('recordings', []) if s['id'] == recording_id), None)
+        if timeline_segment:
+            assert timeline_segment['color_key'] == 'person'
+            assert timeline_segment['color_label'] == 'person'
+
+        # Verify extend_active_rtsp_recording adds new labels without duplicates
+        now = datetime.now(timezone.utc)
+        file_path = tmp_path / 'data' / 'recordings' / 'extend-multi.mp4'
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(b'placeholder')
+
+        ext_recording_id = main.database.add_recording(
+            event_id=None,
+            camera_id='camera-1',
+            started_at=(now - timedelta(seconds=5)).isoformat(),
+            ended_at=now.isoformat(),
+            duration_seconds=5.0,
+            file_path=str(file_path),
+            thumbnail_path=None,
+            source='rtsp',
+            created_at=now.isoformat(),
+            trigger_type='motion',
+            trigger_label='motion',
+        )
+
+        with main.active_rtsp_recordings_lock:
+            main.active_rtsp_recordings['camera-1'] = {
+                'recording_id': ext_recording_id,
+                'start_capture_ts': (now - timedelta(seconds=5)).timestamp(),
+                'capture_deadline_ts': now.timestamp(),
+                'max_capture_deadline_ts': (now + timedelta(seconds=20)).timestamp(),
+            }
+
+        # Extend with new detections that include a NEW label (bicycle) + existing dog
+        extended_id = main.extend_active_rtsp_recording(
+            camera_id='camera-1',
+            event_time=now.isoformat(),
+            recording_config={'enabled': True, 'mode': 'motion', 'record_on_alert': True, 'extension_step_seconds': 10},
+            detections=[
+                {'label': 'bicycle', 'confidence': 0.85, 'alert_triggered': True},
+                {'label': 'dog', 'confidence': 0.75, 'alert_triggered': True},
+            ],
+        )
+        assert extended_id == ext_recording_id
+
+        updated_ext = main.database.get_recording(ext_recording_id)
+        assert updated_ext is not None
+        assert 'bicycle' in updated_ext['labels']
+        assert 'dog' in updated_ext['labels']
+
+        with main.active_rtsp_recordings_lock:
+            main.active_rtsp_recordings.pop('camera-1', None)
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)

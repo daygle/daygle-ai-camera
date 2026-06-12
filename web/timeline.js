@@ -299,6 +299,23 @@ function recordingTypeLabel(recording) {
   return triggerLabel || triggerType;
 }
 
+/**
+ * Returns a compact timeline label for multi-object recordings:
+ * shows the primary label with a count of extra objects, e.g. "Person +2".
+ * Falls back to recordingTypeLabel() for single-object or generic triggers.
+ */
+function timelineSegmentLabel(recording) {
+  const primaryLabel = recordingTypeLabel(recording);
+  const detectionLabels = recordingDetectionLabels(recording);
+  const extraCount = detectionLabels.filter(
+    (label) => !GENERIC_TIMELINE_LABELS.has(label)
+  ).length - 1;
+  if (extraCount > 0) {
+    return `${primaryLabel} +${extraCount}`;
+  }
+  return primaryLabel;
+}
+
 function recordingColorKey(recording) {
   return recordingTypeLabel(recording).toLowerCase();
 }
@@ -586,7 +603,7 @@ function renderTimeline(payload) {
         title="${escapeHtml(`${recordingTriggerSummary(recording)} · ${formatClock(origStart)} · ${formatDuration(recording.duration_seconds)}${recordingConfidenceText(recording)}`)}"
         style="left:${left}%;width:${width}%;top:${recording.rowIndex * TIMELINE_ROW_HEIGHT + 8}px;--segment-color:${color};"
       >
-        <span class="timeline-segment-label">${escapeHtml(recordingTypeLabel(recording))}</span>
+        <span class="timeline-segment-label">${escapeHtml(timelineSegmentLabel(recording))}</span>
         <span class="timeline-segment-time">${escapeHtml(formatClock(origStart))}</span>
       </button>
     `;
@@ -601,7 +618,7 @@ function renderRecordingList(recordings) {
   els.timelineRecordings.innerHTML = recordings.map((recording) => {
     const activeClass = Number(recording.id) === Number(state.activeRecordingId) ? ' active' : '';
     const color = colorForKey(recordingColorKey(recording));
-    const label = titleCase(recordingTypeLabel(recording));
+    const label = titleCase(timelineSegmentLabel(recording));
     const start = formatClock(recording.timeline_start_seconds || 0);
     const end = formatClock(recording.timeline_end_seconds || 0);
     const duration = formatDuration(recording.duration_seconds);
@@ -611,8 +628,11 @@ function renderRecordingList(recordings) {
       .filter((d) => d.confidence > 0)
       .map((d) => `<span class="timeline-recording-confidence" title="${escapeHtml(titleCase(d.label))} confidence">${escapeHtml(titleCase(d.label))} <strong>${Math.round(d.confidence * 100)}%</strong></span>`)
       .join('');
+    const tooltip = detections
+      .map((d) => `${titleCase(d.label)} · ${Math.round(d.confidence * 100)}%`)
+      .join('\n');
     return `
-      <button class="timeline-recording-item${activeClass}" type="button" data-recording-id="${recording.id}">
+      <button class="timeline-recording-item${activeClass}" type="button" data-recording-id="${recording.id}" data-tooltip="${escapeHtml(tooltip)}">
         <span class="timeline-recording-color" style="background:${color}"></span>
         <span class="timeline-recording-main">
           <strong>${escapeHtml(label)}</strong>
