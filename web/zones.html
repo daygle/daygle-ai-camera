@@ -70,30 +70,7 @@
       </article>
     </section>
 
-    <section class="card zones-controls-card">
-      <div class="settings-section-header">
-        <div class="settings-section-icon" aria-hidden="true">🎛️</div>
-        <div>
-          <h2>Editor Controls</h2>
-          <p class="settings-section-subtitle">Pick a camera and choose how to add a monitoring area.</p>
-        </div>
-      </div>
-      <div class="zones-controls-row">
-        <label class="zones-control-camera">
-          <span>Camera</span>
-          <select id="cameraSelect" aria-label="Select camera"></select>
-          <span class="field-help">All edits and overlays apply to the selected camera. Default: first camera</span>
-        </label>
-        <div class="zones-control-actions">
-          <button id="addZoneBtn" type="button">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
-            Draw Area
-          </button>
-          <button id="fullFrameZoneBtn" class="secondary" type="button">Full Frame</button>
-          <button id="saveZonesBtn" class="secondary" type="button">Save Areas</button>
-        </div>
-      </div>
-    </section>
+
 
     <div class="zones-layout">
       <div class="zones-feed-col">
@@ -109,7 +86,13 @@
             <img id="liveFrame" class="live-frame" alt="Live camera footage" />
             <div id="zoneOverlay" class="zone-overlay" aria-label="Monitoring areas"></div>
             <div id="liveStatus" class="live-status-pill">Connecting to camera…</div>
-          </div>
+            <div class="zone-frame-toolbar">
+              <button id="addZoneBtn" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+                Draw Area
+              </button>
+              <button id="fullFrameZoneBtn" class="secondary" type="button">Full Frame</button>
+            </div>
         </div>
         <div id="liveDetectionStatus" class="live-detection-status">Live AI status waiting for frames.</div>
       </div>
@@ -117,11 +100,15 @@
         <div class="settings-section-header">
           <div class="settings-section-icon" aria-hidden="true">🗺️</div>
           <div>
-            <h2>Monitoring Areas</h2>
-            <p class="settings-section-subtitle">Place corner dots on the footage, then click the first dot to close the area.</p>
-          </div>
+          <h2>Monitoring Areas</h2>
+          <p class="settings-section-subtitle">Pick a camera, then place corner dots on the footage to define monitoring areas.</p>
         </div>
-        <div id="zoneList" class="list zones-list"></div>
+      </div>
+      <label class="zones-editor-camera">
+        <span>Camera</span>
+        <select id="cameraSelect" aria-label="Select camera"></select>
+      </label>
+      <div id="zoneList" class="list zones-list"></div>
 
         <div class="camera-motion-settings">
           <div class="settings-section-header">
@@ -145,7 +132,9 @@
           <div id="objectDetectionRules"></div>
         </div>
 
-
+        <div class="zone-editor-footer">
+          <button id="saveZonesBtn" type="button">Save Area</button>
+        </div>
       </section>
     </div>
   </main>

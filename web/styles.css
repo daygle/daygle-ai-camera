@@ -735,15 +735,20 @@ input[type="file"] { padding: 10px; }
 .zone-row.disabled { opacity: .62; }
 .zone-row label,
 .zone-object-rule label { display: grid; gap: 6px; color: var(--muted); font-weight: 800; }
-.zone-object-rules { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); margin-bottom: 1.2rem; }
-.zone-object-rules-header {
+.zone-object-rules { display: grid; gap: 10px; margin-bottom: 1.2rem; }
+.zone-name-card {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: .4rem;
+  padding: .6rem .8rem;
+  margin-bottom: .6rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(71, 214, 255, 0.06);
+  font-weight: 800;
+  font-size: .9em;
+  color: var(--accent);
 }
-.zone-object-rules-header strong { font-size: 14px; }
+.zone-object-rules-header { display: flex; align-items: center; gap: 10px; margin-bottom: .5rem; }
 .zone-object-rules-header select { max-width: 220px; }
 .zone-object-rule {
   display: grid;
@@ -2520,41 +2525,23 @@ input[type="file"] { padding: 10px; }
 
 /* ─── Zones page ────────────────────────────────────────────────────────── */
 .zones-stats { margin-top: 4px; }
-.zones-controls-card { padding: 18px 22px 20px; }
-.zones-controls-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 18px;
-  align-items: end;
-  margin-top: 4px;
-}
-.zones-control-camera { display: grid; gap: 6px; min-width: 0; }
-.zones-control-camera select {
-  display: block;
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text);
-  padding: 10px 14px;
-  outline: none;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 700;
-}
-.zones-control-actions {
+/* ─── Zone frame toolbar (overlaid on footage) ──────────────────────── */
+.zone-frame-toolbar {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 8px;
+  z-index: 3;
 }
-.zones-control-actions button {
+.zone-frame-toolbar button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  font-size: 13px;
+  padding: 9px 13px;
+  border-radius: 10px;
+  font-size: 12px;
+  backdrop-filter: blur(8px);
 }
 
 .zones-frame-card { margin-top: 0; }
@@ -2563,6 +2550,35 @@ input[type="file"] { padding: 10px; }
 .zones-frame-wrap .live-frame { height: min(60vh, 600px); min-height: 360px; }
 
 .zone-editor-card .form-grid + .list { margin-top: 16px; }
+
+/* Zone editor camera select */
+.zones-editor-camera {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+  color: var(--muted);
+  font-weight: 500;
+}
+.zones-editor-camera select {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* Zone editor footer — Save Area button */
+.zone-editor-footer {
+  margin-top: 1.5rem;
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+}
 .camera-recording-settings { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
 .camera-recording-settings h3 { margin: 0 0 12px; font-size: 15px; }
 
@@ -2615,10 +2631,12 @@ input[type="file"] { padding: 10px; }
   text-align: center;
 }
 .rule-table input[type="checkbox"] {
+  display: inline-block;
   width: 1rem;
   height: 1rem;
   cursor: pointer;
   accent-color: var(--success);
+  margin: 0;
 }
 .rule-table input[type="number"] {
   width: 4.8rem;
@@ -2652,20 +2670,9 @@ input[type="file"] { padding: 10px; }
   margin-bottom: .6rem;
 }
 
-.zone-object-rules-header {
-  display: flex;
-  align-items: center;
-  gap: .6rem;
-  margin-bottom: .4rem;
-}
-.zone-object-rules-header strong {
-  font-size: 14px;
-}
-
 @media (max-width: 760px) {
-  .zones-controls-row { grid-template-columns: 1fr; }
-  .zones-control-actions { width: 100%; }
-  .zones-control-actions button { flex: 1 1 120px; justify-content: center; }
+  .zone-frame-toolbar { gap: 6px; }
+  .zone-frame-toolbar button { padding: 7px 11px; font-size: 11px; }
 }
 
 /* ─── Timeline page ─────────────────────────────────────────────────────── */

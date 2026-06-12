@@ -756,15 +756,14 @@ function renderObjectDetectionRules() {
   container.innerHTML = zones.map((zone, zoneIndex) => {
     zone.object_rules = normalizeObjectRules(zone);
     const zoneName = escapeHtml(zone.name || `Zone ${zoneIndex + 1}`);
-    const disabledClass = zone.enabled === false ? ' muted' : '';
     const addOptions = objectRuleOptions('');
     const rulesHtml = zone.object_rules.length
       ? renderObjectRules(zone, zoneIndex)
       : '<p class="muted empty-message">No rules yet. Add an object below.</p>';
     return `
       <div class="zone-object-rules" data-zone-rules-for="${zoneIndex}">
+        <div class="zone-name-card">${zoneName}</div>
         <div class="zone-object-rules-header">
-          <strong class="${disabledClass}">${zoneName}</strong>
           <select data-add-zone-rule="${zoneIndex}" class="rule-add-select">${addOptions}</select>
         </div>
         ${rulesHtml}
