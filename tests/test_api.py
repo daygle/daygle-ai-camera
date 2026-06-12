@@ -2685,23 +2685,52 @@ def test_object_detection_enabled_flag_gates_object_detections(tmp_path, monkeyp
     assert main.filter_detections_for_camera(detections, disabled_settings) == []
 
 
-def test_motion_enabled_flag_gates_motion_detections(tmp_path, monkeypatch):
-    """Setting motion_enabled=False must suppress all motion zone detections."""
+def test_zone_motion_rule_gates_motion_detections(tmp_path, monkeypatch):
+    """Motion is gated per zone: a disabled zone motion rule suppresses motion detections."""
     _app, _database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
 
-    zones = main.normalize_monitoring_zones([
-        {'id': 'z1', 'name': 'Zone 1', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
-         'monitor_motion': True, 'monitor_objects': False,
-         'object_rules': [{'label': 'motion', 'min_confidence': 0.3}]},
-    ])
+    def make_zones(rule_enabled):
+        return main.normalize_monitoring_zones([
+            {'id': 'z1', 'name': 'Zone 1', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
+             'monitor_motion': True, 'monitor_objects': False,
+             'object_rules': [{'label': 'motion', 'min_confidence': 0.3, 'enabled': rule_enabled}]},
+        ])
 
-    enabled_settings = {'detection': {'motion_enabled': True, 'zones': zones}}
-    disabled_settings = {'detection': {'motion_enabled': False, 'zones': zones}}
+    enabled_settings = {'detection': {'zones': make_zones(True)}}
+    disabled_settings = {'detection': {'zones': make_zones(False)}}
 
     # High-confidence motion frame
     assert main.zone_motion_detections([], enabled_settings, frame_motion_confidence=0.9) != []
     assert main.zone_motion_detections([], disabled_settings, frame_motion_confidence=0.9) == []
+
+
+def test_legacy_camera_motion_disabled_migrates_to_zone_rules(tmp_path, monkeypatch):
+    """Cameras stored with the removed camera-level motion switch off must keep
+    motion off after the upgrade by disabling each zone's motion rule."""
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    def legacy_zone():
+        return {'id': 'z1', 'name': 'Zone 1', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
+                'object_rules': [{'label': 'motion', 'min_confidence': 0.3}]}
+
+    for legacy_detection in (
+        {'motion_enabled': False, 'zones': [legacy_zone()]},
+        {'motion': {'enabled': False}, 'zones': [legacy_zone()]},
+    ):
+        camera = main.normalize_camera_settings({'id': 'cam-1', 'detection': legacy_detection})
+        detection = camera['detection']
+        assert 'motion' not in detection
+        assert 'motion_enabled' not in detection
+        assert detection['zones'][0]['monitor_motion'] is False
+        motion_rule = next(r for r in detection['zones'][0]['object_rules'] if r['label'] == 'motion')
+        assert motion_rule['enabled'] is False
+        assert main.zone_motion_detections([], {'detection': detection}, frame_motion_confidence=0.9) == []
+
+    # Cameras without the legacy switch keep motion governed by the zone rule.
+    camera = main.normalize_camera_settings({'id': 'cam-2', 'detection': {'zones': [legacy_zone()]}})
+    assert camera['detection']['zones'][0]['monitor_motion'] is True
 
 
 def test_zone_spatial_filtering_blocks_detections_outside_zone(tmp_path, monkeypatch):

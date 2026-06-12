@@ -22,7 +22,6 @@ const liveEls = {
   cameraGrid: document.getElementById('cameraGrid'),
   zoneOverlay: document.getElementById('zoneOverlay'),
   zoneList: document.getElementById('zoneList'),
-  cameraMotionSettings: document.getElementById('cameraMotionSettings'),
   addZoneBtn: document.getElementById('addZoneBtn'),
   fullFrameZoneBtn: document.getElementById('fullFrameZoneBtn'),
   saveZonesBtn: document.getElementById('saveZonesBtn'),
@@ -179,14 +178,7 @@ function stopLiveRaf() {
 function cameraDetection() {
   selectedCamera.detection ||= { zones: [] };
   selectedCamera.detection.zones ||= [];
-  selectedCamera.detection.motion ||= { enabled: true, record_on_detect: true, email_enabled: true, push_enabled: false };
   return selectedCamera.detection;
-}
-
-function cameraMotion() {
-  const det = cameraDetection();
-  det.motion ||= { enabled: true, record_on_detect: true, email_enabled: true, push_enabled: false };
-  return det.motion;
 }
 
 function cameraRecording() {
@@ -634,7 +626,6 @@ function setSelectedCamera(cameraId) {
   updateZonesStats();
   if (isZonesPage) {
     renderZones();
-    renderMotionDetectionSettings();
   }
   refreshFrame();
   refreshDetectionStatus();
@@ -868,48 +859,6 @@ function bindRuleFields() {
         cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
       });
     });
-  });
-}
-
-function renderMotionDetectionSettings() {
-  if (!selectedCamera || !liveEls.cameraMotionSettings) return;
-  const motion = cameraMotion();
-  liveEls.cameraMotionSettings.innerHTML = `
-    <div style="overflow-x:auto">
-      <table class="rule-table">
-        <thead>
-          <tr>
-            <th>Type</th>
-            <th class="cell-center">Enabled</th>
-            <th class="cell-center">Record</th>
-            <th class="cell-center">Email</th>
-            <th class="cell-center">Push</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td class="cell-label">Motion</td>
-            <td class="cell-center"><input type="checkbox" data-motion-enabled="true" ${motion.enabled !== false ? 'checked' : ''} /></td>
-            <td class="cell-center"><input type="checkbox" data-motion-record="true" ${motion.record_on_detect !== false ? 'checked' : ''} /></td>
-            <td class="cell-center"><input type="checkbox" data-motion-email="true" ${motion.email_enabled ? 'checked' : ''} /></td>
-            <td class="cell-center"><input type="checkbox" data-motion-push="true" ${motion.push_enabled ? 'checked' : ''} /></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  `;
-  updateZonesStats();
-  liveEls.cameraMotionSettings.querySelectorAll('[data-motion-enabled]').forEach((cb) => {
-    cb.addEventListener('change', () => { cameraMotion().enabled = cb.checked; });
-  });
-  liveEls.cameraMotionSettings.querySelectorAll('[data-motion-record]').forEach((cb) => {
-    cb.addEventListener('change', () => { cameraMotion().record_on_detect = cb.checked; });
-  });
-  liveEls.cameraMotionSettings.querySelectorAll('[data-motion-email]').forEach((cb) => {
-    cb.addEventListener('change', () => { cameraMotion().email_enabled = cb.checked; });
-  });
-  liveEls.cameraMotionSettings.querySelectorAll('[data-motion-push]').forEach((cb) => {
-    cb.addEventListener('change', () => { cameraMotion().push_enabled = cb.checked; });
   });
 }
 
