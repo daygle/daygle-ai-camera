@@ -146,6 +146,7 @@ class OnnxYoloDetector:
         try:
             providers = ["CPUExecutionProvider"]
             session_options = ort.SessionOptions()
+            session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
             session_options.intra_op_num_threads = self._num_threads
             session_options.inter_op_num_threads = 1
             self.session = ort.InferenceSession(str(self.model_path), sess_options=session_options, providers=providers)
