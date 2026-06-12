@@ -1,5 +1,44 @@
 // Shared canvas overlay utilities used by live.js, recordings.js, and timeline.js.
 
+// ── Performance caches ─────────────────────────────────────────────────────
+// Caches the 2D context so getContext('2d') is called only once per canvas.
+const _ctxCache = new WeakMap();
+// Tracks which contexts have had their font/textBaseline/lineWidth set up.
+// Invalidated when the canvas is resized (which resets context state).
+const _fontSetupCache = new WeakSet();
+// Cache of measureText widths keyed by the display label string.
+// Labels like "Person 85%" are repeated across frames, so measuring once
+// avoids the expensive text-layout pass on every single frame.
+const _textWidthCache = new Map();
+
+function _getCachedContext(canvas) {
+  let ctx = _ctxCache.get(canvas);
+  if (!ctx) {
+    ctx = canvas.getContext('2d');
+    if (ctx) _ctxCache.set(canvas, ctx);
+  }
+  return ctx;
+}
+
+function _ensureFontSetup(ctx) {
+  if (!_fontSetupCache.has(ctx)) {
+    ctx.font = '12px Inter, ui-sans-serif, system-ui, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 2;
+    _fontSetupCache.add(ctx);
+  }
+}
+
+function _measureTextWidth(ctx, text) {
+  let w = _textWidthCache.get(text);
+  if (w === undefined) {
+    w = ctx.measureText(text).width;
+    _textWidthCache.set(text, w);
+  }
+  return w;
+}
+// ── End caches ─────────────────────────────────────────────────────────────
+
 function normalizeDetectionBox(box, frameWidth, frameHeight) {
   const rawX = Number(box?.x ?? 0);
   const rawY = Number(box?.y ?? 0);
@@ -188,6 +227,10 @@ function resizeOverlayCanvas(canvas, referenceEl) {
   if (canvas.width !== w || canvas.height !== h) {
     canvas.width = w;
     canvas.height = h;
+    // Canvas resize resets context state (font, transform, etc.), so mark
+    // the font setup as needing re-application on the next draw.
+    const ctx = _getCachedContext(canvas);
+    if (ctx) _fontSetupCache.delete(ctx);
   }
 }
 
@@ -196,8 +239,11 @@ function resizeOverlayCanvas(canvas, referenceEl) {
 // Assumes the canvas has already been cleared by the caller.
 function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
   if (!canvas || !referenceEl || !detections?.length) return;
-  const ctx = canvas.getContext('2d');
+  const ctx = _getCachedContext(canvas);
   if (!ctx) return;
+  // Font is set once per context lifetime (resized canvases re-trigger it via
+  // _fontSetupCache invalidation in resizeOverlayCanvas).
+  _ensureFontSetup(ctx);
 
   const cssWidth = Math.max(1, referenceEl.clientWidth);
   const cssHeight = Math.max(1, referenceEl.clientHeight);
@@ -211,10 +257,6 @@ function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
   const renderHeight = srcH * scale;
   const offsetX = (cssWidth - renderWidth) / 2;
   const offsetY = (cssHeight - renderHeight) / 2;
-
-  ctx.font = '12px Inter, ui-sans-serif, system-ui, sans-serif';
-  ctx.textBaseline = 'middle';
-  ctx.lineWidth = 2;
 
   for (const detection of detections) {
     const box = detection?.box || detection || {};
@@ -234,7 +276,10 @@ function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
 
     const confidence = Math.round(Number(detection.confidence || 0) * 100);
     const label = `${String(detection.label || 'object')} ${confidence}%`;
-    const textWidth = ctx.measureText(label).width;
+    // measureText is cached per unique label string — it's the most expensive
+    // per-frame canvas operation. Labels like "Person 85%" repeat across
+    // frames, so we measure once and reuse.
+    const textWidth = _measureTextWidth(ctx, label);
     const labelHeight = 20;
     const labelWidth = textWidth + 12;
     const labelY = dy > labelHeight + 4 ? dy - labelHeight - 4 : dy + 4;
