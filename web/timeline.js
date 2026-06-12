@@ -168,12 +168,15 @@ function stopOverlayRaf() {
 
 function drawClipOverlay(mediaTime) {
   if (!els.clipOverlay || !els.clipPlayer) return;
+  if (!overlayEnabled) {
+    clearClipOverlay();
+    return;
+  }
   resizeOverlayCanvas(els.clipOverlay, els.clipPlayer);
   const context = els.clipOverlay.getContext('2d');
   if (!context) return;
   context.setTransform(1, 0, 0, 1, 0, 0);
   context.clearRect(0, 0, els.clipOverlay.width, els.clipOverlay.height);
-  if (!overlayEnabled) return;
 
   // Prefer the frame-accurate presentation timestamp from requestVideoFrameCallback
   // over currentTime, which lags the displayed frame by a pipeline stage or two.
@@ -930,7 +933,9 @@ els.clipPlayer.addEventListener('error', () => {
   els.clipPlayerStatus.textContent = messages[error?.code] || 'Unable to play this recording.';
 });
 
-['loadedmetadata', 'loadeddata', 'pause', 'seeked', 'timeupdate'].forEach((eventName) => {
+// timeupdate is intentionally omitted — the requestVideoFrameCallback/rAF loop
+// already draws the overlay on every frame during playback, making it redundant.
+['loadedmetadata', 'loadeddata', 'pause', 'seeked'].forEach((eventName) => {
   els.clipPlayer.addEventListener(eventName, drawClipOverlay);
 });
 
