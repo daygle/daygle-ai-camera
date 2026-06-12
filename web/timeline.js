@@ -209,7 +209,7 @@ function drawClipOverlay(vfcMediaTime) {
   if (typeof vfcMediaTime === 'number' && Number.isFinite(vfcMediaTime)) {
     playerTime = vfcMediaTime + _frameDuration;
   } else {
-    playerTime = Number(els.clipPlayer.currentTime || 0);
+    playerTime = Number(els.clipPlayer.currentTime || 0) + _frameDuration;
   }
 
   // The saved detection track replays the boxes the live monitor computed
