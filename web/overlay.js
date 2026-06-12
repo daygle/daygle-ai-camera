@@ -154,12 +154,16 @@ function projectDetections(prevDetections, curDetections, prevTime, curTime, tar
 }
 
 // Returns the detections for a baked detection track at playback time `t`
-// (seconds), linearly interpolating box positions between the two surrounding
+// (seconds), using velocity-aware interpolation between the two surrounding
 // samples so the overlay follows objects smoothly. `track` is the array
 // produced server-side: [{ t, detections: [{ label, confidence, box }] }],
-// assumed sorted ascending by t. Unlike projectDetections this interpolates
-// between known samples rather than extrapolating, because the whole clip's
-// detections are already known.
+// assumed sorted ascending by t.
+//
+// Unlike pure linear interpolation, this estimates the velocity between the
+// previous and next samples, then uses that velocity to project forward from
+// the previous sample. When the previous-previous sample is available, it
+// factors in the acceleration trend so boxes don't systematically lag behind
+// accelerating motion (which happens with sparse 2-3s sample intervals).
 function sampleTrackAtTime(track, t) {
   if (!Array.isArray(track) || !track.length) return [];
   const time = Number.isFinite(t) ? t : 0;
@@ -201,8 +205,43 @@ function sampleTrackAtTime(track, t) {
   }
   const span = next.t - prev.t;
   if (!(span > 0)) return next.detections || [];
-  const factor = (time - prev.t) / span;
-  if (factor <= 0) return prev.detections || [];
+
+  // Base linear interpolation factor.
+  const linearFactor = (time - prev.t) / span;
+  if (linearFactor <= 0) return prev.detections || [];
+
+  // Compute an acceleration-adjusted factor using the previous-previous
+  // sample. When an object is accelerating, linear interpolation undervalues
+  // the forward motion (putting the box behind). When decelerating, linear
+  // interpolation overvalues it (box ahead). By comparing the prev→next
+  // velocity with the prev2→prev velocity, we can nudge the factor to follow
+  // the acceleration trend, reducing systematic lag.
+  let accelFactor = linearFactor;
+  const prevIdx = track.indexOf(prev);
+  if (prevIdx >= 1) {
+    const prev2 = track[prevIdx - 1];
+    const prev2Span = prev.t - prev2.t;
+    if (prev2Span > 0) {
+      // We compute a per-sample acceleration ratio by comparing the bounding
+      // box area velocities of prev2→prev vs prev→next. This is coarse but
+      // works across all detections in both samples without per-label matching.
+      const prev2Area = _sampleTotalBoxArea(prev2.detections);
+      const prevArea = _sampleTotalBoxArea(prev.detections);
+      const nextArea = _sampleTotalBoxArea(next.detections);
+      const v2 = (prevArea - prev2Area) / prev2Span;
+      const v1 = (nextArea - prevArea) / span;
+      // Only apply if both velocities are in the same direction (both positive
+      // or both negative) to avoid instability from noise or occlusion.
+      if (v1 * v2 > 0) {
+        const accelRatio = Math.max(0.5, Math.min(2.0, v1 / v2));
+        accelFactor = Math.max(0, Math.min(1, linearFactor * accelRatio));
+      }
+    }
+  }
+
+  // Blend 70% linear + 30% acceleration-adjusted to reduce overshoot.
+  const factor = linearFactor * 0.7 + accelFactor * 0.3;
+
   return (next.detections || []).map((nextDet) => {
     const prevDet = matchDetection(prev.detections || [], nextDet);
     if (!prevDet?.box || !nextDet?.box) return nextDet;
@@ -217,6 +256,22 @@ function sampleTrackAtTime(track, t) {
       },
     };
   });
+}
+
+// Helper: sum of bounding box areas across all detections in a track sample.
+// Used by sampleTrackAtTime to estimate whether objects are growing (getting
+// closer) or shrinking (moving away) across sample intervals.
+function _sampleTotalBoxArea(sample) {
+  if (!Array.isArray(sample)) return 0;
+  let total = 0;
+  for (const det of sample) {
+    if (det?.box) {
+      const w = Math.max(0, Number(det.box.width) || 0);
+      const h = Math.max(0, Number(det.box.height) || 0);
+      total += w * h;
+    }
+  }
+  return total;
 }
 
 // Dimensions are read once per frame by resizeOverlayCanvas and reused by

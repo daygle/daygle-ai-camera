@@ -203,9 +203,8 @@ function drawClipOverlay(vfcMediaTime) {
   // Use the VFC-provided mediaTime (exact frame PTS) and project one frame
   // ahead. This compensates for the inherent 1-frame delay between VFC
   // firing (after the frame was sent to compositor) and the overlay paint
-  // being displayed (on the next frame). Falls back to currentTime for the
-  // rAF path or when VFC isn't available (rAF fires before compositing,
-  // so no forward projection is needed).
+  // being displayed (on the next frame). Falls back to currentTime (with
+  // forward projection) for the rAF path or when VFC isn't available.
   let playerTime;
   if (typeof vfcMediaTime === 'number' && Number.isFinite(vfcMediaTime)) {
     playerTime = vfcMediaTime + _frameDuration;
