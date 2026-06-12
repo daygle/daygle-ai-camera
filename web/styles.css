@@ -721,7 +721,7 @@ input[type="file"] { padding: 10px; }
 .close-draft-point:active { cursor: pointer; }
 .zones-hero-controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; align-self: flex-end; }
 .zones-hero-controls label { display: flex; align-items: center; gap: 8px; }
-.zones-layout { display: grid; grid-template-columns: 1fr; gap: 18px; align-items: start; }
+.zones-layout { display: grid; grid-template-columns: 1fr; gap: 28px; align-items: start; }
 .zones-shell .live-frame { height: min(68vh, 720px); }
 .zone-editor-card { margin-top: 18px; }
 .zones-layout .zone-editor-card { margin-top: 0; }
@@ -2528,11 +2528,11 @@ input[type="file"] { padding: 10px; }
 /* ─── Zone frame toolbar (overlaid on footage) ──────────────────────── */
 .zone-frame-toolbar {
   position: absolute;
-  left: 18px;
+  right: 18px;
   bottom: 18px;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: flex-end;
   gap: 6px;
   z-index: 3;
 }
