@@ -30,6 +30,8 @@ from urllib.parse import parse_qs, quote, urlsplit, urlunsplit
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from app.alerts import AlertEngine
 from app.auth import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, AuthError, AuthService, utc_now
@@ -2801,15 +2803,21 @@ def safe_backup_timestamp() -> str:
 
 def create_database_backup(prefix: str = 'daygle-database') -> Path:
     backup_path = backup_directory() / f'{prefix}-{safe_backup_timestamp()}-{secrets.token_hex(4)}.sqlite3'
-    source = sqlite3.connect(database.database_path)
     try:
-        destination = sqlite3.connect(backup_path)
+        source = sqlite3.connect(database.database_path)
         try:
-            source.backup(destination)
+            destination = sqlite3.connect(backup_path)
+            try:
+                source.backup(destination)
+            finally:
+                destination.close()
         finally:
-            destination.close()
-    finally:
-        source.close()
+            source.close()
+    except BaseException:
+        # Never leave a partial snapshot behind — a truncated .sqlite3 file in
+        # the backups directory looks like a usable backup but is not.
+        backup_path.unlink(missing_ok=True)
+        raise
     return backup_path
 
 
@@ -2831,6 +2839,30 @@ def validate_restore_database(path: Path) -> None:
             db.close()
     except sqlite3.DatabaseError as exc:
         raise HTTPException(status_code=400, detail='Uploaded file is not a valid SQLite database.') from exc
+
+
+# Serialises restores: running two at once would interleave page copies into
+# the live database file and corrupt it.
+DATABASE_RESTORE_LOCK = threading.Lock()
+
+
+def overwrite_database_from_file(restore_source: Path) -> None:
+    # Use the sqlite3 backup API to restore in-place rather than
+    # shutil.move, which fails on Windows when the database file is open
+    # (WAL mode keeps the file locked). This copies page-by-page into the
+    # existing file, then WAL data is automatically truncated on reconnect.
+    source = sqlite3.connect(str(restore_source))
+    try:
+        destination = sqlite3.connect(str(database.database_path))
+        try:
+            source.backup(destination)
+            checkpoint = destination.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
+            if checkpoint and checkpoint[0] != 0:
+                logger.warning('Database restore WAL checkpoint returned error code %s', checkpoint[0])
+        finally:
+            destination.close()
+    finally:
+        source.close()
 
 
 def refresh_runtime_after_database_restore() -> None:
@@ -4397,11 +4429,15 @@ def backup_database(request: Request):
     require_admin(request)
     backup_path = create_database_backup()
     write_audit_log(request, 'backup', 'database', details={'filename': backup_path.name})
+    # The snapshot only exists to feed this download; delete it once it has
+    # been sent so repeated downloads cannot grow data/backups unbounded.
+    # Pre-restore safety backups are the ones kept on disk.
     return FileResponse(
         backup_path,
         media_type='application/vnd.sqlite3',
         filename=backup_path.name,
         headers={'Cache-Control': 'no-store'},
+        background=BackgroundTask(backup_path.unlink, missing_ok=True),
     )
 
 
@@ -4411,6 +4447,8 @@ async def restore_database(request: Request, file: UploadFile = File(...)):
     filename = Path(file.filename or '').name
     if not filename:
         raise HTTPException(status_code=400, detail='Choose a SQLite database backup file to restore.')
+    if not DATABASE_RESTORE_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail='Another database restore is already in progress.')
     restore_temp = database.database_path.parent / f'.restore-{secrets.token_hex(8)}.sqlite3'
     try:
         with restore_temp.open('wb') as handle:
@@ -4421,28 +4459,15 @@ async def restore_database(request: Request, file: UploadFile = File(...)):
                 handle.write(chunk)
         if restore_temp.stat().st_size == 0:
             raise HTTPException(status_code=400, detail='Uploaded database backup is empty.')
-        validate_restore_database(restore_temp)
-        safety_backup = create_database_backup(prefix='pre-restore-daygle-database')
-        # Use the sqlite3 backup API to restore in-place rather than
-        # shutil.move, which fails on Windows when the database file is open
-        # (WAL mode keeps the file locked). This copies page-by-page into the
-        # existing file, then WAL data is automatically truncated on reconnect.
+        # All sqlite work runs in the threadpool: copying a large database
+        # page-by-page on the event loop would stall every other request.
+        await run_in_threadpool(validate_restore_database, restore_temp)
+        safety_backup = await run_in_threadpool(create_database_backup, 'pre-restore-daygle-database')
         try:
-            source = sqlite3.connect(str(restore_temp))
-            try:
-                destination = sqlite3.connect(str(database.database_path))
-                try:
-                    source.backup(destination)
-                    checkpoint = destination.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
-                    if checkpoint and checkpoint[0] != 0:
-                        logger.warning('Database restore WAL checkpoint returned error code %s', checkpoint[0])
-                finally:
-                    destination.close()
-            finally:
-                source.close()
+            await run_in_threadpool(overwrite_database_from_file, restore_temp)
         except sqlite3.Error as exc:
             raise HTTPException(status_code=500, detail=f'Database restore failed: {exc}') from exc
-        refresh_runtime_after_database_restore()
+        await run_in_threadpool(refresh_runtime_after_database_restore)
         write_audit_log(request, 'restore', 'database', details={'source_filename': filename, 'safety_backup': str(safety_backup)})
         return {
             'ok': True,
@@ -4451,7 +4476,12 @@ async def restore_database(request: Request, file: UploadFile = File(...)):
             'safety_backup': str(safety_backup),
         }
     finally:
+        DATABASE_RESTORE_LOCK.release()
+        # Validation opens the upload directly, so sqlite may have created
+        # WAL sidecar files next to it — remove those along with the upload.
         restore_temp.unlink(missing_ok=True)
+        for sidecar_suffix in ('-wal', '-shm'):
+            Path(f'{restore_temp}{sidecar_suffix}').unlink(missing_ok=True)
         await file.close()
 
 
