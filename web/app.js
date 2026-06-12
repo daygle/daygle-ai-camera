@@ -23,6 +23,8 @@ const els = {
 // ─── State ──────────────────────────────────────────────────────────────────
 let authState = { user: null, csrfToken: null };
 let configuredLabels = null;
+
+const SOUND_CLASS_IDS = new Set(['cat_meow', 'dog_bark', 'glass_breaking', 'smoke_alarm', 'baby_crying', 'doorbell', 'car_alarm', 'loud_bang']);
 let events = [];
 let alertGroups = [];
 let activeFilter = 'all';
@@ -85,6 +87,26 @@ function timeAgo(isoString) {
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
   return formatDate(isoString);
+}
+
+function soundDetectionBadges(detections = []) {
+  if (!detections.length) return '<span class="muted">No sound detections</span>';
+  const best = new Map();
+  for (const d of detections) {
+    const label = String(d.label || '').trim().toLowerCase();
+    if (!label) continue;
+    const conf = Number(d.confidence || 0);
+    if (!best.has(label) || conf > best.get(label)) best.set(label, conf);
+  }
+  if (!best.size) return '<span class="muted">No sound detections</span>';
+  return Array.from(best.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, conf]) => {
+      const display = titleCase(label.replace(/_/g, ' '));
+      const confText = conf > 0 ? ` · ${Math.round(conf * 100)}%` : '';
+      return `<span class="detection detection-sound">🔊 ${escapeHtml(display)}${escapeHtml(confText)}</span>`;
+    })
+    .join('');
 }
 
 function detectionBadges(detections = []) {
@@ -158,14 +180,25 @@ function groupAlertsByEvent(alerts) {
 // column) without duplicating structure across two renderers.
 
 function buildActivityItems() {
-  const eventItems = events.map((event) => ({
-    type: 'event',
-    id: event.id,
-    createdAt: event.created_at,
-    camera: eventSourceLabel(event),
-    detections: event.detections || [],
-    recordingId: event.recordings?.[0]?.id ?? null,
-  }));
+  const eventItems = events.map((event) => {
+    const isSound = event.source === 'sound';
+    let detections = event.detections || [];
+    if (isSound && !detections.length && event.metadata) {
+      const label = event.metadata.label || event.metadata.class_label || 'sound';
+      const confidence = Number(event.metadata.confidence || 0);
+      detections = [{ label, confidence }];
+    }
+    return {
+      type: 'event',
+      id: event.id,
+      createdAt: event.created_at,
+      camera: eventSourceLabel(event),
+      detections,
+      recordingId: event.recordings?.[0]?.id ?? null,
+      isSound,
+      soundMeta: isSound ? event.metadata : null,
+    };
+  });
   const alertItems = alertGroups.map((group) => ({
     type: 'alert',
     id: group.key,
@@ -177,6 +210,7 @@ function buildActivityItems() {
     detections: group.detections,
     recordingId: group.recordingId,
     message: group.message,
+    isSound: group.labels.some((l) => SOUND_CLASS_IDS.has(l)) || group.detections.some((d) => SOUND_CLASS_IDS.has(String(d.label || '').toLowerCase())),
   }));
   // Alerts don't carry a camera name in the grouping step; try to surface it
   // from the event's `metadata.camera_name` if we can match by event id.
@@ -205,6 +239,10 @@ function alertIcon() {
   return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
 }
 
+function soundIcon() {
+  return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
+}
+
 function recordingLink(recordingId, label) {
   if (!recordingId) return '';
   return `<a class="button-link secondary-link activity-item-action" href="/recordings?recording_id=${encodeURIComponent(recordingId)}">${escapeHtml(label)}</a>`;
@@ -212,11 +250,12 @@ function recordingLink(recordingId, label) {
 
 function renderActivityItem(item) {
   const isEvent = item.type === 'event';
-  const icon = isEvent ? eventIcon() : alertIcon();
-  const typeClass = isEvent ? 'activity-item-event' : 'activity-item-alert';
-  const typeLabel = isEvent ? 'Detection' : 'Alert';
+  const isSound = Boolean(item.isSound);
+  const icon = isSound ? soundIcon() : isEvent ? eventIcon() : alertIcon();
+  const typeClass = isSound ? 'activity-item-sound' : isEvent ? 'activity-item-event' : 'activity-item-alert';
+  const typeLabel = isSound ? 'Sound' : isEvent ? 'Detection' : 'Alert';
   const title = isEvent
-    ? `Event #${item.id}`
+    ? (isSound && item.soundMeta ? `🔊 ${item.soundMeta.class_label || titleCase(item.soundMeta.label || 'sound')}` : `Event #${item.id}`)
     : (item.ruleNames?.join(', ') || 'Alert');
   const titleSuffix = !isEvent && item.ruleNames?.length > 1 ? ` <span class="muted">(${item.ruleNames.length} rules)</span>` : '';
   const cameraLine = item.camera ? `Camera: ${escapeHtml(item.camera)}` : 'Camera: unknown';
@@ -247,7 +286,7 @@ function renderActivityItem(item) {
           </div>
         </div>
         <p class="muted activity-item-meta">${metaLine}</p>
-        <div class="activity-item-badges">${detectionBadges(item.detections)}</div>
+        <div class="activity-item-badges">${isSound ? soundDetectionBadges(item.detections) : detectionBadges(item.detections)}</div>
       </div>
       ${actions.length ? `<div class="activity-item-actions">${actions.join('')}</div>` : ''}
     </article>

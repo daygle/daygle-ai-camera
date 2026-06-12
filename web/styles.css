@@ -1719,6 +1719,13 @@ input[type="file"] { padding: 10px; }
 .timeline-recording-confidence strong {
   color: #b4a0f5;
 }
+.timeline-recording-confidence-sound {
+  background: rgba(168,85,247,.18);
+  color: #a855f7;
+}
+.timeline-recording-confidence-sound strong {
+  color: #c084fc;
+}
 
 @media (max-width: 900px) {
   .timeline-controls {
@@ -1950,6 +1957,11 @@ input[type="file"] { padding: 10px; }
   background: rgba(139, 92, 246, 0.12);
   color: #c9b8ff;
 }
+.activity-item-sound .activity-item-icon {
+  border-color: rgba(168, 85, 247, 0.4);
+  background: rgba(168, 85, 247, 0.12);
+  color: #a855f7;
+}
 .activity-item-main {
   display: grid;
   gap: 6px;
@@ -1987,6 +1999,11 @@ input[type="file"] { padding: 10px; }
   background: rgba(139, 92, 246, 0.14);
   color: #c9b8ff;
   border-color: rgba(139, 92, 246, 0.35);
+}
+.activity-item-sound .activity-item-type {
+  background: rgba(168, 85, 247, 0.14);
+  color: #a855f7;
+  border-color: rgba(168, 85, 247, 0.4);
 }
 .activity-item-name {
   font-weight: 900;
@@ -2397,6 +2414,11 @@ input[type="file"] { padding: 10px; }
   background: rgba(248, 113, 113, 0.12);
   border-color: rgba(248, 113, 113, 0.35);
   color: #ff8a8a;
+}
+.detection-chip-sound {
+  background: rgba(168, 85, 247, 0.14);
+  border-color: rgba(168, 85, 247, 0.4);
+  color: #a855f7;
 }
 .detection-chip-empty {
   background: rgba(255, 255, 255, 0.04);
