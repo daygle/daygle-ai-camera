@@ -42,6 +42,7 @@ from app.push_notifications import PushNotificationError, PushNotificationServic
 from app.camera_backend import OpenCvStreamCamera
 from app.recordings import RecordingService
 from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, load_settings
+from app.sound_detector import SoundDetector, list_audio_devices, SOUND_CLASSES, DEFAULT_RULES
 from app.storage import Storage
 
 logger = logging.getLogger('daygle.ai')
@@ -114,12 +115,14 @@ async def app_lifespan(_app: FastAPI):
         logger.info(f"Cleaned up {len(removed)} incomplete recording(s) from previous session")
     log_detector_initialization()
     start_live_alert_monitor()
+    apply_sound_settings()
     try:
         yield
     finally:
         recording_service.stop_prebuffer_workers()
         recording_service.stop_all_continuous_recordings()
         stop_live_alert_monitor()
+        stop_sound_monitor()
 
 
 app = FastAPI(title='Daygle AI Camera', lifespan=app_lifespan)
@@ -312,6 +315,12 @@ _MOTION_BACKGROUND_ALPHA = 0.05 # background learning rate; stationary objects a
 live_alert_monitor_stop = threading.Event()
 live_alert_monitor_thread: threading.Thread | None = None
 
+# ── Sound detection state ────────────────────────────────────────────────
+_sound_detector: SoundDetector | None = None
+_sound_detector_lock = threading.Lock()
+_sound_status: dict[str, Any] = {'state': 'stopped', 'last_detected_at': None, 'last_confidence': 0.0, 'backend': None}
+_sound_status_lock = threading.Lock()
+
 # ── Camera offline alert health tracking ─────────────────────────────────
 _camera_health_state: dict[str, dict[str, Any]] = {}
 _camera_health_lock = threading.Lock()
@@ -326,6 +335,28 @@ def effective_camera_offline_alert_settings() -> dict[str, Any]:
     if isinstance(override, dict):
         settings.update(override)
     return settings
+
+
+def effective_sound_config() -> dict[str, Any]:
+    defaults: dict[str, Any] = {
+        'enabled': False,
+        'source': 'microphone',
+        'device_index': None,
+        'rtsp_camera_id': None,
+        'sample_duration_seconds': 1.0,
+        'alert_email': True,
+        'alert_push': True,
+        'rules': list(DEFAULT_RULES),
+    }
+    override = database.get_setting('sound_detection')
+    if isinstance(override, dict):
+        defaults.update(override)
+    # Ensure any class missing from saved rules gets added with defaults disabled
+    saved_classes = {r.get('class') for r in defaults.get('rules') or []}
+    for rule in DEFAULT_RULES:
+        if rule['class'] not in saved_classes:
+            defaults['rules'].append({**rule, 'enabled': False})
+    return defaults
 
 
 def _update_camera_health(camera_id: str, online: bool) -> None:
@@ -1390,6 +1421,194 @@ def stop_live_alert_monitor() -> None:
     if live_alert_monitor_thread and live_alert_monitor_thread.is_alive():
         live_alert_monitor_thread.join(timeout=5)
     live_alert_monitor_thread = None
+
+
+# ── Sound detection ───────────────────────────────────────────────────────
+
+def _on_sound_detected(class_id: str, rule_name: str, confidence: float, meta: dict[str, Any]) -> None:
+    """Callback invoked by SoundDetector when a sound class is detected."""
+    class_label = SOUND_CLASSES.get(class_id, {}).get('label', class_id)
+    with _sound_status_lock:
+        _sound_status['state'] = 'detected'
+        _sound_status['last_detected_at'] = datetime.now(timezone.utc).isoformat()
+        _sound_status['last_class'] = class_id
+        _sound_status['last_class_label'] = class_label
+        _sound_status['last_confidence'] = round(confidence, 3)
+        _sound_status['backend'] = meta.get('backend', 'unknown')
+
+    logger.info(
+        'Sound detected: %s (confidence=%.2f, source=%s, backend=%s)',
+        class_label, confidence, meta.get('source'), meta.get('backend'),
+    )
+
+    sound_cfg = effective_sound_config()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    event_id = database.add_event(
+        created_at=now_iso,
+        source='sound',
+        snapshot_path=None,
+        detections=[],
+        alert_triggered=True,
+        metadata={
+            'source': 'sound-detection',
+            'sound_source': meta.get('source', 'microphone'),
+            'label': class_id,
+            'class_label': class_label,
+            'confidence': round(confidence, 3),
+        },
+    )
+
+    # Trigger a clip from every configured camera that has recording enabled.
+    # Sound detection fires independently of the visual pipeline, so we force
+    # record_on_alert=True so the recording mode (motion/objects/human) doesn't
+    # suppress it. Cameras with recording disabled (mode='off') are skipped.
+    sound_detection = {
+        'label': class_id,
+        'confidence': confidence,
+        'alert_triggered': True,
+    }
+    recording_ids: list[int] = []
+    for cam in list(cameras_config):
+        cam_id = str(cam.get('id') or '')
+        stream_url = build_stream_url(cam)
+        if not stream_url:
+            continue
+        cam_rec_config = {**camera_event_recording_config(cam), 'record_on_alert': True}
+        if not recording_service.enabled_for(cam_rec_config):
+            continue
+        recording_service.prime_rtsp_prebuffer(
+            stream_url=stream_url,
+            camera_id=cam_id,
+            recording_config=cam_rec_config,
+        )
+        rid = attach_event_recording(
+            event_id,
+            now_iso,
+            'rtsp',
+            [sound_detection],
+            camera_id=cam_id,
+            recording_config=cam_rec_config,
+        )
+        if rid is not None:
+            recording_ids.append(rid)
+            logger.debug('Sound event %s linked to recording %s (camera %s)', event_id, rid, cam_id)
+
+    message = f'{class_label} detected ({confidence:.0%} confidence)'
+    database.add_alert(
+        created_at=now_iso,
+        rule_name=rule_name,
+        event_id=event_id,
+        label=class_id,
+        confidence=confidence,
+        message=message,
+        recording_id=recording_ids[0] if recording_ids else None,
+    )
+
+    alert_payload = {
+        'rule_name': rule_name,
+        'label': class_id,
+        'confidence': confidence,
+        'message': message,
+    }
+    notify_rule = {
+        'name': rule_name,
+        'email_enabled': normalize_bool_setting(sound_cfg.get('alert_email'), True),
+        'push_enabled': normalize_bool_setting(sound_cfg.get('alert_push'), True),
+        'email_recipients': [],
+    }
+    notify_thread = threading.Thread(
+        target=_deliver_sound_alert_notifications,
+        args=([alert_payload], event_id, notify_rule),
+        name=f'sound-alert-notify-{event_id}',
+        daemon=True,
+    )
+    with _notification_threads_lock:
+        _notification_threads[:] = [t for t in _notification_threads if t.is_alive()]
+        _notification_threads.append(notify_thread)
+    notify_thread.start()
+
+
+def _deliver_sound_alert_notifications(
+    triggered: list[dict[str, Any]],
+    event_id: int,
+    rule: dict[str, Any],
+) -> None:
+    if rule.get('email_enabled'):
+        try:
+            deliver_email_alerts(triggered, event_id, rules=[rule])
+        except Exception as exc:
+            logger.warning('Sound alert email delivery failed for event %s: %s', event_id, exc)
+    if rule.get('push_enabled'):
+        try:
+            deliver_push_notifications(triggered, event_id, rules=[rule])
+        except Exception as exc:
+            logger.warning('Sound alert push delivery failed for event %s: %s', event_id, exc)
+
+
+def apply_sound_settings() -> None:
+    """Start, restart, or stop the sound detector based on current settings."""
+    global _sound_detector
+    with _sound_detector_lock:
+        if _sound_detector is not None:
+            _sound_detector.stop()
+            _sound_detector = None
+
+        sound_cfg = effective_sound_config()
+        if not normalize_bool_setting(sound_cfg.get('enabled'), False):
+            with _sound_status_lock:
+                _sound_status['state'] = 'disabled'
+            return
+
+        source = str(sound_cfg.get('source') or 'microphone')
+        rtsp_url: str | None = None
+        if source == 'rtsp':
+            cam_id = str(sound_cfg.get('rtsp_camera_id') or '')
+            for cam in cameras_config:
+                if str(cam.get('id') or '') == cam_id:
+                    rtsp_url = build_stream_url(cam)
+                    break
+
+        device_index = sound_cfg.get('device_index')
+        if device_index is not None:
+            try:
+                device_index = int(device_index)
+            except (TypeError, ValueError):
+                device_index = None
+
+        rules = sound_cfg.get('rules') or []
+        enabled_rules = [r for r in rules if r.get('enabled')]
+        if not enabled_rules:
+            with _sound_status_lock:
+                _sound_status['state'] = 'disabled'
+            return
+
+        _sound_detector = SoundDetector(
+            on_detect=_on_sound_detected,
+            rules=enabled_rules,
+            source=source,
+            device_index=device_index,
+            rtsp_url=rtsp_url,
+            sample_duration_seconds=float(sound_cfg.get('sample_duration_seconds', 1.0)),
+        )
+        _sound_detector.start()
+        with _sound_status_lock:
+            _sound_status['state'] = 'listening'
+            _sound_status['backend'] = _sound_detector.backend
+        logger.info(
+            'Sound monitor started (source=%s, active_rules=%s)',
+            source,
+            [r.get('class') for r in enabled_rules],
+        )
+
+
+def stop_sound_monitor() -> None:
+    global _sound_detector
+    with _sound_detector_lock:
+        if _sound_detector is not None:
+            _sound_detector.stop()
+            _sound_detector = None
+    with _sound_status_lock:
+        _sound_status['state'] = 'stopped'
 
 
 def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any]) -> None:
@@ -4400,6 +4619,122 @@ async def update_camera_offline_alert_settings(request: Request):
         validated['offline_delay_minutes'] = 1
     result = database.set_setting('camera_offline_alert', validated, utc_now())
     return result
+
+
+@app.get('/api/settings/sound')
+def get_sound_settings():
+    return effective_sound_config()
+
+
+@app.put('/api/settings/sound')
+async def update_sound_settings(request: Request):
+    require_admin(request)
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail='Invalid sound settings payload')
+
+    validated: dict[str, Any] = {
+        'enabled': normalize_bool_setting(payload.get('enabled'), False),
+        'source': str(payload.get('source') or 'microphone'),
+        'alert_email': normalize_bool_setting(payload.get('alert_email'), True),
+        'alert_push': normalize_bool_setting(payload.get('alert_push'), True),
+    }
+    if validated['source'] not in ('microphone', 'rtsp'):
+        validated['source'] = 'microphone'
+
+    device_raw = payload.get('device_index')
+    if device_raw is None or str(device_raw).strip() == '':
+        validated['device_index'] = None
+    else:
+        try:
+            validated['device_index'] = int(device_raw)
+        except (TypeError, ValueError):
+            validated['device_index'] = None
+
+    rtsp_cam = str(payload.get('rtsp_camera_id') or '').strip()
+    validated['rtsp_camera_id'] = rtsp_cam or None
+
+    try:
+        validated['sample_duration_seconds'] = max(0.5, min(5.0, float(payload.get('sample_duration_seconds', 1.0))))
+    except (TypeError, ValueError):
+        validated['sample_duration_seconds'] = 1.0
+
+    # Validate per-class rules
+    raw_rules = payload.get('rules')
+    if not isinstance(raw_rules, list):
+        raw_rules = []
+    validated_rules: list[dict[str, Any]] = []
+    for raw in raw_rules:
+        if not isinstance(raw, dict):
+            continue
+        class_id = str(raw.get('class') or '').strip()
+        if class_id not in SOUND_CLASSES:
+            continue
+        rule: dict[str, Any] = {
+            'class': class_id,
+            'name': str(raw.get('name') or SOUND_CLASSES[class_id]['label']),
+            'enabled': normalize_bool_setting(raw.get('enabled'), False),
+        }
+        try:
+            rule['confidence_threshold'] = max(0.1, min(1.0, float(raw.get('confidence_threshold', 0.60))))
+        except (TypeError, ValueError):
+            rule['confidence_threshold'] = 0.60
+        try:
+            rule['cooldown_seconds'] = max(5.0, float(raw.get('cooldown_seconds', 30)))
+        except (TypeError, ValueError):
+            rule['cooldown_seconds'] = 30.0
+        validated_rules.append(rule)
+
+    # Ensure all known classes are represented
+    saved_classes = {r['class'] for r in validated_rules}
+    for default_rule in DEFAULT_RULES:
+        if default_rule['class'] not in saved_classes:
+            validated_rules.append({**default_rule, 'enabled': False})
+    validated['rules'] = validated_rules
+
+    database.set_setting('sound_detection', validated, utc_now())
+    write_audit_log(request, 'update', 'settings.sound_detection')
+    apply_sound_settings()
+    return validated
+
+
+@app.get('/api/sound/classes')
+def list_sound_classes():
+    return {
+        'classes': [
+            {
+                'id': class_id,
+                'label': meta['label'],
+                'description': meta['description'],
+                'default_threshold': meta['default_threshold'],
+                'default_cooldown': meta['default_cooldown'],
+            }
+            for class_id, meta in SOUND_CLASSES.items()
+        ]
+    }
+
+
+@app.get('/api/sound/devices')
+def list_sound_devices():
+    return {'devices': list_audio_devices()}
+
+
+@app.get('/api/sound/status')
+def get_sound_status():
+    with _sound_status_lock:
+        status = dict(_sound_status)
+    with _sound_detector_lock:
+        if _sound_detector is not None:
+            status['running'] = _sound_detector.running
+            status['detector_status'] = _sound_detector.status
+            status['last_confidences'] = {
+                k: round(v, 3) for k, v in _sound_detector.last_confidences().items()
+            }
+        else:
+            status['running'] = False
+            status['detector_status'] = 'stopped'
+            status['last_confidences'] = {}
+    return status
 
 
 @app.get('/api/settings/system')

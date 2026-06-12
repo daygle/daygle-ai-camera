@@ -111,10 +111,15 @@ function recordingDetectionLabels(recording) {
 }
 
 function recordingDisplayTrigger(recording) {
+  if (isSoundRecording(recording)) {
+    const meta = recording.event?.metadata || {};
+    const classLabel = meta.class_label || meta.label || recording.trigger_label || 'sound';
+    return `🔊 ${titleCase(classLabel)}`;
+  }
+
   const triggerType = recordingTriggerType(recording);
   const triggerLabel = recordingTriggerLabel(recording);
   const detectionLabels = recordingDetectionLabels(recording);
-  const firstSpecificDetection = detectionLabels.find((label) => !GENERIC_TRIGGER_LABELS.has(label));
   const hasDetections = detectionLabels.length > 0;
 
   if (triggerType === 'motion' || triggerType === 'alert' || triggerType === 'human' || triggerType === 'object') {
@@ -213,7 +218,7 @@ function renderRecordings(recordings) {
   els.recordings.innerHTML = recordings.map((recording) => {
     const mediaReady = recording.media_ready !== false;
     const trigger = recordingDisplayTrigger(recording);
-    const triggerPillClass = triggerBadgeClass(trigger);
+    const triggerPillClass = triggerBadgeClass(trigger, recording);
     const triggerTooltip = recordingDetectionSummary(recording)
       .map((d) => `${titleCase(d.label)} · ${Math.round(d.confidence * 100)}%`)
       .join('\n');
@@ -271,7 +276,12 @@ function renderRecordings(recordings) {
   bindRecordingButtons();
 }
 
-function triggerBadgeClass(trigger) {
+function isSoundRecording(recording) {
+  return recording?.event?.metadata?.source === 'sound-detection';
+}
+
+function triggerBadgeClass(trigger, recording) {
+  if (recording && isSoundRecording(recording)) return 'chip-sound';
   const t = String(trigger || '').toLowerCase();
   if (t.startsWith('alert') || t.startsWith('human')) return 'chip-warn';
   if (t.startsWith('motion')) return 'chip-info';
@@ -280,6 +290,13 @@ function triggerBadgeClass(trigger) {
 }
 
 function recordingDetectionSummary(recording) {
+  if (isSoundRecording(recording)) {
+    const meta = recording.event?.metadata || {};
+    const label = (meta.class_label || meta.label || recording.trigger_label || 'sound').toLowerCase();
+    const confidence = Number(meta.confidence || 0);
+    return [{ label, confidence }];
+  }
+
   // Build best-confidence map from all detections regardless of current config —
   // this is historical data so we show everything that was actually recorded.
   const best = new Map();
@@ -300,19 +317,21 @@ function recordingDetectionSummary(recording) {
 
 function renderRecordingDetails(recording) {
   const detections = recordingDetectionSummary(recording);
+  const isSound = isSoundRecording(recording);
   const detectionBadges = detections.length
     ? detections
-        .map((d) => `<span class="detection">${escapeHtml(titleCase(d.label))} (${Math.round(d.confidence * 100)}%)</span>`)
+        .map((d) => `<span class="detection ${isSound ? 'detection-sound' : ''}">${escapeHtml(titleCase(d.label))} (${Math.round(d.confidence * 100)}%)</span>`)
         .join(' ')
     : 'none';
+  const detectionLabel = isSound ? 'Sound' : 'Detections';
   els.recordingDetails.innerHTML = `
     <div><span>Recording</span><strong>#${recording.id}</strong></div>
     <div><span>Event</span><strong>${recording.event_id || 'none'}</strong></div>
     <div><span>Camera</span><strong>${escapeHtml(cameraLabel(recording))}</strong></div>
-    <div><span>Trigger</span><strong>${escapeHtml(titleCase(recordingDisplayTrigger(recording)))}</strong></div>
+    <div><span>Trigger</span><strong>${escapeHtml(recordingDisplayTrigger(recording))}</strong></div>
     <div><span>Started</span><strong>${escapeHtml(formatDateTime(recording.started_at))}</strong></div>
     <div><span>Duration</span><strong>${Number(recording.duration_seconds || 0).toFixed(1)}s</strong></div>
-    <div class="wide"><span>Detections</span><strong>${detectionBadges}</strong></div>
+    <div class="wide"><span>${detectionLabel}</span><strong>${detectionBadges}</strong></div>
   `;
 }
 

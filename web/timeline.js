@@ -296,6 +296,12 @@ function recordingDetectionLabels(recording) {
  * filtered to non-generic labels that pass the configuredLabels threshold.
  */
 function recordingDetectionSummary(recording) {
+  if (isSoundRecording(recording)) {
+    const meta = recording.event?.metadata || {};
+    const label = (meta.class_label || meta.label || recording.trigger_label || 'sound').toLowerCase();
+    const confidence = Number(meta.confidence || 0);
+    return [{ label, confidence }];
+  }
   // Build best-confidence map from all detections — historical data, no config filtering.
   const best = new Map();
   for (const d of (recording.detections || [])) {
@@ -314,6 +320,10 @@ function recordingDetectionSummary(recording) {
 }
 
 function recordingTypeLabel(recording) {
+  if (isSoundRecording(recording)) {
+    const meta = recording.event?.metadata || {};
+    return meta.class_label || titleCase((meta.label || recording.trigger_label || 'sound').replace(/_/g, ' '));
+  }
   const triggerType = recordingTriggerType(recording);
   const triggerLabel = recordingTriggerLabel(recording);
   const detectionLabels = recordingDetectionLabels(recording);
@@ -350,10 +360,14 @@ function timelineSegmentLabel(recording) {
 }
 
 function recordingColorKey(recording) {
+  if (isSoundRecording(recording)) return '__sound__';
   return recordingTypeLabel(recording).toLowerCase();
 }
 
 function recordingTriggerSummary(recording) {
+  if (isSoundRecording(recording)) {
+    return `🔊 ${recordingTypeLabel(recording)}`;
+  }
   const triggerType = recordingTriggerType(recording);
   const triggerLabel = recordingTriggerLabel(recording);
   const typeLabel = recordingTypeLabel(recording);
@@ -391,7 +405,12 @@ function cameraLabel(recording) {
   return metadata.camera_name || recording.camera_id || recording.source || 'unknown';
 }
 
+function isSoundRecording(recording) {
+  return recording?.event?.metadata?.source === 'sound-detection';
+}
+
 function colorForKey(key) {
+  if (key === '__sound__') return '#a855f7';
   const normalized = String(key || 'motion').trim().toLowerCase() || 'motion';
   let hash = 0;
   for (let index = 0; index < normalized.length; index += 1) {
@@ -657,9 +676,14 @@ function renderRecordingList(recordings) {
     const duration = formatDuration(recording.duration_seconds);
     const camera = escapeHtml(cameraLabel(recording));
     const detections = recordingDetectionSummary(recording);
+    const isSound = isSoundRecording(recording);
     const confidenceBadges = detections
       .filter((d) => d.confidence > 0)
-      .map((d) => `<span class="timeline-recording-confidence" title="${escapeHtml(titleCase(d.label))} confidence">${escapeHtml(titleCase(d.label))} <strong>${Math.round(d.confidence * 100)}%</strong></span>`)
+      .map((d) => {
+        const displayLabel = isSound ? titleCase(d.label.replace(/_/g, ' ')) : titleCase(d.label);
+        const prefix = isSound ? '🔊 ' : '';
+        return `<span class="timeline-recording-confidence${isSound ? ' timeline-recording-confidence-sound' : ''}" title="${escapeHtml(displayLabel)} confidence">${prefix}${escapeHtml(displayLabel)} <strong>${Math.round(d.confidence * 100)}%</strong></span>`;
+      })
       .join('');
     const tooltip = detections
       .map((d) => `${titleCase(d.label)} · ${Math.round(d.confidence * 100)}%`)
@@ -689,19 +713,24 @@ function recordingConfidenceText(recording) {
 }
 
 function renderRecordingDetails(recording) {
+  const isSound = isSoundRecording(recording);
   const detections = recordingDetectionSummary(recording);
   const detectionBadges = detections.length
     ? detections
-        .map((d) => `<span class="detection">${escapeHtml(titleCase(d.label))} (${Math.round(d.confidence * 100)}%)</span>`)
+        .map((d) => {
+          const label = isSound ? titleCase(d.label.replace(/_/g, ' ')) : titleCase(d.label);
+          return `<span class="detection ${isSound ? 'detection-sound' : ''}">${isSound ? '🔊 ' : ''}${escapeHtml(label)} (${Math.round(d.confidence * 100)}%)</span>`;
+        })
         .join(' ')
     : 'none';
+  const detectionLabel = isSound ? 'Sound' : 'Detections';
   els.recordingDetails.innerHTML = `
     <div><span>Recording</span><strong><a href="/recordings?recording_id=${recording.id}" class="timeline-recording-link">#${recording.id} ↗</a></strong></div>
     <div><span>Camera</span><strong>${escapeHtml(cameraLabel(recording))}</strong></div>
-    <div><span>Trigger</span><strong>${escapeHtml(titleCase(recordingTriggerSummary(recording)))}</strong></div>
+    <div><span>Trigger</span><strong>${escapeHtml(recordingTriggerSummary(recording))}</strong></div>
     <div><span>Started</span><strong>${escapeHtml(formatDateTime(recording.started_at))}</strong></div>
     <div><span>Duration</span><strong>${escapeHtml(formatDuration(recording.duration_seconds))}</strong></div>
-    <div class="wide"><span>Detections</span><strong>${detectionBadges}</strong></div>
+    <div class="wide"><span>${detectionLabel}</span><strong>${detectionBadges}</strong></div>
   `;
 }
 

@@ -221,6 +221,52 @@ function createPushNotificationSection() {
   }
 }
 
+function createSoundDetectionSection() {
+  const section = document.createElement('section');
+  section.className = 'card';
+  section.id = 'soundDetectionSection';
+  section.innerHTML = `
+    <div class="settings-section-header"><div class="settings-section-icon">🔊</div><div><h2>Sound Detection Alerts</h2><p class="settings-section-subtitle">Detect sounds from a microphone or an RTSP camera's audio track and trigger alerts. Enable individual sound classes below.</p></div></div>
+    <form id="soundSettingsForm">
+      <div class="form-grid">
+        <label><span>Sound Detection</span><select name="enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select><span class="field-help">Master toggle for all sound detection. Requires a microphone or a camera with an audio track.</span></label>
+        <label><span>Audio Source</span><select name="source"><option value="microphone">Microphone (local device)</option><option value="rtsp">RTSP Camera Audio</option></select><span class="field-help">Where audio is captured from.</span></label>
+        <label id="soundDeviceLabel"><span>Microphone Device</span><select name="device_index"><option value="">Default device</option></select><span class="field-help">Specific input device to use, or "Default device".</span></label>
+        <label id="soundRtspLabel"><span>RTSP Camera</span><select name="rtsp_camera_id"><option value="">Select a camera</option></select><span class="field-help">Camera whose audio track will be monitored.</span></label>
+        <label><span>Email Alerts</span><select name="alert_email"><option value="true">Enabled</option><option value="false">Disabled</option></select><span class="field-help">Send email when a sound is detected (requires Email Delivery to be configured).</span></label>
+        <label><span>Push Alerts</span><select name="alert_push"><option value="true">Enabled</option><option value="false">Disabled</option></select><span class="field-help">Send push notification when a sound is detected (requires Push Notifications to be configured).</span></label>
+      </div>
+      <div style="margin-top:1.2rem">
+        <p class="muted" style="margin-bottom:.6rem;font-size:.9em">Configure which sounds to alert on. Each class can have its own sensitivity and cooldown.</p>
+        <div style="overflow-x:auto">
+          <table id="soundRulesTable" style="width:100%;border-collapse:collapse;font-size:.9em">
+            <thead>
+              <tr style="text-align:left;border-bottom:1px solid var(--border,#ddd)">
+                <th style="padding:.4rem .6rem">Sound</th>
+                <th style="padding:.4rem .6rem">Description</th>
+                <th style="padding:.4rem .6rem;white-space:nowrap">Alert On</th>
+                <th style="padding:.4rem .6rem;white-space:nowrap">Threshold (0.1–1.0)</th>
+                <th style="padding:.4rem .6rem;white-space:nowrap">Cooldown (s)</th>
+              </tr>
+            </thead>
+            <tbody id="soundRulesBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </form>
+    <div class="button-row">
+      <button type="submit" form="soundSettingsForm">Save Sound Settings</button>
+      <span id="soundStatusBadge" class="muted" style="margin-left:auto;align-self:center;font-size:.85em"></span>
+    </div>
+  `;
+  const offlineSection = document.getElementById('cameraOfflineForm')?.closest('section');
+  if (offlineSection) {
+    offlineSection.after(section);
+  } else {
+    document.querySelector('main')?.append(section);
+  }
+}
+
 function createCameraOfflineSection() {
   const section = document.createElement('section');
   section.className = 'card';
@@ -270,6 +316,7 @@ function createEmailDeliverySection() {
 
 createPushNotificationSection();
 createCameraOfflineSection();
+createSoundDetectionSection();
 createEmailDeliverySection();
 createRuntimeResetSection();
 ensureRecordingExtensionStepField();
@@ -376,14 +423,129 @@ function renderCameraOffline(settings) {
   }
 }
 
+async function loadSoundDevices() {
+  const deviceSelect = document.querySelector('#soundSettingsForm select[name="device_index"]');
+  if (!deviceSelect) return;
+  try {
+    const { devices } = await api('/api/sound/devices');
+    deviceSelect.innerHTML = '<option value="">Default device</option>';
+    for (const dev of (devices || [])) {
+      const opt = document.createElement('option');
+      opt.value = dev.index;
+      opt.textContent = `[${dev.index}] ${dev.name} (${dev.channels}ch, ${dev.default_sample_rate}Hz)`;
+      deviceSelect.append(opt);
+    }
+  } catch (_) { /* sounddevice not installed — leave default */ }
+}
+
+async function loadSoundCameras(camerasList) {
+  const camSelect = document.querySelector('#soundSettingsForm select[name="rtsp_camera_id"]');
+  if (!camSelect) return;
+  camSelect.innerHTML = '<option value="">Select a camera</option>';
+  for (const cam of (camerasList || [])) {
+    const opt = document.createElement('option');
+    opt.value = cam.id || '';
+    opt.textContent = cam.name || cam.id || 'Unnamed camera';
+    camSelect.append(opt);
+  }
+}
+
+let _soundClassDefs = [];
+
+async function loadSoundClasses() {
+  try {
+    const { classes } = await api('/api/sound/classes');
+    _soundClassDefs = classes || [];
+  } catch (_) {}
+}
+
+function renderSoundRulesTable(rules) {
+  const tbody = document.getElementById('soundRulesBody');
+  if (!tbody || !_soundClassDefs.length) return;
+  const rulesByClass = Object.fromEntries((rules || []).map((r) => [r.class, r]));
+  tbody.innerHTML = '';
+  for (const cls of _soundClassDefs) {
+    const rule = rulesByClass[cls.id] || { class: cls.id, enabled: false, confidence_threshold: cls.default_threshold, cooldown_seconds: cls.default_cooldown };
+    const tr = document.createElement('tr');
+    tr.dataset.classId = cls.id;
+    tr.style.borderBottom = '1px solid var(--border,#eee)';
+    tr.innerHTML = `
+      <td style="padding:.4rem .6rem;font-weight:500;white-space:nowrap">${escapeHtml(cls.label)}</td>
+      <td style="padding:.4rem .6rem;color:var(--muted,#666);font-size:.85em">${escapeHtml(cls.description)}</td>
+      <td style="padding:.4rem .6rem;text-align:center"><input type="checkbox" data-rule-field="enabled" ${rule.enabled ? 'checked' : ''} style="width:1.1rem;height:1.1rem;cursor:pointer" /></td>
+      <td style="padding:.4rem .6rem"><input type="number" data-rule-field="confidence_threshold" value="${rule.confidence_threshold}" min="0.1" max="1.0" step="0.05" style="width:5rem" /></td>
+      <td style="padding:.4rem .6rem"><input type="number" data-rule-field="cooldown_seconds" value="${rule.cooldown_seconds}" min="5" max="3600" step="5" style="width:5rem" /></td>
+    `;
+    tbody.append(tr);
+  }
+}
+
+function collectSoundRules() {
+  const tbody = document.getElementById('soundRulesBody');
+  if (!tbody) return [];
+  return Array.from(tbody.querySelectorAll('tr[data-class-id]')).map((tr) => {
+    const cls = _soundClassDefs.find((c) => c.id === tr.dataset.classId) || {};
+    return {
+      class: tr.dataset.classId,
+      name: cls.label || tr.dataset.classId,
+      enabled: tr.querySelector('[data-rule-field="enabled"]')?.checked ?? false,
+      confidence_threshold: Number(tr.querySelector('[data-rule-field="confidence_threshold"]')?.value) || cls.default_threshold || 0.60,
+      cooldown_seconds: Number(tr.querySelector('[data-rule-field="cooldown_seconds"]')?.value) || cls.default_cooldown || 30,
+    };
+  });
+}
+
+function renderSoundSettings(s) {
+  const form = document.getElementById('soundSettingsForm');
+  if (!form) return;
+  for (const key of ['enabled', 'source', 'device_index', 'rtsp_camera_id', 'alert_email', 'alert_push']) {
+    const el = form.elements[key];
+    if (el && s[key] !== undefined) el.value = String(s[key] ?? '');
+  }
+  renderSoundRulesTable(s.rules);
+  updateSoundSourceVisibility(form);
+}
+
+function updateSoundSourceVisibility(form) {
+  if (!form) return;
+  const source = form.elements.source?.value;
+  const micLabel = document.getElementById('soundDeviceLabel');
+  const rtspLabel = document.getElementById('soundRtspLabel');
+  if (micLabel) micLabel.style.display = source === 'microphone' ? '' : 'none';
+  if (rtspLabel) rtspLabel.style.display = source === 'rtsp' ? '' : 'none';
+}
+
+async function loadSoundStatus() {
+  const badge = document.getElementById('soundStatusBadge');
+  if (!badge) return;
+  try {
+    const s = await api('/api/sound/status');
+    const state = s.detector_status || s.state || 'stopped';
+    const backend = s.backend;
+    const confs = s.last_confidences || {};
+    const topConf = Object.entries(confs).sort(([, a], [, b]) => b - a)[0];
+    const confStr = topConf && topConf[1] > 0 ? ` · ${topConf[0].replace(/_/g, ' ')}: ${(topConf[1] * 100).toFixed(0)}%` : '';
+    const backendStr = backend === 'yamnet' ? ' · YAMNet' : backend === 'spectral' ? ' · spectral fallback' : backend === 'loading' ? ' · loading model…' : '';
+    badge.textContent = `${state}${backendStr}${confStr}`;
+    badge.className = 'chip ' + (
+      state === 'listening' && backend === 'yamnet' ? 'chip-green' :
+      state === 'listening' ? 'chip-info' :
+      state.startsWith('detected') ? 'chip-warn' :
+      state === 'disabled' ? 'chip-dim' :
+      'chip-dim'
+    );
+  } catch (_) {}
+}
+
 async function loadSettings() {
   const me = await api('/api/auth/me');
   csrfToken = me.csrf_token;
-  const [settings, emailSettings, pushSettings, cameraOfflineSettings] = await Promise.all([
+  const [settings, emailSettings, pushSettings, cameraOfflineSettings, soundSettings] = await Promise.all([
     api('/api/settings/system'),
     api('/api/settings/alert-email'),
     api('/api/settings/alert-push'),
     api('/api/settings/camera-offline'),
+    api('/api/settings/sound'),
   ]);
   fillForm(forms.live, settings.live);
   fillForm(forms.recording, settings.recording);
@@ -393,6 +555,11 @@ async function loadSettings() {
   renderEmail(emailSettings);
   renderPush(pushSettings);
   renderCameraOffline(cameraOfflineSettings);
+  await loadSoundClasses();
+  await loadSoundDevices();
+  await loadSoundCameras(settings.cameras);
+  renderSoundSettings(soundSettings);
+  await loadSoundStatus();
   enhanceFormFieldLabels();
   messageEl.textContent = '';
 }
@@ -510,6 +677,30 @@ forms.databaseRestore.addEventListener('submit', async (event) => {
     setMessage(error.message, true);
   }
 });
+
+const soundForm = document.getElementById('soundSettingsForm');
+soundForm?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const data = {
+    enabled: soundForm.elements.enabled?.value === 'true',
+    source: soundForm.elements.source?.value || 'microphone',
+    alert_email: soundForm.elements.alert_email?.value === 'true',
+    alert_push: soundForm.elements.alert_push?.value === 'true',
+    device_index: soundForm.elements.device_index?.value === '' ? null : Number(soundForm.elements.device_index?.value),
+    rtsp_camera_id: soundForm.elements.rtsp_camera_id?.value || null,
+    rules: collectSoundRules(),
+  };
+  try {
+    const updated = await api('/api/settings/sound', { method: 'PUT', body: JSON.stringify(data) });
+    renderSoundSettings(updated);
+    setMessage('Sound detection settings saved.');
+    setTimeout(loadSoundStatus, 1500);
+  } catch (error) {
+    setMessage(error.message, true);
+  }
+});
+
+soundForm?.elements.source?.addEventListener('change', () => updateSoundSourceVisibility(soundForm));
 
 loadSettings().catch((error) => setMessage(error.message, true));
 

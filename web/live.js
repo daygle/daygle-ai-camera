@@ -441,7 +441,7 @@ function updateZonesStats() {
 
 // Build a structured summary of the monitor's latest cycle so the renderer
 // can split the visual into a state chip, per-label chips, and a status line.
-function summarizeDetectionStatus(payload) {
+function summarizeDetectionStatus(payload, soundStatus = null) {
   if (!payload) {
     return { state: 'idle', stateLabel: 'Idle', chips: [], message: 'Live AI status unavailable.' };
   }
@@ -463,10 +463,20 @@ function summarizeDetectionStatus(payload) {
   }
   const chips = Array.from(confMap.entries())
     .sort((a, b) => b[1] - a[1])
-    .map(([label, confidence]) => ({ label, confidence }));
+    .map(([label, confidence]) => ({ label, confidence, isSound: false }));
   const labelStr = chips.length
     ? chips.map((c) => c.confidence > 0 ? `${titleCase(c.label)} (${Math.round(c.confidence * 100)}%)` : titleCase(c.label)).join(', ')
     : null;
+
+  // Append a sound chip when the detector has fired within the last 60 seconds.
+  if (soundStatus && soundStatus.last_detected_at) {
+    const ageMs = Date.now() - Date.parse(soundStatus.last_detected_at);
+    if (ageMs < 60000) {
+      const soundLabel = soundStatus.last_class_label || soundStatus.last_class || 'sound';
+      const soundConf = Number(soundStatus.last_confidence || 0);
+      chips.push({ label: soundLabel, confidence: soundConf, isSound: true });
+    }
+  }
 
   if (payload.state === 'alerted') {
     const alerts = (payload.triggered_alerts || []).map((a) => a.rule_name).join(', ') || 'unknown rule';
@@ -478,7 +488,7 @@ function summarizeDetectionStatus(payload) {
 
   if (payload.state === 'checked') {
     if (!labelStr) {
-      return { state: 'idle', stateLabel: 'Monitoring', chips: [], message: 'Matched Objects: No detections found' };
+      return { state: 'idle', stateLabel: 'Monitoring', chips, message: 'Matched Objects: No detections found' };
     }
     const reason = String(payload.reason || '');
     let suffix;
@@ -494,7 +504,7 @@ function summarizeDetectionStatus(payload) {
   return {
     state: payload.state || 'idle',
     stateLabel: payload.state ? payload.state[0].toUpperCase() + payload.state.slice(1) : 'Idle',
-    chips: [],
+    chips,
     message: `Live AI: ${payload.state || 'waiting'} — ${fallback}`,
   };
 }
@@ -510,14 +520,21 @@ function renderDetectionStatus(summary) {
     );
   }
   if (liveEls.detectionChips) {
-    if (!summary.chips.length) {
+    const visualChips = summary.chips.filter((c) => !c.isSound);
+    const soundChips = summary.chips.filter((c) => c.isSound);
+    if (!visualChips.length && !soundChips.length) {
       liveEls.detectionChips.innerHTML = '<span class="detection-chip detection-chip-empty">No active detections</span>';
     } else {
-      liveEls.detectionChips.innerHTML = summary.chips.map((c) => {
+      const visualHtml = visualChips.map((c) => {
         const variant = summary.state === 'alerted' ? 'detection-chip-alert' : '';
         const text = c.confidence > 0 ? `${titleCase(c.label)} · ${Math.round(c.confidence * 100)}%` : titleCase(c.label);
         return `<span class="detection-chip ${variant}">${escapeHtml(text)}</span>`;
       }).join('');
+      const soundHtml = soundChips.map((c) => {
+        const text = c.confidence > 0 ? `🔊 ${c.label} · ${Math.round(c.confidence * 100)}%` : `🔊 ${c.label}`;
+        return `<span class="detection-chip detection-chip-sound">${escapeHtml(text)}</span>`;
+      }).join('');
+      liveEls.detectionChips.innerHTML = visualHtml + soundHtml;
     }
   }
   if (liveEls.detectionStatus) {
@@ -567,9 +584,12 @@ async function refreshDetectionStatus() {
   if (!selectedCamera) return;
   try {
     const cameraId = encodeURIComponent(selectedCamera.id);
-    const payload = await api(`/api/live/detection-status?camera_id=${cameraId}`);
+    const [payload, soundStatus] = await Promise.all([
+      api(`/api/live/detection-status?camera_id=${cameraId}`),
+      api('/api/sound/status').catch(() => null),
+    ]);
     ingestServerTrackDetections(payload);
-    renderDetectionStatus(summarizeDetectionStatus(payload));
+    renderDetectionStatus(summarizeDetectionStatus(payload, soundStatus));
   } catch (error) {
     renderDetectionStatus({
       state: 'error',
