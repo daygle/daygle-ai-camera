@@ -227,7 +227,6 @@ def camera_event_recording_config(settings: dict[str, Any]) -> dict[str, Any]:
     camera_recording = normalize_camera_recording_settings(settings.get('recording'))
     base.update({
         'continuous': camera_recording['continuous'],
-        'mode': 'continuous' if camera_recording['continuous'] else 'motion',
     })
     return base
 
@@ -1418,7 +1417,7 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None = None) -> 
                 camera_id=camera_id,
                 recording_config=cam_rec_config,
             )
-            if recording_service.mode_for(cam_rec_config) == 'continuous':
+            if cam_rec_config.get('continuous'):
                 recording_service.start_continuous_chunk_recording(
                     stream_url=stream_url,
                     camera_id=camera_id,
@@ -1538,23 +1537,22 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
         stream_url = build_stream_url(cam_settings)
         if stream_url:
             cam_rec_config = camera_event_recording_config(cam_settings)
-            if recording_service.enabled_for(cam_rec_config):
-                recording_service.prime_rtsp_prebuffer(
-                    stream_url=stream_url,
-                    camera_id=camera_id,
-                    recording_config=cam_rec_config,
-                )
-                rid = attach_event_recording(
-                    event_id,
-                    now_iso,
-                    'rtsp',
-                    [sound_detection],
-                    camera_id=camera_id,
-                    recording_config=cam_rec_config,
-                )
-                if rid is not None:
-                    recording_ids.append(rid)
-                    logger.debug('Sound event %s linked to recording %s (camera %s)', event_id, rid, camera_id)
+            recording_service.prime_rtsp_prebuffer(
+                stream_url=stream_url,
+                camera_id=camera_id,
+                recording_config=cam_rec_config,
+            )
+            rid = attach_event_recording(
+                event_id,
+                now_iso,
+                'rtsp',
+                [sound_detection],
+                camera_id=camera_id,
+                recording_config=cam_rec_config,
+            )
+            if rid is not None:
+                recording_ids.append(rid)
+                logger.debug('Sound event %s linked to recording %s (camera %s)', event_id, rid, camera_id)
 
     message = f'{class_label} detected ({confidence:.0%} confidence)'
     database.add_alert(
@@ -2483,8 +2481,6 @@ def recording_skip_reason(detections: list[dict[str, Any]], recording_config: di
     should_record, trigger_type, trigger_label = recording_service.should_record(detections, recording_config)
     if should_record:
         return f'Recording policy matched {trigger_type}{f" {trigger_label}" if trigger_label else ""}, but no recording was linked.'
-    if not recording_service.enabled_for(recording_config):
-        return 'Recording is disabled or recording mode is off.'
     labels = ', '.join(str(detection.get('label')) for detection in detections if detection.get('label')) or 'none'
     return f'Recording is waiting for an enabled alert rule to trigger for this camera. Detected labels: {labels}.'
 
@@ -3401,7 +3397,7 @@ def _settings_section_update() -> str:
 def _settings_section_recording() -> str:
     return (
         '<section class="card">'
-        '<div class="settings-section-header"><div class="settings-section-icon">🎬</div><div><h2>Recording Clips</h2><p class="settings-section-subtitle">Control how event recordings are captured. Per-camera recording toggles are on the Live Cameras page.</p></div></div>'
+        '<div class="settings-section-header"><div class="settings-section-icon">🎬</div><div><h2>Recording Clips</h2><p class="settings-section-subtitle">Control how event recordings are captured. Per-rule Record toggles are on the Zones page; Continuous Recording is per camera on the Cameras page.</p></div></div>'
         '<form id="recordingSettingsForm" class="form-grid">'
         '<label><span>Pre-Event Seconds</span><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="10" /><span class="field-help">Seconds of footage to include before the trigger event. Default: 10s</span></label>'
         '<label><span>Post-Event Seconds</span><input name="post_event_seconds" type="number" min="0" max="300" placeholder="15" /><span class="field-help">Seconds to continue recording after the last detection. Default: 15s</span></label>'
@@ -4239,18 +4235,14 @@ def validate_cameras_settings(payload: Any) -> list[dict[str, Any]]:
 def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_recording_config()
     merged = {**current, **payload}
-    mode = str(merged.get('mode', 'motion')).lower()
-    if mode not in {'off', 'continuous', 'motion', 'human', 'objects'}:
-        raise HTTPException(status_code=400, detail='Recording mode must be off, continuous, motion, human, or objects.')
     fmt = str(merged.get('format', 'mp4')).strip().lstrip('.').lower() or 'mp4'
     if fmt == 'avi':
         fmt = 'mp4'
     if fmt != 'mp4':
         raise HTTPException(status_code=400, detail='Recording format must be mp4 for browser playback.')
+    # Global enabled/mode/continuous were removed: recording is gated per-rule
+    # on the Zones page and per-camera via the Continuous Recording toggle.
     return {
-        'enabled': _bool_value(merged.get('enabled', True)),
-        'mode': mode,
-        'continuous': _bool_value(merged.get('continuous', mode == 'continuous')),
         'pre_event_seconds': _int_field(merged, 'pre_event_seconds', 10, 0, 300),
         'post_event_seconds': _int_field(merged, 'post_event_seconds', 15, 0, 300),
         'extension_step_seconds': _int_field(merged, 'extension_step_seconds', 45, 0, 300),

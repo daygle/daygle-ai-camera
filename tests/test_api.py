@@ -791,9 +791,6 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
             "/api/settings/system/recording",
             method="PUT",
             json_body={
-                "enabled": True,
-                "mode": "objects",
-                "continuous": False,
                 "pre_event_seconds": 2,
                 "post_event_seconds": 3,
                 "max_clip_seconds": 10,
@@ -805,7 +802,10 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
             headers={"X-CSRF-Token": csrf},
         )
         assert status == 200
-        assert recording["mode"] == "objects"
+        assert recording["pre_event_seconds"] == 2
+        # Global enabled/mode/continuous were removed; only clip mechanics remain.
+        assert "mode" not in recording
+        assert "enabled" not in recording
 
         status, _headers, storage = client.request(
             "/api/settings/system/storage",
@@ -847,9 +847,6 @@ def test_runtime_data_reset_clears_operational_data_but_keeps_settings(tmp_path,
             '/api/settings/system/recording',
             method='PUT',
             json_body={
-                'enabled': True,
-                'mode': 'motion',
-                'continuous': False,
                 'pre_event_seconds': 5,
                 'post_event_seconds': 10,
                 'max_clip_seconds': 60,
@@ -1223,7 +1220,7 @@ def test_extend_active_rtsp_recording_updates_trigger_label_to_specific_object(t
     extended_id = main.extend_active_rtsp_recording(
         camera_id='camera-1',
         event_time=now.isoformat(),
-        recording_config={'enabled': True, 'mode': 'motion', 'record_on_alert': True, 'extension_step_seconds': 10},
+        recording_config={'extension_step_seconds': 10},
         detections=[{'label': 'dog', 'confidence': 0.88, 'alert_triggered': True}],
     )
 
@@ -1311,7 +1308,7 @@ def test_live_stream_detection_without_alert_rule_does_not_record_by_default(tmp
                     {'id': 'porch', 'name': 'Porch', 'x': 0, 'y': 0, 'width': 1, 'height': 1, 'monitor_motion': True, 'monitor_objects': True},
                 ],
             },
-            'recording': {'enabled': True, 'record_on_alert': True, 'continuous': False},
+            'recording': {'continuous': False},
         },
     )
 
@@ -1415,7 +1412,7 @@ def test_live_stream_camera_continuous_recording_records_without_alert_rule(tmp_
                     {'id': 'porch', 'name': 'Porch', 'x': 0, 'y': 0, 'width': 1, 'height': 1, 'monitor_motion': True, 'monitor_objects': True},
                 ],
             },
-            'recording': {'enabled': True, 'record_on_alert': True, 'continuous': True},
+            'recording': {'continuous': True},
         },
     )
 
@@ -1527,7 +1524,7 @@ def test_rtsp_recording_metadata_can_skip_generated_placeholder(tmp_path):
 
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
-        'recording': {'enabled': True, 'mode': 'motion', 'format': 'mp4'},
+        'recording': {'format': 'mp4'},
     })
 
     metadata = service.event_recording_metadata(
@@ -1550,9 +1547,6 @@ def test_alert_recording_prefers_specific_object_label_over_motion(tmp_path):
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
         'recording': {
-            'enabled': True,
-            'mode': 'motion',
-            'record_on_alert': True,
             'format': 'mp4',
         },
     })
@@ -1635,7 +1629,7 @@ def test_collect_prebuffer_segments_selects_by_content_overlap(tmp_path):
 
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
-        'recording': {'enabled': True, 'mode': 'motion', 'format': 'mp4'},
+        'recording': {'format': 'mp4'},
     })
     camera_dir = service.prebuffer_dir / 'camera-1'
     camera_dir.mkdir(parents=True, exist_ok=True)
@@ -1673,7 +1667,7 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
 
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
-        'recording': {'enabled': True, 'mode': 'motion', 'format': 'mp4'},
+        'recording': {'format': 'mp4'},
     })
     camera_dir = service.prebuffer_dir / 'cam'
     camera_dir.mkdir(parents=True, exist_ok=True)
@@ -1795,7 +1789,7 @@ def test_write_rtsp_clip_rejects_videoless_output(tmp_path, monkeypatch):
 
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
-        'recording': {'enabled': True, 'mode': 'motion', 'format': 'mp4'},
+        'recording': {'format': 'mp4'},
     })
 
     def fake_run(command, *_args, **_kwargs):
@@ -1822,7 +1816,7 @@ def test_write_rtsp_clip_keeps_clip_with_video_stream(tmp_path, monkeypatch):
 
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
-        'recording': {'enabled': True, 'mode': 'motion', 'format': 'mp4'},
+        'recording': {'format': 'mp4'},
     })
 
     def fake_run(command, *_args, **_kwargs):
@@ -3007,7 +3001,7 @@ def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, m
                     },
                 ],
             },
-            'recording': {'enabled': True, 'record_on_alert': True, 'continuous': False},
+            'recording': {'continuous': False},
         },
         enforce_interval=False,
     )
@@ -3035,7 +3029,7 @@ def _zone_camera_settings(zone_rules: list) -> dict:
                 },
             ],
         },
-        'recording': {'enabled': True, 'record_on_alert': True, 'continuous': False},
+        'recording': {'continuous': False},
     }
 
 
@@ -3170,7 +3164,7 @@ def test_object_outside_zone_does_not_create_recording(tmp_path, monkeypatch):
                 },
             ],
         },
-        'recording': {'enabled': True, 'record_on_alert': True, 'continuous': False},
+        'recording': {'continuous': False},
     }
     event_id = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
 
@@ -3914,7 +3908,7 @@ def test_multi_object_recording_labels_and_trigger_type(tmp_path, monkeypatch):
         extended_id = main.extend_active_rtsp_recording(
             camera_id='camera-1',
             event_time=now.isoformat(),
-            recording_config={'enabled': True, 'mode': 'motion', 'record_on_alert': True, 'extension_step_seconds': 10},
+            recording_config={'extension_step_seconds': 10},
             detections=[
                 {'label': 'bicycle', 'confidence': 0.85, 'alert_triggered': True},
                 {'label': 'dog', 'confidence': 0.75, 'alert_triggered': True},
