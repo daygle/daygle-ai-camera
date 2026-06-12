@@ -212,10 +212,6 @@ h2 { margin: 0; font-size: 20px; }
 .muted { color: var(--muted); }
 .grid { display: grid; gap: 18px; }
 .stats-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
-.main-grid {
-  grid-template-columns: 1fr 1fr;
-  align-items: start;
-}
 .card {
   border: 1px solid var(--border);
   background: linear-gradient(180deg, var(--panel), rgba(10, 16, 28, 0.86));
@@ -232,12 +228,9 @@ h2 { margin: 0; font-size: 20px; }
 .stats-grid .card strong { display: block; margin-top: 10px; font-size: 32px; font-weight: 900; letter-spacing: -.01em; }
 
 .stats-grid .card small { display: block; margin-top: 6px; line-height: 1.4; }
-.ai-status-card small { display: block; margin-top: 6px; line-height: 1.4; }
 .ai-mode { font-size: 24px; letter-spacing: .04em; }
 .ai-mode.onnx-active { color: var(--success); }
 .ai-mode.model-failed { color: var(--danger); }
-.section-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
-.section-header h2 { font-size: 16px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
 .primary, button {
   border: 0;
   border-radius: 14px;
@@ -264,7 +257,6 @@ textarea {
   padding: 12px 14px;
   outline: none;
 }
-.search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; margin-bottom: 16px; }
 .chip {
   display: inline-flex;
   align-items: center;
@@ -433,8 +425,7 @@ input[type="file"] { padding: 10px; }
   }
   .nav-dropdown-item { padding: 8px 12px; }
   .hero { flex-direction: column; align-items: stretch; }
-  .stats-grid, .main-grid, .recording-timeline-layout { grid-template-columns: 1fr; }
-  .search-row { grid-template-columns: 1fr; }
+  .stats-grid, .recording-timeline-layout { grid-template-columns: 1fr; }
   /* Override custom search rows that wouldn't collapse from the base .search-row rule */
   .recordings-search-row { grid-template-columns: minmax(0, 1fr) auto auto; }
   .recordings-search-row select { grid-column: 1 / -1; }
@@ -449,19 +440,6 @@ input[type="file"] { padding: 10px; }
   cursor: pointer;
   text-decoration: underline;
 }
-.live-viewer-card {
-  display: grid;
-  gap: 18px;
-  min-height: calc(100vh - 112px);
-}
-.live-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 16px 0 0;
-}
-.live-toolbar h1 { font-size: clamp(30px, 4vw, 52px); }
 .toggle-control {
   display: inline-flex;
   align-items: center;
@@ -478,15 +456,12 @@ input[type="file"] { padding: 10px; }
 .live-frame-wrap {
   position: relative;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 28px;
   background: #000;
-  box-shadow: 0 22px 70px rgba(0,0,0,.42);
 }
 .live-frame {
   display: block;
   width: 100%;
-  height: calc(100vh - 214px);
+  height: calc(100vh - 320px);
   min-height: 420px;
   object-fit: contain;
   background: #000;
@@ -534,7 +509,6 @@ input[type="file"] { padding: 10px; }
   padding: 12px 14px;
 }
 @media (max-width: 900px) {
-  .live-toolbar { flex-direction: column; align-items: stretch; }
   .toggle-control { justify-content: center; }
   .live-frame { height: 58vh; }
 }
@@ -1077,7 +1051,6 @@ input[type="file"] { padding: 10px; }
 /* Small phones (≤600px): compact nav, tighter cards, section headers that wrap */
 @media (max-width: 600px) {
   .card { padding: 16px; }
-  .section-header { flex-wrap: wrap; }
   .brand-text { display: none; }
   /* Clip overlay controls stack vertically on small phones */
   .clip-overlay-controls { flex-direction: column; align-items: stretch; gap: 8px; }
@@ -1503,18 +1476,6 @@ input[type="file"] { padding: 10px; }
 .timeline-card {
   display: grid;
   gap: 18px;
-}
-.timeline-card .section-header {
-  align-items: flex-start;
-  gap: 10px;
-}
-.timeline-card .section-header h2 {
-  font-size: 22px;
-}
-.timeline-card .section-header .muted {
-  margin-top: 2px;
-  max-width: 34ch;
-  text-align: right;
 }
 .timeline-card .status-panel {
   margin: 0;
@@ -2262,21 +2223,6 @@ input[type="file"] { padding: 10px; }
 @keyframes live-pulse-anim {
   0%, 100% { box-shadow: 0 0 0 3px rgba(73, 230, 163, 0.22); }
   50% { box-shadow: 0 0 0 6px rgba(73, 230, 163, 0.05); }
-}
-
-/* Frame wrap (no border — the card provides it) */
-.live-frame-wrap {
-  position: relative;
-  overflow: hidden;
-  background: #000;
-}
-.live-frame {
-  display: block;
-  width: 100%;
-  height: calc(100vh - 320px);
-  min-height: 420px;
-  object-fit: contain;
-  background: #000;
 }
 
 /* Status pill overlaid on the frame */

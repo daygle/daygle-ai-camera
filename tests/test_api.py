@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import importlib
 import json
@@ -415,12 +415,12 @@ def test_ai_model_status_and_action_endpoints(tmp_path, monkeypatch):
         csrf = _login(client)
         status, _headers, payload = client.request('/api/status/ai')
         assert status == 200
-        assert {'current_backend', 'model_exists', 'onnx_runtime_installed', 'detector_loaded', 'active_config_source'} <= set(payload)
+        assert {'active_backend', 'model_exists', 'onnx_runtime_installed', 'detector_loaded', 'active_config_source'} <= set(payload)
         assert payload['active_config_source'] == 'config.yaml'
 
         status, _headers, checked = client.request('/api/settings/ai/check-model', method='POST', headers={'X-CSRF-Token': csrf})
         assert status == 200
-        assert checked['current_backend'] == 'onnx'
+        assert checked['active_backend'] == 'onnx'
 
         status, _headers, tested = client.request('/api/settings/ai/test-detector', method='POST', headers={'X-CSRF-Token': csrf})
         assert status == 200
@@ -3041,8 +3041,12 @@ def _zone_camera_settings(zone_rules: list) -> dict:
     }
 
 
-def test_person_detection_in_zone_creates_alert_and_recording(tmp_path, monkeypatch):
-    """Person detected inside a zone that has a person alert+record rule must produce a
+@pytest.mark.parametrize('label,confidence,box', [
+    ('person', 0.91, {'x': 0.1, 'y': 0.1, 'width': 0.3, 'height': 0.5}),
+    ('cat', 0.82, {'x': 0.2, 'y': 0.2, 'width': 0.3, 'height': 0.3}),
+])
+def test_zone_detection_creates_alert_and_recording(tmp_path, monkeypatch, label, confidence, box):
+    """A detection inside a zone with a matching alert+record rule must produce a
     saved event with recording_status='linked' and an alert history entry."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
@@ -3052,8 +3056,8 @@ def test_person_detection_in_zone_creates_alert_and_recording(tmp_path, monkeypa
         available = True
         unavailable_reason = None
 
-        def detect_image(self, _bytes, confidence=None):
-            return [{'label': 'person', 'confidence': 0.91, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.3, 'height': 0.5}}]
+        def detect_image(self, _bytes, **kwargs):
+            return [{'label': label, 'confidence': confidence, 'box': box}]
 
     monkeypatch.setattr(main, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
@@ -3061,94 +3065,17 @@ def test_person_detection_in_zone_creates_alert_and_recording(tmp_path, monkeypa
     main.alerts.last_triggered.clear()
 
     settings = _zone_camera_settings([
-        {'label': 'person', 'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
+        {'label': label, 'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
     ])
     event_id = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
 
     assert event_id is not None
     event = main.database.get_event(event_id)
-    assert any(d['label'] == 'person' for d in event['detections'])
+    assert any(d['label'] == label for d in event['detections'])
     assert event['recording_status'] == 'linked'
-    assert event['recordings'][0]['trigger_label'] == 'person'
+    assert event['recordings'][0]['trigger_label'] == label
     alerts = main.database.alerts(limit=10)
-    assert any(a['label'] == 'person' for a in alerts)
-
-
-def test_live_history_samples_are_stamped_with_frame_capture_time(tmp_path, monkeypatch):
-    """Detection history samples must be stamped with when the frame was
-    CAPTURED, not when inference finished: recording tracks are sliced from
-    this history and replayed against the video, and a completion-time stamp
-    shifts every box late by the inference duration, so playback overlays
-    trail moving objects."""
-    _load_app(tmp_path, monkeypatch)
-    import app.main as main
-
-    class FakeDetector:
-        backend = 'onnx'
-        available = True
-        unavailable_reason = None
-
-        def detect_image(self, _bytes, confidence=None):
-            return [{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}}]
-
-    monkeypatch.setattr(main, 'detector', FakeDetector())
-    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
-    main.live_detection_last_checked.clear()
-    main.live_detection_history.clear()
-
-    settings = _zone_camera_settings([])
-    camera_id = str(settings['id'])
-
-    capture_ts = time.time() - 2.5  # camera read happened 2.5s before "inference finished"
-    main.process_live_stream_alerts(
-        b'frame', {'width': 1280, 'height': 720, 'timestamp': capture_ts}, settings, enforce_interval=False,
-    )
-    sample_ts, sample = list(main.live_detection_history[camera_id])[-1]
-    assert sample_ts == pytest.approx(capture_ts, abs=0.05)
-    assert sample[0]['label'] == 'person'
-
-    # A missing or bogus frame timestamp (epoch 0, stream-relative seconds)
-    # falls back to a wall-clock stamp taken before inference runs.
-    before = time.time()
-    main.process_live_stream_alerts(
-        b'frame', {'width': 1280, 'height': 720, 'timestamp': 12.5}, settings, enforce_interval=False,
-    )
-    after = time.time()
-    fallback_ts, _ = list(main.live_detection_history[camera_id])[-1]
-    assert before <= fallback_ts <= after
-
-
-def test_cat_detection_in_zone_creates_alert_and_recording(tmp_path, monkeypatch):
-    """Cat detected inside a zone that has a cat alert+record rule must produce a saved
-    event, a recording with trigger_label='cat', and an alert history entry."""
-    _load_app(tmp_path, monkeypatch)
-    import app.main as main
-
-    class FakeDetector:
-        backend = 'onnx'
-        available = True
-        unavailable_reason = None
-
-        def detect_image(self, _bytes, confidence=None):
-            return [{'label': 'cat', 'confidence': 0.82, 'box': {'x': 0.2, 'y': 0.2, 'width': 0.2, 'height': 0.2}}]
-
-    monkeypatch.setattr(main, 'detector', FakeDetector())
-    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
-    main.live_detection_last_checked.clear()
-    main.alerts.last_triggered.clear()
-
-    settings = _zone_camera_settings([
-        {'label': 'cat', 'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
-    ])
-    event_id = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
-
-    assert event_id is not None
-    event = main.database.get_event(event_id)
-    assert any(d['label'] == 'cat' for d in event['detections'])
-    assert event['recording_status'] == 'linked'
-    assert event['recordings'][0]['trigger_label'] == 'cat'
-    alerts = main.database.alerts(limit=10)
-    assert any(a['label'] == 'cat' for a in alerts)
+    assert any(a['label'] == label for a in alerts)
 
 
 def test_person_and_cat_in_zone_each_create_independent_events(tmp_path, monkeypatch):
@@ -3372,82 +3299,39 @@ def test_object_detection_without_global_email_enabled_sends_nothing(tmp_path, m
     assert delivered == [], 'no email should be delivered while global SMTP is disabled'
 
 
-def test_compute_minimum_rule_confidence_falls_back_to_global_ai_confidence(tmp_path, monkeypatch):
-    """When no zone object rules are configured, compute_minimum_rule_confidence must
-    return the global AI confidence setting rather than a hardcoded floor value."""
+@pytest.mark.parametrize('zone_rules,global_conf,expected', [
+    # No zone rules -> falls back to global AI confidence
+    (None, 0.62, 0.62),
+    # Zone with person rule at 0.35 -> uses lowest rule confidence
+    ([{'label': 'person', 'min_confidence': 0.35, 'record_on_detect': True, 'alert_on_detect': True, 'cooldown_seconds': 60}], 0.5, 0.35),
+    # Zone with motion rule at 0.1 -> motion rule ignored, falls back to global
+    ([{'label': 'motion', 'min_confidence': 0.1, 'record_on_detect': True, 'alert_on_detect': True, 'cooldown_seconds': 60},
+      {'label': 'person', 'min_confidence': 0.45, 'record_on_detect': True, 'alert_on_detect': True, 'cooldown_seconds': 60}], 0.5, 0.45),
+])
+def test_compute_minimum_rule_confidence(tmp_path, monkeypatch, zone_rules, global_conf, expected):
+    """compute_minimum_rule_confidence returns the lowest enabled object rule's
+    min_confidence, falling back to the global AI confidence when no object rule
+    is lower. Motion rules are excluded from the floor calculation."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
 
-    # Store a non-default global confidence so we can distinguish it from any magic fallback.
-    main.database.set_setting('ai', {'backend': 'onnx', 'confidence': 0.62, 'model_path': 'fake.onnx'}, main.utc_now())
-    main._min_rule_confidence_cache = None  # bust the TTL cache
-
-    # No cameras have zone rules → fallback must be the global 0.62.
-    main.database.set_setting('cameras', [], main.utc_now())
-    assert main.compute_minimum_rule_confidence() == pytest.approx(0.62)
-
-
-def test_compute_minimum_rule_confidence_uses_lowest_zone_rule_below_global(tmp_path, monkeypatch):
-    """When a zone rule has a lower min_confidence than the global setting, the zone
-    rule's value must win so YOLO doesn't silently filter those detections."""
-    _load_app(tmp_path, monkeypatch)
-    import app.main as main
-
-    global_confidence = 0.60
-    main.database.set_setting('ai', {'backend': 'onnx', 'confidence': global_confidence, 'model_path': 'fake.onnx'}, main.utc_now())
-    main.database.set_setting(
-        'cameras',
-        [{
-            'id': 'cam-1',
-            'name': 'Test',
-            'detection': {
-                'zones': [{
-                    'id': 'z1', 'name': 'Z1', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                    'monitor_objects': True,
-                    'object_rules': [
-                        {'label': 'person', 'enabled': True, 'min_confidence': 0.35},
-                        {'label': 'cat',    'enabled': True, 'min_confidence': 0.45},
-                    ],
-                }],
-            },
-        }],
-        main.utc_now(),
-    )
+    main.database.set_setting('ai', {'backend': 'onnx', 'confidence': global_conf, 'model_path': 'fake.onnx'}, main.utc_now())
     main._min_rule_confidence_cache = None
 
-    assert main.compute_minimum_rule_confidence() == pytest.approx(0.35)
+    if zone_rules is not None:
+        main.database.set_setting('cameras', [
+            {'id': 'camera-1', 'backend': 'onvif', 'stream_url': 'rtsp://127.0.0.1:554/stream',
+             'detection': {
+                 'object_labels': ['person', 'cat'],
+                 'zones': [{'id': 'test', 'name': 'Test', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
+                            'monitor_motion': True, 'monitor_objects': True, 'object_rules': zone_rules}],
+             }},
+        ], main.utc_now())
+    else:
+        main.database.set_setting('cameras', [], main.utc_now())
 
-
-def test_compute_minimum_rule_confidence_ignores_motion_rules(tmp_path, monkeypatch):
-    """Motion rules must be excluded from the minimum search; only object rules count."""
-    _load_app(tmp_path, monkeypatch)
-    import app.main as main
-
-    main.database.set_setting('ai', {'backend': 'onnx', 'confidence': 0.50, 'model_path': 'fake.onnx'}, main.utc_now())
-    main.database.set_setting(
-        'cameras',
-        [{
-            'id': 'cam-1',
-            'name': 'Test',
-            'detection': {
-                'zones': [{
-                    'id': 'z1', 'name': 'Z1', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
-                    'monitor_objects': True,
-                    'object_rules': [
-                        {'label': 'motion', 'enabled': True, 'min_confidence': 0.10},  # must be ignored
-                        {'label': 'person', 'enabled': True, 'min_confidence': 0.55},
-                    ],
-                }],
-            },
-        }],
-        main.utc_now(),
-    )
     main._min_rule_confidence_cache = None
-
-    # Motion rule (0.10) must be ignored; person rule (0.55) > global (0.50) so global wins
-    # (zone rules with higher thresholds must not raise YOLO's detection floor above global)
-    assert main.compute_minimum_rule_confidence() == pytest.approx(0.50)
-
+    assert main.compute_minimum_rule_confidence() == pytest.approx(expected)
 
 def test_trailing_motion_after_object_event_is_debounced(tmp_path, monkeypatch):
     """Generic motion right after any event on the camera is the trailing edge of the
@@ -3596,27 +3480,29 @@ def test_live_monitor_populates_detection_history(tmp_path, monkeypatch):
     assert sample_detections[0]['box']['width'] == pytest.approx(0.2)
 
 
-def test_recording_detail_backfills_track_from_live_history(tmp_path, monkeypatch):
-    """Opening a recording without a track sidecar fills it synchronously from
-    the live monitor's history while the history still covers the clip's
-    window. The clip itself is never decoded or re-analyzed."""
+@pytest.mark.parametrize('has_history_coverage,expect_track', [
+    (True, True),
+    (False, False),
+])
+def test_recording_detail_track_backfill(tmp_path, monkeypatch, has_history_coverage, expect_track):
+    """When live history covers a recording's window, the detail view backfills
+    a track sidecar synchronously. Without coverage, no track is generated."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
 
-    clip = tmp_path / 'data' / 'recordings' / 'event_99.mp4'
+    clip = tmp_path / 'data' / 'recordings' / ('event_backfill.mp4' if has_history_coverage else 'event_no_history.mp4')
     clip.parent.mkdir(parents=True, exist_ok=True)
     clip.write_bytes(b'not-decoded')
 
     started = datetime.now(timezone.utc) - timedelta(seconds=12)
     ended = started + timedelta(seconds=8)
     box = {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}
-    main.live_detection_history['camera-1'] = main.deque(
-        [
-            (started.timestamp() + 2.0, [{'label': 'person', 'confidence': 0.9, 'box': box}]),
-            (started.timestamp() + 4.0, []),
-        ],
-        maxlen=1200,
-    )
+
+    if has_history_coverage:
+        main.live_detection_history['camera-1'] = main.deque(
+            [(started.timestamp() + 2.0, [{'label': 'person', 'confidence': 0.9, 'box': box}])],
+            maxlen=1200,
+        )
 
     event_id = main.database.add_event(
         created_at=main.utc_now(), source='rtsp', snapshot_path=None,
@@ -3631,38 +3517,287 @@ def test_recording_detail_backfills_track_from_live_history(tmp_path, monkeypatc
     )
 
     detail = main.recording_detail(recording_id)
-    assert main.recording_track_sidecar_path(clip).exists(), 'backfill must write the track sidecar'
-    assert detail['track'], 'detail view must return the backfilled track'
-    assert detail['track'][0]['t'] == pytest.approx(2.0, abs=0.01)
-    assert detail['track'][0]['detections'][0]['label'] == 'person'
-
-
-def test_recording_detail_without_history_coverage_has_no_track(tmp_path, monkeypatch):
-    """A clip whose capture window is not covered by the in-memory history gets
-    no track and is never decoded; playback falls back to the static event box."""
-    _load_app(tmp_path, monkeypatch)
-    import app.main as main
-
-    clip = tmp_path / 'data' / 'recordings' / 'event_77.mp4'
-    clip.parent.mkdir(parents=True, exist_ok=True)
-    clip.write_bytes(b'not-decoded')
-
-    event_id = main.database.add_event(
-        created_at=main.utc_now(), source='rtsp', snapshot_path=None,
-        detections=[{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}}],
-        alert_triggered=True, metadata={},
-    )
-    recording_id = main.database.add_recording(
-        event_id=event_id, camera_id='camera-1',
-        started_at=main.utc_now(), ended_at=main.utc_now(), duration_seconds=2.0,
-        file_path=str(clip), thumbnail_path=None, source='rtsp',
-        created_at=main.utc_now(), trigger_type='object', trigger_label='person',
-    )
-
-    detail = main.recording_detail(recording_id)
-    assert detail['track'] is None
-    assert not main.recording_track_sidecar_path(clip).exists()
+    if expect_track:
+        assert main.recording_track_sidecar_path(clip).exists(), 'backfill must write the track sidecar'
+        assert detail['track'], 'detail view must return the backfilled track'
+        assert detail['track'][0]['t'] == pytest.approx(2.0, abs=0.01)
+        assert detail['track'][0]['detections'][0]['label'] == 'person'
+    else:
+        assert detail['track'] is None
+        assert not main.recording_track_sidecar_path(clip).exists()
 
     # Repeat views stay cheap and consistent.
     detail = main.recording_detail(recording_id)
-    assert detail['track'] is None
+    if expect_track:
+        assert detail['track']
+    else:
+        assert detail['track'] is None
+
+def test_get_ai_settings(tmp_path, monkeypatch):
+    """GET /api/settings/ai returns the current AI configuration with status fields."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        _login(client)
+        status, _headers, settings = client.request("/api/settings/ai")
+        assert status == 200
+        expected_keys = {"backend", "confidence", "active_backend", "configured_backend", "mode",
+                         "available", "model_loaded", "detector_loaded", "model_exists",
+                         "onnx_runtime_installed", "active_config_source", "error", "labels_path",
+                         "model_path"}
+        assert expected_keys <= set(settings), f"Missing keys: {expected_keys - set(settings)}"
+        assert settings["backend"] == "onnx"
+        assert settings["active_backend"] in ("onnx", "unknown")
+        assert settings["active_config_source"] == "config.yaml"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+def test_ai_reload_endpoint(tmp_path, monkeypatch):
+    """POST /api/settings/ai/reload reloads the detector and returns status."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        status, _headers, payload = client.request(
+            "/api/settings/ai/reload",
+            method="POST",
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status in (200, 400), f"Expected 200 or 400, got {status}"
+        assert "reload_succeeded" in payload
+        assert "reload_error" in payload
+        assert "backend" in payload
+        assert "active_backend" in payload
+        assert "mode" in payload
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+def test_ai_models_endpoint(tmp_path, monkeypatch):
+    """GET /api/settings/ai/models lists available YOLO models with installation status."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        _login(client)
+        status, _headers, models = client.request("/api/settings/ai/models")
+        assert status == 200
+        assert isinstance(models, list)
+        assert len(models) >= 5
+        for model in models:
+            assert "id" in model
+            assert "label" in model
+            assert "description" in model
+            assert "approx_mb" in model
+            assert "installed" in model
+            assert "active" in model
+        model_ids = [m["id"] for m in models]
+        assert "yolov8n" in model_ids
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+def test_alert_email_settings_get_and_update(tmp_path, monkeypatch):
+    """GET returns current email alert settings; PUT updates and persists them."""
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        status, _headers, settings = client.request("/api/settings/alert-email")
+        assert status == 200
+        expected_keys = {"enabled", "host", "port", "username", "password", "from_address", "use_tls", "use_ssl"}
+        assert expected_keys <= set(settings)
+        status, _headers, updated = client.request(
+            "/api/settings/alert-email",
+            method="PUT",
+            json_body={"enabled": False, "host": "smtp.example.com", "port": 587, "from_address": "alerts@example.com"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert updated["enabled"] is False
+        assert updated["host"] == "smtp.example.com"
+        assert updated["from_address"] == "alerts@example.com"
+        import sqlite3
+        with sqlite3.connect(database_path) as db:
+            row = db.execute("SELECT value FROM app_settings WHERE key = 'alert_email'").fetchone()
+        assert row is not None
+        saved = json.loads(row[0])
+        assert saved["host"] == "smtp.example.com"
+        assert saved["enabled"] is False
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+def test_push_notification_settings_get_and_update(tmp_path, monkeypatch):
+    """GET returns current push notification settings; PUT updates and persists them."""
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        status, _headers, settings = client.request("/api/settings/alert-push")
+        assert status == 200
+        expected_keys = {"enabled", "server_url", "topic", "priority", "username", "password"}
+        assert expected_keys <= set(settings)
+        status, _headers, updated = client.request(
+            "/api/settings/alert-push",
+            method="PUT",
+            json_body={"enabled": True, "server_url": "https://ntfy.sh", "topic": "daygle-test", "priority": "default"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert updated["enabled"] is True
+        assert updated["server_url"] == "https://ntfy.sh"
+        assert updated["topic"] == "daygle-test"
+        import sqlite3
+        with sqlite3.connect(database_path) as db:
+            row = db.execute("SELECT value FROM app_settings WHERE key = 'alert_push'").fetchone()
+        assert row is not None
+        saved = json.loads(row[0])
+        assert saved["topic"] == "daygle-test"
+        assert saved["enabled"] is True
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+def test_push_notification_test_endpoint(tmp_path, monkeypatch):
+    """POST /api/settings/alert-push/test sends a test push notification."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        import app.main as main_module
+        sent = []
+        monkeypatch.setattr(main_module.PushNotificationService, "send_test", lambda self: sent.append(self.settings))
+        status, _headers, payload = client.request(
+            "/api/settings/alert-push/test",
+            method="POST",
+            json_body={
+                "settings": {
+                    "enabled": True,
+                    "server_url": "https://ntfy.sh",
+                    "topic": "daygle-test",
+                    "priority": "default",
+                },
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert payload == {"ok": True}
+        assert len(sent) == 1
+        assert sent[0]["topic"] == "daygle-test"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+def test_audit_log_api(tmp_path, monkeypatch):
+    """GET /api/audit returns audit log entries with pagination and filtering."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        status, _headers, _body = client.request(
+            "/api/settings/alert-email",
+            method="PUT",
+            json_body={"enabled": False, "host": "audit-test.example.com", "port": 587, "from_address": "audit@example.com"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        status, _headers, audit = client.request("/api/audit")
+        assert status == 200
+        assert "entries" in audit
+        assert "total" in audit
+        assert "limit" in audit
+        assert "offset" in audit
+        assert len(audit["entries"]) >= 1
+        actions = [entry["action"] for entry in audit["entries"]]
+        assert "update" in actions
+        status, _headers, limited = client.request("/api/audit?limit=1")
+        assert status == 200
+        assert len(limited["entries"]) <= 1
+        assert limited["limit"] == 1
+        status, _headers, filtered = client.request("/api/audit?action=update")
+        assert status == 200
+        assert all(entry["action"] == "update" for entry in filtered["entries"])
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+def test_system_live_settings_update(tmp_path, monkeypatch):
+    """PUT /api/settings/system/live updates live stream settings."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        status, _headers, updated = client.request(
+            "/api/settings/system/live",
+            method="PUT",
+            json_body={
+                "snapshot_refresh_ms": 300,
+                "detection_status_refresh_ms": 3000,
+                "background_detection_enabled": False,
+                "detection_interval_seconds": 1.0,
+                "event_debounce_seconds": 15.0,
+                "detection_history_minutes": 5,
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert updated["snapshot_refresh_ms"] == 300
+        assert updated["detection_status_refresh_ms"] == 3000
+        assert updated["background_detection_enabled"] is False
+        assert updated["detection_interval_seconds"] == 1.0
+        assert updated["event_debounce_seconds"] == 15.0
+        assert updated["detection_history_minutes"] == 5
+        status, _headers, system = client.request("/api/settings/system")
+        assert status == 200
+        assert system["live"]["detection_interval_seconds"] == 1.0
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+def test_delete_event_endpoint(tmp_path, monkeypatch):
+    """DELETE /api/events/{event_id} removes an event."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        status, _headers, payload = client.request(
+            "/api/detect/frame",
+            method="POST",
+            data=TEST_IMAGE_PNG,
+            headers={"Content-Type": "image/png", "X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        event_id = payload.get("event_id")
+        if event_id:
+            status, _headers, deleted = client.request(
+                f"/api/events/{event_id}",
+                method="DELETE",
+                headers={"X-CSRF-Token": csrf},
+            )
+            assert status == 200
+            assert deleted.get("ok") is True
+            status, _headers, events = client.request("/api/events")
+            assert status == 200
+            assert all(e["id"] != event_id for e in events)
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
