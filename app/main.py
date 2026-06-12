@@ -1091,6 +1091,9 @@ def extend_active_rtsp_recording(
     database.update_recording_timing(recording_id, ended_at=ended_at, duration_seconds=duration_seconds)
     if detections:
         should_record, trigger_type, trigger_label = recording_service.should_record(detections, config)
+        new_labels = detection_label_strings(detections)
+        if new_labels:
+            database.add_recording_labels(recording_id, new_labels, source='extension')
         if should_record and trigger_label:
             current_recording = database.get_recording(recording_id) or {}
             current_label = str(current_recording.get('trigger_label') or '').strip().lower()
@@ -1105,11 +1108,6 @@ def extend_active_rtsp_recording(
                     recording_id,
                     trigger_type=trigger_type,
                     trigger_label=candidate_label,
-                )
-                database.add_recording_labels(
-                    recording_id,
-                    detection_label_strings(detections or []) + [candidate_label],
-                    source='extension',
                 )
     return recording_id
 
