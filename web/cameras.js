@@ -54,11 +54,11 @@ function cameraRecordingChips(camera) {
   const alertClips = camera.recording?.record_on_alert !== false;
   const chips = [];
   if (recEnabled) {
-    chips.push('<span class="chip chip-green">Recording on</span>');
-    if (alertClips) chips.push('<span class="chip">Alert clips</span>');
+    chips.push('<span class="chip chip-green">Recording On</span>');
+    if (alertClips) chips.push('<span class="chip">Alert Clips</span>');
     if (continuous) chips.push('<span class="chip">Continuous</span>');
   } else {
-    chips.push('<span class="chip chip-dim">Recording off</span>');
+    chips.push('<span class="chip chip-dim">Recording Off</span>');
   }
   return chips.join('');
 }
@@ -121,7 +121,7 @@ function renderCameraCard(camera, index) {
           <span class="cam-meta-label">Zones</span>
           <span class="cam-meta-value">
             ${zoneCount > 0
-              ? `<span class="chip chip-green">${zoneCount} configured</span>`
+              ? `<span class="chip chip-green">${zoneCount}</span>`
               : `<span class="chip chip-warn">No zones</span>`}
           </span>
         </div>

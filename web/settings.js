@@ -221,6 +221,26 @@ function createPushNotificationSection() {
   }
 }
 
+function createCameraOfflineSection() {
+  const section = document.createElement('section');
+  section.className = 'card';
+  section.innerHTML = `
+    <div class="settings-section-header"><div class="settings-section-icon">📡</div><div><h2>Camera Offline Notifications</h2><p class="settings-section-subtitle">Get notified when a camera goes offline or recovers. Works with both email and push notification channels.</p></div></div>
+    <form id="cameraOfflineForm" class="form-grid">
+      <label><span>Offline Alerts</span><select name="enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select><span class="field-help">Master toggle for camera offline notifications. When enabled, you'll be notified when a camera stays offline past the delay period. Default: Disabled</span></label>
+      <label><span>Offline Delay (minutes)</span><input name="offline_delay_minutes" type="number" min="1" max="60" step="1" placeholder="1" /><span class="field-help">How long a camera must be unreachable before sending an offline notification. Set higher to avoid alerts from brief connection blips. Default: 1 min</span></label>
+    </form>
+    <div class="button-row"><button type="submit" form="cameraOfflineForm">Save Offline Alert Settings</button></div>
+  `;
+
+  const pushSection = document.getElementById('pushSettingsForm')?.closest('section');
+  if (pushSection) {
+    pushSection.after(section);
+  } else {
+    document.querySelector('main')?.append(section);
+  }
+}
+
 function createEmailDeliverySection() {
   const section = document.createElement('section');
   section.className = 'card';
@@ -249,6 +269,7 @@ function createEmailDeliverySection() {
 }
 
 createPushNotificationSection();
+createCameraOfflineSection();
 createEmailDeliverySection();
 createRuntimeResetSection();
 ensureRecordingExtensionStepField();
@@ -347,13 +368,22 @@ function renderPush(settings) {
   if (!pushForm.elements.priority.value) pushForm.elements.priority.value = 'default';
 }
 
+function renderCameraOffline(settings) {
+  const form = document.getElementById('cameraOfflineForm');
+  if (!form) return;
+  for (const [key, value] of Object.entries(settings || {})) {
+    if (form.elements[key]) form.elements[key].value = String(value ?? '');
+  }
+}
+
 async function loadSettings() {
   const me = await api('/api/auth/me');
   csrfToken = me.csrf_token;
-  const [settings, emailSettings, pushSettings] = await Promise.all([
+  const [settings, emailSettings, pushSettings, cameraOfflineSettings] = await Promise.all([
     api('/api/settings/system'),
     api('/api/settings/alert-email'),
     api('/api/settings/alert-push'),
+    api('/api/settings/camera-offline'),
   ]);
   fillForm(forms.live, settings.live);
   fillForm(forms.recording, settings.recording);
@@ -362,6 +392,7 @@ async function loadSettings() {
   fillForm(forms.auth, settings.auth);
   renderEmail(emailSettings);
   renderPush(pushSettings);
+  renderCameraOffline(cameraOfflineSettings);
   enhanceFormFieldLabels();
   messageEl.textContent = '';
 }
@@ -400,6 +431,21 @@ pushForm?.addEventListener('submit', async (event) => {
   try {
     renderPush(await api('/api/settings/alert-push', { method: 'PUT', body: JSON.stringify(pushPayload(pushForm)) }));
     setMessage('Push notification settings saved.');
+  } catch (error) {
+    setMessage(error.message, true);
+  }
+});
+
+document.getElementById('cameraOfflineForm')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = document.getElementById('cameraOfflineForm');
+  try {
+    const data = {
+      enabled: form.elements.enabled.value === 'true',
+      offline_delay_minutes: Number.parseInt(form.elements.offline_delay_minutes.value, 10) || 1,
+    };
+    await api('/api/settings/camera-offline', { method: 'PUT', body: JSON.stringify(data) });
+    setMessage('Camera offline alert settings saved.');
   } catch (error) {
     setMessage(error.message, true);
   }
