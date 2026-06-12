@@ -51,7 +51,6 @@ let draftPolygon = null;
 let zoneDrag = null;
 
 let configuredLabels = null;
-let soundClasses = [];
 
 const LIVE_AI_TRACK_KEY = 'daygle.live.overlay.track.enabled';
 // Off by default; users opt in per-browser via the toggle. The overlay only
@@ -188,26 +187,6 @@ function cameraMotion() {
   const det = cameraDetection();
   det.motion ||= { enabled: true, record_on_detect: true, email_enabled: true, push_enabled: false };
   return det.motion;
-}
-
-function cameraSoundDetection() {
-  const det = cameraDetection();
-  det.sound ||= { enabled: false, rules: [] };
-  det.sound.rules ||= [];
-  return det.sound;
-}
-
-function defaultSoundRule(cls) {
-  return {
-    class: cls.id,
-    name: cls.label,
-    enabled: false,
-    record_on_detect: true,
-    confidence_threshold: cls.default_threshold,
-    cooldown_seconds: cls.default_cooldown,
-    email_enabled: false,
-    push_enabled: false,
-  };
 }
 
 function cameraRecording() {
@@ -468,7 +447,7 @@ function updateZonesStats() {
 
 // Build a structured summary of the monitor's latest cycle so the renderer
 // can split the visual into a state chip, per-label chips, and a status line.
-function summarizeDetectionStatus(payload, soundStatus = null) {
+function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = false) {
   if (!payload) {
     return { state: 'idle', stateLabel: 'Idle', chips: [], message: 'Live AI status unavailable.' };
   }
@@ -495,14 +474,23 @@ function summarizeDetectionStatus(payload, soundStatus = null) {
     ? chips.map((c) => c.confidence > 0 ? `${titleCase(c.label)} (${Math.round(c.confidence * 100)}%)` : titleCase(c.label)).join(', ')
     : null;
 
-  // Append a sound chip when the detector has fired within the last 60 seconds.
-  if (soundStatus && soundStatus.last_detected_at) {
-    const ageMs = Date.now() - Date.parse(soundStatus.last_detected_at);
-    if (ageMs < 60000) {
-      const soundLabel = soundStatus.last_class_label || soundStatus.last_class || 'sound';
-      const soundConf = Number(soundStatus.last_confidence || 0);
-      chips.push({ label: soundLabel, confidence: soundConf, isSound: true });
+  // Persistent sound status chip — always shown to indicate whether sound
+  // detection is enabled, idle, or recently fired.
+  if (soundEnabled) {
+    if (soundStatus && soundStatus.last_detected_at) {
+      const ageMs = Date.now() - Date.parse(soundStatus.last_detected_at);
+      if (ageMs < 60000) {
+        const soundLabel = soundStatus.last_class_label || soundStatus.last_class || 'sound';
+        const soundConf = Number(soundStatus.last_confidence || 0);
+        chips.push({ label: `🔊 ${soundLabel}`, confidence: soundConf, isSound: true });
+      } else {
+        chips.push({ label: '🔊 Listening', confidence: 0, isSound: true, isIdle: true });
+      }
+    } else {
+      chips.push({ label: '🔊 Listening', confidence: 0, isSound: true, isIdle: true });
     }
+  } else {
+    chips.push({ label: '🔊 Sound Off', confidence: 0, isSound: true, isDisabled: true });
   }
 
   if (payload.state === 'alerted') {
@@ -558,8 +546,11 @@ function renderDetectionStatus(summary) {
         return `<span class="detection-chip ${variant}">${escapeHtml(text)}</span>`;
       }).join('');
       const soundHtml = soundChips.map((c) => {
-        const text = c.confidence > 0 ? `🔊 ${c.label} · ${Math.round(c.confidence * 100)}%` : `🔊 ${c.label}`;
-        return `<span class="detection-chip detection-chip-sound">${escapeHtml(text)}</span>`;
+        let cls = 'detection-chip detection-chip-sound';
+        if (c.isDisabled) cls = 'detection-chip detection-chip-empty';
+        else if (c.isIdle) cls = 'detection-chip detection-chip-sound';
+        const text = c.confidence > 0 ? `${c.label} · ${Math.round(c.confidence * 100)}%` : c.label;
+        return `<span class="${cls}">${escapeHtml(text)}</span>`;
       }).join('');
       liveEls.detectionChips.innerHTML = visualHtml + soundHtml;
     }
@@ -611,12 +602,14 @@ async function refreshDetectionStatus() {
   if (!selectedCamera) return;
   try {
     const cameraId = encodeURIComponent(selectedCamera.id);
+    // Check camera-level sound detection enabled state
+    const soundEnabled = selectedCamera.detection?.sound?.enabled === true;
     const [payload, soundStatus] = await Promise.all([
       api(`/api/live/detection-status?camera_id=${cameraId}`),
       api(`/api/sound/status?camera_id=${cameraId}`).catch(() => null),
     ]);
     ingestServerTrackDetections(payload);
-    renderDetectionStatus(summarizeDetectionStatus(payload, soundStatus));
+    renderDetectionStatus(summarizeDetectionStatus(payload, soundStatus, soundEnabled));
   } catch (error) {
     renderDetectionStatus({
       state: 'error',
@@ -643,7 +636,6 @@ function setSelectedCamera(cameraId) {
   if (isZonesPage) {
     renderZones();
     renderMotionDetectionSettings();
-    renderSoundDetectionSettings();
   }
   refreshFrame();
   refreshDetectionStatus();
@@ -694,32 +686,32 @@ function renderObjectRules(zone, zoneIndex) {
   const rows = zone.object_rules.map((rule, ruleIndex) => {
     const key = `${zoneIndex}:${ruleIndex}`;
     return `
-      <tr data-zone-rule="${key}" style="border-bottom:1px solid var(--border,#eee)">
-        <td style="padding:.35rem .5rem;font-weight:500;white-space:nowrap">${escapeHtml(titleCase(rule.label))}</td>
-        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-zone-rule-enabled="${key}" ${rule.enabled !== false ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
-        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-zone-rule-record="${key}" ${rule.record_on_detect !== false ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
-        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-zone-rule-alert="${key}" ${rule.alert_on_detect !== false ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
-        <td style="padding:.35rem .5rem"><input type="number" data-zone-rule-confidence="${key}" value="${rule.min_confidence}" min="0" max="1" step="0.05" style="width:4.5rem" /></td>
-        <td style="padding:.35rem .5rem"><input type="number" data-zone-rule-cooldown="${key}" value="${rule.cooldown_seconds}" min="0" max="3600" step="5" style="width:4.5rem" /></td>
-        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-zone-rule-email="${key}" ${rule.email_enabled === true ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
-        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-zone-rule-push="${key}" ${rule.push_enabled === true ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
-        <td style="padding:.35rem .5rem;text-align:center"><button class="secondary delete-btn" type="button" data-delete-zone-rule="${key}" style="padding:.2rem .5rem;font-size:.8em">✕</button></td>
+      <tr>
+        <td class="cell-label">${escapeHtml(titleCase(rule.label))}</td>
+        <td class="cell-center"><input type="checkbox" data-zone-rule-enabled="${key}" ${rule.enabled !== false ? 'checked' : ''} /></td>
+        <td class="cell-center"><input type="checkbox" data-zone-rule-record="${key}" ${rule.record_on_detect !== false ? 'checked' : ''} /></td>
+        <td class="cell-center"><input type="checkbox" data-zone-rule-alert="${key}" ${rule.alert_on_detect !== false ? 'checked' : ''} /></td>
+        <td><input type="number" data-zone-rule-confidence="${key}" value="${rule.min_confidence}" min="0" max="1" step="0.05" /></td>
+        <td><input type="number" data-zone-rule-cooldown="${key}" value="${rule.cooldown_seconds}" min="0" max="3600" step="5" /></td>
+        <td class="cell-center"><input type="checkbox" data-zone-rule-email="${key}" ${rule.email_enabled === true ? 'checked' : ''} /></td>
+        <td class="cell-center"><input type="checkbox" data-zone-rule-push="${key}" ${rule.push_enabled === true ? 'checked' : ''} /></td>
+        <td class="cell-center"><button class="secondary delete-btn" type="button" data-delete-zone-rule="${key}">✕</button></td>
       </tr>`;
   }).join('');
   return `
     <div style="overflow-x:auto">
-      <table style="width:100%;border-collapse:collapse;font-size:.87em">
+      <table class="rule-table">
         <thead>
-          <tr style="text-align:left;border-bottom:1px solid var(--border,#ddd)">
-            <th style="padding:.35rem .5rem">Object</th>
-            <th style="padding:.35rem .5rem;white-space:nowrap">Enabled</th>
-            <th style="padding:.35rem .5rem;white-space:nowrap">Record</th>
-            <th style="padding:.35rem .5rem;white-space:nowrap">Alert</th>
-            <th style="padding:.35rem .5rem;white-space:nowrap">Confidence</th>
-            <th style="padding:.35rem .5rem;white-space:nowrap">Cooldown (s)</th>
-            <th style="padding:.35rem .5rem;white-space:nowrap">Email</th>
-            <th style="padding:.35rem .5rem;white-space:nowrap">Push</th>
-            <th style="padding:.35rem .5rem"></th>
+          <tr>
+            <th>Object</th>
+            <th class="cell-center">Enabled</th>
+            <th class="cell-center">Record</th>
+            <th class="cell-center">Alert</th>
+            <th>Confidence</th>
+            <th>Cooldown (s)</th>
+            <th class="cell-center">Email</th>
+            <th class="cell-center">Push</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -758,7 +750,7 @@ function renderObjectDetectionRules() {
   if (!selectedCamera) { container.innerHTML = ''; return; }
   const zones = cameraDetection().zones;
   if (!zones.length) {
-    container.innerHTML = '<p class="muted" style="font-size:.85em;margin:.4rem 0">No monitoring areas configured. Draw an area above first.</p>';
+    container.innerHTML = '<p class="muted empty-message">No monitoring areas configured. Draw an area above first.</p>';
     return;
   }
   container.innerHTML = zones.map((zone, zoneIndex) => {
@@ -768,12 +760,12 @@ function renderObjectDetectionRules() {
     const addOptions = objectRuleOptions('');
     const rulesHtml = zone.object_rules.length
       ? renderObjectRules(zone, zoneIndex)
-      : '<p class="muted" style="font-size:.85em;margin:.4rem 0">No rules yet. Add an object below.</p>';
+      : '<p class="muted empty-message">No rules yet. Add an object below.</p>';
     return `
-      <div class="zone-object-rules" data-zone-rules-for="${zoneIndex}" style="margin-bottom:1rem">
-        <div class="zone-object-rules-header" style="display:flex;align-items:center;gap:.6rem;margin-bottom:.4rem">
+      <div class="zone-object-rules" data-zone-rules-for="${zoneIndex}">
+        <div class="zone-object-rules-header">
           <strong class="${disabledClass}">${zoneName}</strong>
-          <select data-add-zone-rule="${zoneIndex}" style="font-size:.87em">${addOptions}</select>
+          <select data-add-zone-rule="${zoneIndex}" class="rule-add-select">${addOptions}</select>
         </div>
         ${rulesHtml}
       </div>`;
@@ -929,23 +921,23 @@ function renderMotionDetectionSettings() {
   const motion = cameraMotion();
   liveEls.cameraMotionSettings.innerHTML = `
     <div style="overflow-x:auto">
-      <table style="width:100%;border-collapse:collapse;font-size:.87em">
+      <table class="rule-table">
         <thead>
-          <tr style="text-align:left;border-bottom:1px solid var(--border,#ddd)">
-            <th style="padding:.35rem .5rem">Type</th>
-            <th style="padding:.35rem .5rem;white-space:nowrap">Enabled</th>
-            <th style="padding:.35rem .5rem;white-space:nowrap">Record</th>
-            <th style="padding:.35rem .5rem;white-space:nowrap">Email</th>
-            <th style="padding:.35rem .5rem;white-space:nowrap">Push</th>
+          <tr>
+            <th>Type</th>
+            <th class="cell-center">Enabled</th>
+            <th class="cell-center">Record</th>
+            <th class="cell-center">Email</th>
+            <th class="cell-center">Push</th>
           </tr>
         </thead>
         <tbody>
-          <tr style="border-bottom:1px solid var(--border,#eee)">
-            <td style="padding:.35rem .5rem;font-weight:500;white-space:nowrap">Motion</td>
-            <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-motion-enabled="true" ${motion.enabled !== false ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
-            <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-motion-record="true" ${motion.record_on_detect !== false ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
-            <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-motion-email="true" ${motion.email_enabled ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
-            <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-motion-push="true" ${motion.push_enabled ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
+          <tr>
+            <td class="cell-label">Motion</td>
+            <td class="cell-center"><input type="checkbox" data-motion-enabled="true" ${motion.enabled !== false ? 'checked' : ''} /></td>
+            <td class="cell-center"><input type="checkbox" data-motion-record="true" ${motion.record_on_detect !== false ? 'checked' : ''} /></td>
+            <td class="cell-center"><input type="checkbox" data-motion-email="true" ${motion.email_enabled ? 'checked' : ''} /></td>
+            <td class="cell-center"><input type="checkbox" data-motion-push="true" ${motion.push_enabled ? 'checked' : ''} /></td>
           </tr>
         </tbody>
       </table>
@@ -964,128 +956,6 @@ function renderMotionDetectionSettings() {
   liveEls.cameraMotionSettings.querySelectorAll('[data-motion-push]').forEach((cb) => {
     cb.addEventListener('change', () => { cameraMotion().push_enabled = cb.checked; });
   });
-}
-
-function _soundRuleOptions() {
-  const sound = cameraSoundDetection();
-  const activeIds = new Set((sound.rules || []).map((r) => r.class));
-  const available = soundClasses.filter((cls) => !activeIds.has(cls.id));
-  const options = available.map((cls) => `<option value="${escapeHtml(cls.id)}">${escapeHtml(cls.label)}</option>`).join('');
-  return `<option value="">Add Sound…</option>${options}`;
-}
-
-function renderSoundDetectionSettings() {
-  if (!isZonesPage || !selectedCamera) return;
-  const container = document.getElementById('cameraSoundSettings');
-  if (!container) return;
-  if (!soundClasses.length) {
-    container.innerHTML = '<p class="muted" style="font-size:.85em;margin:.4rem 0">Sound classes unavailable.</p>';
-    return;
-  }
-  const sound = cameraSoundDetection();
-
-  const enabledSel = sound.enabled ? 'selected' : '';
-  const disabledSel = sound.enabled ? '' : 'selected';
-
-  const rows = (sound.rules || []).map((rule) => {
-    const cls = soundClasses.find((c) => c.id === rule.class);
-    const label = cls ? cls.label : titleCase(rule.class.replace(/_/g, ' '));
-    return `
-      <tr data-sound-class="${escapeHtml(rule.class)}" style="border-bottom:1px solid var(--border,#eee)">
-        <td style="padding:.35rem .5rem;font-weight:500;white-space:nowrap">${escapeHtml(label)}</td>
-        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-sound-rule-enabled="${escapeHtml(rule.class)}" ${rule.enabled ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
-        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-sound-rule-record="${escapeHtml(rule.class)}" ${rule.record_on_detect !== false ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
-        <td style="padding:.35rem .5rem"><input type="number" data-sound-rule-threshold="${escapeHtml(rule.class)}" value="${rule.confidence_threshold}" min="0.1" max="1.0" step="0.05" style="width:4.5rem" /></td>
-        <td style="padding:.35rem .5rem"><input type="number" data-sound-rule-cooldown="${escapeHtml(rule.class)}" value="${rule.cooldown_seconds}" min="5" max="3600" step="5" style="width:4.5rem" /></td>
-        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-sound-rule-email="${escapeHtml(rule.class)}" ${rule.email_enabled ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
-        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-sound-rule-push="${escapeHtml(rule.class)}" ${rule.push_enabled ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
-        <td style="padding:.35rem .5rem;text-align:center"><button class="secondary delete-btn" type="button" data-remove-sound-rule="${escapeHtml(rule.class)}" style="padding:.2rem .5rem;font-size:.8em">✕</button></td>
-      </tr>`;
-  }).join('');
-
-  container.innerHTML = `
-    <div class="form-grid compact-grid" style="margin-bottom:.8rem">
-      <label><span>Sound Detection</span>
-        <select id="cameraSoundEnabled">
-          <option value="false" ${disabledSel}>Disabled</option>
-          <option value="true" ${enabledSel}>Enabled (RTSP audio)</option>
-        </select>
-        <span class="field-help">Listens to this camera's RTSP audio track using YAMNet neural detection.</span>
-      </label>
-    </div>
-    <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem">
-      <select id="addSoundRuleSelect" style="font-size:.87em">${_soundRuleOptions()}</select>
-    </div>
-    ${rows ? `<div style="overflow-x:auto">
-      <table style="width:100%;border-collapse:collapse;font-size:.87em">
-        <thead>
-          <tr style="text-align:left;border-bottom:1px solid var(--border,#ddd)">
-            <th style="padding:.35rem .5rem">Sound</th>
-            <th style="padding:.35rem .5rem;white-space:nowrap">Enabled</th>
-            <th style="padding:.35rem .5rem;white-space:nowrap">Record</th>
-            <th style="padding:.35rem .5rem;white-space:nowrap">Threshold</th>
-            <th style="padding:.35rem .5rem;white-space:nowrap">Cooldown (s)</th>
-            <th style="padding:.35rem .5rem;white-space:nowrap">Email</th>
-            <th style="padding:.35rem .5rem;white-space:nowrap">Push</th>
-            <th style="padding:.35rem .5rem"></th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>` : '<p class="muted" style="font-size:.85em;margin:.4rem 0">No sound rules configured. Use the dropdown above to add one.</p>'}`;
-
-  document.getElementById('cameraSoundEnabled')?.addEventListener('change', (e) => {
-    cameraSoundDetection().enabled = e.target.value === 'true';
-  });
-  document.getElementById('addSoundRuleSelect')?.addEventListener('change', (e) => {
-    const classId = e.target.value;
-    if (!classId) return;
-    const cls = soundClasses.find((c) => c.id === classId);
-    if (!cls) return;
-    const sound = cameraSoundDetection();
-    if (!sound.rules.some((r) => r.class === classId)) {
-      sound.rules.push(defaultSoundRule(cls));
-    }
-    renderSoundDetectionSettings();
-  });
-  container.querySelectorAll('[data-remove-sound-rule]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const classId = btn.dataset.removeSoundRule;
-      const sound = cameraSoundDetection();
-      sound.rules = sound.rules.filter((r) => r.class !== classId);
-      renderSoundDetectionSettings();
-    });
-  });
-  container.querySelectorAll('[data-sound-rule-enabled]').forEach((cb) => {
-    cb.addEventListener('change', () => { _updateSoundRule(cb.dataset.soundRuleEnabled, 'enabled', cb.checked); });
-  });
-  container.querySelectorAll('[data-sound-rule-record]').forEach((cb) => {
-    cb.addEventListener('change', () => { _updateSoundRule(cb.dataset.soundRuleRecord, 'record_on_detect', cb.checked); });
-  });
-  container.querySelectorAll('[data-sound-rule-threshold]').forEach((inp) => {
-    inp.addEventListener('change', () => { _updateSoundRule(inp.dataset.soundRuleThreshold, 'confidence_threshold', Math.max(0.1, Math.min(1.0, Number(inp.value) || 0.35))); });
-  });
-  container.querySelectorAll('[data-sound-rule-cooldown]').forEach((inp) => {
-    inp.addEventListener('change', () => { _updateSoundRule(inp.dataset.soundRuleCooldown, 'cooldown_seconds', Math.max(5, Number.parseInt(inp.value, 10) || 30)); });
-  });
-  container.querySelectorAll('[data-sound-rule-email]').forEach((cb) => {
-    cb.addEventListener('change', () => { _updateSoundRule(cb.dataset.soundRuleEmail, 'email_enabled', cb.checked); });
-  });
-  container.querySelectorAll('[data-sound-rule-push]').forEach((cb) => {
-    cb.addEventListener('change', () => { _updateSoundRule(cb.dataset.soundRulePush, 'push_enabled', cb.checked); });
-  });
-}
-
-function _updateSoundRule(classId, field, value) {
-  const sound = cameraSoundDetection();
-  let rule = sound.rules.find((r) => r.class === classId);
-  if (!rule) {
-    const cls = soundClasses.find((c) => c.id === classId);
-    if (!cls) return;
-    rule = defaultSoundRule(cls);
-    sound.rules.push(rule);
-  }
-  rule[field] = value;
 }
 
 function pointFromEvent(event) {
@@ -1382,12 +1252,6 @@ async function init() {
       availableLabels = aiSettings.available_labels || [];
     } catch {
       availableLabels = [];
-    }
-    try {
-      const { classes } = await api('/api/sound/classes');
-      soundClasses = classes || [];
-    } catch {
-      soundClasses = [];
     }
   }
   await loadConfiguredLabels();

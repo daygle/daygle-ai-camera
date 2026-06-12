@@ -735,8 +735,14 @@ input[type="file"] { padding: 10px; }
 .zone-row.disabled { opacity: .62; }
 .zone-row label,
 .zone-object-rule label { display: grid; gap: 6px; color: var(--muted); font-weight: 800; }
-.zone-object-rules { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
-.zone-object-rules-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.zone-object-rules { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); margin-bottom: 1.2rem; }
+.zone-object-rules-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: .4rem;
+}
 .zone-object-rules-header strong { font-size: 14px; }
 .zone-object-rules-header select { max-width: 220px; }
 .zone-object-rule {
@@ -2559,8 +2565,102 @@ input[type="file"] { padding: 10px; }
 .zone-editor-card .form-grid + .list { margin-top: 16px; }
 .camera-recording-settings { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
 .camera-recording-settings h3 { margin: 0 0 12px; font-size: 15px; }
-.camera-sound-settings { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
-.camera-sound-settings h3 { margin: 0 0 12px; font-size: 15px; }
+
+/* ─── Zones page: section dividers ─────────────────────────────────────── */
+.camera-motion-settings,
+.camera-object-detection-settings,
+.camera-sound-settings {
+  margin-top: 0;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+/* ─── Rule tables ───────────────────────────────────────────────────────── */
+.rule-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .875em;
+  margin-top: 4px;
+}
+.rule-table thead {
+  border-bottom: 1px solid var(--border, #ddd);
+}
+.rule-table th {
+  padding: .4rem .6rem;
+  white-space: nowrap;
+  font-weight: 700;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  text-align: left;
+}
+.rule-table th.cell-center {
+  text-align: center;
+}
+.rule-table td {
+  padding: .45rem .6rem;
+  border-bottom: 1px solid var(--border, #eee);
+  vertical-align: middle;
+}
+.rule-table tr:last-child td {
+  border-bottom: none;
+}
+.rule-table .cell-label {
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--text);
+}
+.rule-table .cell-center {
+  text-align: center;
+}
+.rule-table input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+  accent-color: var(--success);
+}
+.rule-table input[type="number"] {
+  width: 4.8rem;
+  padding: 5px 6px;
+  border-radius: 8px;
+  font-size: .9em;
+  text-align: center;
+}
+.rule-table .delete-btn {
+  padding: .25rem .55rem;
+  font-size: .8em;
+  border-radius: 8px;
+}
+.empty-message {
+  font-size: .85em;
+  margin: .4rem 0;
+}
+.rule-select-wrapper {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  margin-bottom: .5rem;
+}
+.rule-select-wrapper select,
+.rule-add-select {
+  font-size: .87em;
+  max-width: 220px;
+}
+
+.sound-toggle-row {
+  margin-bottom: .6rem;
+}
+
+.zone-object-rules-header {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  margin-bottom: .4rem;
+}
+.zone-object-rules-header strong {
+  font-size: 14px;
+}
 
 @media (max-width: 760px) {
   .zones-controls-row { grid-template-columns: 1fr; }

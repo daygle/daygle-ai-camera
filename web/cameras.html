@@ -133,6 +133,7 @@
       <div class="modal-tabs" role="tablist">
         <button class="modal-tab active" data-tab="connection" role="tab" aria-selected="true">Connection</button>
         <button class="modal-tab" data-tab="recording" role="tab" aria-selected="false">Recording</button>
+        <button class="modal-tab" data-tab="sound" role="tab" aria-selected="false">Sound</button>
         <button class="modal-tab" data-tab="advanced" role="tab" aria-selected="false">Advanced</button>
       </div>
 
@@ -194,6 +195,11 @@
             </label>
           </div>
           <p class="form-help muted">Alert clips record a short clip each time a detection event fires. Continuous recording writes an uninterrupted stream regardless of events.</p>
+        </div>
+
+        <!-- Sound Tab -->
+        <div class="modal-tab-panel" data-panel="sound" hidden>
+          <div id="cameraModalSoundSettings"></div>
         </div>
 
         <!-- Advanced Tab -->
