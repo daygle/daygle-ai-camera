@@ -1454,6 +1454,41 @@ def _on_sound_detected(class_id: str, rule_name: str, confidence: float, meta: d
         },
     )
 
+    # Trigger a clip from every configured camera that has recording enabled.
+    # Sound detection fires independently of the visual pipeline, so we force
+    # record_on_alert=True so the recording mode (motion/objects/human) doesn't
+    # suppress it. Cameras with recording disabled (mode='off') are skipped.
+    sound_detection = {
+        'label': class_id,
+        'confidence': confidence,
+        'alert_triggered': True,
+    }
+    recording_ids: list[int] = []
+    for cam in list(cameras_config):
+        cam_id = str(cam.get('id') or '')
+        stream_url = build_stream_url(cam)
+        if not stream_url:
+            continue
+        cam_rec_config = {**camera_event_recording_config(cam), 'record_on_alert': True}
+        if not recording_service.enabled_for(cam_rec_config):
+            continue
+        recording_service.prime_rtsp_prebuffer(
+            stream_url=stream_url,
+            camera_id=cam_id,
+            recording_config=cam_rec_config,
+        )
+        rid = attach_event_recording(
+            event_id,
+            now_iso,
+            'rtsp',
+            [sound_detection],
+            camera_id=cam_id,
+            recording_config=cam_rec_config,
+        )
+        if rid is not None:
+            recording_ids.append(rid)
+            logger.debug('Sound event %s linked to recording %s (camera %s)', event_id, rid, cam_id)
+
     message = f'{class_label} detected ({confidence:.0%} confidence)'
     database.add_alert(
         created_at=now_iso,
@@ -1462,6 +1497,7 @@ def _on_sound_detected(class_id: str, rule_name: str, confidence: float, meta: d
         label=class_id,
         confidence=confidence,
         message=message,
+        recording_id=recording_ids[0] if recording_ids else None,
     )
 
     alert_payload = {
