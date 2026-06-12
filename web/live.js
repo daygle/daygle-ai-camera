@@ -289,9 +289,6 @@ function normalizeZone(zone) {
   const sourcePoints = Array.isArray(zone.points) && zone.points.length >= 3 ? zone.points : rectanglePoints(zone);
   zone.points = sourcePoints.map(normalizePoint);
   zone.object_rules = normalizeObjectRules(zone);
-  if (zone.monitor_motion !== false && !zone.object_rules.some((r) => r.label === 'motion')) {
-    zone.object_rules.unshift(defaultObjectRule('motion'));
-  }
   zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion').map((rule) => rule.label);
   updateZoneBounds(zone);
   return zone;
@@ -778,8 +775,7 @@ function bindObjectRuleControls() {
   document.querySelectorAll('[data-delete-zone-rule]').forEach((button) => {
     button.addEventListener('click', () => {
       const zones = cameraDetection().zones;
-      const { zoneIndex, ruleIndex, rule } = parseZoneRuleKey(button.dataset.deleteZoneRule);
-      if (rule?.label === 'motion') zones[zoneIndex].monitor_motion = false;
+      const { zoneIndex, ruleIndex } = parseZoneRuleKey(button.dataset.deleteZoneRule);
       zones[zoneIndex].object_rules.splice(ruleIndex, 1);
       zones[zoneIndex].object_labels = zones[zoneIndex].object_rules.filter((r) => r.label !== 'motion').map((r) => r.label);
       renderZones();
@@ -925,7 +921,7 @@ function finishDraftPolygon() {
     points: draftPolygon.points.map(normalizePoint),
     enabled: true,
     object_labels: [],
-    object_rules: [defaultObjectRule('motion')],
+    object_rules: [],
   });
   selectedZoneIndex = zones.length - 1;
   normalizeZone(zones[selectedZoneIndex]);
@@ -950,7 +946,7 @@ function addFullFrameZone() {
     ],
     enabled: true,
     object_labels: [],
-    object_rules: [defaultObjectRule('motion')],
+    object_rules: [],
   });
   selectedZoneIndex = zones.length - 1;
   draftPolygon = null;
