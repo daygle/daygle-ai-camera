@@ -179,7 +179,6 @@ class OpenCvStreamCamera:
         """
         with self._lock:
             capture = self._open_capture()
-            import cv2
 
             ok, image, capture_ts = self._read_latest_frame(capture, self._stale_frame_grabs(), self.fps)
             if not ok or image is None:
