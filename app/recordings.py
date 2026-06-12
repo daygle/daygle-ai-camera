@@ -62,7 +62,6 @@ class RecordingService:
             return False, 'off', None
         labels = [str(detection.get('label') or '').lower() for detection in detections]
         labels = [label for label in labels if label]
-        object_labels = {str(label).lower() for label in config.get('record_on_objects', [])}
 
         def preferred_label(candidates: list[dict[str, Any]], *, allow_motion: bool = False) -> str | None:
             sorted_candidates = sorted(candidates, key=lambda detection: float(detection.get('confidence') or 0), reverse=True)
@@ -82,24 +81,20 @@ class RecordingService:
             alert_labels = [str(detection.get('label') or '').lower() for detection in alert_detections]
             if alert_labels:
                 if alert_labels[0] == 'motion':
-                    # Search all detections for a more specific label (e.g. person in frame when motion fires).
                     specific_label = preferred_label(detections)
                     return True, 'alert', specific_label or 'motion'
                 return True, 'alert', alert_labels[0]
             return False, 'none', None
-        # The record_on_* flags default from the configured mode; defaulting them
-        # to True regardless of mode made the motion branch swallow every event
-        # so 'human' and 'objects' modes never applied their own filters.
-        if (mode == 'motion' or bool(config.get('record_on_motion', mode == 'motion'))) and labels:
+        if mode == 'motion' and labels:
             specific_label = preferred_label(detections)
             if specific_label:
                 return True, 'object', specific_label
             return True, 'motion', 'motion'
-        if (mode == 'human' or bool(config.get('record_on_human', mode == 'human'))) and 'person' in labels:
+        if mode == 'human' and 'person' in labels:
             return True, 'human', 'person'
-        for label in labels:
-            if label in object_labels or (mode == 'objects' and not object_labels):
-                return True, 'object', label
+        if mode == 'objects' and labels:
+            specific_label = preferred_label(detections)
+            return True, 'object', specific_label or labels[0]
         return False, 'none', None
 
     def event_recording_metadata(

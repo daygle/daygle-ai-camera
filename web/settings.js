@@ -71,9 +71,6 @@ const FIELD_LABELS = {
   enabled: 'Enabled',
   continuous: 'Continuous',
   record_on_alert: 'Alert Clips',
-  record_on_motion: 'Record on Motion',
-  record_on_human: 'Record on Human',
-  record_on_objects: 'Record on Objects',
   rule_name: 'Rule Name',
   rule_type: 'Rule Type',
   cooldown_seconds: 'Cooldown Seconds',
@@ -303,7 +300,7 @@ function fillForm(form, values) {
 
 function payloadFor(form) {
   const data = Object.fromEntries(new FormData(form).entries());
-  for (const key of ['enabled', 'continuous', 'record_on_motion', 'record_on_human', 'auto_purge_enabled', 'background_detection_enabled']) if (key in data) data[key] = data[key] === 'true';
+  for (const key of ['enabled', 'continuous', 'auto_purge_enabled', 'background_detection_enabled']) if (key in data) data[key] = data[key] === 'true';
   for (const key of ['width', 'height', 'fps', 'port', 'pre_event_seconds', 'post_event_seconds', 'extension_step_seconds', 'max_clip_seconds', 'retention_days', 'max_storage_gb', 'max_login_attempts', 'lockout_minutes']) {
     if (key in data && data[key] !== '') data[key] = Number.parseInt(data[key], 10);
   }
@@ -313,7 +310,6 @@ function payloadFor(form) {
   if ('detection_interval_seconds' in data && data.detection_interval_seconds !== '') data.detection_interval_seconds = Number(data.detection_interval_seconds);
   if ('event_debounce_seconds' in data && data.event_debounce_seconds !== '') data.event_debounce_seconds = Number(data.event_debounce_seconds);
       if ('detection_history_minutes' in data && data.detection_history_minutes !== '') data.detection_history_minutes = Number(data.detection_history_minutes);
-  if ('record_on_objects' in data) data.record_on_objects = data.record_on_objects.split(',').map((label) => label.trim()).filter(Boolean);
   if ('vehicle_labels' in data) data.vehicle_labels = data.vehicle_labels.split(',').map((label) => label.trim()).filter(Boolean);
   if ('min_confidence' in data && data.min_confidence !== '') data.min_confidence = Number(data.min_confidence);
   if ('session_timeout_hours' in data && data.session_timeout_hours !== '') data.session_timeout_hours = Number(data.session_timeout_hours);
@@ -362,9 +358,6 @@ async function loadSettings() {
   fillForm(forms.live, settings.live);
   fillForm(forms.recording, settings.recording);
   fillForm(forms.retention, settings.recording);
-  if (forms.recording.elements.record_on_objects) {
-    forms.recording.elements.record_on_objects.value = (settings.recording.record_on_objects || []).join(', ');
-  }
   fillForm(forms.storage, settings.storage);
   fillForm(forms.auth, settings.auth);
   renderEmail(emailSettings);

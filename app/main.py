@@ -226,9 +226,6 @@ def camera_event_recording_config(settings: dict[str, Any]) -> dict[str, Any]:
         'continuous': camera_recording['continuous'],
         'record_on_alert': camera_recording['record_on_alert'],
         'mode': 'continuous' if camera_recording['continuous'] else 'motion',
-        'record_on_motion': False,
-        'record_on_human': False,
-        'record_on_objects': [],
     })
     return base
 
@@ -3801,20 +3798,10 @@ def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
         fmt = 'mp4'
     if fmt != 'mp4':
         raise HTTPException(status_code=400, detail='Recording format must be mp4 for browser playback.')
-    raw_objects = merged.get('record_on_objects', [])
-    if isinstance(raw_objects, str):
-        object_labels = [label.strip().lower() for label in raw_objects.split(',') if label.strip()]
-    elif isinstance(raw_objects, list):
-        object_labels = [str(label).strip().lower() for label in raw_objects if str(label).strip()]
-    else:
-        raise HTTPException(status_code=400, detail='record_on_objects must be a list or comma-separated string.')
     return {
         'enabled': _bool_value(merged.get('enabled', True)),
         'mode': mode,
         'continuous': _bool_value(merged.get('continuous', mode == 'continuous')),
-        'record_on_motion': _bool_value(merged.get('record_on_motion', True)),
-        'record_on_human': _bool_value(merged.get('record_on_human', True)),
-        'record_on_objects': object_labels,
         'pre_event_seconds': _int_field(merged, 'pre_event_seconds', 10, 0, 300),
         'post_event_seconds': _int_field(merged, 'post_event_seconds', 15, 0, 300),
         'extension_step_seconds': _int_field(merged, 'extension_step_seconds', 45, 0, 300),
