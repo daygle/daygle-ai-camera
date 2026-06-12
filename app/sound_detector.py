@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import logging
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -30,8 +31,9 @@ _YAMNET_HUB_URL = 'https://tfhub.dev/google/yamnet/1'
 
 # ─── Sound class catalogue ────────────────────────────────────────────────────
 #
-# yamnet_terms: substrings matched case-insensitively against AudioSet display
-#   names — a YAMNet class is included when ANY term appears in its name.
+# yamnet_terms: matched against AudioSet display names using word-boundary
+#   matching — a YAMNet class is included when ANY term appears as a whole
+#   word in its name (e.g. 'cat' matches 'Cat' but not 'Cattle, bovinae').
 #   YAMNet default_threshold values are lower than spectral ones because
 #   YAMNet outputs calibrated probabilities (0.0–1.0 from a trained model)
 #   rather than the hand-crafted heuristic scores used by the spectral fallback.
@@ -49,7 +51,7 @@ SOUND_CLASSES: dict[str, dict[str, Any]] = {
         'energy_ratio_min': 0.35,
         'zcr_min': 0.01, 'zcr_max': 0.22,
         'w_centroid': 0.30, 'w_energy': 0.55, 'w_zcr': 0.15,
-        'default_threshold': 0.35,
+        'default_threshold': 0.50,
         'default_cooldown': 30,
     },
     'dog_bark': {
@@ -208,13 +210,18 @@ class _YamnetBackend:
                     class_names = [row['display_name'] for row in csv.DictReader(f)]
 
                 # Build index lists: for each of our classes, find every
-                # AudioSet class whose display_name contains one of our terms
+                # AudioSet class whose display_name matches one of our terms
+                # using word-boundary matching to prevent false positives
+                # (e.g. 'cat' must not match 'Cattle, bovinae').
                 indices: dict[str, list[int]] = {}
                 for class_id, meta in SOUND_CLASSES.items():
-                    terms = [t.lower() for t in meta.get('yamnet_terms', [])]
+                    patterns = [
+                        re.compile(r'\b' + re.escape(t.lower()) + r'\b')
+                        for t in meta.get('yamnet_terms', [])
+                    ]
                     matched = [
                         i for i, name in enumerate(class_names)
-                        if any(term in name.lower() for term in terms)
+                        if any(pat.search(name) for pat in patterns)
                     ]
                     indices[class_id] = matched
                     logger.debug(

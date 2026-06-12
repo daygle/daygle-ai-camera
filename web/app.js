@@ -220,7 +220,29 @@ function buildActivityItems() {
     const ev = item.eventId !== null ? eventsById.get(item.eventId) : null;
     item.camera = ev ? eventSourceLabel(ev) : '';
   }
-  return [...eventItems, ...alertItems]
+  // Deduplicate sound events by recordingId: multiple sound detections during
+  // the same recording share a recordingId (via extend_active_rtsp_recording),
+  // so collapse them into one entry — matching how object detections appear
+  // once per recording.  Merge detections from all grouped events so every
+  // detected sound class shows as a badge on the single entry.
+  const seenSoundRecording = new Map();
+  const dedupedEventItems = eventItems.filter((item) => {
+    if (!item.isSound) return true;
+    const recId = item.recordingId;
+    if (!recId) return true; // no recording — keep as-is
+    const prev = seenSoundRecording.get(recId);
+    if (prev) {
+      // Merge detections into the first (most recent) entry for this recording.
+      for (const d of item.detections) {
+        prev.detections.push(d);
+      }
+      return false;
+    }
+    seenSoundRecording.set(recId, item);
+    return true;
+  });
+
+  return [...dedupedEventItems, ...alertItems]
     .filter((item) => item.createdAt)
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 }

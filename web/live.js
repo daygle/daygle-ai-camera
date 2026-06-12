@@ -682,24 +682,42 @@ function objectRuleOptions(selectedLabel) {
 function renderObjectRules(zone, zoneIndex) {
   zone.object_rules = normalizeObjectRules(zone);
   if (!zone.object_rules.length) {
-    return '<div class="empty compact-empty">No object rules yet. Choose an object below to add recording and alert settings for this zone.</div>';
+    return '<div class="empty compact-empty">No object rules yet. Choose an object above to add detection settings for this zone.</div>';
   }
-  return zone.object_rules.map((rule, ruleIndex) => `
-    <div class="zone-object-rule" data-zone-rule="${zoneIndex}:${ruleIndex}">
-      <label><span>Object</span><select data-zone-rule-label="${zoneIndex}:${ruleIndex}">${objectRuleOptions(rule.label)}</select></label>
-      <label><span>Rule</span><select data-zone-rule-enabled="${zoneIndex}:${ruleIndex}"><option value="true" ${rule.enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${rule.enabled === false ? 'selected' : ''}>Disabled</option></select></label>
-      <label><span>Record</span><select data-zone-rule-record="${zoneIndex}:${ruleIndex}"><option value="true" ${rule.record_on_detect !== false ? 'selected' : ''}>On detect</option><option value="false" ${rule.record_on_detect === false ? 'selected' : ''}>Off</option></select></label>
-      <label><span>Alert</span><select data-zone-rule-alert="${zoneIndex}:${ruleIndex}"><option value="true" ${rule.alert_on_detect !== false ? 'selected' : ''}>On detect</option><option value="false" ${rule.alert_on_detect === false ? 'selected' : ''}>Off</option></select></label>
-      <label><span>Min Confidence</span><input data-zone-rule-confidence="${zoneIndex}:${ruleIndex}" type="number" min="0" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" /></label>
-      <label><span>Cooldown</span><input data-zone-rule-cooldown="${zoneIndex}:${ruleIndex}" type="number" min="0" step="1" value="${escapeHtml(rule.cooldown_seconds)}" /></label>
-      <label><span>Email</span><select data-zone-rule-email="${zoneIndex}:${ruleIndex}"><option value="false" ${rule.email_enabled !== true ? 'selected' : ''}>Off</option><option value="true" ${rule.email_enabled === true ? 'selected' : ''}>On</option></select></label>
-      <input data-zone-rule-recipients="${zoneIndex}:${ruleIndex}" value="${escapeHtml(rule.email_recipients.join(', '))}" placeholder="Email recipients" />
-      <label><span>Push</span><select data-zone-rule-push="${zoneIndex}:${ruleIndex}"><option value="false" ${rule.push_enabled !== true ? 'selected' : ''}>Off</option><option value="true" ${rule.push_enabled === true ? 'selected' : ''}>On</option></select></label>
-      <label><span>Active Start</span><input data-zone-rule-active-start="${zoneIndex}:${ruleIndex}" type="time" value="${escapeHtml(rule.active_start || '')}" /></label>
-      <label><span>Active End</span><input data-zone-rule-active-end="${zoneIndex}:${ruleIndex}" type="time" value="${escapeHtml(rule.active_end || '')}" /></label>
-      <button class="secondary" type="button" data-delete-zone-rule="${zoneIndex}:${ruleIndex}">Remove</button>
-    </div>
-  `).join('');
+  const rows = zone.object_rules.map((rule, ruleIndex) => {
+    const key = `${zoneIndex}:${ruleIndex}`;
+    return `
+      <tr data-zone-rule="${key}" style="border-bottom:1px solid var(--border,#eee)">
+        <td style="padding:.35rem .5rem;font-weight:500;white-space:nowrap">${escapeHtml(titleCase(rule.label))}</td>
+        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-zone-rule-enabled="${key}" ${rule.enabled !== false ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
+        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-zone-rule-record="${key}" ${rule.record_on_detect !== false ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
+        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-zone-rule-alert="${key}" ${rule.alert_on_detect !== false ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
+        <td style="padding:.35rem .5rem"><input type="number" data-zone-rule-confidence="${key}" value="${rule.min_confidence}" min="0" max="1" step="0.05" style="width:4.5rem" /></td>
+        <td style="padding:.35rem .5rem"><input type="number" data-zone-rule-cooldown="${key}" value="${rule.cooldown_seconds}" min="0" max="3600" step="5" style="width:4.5rem" /></td>
+        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-zone-rule-email="${key}" ${rule.email_enabled === true ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
+        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-zone-rule-push="${key}" ${rule.push_enabled === true ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
+        <td style="padding:.35rem .5rem;text-align:center"><button class="secondary delete-btn" type="button" data-delete-zone-rule="${key}" style="padding:.2rem .5rem;font-size:.8em">✕</button></td>
+      </tr>`;
+  }).join('');
+  return `
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:.87em">
+        <thead>
+          <tr style="text-align:left;border-bottom:1px solid var(--border,#ddd)">
+            <th style="padding:.35rem .5rem">Object</th>
+            <th style="padding:.35rem .5rem;white-space:nowrap">Enabled</th>
+            <th style="padding:.35rem .5rem;white-space:nowrap">Record</th>
+            <th style="padding:.35rem .5rem;white-space:nowrap">Alert</th>
+            <th style="padding:.35rem .5rem;white-space:nowrap">Confidence</th>
+            <th style="padding:.35rem .5rem;white-space:nowrap">Cooldown (s)</th>
+            <th style="padding:.35rem .5rem;white-space:nowrap">Email</th>
+            <th style="padding:.35rem .5rem;white-space:nowrap">Push</th>
+            <th style="padding:.35rem .5rem"></th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
 }
 
 function renderZones() {
@@ -794,20 +812,16 @@ function bindZoneControls(zones) {
 }
 
 function bindRuleFields() {
-  const bindings = [
+  // Select-based fields (old layout compatibility)
+  const selectBindings = [
     ['zoneRuleLabel', 'label', (value) => value],
     ['zoneRuleEnabled', 'enabled', (value) => value === 'true'],
     ['zoneRuleRecord', 'record_on_detect', (value) => value === 'true'],
     ['zoneRuleAlert', 'alert_on_detect', (value) => value === 'true'],
-    ['zoneRuleConfidence', 'min_confidence', (value) => clamp(Number(value || 0), 0, 1)],
-    ['zoneRuleCooldown', 'cooldown_seconds', (value) => Math.max(0, Number.parseInt(value || 0, 10) || 0)],
     ['zoneRuleEmail', 'email_enabled', (value) => value === 'true'],
-    ['zoneRuleRecipients', 'email_recipients', normalizeEmailList],
     ['zoneRulePush', 'push_enabled', (value) => value === 'true'],
-    ['zoneRuleActiveStart', 'active_start', (value) => value || null],
-    ['zoneRuleActiveEnd', 'active_end', (value) => value || null],
   ];
-  bindings.forEach(([datasetKey, ruleKey, transform]) => {
+  selectBindings.forEach(([datasetKey, ruleKey, transform]) => {
     document.querySelectorAll(`[data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((field) => {
       field.addEventListener('change', () => {
         const { zoneIndex, rule } = parseZoneRuleKey(field.dataset[datasetKey]);
@@ -815,6 +829,60 @@ function bindRuleFields() {
         rule[ruleKey] = transform(field.value);
         cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
         if (ruleKey === 'label') renderZones();
+      });
+    });
+  });
+  // Checkbox-based fields (table layout)
+  const checkboxBindings = [
+    ['zoneRuleEnabled', 'enabled'],
+    ['zoneRuleRecord', 'record_on_detect'],
+    ['zoneRuleAlert', 'alert_on_detect'],
+    ['zoneRuleEmail', 'email_enabled'],
+    ['zoneRulePush', 'push_enabled'],
+  ];
+  checkboxBindings.forEach(([datasetKey, ruleKey]) => {
+    document.querySelectorAll(`input[type="checkbox"][data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const { zoneIndex, rule } = parseZoneRuleKey(cb.dataset[datasetKey]);
+        if (!rule) return;
+        rule[ruleKey] = cb.checked;
+        cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
+      });
+    });
+  });
+  // Number input fields (table layout)
+  const numberBindings = [
+    ['zoneRuleConfidence', 'min_confidence', (value) => clamp(Number(value || 0), 0, 1)],
+    ['zoneRuleCooldown', 'cooldown_seconds', (value) => Math.max(0, Number.parseInt(value || 0, 10) || 0)],
+  ];
+  numberBindings.forEach(([datasetKey, ruleKey, transform]) => {
+    document.querySelectorAll(`input[type="number"][data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((inp) => {
+      inp.addEventListener('change', () => {
+        const { zoneIndex, rule } = parseZoneRuleKey(inp.dataset[datasetKey]);
+        if (!rule) return;
+        rule[ruleKey] = transform(inp.value);
+        cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
+      });
+    });
+  });
+  // Text input fields (email recipients)
+  document.querySelectorAll('[data-zone-rule-recipients]').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      const { zoneIndex, rule } = parseZoneRuleKey(inp.dataset.zoneRuleRecipients);
+      if (!rule) return;
+      rule.email_recipients = normalizeEmailList(inp.value);
+      cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
+    });
+  });
+  // Time input fields (active start/end)
+  ['activeStart', 'activeEnd'].forEach((key) => {
+    const datasetKey = `zoneRule${key.charAt(0).toUpperCase() + key.slice(1)}`;
+    const dataAttr = `zone-rule-${key.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}`;
+    document.querySelectorAll(`[data-${dataAttr}]`).forEach((inp) => {
+      inp.addEventListener('change', () => {
+        const { rule } = parseZoneRuleKey(inp.dataset[datasetKey]);
+        if (!rule) return;
+        rule[key === 'activeStart' ? 'active_start' : 'active_end'] = inp.value || null;
       });
     });
   });

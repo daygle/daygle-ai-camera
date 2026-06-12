@@ -1477,6 +1477,7 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
             'source': 'sound-detection',
             'sound_source': 'rtsp',
             'camera_id': camera_id,
+            'camera_name': str(cam_settings.get('name') or '').strip() or None,
             'label': class_id,
             'class_label': class_label,
             'confidence': round(confidence, 3),
