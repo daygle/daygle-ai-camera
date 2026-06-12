@@ -974,18 +974,7 @@ els.clipPlayer.addEventListener('error', () => {
 els.clipPlayer.addEventListener('play', () => {
   if (overlayShouldAnimate()) startOverlayRaf();
   drawClipOverlay();
-  // ── Detect track offset ───────────────────────────────────────────
-  if (activeRecording && activeRecording.track && activeRecording.track.length >= 2) {
-    const _t0 = activeRecording.track[0].t;
-    const _tN = activeRecording.track[activeRecording.track.length - 1].t;
-    console.log(
-      '[overlay] recording', activeRecording.id,
-      '| video', activeRecording.duration_seconds + 's',
-      '| track', activeRecording.track.length + ' samples',
-      '| t_range', _t0.toFixed(3) + '-' + _tN.toFixed(3) + 's',
-      '| diff', (activeRecording.duration_seconds - _tN).toFixed(3) + 's',
-    );
-  }
+
 });
 
 els.clipPlayer.addEventListener('pause', () => {
