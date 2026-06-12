@@ -48,7 +48,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "mode": "motion",
         "continuous": False,
         "record_on_motion": True,
-        "record_on_human": True,
+        "record_on_human": False,
         "record_on_objects": [],
         "pre_event_seconds": 10,
         "post_event_seconds": 15,
