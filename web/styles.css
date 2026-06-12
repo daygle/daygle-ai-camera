@@ -2559,6 +2559,8 @@ input[type="file"] { padding: 10px; }
 .zone-editor-card .form-grid + .list { margin-top: 16px; }
 .camera-recording-settings { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
 .camera-recording-settings h3 { margin: 0 0 12px; font-size: 15px; }
+.camera-sound-settings { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
+.camera-sound-settings h3 { margin: 0 0 12px; font-size: 15px; }
 
 @media (max-width: 760px) {
   .zones-controls-row { grid-template-columns: 1fr; }

@@ -51,6 +51,7 @@ let draftPolygon = null;
 let zoneDrag = null;
 
 let configuredLabels = null;
+let soundClasses = [];
 
 const LIVE_AI_TRACK_KEY = 'daygle.live.overlay.track.enabled';
 // Off by default; users opt in per-browser via the toggle. The overlay only
@@ -181,6 +182,25 @@ function cameraDetection() {
   selectedCamera.detection.zones ||= [];
   selectedCamera.detection.motion_email_enabled ??= true;
   return selectedCamera.detection;
+}
+
+function cameraSoundDetection() {
+  const det = cameraDetection();
+  det.sound ||= { enabled: false, rules: [] };
+  det.sound.rules ||= [];
+  return det.sound;
+}
+
+function defaultSoundRule(cls) {
+  return {
+    class: cls.id,
+    name: cls.label,
+    enabled: false,
+    confidence_threshold: cls.default_threshold,
+    cooldown_seconds: cls.default_cooldown,
+    email_enabled: false,
+    push_enabled: false,
+  };
 }
 
 function cameraRecording() {
@@ -586,7 +606,7 @@ async function refreshDetectionStatus() {
     const cameraId = encodeURIComponent(selectedCamera.id);
     const [payload, soundStatus] = await Promise.all([
       api(`/api/live/detection-status?camera_id=${cameraId}`),
-      api('/api/sound/status').catch(() => null),
+      api(`/api/sound/status?camera_id=${cameraId}`).catch(() => null),
     ]);
     ingestServerTrackDetections(payload);
     renderDetectionStatus(summarizeDetectionStatus(payload, soundStatus));
@@ -616,6 +636,7 @@ function setSelectedCamera(cameraId) {
   if (isZonesPage) {
     renderZones();
     renderCameraRecordingControls();
+    renderSoundDetectionSettings();
   }
   refreshFrame();
   refreshDetectionStatus();
@@ -820,6 +841,93 @@ function renderCameraRecordingControls() {
       cameraDetection()[select.dataset.cameraDetection] = select.value === 'true';
     });
   });
+}
+
+function renderSoundDetectionSettings() {
+  if (!isZonesPage || !selectedCamera) return;
+  const container = document.getElementById('cameraSoundSettings');
+  if (!container) return;
+  if (!soundClasses.length) {
+    container.innerHTML = '<p class="muted" style="font-size:.85em;margin:.4rem 0">Sound classes unavailable.</p>';
+    return;
+  }
+  const sound = cameraSoundDetection();
+  const rulesByClass = Object.fromEntries((sound.rules || []).map((r) => [r.class, r]));
+
+  const enabledSel = sound.enabled ? 'selected' : '';
+  const disabledSel = sound.enabled ? '' : 'selected';
+
+  const rows = soundClasses.map((cls) => {
+    const rule = rulesByClass[cls.id] || defaultSoundRule(cls);
+    return `
+      <tr data-sound-class="${escapeHtml(cls.id)}" style="border-bottom:1px solid var(--border,#eee)">
+        <td style="padding:.35rem .5rem;font-weight:500;white-space:nowrap">${escapeHtml(cls.label)}</td>
+        <td style="padding:.35rem .5rem;color:var(--muted,#666);font-size:.82em">${escapeHtml(cls.description)}</td>
+        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-sound-rule-enabled="${escapeHtml(cls.id)}" ${rule.enabled ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
+        <td style="padding:.35rem .5rem"><input type="number" data-sound-rule-threshold="${escapeHtml(cls.id)}" value="${rule.confidence_threshold}" min="0.1" max="1.0" step="0.05" style="width:4.5rem" /></td>
+        <td style="padding:.35rem .5rem"><input type="number" data-sound-rule-cooldown="${escapeHtml(cls.id)}" value="${rule.cooldown_seconds}" min="5" max="3600" step="5" style="width:4.5rem" /></td>
+        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-sound-rule-email="${escapeHtml(cls.id)}" ${rule.email_enabled ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
+        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-sound-rule-push="${escapeHtml(cls.id)}" ${rule.push_enabled ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
+      </tr>`;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="form-grid compact-grid" style="margin-bottom:.8rem">
+      <label><span>Sound Detection</span>
+        <select id="cameraSoundEnabled">
+          <option value="false" ${disabledSel}>Disabled</option>
+          <option value="true" ${enabledSel}>Enabled (RTSP audio)</option>
+        </select>
+        <span class="field-help">Listens to this camera's RTSP audio track using YAMNet neural detection.</span>
+      </label>
+    </div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:.87em">
+        <thead>
+          <tr style="text-align:left;border-bottom:1px solid var(--border,#ddd)">
+            <th style="padding:.35rem .5rem">Sound</th>
+            <th style="padding:.35rem .5rem">Description</th>
+            <th style="padding:.35rem .5rem;white-space:nowrap">Alert On</th>
+            <th style="padding:.35rem .5rem;white-space:nowrap">Threshold</th>
+            <th style="padding:.35rem .5rem;white-space:nowrap">Cooldown (s)</th>
+            <th style="padding:.35rem .5rem;white-space:nowrap">Email</th>
+            <th style="padding:.35rem .5rem;white-space:nowrap">Push</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+
+  document.getElementById('cameraSoundEnabled')?.addEventListener('change', (e) => {
+    cameraSoundDetection().enabled = e.target.value === 'true';
+  });
+  container.querySelectorAll('[data-sound-rule-enabled]').forEach((cb) => {
+    cb.addEventListener('change', () => { _updateSoundRule(cb.dataset.soundRuleEnabled, 'enabled', cb.checked); });
+  });
+  container.querySelectorAll('[data-sound-rule-threshold]').forEach((inp) => {
+    inp.addEventListener('change', () => { _updateSoundRule(inp.dataset.soundRuleThreshold, 'confidence_threshold', Math.max(0.1, Math.min(1.0, Number(inp.value) || 0.35))); });
+  });
+  container.querySelectorAll('[data-sound-rule-cooldown]').forEach((inp) => {
+    inp.addEventListener('change', () => { _updateSoundRule(inp.dataset.soundRuleCooldown, 'cooldown_seconds', Math.max(5, Number.parseInt(inp.value, 10) || 30)); });
+  });
+  container.querySelectorAll('[data-sound-rule-email]').forEach((cb) => {
+    cb.addEventListener('change', () => { _updateSoundRule(cb.dataset.soundRuleEmail, 'email_enabled', cb.checked); });
+  });
+  container.querySelectorAll('[data-sound-rule-push]').forEach((cb) => {
+    cb.addEventListener('change', () => { _updateSoundRule(cb.dataset.soundRulePush, 'push_enabled', cb.checked); });
+  });
+}
+
+function _updateSoundRule(classId, field, value) {
+  const sound = cameraSoundDetection();
+  let rule = sound.rules.find((r) => r.class === classId);
+  if (!rule) {
+    const cls = soundClasses.find((c) => c.id === classId);
+    if (!cls) return;
+    rule = defaultSoundRule(cls);
+    sound.rules.push(rule);
+  }
+  rule[field] = value;
 }
 
 function pointFromEvent(event) {
@@ -1116,6 +1224,12 @@ async function init() {
       availableLabels = aiSettings.available_labels || [];
     } catch {
       availableLabels = [];
+    }
+    try {
+      const { classes } = await api('/api/sound/classes');
+      soundClasses = classes || [];
+    } catch {
+      soundClasses = [];
     }
   }
   await loadConfiguredLabels();
