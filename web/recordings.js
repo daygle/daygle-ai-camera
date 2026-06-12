@@ -211,7 +211,6 @@ function renderRecordings(recordings) {
     return;
   }
   els.recordings.innerHTML = recordings.map((recording) => {
-    const fileName = (recording.file_path || '').split(/[\\/]/).pop();
     const mediaReady = recording.media_ready !== false;
     const trigger = recordingDisplayTrigger(recording);
     const triggerPillClass = triggerBadgeClass(trigger);
@@ -244,10 +243,7 @@ function renderRecordings(recordings) {
               <span class="recording-meta-label">Event</span>
               <span class="recording-meta-value">#${escapeHtml(recording.event_id || 'none')}</span>
             </div>
-            <div class="recording-meta-pill recording-meta-pill-file" title="${escapeHtml(fileName)}">
-              <span class="recording-meta-label">File</span>
-              <span class="recording-meta-value recording-meta-filename">${escapeHtml(fileName || 'unknown')}</span>
-            </div>
+
           </div>
           <div class="recording-row-badges">${recordingDetectionSummary(recording).map((d) => `<span class="detection">${escapeHtml(titleCase(d.label))} · ${Math.round(d.confidence * 100)}%</span>`).join('') || '<span class="muted">No detections</span>'}</div>
         </div>

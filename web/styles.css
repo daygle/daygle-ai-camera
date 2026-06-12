@@ -880,9 +880,6 @@ input[type="file"] { padding: 10px; }
   max-width: 100%;
   min-width: 0;
 }
-.recording-meta-pill-file {
-  max-width: 260px;
-}
 .recording-meta-label {
   color: var(--muted);
   text-transform: uppercase;
@@ -896,11 +893,6 @@ input[type="file"] { padding: 10px; }
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 220px;
-}
-.recording-meta-filename {
-  font-family: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
-  font-size: 11px;
-  color: var(--muted);
 }
 .recording-row-badges {
   display: flex;
@@ -995,7 +987,7 @@ input[type="file"] { padding: 10px; }
   .recording-row-actions button { flex: 1; justify-content: center; }
   .recordings-filter-grid { grid-template-columns: 1fr; }
   .recordings-toolbar-actions { width: 100%; }
-  .recording-meta-pill-file { max-width: 100%; }
+  
   .recording-meta-value { max-width: 100%; }
 }
 
