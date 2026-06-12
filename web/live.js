@@ -911,6 +911,14 @@ function renderCameraRecordingControls() {
   });
 }
 
+function _soundRuleOptions() {
+  const sound = cameraSoundDetection();
+  const activeIds = new Set((sound.rules || []).map((r) => r.class));
+  const available = soundClasses.filter((cls) => !activeIds.has(cls.id));
+  const options = available.map((cls) => `<option value="${escapeHtml(cls.id)}">${escapeHtml(cls.label)}</option>`).join('');
+  return `<option value="">Add Sound…</option>${options}`;
+}
+
 function renderSoundDetectionSettings() {
   if (!isZonesPage || !selectedCamera) return;
   const container = document.getElementById('cameraSoundSettings');
@@ -920,22 +928,22 @@ function renderSoundDetectionSettings() {
     return;
   }
   const sound = cameraSoundDetection();
-  const rulesByClass = Object.fromEntries((sound.rules || []).map((r) => [r.class, r]));
 
   const enabledSel = sound.enabled ? 'selected' : '';
   const disabledSel = sound.enabled ? '' : 'selected';
 
-  const rows = soundClasses.map((cls) => {
-    const rule = rulesByClass[cls.id] || defaultSoundRule(cls);
+  const rows = (sound.rules || []).map((rule) => {
+    const cls = soundClasses.find((c) => c.id === rule.class);
+    const label = cls ? cls.label : titleCase(rule.class.replace(/_/g, ' '));
     return `
-      <tr data-sound-class="${escapeHtml(cls.id)}" style="border-bottom:1px solid var(--border,#eee)">
-        <td style="padding:.35rem .5rem;font-weight:500;white-space:nowrap">${escapeHtml(cls.label)}</td>
-        <td style="padding:.35rem .5rem;color:var(--muted,#666);font-size:.82em">${escapeHtml(cls.description)}</td>
-        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-sound-rule-enabled="${escapeHtml(cls.id)}" ${rule.enabled ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
-        <td style="padding:.35rem .5rem"><input type="number" data-sound-rule-threshold="${escapeHtml(cls.id)}" value="${rule.confidence_threshold}" min="0.1" max="1.0" step="0.05" style="width:4.5rem" /></td>
-        <td style="padding:.35rem .5rem"><input type="number" data-sound-rule-cooldown="${escapeHtml(cls.id)}" value="${rule.cooldown_seconds}" min="5" max="3600" step="5" style="width:4.5rem" /></td>
-        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-sound-rule-email="${escapeHtml(cls.id)}" ${rule.email_enabled ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
-        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-sound-rule-push="${escapeHtml(cls.id)}" ${rule.push_enabled ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
+      <tr data-sound-class="${escapeHtml(rule.class)}" style="border-bottom:1px solid var(--border,#eee)">
+        <td style="padding:.35rem .5rem;font-weight:500;white-space:nowrap">${escapeHtml(label)}</td>
+        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-sound-rule-enabled="${escapeHtml(rule.class)}" ${rule.enabled ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
+        <td style="padding:.35rem .5rem"><input type="number" data-sound-rule-threshold="${escapeHtml(rule.class)}" value="${rule.confidence_threshold}" min="0.1" max="1.0" step="0.05" style="width:4.5rem" /></td>
+        <td style="padding:.35rem .5rem"><input type="number" data-sound-rule-cooldown="${escapeHtml(rule.class)}" value="${rule.cooldown_seconds}" min="5" max="3600" step="5" style="width:4.5rem" /></td>
+        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-sound-rule-email="${escapeHtml(rule.class)}" ${rule.email_enabled ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
+        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-sound-rule-push="${escapeHtml(rule.class)}" ${rule.push_enabled ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
+        <td style="padding:.35rem .5rem;text-align:center"><button class="secondary delete-btn" type="button" data-remove-sound-rule="${escapeHtml(rule.class)}" style="padding:.2rem .5rem;font-size:.8em">✕</button></td>
       </tr>`;
   }).join('');
 
@@ -949,25 +957,47 @@ function renderSoundDetectionSettings() {
         <span class="field-help">Listens to this camera's RTSP audio track using YAMNet neural detection.</span>
       </label>
     </div>
-    <div style="overflow-x:auto">
+    <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem">
+      <select id="addSoundRuleSelect" style="font-size:.87em">${_soundRuleOptions()}</select>
+    </div>
+    ${rows ? `<div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;font-size:.87em">
         <thead>
           <tr style="text-align:left;border-bottom:1px solid var(--border,#ddd)">
             <th style="padding:.35rem .5rem">Sound</th>
-            <th style="padding:.35rem .5rem">Description</th>
             <th style="padding:.35rem .5rem;white-space:nowrap">Alert On</th>
             <th style="padding:.35rem .5rem;white-space:nowrap">Threshold</th>
             <th style="padding:.35rem .5rem;white-space:nowrap">Cooldown (s)</th>
             <th style="padding:.35rem .5rem;white-space:nowrap">Email</th>
             <th style="padding:.35rem .5rem;white-space:nowrap">Push</th>
+            <th style="padding:.35rem .5rem"></th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>
-    </div>`;
+    </div>` : '<p class="muted" style="font-size:.85em;margin:.4rem 0">No sound rules configured. Use the dropdown above to add one.</p>'}`;
 
   document.getElementById('cameraSoundEnabled')?.addEventListener('change', (e) => {
     cameraSoundDetection().enabled = e.target.value === 'true';
+  });
+  document.getElementById('addSoundRuleSelect')?.addEventListener('change', (e) => {
+    const classId = e.target.value;
+    if (!classId) return;
+    const cls = soundClasses.find((c) => c.id === classId);
+    if (!cls) return;
+    const sound = cameraSoundDetection();
+    if (!sound.rules.some((r) => r.class === classId)) {
+      sound.rules.push(defaultSoundRule(cls));
+    }
+    renderSoundDetectionSettings();
+  });
+  container.querySelectorAll('[data-remove-sound-rule]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const classId = btn.dataset.removeSoundRule;
+      const sound = cameraSoundDetection();
+      sound.rules = sound.rules.filter((r) => r.class !== classId);
+      renderSoundDetectionSettings();
+    });
   });
   container.querySelectorAll('[data-sound-rule-enabled]').forEach((cb) => {
     cb.addEventListener('change', () => { _updateSoundRule(cb.dataset.soundRuleEnabled, 'enabled', cb.checked); });
