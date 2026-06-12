@@ -4,6 +4,7 @@ import csv
 import logging
 import os
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -172,6 +173,30 @@ class _YamnetBackend:
         with self._lock:
             if self._available is not None:
                 return self._available
+            # Probe TensorFlow in a subprocess before importing it in-process.
+            # On CPUs without AVX2 support the prebuilt TF wheels raise SIGILL
+            # inside native libraries, which would kill the entire main process.
+            # Running the probe in a child process contains the crash.
+            try:
+                probe = subprocess.run(
+                    [sys.executable, '-c', 'import tensorflow'],
+                    capture_output=True,
+                    timeout=60,
+                    env={**os.environ, 'TF_CPP_MIN_LOG_LEVEL': '3', 'CUDA_VISIBLE_DEVICES': ''},
+                )
+                if probe.returncode != 0:
+                    logger.warning(
+                        'TensorFlow unavailable on this CPU (probe exited %d) — '
+                        'using spectral fallback for sound detection. '
+                        'Install tensorflow-cpu built for your CPU architecture to enable YAMNet.',
+                        probe.returncode,
+                    )
+                    self._available = False
+                    return False
+            except Exception as exc:
+                logger.warning('TensorFlow CPU probe failed: %s — using spectral fallback.', exc)
+                self._available = False
+                return False
             try:
                 import tensorflow_hub as hub  # type: ignore[import]
                 logger.info('Loading YAMNet from TF Hub (first run downloads ~13 MB)…')
