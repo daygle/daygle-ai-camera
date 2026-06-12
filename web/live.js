@@ -729,6 +729,7 @@ function renderZones() {
   updateZonesStats();
   if (!zones.length) {
     liveEls.zoneList.innerHTML = '<div class="empty">No monitoring areas yet. Click "Draw area", place corner dots on the footage, then click the first dot to close the area.</div>';
+    renderObjectDetectionRules();
     return;
   }
   liveEls.zoneList.innerHTML = zones.map((zone, index) => `
@@ -738,16 +739,65 @@ function renderZones() {
         <label><span>Zone</span><select data-zone-enabled="${index}"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Shown</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
         <button class="secondary" type="button" data-delete-zone="${index}">Remove</button>
       </div>
-      <div class="zone-object-rules">
-        <div class="zone-object-rules-header">
-          <strong>Detection rules</strong>
-          <select data-add-zone-rule="${index}">${objectRuleOptions('')}</select>
-        </div>
-        ${renderObjectRules(zone, index)}
-      </div>
     </div>
   `).join('');
   bindZoneControls(zones);
+  renderObjectDetectionRules();
+}
+
+function renderObjectDetectionRules() {
+  const container = document.getElementById('objectDetectionRules');
+  if (!container) return;
+  if (!selectedCamera) { container.innerHTML = ''; return; }
+  const zones = cameraDetection().zones;
+  if (!zones.length) {
+    container.innerHTML = '<p class="muted" style="font-size:.85em;margin:.4rem 0">No monitoring areas configured. Draw an area above first.</p>';
+    return;
+  }
+  container.innerHTML = zones.map((zone, zoneIndex) => {
+    zone.object_rules = normalizeObjectRules(zone);
+    const zoneName = escapeHtml(zone.name || `Zone ${zoneIndex + 1}`);
+    const disabledClass = zone.enabled === false ? ' muted' : '';
+    const addOptions = objectRuleOptions('');
+    const rulesHtml = zone.object_rules.length
+      ? renderObjectRules(zone, zoneIndex)
+      : '<p class="muted" style="font-size:.85em;margin:.4rem 0">No rules yet. Add an object below.</p>';
+    return `
+      <div class="zone-object-rules" data-zone-rules-for="${zoneIndex}" style="margin-bottom:1rem">
+        <div class="zone-object-rules-header" style="display:flex;align-items:center;gap:.6rem;margin-bottom:.4rem">
+          <strong class="${disabledClass}">${zoneName}</strong>
+          <select data-add-zone-rule="${zoneIndex}" style="font-size:.87em">${addOptions}</select>
+        </div>
+        ${rulesHtml}
+      </div>`;
+  }).join('');
+  bindObjectRuleControls();
+}
+
+function bindObjectRuleControls() {
+  document.querySelectorAll('[data-add-zone-rule]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const label = select.value;
+      if (!label) return;
+      const zones = cameraDetection().zones;
+      const zone = zones[Number(select.dataset.addZoneRule)];
+      zone.object_rules = normalizeObjectRules(zone);
+      if (!zone.object_rules.some((rule) => rule.label === label)) zone.object_rules.push(defaultObjectRule(label));
+      zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion').map((rule) => rule.label);
+      renderZones();
+    });
+  });
+  document.querySelectorAll('[data-delete-zone-rule]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const zones = cameraDetection().zones;
+      const { zoneIndex, ruleIndex, rule } = parseZoneRuleKey(button.dataset.deleteZoneRule);
+      if (rule?.label === 'motion') zones[zoneIndex].monitor_motion = false;
+      zones[zoneIndex].object_rules.splice(ruleIndex, 1);
+      zones[zoneIndex].object_labels = zones[zoneIndex].object_rules.filter((r) => r.label !== 'motion').map((r) => r.label);
+      renderZones();
+    });
+  });
+  bindRuleFields();
 }
 
 function parseZoneRuleKey(value) {
@@ -788,27 +838,6 @@ function bindZoneControls(zones) {
       renderZones();
     });
   });
-  document.querySelectorAll('[data-add-zone-rule]').forEach((select) => {
-    select.addEventListener('change', () => {
-      const label = select.value;
-      if (!label) return;
-      const zone = zones[Number(select.dataset.addZoneRule)];
-      zone.object_rules = normalizeObjectRules(zone);
-      if (!zone.object_rules.some((rule) => rule.label === label)) zone.object_rules.push(defaultObjectRule(label));
-      zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion').map((rule) => rule.label);
-      renderZones();
-    });
-  });
-  document.querySelectorAll('[data-delete-zone-rule]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const { zoneIndex, ruleIndex, rule } = parseZoneRuleKey(button.dataset.deleteZoneRule);
-      if (rule?.label === 'motion') zones[zoneIndex].monitor_motion = false;
-      zones[zoneIndex].object_rules.splice(ruleIndex, 1);
-      zones[zoneIndex].object_labels = zones[zoneIndex].object_rules.filter((r) => r.label !== 'motion').map((r) => r.label);
-      renderZones();
-    });
-  });
-  bindRuleFields();
 }
 
 function bindRuleFields() {
@@ -895,7 +924,6 @@ function renderCameraRecordingControls() {
   liveEls.cameraRecordingControls.innerHTML = `
     <label><span>Recording</span><select data-camera-recording="enabled"><option value="true" ${recording.enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${recording.enabled === false ? 'selected' : ''}>Disabled</option></select></label>
     <label><span>Alert Clips</span><select data-camera-recording="record_on_alert"><option value="true" ${recording.record_on_alert !== false ? 'selected' : ''}>Enabled</option><option value="false" ${recording.record_on_alert === false ? 'selected' : ''}>Disabled</option></select></label>
-    <label><span>Continuous</span><select data-camera-recording="continuous"><option value="false" ${recording.continuous !== true ? 'selected' : ''}>Disabled</option><option value="true" ${recording.continuous === true ? 'selected' : ''}>Enabled</option></select></label>
     <label><span>Motion Email Alerts</span><select data-camera-detection="motion_email_enabled"><option value="true" ${detection.motion_email_enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${detection.motion_email_enabled === false ? 'selected' : ''}>Disabled</option></select></label>
   `;
   updateZonesStats();
