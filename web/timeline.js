@@ -174,6 +174,7 @@ function drawClipOverlay() {
   // a real-time position that matches what's actually on screen.
   // Periodic re-sync with currentTime prevents long-term clock drift.
   const playbackRate = els.clipPlayer.playbackRate || 1;
+  const rawCurrentTime = Number(els.clipPlayer.currentTime || 0);
   let playerTime;
   if (_playbackSyncBase && !els.clipPlayer.paused) {
     const elapsedWall = (performance.now() - _playbackSyncBase.wallTime) / 1000;
@@ -184,13 +185,32 @@ function drawClipOverlay() {
     if (_playbackReSyncCounter >= 60) {
       _playbackReSyncCounter = 0;
       _playbackSyncBase = {
-        videoTime: Number(els.clipPlayer.currentTime || 0),
+        videoTime: rawCurrentTime,
         wallTime: performance.now(),
       };
     }
   } else {
-    playerTime = Number(els.clipPlayer.currentTime || 0);
+    playerTime = rawCurrentTime;
   }
+
+  // ── Timing diagnostics (every ~60 frames) ──────────────────────────
+  _diagFrameCount = (_diagFrameCount || 0) + 1;
+  if (_diagFrameCount % 60 === 1) {
+    const _diagTrack = recordingTrack();
+    if (_diagTrack && _diagTrack.length) {
+      const _nearestBefore = _diagTrack.reduce((_b, _s) => (_s.t <= playerTime && (!_b || _s.t > _b.t) ? _s : _b), null);
+      const _nearestAfter = _diagTrack.reduce((_b, _s) => (_s.t >= playerTime && (!_b || _s.t < _b.t) ? _s : _b), null);
+      const _msg = [
+        `[overlay-timing] playerTime=${playerTime.toFixed(3)}s`,
+        `currentTime=${rawCurrentTime.toFixed(3)}s`,
+        `diff=${(playerTime - rawCurrentTime).toFixed(3)}s`,
+      ];
+      if (_nearestBefore) _msg.push(`trackBefore=${_nearestBefore.t.toFixed(3)}s (offset=${(playerTime - _nearestBefore.t).toFixed(3)}s)`);
+      if (_nearestAfter) _msg.push(`trackAfter=${_nearestAfter.t.toFixed(3)}s (offset=${(_nearestAfter.t - playerTime).toFixed(3)}s)`);
+      console.log(_msg.join(' | '));
+    }
+  }
+  // ── End diagnostics ────────────────────────────────────────────────
 
   // The saved detection track replays the boxes the live monitor computed
   // while the clip recorded, so playback never runs inference. Clips without
