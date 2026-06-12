@@ -42,7 +42,7 @@ from app.push_notifications import PushNotificationError, PushNotificationServic
 from app.camera_backend import OpenCvStreamCamera
 from app.recordings import RecordingService
 from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, load_settings
-from app.sound_detector import CatMeowDetector, list_audio_devices
+from app.sound_detector import SoundDetector, list_audio_devices, SOUND_CLASSES, DEFAULT_RULES
 from app.storage import Storage
 
 logger = logging.getLogger('daygle.ai')
@@ -316,7 +316,7 @@ live_alert_monitor_stop = threading.Event()
 live_alert_monitor_thread: threading.Thread | None = None
 
 # ── Sound detection state ────────────────────────────────────────────────
-_sound_detector: CatMeowDetector | None = None
+_sound_detector: SoundDetector | None = None
 _sound_detector_lock = threading.Lock()
 _sound_status: dict[str, Any] = {'state': 'stopped', 'last_detected_at': None, 'last_confidence': 0.0}
 _sound_status_lock = threading.Lock()
@@ -343,15 +343,19 @@ def effective_sound_config() -> dict[str, Any]:
         'source': 'microphone',
         'device_index': None,
         'rtsp_camera_id': None,
-        'confidence_threshold': 0.60,
-        'cooldown_seconds': 30,
         'sample_duration_seconds': 1.0,
         'alert_email': True,
         'alert_push': True,
+        'rules': list(DEFAULT_RULES),
     }
     override = database.get_setting('sound_detection')
     if isinstance(override, dict):
         defaults.update(override)
+    # Ensure any class missing from saved rules gets added with defaults disabled
+    saved_classes = {r.get('class') for r in defaults.get('rules') or []}
+    for rule in DEFAULT_RULES:
+        if rule['class'] not in saved_classes:
+            defaults['rules'].append({**rule, 'enabled': False})
     return defaults
 
 
@@ -1421,14 +1425,17 @@ def stop_live_alert_monitor() -> None:
 
 # ── Sound detection ───────────────────────────────────────────────────────
 
-def _on_meow_detected(confidence: float, meta: dict[str, Any]) -> None:
-    """Callback invoked by CatMeowDetector when a cat meow is detected."""
+def _on_sound_detected(class_id: str, rule_name: str, confidence: float, meta: dict[str, Any]) -> None:
+    """Callback invoked by SoundDetector when a sound class is detected."""
+    class_label = SOUND_CLASSES.get(class_id, {}).get('label', class_id)
     with _sound_status_lock:
         _sound_status['state'] = 'detected'
         _sound_status['last_detected_at'] = datetime.now(timezone.utc).isoformat()
+        _sound_status['last_class'] = class_id
+        _sound_status['last_class_label'] = class_label
         _sound_status['last_confidence'] = round(confidence, 3)
 
-    logger.info('Cat meow detected (confidence=%.2f, source=%s)', confidence, meta.get('source'))
+    logger.info('Sound detected: %s (confidence=%.2f, source=%s)', class_label, confidence, meta.get('source'))
 
     sound_cfg = effective_sound_config()
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -1441,28 +1448,29 @@ def _on_meow_detected(confidence: float, meta: dict[str, Any]) -> None:
         metadata={
             'source': 'sound-detection',
             'sound_source': meta.get('source', 'microphone'),
-            'label': 'cat_meow',
+            'label': class_id,
+            'class_label': class_label,
             'confidence': round(confidence, 3),
         },
     )
 
-    rule_name = 'Cat Meow'
+    message = f'{class_label} detected ({confidence:.0%} confidence)'
     database.add_alert(
         created_at=now_iso,
         rule_name=rule_name,
         event_id=event_id,
-        label='cat_meow',
+        label=class_id,
         confidence=confidence,
-        message=f'Cat meow detected ({confidence:.0%} confidence)',
+        message=message,
     )
 
     alert_payload = {
         'rule_name': rule_name,
-        'label': 'cat_meow',
+        'label': class_id,
         'confidence': confidence,
-        'message': f'Cat meow detected ({confidence:.0%} confidence)',
+        'message': message,
     }
-    rule = {
+    notify_rule = {
         'name': rule_name,
         'email_enabled': normalize_bool_setting(sound_cfg.get('alert_email'), True),
         'push_enabled': normalize_bool_setting(sound_cfg.get('alert_push'), True),
@@ -1470,7 +1478,7 @@ def _on_meow_detected(confidence: float, meta: dict[str, Any]) -> None:
     }
     notify_thread = threading.Thread(
         target=_deliver_sound_alert_notifications,
-        args=([alert_payload], event_id, rule),
+        args=([alert_payload], event_id, notify_rule),
         name=f'sound-alert-notify-{event_id}',
         daemon=True,
     )
@@ -1527,23 +1535,28 @@ def apply_sound_settings() -> None:
             except (TypeError, ValueError):
                 device_index = None
 
-        _sound_detector = CatMeowDetector(
-            on_detect=_on_meow_detected,
+        rules = sound_cfg.get('rules') or []
+        enabled_rules = [r for r in rules if r.get('enabled')]
+        if not enabled_rules:
+            with _sound_status_lock:
+                _sound_status['state'] = 'disabled'
+            return
+
+        _sound_detector = SoundDetector(
+            on_detect=_on_sound_detected,
+            rules=enabled_rules,
             source=source,
             device_index=device_index,
             rtsp_url=rtsp_url,
-            confidence_threshold=float(sound_cfg.get('confidence_threshold', 0.60)),
             sample_duration_seconds=float(sound_cfg.get('sample_duration_seconds', 1.0)),
-            cooldown_seconds=float(sound_cfg.get('cooldown_seconds', 30)),
         )
         _sound_detector.start()
         with _sound_status_lock:
             _sound_status['state'] = 'listening'
         logger.info(
-            'Sound monitor started (source=%s, threshold=%.2f, cooldown=%ss)',
+            'Sound monitor started (source=%s, active_rules=%s)',
             source,
-            float(sound_cfg.get('confidence_threshold', 0.60)),
-            sound_cfg.get('cooldown_seconds', 30),
+            [r.get('class') for r in enabled_rules],
         )
 
 
@@ -4600,20 +4613,64 @@ async def update_sound_settings(request: Request):
     rtsp_cam = str(payload.get('rtsp_camera_id') or '').strip()
     validated['rtsp_camera_id'] = rtsp_cam or None
 
-    for key, default in [('confidence_threshold', 0.60), ('cooldown_seconds', 30), ('sample_duration_seconds', 1.0)]:
-        try:
-            validated[key] = float(payload.get(key, default))
-        except (TypeError, ValueError):
-            validated[key] = default
+    try:
+        validated['sample_duration_seconds'] = max(0.5, min(5.0, float(payload.get('sample_duration_seconds', 1.0))))
+    except (TypeError, ValueError):
+        validated['sample_duration_seconds'] = 1.0
 
-    validated['confidence_threshold'] = max(0.1, min(1.0, validated['confidence_threshold']))
-    validated['cooldown_seconds'] = max(5.0, validated['cooldown_seconds'])
-    validated['sample_duration_seconds'] = max(0.5, min(5.0, validated['sample_duration_seconds']))
+    # Validate per-class rules
+    raw_rules = payload.get('rules')
+    if not isinstance(raw_rules, list):
+        raw_rules = []
+    validated_rules: list[dict[str, Any]] = []
+    for raw in raw_rules:
+        if not isinstance(raw, dict):
+            continue
+        class_id = str(raw.get('class') or '').strip()
+        if class_id not in SOUND_CLASSES:
+            continue
+        rule: dict[str, Any] = {
+            'class': class_id,
+            'name': str(raw.get('name') or SOUND_CLASSES[class_id]['label']),
+            'enabled': normalize_bool_setting(raw.get('enabled'), False),
+        }
+        try:
+            rule['confidence_threshold'] = max(0.1, min(1.0, float(raw.get('confidence_threshold', 0.60))))
+        except (TypeError, ValueError):
+            rule['confidence_threshold'] = 0.60
+        try:
+            rule['cooldown_seconds'] = max(5.0, float(raw.get('cooldown_seconds', 30)))
+        except (TypeError, ValueError):
+            rule['cooldown_seconds'] = 30.0
+        validated_rules.append(rule)
+
+    # Ensure all known classes are represented
+    saved_classes = {r['class'] for r in validated_rules}
+    for default_rule in DEFAULT_RULES:
+        if default_rule['class'] not in saved_classes:
+            validated_rules.append({**default_rule, 'enabled': False})
+    validated['rules'] = validated_rules
 
     database.set_setting('sound_detection', validated, utc_now())
     write_audit_log(request, 'update', 'settings.sound_detection')
     apply_sound_settings()
     return validated
+
+
+@app.get('/api/sound/classes')
+def list_sound_classes():
+    return {
+        'classes': [
+            {
+                'id': class_id,
+                'label': meta['label'],
+                'description': meta['description'],
+                'default_threshold': meta['default_threshold'],
+                'default_cooldown': meta['default_cooldown'],
+            }
+            for class_id, meta in SOUND_CLASSES.items()
+        ]
+    }
 
 
 @app.get('/api/sound/devices')
@@ -4629,10 +4686,13 @@ def get_sound_status():
         if _sound_detector is not None:
             status['running'] = _sound_detector.running
             status['detector_status'] = _sound_detector.status
-            status['last_confidence'] = round(_sound_detector.last_confidence, 3)
+            status['last_confidences'] = {
+                k: round(v, 3) for k, v in _sound_detector.last_confidences().items()
+            }
         else:
             status['running'] = False
             status['detector_status'] = 'stopped'
+            status['last_confidences'] = {}
     return status
 
 

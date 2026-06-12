@@ -11,17 +11,114 @@ import numpy as np
 logger = logging.getLogger('daygle.sound')
 
 SAMPLE_RATE = 16000
-CHUNK_SAMPLES = SAMPLE_RATE  # 1 second windows
 
-# Cat vocalization spectral fingerprint:
-# Fundamental ~300-1500 Hz with harmonics up to ~4000 Hz
-_CAT_BAND_LOW = 300.0
-_CAT_BAND_HIGH = 3500.0
-_CENTROID_MIN = 500.0
-_CENTROID_MAX = 2500.0
-_ENERGY_RATIO_THRESHOLD = 0.35  # fraction of energy that must land in cat band
-_ZCR_LOW = 0.01                 # below this = hum/DC offset
-_ZCR_HIGH = 0.22                # above this = white noise / hiss
+# Each sound class is described by spectral fingerprints:
+#   centroid_min/max  – expected spectral centroid range (Hz)
+#   band_low/high     – frequency band that must contain most of the energy
+#   energy_ratio_min  – minimum fraction of energy that must land in that band
+#   zcr_min/max       – zero-crossing rate range (tonal vs. noisy)
+#   w_centroid, w_energy, w_zcr – weights that sum to 1.0
+SOUND_CLASSES: dict[str, dict[str, Any]] = {
+    'cat_meow': {
+        'label': 'Cat Meow',
+        'description': 'Cat vocalizations and meowing',
+        'centroid_min': 500,  'centroid_max': 2500,
+        'band_low': 300,      'band_high': 3500,
+        'energy_ratio_min': 0.35,
+        'zcr_min': 0.01, 'zcr_max': 0.22,
+        'w_centroid': 0.30, 'w_energy': 0.55, 'w_zcr': 0.15,
+        'default_threshold': 0.60,
+        'default_cooldown': 30,
+    },
+    'dog_bark': {
+        'label': 'Dog Bark',
+        'description': 'Dog barking or howling',
+        'centroid_min': 150,  'centroid_max': 1500,
+        'band_low': 100,      'band_high': 2500,
+        'energy_ratio_min': 0.45,
+        'zcr_min': 0.05, 'zcr_max': 0.35,
+        'w_centroid': 0.35, 'w_energy': 0.45, 'w_zcr': 0.20,
+        'default_threshold': 0.65,
+        'default_cooldown': 20,
+    },
+    'glass_breaking': {
+        'label': 'Glass Breaking',
+        'description': 'Breaking glass, ceramic, or window',
+        'centroid_min': 2000, 'centroid_max': 7000,
+        'band_low': 1500,     'band_high': 8000,
+        'energy_ratio_min': 0.40,
+        'zcr_min': 0.18, 'zcr_max': 0.55,
+        'w_centroid': 0.25, 'w_energy': 0.40, 'w_zcr': 0.35,
+        'default_threshold': 0.65,
+        'default_cooldown': 10,
+    },
+    'smoke_alarm': {
+        'label': 'Smoke Alarm',
+        'description': 'Smoke or carbon monoxide detector beeping',
+        'centroid_min': 2700, 'centroid_max': 3600,
+        'band_low': 2500,     'band_high': 4000,
+        'energy_ratio_min': 0.50,
+        'zcr_min': 0.02, 'zcr_max': 0.18,
+        'w_centroid': 0.45, 'w_energy': 0.40, 'w_zcr': 0.15,
+        'default_threshold': 0.60,
+        'default_cooldown': 60,
+    },
+    'baby_crying': {
+        'label': 'Baby Crying',
+        'description': 'Infant or young child crying',
+        'centroid_min': 350,  'centroid_max': 3000,
+        'band_low': 250,      'band_high': 4000,
+        'energy_ratio_min': 0.45,
+        'zcr_min': 0.05, 'zcr_max': 0.28,
+        'w_centroid': 0.30, 'w_energy': 0.50, 'w_zcr': 0.20,
+        'default_threshold': 0.60,
+        'default_cooldown': 30,
+    },
+    'doorbell': {
+        'label': 'Doorbell',
+        'description': 'Door bell or chime ringing',
+        'centroid_min': 350,  'centroid_max': 1200,
+        'band_low': 300,      'band_high': 1800,
+        'energy_ratio_min': 0.55,
+        'zcr_min': 0.01, 'zcr_max': 0.14,
+        'w_centroid': 0.40, 'w_energy': 0.45, 'w_zcr': 0.15,
+        'default_threshold': 0.65,
+        'default_cooldown': 15,
+    },
+    'car_alarm': {
+        'label': 'Car Alarm',
+        'description': 'Vehicle alarm, horn, or siren',
+        'centroid_min': 500,  'centroid_max': 2800,
+        'band_low': 300,      'band_high': 3500,
+        'energy_ratio_min': 0.45,
+        'zcr_min': 0.03, 'zcr_max': 0.25,
+        'w_centroid': 0.30, 'w_energy': 0.50, 'w_zcr': 0.20,
+        'default_threshold': 0.65,
+        'default_cooldown': 60,
+    },
+    'loud_bang': {
+        'label': 'Loud Bang',
+        'description': 'Gunshot, explosion, loud impact, or door slam',
+        'centroid_min': 200,  'centroid_max': 5000,
+        'band_low': 50,       'band_high': 8000,
+        'energy_ratio_min': 0.75,
+        'zcr_min': 0.00, 'zcr_max': 0.45,
+        'w_centroid': 0.10, 'w_energy': 0.80, 'w_zcr': 0.10,
+        'default_threshold': 0.70,
+        'default_cooldown': 10,
+    },
+}
+
+DEFAULT_RULES: list[dict[str, Any]] = [
+    {
+        'class': class_id,
+        'name': meta['label'],
+        'enabled': class_id == 'cat_meow',
+        'confidence_threshold': meta['default_threshold'],
+        'cooldown_seconds': meta['default_cooldown'],
+    }
+    for class_id, meta in SOUND_CLASSES.items()
+]
 
 
 def list_audio_devices() -> list[dict[str, Any]]:
@@ -45,8 +142,18 @@ def list_audio_devices() -> list[dict[str, Any]]:
         return []
 
 
-def compute_meow_confidence(audio: np.ndarray, sample_rate: int = SAMPLE_RATE) -> float:
-    """Return a [0, 1] confidence score that this audio chunk contains a cat meow."""
+def compute_class_confidence(audio: np.ndarray, class_id: str, sample_rate: int = SAMPLE_RATE) -> float:
+    """
+    Return a [0, 1] confidence score that ``audio`` matches the named sound class.
+
+    Uses three spectral features weighted by the class's fingerprint:
+    - spectral centroid (is energy centered in the expected frequency range?)
+    - band energy ratio (is enough energy concentrated in the class's band?)
+    - zero-crossing rate (is the tonal/noise character correct?)
+    """
+    cls = SOUND_CLASSES.get(class_id)
+    if cls is None:
+        return 0.0
     if len(audio) < 256:
         return 0.0
 
@@ -55,7 +162,7 @@ def compute_meow_confidence(audio: np.ndarray, sample_rate: int = SAMPLE_RATE) -
         audio = audio.mean(axis=1)
 
     rms = float(np.sqrt(np.mean(audio ** 2)))
-    if rms < 5e-4:  # silence gate ~-66 dBFS
+    if rms < 5e-4:
         return 0.0
 
     fft_mag = np.abs(np.fft.rfft(audio))
@@ -65,64 +172,71 @@ def compute_meow_confidence(audio: np.ndarray, sample_rate: int = SAMPLE_RATE) -
     if total_power < 1e-12:
         return 0.0
 
-    # Spectral centroid
+    # Spectral centroid score
     centroid = float(np.dot(freqs, power) / total_power)
+    c_min, c_max = float(cls['centroid_min']), float(cls['centroid_max'])
     centroid_score = 0.0
-    if _CENTROID_MIN <= centroid <= _CENTROID_MAX:
-        mid = (_CENTROID_MIN + _CENTROID_MAX) / 2.0
-        half_span = (_CENTROID_MAX - _CENTROID_MIN) / 2.0
+    if c_min <= centroid <= c_max:
+        mid = (c_min + c_max) / 2.0
+        half_span = (c_max - c_min) / 2.0
         centroid_score = max(0.0, 1.0 - abs(centroid - mid) / half_span)
 
-    # Energy concentration in cat-meow band
-    band_mask = (freqs >= _CAT_BAND_LOW) & (freqs <= _CAT_BAND_HIGH)
+    # Band energy ratio score
+    band_mask = (freqs >= cls['band_low']) & (freqs <= cls['band_high'])
     band_ratio = float(np.sum(power[band_mask]) / total_power)
-    energy_score = min(1.0, band_ratio / _ENERGY_RATIO_THRESHOLD)
+    energy_score = min(1.0, band_ratio / float(cls['energy_ratio_min']))
 
-    # Zero-crossing rate — cat meows are tonal, not noisy
+    # Zero-crossing rate score
     zcr = float(np.mean(np.abs(np.diff(np.sign(audio)))) / 2.0)
+    z_min, z_max = float(cls['zcr_min']), float(cls['zcr_max'])
     zcr_score = 0.0
-    if _ZCR_LOW <= zcr <= _ZCR_HIGH:
-        # Peak score around ZCR = 0.05–0.08 (typical voiced vocalization)
-        if zcr <= 0.07:
-            zcr_score = (zcr - _ZCR_LOW) / (0.07 - _ZCR_LOW)
-        else:
-            zcr_score = max(0.0, 1.0 - (zcr - 0.07) / (_ZCR_HIGH - 0.07))
+    if z_min <= zcr <= z_max:
+        mid_z = (z_min + z_max) / 2.0
+        half_z = (z_max - z_min) / 2.0
+        zcr_score = max(0.0, 1.0 - abs(zcr - mid_z) / half_z)
 
-    confidence = 0.30 * centroid_score + 0.55 * energy_score + 0.15 * zcr_score
+    w_c, w_e, w_z = float(cls['w_centroid']), float(cls['w_energy']), float(cls['w_zcr'])
+    confidence = w_c * centroid_score + w_e * energy_score + w_z * zcr_score
     return float(min(1.0, max(0.0, confidence)))
 
 
-class CatMeowDetector:
+class SoundDetector:
     """
-    Continuously listens for cat meow sounds and fires a callback when detected.
+    Continuously listens for sounds matching configurable rules and fires a
+    callback for each matching rule.
 
     Supports two audio sources:
     - ``'microphone'``: uses ``sounddevice`` to capture from a local input device
     - ``'rtsp'``: extracts audio from an RTSP camera stream via FFmpeg
+
+    Each rule in ``rules`` is a dict with:
+        class                – key into SOUND_CLASSES
+        name                 – human-readable name used in alerts
+        enabled              – bool
+        confidence_threshold – [0, 1] minimum score to fire
+        cooldown_seconds     – minimum seconds between consecutive alerts
     """
 
     def __init__(
         self,
-        on_detect: Callable[[float, dict[str, Any]], None],
+        on_detect: Callable[[str, str, float, dict[str, Any]], None],
+        rules: list[dict[str, Any]],
         source: str = 'microphone',
         device_index: int | None = None,
         rtsp_url: str | None = None,
-        confidence_threshold: float = 0.60,
         sample_duration_seconds: float = 1.0,
-        cooldown_seconds: float = 30.0,
     ) -> None:
         self.on_detect = on_detect
+        self.rules = [r for r in rules if r.get('enabled') and r.get('class') in SOUND_CLASSES]
         self.source = source
         self.device_index = device_index
         self.rtsp_url = rtsp_url
-        self.confidence_threshold = confidence_threshold
         self.sample_duration_seconds = sample_duration_seconds
-        self.cooldown_seconds = cooldown_seconds
 
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
-        self._last_triggered: float = 0.0
-        self._last_confidence: float = 0.0
+        self._last_triggered: dict[str, float] = {}
+        self._last_confidences: dict[str, float] = {}
         self._status: str = 'stopped'
         self._status_lock = threading.Lock()
 
@@ -131,10 +245,13 @@ class CatMeowDetector:
         with self._status_lock:
             return self._status
 
-    @property
-    def last_confidence(self) -> float:
+    def last_confidences(self) -> dict[str, float]:
         with self._status_lock:
-            return self._last_confidence
+            return dict(self._last_confidences)
+
+    @property
+    def running(self) -> bool:
+        return bool(self._thread and self._thread.is_alive())
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -149,33 +266,35 @@ class CatMeowDetector:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=5)
         self._thread = None
-        with self._status_lock:
-            self._status = 'stopped'
-
-    @property
-    def running(self) -> bool:
-        return bool(self._thread and self._thread.is_alive())
+        self._set_status('stopped')
 
     def _set_status(self, status: str) -> None:
         with self._status_lock:
             self._status = status
 
     def _handle_chunk(self, audio: np.ndarray) -> None:
-        confidence = compute_meow_confidence(audio)
-        with self._status_lock:
-            self._last_confidence = confidence
-        if confidence < self.confidence_threshold:
-            self._set_status('listening')
+        if not self.rules:
             return
         now = time.time()
-        if now - self._last_triggered < self.cooldown_seconds:
-            return
-        self._last_triggered = now
-        self._set_status('detected')
-        try:
-            self.on_detect(confidence, {'source': self.source})
-        except Exception as exc:
-            logger.error('Sound detection callback failed: %s', exc)
+        for rule in self.rules:
+            class_id = str(rule.get('class') or '')
+            confidence = compute_class_confidence(audio, class_id)
+            with self._status_lock:
+                self._last_confidences[class_id] = confidence
+            threshold = float(rule.get('confidence_threshold', 0.60))
+            if confidence < threshold:
+                continue
+            cooldown = float(rule.get('cooldown_seconds', 30))
+            last = self._last_triggered.get(class_id, 0.0)
+            if now - last < cooldown:
+                continue
+            self._last_triggered[class_id] = now
+            self._set_status(f'detected:{class_id}')
+            try:
+                self.on_detect(class_id, str(rule.get('name') or SOUND_CLASSES[class_id]['label']), confidence, {'source': self.source})
+            except Exception as exc:
+                logger.error('Sound detection callback failed for %s: %s', class_id, exc)
+        self._set_status('listening')
 
     def _run_microphone(self) -> None:
         try:
@@ -197,9 +316,9 @@ class CatMeowDetector:
             if status:
                 logger.debug('sounddevice status: %s', status)
             flat = indata[:, 0] if indata.ndim > 1 else indata.flatten()
+            n = min(len(flat), chunk_samples)
             with buffer_lock:
                 nonlocal buffer
-                n = min(len(flat), chunk_samples)
                 buffer = np.roll(buffer, -n)
                 buffer[-n:] = flat[-n:]
 
@@ -213,10 +332,8 @@ class CatMeowDetector:
                 device=self.device_index,
                 callback=_callback,
             ):
-                logger.info(
-                    'Sound monitor started (microphone, device=%s, threshold=%.2f)',
-                    self.device_index, self.confidence_threshold,
-                )
+                enabled_classes = [r['class'] for r in self.rules]
+                logger.info('Sound monitor started (microphone, device=%s, classes=%s)', self.device_index, enabled_classes)
                 while not self._stop_event.is_set():
                     self._stop_event.wait(self.sample_duration_seconds / 2)
                     with buffer_lock:
@@ -248,10 +365,8 @@ class CatMeowDetector:
             'pipe:1',
         ]
 
-        logger.info(
-            'Sound monitor started (RTSP, threshold=%.2f)',
-            self.confidence_threshold,
-        )
+        enabled_classes = [r['class'] for r in self.rules]
+        logger.info('Sound monitor started (RTSP, classes=%s)', enabled_classes)
         self._set_status('listening')
 
         while not self._stop_event.is_set():
@@ -286,3 +401,7 @@ class CatMeowDetector:
 
             if not self._stop_event.is_set():
                 self._stop_event.wait(5.0)
+
+
+# Backwards-compatible alias
+CatMeowDetector = SoundDetector
