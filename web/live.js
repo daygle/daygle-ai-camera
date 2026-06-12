@@ -465,7 +465,7 @@ function summarizeDetectionStatus(payload) {
     .sort((a, b) => b[1] - a[1])
     .map(([label, confidence]) => ({ label, confidence }));
   const labelStr = chips.length
-    ? chips.map((c) => c.confidence > 0 ? `${c.label} (${Math.round(c.confidence * 100)}%)` : c.label).join(', ')
+    ? chips.map((c) => c.confidence > 0 ? `${titleCase(c.label)} (${Math.round(c.confidence * 100)}%)` : titleCase(c.label)).join(', ')
     : null;
 
   if (payload.state === 'alerted') {
@@ -515,7 +515,7 @@ function renderDetectionStatus(summary) {
     } else {
       liveEls.detectionChips.innerHTML = summary.chips.map((c) => {
         const variant = summary.state === 'alerted' ? 'detection-chip-alert' : '';
-        const text = c.confidence > 0 ? `${c.label} · ${Math.round(c.confidence * 100)}%` : c.label;
+        const text = c.confidence > 0 ? `${titleCase(c.label)} · ${Math.round(c.confidence * 100)}%` : titleCase(c.label);
         return `<span class="detection-chip ${variant}">${escapeHtml(text)}</span>`;
       }).join('');
     }

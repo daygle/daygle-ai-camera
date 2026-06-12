@@ -69,7 +69,7 @@ function detectionBadges(detections = []) {
     }))
     .filter((detection) => detection.label && (!configuredLabels || (configuredLabels.has(detection.label) && detection.confidence >= (configuredLabels.get(detection.label) ?? 0))));
   if (!normalized.length) return '<span class="muted">No detections</span>';
-  return normalized.map((detection) => `<span class="detection">${escapeHtml(detection.label)} · ${Math.round(detection.confidence * 100)}%</span>`).join('');
+  return normalized.map((detection) => `<span class="detection">${escapeHtml(titleCase(detection.label))} · ${Math.round(detection.confidence * 100)}%</span>`).join('');
 }
 
 function cameraLabel(recording) {
@@ -114,8 +114,9 @@ function recordingDisplayTrigger(recording) {
   const firstSpecificDetection = detectionLabels.find((label) => !GENERIC_TRIGGER_LABELS.has(label));
   const hasDetections = detectionLabels.length > 0;
 
-  if (triggerType === 'motion' || triggerType === 'alert' || triggerType === 'human') {
-    if (firstSpecificDetection) return `${triggerType} · ${firstSpecificDetection}`;
+  if (triggerType === 'motion' || triggerType === 'alert' || triggerType === 'human' || triggerType === 'object') {
+    // Prefer concrete object labels over generic trigger type names.
+    if (firstSpecificDetection) return firstSpecificDetection;
     // If detections exist and none are specific, trust the detection set and keep this as motion.
     if (!hasDetections && triggerLabel && !GENERIC_TRIGGER_LABELS.has(triggerLabel)) return `${triggerType} · ${triggerLabel}`;
     return triggerType;
@@ -215,7 +216,7 @@ function renderRecordings(recordings) {
           <div class="recording-row-header">
             <div class="recording-row-title">
               <span class="recording-row-id">Recording #${recording.id}</span>
-              <span class="chip recording-row-trigger ${triggerPillClass}">${escapeHtml(trigger)}</span>
+              <span class="chip recording-row-trigger ${triggerPillClass}">${escapeHtml(titleCase(trigger))}</span>
             </div>
             <div class="recording-row-when">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -240,7 +241,7 @@ function renderRecordings(recordings) {
               <span class="recording-meta-value recording-meta-filename">${escapeHtml(fileName || 'unknown')}</span>
             </div>
           </div>
-          <div class="recording-row-badges">${recordingDetectionSummary(recording).map((d) => `<span class="detection">${escapeHtml(d.label)} · ${Math.round(d.confidence * 100)}%</span>`).join('') || '<span class="muted">No detections</span>'}</div>
+          <div class="recording-row-badges">${recordingDetectionSummary(recording).map((d) => `<span class="detection">${escapeHtml(titleCase(d.label))} · ${Math.round(d.confidence * 100)}%</span>`).join('') || '<span class="muted">No detections</span>'}</div>
         </div>
         <div class="recording-row-actions">
           <button class="secondary" data-play-recording="${recording.id}" ${mediaReady ? '' : 'disabled'}>
@@ -297,14 +298,14 @@ function renderRecordingDetails(recording) {
   const detections = recordingDetectionSummary(recording);
   const detectionBadges = detections.length
     ? detections
-        .map((d) => `<span class="detection">${escapeHtml(d.label)} (${Math.round(d.confidence * 100)}%)</span>`)
+        .map((d) => `<span class="detection">${escapeHtml(titleCase(d.label))} (${Math.round(d.confidence * 100)}%)</span>`)
         .join(' ')
     : 'none';
   els.recordingDetails.innerHTML = `
     <div><span>Recording</span><strong>#${recording.id}</strong></div>
     <div><span>Event</span><strong>${recording.event_id || 'none'}</strong></div>
     <div><span>Camera</span><strong>${escapeHtml(cameraLabel(recording))}</strong></div>
-    <div><span>Trigger</span><strong>${escapeHtml(recordingDisplayTrigger(recording))}</strong></div>
+    <div><span>Trigger</span><strong>${escapeHtml(titleCase(recordingDisplayTrigger(recording)))}</strong></div>
     <div><span>Started</span><strong>${escapeHtml(formatDateTime(recording.started_at))}</strong></div>
     <div><span>Duration</span><strong>${Number(recording.duration_seconds || 0).toFixed(1)}s</strong></div>
     <div class="wide"><span>Detections</span><strong>${detectionBadges}</strong></div>

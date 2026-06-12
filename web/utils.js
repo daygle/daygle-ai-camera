@@ -2,6 +2,14 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'\"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
 }
 
+function titleCase(value) {
+  return String(value || '')
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(' ');
+}
+
 // ─── User display preferences (date_format / time_format) ──────────────────
 // Populated by nav.js after /api/auth/me resolves, but exposed as early as
 // possible so every page (dashboard, events, alerts, recordings, etc.) renders

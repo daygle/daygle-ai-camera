@@ -219,14 +219,6 @@ async function api(path, options = {}) {
   return payload;
 }
 
-function titleCase(value) {
-  return String(value || '')
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
-    .join(' ');
-}
-
 function formatClock(seconds) {
   return formatUserClock(seconds);
 }
@@ -293,7 +285,7 @@ function recordingTypeLabel(recording) {
   const triggerLabel = recordingTriggerLabel(recording);
   const detectionLabels = recordingDetectionLabels(recording);
 
-  if (triggerType === 'motion' || triggerType === 'alert' || triggerType === 'human') {
+  if (triggerType === 'motion' || triggerType === 'alert' || triggerType === 'human' || triggerType === 'object') {
     // Prefer concrete object labels for timeline chips/segments, fall back to generic motion.
     if (triggerLabel && !GENERIC_TIMELINE_LABELS.has(triggerLabel)) return triggerLabel;
     const firstSpecificDetection = detectionLabels.find((label) => !GENERIC_TIMELINE_LABELS.has(label));

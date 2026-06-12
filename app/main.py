@@ -1103,7 +1103,7 @@ def extend_active_rtsp_recording(
             ):
                 database.update_recording_trigger(
                     recording_id,
-                    trigger_type='alert' if trigger_type in {'motion', 'human', 'object'} else trigger_type,
+                    trigger_type=trigger_type,
                     trigger_label=candidate_label,
                 )
                 database.add_recording_labels(
