@@ -44,12 +44,11 @@ const OVERLAY_TOGGLE_KEY = 'daygle.timeline.overlay.enabled';
 // Off by default; users opt in per-browser via the toggle.
 let overlayEnabled = false;
 let overlayRafId = null;
+let overlayVfcHandle = null;
 let overlayResizeObserver = null;
-// Wall-clock sync baseline for overlay position estimation. Using the wall
-// clock bypasses currentTime lag (which can trail the displayed frame by
-// 50-100ms) by tracking how long the video has been playing independently.
-let _playbackSyncBase = null;
-let _playbackReSyncCounter = 0;
+// Estimated frame duration (seconds) used to project detection boxes one
+// frame ahead of the VFC mediaTime or currentTime.
+let _frameDuration = 1 / 30; // default 30fps, updated on each VFC frame
 
 const DAY_SECONDS = 24 * 60 * 60;
 const TIMELINE_ROW_HEIGHT = 42;
@@ -131,32 +130,65 @@ function overlayShouldAnimate() {
 }
 
 function startOverlayRaf() {
-  if (overlayRafId !== null) return;
   const video = els.clipPlayer;
   if (!video) return;
-  // Uses requestAnimationFrame instead of requestVideoFrameCallback because
-  // rAF fires BEFORE compositing — the overlay is painted in the same frame
-  // as the video, avoiding the 1-frame VFC lag where the overlay would show
-  // data for the frame that was just displayed.
-  function loop() {
+  // Uses requestVideoFrameCallback for frame-accurate sync with the video
+  // decoder. The callback provides `mediaTime` — the exact PTS of the frame
+  // being displayed. We project one frame ahead (mediaTime + frameDuration)
+  // so the overlay paints boxes where the object will be when the next frame
+  // hits the screen, compensating for the 1-frame VFC-to-composite delay.
+  // Falls back to rAF + currentTime when VFC is unavailable (older browsers).
+  const useVfc = typeof video.requestVideoFrameCallback === 'function';
+
+  let prevVfcTime = 0;
+  function onVfcFrame(now, metadata) {
+    if (!els.clipPlayer || els.clipPlayer.paused || !overlayShouldAnimate()) {
+      overlayRafId = null;
+      overlayVfcHandle = null;
+      return;
+    }
+    // Estimate frame duration from the delta between consecutive VFC frames
+    // (clamped to a reasonable 10-200ms range to filter outliers).
+    const mediaTime = metadata && typeof metadata.mediaTime === 'number' ? metadata.mediaTime : null;
+    if (mediaTime !== null && prevVfcTime > 0) {
+      const dt = mediaTime - prevVfcTime;
+      if (dt >= 0.01 && dt <= 0.2) _frameDuration = dt;
+    }
+    if (mediaTime !== null) prevVfcTime = mediaTime;
+    drawClipOverlay(mediaTime);
+    overlayVfcHandle = video.requestVideoFrameCallback(onVfcFrame);
+  }
+
+  function onRafFrame() {
     if (!els.clipPlayer || els.clipPlayer.paused || !overlayShouldAnimate()) {
       overlayRafId = null;
       return;
     }
     drawClipOverlay();
-    overlayRafId = requestAnimationFrame(loop);
+    overlayRafId = requestAnimationFrame(onRafFrame);
   }
-  overlayRafId = requestAnimationFrame(loop);
+
+  if (useVfc) {
+    if (overlayVfcHandle !== null) return; // already running
+    overlayVfcHandle = video.requestVideoFrameCallback(onVfcFrame);
+  } else {
+    if (overlayRafId !== null) return; // already running
+    overlayRafId = requestAnimationFrame(onRafFrame);
+  }
 }
 
 function stopOverlayRaf() {
+  if (overlayVfcHandle !== null && els.clipPlayer && typeof els.clipPlayer.cancelVideoFrameCallback === 'function') {
+    els.clipPlayer.cancelVideoFrameCallback(overlayVfcHandle);
+    overlayVfcHandle = null;
+  }
   if (overlayRafId !== null) {
     cancelAnimationFrame(overlayRafId);
     overlayRafId = null;
   }
 }
 
-function drawClipOverlay() {
+function drawClipOverlay(vfcMediaTime) {
   if (!els.clipOverlay || !els.clipPlayer) return;
   if (!overlayEnabled) {
     clearClipOverlay();
@@ -168,29 +200,17 @@ function drawClipOverlay() {
   context.setTransform(1, 0, 0, 1, 0, 0);
   context.clearRect(0, 0, els.clipOverlay.width, els.clipOverlay.height);
 
-  // Use wall-clock-based playback position instead of currentTime, which can
-  // lag behind the displayed frame by 50-100ms on many browsers. The estimator
-  // tracks elapsed wall time from a sync baseline taken on play/seek, giving
-  // a real-time position that matches what's actually on screen.
-  // Periodic re-sync with currentTime prevents long-term clock drift.
-  const playbackRate = els.clipPlayer.playbackRate || 1;
-  const rawCurrentTime = Number(els.clipPlayer.currentTime || 0);
+  // Use the VFC-provided mediaTime (exact frame PTS) and project one frame
+  // ahead. This compensates for the inherent 1-frame delay between VFC
+  // firing (after the frame was sent to compositor) and the overlay paint
+  // being displayed (on the next frame). Falls back to currentTime for the
+  // rAF path or when VFC isn't available (rAF fires before compositing,
+  // so no forward projection is needed).
   let playerTime;
-  if (_playbackSyncBase && !els.clipPlayer.paused) {
-    const elapsedWall = (performance.now() - _playbackSyncBase.wallTime) / 1000;
-    playerTime = _playbackSyncBase.videoTime + elapsedWall * playbackRate;
-    // Re-sync with currentTime every ~60 frames (~1s at 60fps) to prevent
-    // the wall clock from drifting away from the video decoder's clock.
-    _playbackReSyncCounter++;
-    if (_playbackReSyncCounter >= 60) {
-      _playbackReSyncCounter = 0;
-      _playbackSyncBase = {
-        videoTime: rawCurrentTime,
-        wallTime: performance.now(),
-      };
-    }
+  if (typeof vfcMediaTime === 'number' && Number.isFinite(vfcMediaTime)) {
+    playerTime = vfcMediaTime + _frameDuration;
   } else {
-    playerTime = rawCurrentTime;
+    playerTime = Number(els.clipPlayer.currentTime || 0);
   }
 
   // The saved detection track replays the boxes the live monitor computed
@@ -704,8 +724,6 @@ function closeVideoModal() {
   document.body.style.overflow = '';
   els.clipPlayer.pause();
   stopOverlayRaf();
-  _playbackSyncBase = null;
-  _playbackReSyncCounter = 0;
   els.clipPlayer.removeAttribute('src');
   els.clipPlayer.load();
   els.videoModalDownload.hidden = true;
@@ -950,26 +968,11 @@ els.clipPlayer.addEventListener('error', () => {
 // already draws the overlay on every frame during playback, making it redundant.
 ['loadedmetadata', 'loadeddata', 'pause', 'seeked'].forEach((eventName) => {
   els.clipPlayer.addEventListener(eventName, () => {
-    // Reset sync base on seek so the estimator picks up the new position.
-    if (eventName === 'seeked') {
-      _playbackSyncBase = {
-        videoTime: Number(els.clipPlayer.currentTime || 0),
-        wallTime: performance.now(),
-      };
-      _playbackReSyncCounter = 0;
-    }
     drawClipOverlay();
   });
 });
 
 els.clipPlayer.addEventListener('play', () => {
-  // Reset wall-clock sync base so the overlay position estimator has an
-  // accurate starting point for this playback session.
-  _playbackSyncBase = {
-    videoTime: Number(els.clipPlayer.currentTime || 0),
-    wallTime: performance.now(),
-  };
-  _playbackReSyncCounter = 0;
   if (overlayShouldAnimate()) startOverlayRaf();
   drawClipOverlay();
   // ── Detect track offset ───────────────────────────────────────────
@@ -987,11 +990,6 @@ els.clipPlayer.addEventListener('play', () => {
 });
 
 els.clipPlayer.addEventListener('pause', () => {
-  // Freeze sync base at the current paused position so resume doesn't jump.
-  _playbackSyncBase = {
-    videoTime: Number(els.clipPlayer.currentTime || 0),
-    wallTime: performance.now(),
-  };
   stopOverlayRaf();
   drawClipOverlay();
 });
