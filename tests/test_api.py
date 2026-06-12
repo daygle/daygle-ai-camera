@@ -1463,6 +1463,14 @@ def test_admin_can_backup_and_restore_database_from_api(tmp_path, monkeypatch):
         with sqlite3.connect(database_path) as db:
             assert db.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetchone()[0] == 1
 
+        # The server-side snapshot is deleted once the download completes
+        # (background task), so poll briefly rather than asserting instantly.
+        backups_dir = database_path.parent / 'backups'
+        deadline = time.time() + 5
+        while time.time() < deadline and list(backups_dir.glob('daygle-database-*.sqlite3')):
+            time.sleep(0.05)
+        assert list(backups_dir.glob('daygle-database-*.sqlite3')) == []
+
         status, _headers, camera = client.request(
             '/api/cameras/camera-1',
             method='PUT',
