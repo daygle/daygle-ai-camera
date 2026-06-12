@@ -221,6 +221,35 @@ function createPushNotificationSection() {
   }
 }
 
+function createSoundDetectionSection() {
+  const section = document.createElement('section');
+  section.className = 'card';
+  section.id = 'soundDetectionSection';
+  section.innerHTML = `
+    <div class="settings-section-header"><div class="settings-section-icon">🔊</div><div><h2>Cat Meow Sound Detection</h2><p class="settings-section-subtitle">Detect cat meows from a microphone or an RTSP camera's audio track and trigger email or push alerts.</p></div></div>
+    <form id="soundSettingsForm" class="form-grid">
+      <label><span>Sound Detection</span><select name="enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select><span class="field-help">Master toggle for cat meow sound detection. Requires a microphone or an RTSP camera with an audio track.</span></label>
+      <label><span>Audio Source</span><select name="source"><option value="microphone">Microphone (local device)</option><option value="rtsp">RTSP Camera Audio</option></select><span class="field-help">Choose where audio is captured from. "Microphone" uses a local input device; "RTSP Camera Audio" extracts audio from one of your configured camera streams.</span></label>
+      <label id="soundDeviceLabel"><span>Microphone Device</span><select name="device_index"><option value="">Default device</option></select><span class="field-help">Select a specific input device, or leave as "Default device".</span></label>
+      <label id="soundRtspLabel"><span>RTSP Camera</span><select name="rtsp_camera_id"><option value="">Select a camera</option></select><span class="field-help">Camera whose audio track will be monitored. The camera must have an audio channel enabled in its stream.</span></label>
+      <label><span>Detection Threshold</span><input name="confidence_threshold" type="number" min="0.1" max="1.0" step="0.05" placeholder="0.60" /><span class="field-help">Minimum spectral match score (0.1–1.0) to trigger a meow alert. Lower = more sensitive, higher = fewer false positives. Default: 0.60</span></label>
+      <label><span>Cooldown (seconds)</span><input name="cooldown_seconds" type="number" min="5" max="3600" step="5" placeholder="30" /><span class="field-help">Minimum quiet time between consecutive alerts. Default: 30s</span></label>
+      <label><span>Email Alerts</span><select name="alert_email"><option value="true">Enabled</option><option value="false">Disabled</option></select><span class="field-help">Send an email alert when a cat meow is detected (requires Email Delivery to be configured).</span></label>
+      <label><span>Push Alerts</span><select name="alert_push"><option value="true">Enabled</option><option value="false">Disabled</option></select><span class="field-help">Send a push notification when a cat meow is detected (requires Push Notifications to be configured).</span></label>
+    </form>
+    <div class="button-row">
+      <button type="submit" form="soundSettingsForm">Save Sound Settings</button>
+      <span id="soundStatusBadge" class="muted" style="margin-left:auto;align-self:center;font-size:.85em"></span>
+    </div>
+  `;
+  const offlineSection = document.getElementById('cameraOfflineForm')?.closest('section');
+  if (offlineSection) {
+    offlineSection.after(section);
+  } else {
+    document.querySelector('main')?.append(section);
+  }
+}
+
 function createCameraOfflineSection() {
   const section = document.createElement('section');
   section.className = 'card';
@@ -270,6 +299,7 @@ function createEmailDeliverySection() {
 
 createPushNotificationSection();
 createCameraOfflineSection();
+createSoundDetectionSection();
 createEmailDeliverySection();
 createRuntimeResetSection();
 ensureRecordingExtensionStepField();
@@ -376,14 +406,71 @@ function renderCameraOffline(settings) {
   }
 }
 
+async function loadSoundDevices() {
+  const deviceSelect = document.querySelector('#soundSettingsForm select[name="device_index"]');
+  if (!deviceSelect) return;
+  try {
+    const { devices } = await api('/api/sound/devices');
+    deviceSelect.innerHTML = '<option value="">Default device</option>';
+    for (const dev of (devices || [])) {
+      const opt = document.createElement('option');
+      opt.value = dev.index;
+      opt.textContent = `[${dev.index}] ${dev.name} (${dev.channels}ch, ${dev.default_sample_rate}Hz)`;
+      deviceSelect.append(opt);
+    }
+  } catch (_) { /* sounddevice not installed — leave default */ }
+}
+
+async function loadSoundCameras(camerasList) {
+  const camSelect = document.querySelector('#soundSettingsForm select[name="rtsp_camera_id"]');
+  if (!camSelect) return;
+  camSelect.innerHTML = '<option value="">Select a camera</option>';
+  for (const cam of (camerasList || [])) {
+    const opt = document.createElement('option');
+    opt.value = cam.id || '';
+    opt.textContent = cam.name || cam.id || 'Unnamed camera';
+    camSelect.append(opt);
+  }
+}
+
+function renderSoundSettings(s) {
+  const form = document.getElementById('soundSettingsForm');
+  if (!form) return;
+  for (const [key, value] of Object.entries(s || {})) {
+    if (form.elements[key]) form.elements[key].value = String(value ?? '');
+  }
+  updateSoundSourceVisibility(form);
+}
+
+function updateSoundSourceVisibility(form) {
+  if (!form) return;
+  const source = form.elements.source?.value;
+  const micLabel = document.getElementById('soundDeviceLabel');
+  const rtspLabel = document.getElementById('soundRtspLabel');
+  if (micLabel) micLabel.style.display = source === 'microphone' ? '' : 'none';
+  if (rtspLabel) rtspLabel.style.display = source === 'rtsp' ? '' : 'none';
+}
+
+async function loadSoundStatus() {
+  const badge = document.getElementById('soundStatusBadge');
+  if (!badge) return;
+  try {
+    const s = await api('/api/sound/status');
+    const state = s.detector_status || s.state || 'stopped';
+    const conf = s.last_confidence ? ` (last: ${(s.last_confidence * 100).toFixed(0)}%)` : '';
+    badge.textContent = `Status: ${state}${conf}`;
+  } catch (_) {}
+}
+
 async function loadSettings() {
   const me = await api('/api/auth/me');
   csrfToken = me.csrf_token;
-  const [settings, emailSettings, pushSettings, cameraOfflineSettings] = await Promise.all([
+  const [settings, emailSettings, pushSettings, cameraOfflineSettings, soundSettings] = await Promise.all([
     api('/api/settings/system'),
     api('/api/settings/alert-email'),
     api('/api/settings/alert-push'),
     api('/api/settings/camera-offline'),
+    api('/api/settings/sound'),
   ]);
   fillForm(forms.live, settings.live);
   fillForm(forms.recording, settings.recording);
@@ -393,6 +480,10 @@ async function loadSettings() {
   renderEmail(emailSettings);
   renderPush(pushSettings);
   renderCameraOffline(cameraOfflineSettings);
+  await loadSoundDevices();
+  await loadSoundCameras(settings.cameras);
+  renderSoundSettings(soundSettings);
+  await loadSoundStatus();
   enhanceFormFieldLabels();
   messageEl.textContent = '';
 }
@@ -510,6 +601,28 @@ forms.databaseRestore.addEventListener('submit', async (event) => {
     setMessage(error.message, true);
   }
 });
+
+const soundForm = document.getElementById('soundSettingsForm');
+soundForm?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(soundForm).entries());
+  data.enabled = data.enabled === 'true';
+  data.alert_email = data.alert_email === 'true';
+  data.alert_push = data.alert_push === 'true';
+  if (data.confidence_threshold !== '') data.confidence_threshold = Number(data.confidence_threshold);
+  if (data.cooldown_seconds !== '') data.cooldown_seconds = Number(data.cooldown_seconds);
+  if (data.device_index === '') data.device_index = null; else if (data.device_index !== undefined) data.device_index = Number(data.device_index);
+  try {
+    const updated = await api('/api/settings/sound', { method: 'PUT', body: JSON.stringify(data) });
+    renderSoundSettings(updated);
+    setMessage('Sound detection settings saved.');
+    setTimeout(loadSoundStatus, 1500);
+  } catch (error) {
+    setMessage(error.message, true);
+  }
+});
+
+soundForm?.elements.source?.addEventListener('change', () => updateSoundSourceVisibility(soundForm));
 
 loadSettings().catch((error) => setMessage(error.message, true));
 

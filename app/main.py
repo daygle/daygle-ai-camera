@@ -42,6 +42,7 @@ from app.push_notifications import PushNotificationError, PushNotificationServic
 from app.camera_backend import OpenCvStreamCamera
 from app.recordings import RecordingService
 from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, load_settings
+from app.sound_detector import CatMeowDetector, list_audio_devices
 from app.storage import Storage
 
 logger = logging.getLogger('daygle.ai')
@@ -114,12 +115,14 @@ async def app_lifespan(_app: FastAPI):
         logger.info(f"Cleaned up {len(removed)} incomplete recording(s) from previous session")
     log_detector_initialization()
     start_live_alert_monitor()
+    apply_sound_settings()
     try:
         yield
     finally:
         recording_service.stop_prebuffer_workers()
         recording_service.stop_all_continuous_recordings()
         stop_live_alert_monitor()
+        stop_sound_monitor()
 
 
 app = FastAPI(title='Daygle AI Camera', lifespan=app_lifespan)
@@ -312,6 +315,12 @@ _MOTION_BACKGROUND_ALPHA = 0.05 # background learning rate; stationary objects a
 live_alert_monitor_stop = threading.Event()
 live_alert_monitor_thread: threading.Thread | None = None
 
+# ── Sound detection state ────────────────────────────────────────────────
+_sound_detector: CatMeowDetector | None = None
+_sound_detector_lock = threading.Lock()
+_sound_status: dict[str, Any] = {'state': 'stopped', 'last_detected_at': None, 'last_confidence': 0.0}
+_sound_status_lock = threading.Lock()
+
 # ── Camera offline alert health tracking ─────────────────────────────────
 _camera_health_state: dict[str, dict[str, Any]] = {}
 _camera_health_lock = threading.Lock()
@@ -326,6 +335,24 @@ def effective_camera_offline_alert_settings() -> dict[str, Any]:
     if isinstance(override, dict):
         settings.update(override)
     return settings
+
+
+def effective_sound_config() -> dict[str, Any]:
+    defaults: dict[str, Any] = {
+        'enabled': False,
+        'source': 'microphone',
+        'device_index': None,
+        'rtsp_camera_id': None,
+        'confidence_threshold': 0.60,
+        'cooldown_seconds': 30,
+        'sample_duration_seconds': 1.0,
+        'alert_email': True,
+        'alert_push': True,
+    }
+    override = database.get_setting('sound_detection')
+    if isinstance(override, dict):
+        defaults.update(override)
+    return defaults
 
 
 def _update_camera_health(camera_id: str, online: bool) -> None:
@@ -1390,6 +1417,144 @@ def stop_live_alert_monitor() -> None:
     if live_alert_monitor_thread and live_alert_monitor_thread.is_alive():
         live_alert_monitor_thread.join(timeout=5)
     live_alert_monitor_thread = None
+
+
+# ── Sound detection ───────────────────────────────────────────────────────
+
+def _on_meow_detected(confidence: float, meta: dict[str, Any]) -> None:
+    """Callback invoked by CatMeowDetector when a cat meow is detected."""
+    with _sound_status_lock:
+        _sound_status['state'] = 'detected'
+        _sound_status['last_detected_at'] = datetime.now(timezone.utc).isoformat()
+        _sound_status['last_confidence'] = round(confidence, 3)
+
+    logger.info('Cat meow detected (confidence=%.2f, source=%s)', confidence, meta.get('source'))
+
+    sound_cfg = effective_sound_config()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    event_id = database.add_event(
+        created_at=now_iso,
+        source='sound',
+        snapshot_path=None,
+        detections=[],
+        alert_triggered=True,
+        metadata={
+            'source': 'sound-detection',
+            'sound_source': meta.get('source', 'microphone'),
+            'label': 'cat_meow',
+            'confidence': round(confidence, 3),
+        },
+    )
+
+    rule_name = 'Cat Meow'
+    database.add_alert(
+        created_at=now_iso,
+        rule_name=rule_name,
+        event_id=event_id,
+        label='cat_meow',
+        confidence=confidence,
+        message=f'Cat meow detected ({confidence:.0%} confidence)',
+    )
+
+    alert_payload = {
+        'rule_name': rule_name,
+        'label': 'cat_meow',
+        'confidence': confidence,
+        'message': f'Cat meow detected ({confidence:.0%} confidence)',
+    }
+    rule = {
+        'name': rule_name,
+        'email_enabled': normalize_bool_setting(sound_cfg.get('alert_email'), True),
+        'push_enabled': normalize_bool_setting(sound_cfg.get('alert_push'), True),
+        'email_recipients': [],
+    }
+    notify_thread = threading.Thread(
+        target=_deliver_sound_alert_notifications,
+        args=([alert_payload], event_id, rule),
+        name=f'sound-alert-notify-{event_id}',
+        daemon=True,
+    )
+    with _notification_threads_lock:
+        _notification_threads[:] = [t for t in _notification_threads if t.is_alive()]
+        _notification_threads.append(notify_thread)
+    notify_thread.start()
+
+
+def _deliver_sound_alert_notifications(
+    triggered: list[dict[str, Any]],
+    event_id: int,
+    rule: dict[str, Any],
+) -> None:
+    if rule.get('email_enabled'):
+        try:
+            deliver_email_alerts(triggered, event_id, rules=[rule])
+        except Exception as exc:
+            logger.warning('Sound alert email delivery failed for event %s: %s', event_id, exc)
+    if rule.get('push_enabled'):
+        try:
+            deliver_push_notifications(triggered, event_id, rules=[rule])
+        except Exception as exc:
+            logger.warning('Sound alert push delivery failed for event %s: %s', event_id, exc)
+
+
+def apply_sound_settings() -> None:
+    """Start, restart, or stop the sound detector based on current settings."""
+    global _sound_detector
+    with _sound_detector_lock:
+        if _sound_detector is not None:
+            _sound_detector.stop()
+            _sound_detector = None
+
+        sound_cfg = effective_sound_config()
+        if not normalize_bool_setting(sound_cfg.get('enabled'), False):
+            with _sound_status_lock:
+                _sound_status['state'] = 'disabled'
+            return
+
+        source = str(sound_cfg.get('source') or 'microphone')
+        rtsp_url: str | None = None
+        if source == 'rtsp':
+            cam_id = str(sound_cfg.get('rtsp_camera_id') or '')
+            for cam in cameras_config:
+                if str(cam.get('id') or '') == cam_id:
+                    rtsp_url = build_stream_url(cam)
+                    break
+
+        device_index = sound_cfg.get('device_index')
+        if device_index is not None:
+            try:
+                device_index = int(device_index)
+            except (TypeError, ValueError):
+                device_index = None
+
+        _sound_detector = CatMeowDetector(
+            on_detect=_on_meow_detected,
+            source=source,
+            device_index=device_index,
+            rtsp_url=rtsp_url,
+            confidence_threshold=float(sound_cfg.get('confidence_threshold', 0.60)),
+            sample_duration_seconds=float(sound_cfg.get('sample_duration_seconds', 1.0)),
+            cooldown_seconds=float(sound_cfg.get('cooldown_seconds', 30)),
+        )
+        _sound_detector.start()
+        with _sound_status_lock:
+            _sound_status['state'] = 'listening'
+        logger.info(
+            'Sound monitor started (source=%s, threshold=%.2f, cooldown=%ss)',
+            source,
+            float(sound_cfg.get('confidence_threshold', 0.60)),
+            sound_cfg.get('cooldown_seconds', 30),
+        )
+
+
+def stop_sound_monitor() -> None:
+    global _sound_detector
+    with _sound_detector_lock:
+        if _sound_detector is not None:
+            _sound_detector.stop()
+            _sound_detector = None
+    with _sound_status_lock:
+        _sound_status['state'] = 'stopped'
 
 
 def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any]) -> None:
@@ -4400,6 +4565,75 @@ async def update_camera_offline_alert_settings(request: Request):
         validated['offline_delay_minutes'] = 1
     result = database.set_setting('camera_offline_alert', validated, utc_now())
     return result
+
+
+@app.get('/api/settings/sound')
+def get_sound_settings():
+    return effective_sound_config()
+
+
+@app.put('/api/settings/sound')
+async def update_sound_settings(request: Request):
+    require_admin(request)
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail='Invalid sound settings payload')
+
+    validated: dict[str, Any] = {
+        'enabled': normalize_bool_setting(payload.get('enabled'), False),
+        'source': str(payload.get('source') or 'microphone'),
+        'alert_email': normalize_bool_setting(payload.get('alert_email'), True),
+        'alert_push': normalize_bool_setting(payload.get('alert_push'), True),
+    }
+    if validated['source'] not in ('microphone', 'rtsp'):
+        validated['source'] = 'microphone'
+
+    device_raw = payload.get('device_index')
+    if device_raw is None or str(device_raw).strip() == '':
+        validated['device_index'] = None
+    else:
+        try:
+            validated['device_index'] = int(device_raw)
+        except (TypeError, ValueError):
+            validated['device_index'] = None
+
+    rtsp_cam = str(payload.get('rtsp_camera_id') or '').strip()
+    validated['rtsp_camera_id'] = rtsp_cam or None
+
+    for key, default in [('confidence_threshold', 0.60), ('cooldown_seconds', 30), ('sample_duration_seconds', 1.0)]:
+        try:
+            validated[key] = float(payload.get(key, default))
+        except (TypeError, ValueError):
+            validated[key] = default
+
+    validated['confidence_threshold'] = max(0.1, min(1.0, validated['confidence_threshold']))
+    validated['cooldown_seconds'] = max(5.0, validated['cooldown_seconds'])
+    validated['sample_duration_seconds'] = max(0.5, min(5.0, validated['sample_duration_seconds']))
+
+    database.set_setting('sound_detection', validated, utc_now())
+    write_audit_log(request, 'update', 'settings.sound_detection')
+    apply_sound_settings()
+    return validated
+
+
+@app.get('/api/sound/devices')
+def list_sound_devices():
+    return {'devices': list_audio_devices()}
+
+
+@app.get('/api/sound/status')
+def get_sound_status():
+    with _sound_status_lock:
+        status = dict(_sound_status)
+    with _sound_detector_lock:
+        if _sound_detector is not None:
+            status['running'] = _sound_detector.running
+            status['detector_status'] = _sound_detector.status
+            status['last_confidence'] = round(_sound_detector.last_confidence, 3)
+        else:
+            status['running'] = False
+            status['detector_status'] = 'stopped'
+    return status
 
 
 @app.get('/api/settings/system')
