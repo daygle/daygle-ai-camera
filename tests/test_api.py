@@ -791,9 +791,6 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
             "/api/settings/system/recording",
             method="PUT",
             json_body={
-                "enabled": True,
-                "mode": "objects",
-                "continuous": False,
                 "pre_event_seconds": 2,
                 "post_event_seconds": 3,
                 "max_clip_seconds": 10,
@@ -805,7 +802,10 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
             headers={"X-CSRF-Token": csrf},
         )
         assert status == 200
-        assert recording["mode"] == "objects"
+        assert recording["pre_event_seconds"] == 2
+        # Global enabled/mode/continuous were removed; only clip mechanics remain.
+        assert "mode" not in recording
+        assert "enabled" not in recording
 
         status, _headers, storage = client.request(
             "/api/settings/system/storage",
@@ -847,9 +847,6 @@ def test_runtime_data_reset_clears_operational_data_but_keeps_settings(tmp_path,
             '/api/settings/system/recording',
             method='PUT',
             json_body={
-                'enabled': True,
-                'mode': 'motion',
-                'continuous': False,
                 'pre_event_seconds': 5,
                 'post_event_seconds': 10,
                 'max_clip_seconds': 60,
@@ -1223,7 +1220,7 @@ def test_extend_active_rtsp_recording_updates_trigger_label_to_specific_object(t
     extended_id = main.extend_active_rtsp_recording(
         camera_id='camera-1',
         event_time=now.isoformat(),
-        recording_config={'enabled': True, 'mode': 'motion', 'record_on_alert': True, 'extension_step_seconds': 10},
+        recording_config={'extension_step_seconds': 10},
         detections=[{'label': 'dog', 'confidence': 0.88, 'alert_triggered': True}],
     )
 
@@ -1311,7 +1308,7 @@ def test_live_stream_detection_without_alert_rule_does_not_record_by_default(tmp
                     {'id': 'porch', 'name': 'Porch', 'x': 0, 'y': 0, 'width': 1, 'height': 1, 'monitor_motion': True, 'monitor_objects': True},
                 ],
             },
-            'recording': {'enabled': True, 'record_on_alert': True, 'continuous': False},
+            'recording': {'continuous': False},
         },
     )
 
@@ -1415,7 +1412,7 @@ def test_live_stream_camera_continuous_recording_records_without_alert_rule(tmp_
                     {'id': 'porch', 'name': 'Porch', 'x': 0, 'y': 0, 'width': 1, 'height': 1, 'monitor_motion': True, 'monitor_objects': True},
                 ],
             },
-            'recording': {'enabled': True, 'record_on_alert': True, 'continuous': True},
+            'recording': {'continuous': True},
         },
     )
 
@@ -1527,14 +1524,14 @@ def test_rtsp_recording_metadata_can_skip_generated_placeholder(tmp_path):
 
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
-        'recording': {'enabled': True, 'mode': 'motion', 'format': 'mp4'},
+        'recording': {'format': 'mp4'},
     })
 
     metadata = service.event_recording_metadata(
         42,
         '2026-06-06T00:00:00+00:00',
         'rtsp',
-        [{'label': 'car', 'confidence': 0.8}],
+        [{'label': 'car', 'confidence': 0.8, 'alert_triggered': True}],
         write_clip=False,
     )
 
@@ -1550,9 +1547,6 @@ def test_alert_recording_prefers_specific_object_label_over_motion(tmp_path):
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
         'recording': {
-            'enabled': True,
-            'mode': 'motion',
-            'record_on_alert': True,
             'format': 'mp4',
         },
     })
@@ -1635,7 +1629,7 @@ def test_collect_prebuffer_segments_selects_by_content_overlap(tmp_path):
 
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
-        'recording': {'enabled': True, 'mode': 'motion', 'format': 'mp4'},
+        'recording': {'format': 'mp4'},
     })
     camera_dir = service.prebuffer_dir / 'camera-1'
     camera_dir.mkdir(parents=True, exist_ok=True)
@@ -1673,7 +1667,7 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
 
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
-        'recording': {'enabled': True, 'mode': 'motion', 'format': 'mp4'},
+        'recording': {'format': 'mp4'},
     })
     camera_dir = service.prebuffer_dir / 'cam'
     camera_dir.mkdir(parents=True, exist_ok=True)
@@ -1795,7 +1789,7 @@ def test_write_rtsp_clip_rejects_videoless_output(tmp_path, monkeypatch):
 
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
-        'recording': {'enabled': True, 'mode': 'motion', 'format': 'mp4'},
+        'recording': {'format': 'mp4'},
     })
 
     def fake_run(command, *_args, **_kwargs):
@@ -1822,7 +1816,7 @@ def test_write_rtsp_clip_keeps_clip_with_video_stream(tmp_path, monkeypatch):
 
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
-        'recording': {'enabled': True, 'mode': 'motion', 'format': 'mp4'},
+        'recording': {'format': 'mp4'},
     })
 
     def fake_run(command, *_args, **_kwargs):
@@ -2124,7 +2118,7 @@ def test_recording_labels_api_filter_matches_any_recorded_label(tmp_path, monkey
         # Footage-style event: detections include BOTH cat and person, but the
         # recording's trigger_label is 'cat' (first alert-triggered detection).
         detections = [
-            {'label': 'cat', 'confidence': 0.9, 'box': {'x': 0.0, 'y': 0.0, 'width': 0.5, 'height': 0.5}},
+            {'label': 'cat', 'confidence': 0.9, 'alert_triggered': True, 'box': {'x': 0.0, 'y': 0.0, 'width': 0.5, 'height': 0.5}},
             {'label': 'person', 'confidence': 0.8, 'box': {'x': 0.2, 'y': 0.2, 'width': 0.5, 'height': 0.5}},
         ]
         event_id = main.database.add_event(
@@ -2231,7 +2225,7 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         )
         assert status == 200
 
-        detections = [{'label': 'cat', 'confidence': 0.91, 'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}}]
+        detections = [{'label': 'cat', 'confidence': 0.91, 'alert_triggered': True, 'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}}]
         event_time = datetime.now(timezone.utc).isoformat()
         snapshot_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'test.png')
         event_id = main.database.add_event(
@@ -2251,7 +2245,7 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         assert recordings[0]['event_id'] == event_id
         assert recordings[0]['detections']
         assert recordings[0]['source'] == 'upload'
-        assert recordings[0]['trigger_type'] in {'motion', 'human', 'object', 'continuous'}
+        assert recordings[0]['trigger_type'] in {'motion', 'human', 'object', 'continuous', 'alert'}
         assert Path(recordings[0]['file_path']).exists()
 
         label = recordings[0]['detections'][0]['label']
@@ -2312,7 +2306,7 @@ def test_recording_retention_purge_deletes_metadata_and_files(tmp_path, monkeypa
     try:
         _setup_admin(admin)
         admin_csrf = _login(admin)
-        detections = [{'label': 'cat', 'confidence': 0.91, 'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}}]
+        detections = [{'label': 'cat', 'confidence': 0.91, 'alert_triggered': True, 'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}}]
         event_time = datetime.now(timezone.utc).isoformat()
         event_id = main.database.add_event(
             created_at=event_time,
@@ -2691,23 +2685,52 @@ def test_object_detection_enabled_flag_gates_object_detections(tmp_path, monkeyp
     assert main.filter_detections_for_camera(detections, disabled_settings) == []
 
 
-def test_motion_enabled_flag_gates_motion_detections(tmp_path, monkeypatch):
-    """Setting motion_enabled=False must suppress all motion zone detections."""
+def test_zone_motion_rule_gates_motion_detections(tmp_path, monkeypatch):
+    """Motion is gated per zone: a disabled zone motion rule suppresses motion detections."""
     _app, _database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
 
-    zones = main.normalize_monitoring_zones([
-        {'id': 'z1', 'name': 'Zone 1', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
-         'monitor_motion': True, 'monitor_objects': False,
-         'object_rules': [{'label': 'motion', 'min_confidence': 0.3}]},
-    ])
+    def make_zones(rule_enabled):
+        return main.normalize_monitoring_zones([
+            {'id': 'z1', 'name': 'Zone 1', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
+             'monitor_motion': True, 'monitor_objects': False,
+             'object_rules': [{'label': 'motion', 'min_confidence': 0.3, 'enabled': rule_enabled}]},
+        ])
 
-    enabled_settings = {'detection': {'motion_enabled': True, 'zones': zones}}
-    disabled_settings = {'detection': {'motion_enabled': False, 'zones': zones}}
+    enabled_settings = {'detection': {'zones': make_zones(True)}}
+    disabled_settings = {'detection': {'zones': make_zones(False)}}
 
     # High-confidence motion frame
     assert main.zone_motion_detections([], enabled_settings, frame_motion_confidence=0.9) != []
     assert main.zone_motion_detections([], disabled_settings, frame_motion_confidence=0.9) == []
+
+
+def test_legacy_camera_motion_disabled_migrates_to_zone_rules(tmp_path, monkeypatch):
+    """Cameras stored with the removed camera-level motion switch off must keep
+    motion off after the upgrade by disabling each zone's motion rule."""
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    def legacy_zone():
+        return {'id': 'z1', 'name': 'Zone 1', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
+                'object_rules': [{'label': 'motion', 'min_confidence': 0.3}]}
+
+    for legacy_detection in (
+        {'motion_enabled': False, 'zones': [legacy_zone()]},
+        {'motion': {'enabled': False}, 'zones': [legacy_zone()]},
+    ):
+        camera = main.normalize_camera_settings({'id': 'cam-1', 'detection': legacy_detection})
+        detection = camera['detection']
+        assert 'motion' not in detection
+        assert 'motion_enabled' not in detection
+        assert detection['zones'][0]['monitor_motion'] is False
+        motion_rule = next(r for r in detection['zones'][0]['object_rules'] if r['label'] == 'motion')
+        assert motion_rule['enabled'] is False
+        assert main.zone_motion_detections([], {'detection': detection}, frame_motion_confidence=0.9) == []
+
+    # Cameras without the legacy switch keep motion governed by the zone rule.
+    camera = main.normalize_camera_settings({'id': 'cam-2', 'detection': {'zones': [legacy_zone()]}})
+    assert camera['detection']['zones'][0]['monitor_motion'] is True
 
 
 def test_zone_spatial_filtering_blocks_detections_outside_zone(tmp_path, monkeypatch):
@@ -3007,7 +3030,7 @@ def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, m
                     },
                 ],
             },
-            'recording': {'enabled': True, 'record_on_alert': True, 'continuous': False},
+            'recording': {'continuous': False},
         },
         enforce_interval=False,
     )
@@ -3035,7 +3058,7 @@ def _zone_camera_settings(zone_rules: list) -> dict:
                 },
             ],
         },
-        'recording': {'enabled': True, 'record_on_alert': True, 'continuous': False},
+        'recording': {'continuous': False},
     }
 
 
@@ -3170,7 +3193,7 @@ def test_object_outside_zone_does_not_create_recording(tmp_path, monkeypatch):
                 },
             ],
         },
-        'recording': {'enabled': True, 'record_on_alert': True, 'continuous': False},
+        'recording': {'continuous': False},
     }
     event_id = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
 
@@ -3825,9 +3848,9 @@ def test_multi_object_recording_labels_and_trigger_type(tmp_path, monkeypatch):
 
         # Create event with 3 diverse object detections
         detections = [
-            {'label': 'person', 'confidence': 0.92, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.3, 'height': 0.4}},
-            {'label': 'cat', 'confidence': 0.78, 'box': {'x': 0.5, 'y': 0.5, 'width': 0.2, 'height': 0.2}},
-            {'label': 'dog', 'confidence': 0.45, 'box': {'x': 0.3, 'y': 0.3, 'width': 0.25, 'height': 0.3}},
+            {'label': 'person', 'confidence': 0.92, 'alert_triggered': True, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.3, 'height': 0.4}},
+            {'label': 'cat', 'confidence': 0.78, 'alert_triggered': True, 'box': {'x': 0.5, 'y': 0.5, 'width': 0.2, 'height': 0.2}},
+            {'label': 'dog', 'confidence': 0.45, 'alert_triggered': True, 'box': {'x': 0.3, 'y': 0.3, 'width': 0.25, 'height': 0.3}},
         ]
         event_time = datetime.now(timezone.utc).isoformat()
         snapshot_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'test.png')
@@ -3850,10 +3873,10 @@ def test_multi_object_recording_labels_and_trigger_type(tmp_path, monkeypatch):
         assert len(recordings) >= 1
         recording = next(r for r in recordings if r['id'] == recording_id)
 
-        # trigger_label should be the highest-confidence detection (person at 0.92)
+        # trigger_label should be the first alert-triggered detection (person)
         assert recording['trigger_label'] == 'person', f'Expected person, got {recording["trigger_label"]}'
-        # trigger_type should be 'object' (not 'alert') since mode is 'motion' with specific labels
-        assert recording['trigger_type'] == 'object', f'Expected object, got {recording["trigger_type"]}'
+        # trigger_type is 'alert' since recordings are gated per-rule via alert_triggered
+        assert recording['trigger_type'] == 'alert', f'Expected alert, got {recording["trigger_type"]}'
         # labels must contain ALL non-generic detections
         assert sorted(recording['labels']) == ['cat', 'dog', 'person'], f'Got {sorted(recording["labels"])}'
 
@@ -3914,7 +3937,7 @@ def test_multi_object_recording_labels_and_trigger_type(tmp_path, monkeypatch):
         extended_id = main.extend_active_rtsp_recording(
             camera_id='camera-1',
             event_time=now.isoformat(),
-            recording_config={'enabled': True, 'mode': 'motion', 'record_on_alert': True, 'extension_step_seconds': 10},
+            recording_config={'extension_step_seconds': 10},
             detections=[
                 {'label': 'bicycle', 'confidence': 0.85, 'alert_triggered': True},
                 {'label': 'dog', 'confidence': 0.75, 'alert_triggered': True},

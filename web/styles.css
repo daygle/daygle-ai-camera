@@ -726,8 +726,6 @@ input[type="file"] { padding: 10px; }
 .zone-editor-card { margin-top: 18px; }
 .zones-layout .zone-editor-card { margin-top: 0; }
 .zone-editor-card .form-grid + .list { margin-top: 18px; }
-.camera-recording-settings { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
-.camera-recording-settings h3 { margin: 0; }
 .zones-list { max-height: none; }
 .zone-row { display: grid; gap: 14px; align-items: stretch; }
 .zone-row-main { display: grid; grid-template-columns: minmax(0, 1fr) 102px 102px 102px 102px auto; gap: 10px; align-items: end; }
@@ -2581,13 +2579,8 @@ input[type="file"] { padding: 10px; }
   display: flex;
   justify-content: flex-end;
 }
-.camera-recording-settings { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
-.camera-recording-settings h3 { margin: 0 0 12px; font-size: 15px; }
-
 /* ─── Zones page: section dividers ─────────────────────────────────────── */
-.camera-motion-settings,
-.camera-object-detection-settings,
-.camera-sound-settings {
+.camera-object-detection-settings {
   margin-top: 0;
   padding-top: 1.5rem;
   border-top: 1px solid var(--border);

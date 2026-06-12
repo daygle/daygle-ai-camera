@@ -22,7 +22,6 @@ const liveEls = {
   cameraGrid: document.getElementById('cameraGrid'),
   zoneOverlay: document.getElementById('zoneOverlay'),
   zoneList: document.getElementById('zoneList'),
-  cameraMotionSettings: document.getElementById('cameraMotionSettings'),
   addZoneBtn: document.getElementById('addZoneBtn'),
   fullFrameZoneBtn: document.getElementById('fullFrameZoneBtn'),
   saveZonesBtn: document.getElementById('saveZonesBtn'),
@@ -179,14 +178,7 @@ function stopLiveRaf() {
 function cameraDetection() {
   selectedCamera.detection ||= { zones: [] };
   selectedCamera.detection.zones ||= [];
-  selectedCamera.detection.motion ||= { enabled: true, record_on_detect: true, email_enabled: true, push_enabled: false };
   return selectedCamera.detection;
-}
-
-function cameraMotion() {
-  const det = cameraDetection();
-  det.motion ||= { enabled: true, record_on_detect: true, email_enabled: true, push_enabled: false };
-  return det.motion;
 }
 
 function cameraRecording() {
@@ -297,9 +289,6 @@ function normalizeZone(zone) {
   const sourcePoints = Array.isArray(zone.points) && zone.points.length >= 3 ? zone.points : rectanglePoints(zone);
   zone.points = sourcePoints.map(normalizePoint);
   zone.object_rules = normalizeObjectRules(zone);
-  if (zone.monitor_motion !== false && !zone.object_rules.some((r) => r.label === 'motion')) {
-    zone.object_rules.unshift(defaultObjectRule('motion'));
-  }
   zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion').map((rule) => rule.label);
   updateZoneBounds(zone);
   return zone;
@@ -634,7 +623,6 @@ function setSelectedCamera(cameraId) {
   updateZonesStats();
   if (isZonesPage) {
     renderZones();
-    renderMotionDetectionSettings();
   }
   refreshFrame();
   refreshDetectionStatus();
@@ -787,8 +775,7 @@ function bindObjectRuleControls() {
   document.querySelectorAll('[data-delete-zone-rule]').forEach((button) => {
     button.addEventListener('click', () => {
       const zones = cameraDetection().zones;
-      const { zoneIndex, ruleIndex, rule } = parseZoneRuleKey(button.dataset.deleteZoneRule);
-      if (rule?.label === 'motion') zones[zoneIndex].monitor_motion = false;
+      const { zoneIndex, ruleIndex } = parseZoneRuleKey(button.dataset.deleteZoneRule);
       zones[zoneIndex].object_rules.splice(ruleIndex, 1);
       zones[zoneIndex].object_labels = zones[zoneIndex].object_rules.filter((r) => r.label !== 'motion').map((r) => r.label);
       renderZones();
@@ -838,27 +825,6 @@ function bindZoneControls(zones) {
 }
 
 function bindRuleFields() {
-  // Select-based fields (old layout compatibility)
-  const selectBindings = [
-    ['zoneRuleLabel', 'label', (value) => value],
-    ['zoneRuleEnabled', 'enabled', (value) => value === 'true'],
-    ['zoneRuleRecord', 'record_on_detect', (value) => value === 'true'],
-    ['zoneRuleAlert', 'alert_on_detect', (value) => value === 'true'],
-    ['zoneRuleEmail', 'email_enabled', (value) => value === 'true'],
-    ['zoneRulePush', 'push_enabled', (value) => value === 'true'],
-  ];
-  selectBindings.forEach(([datasetKey, ruleKey, transform]) => {
-    document.querySelectorAll(`[data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((field) => {
-      field.addEventListener('change', () => {
-        const { zoneIndex, rule } = parseZoneRuleKey(field.dataset[datasetKey]);
-        if (!rule) return;
-        rule[ruleKey] = transform(field.value);
-        cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
-        if (ruleKey === 'label') renderZones();
-      });
-    });
-  });
-  // Checkbox-based fields (table layout)
   const checkboxBindings = [
     ['zoneRuleEnabled', 'enabled'],
     ['zoneRuleRecord', 'record_on_detect'],
@@ -876,7 +842,6 @@ function bindRuleFields() {
       });
     });
   });
-  // Number input fields (table layout)
   const numberBindings = [
     ['zoneRuleConfidence', 'min_confidence', (value) => clamp(Number(value || 0), 0, 1)],
     ['zoneRuleCooldown', 'cooldown_seconds', (value) => Math.max(0, Number.parseInt(value || 0, 10) || 0)],
@@ -890,69 +855,6 @@ function bindRuleFields() {
         cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
       });
     });
-  });
-  // Text input fields (email recipients)
-  document.querySelectorAll('[data-zone-rule-recipients]').forEach((inp) => {
-    inp.addEventListener('change', () => {
-      const { zoneIndex, rule } = parseZoneRuleKey(inp.dataset.zoneRuleRecipients);
-      if (!rule) return;
-      rule.email_recipients = normalizeEmailList(inp.value);
-      cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
-    });
-  });
-  // Time input fields (active start/end)
-  ['activeStart', 'activeEnd'].forEach((key) => {
-    const datasetKey = `zoneRule${key.charAt(0).toUpperCase() + key.slice(1)}`;
-    const dataAttr = `zone-rule-${key.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}`;
-    document.querySelectorAll(`[data-${dataAttr}]`).forEach((inp) => {
-      inp.addEventListener('change', () => {
-        const { rule } = parseZoneRuleKey(inp.dataset[datasetKey]);
-        if (!rule) return;
-        rule[key === 'activeStart' ? 'active_start' : 'active_end'] = inp.value || null;
-      });
-    });
-  });
-}
-
-function renderMotionDetectionSettings() {
-  if (!selectedCamera || !liveEls.cameraMotionSettings) return;
-  const motion = cameraMotion();
-  liveEls.cameraMotionSettings.innerHTML = `
-    <div style="overflow-x:auto">
-      <table class="rule-table">
-        <thead>
-          <tr>
-            <th>Type</th>
-            <th class="cell-center">Enabled</th>
-            <th class="cell-center">Record</th>
-            <th class="cell-center">Email</th>
-            <th class="cell-center">Push</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td class="cell-label">Motion</td>
-            <td class="cell-center"><input type="checkbox" data-motion-enabled="true" ${motion.enabled !== false ? 'checked' : ''} /></td>
-            <td class="cell-center"><input type="checkbox" data-motion-record="true" ${motion.record_on_detect !== false ? 'checked' : ''} /></td>
-            <td class="cell-center"><input type="checkbox" data-motion-email="true" ${motion.email_enabled ? 'checked' : ''} /></td>
-            <td class="cell-center"><input type="checkbox" data-motion-push="true" ${motion.push_enabled ? 'checked' : ''} /></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  `;
-  updateZonesStats();
-  liveEls.cameraMotionSettings.querySelectorAll('[data-motion-enabled]').forEach((cb) => {
-    cb.addEventListener('change', () => { cameraMotion().enabled = cb.checked; });
-  });
-  liveEls.cameraMotionSettings.querySelectorAll('[data-motion-record]').forEach((cb) => {
-    cb.addEventListener('change', () => { cameraMotion().record_on_detect = cb.checked; });
-  });
-  liveEls.cameraMotionSettings.querySelectorAll('[data-motion-email]').forEach((cb) => {
-    cb.addEventListener('change', () => { cameraMotion().email_enabled = cb.checked; });
-  });
-  liveEls.cameraMotionSettings.querySelectorAll('[data-motion-push]').forEach((cb) => {
-    cb.addEventListener('change', () => { cameraMotion().push_enabled = cb.checked; });
   });
 }
 
@@ -1019,7 +921,7 @@ function finishDraftPolygon() {
     points: draftPolygon.points.map(normalizePoint),
     enabled: true,
     object_labels: [],
-    object_rules: [defaultObjectRule('motion')],
+    object_rules: [],
   });
   selectedZoneIndex = zones.length - 1;
   normalizeZone(zones[selectedZoneIndex]);
@@ -1044,7 +946,7 @@ function addFullFrameZone() {
     ],
     enabled: true,
     object_labels: [],
-    object_rules: [defaultObjectRule('motion')],
+    object_rules: [],
   });
   selectedZoneIndex = zones.length - 1;
   draftPolygon = null;

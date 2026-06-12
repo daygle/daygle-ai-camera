@@ -221,7 +221,7 @@ class _YamnetBackend:
                     ]
                     matched = [
                         i for i, name in enumerate(class_names)
-                        if any(pat.search(name) for pat in patterns)
+                        if any(pat.search(name.lower()) for pat in patterns)
                     ]
                     indices[class_id] = matched
                     logger.debug(

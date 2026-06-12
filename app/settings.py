@@ -44,9 +44,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "rules": [],
     },
     "recording": {
-        "enabled": True,
-        "mode": "motion",
-        "continuous": False,
         "pre_event_seconds": 10,
         "post_event_seconds": 15,
         "extension_step_seconds": 45,

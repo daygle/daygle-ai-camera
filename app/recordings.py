@@ -18,7 +18,6 @@ logger = logging.getLogger('daygle.ai')
 class RecordingService:
     """Event recording facade with policy selection and generated test footage."""
 
-    VALID_MODES = {'off', 'continuous', 'motion', 'human', 'objects'}
     VALID_SOURCES = {'camera', 'upload', 'rtsp'}
     PLAYBACK_FORMAT = 'mp4'
     GENERIC_TRIGGER_LABELS = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous'}
@@ -36,29 +35,8 @@ class RecordingService:
         self._continuous_lock = threading.Lock()
         self._continuous_workers: dict[str, dict[str, Any]] = {}
 
-    @property
-    def enabled(self) -> bool:
-        return self.mode != 'off'
-
-    @property
-    def mode(self) -> str:
-        mode = str(self.recording_config.get('mode', 'motion')).lower()
-        return mode if mode in self.VALID_MODES else 'motion'
-
-    def enabled_for(self, recording_config: dict[str, Any] | None = None) -> bool:
-        mode = self.mode_for(recording_config)
-        return mode != 'off'
-
-    def mode_for(self, recording_config: dict[str, Any] | None = None) -> str:
-        config = recording_config or self.recording_config
-        mode = str(config.get('mode', 'motion')).lower()
-        return mode if mode in self.VALID_MODES else 'motion'
-
     def should_record(self, detections: list[dict[str, Any]], recording_config: dict[str, Any] | None = None) -> tuple[bool, str, str | None]:
         config = recording_config or self.recording_config
-        mode = self.mode_for(config)
-        if not self.enabled_for(config):
-            return False, 'off', None
         labels = [str(detection.get('label') or '').lower() for detection in detections]
         labels = [label for label in labels if label]
 
@@ -73,11 +51,12 @@ class RecordingService:
                 return label
             return None
 
-        if bool(config.get('continuous')) or mode == 'continuous':
+        if bool(config.get('continuous')):
             return True, 'continuous', labels[0] if labels else None
-        # Alert-triggered recording is always enabled (formerly controlled by
-        # record_on_alert, which was removed as it's handled per-zone via
-        # record_on_detect in object rules).
+        # Non-continuous recording is gated per detection: a detection records
+        # only when its zone/sound rule marked it alert_triggered (the rule's
+        # record_on_detect flag). Detections without a matching record rule
+        # must not start a recording.
         alert_detections = [detection for detection in detections if detection.get('alert_triggered') and detection.get('label')]
         alert_labels = [str(detection.get('label') or '').lower() for detection in alert_detections]
         if alert_labels:
@@ -85,16 +64,6 @@ class RecordingService:
                 specific_label = preferred_label(detections)
                 return True, 'alert', specific_label or 'motion'
             return True, 'alert', alert_labels[0]
-        if mode == 'motion' and labels:
-            specific_label = preferred_label(detections)
-            if specific_label:
-                return True, 'object', specific_label
-            return True, 'motion', 'motion'
-        if mode == 'human' and 'person' in labels:
-            return True, 'human', 'person'
-        if mode == 'objects' and labels:
-            specific_label = preferred_label(detections)
-            return True, 'object', specific_label or labels[0]
         return False, 'none', None
 
     def event_recording_metadata(
@@ -216,8 +185,6 @@ class RecordingService:
         on_chunk_complete: Callable[[str, Path], None] | None = None,
     ) -> bool:
         config = recording_config or self.recording_config
-        if not self.enabled_for(config):
-            return False
         chunk_seconds = max(60, int(config.get('chunk_duration_seconds', 3600)))
         camera_key = self._camera_key(camera_id)
         chunks_dir = self.recordings_dir / f'continuous-{camera_key}'
@@ -371,8 +338,6 @@ class RecordingService:
         recording_config: dict[str, Any] | None = None,
     ) -> bool:
         config = recording_config or self.recording_config
-        if not self.enabled_for(config):
-            return False
         pre_seconds = max(0, int(config.get('pre_event_seconds', 0)))
         if pre_seconds <= 0:
             return False

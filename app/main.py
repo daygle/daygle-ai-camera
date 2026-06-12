@@ -227,7 +227,6 @@ def camera_event_recording_config(settings: dict[str, Any]) -> dict[str, Any]:
     camera_recording = normalize_camera_recording_settings(settings.get('recording'))
     base.update({
         'continuous': camera_recording['continuous'],
-        'mode': 'continuous' if camera_recording['continuous'] else 'motion',
     })
     return base
 
@@ -492,22 +491,8 @@ def normalize_camera_id(value: Any, fallback: str = 'camera-1') -> str:
 
 def default_camera_detection_settings() -> dict[str, Any]:
     return {
-        'motion': {
-            'enabled': True,
-            'record_on_detect': True,
-            'email_enabled': True,
-            'push_enabled': False,
-        },
-        'motion_enabled': True,
-        'motion_email_enabled': True,
         'object_detection_enabled': True,
         'zones': [],
-    }
-
-
-def default_camera_recording_settings() -> dict[str, Any]:
-    return {
-        'continuous': False,
     }
 
 
@@ -611,11 +596,10 @@ def zone_motion_min_confidence(zone: dict[str, Any]) -> float:
 
 
 def normalize_camera_recording_settings(settings: Any) -> dict[str, Any]:
-    recording = default_camera_recording_settings()
-    if isinstance(settings, dict):
-        recording.update(settings)
-    recording['continuous'] = normalize_bool_setting(recording.get('continuous'), False)
-    return recording
+    raw = settings if isinstance(settings, dict) else {}
+    # Only 'continuous' remains; stale keys from older configs (enabled,
+    # record_on_alert) are intentionally dropped.
+    return {'continuous': normalize_bool_setting(raw.get('continuous'), False)}
 
 
 def normalize_zone_point(point: Any) -> dict[str, float] | None:
@@ -726,39 +710,33 @@ def _normalize_camera_sound_settings(raw: Any) -> dict[str, Any]:
     return {'enabled': enabled, 'rules': rules}
 
 
-def _normalize_camera_motion_settings(raw: Any) -> dict[str, Any]:
-    """Normalize camera-level motion detection settings.
+def _migrate_legacy_camera_motion(detection: dict[str, Any]) -> None:
+    """Fold the removed camera-level motion master switch into each zone's
+    motion rule, then drop the legacy fields.
 
-    Falls back to the legacy ``motion_enabled`` / ``motion_email_enabled`` flat
-    fields when the ``motion`` dict is not present (pre-migration data).
+    Motion is configured per zone via each zone's 'motion' object rule; there
+    is no camera-level motion setting any more. If a stored config still has
+    the old camera-level switch turned off (either the short-lived
+    ``detection.motion.enabled`` dict or the older flat ``motion_enabled``
+    field), disable the motion rule in every zone so motion stays off after
+    the upgrade. The legacy record/email/push flags are dropped: the zone
+    rule's own checkboxes are the single source of truth.
     """
-    if not isinstance(raw, dict):
-        raw = {}
-    enabled = normalize_bool_setting(raw.get('enabled'), True)
-    record_on_detect = normalize_bool_setting(raw.get('record_on_detect'), True)
-    email_enabled = normalize_bool_setting(raw.get('email_enabled'), True)
-    push_enabled = normalize_bool_setting(raw.get('push_enabled'), False)
-    return {
-        'enabled': enabled,
-        'record_on_detect': record_on_detect,
-        'email_enabled': email_enabled,
-        'push_enabled': push_enabled,
-    }
-
-
-def effective_camera_motion_settings(settings: dict[str, Any]) -> dict[str, Any]:
-    """Return the effective motion settings for a camera, falling back to legacy fields."""
-    detection = settings.get('detection') or {}
-    motion = detection.get('motion')
-    if isinstance(motion, dict):
-        return _normalize_camera_motion_settings(motion)
-    # Legacy fallback: construct from flat fields
-    return {
-        'enabled': normalize_bool_setting(detection.get('motion_enabled'), True),
-        'record_on_detect': True,
-        'email_enabled': normalize_bool_setting(detection.get('motion_email_enabled'), True),
-        'push_enabled': False,
-    }
+    legacy = detection.pop('motion', None)
+    flat_enabled = detection.pop('motion_enabled', None)
+    detection.pop('motion_email_enabled', None)
+    enabled = True
+    if isinstance(legacy, dict):
+        enabled = normalize_bool_setting(legacy.get('enabled'), True)
+    elif flat_enabled is not None:
+        enabled = normalize_bool_setting(flat_enabled, True)
+    if enabled:
+        return
+    for zone in detection.get('zones', []):
+        zone['monitor_motion'] = False
+        for rule in zone.get('object_rules', []):
+            if str(rule.get('label') or '').strip().lower() == 'motion':
+                rule['enabled'] = False
 
 
 def normalize_camera_settings(settings: dict[str, Any], index: int = 1) -> dict[str, Any]:
@@ -774,12 +752,11 @@ def normalize_camera_settings(settings: dict[str, Any], index: int = 1) -> dict[
     detection = default_camera_detection_settings()
     if isinstance(camera_settings.get('detection'), dict):
         detection.update(camera_settings['detection'])
-    for key in ('motion_enabled', 'motion_email_enabled', 'object_detection_enabled'):
-        detection[key] = bool(detection.get(key, True))
+    detection['object_detection_enabled'] = bool(detection.get('object_detection_enabled', True))
     detection['object_labels'] = normalize_label_list(detection.get('object_labels', []))
     detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
     detection['sound'] = _normalize_camera_sound_settings(detection.get('sound'))
-    detection['motion'] = _normalize_camera_motion_settings(detection.get('motion'))
+    _migrate_legacy_camera_motion(detection)
     camera_settings['detection'] = detection
     camera_settings['recording'] = normalize_camera_recording_settings(camera_settings.get('recording'))
     return camera_settings
@@ -911,9 +888,9 @@ def filter_detections_for_camera(detections: list[dict[str, Any]], settings: dic
 
 def zone_motion_detections(detections: list[dict[str, Any]], settings: dict[str, Any], frame_motion_confidence: float = 0.5) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
-    motion_settings = effective_camera_motion_settings(settings)
-    if not motion_settings.get('enabled', True):
-        return []
+    # monitor_motion is derived from the zone's enabled 'motion' rule during
+    # normalization, so motion monitoring is gated per zone — there is no
+    # camera-level motion switch.
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_motion', True)]
     if not zones:
         return []
@@ -1417,7 +1394,7 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None = None) -> 
                 camera_id=camera_id,
                 recording_config=cam_rec_config,
             )
-            if recording_service.mode_for(cam_rec_config) == 'continuous':
+            if cam_rec_config.get('continuous'):
                 recording_service.start_continuous_chunk_recording(
                     stream_url=stream_url,
                     camera_id=camera_id,
@@ -1518,7 +1495,7 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
             'source': 'sound-detection',
             'sound_source': 'rtsp',
             'camera_id': camera_id,
-            'camera_name': str(cam_settings.get('name') or '').strip() or None,
+            'camera_name': str((cam_settings or {}).get('name') or '').strip() or None,
             'label': class_id,
             'class_label': class_label,
             'confidence': round(confidence, 3),
@@ -1537,23 +1514,22 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
         stream_url = build_stream_url(cam_settings)
         if stream_url:
             cam_rec_config = camera_event_recording_config(cam_settings)
-            if recording_service.enabled_for(cam_rec_config):
-                recording_service.prime_rtsp_prebuffer(
-                    stream_url=stream_url,
-                    camera_id=camera_id,
-                    recording_config=cam_rec_config,
-                )
-                rid = attach_event_recording(
-                    event_id,
-                    now_iso,
-                    'rtsp',
-                    [sound_detection],
-                    camera_id=camera_id,
-                    recording_config=cam_rec_config,
-                )
-                if rid is not None:
-                    recording_ids.append(rid)
-                    logger.debug('Sound event %s linked to recording %s (camera %s)', event_id, rid, camera_id)
+            recording_service.prime_rtsp_prebuffer(
+                stream_url=stream_url,
+                camera_id=camera_id,
+                recording_config=cam_rec_config,
+            )
+            rid = attach_event_recording(
+                event_id,
+                now_iso,
+                'rtsp',
+                [sound_detection],
+                camera_id=camera_id,
+                recording_config=cam_rec_config,
+            )
+            if rid is not None:
+                recording_ids.append(rid)
+                logger.debug('Sound event %s linked to recording %s (camera %s)', event_id, rid, camera_id)
 
     message = f'{class_label} detected ({confidence:.0%} confidence)'
     database.add_alert(
@@ -1825,8 +1801,6 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     ]
     if motion_detections:
         _motion_record = zone_motion_record_on_detect(settings)
-        # Camera-level AND-gate: only record if the camera's motion.record_on_detect is True
-        _motion_record = _motion_record and effective_camera_motion_settings(settings).get('record_on_detect', True)
         recording_detections.append({
             **strongest_motion,
             'label': 'motion',
@@ -1931,25 +1905,16 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             message=alert['message'],
             recording_id=recording_id,
         )
-    motion_settings = effective_camera_motion_settings(settings)
-    motion_email_enabled = motion_settings.get('email_enabled', True)
-    motion_push_enabled = motion_settings.get('push_enabled', False)
-    email_triggered = [
-        alert for alert in triggered
-        if motion_email_enabled or str(alert.get('label') or '').strip().lower() != 'motion'
-    ]
-    push_triggered = [
-        alert for alert in triggered
-        if motion_push_enabled or str(alert.get('label') or '').strip().lower() != 'motion'
-    ]
+    # Per-rule email/push flags (including each zone's motion rule) are
+    # enforced inside deliver_email_alerts / deliver_push_notifications.
     # Deliver notifications off the detection thread: SMTP/ntfy calls block for
     # up to their 10s timeouts, and this thread holds the camera's detection
     # slot — a slow mail server would stall monitoring (and history sampling,
     # which playback overlays are sliced from) for that whole time.
-    if email_triggered or push_triggered:
+    if triggered:
         notify_thread = threading.Thread(
             target=_deliver_alert_notifications,
-            args=(email_triggered, push_triggered, event_id, zone_rules),
+            args=(triggered, event_id, zone_rules),
             name=f'alert-notify-{event_id}',
             daemon=True,
         )
@@ -1960,7 +1925,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     email_rules = [
         rule for rule in zone_rules
         if rule.get('enabled', True) and rule.get('email_enabled') and str(rule.get('name') or '') in {
-            str(alert.get('rule_name') or '') for alert in email_triggered
+            str(alert.get('rule_name') or '') for alert in triggered
         }
     ]
     email_recipients = sorted({recipient for rule in email_rules for recipient in rule.get('email_recipients', [])})
@@ -1981,7 +1946,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(recording_detections, camera_event_recording_config(settings)),
         email_enabled_rules=len(email_rules),
         email_recipients=email_recipients,
-        email_attempted=bool(email_triggered and email_recipients and effective_email_alert_settings().get('enabled')),
+        email_attempted=bool(triggered and email_recipients and effective_email_alert_settings().get('enabled')),
     )
     return event_id
 
@@ -2482,13 +2447,8 @@ def recording_skip_reason(detections: list[dict[str, Any]], recording_config: di
     should_record, trigger_type, trigger_label = recording_service.should_record(detections, recording_config)
     if should_record:
         return f'Recording policy matched {trigger_type}{f" {trigger_label}" if trigger_label else ""}, but no recording was linked.'
-    if not recording_service.enabled_for(recording_config):
-        return 'Recording is disabled or recording mode is off.'
-    if recording_config and recording_config.get('record_on_alert'):
-        return 'Recording is waiting for an enabled alert rule to trigger for this camera.'
     labels = ', '.join(str(detection.get('label')) for detection in detections if detection.get('label')) or 'none'
-    mode = recording_service.mode_for(recording_config)
-    return f'Recording policy skipped this event. Detected labels: {labels}. Mode: {mode}.'
+    return f'Recording is waiting for an enabled alert rule to trigger for this camera. Detected labels: {labels}.'
 
 
 _notification_threads_lock = threading.Lock()
@@ -2505,13 +2465,12 @@ def wait_for_pending_alert_notifications(timeout: float = 10.0) -> None:
 
 
 def _deliver_alert_notifications(
-    email_triggered: list[dict[str, Any]],
     triggered: list[dict[str, Any]],
     event_id: int,
     rules: list[dict[str, Any]] | None,
 ) -> None:
     try:
-        deliver_email_alerts(email_triggered, event_id, rules=rules)
+        deliver_email_alerts(triggered, event_id, rules=rules)
     except Exception as exc:
         logger.warning('Email alert delivery failed for event %s: %s', event_id, exc)
     try:
@@ -3403,7 +3362,7 @@ def _settings_section_update() -> str:
 def _settings_section_recording() -> str:
     return (
         '<section class="card">'
-        '<div class="settings-section-header"><div class="settings-section-icon">🎬</div><div><h2>Recording Clips</h2><p class="settings-section-subtitle">Control how event recordings are captured. Per-camera recording toggles are on the Live Cameras page.</p></div></div>'
+        '<div class="settings-section-header"><div class="settings-section-icon">🎬</div><div><h2>Recording Clips</h2><p class="settings-section-subtitle">Control how event recordings are captured. Per-rule Record toggles are on the Zones page; Continuous Recording is per camera on the Cameras page.</p></div></div>'
         '<form id="recordingSettingsForm" class="form-grid">'
         '<label><span>Pre-Event Seconds</span><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="10" /><span class="field-help">Seconds of footage to include before the trigger event. Default: 10s</span></label>'
         '<label><span>Post-Event Seconds</span><input name="post_event_seconds" type="number" min="0" max="300" placeholder="15" /><span class="field-help">Seconds to continue recording after the last detection. Default: 15s</span></label>'
@@ -4208,10 +4167,10 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     payload_detection = payload.get('detection') if isinstance(payload.get('detection'), dict) else {}
     detection.update(existing_detection)
     detection.update(payload_detection)
-    detection['motion_enabled'] = _bool_value(detection.get('motion_enabled', True))
     detection['object_detection_enabled'] = _bool_value(detection.get('object_detection_enabled', True))
     detection['object_labels'] = normalize_label_list(detection.get('object_labels', []))
     detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
+    _migrate_legacy_camera_motion(detection)
     updated['detection'] = detection
 
     existing_recording = current.get('recording') if isinstance(current.get('recording'), dict) else {}
@@ -4241,18 +4200,14 @@ def validate_cameras_settings(payload: Any) -> list[dict[str, Any]]:
 def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_recording_config()
     merged = {**current, **payload}
-    mode = str(merged.get('mode', 'motion')).lower()
-    if mode not in {'off', 'continuous', 'motion', 'human', 'objects'}:
-        raise HTTPException(status_code=400, detail='Recording mode must be off, continuous, motion, human, or objects.')
     fmt = str(merged.get('format', 'mp4')).strip().lstrip('.').lower() or 'mp4'
     if fmt == 'avi':
         fmt = 'mp4'
     if fmt != 'mp4':
         raise HTTPException(status_code=400, detail='Recording format must be mp4 for browser playback.')
+    # Global enabled/mode/continuous were removed: recording is gated per-rule
+    # on the Zones page and per-camera via the Continuous Recording toggle.
     return {
-        'enabled': _bool_value(merged.get('enabled', True)),
-        'mode': mode,
-        'continuous': _bool_value(merged.get('continuous', mode == 'continuous')),
         'pre_event_seconds': _int_field(merged, 'pre_event_seconds', 10, 0, 300),
         'post_event_seconds': _int_field(merged, 'post_event_seconds', 15, 0, 300),
         'extension_step_seconds': _int_field(merged, 'extension_step_seconds', 45, 0, 300),
