@@ -647,6 +647,22 @@ els.clipPlayer.addEventListener('play', () => {
   _playbackReSyncCounter = 0;
   if (overlayShouldAnimate()) startOverlayRaf();
   drawClipOverlay();
+  // ── Detect track offset ───────────────────────────────────────────
+  // Log track time vs video duration once at start. If the track's last
+  // sample time is much shorter than the video duration (e.g. 3s vs 15s),
+  // the overlay will show nothing after the track ends. But more importantly,
+  // this lets us compare track.t to video.currentTime during playback.
+  if (activeRecording && activeRecording.track && activeRecording.track.length >= 2) {
+    const _t0 = activeRecording.track[0].t;
+    const _tN = activeRecording.track[activeRecording.track.length - 1].t;
+    console.log(
+      '[overlay] recording', activeRecording.id,
+      '| video', activeRecording.duration_seconds + 's',
+      '| track', activeRecording.track.length + ' samples',
+      '| t_range', _t0.toFixed(3) + '-' + _tN.toFixed(3) + 's',
+      '| diff', (activeRecording.duration_seconds - _tN).toFixed(3) + 's',
+    );
+  }
 });
 
 els.clipPlayer.addEventListener('pause', () => {
