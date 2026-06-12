@@ -22,7 +22,7 @@ const liveEls = {
   cameraGrid: document.getElementById('cameraGrid'),
   zoneOverlay: document.getElementById('zoneOverlay'),
   zoneList: document.getElementById('zoneList'),
-  cameraRecordingControls: document.getElementById('cameraRecordingControls'),
+  cameraMotionSettings: document.getElementById('cameraMotionSettings'),
   addZoneBtn: document.getElementById('addZoneBtn'),
   fullFrameZoneBtn: document.getElementById('fullFrameZoneBtn'),
   saveZonesBtn: document.getElementById('saveZonesBtn'),
@@ -180,8 +180,14 @@ function stopLiveRaf() {
 function cameraDetection() {
   selectedCamera.detection ||= { zones: [] };
   selectedCamera.detection.zones ||= [];
-  selectedCamera.detection.motion_email_enabled ??= true;
+  selectedCamera.detection.motion ||= { enabled: true, record_on_detect: true, email_enabled: true, push_enabled: false };
   return selectedCamera.detection;
+}
+
+function cameraMotion() {
+  const det = cameraDetection();
+  det.motion ||= { enabled: true, record_on_detect: true, email_enabled: true, push_enabled: false };
+  return det.motion;
 }
 
 function cameraSoundDetection() {
@@ -196,6 +202,7 @@ function defaultSoundRule(cls) {
     class: cls.id,
     name: cls.label,
     enabled: false,
+    record_on_detect: true,
     confidence_threshold: cls.default_threshold,
     cooldown_seconds: cls.default_cooldown,
     email_enabled: false,
@@ -635,7 +642,7 @@ function setSelectedCamera(cameraId) {
   updateZonesStats();
   if (isZonesPage) {
     renderZones();
-    renderCameraRecordingControls();
+    renderMotionDetectionSettings();
     renderSoundDetectionSettings();
   }
   refreshFrame();
@@ -869,7 +876,7 @@ function bindRuleFields() {
     ['zoneRuleEmail', 'email_enabled'],
     ['zoneRulePush', 'push_enabled'],
   ];
-  checkboxBindings.forEach(([datasetKey, ruleKey]) => {
+  checkboxBindings.forEach(([datasetKey, ruleKey]) => {
     document.querySelectorAll(`input[type="checkbox"][data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((cb) => {
       cb.addEventListener('change', () => {
         const { zoneIndex, rule } = parseZoneRuleKey(cb.dataset[datasetKey]);
@@ -917,25 +924,45 @@ function bindRuleFields() {
   });
 }
 
-function renderCameraRecordingControls() {
-  if (!selectedCamera || !liveEls.cameraRecordingControls) return;
-  const recording = cameraRecording();
-  const detection = cameraDetection();
-  liveEls.cameraRecordingControls.innerHTML = `
-    <label><span>Recording</span><select data-camera-recording="enabled"><option value="true" ${recording.enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${recording.enabled === false ? 'selected' : ''}>Disabled</option></select></label>
-    <label><span>Alert Clips</span><select data-camera-recording="record_on_alert"><option value="true" ${recording.record_on_alert !== false ? 'selected' : ''}>Enabled</option><option value="false" ${recording.record_on_alert === false ? 'selected' : ''}>Disabled</option></select></label>
-    <label><span>Motion Email Alerts</span><select data-camera-detection="motion_email_enabled"><option value="true" ${detection.motion_email_enabled !== false ? 'selected' : ''}>Enabled</option><option value="false" ${detection.motion_email_enabled === false ? 'selected' : ''}>Disabled</option></select></label>
+function renderMotionDetectionSettings() {
+  if (!selectedCamera || !liveEls.cameraMotionSettings) return;
+  const motion = cameraMotion();
+  liveEls.cameraMotionSettings.innerHTML = `
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:.87em">
+        <thead>
+          <tr style="text-align:left;border-bottom:1px solid var(--border,#ddd)">
+            <th style="padding:.35rem .5rem">Type</th>
+            <th style="padding:.35rem .5rem;white-space:nowrap">Enabled</th>
+            <th style="padding:.35rem .5rem;white-space:nowrap">Record</th>
+            <th style="padding:.35rem .5rem;white-space:nowrap">Email</th>
+            <th style="padding:.35rem .5rem;white-space:nowrap">Push</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-bottom:1px solid var(--border,#eee)">
+            <td style="padding:.35rem .5rem;font-weight:500;white-space:nowrap">Motion</td>
+            <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-motion-enabled="true" ${motion.enabled !== false ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
+            <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-motion-record="true" ${motion.record_on_detect !== false ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
+            <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-motion-email="true" ${motion.email_enabled ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
+            <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-motion-push="true" ${motion.push_enabled ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   `;
   updateZonesStats();
-  liveEls.cameraRecordingControls.querySelectorAll('[data-camera-recording]').forEach((select) => {
-    select.addEventListener('change', () => {
-      cameraRecording()[select.dataset.cameraRecording] = select.value === 'true';
-    });
+  liveEls.cameraMotionSettings.querySelectorAll('[data-motion-enabled]').forEach((cb) => {
+    cb.addEventListener('change', () => { cameraMotion().enabled = cb.checked; });
   });
-  liveEls.cameraRecordingControls.querySelectorAll('[data-camera-detection]').forEach((select) => {
-    select.addEventListener('change', () => {
-      cameraDetection()[select.dataset.cameraDetection] = select.value === 'true';
-    });
+  liveEls.cameraMotionSettings.querySelectorAll('[data-motion-record]').forEach((cb) => {
+    cb.addEventListener('change', () => { cameraMotion().record_on_detect = cb.checked; });
+  });
+  liveEls.cameraMotionSettings.querySelectorAll('[data-motion-email]').forEach((cb) => {
+    cb.addEventListener('change', () => { cameraMotion().email_enabled = cb.checked; });
+  });
+  liveEls.cameraMotionSettings.querySelectorAll('[data-motion-push]').forEach((cb) => {
+    cb.addEventListener('change', () => { cameraMotion().push_enabled = cb.checked; });
   });
 }
 
@@ -967,6 +994,7 @@ function renderSoundDetectionSettings() {
       <tr data-sound-class="${escapeHtml(rule.class)}" style="border-bottom:1px solid var(--border,#eee)">
         <td style="padding:.35rem .5rem;font-weight:500;white-space:nowrap">${escapeHtml(label)}</td>
         <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-sound-rule-enabled="${escapeHtml(rule.class)}" ${rule.enabled ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
+        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-sound-rule-record="${escapeHtml(rule.class)}" ${rule.record_on_detect !== false ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
         <td style="padding:.35rem .5rem"><input type="number" data-sound-rule-threshold="${escapeHtml(rule.class)}" value="${rule.confidence_threshold}" min="0.1" max="1.0" step="0.05" style="width:4.5rem" /></td>
         <td style="padding:.35rem .5rem"><input type="number" data-sound-rule-cooldown="${escapeHtml(rule.class)}" value="${rule.cooldown_seconds}" min="5" max="3600" step="5" style="width:4.5rem" /></td>
         <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" data-sound-rule-email="${escapeHtml(rule.class)}" ${rule.email_enabled ? 'checked' : ''} style="width:1rem;height:1rem;cursor:pointer" /></td>
@@ -993,7 +1021,8 @@ function renderSoundDetectionSettings() {
         <thead>
           <tr style="text-align:left;border-bottom:1px solid var(--border,#ddd)">
             <th style="padding:.35rem .5rem">Sound</th>
-            <th style="padding:.35rem .5rem;white-space:nowrap">Alert On</th>
+            <th style="padding:.35rem .5rem;white-space:nowrap">Enabled</th>
+            <th style="padding:.35rem .5rem;white-space:nowrap">Record</th>
             <th style="padding:.35rem .5rem;white-space:nowrap">Threshold</th>
             <th style="padding:.35rem .5rem;white-space:nowrap">Cooldown (s)</th>
             <th style="padding:.35rem .5rem;white-space:nowrap">Email</th>
@@ -1029,6 +1058,9 @@ function renderSoundDetectionSettings() {
   });
   container.querySelectorAll('[data-sound-rule-enabled]').forEach((cb) => {
     cb.addEventListener('change', () => { _updateSoundRule(cb.dataset.soundRuleEnabled, 'enabled', cb.checked); });
+  });
+  container.querySelectorAll('[data-sound-rule-record]').forEach((cb) => {
+    cb.addEventListener('change', () => { _updateSoundRule(cb.dataset.soundRuleRecord, 'record_on_detect', cb.checked); });
   });
   container.querySelectorAll('[data-sound-rule-threshold]').forEach((inp) => {
     inp.addEventListener('change', () => { _updateSoundRule(inp.dataset.soundRuleThreshold, 'confidence_threshold', Math.max(0.1, Math.min(1.0, Number(inp.value) || 0.35))); });

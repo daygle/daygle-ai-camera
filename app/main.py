@@ -494,6 +494,12 @@ def normalize_camera_id(value: Any, fallback: str = 'camera-1') -> str:
 
 def default_camera_detection_settings() -> dict[str, Any]:
     return {
+        'motion': {
+            'enabled': True,
+            'record_on_detect': True,
+            'email_enabled': True,
+            'push_enabled': False,
+        },
         'motion_enabled': True,
         'motion_email_enabled': True,
         'object_detection_enabled': True,
@@ -698,10 +704,13 @@ def _normalize_camera_sound_settings(raw: Any) -> dict[str, Any]:
         cls = str(r.get('class') or '').strip()
         if cls in SOUND_CLASSES:
             saved[cls] = r
+    # Build a lookup of default values by sound class for normalization
+    defaults_by_class: dict[str, dict[str, Any]] = {d['class']: d for d in DEFAULT_RULES}
     rules = []
-    for default in DEFAULT_RULES:
-        cls = default['class']
-        r = saved.get(cls, {**default, 'enabled': False})
+    for cls, r in saved.items():
+        default = defaults_by_class.get(cls)
+        if not default:
+            continue
         try:
             threshold = max(0.1, min(1.0, float(r.get('confidence_threshold', default['confidence_threshold']))))
         except (TypeError, ValueError):
@@ -714,12 +723,48 @@ def _normalize_camera_sound_settings(raw: Any) -> dict[str, Any]:
             'class': cls,
             'name': str(r.get('name') or SOUND_CLASSES[cls]['label']),
             'enabled': normalize_bool_setting(r.get('enabled'), False),
+            'record_on_detect': normalize_bool_setting(r.get('record_on_detect'), True),
             'confidence_threshold': threshold,
             'cooldown_seconds': cooldown,
             'email_enabled': normalize_bool_setting(r.get('email_enabled'), False),
             'push_enabled': normalize_bool_setting(r.get('push_enabled'), False),
         })
     return {'enabled': enabled, 'rules': rules}
+
+
+def _normalize_camera_motion_settings(raw: Any) -> dict[str, Any]:
+    """Normalize camera-level motion detection settings.
+
+    Falls back to the legacy ``motion_enabled`` / ``motion_email_enabled`` flat
+    fields when the ``motion`` dict is not present (pre-migration data).
+    """
+    if not isinstance(raw, dict):
+        raw = {}
+    enabled = normalize_bool_setting(raw.get('enabled'), True)
+    record_on_detect = normalize_bool_setting(raw.get('record_on_detect'), True)
+    email_enabled = normalize_bool_setting(raw.get('email_enabled'), True)
+    push_enabled = normalize_bool_setting(raw.get('push_enabled'), False)
+    return {
+        'enabled': enabled,
+        'record_on_detect': record_on_detect,
+        'email_enabled': email_enabled,
+        'push_enabled': push_enabled,
+    }
+
+
+def effective_camera_motion_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    """Return the effective motion settings for a camera, falling back to legacy fields."""
+    detection = settings.get('detection') or {}
+    motion = detection.get('motion')
+    if isinstance(motion, dict):
+        return _normalize_camera_motion_settings(motion)
+    # Legacy fallback: construct from flat fields
+    return {
+        'enabled': normalize_bool_setting(detection.get('motion_enabled'), True),
+        'record_on_detect': True,
+        'email_enabled': normalize_bool_setting(detection.get('motion_email_enabled'), True),
+        'push_enabled': False,
+    }
 
 
 def normalize_camera_settings(settings: dict[str, Any], index: int = 1) -> dict[str, Any]:
@@ -740,6 +785,7 @@ def normalize_camera_settings(settings: dict[str, Any], index: int = 1) -> dict[
     detection['object_labels'] = normalize_label_list(detection.get('object_labels', []))
     detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
     detection['sound'] = _normalize_camera_sound_settings(detection.get('sound'))
+    detection['motion'] = _normalize_camera_motion_settings(detection.get('motion'))
     camera_settings['detection'] = detection
     camera_settings['recording'] = normalize_camera_recording_settings(camera_settings.get('recording'))
     return camera_settings
@@ -871,7 +917,8 @@ def filter_detections_for_camera(detections: list[dict[str, Any]], settings: dic
 
 def zone_motion_detections(detections: list[dict[str, Any]], settings: dict[str, Any], frame_motion_confidence: float = 0.5) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
-    if not detection_settings.get('motion_enabled', True):
+    motion_settings = effective_camera_motion_settings(settings)
+    if not motion_settings.get('enabled', True):
         return []
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_motion', True)]
     if not zones:
@@ -1490,8 +1537,9 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
         'confidence': confidence,
         'alert_triggered': True,
     }
+    should_record = normalize_bool_setting(fired_rule.get('record_on_detect'), True)
     recording_ids: list[int] = []
-    if cam_settings:
+    if should_record and cam_settings:
         stream_url = build_stream_url(cam_settings)
         if stream_url:
             cam_rec_config = {**camera_event_recording_config(cam_settings), 'record_on_alert': True}
@@ -1783,6 +1831,8 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     ]
     if motion_detections:
         _motion_record = zone_motion_record_on_detect(settings)
+        # Camera-level AND-gate: only record if the camera's motion.record_on_detect is True
+        _motion_record = _motion_record and effective_camera_motion_settings(settings).get('record_on_detect', True)
         recording_detections.append({
             **strongest_motion,
             'label': 'motion',
@@ -1887,19 +1937,25 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             message=alert['message'],
             recording_id=recording_id,
         )
-    motion_email_enabled = normalize_bool_setting((settings.get('detection') or {}).get('motion_email_enabled'), True)
+    motion_settings = effective_camera_motion_settings(settings)
+    motion_email_enabled = motion_settings.get('email_enabled', True)
+    motion_push_enabled = motion_settings.get('push_enabled', False)
     email_triggered = [
         alert for alert in triggered
         if motion_email_enabled or str(alert.get('label') or '').strip().lower() != 'motion'
+    ]
+    push_triggered = [
+        alert for alert in triggered
+        if motion_push_enabled or str(alert.get('label') or '').strip().lower() != 'motion'
     ]
     # Deliver notifications off the detection thread: SMTP/ntfy calls block for
     # up to their 10s timeouts, and this thread holds the camera's detection
     # slot — a slow mail server would stall monitoring (and history sampling,
     # which playback overlays are sliced from) for that whole time.
-    if email_triggered or triggered:
+    if email_triggered or push_triggered:
         notify_thread = threading.Thread(
             target=_deliver_alert_notifications,
-            args=(email_triggered, triggered, event_id, zone_rules),
+            args=(email_triggered, push_triggered, event_id, zone_rules),
             name=f'alert-notify-{event_id}',
             daemon=True,
         )
