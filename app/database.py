@@ -435,6 +435,23 @@ class EventDatabase:
             db.execute("DELETE FROM events")
             return int(count)
 
+    def cleanup_incomplete_recordings(self) -> list[dict[str, Any]]:
+        """Delete recordings whose files were never written (e.g. service restarted mid-capture)."""
+        with self.connect() as db:
+            rows = db.execute("SELECT * FROM recordings").fetchall()
+            incomplete = [
+                dict(row) for row in rows
+                if not (
+                    row["file_path"]
+                    and Path(str(row["file_path"])).exists()
+                    and Path(str(row["file_path"])).stat().st_size > 0
+                )
+            ]
+            if incomplete:
+                ids = [int(r["id"]) for r in incomplete]
+                db.execute(f"DELETE FROM recordings WHERE id IN ({','.join('?' * len(ids))})", ids)
+            return incomplete
+
     def delete_all_recordings(self) -> list[dict[str, Any]]:
         with self.connect() as db:
             rows = db.execute("SELECT * FROM recordings").fetchall()
