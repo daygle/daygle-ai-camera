@@ -576,7 +576,10 @@ class RecordingService:
                 '1',
                 str(output_pattern),
             ]
-            process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            import tempfile as _tempfile
+            _stderr_file = _tempfile.NamedTemporaryFile(mode='w+', suffix='.log', delete=False, dir=str(self.prebuffer_dir))
+            _stderr_path = _stderr_file.name
+            process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=_stderr_file)
             try:
                 while process.poll() is None and not stop_event.is_set():
                     self._prune_prebuffer_segments(camera_dir, buffer_seconds)
@@ -588,6 +591,17 @@ class RecordingService:
                         process.wait(timeout=2)
                     except subprocess.TimeoutExpired:
                         process.kill()
+                if _stderr_path:
+                    try:
+                        _stderr_content = Path(_stderr_path).read_text(encoding='utf-8', errors='replace')
+                        if _stderr_content.strip():
+                            logger.debug('Prebuffer ffmpeg %s: %s', camera_key, _stderr_content.strip()[:1000])
+                    except OSError:
+                        pass
+                    try:
+                        Path(_stderr_path).unlink(missing_ok=True)
+                    except OSError:
+                        pass
                 self._prune_prebuffer_segments(camera_dir, buffer_seconds)
             if not stop_event.is_set():
                 time.sleep(1)

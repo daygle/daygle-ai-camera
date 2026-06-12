@@ -65,8 +65,8 @@ def _configure_ffmpeg_log_level() -> None:
                         _pkg_dir = os.path.dirname(_spec.origin)
                         for _d in [_pkg_dir, os.path.join(_pkg_dir, '.libs')]:
                             lib_paths.extend(sorted(_glob.glob(os.path.join(_d, 'libavutil*.so*'))))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Could not search cv2 package for libavutil: %s", exc)
 
                 # Scan /proc/self/maps for any libavutil already mapped into this
                 # process (populated after cv2.VideoCapture() opens the stream).
@@ -77,8 +77,8 @@ def _configure_ffmpeg_log_level() -> None:
                                 _parts = _line.rstrip().split()
                                 if _parts and _parts[-1].startswith('/') and _parts[-1] not in lib_paths:
                                     lib_paths.append(_parts[-1])
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Could not scan /proc/self/maps for libavutil: %s", exc)
 
                 # Fall back to the system-installed library.
                 _system_lib = ctypes.util.find_library('avutil')

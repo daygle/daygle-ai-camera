@@ -32,7 +32,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 
 from app.alerts import AlertEngine
-from app.auth import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, AuthError, AuthService
+from app.auth import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, AuthError, AuthService, utc_now
 from app.database import EventDatabase
 from app.detector import DetectorUnavailableError, create_detector, load_labels
 from app.email_alerts import EmailAlertError, EmailAlertService
@@ -127,10 +127,6 @@ web_dir = BASE_DIR / 'web'
 static_dir = web_dir
 if static_dir.exists():
     app.mount('/static', StaticFiles(directory=static_dir), name='static')
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
 
 def effective_ai_config() -> dict[str, Any]:
     settings = copy.deepcopy(config.get('ai', {}))
@@ -1118,7 +1114,7 @@ def detect_frame_motion(camera_id: str, image: Any) -> tuple[bool, float]:
     skipped, saving ~5-15 ms per cycle.
     """
     try:
-        import numpy as _np
+        import numpy as np
         if hasattr(image, 'shape') and hasattr(image, 'dtype'):
             # Fast path: already a numpy BGR array — convert to grayscale
             # using OpenCV (faster than PIL for large frames).
@@ -1126,13 +1122,13 @@ def detect_frame_motion(camera_id: str, image: Any) -> tuple[bool, float]:
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             resized = cv2.resize(gray, (_MOTION_FRAME_W, _MOTION_FRAME_H),
                                  interpolation=cv2.INTER_NEAREST)
-            current = _np.array(resized, dtype=_np.float32)
+            current = np.array(resized, dtype=np.float32)
         else:
             from PIL import Image as _Image
             img = _Image.open(io.BytesIO(image)).convert('L').resize(
                 (_MOTION_FRAME_W, _MOTION_FRAME_H), _Image.NEAREST
             )
-            current = _np.array(img, dtype=_np.float32)
+            current = np.array(img, dtype=np.float32)
         with _frame_motion_lock:
             background = _frame_motion_prev.get(camera_id)
             if background is None:
@@ -1142,7 +1138,7 @@ def detect_frame_motion(camera_id: str, image: Any) -> tuple[bool, float]:
             # deviation from the learned scene, not just the previous frame.
             updated_bg = (1.0 - _MOTION_BACKGROUND_ALPHA) * background + _MOTION_BACKGROUND_ALPHA * current
             _frame_motion_prev[camera_id] = updated_bg
-        changed_fraction = float(_np.mean(_np.abs(current - background) > _MOTION_PIXEL_THRESHOLD))
+        changed_fraction = float(np.mean(np.abs(current - background) > _MOTION_PIXEL_THRESHOLD))
         if changed_fraction < _MOTION_GATE_FRACTION:
             return False, 0.0
         return True, round(min(1.0, changed_fraction / _MOTION_SCALE_FRACTION), 3)
@@ -2356,7 +2352,8 @@ def _read_installed_models() -> dict[str, Any]:
     if p.exists():
         try:
             return json.loads(p.read_text(encoding='utf-8'))
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to read settings file: %s", exc)
             return {}
     return {}
 
@@ -2891,13 +2888,13 @@ async def login(request: Request):
     except AuthError as exc:
         try:
             database.add_audit_log(created_at=utc_now(), user_id=None, username=username, action='login', resource='session', ip_address=ip, status='failed', details={'reason': str(exc)})
-        except Exception:
-            pass
+        except Exception as unexpected_exc:
+            logger.warning("Unexpected error during login callback: %s", unexpected_exc)
         return login_page(request, str(exc))
     try:
         database.add_audit_log(created_at=utc_now(), user_id=int(_user['id']), username=str(_user['username']), action='login', resource='session', ip_address=ip, status='success')
-    except Exception:
-        pass
+    except Exception as unexpected_exc:
+        logger.warning("Unexpected error during login: %s", unexpected_exc)
     response = RedirectResponse('/', status_code=303)
     set_session_cookie(response, request, token, expires_at)
     response.delete_cookie(CSRF_COOKIE)
@@ -4028,8 +4025,8 @@ def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
     for old_cam in (old_instances or {}).values():
         try:
             old_cam.close()
-        except Exception:
-            pass
+        except Exception as unexpected_exc:
+            logger.warning("Unexpected error updating camera: %s", unexpected_exc)
 
 
 def apply_storage_and_recording_settings() -> None:
@@ -4041,8 +4038,8 @@ def apply_storage_and_recording_settings() -> None:
         try:
             old_service.stop_prebuffer_workers()
             old_service.stop_all_continuous_recordings()
-        except Exception:
-            pass
+        except Exception as unexpected_exc:
+            logger.warning("Unexpected error deleting camera: %s", unexpected_exc)
 
 
 @app.get('/api/settings/ai')
