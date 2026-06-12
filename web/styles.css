@@ -636,6 +636,9 @@ input[type="file"] { padding: 10px; }
   height: 100%;
   pointer-events: none;
   border-radius: 16px;
+  /* Promote to own compositor layer so the browser composites the overlay as
+     a separate GPU texture instead of repainting the full layer tree. */
+  will-change: transform;
 }
 .clip-overlay-toggle {
   margin-top: 10px;

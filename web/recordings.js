@@ -352,6 +352,10 @@ function startOverlayRaf() {
   if (overlayRafId !== null || overlayVfcHandle !== null) return;
   const video = els.clipPlayer;
   if (!video) return;
+  // Throttle counter: skip every other callback to draw at ~30fps.
+  // Interpolated bounding boxes move smoothly enough at this rate while
+  // halving the per-frame canvas work.
+  let frameCount = 0;
   if (typeof video.requestVideoFrameCallback === 'function') {
     // requestVideoFrameCallback fires with the exact presentation timestamp of
     // each decoded frame, eliminating the lag from reading currentTime in rAF.
@@ -360,7 +364,7 @@ function startOverlayRaf() {
         overlayVfcHandle = null;
         return;
       }
-      drawClipOverlay(metadata.mediaTime);
+      if ((frameCount++ & 1) === 0) drawClipOverlay(metadata.mediaTime);
       overlayVfcHandle = els.clipPlayer.requestVideoFrameCallback(vfcLoop);
     }
     overlayVfcHandle = video.requestVideoFrameCallback(vfcLoop);
@@ -370,7 +374,7 @@ function startOverlayRaf() {
         overlayRafId = null;
         return;
       }
-      drawClipOverlay();
+      if ((frameCount++ & 1) === 0) drawClipOverlay();
       overlayRafId = requestAnimationFrame(loop);
     }
     overlayRafId = requestAnimationFrame(loop);

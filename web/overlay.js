@@ -219,11 +219,18 @@ function sampleTrackAtTime(track, t) {
   });
 }
 
+// Dimensions are read once per frame by resizeOverlayCanvas and reused by
+// drawDetectionBoxesOnCanvas to avoid triggering forced layout twice.
+let _lastKnownDims = null;
+
 function resizeOverlayCanvas(canvas, referenceEl) {
   if (!canvas || !referenceEl) return;
   const dpr = window.devicePixelRatio || 1;
-  const w = Math.max(1, Math.round(referenceEl.clientWidth * dpr));
-  const h = Math.max(1, Math.round(referenceEl.clientHeight * dpr));
+  const cssWidth = Math.max(1, referenceEl.clientWidth);
+  const cssHeight = Math.max(1, referenceEl.clientHeight);
+  _lastKnownDims = { cssWidth, cssHeight, dpr };
+  const w = Math.max(1, Math.round(cssWidth * dpr));
+  const h = Math.max(1, Math.round(cssHeight * dpr));
   if (canvas.width !== w || canvas.height !== h) {
     canvas.width = w;
     canvas.height = h;
@@ -232,6 +239,22 @@ function resizeOverlayCanvas(canvas, referenceEl) {
     const ctx = _getCachedContext(canvas);
     if (ctx) _fontSetupCache.delete(ctx);
   }
+}
+
+function _readElementDims(referenceEl) {
+  // Use cached dimensions from resizeOverlayCanvas (called first per frame)
+  // to avoid a second forced-layout read of clientWidth/clientHeight.
+  if (_lastKnownDims) {
+    const dims = _lastKnownDims;
+    _lastKnownDims = null; // Consume once so stale values aren't reused
+    return dims;
+  }
+  // Fallback if drawDetectionBoxesOnCanvas is called standalone (live.js path)
+  return {
+    cssWidth: Math.max(1, referenceEl.clientWidth),
+    cssHeight: Math.max(1, referenceEl.clientHeight),
+    dpr: window.devicePixelRatio || 1,
+  };
 }
 
 // Draws detection bounding boxes onto canvas. referenceEl is the <video> or <img>
@@ -245,9 +268,9 @@ function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
   // _fontSetupCache invalidation in resizeOverlayCanvas).
   _ensureFontSetup(ctx);
 
-  const cssWidth = Math.max(1, referenceEl.clientWidth);
-  const cssHeight = Math.max(1, referenceEl.clientHeight);
-  const dpr = window.devicePixelRatio || 1;
+  // Reuse dimensions cached by resizeOverlayCanvas (called earlier in the
+  // same frame) instead of reading clientWidth/clientHeight again.
+  const { cssWidth, cssHeight, dpr } = _readElementDims(referenceEl);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   const srcW = Math.max(1, Number(referenceEl.videoWidth || referenceEl.naturalWidth || cssWidth));
