@@ -748,7 +748,7 @@ input[type="file"] { padding: 10px; }
   font-size: .9em;
   color: var(--accent);
 }
-.zone-object-rules-header { display: flex; align-items: center; gap: 10px; margin-bottom: .5rem; }
+.zone-object-rules-header { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-bottom: .5rem; }
 .zone-object-rules-header select { max-width: 220px; }
 .zone-object-rule {
   display: grid;
@@ -1301,7 +1301,7 @@ input[type="file"] { padding: 10px; }
 }
 
 .modal-panel {
-  width: min(600px, 100%);
+  width: min(760px, 100%);
   max-height: calc(100vh - 32px);
   overflow-y: auto;
   border: 1px solid var(--border);
@@ -2531,7 +2531,9 @@ input[type="file"] { padding: 10px; }
   left: 18px;
   bottom: 18px;
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   z-index: 3;
 }
 .zone-frame-toolbar button {
@@ -2671,7 +2673,7 @@ input[type="file"] { padding: 10px; }
 }
 
 @media (max-width: 760px) {
-  .zone-frame-toolbar { gap: 6px; }
+  .zone-frame-toolbar { gap: 4px; }
   .zone-frame-toolbar button { padding: 7px 11px; font-size: 11px; }
 }
 
