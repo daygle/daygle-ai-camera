@@ -9,7 +9,6 @@ import re
 import socket
 import urllib.error
 import urllib.request
-import urllib.parse
 
 logger = logging.getLogger('daygle.ai')
 
@@ -19,9 +18,8 @@ VALID_COMMANDS = frozenset({
     'zoom_in', 'zoom_out',
 })
 
-# ─── ONVIF PTZ (primary — confirmed working on P6S cameras) ──────────────────
+# ─── ONVIF PTZ ────────────────────────────────────────────────────────────────
 
-# (pan, tilt, zoom) unit vectors; scaled by speed at send time.
 _ONVIF_VELOCITY: dict[str, tuple[float, float, float]] = {
     'up':        ( 0.0,  1.0,  0.0),
     'down':      ( 0.0, -1.0,  0.0),
@@ -36,8 +34,7 @@ _ONVIF_VELOCITY: dict[str, tuple[float, float, float]] = {
     'stop':      ( 0.0,  0.0,  0.0),
 }
 
-# Profile token cache keyed by (host, port) — avoids a GetProfiles round-trip
-# on every button press.
+# Profile token cache — avoids a GetProfiles round-trip on every button press.
 _profile_token_cache: dict[tuple[str, int], str] = {}
 
 
@@ -89,17 +86,13 @@ def _get_profile_token(host: str, http_port: int, username: str, password: str) 
     key = (host, http_port)
     if key in _profile_token_cache:
         return _profile_token_cache[key]
-
     url = f'http://{host}:{http_port}/onvif/media_service'
     response = _soap(url, '<trt:GetProfiles/>', username, password)
-
-    # The token is an XML attribute: <trt:Profiles token="..."> or token='...'
     match = re.search(r'<[^>]*Profiles[^>]+token=["\']([^"\']+)["\']', response)
     if not match:
         match = re.search(r'token=["\']([^"\']+)["\']', response)
     if not match:
         raise OSError('Could not find ONVIF media profile token. Check credentials.')
-
     token = match.group(1)
     logger.debug('ONVIF profile token for %s:%d → %s', host, http_port, token)
     _profile_token_cache[key] = token
@@ -123,24 +116,21 @@ def send_ptz_command_onvif(
         )
     else:
         pan, tilt, zoom = _ONVIF_VELOCITY.get(command, (0.0, 0.0, 0.0))
-        pv = pan * speed_factor
-        tv = tilt * speed_factor
-        zv = zoom * speed_factor
         body = (
             '<tptz:ContinuousMove>'
             f'<tptz:ProfileToken>{token}</tptz:ProfileToken>'
             '<tptz:Velocity>'
-            f'<tt:PanTilt x="{pv:.3f}" y="{tv:.3f}"/>'
-            f'<tt:Zoom x="{zv:.3f}"/>'
+            f'<tt:PanTilt x="{pan * speed_factor:.3f}" y="{tilt * speed_factor:.3f}"/>'
+            f'<tt:Zoom x="{zoom * speed_factor:.3f}"/>'
             '</tptz:Velocity>'
             '</tptz:ContinuousMove>'
         )
 
     _soap(ptz_url, body, username, password)
-    logger.debug('ONVIF PTZ %s sent to %s:%d', command, host, http_port)
+    logger.debug('ONVIF PTZ %s → %s:%d', command, host, http_port)
 
 
-# ─── Raw PelcoD over TCP / UDP (fallback options) ─────────────────────────────
+# ─── Raw PelcoD over TCP (fallback for cameras without ONVIF) ─────────────────
 
 _PELCOD_COMMANDS: dict[str, int] = {
     'stop':      0x00, 'right':     0x02, 'left':      0x04,
@@ -160,15 +150,9 @@ def _pelcod_packet(address: int, command_byte: int, speed: int) -> bytes:
 
 def send_ptz_command_tcp(host: str, port: int, address: int, command: str, speed: int) -> None:
     packet = _pelcod_packet(address, _PELCOD_COMMANDS[command], speed)
+    logger.debug('PTZ TCP %s → %s:%d pkt=%s', command, host, port, packet.hex())
     with socket.create_connection((host, port), timeout=2.0) as sock:
         sock.sendall(packet)
-
-
-def send_ptz_command_udp(host: str, port: int, address: int, command: str, speed: int) -> None:
-    packet = _pelcod_packet(address, _PELCOD_COMMANDS[command], speed)
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-        sock.settimeout(1.0)
-        sock.sendto(packet, (host, port))
 
 
 # ─── Dispatcher ───────────────────────────────────────────────────────────────
@@ -189,7 +173,5 @@ def send_ptz_command(
         raise ValueError(f'Unknown PTZ command: {command!r}')
     if protocol == 'tcp_pelcod':
         send_ptz_command_tcp(host, tcp_port, address, command, max(0, min(63, speed)))
-    elif protocol == 'udp_pelcod':
-        send_ptz_command_udp(host, tcp_port, address, command, max(0, min(63, speed)))
     else:
         send_ptz_command_onvif(host, http_port, command, speed, username, password)

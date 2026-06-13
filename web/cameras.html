@@ -206,12 +206,10 @@
             </label>
             <label class="full-width"><span>Protocol</span>
               <select id="editPtzProtocol" name="ptz_protocol">
-                <option value="onvif">ONVIF (recommended for P6S)</option>
-                <option value="http_cgi">HTTP CGI (HiSilicon)</option>
-                <option value="udp_pelcod">UDP PelcoD</option>
-                <option value="tcp_pelcod">TCP PelcoD</option>
+                <option value="onvif">ONVIF (recommended)</option>
+                <option value="tcp_pelcod">TCP PelcoD (legacy cameras)</option>
               </select>
-              <span class="field-help">HTTP CGI uses the camera's web port (80). TCP PelcoD sends raw PelcoD packets to the Command Port.</span>
+              <span class="field-help">ONVIF uses standard PTZ over the camera's HTTP port. TCP PelcoD sends raw binary commands to the Command Port.</span>
             </label>
             <label><span>HTTP Port</span><input id="editPtzHttpPort" name="ptz_http_port" type="number" min="1" max="65535" placeholder="80" /><span class="field-help">Camera web port used by HTTP CGI (default 80).</span></label>
             <label><span>Command Port</span><input id="editPtzPort" name="ptz_port" type="number" min="1" max="65535" placeholder="6060" /><span class="field-help">Port for TCP PelcoD only (default 6060).</span></label>
