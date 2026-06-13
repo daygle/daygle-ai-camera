@@ -298,7 +298,7 @@ function updateEmptyState() {
 
 // Build a structured summary of the monitor's latest cycle so the renderer
 // can split the visual into a state chip, per-label chips, and a status line.
-function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = false, soundMinConf = 0) {
+function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = false, soundMinConf = 0, belowThresholdSound = null) {
   if (!payload) {
     return { state: 'idle', stateLabel: 'Idle', chips: [], message: 'Live AI status unavailable.' };
   }
@@ -328,16 +328,19 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
   // Persistent sound status chip - always shown to indicate whether sound
   // detection is enabled, idle, or recently fired.
   if (soundEnabled) {
+    let soundChipPushed = false;
     if (soundStatus && soundStatus.last_detected_at) {
       const ageMs = Date.now() - Date.parse(soundStatus.last_detected_at);
       const soundConf = Number(soundStatus.last_confidence || 0);
       if (ageMs < 60000 && soundConf >= soundMinConf) {
         const soundLabel = soundStatus.last_class_label || soundStatus.last_class || 'sound';
         chips.push({ label: `🔊 ${soundLabel}`, confidence: soundConf, isSound: true });
-      } else {
-        chips.push({ label: '🔊 Listening', confidence: 0, isSound: true, isIdle: true });
+        soundChipPushed = true;
       }
-    } else {
+    }
+    if (!soundChipPushed && belowThresholdSound) {
+      chips.push({ label: `🔊 ${belowThresholdSound.label}`, confidence: belowThresholdSound.confidence, isSound: true, isBelowThreshold: true });
+    } else if (!soundChipPushed) {
       chips.push({ label: '🔊 Listening', confidence: 0, isSound: true, isIdle: true });
     }
   } else {
@@ -377,7 +380,7 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
 
 function renderDetectionStatus(summary) {
   if (liveEls.detectionState) {
-    liveEls.detectionState.textContent = summary.stateLabel;
+    liveEls.detectionState.textContent = `👁️ ${summary.stateLabel}`;
     liveEls.detectionState.className = 'chip ' + (
       summary.state === 'alerted' ? 'chip-warn' :
       summary.state === 'detected' ? 'chip-info' :
@@ -467,8 +470,19 @@ async function refreshDetectionStatus() {
     const soundMinConf = matchedSoundRule
       ? Number(matchedSoundRule.confidence_threshold ?? 0.35)
       : soundRules.filter((r) => r.enabled !== false).reduce((min, r) => Math.min(min, Number(r.confidence_threshold ?? 0.35)), 0.35);
+    // Find the highest-scoring sound class currently below its threshold (mirrors "outside zone" for objects).
+    const liveConf = soundStatus?.last_confidences || {};
+    let belowThresholdSound = null;
+    for (const rule of soundRules) {
+      if (rule.enabled === false) continue;
+      const conf = Number(liveConf[rule.class] || 0);
+      const threshold = Number(rule.confidence_threshold ?? 0.35);
+      if (conf > 0 && conf < threshold && (!belowThresholdSound || conf > belowThresholdSound.confidence)) {
+        belowThresholdSound = { label: rule.name || rule.class, confidence: conf };
+      }
+    }
     ingestServerTrackDetections(payload);
-    renderDetectionStatus(summarizeDetectionStatus(payload, soundStatus, soundEnabled, soundMinConf));
+    renderDetectionStatus(summarizeDetectionStatus(payload, soundStatus, soundEnabled, soundMinConf, belowThresholdSound));
   } catch (error) {
     renderDetectionStatus({
       state: 'error',
