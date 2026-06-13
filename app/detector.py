@@ -171,6 +171,7 @@ class OnnxYoloDetector:
             self.session = ort.InferenceSession(str(self.model_path), sess_options=session_options, providers=providers)
             self.input_name = self.session.get_inputs()[0].name
             self.output_names = [output.name for output in self.session.get_outputs()]
+            self.active_providers = self.session.get_providers()
         except Exception as exc:  # pragma: no cover - depends on runtime/model internals
             self.unavailable_reason = f"Failed to load ONNX model {self.model_path}: {exc}"
 
