@@ -2572,7 +2572,6 @@ a.activity-item-action {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  min-height: 32px;
 }
 .detection-chip {
   display: inline-flex;

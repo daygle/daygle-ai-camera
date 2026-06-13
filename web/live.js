@@ -9,6 +9,7 @@ const liveEls = {
   detectionStatus: document.getElementById('liveDetectionStatus'),
   detectionChips: document.getElementById('liveDetectionChips'),
   detectionState: document.getElementById('liveDetectionState'),
+  detectionMeta: document.querySelector('.live-detection-meta'),
   // Zones-page stats (null on live page - harmless)
   statZoneCount: document.getElementById('statZoneCount'),
   statRuleCount: document.getElementById('statRuleCount'),
@@ -384,26 +385,27 @@ function renderDetectionStatus(summary) {
       'chip-dim'
     );
   }
+  const visualChips = summary.chips.filter((c) => !c.isSound);
+  const soundChips = summary.chips.filter((c) => c.isSound);
+
+  // Sound chips go in the header row, to the left of the state chip.
+  if (liveEls.detectionMeta && liveEls.detectionState) {
+    liveEls.detectionMeta.querySelectorAll('.detection-chip').forEach((el) => el.remove());
+    const soundHtml = soundChips.map((c) => {
+      const cls = c.isDisabled ? 'detection-chip detection-chip-empty' : 'detection-chip detection-chip-sound';
+      const text = c.confidence > 0 ? `${c.label} · ${Math.round(c.confidence * 100)}%` : c.label;
+      return `<span class="${cls}">${escapeHtml(text)}</span>`;
+    }).join('');
+    liveEls.detectionState.insertAdjacentHTML('beforebegin', soundHtml);
+  }
+
+  // Object chips go in the chips row below the header.
   if (liveEls.detectionChips) {
-    const visualChips = summary.chips.filter((c) => !c.isSound);
-    const soundChips = summary.chips.filter((c) => c.isSound);
-    if (!visualChips.length && !soundChips.length) {
-      liveEls.detectionChips.innerHTML = '<span class="detection-chip detection-chip-empty">No active detections</span>';
-    } else {
-      const visualHtml = visualChips.map((c) => {
-        const variant = summary.state === 'alerted' ? 'detection-chip-alert' : '';
-        const text = c.confidence > 0 ? `👁️ ${titleCase(c.label)} · ${Math.round(c.confidence * 100)}%` : `👁️ ${titleCase(c.label)}`;
-        return `<span class="detection-chip ${variant}">${escapeHtml(text)}</span>`;
-      }).join('');
-      const soundHtml = soundChips.map((c) => {
-        let cls = 'detection-chip detection-chip-sound';
-        if (c.isDisabled) cls = 'detection-chip detection-chip-empty';
-        else if (c.isIdle) cls = 'detection-chip detection-chip-sound';
-        const text = c.confidence > 0 ? `${c.label} · ${Math.round(c.confidence * 100)}%` : c.label;
-        return `<span class="${cls}">${escapeHtml(text)}</span>`;
-      }).join('');
-      liveEls.detectionChips.innerHTML = visualHtml + soundHtml;
-    }
+    liveEls.detectionChips.innerHTML = visualChips.map((c) => {
+      const variant = summary.state === 'alerted' ? 'detection-chip-alert' : '';
+      const text = c.confidence > 0 ? `👁️ ${titleCase(c.label)} · ${Math.round(c.confidence * 100)}%` : `👁️ ${titleCase(c.label)}`;
+      return `<span class="detection-chip ${variant}">${escapeHtml(text)}</span>`;
+    }).join('');
   }
   if (liveEls.detectionStatus) {
     liveEls.detectionStatus.textContent = summary.message;

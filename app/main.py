@@ -1805,7 +1805,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             reason='No detections matched this camera and its monitoring areas.',
             detected_labels=raw_labels,
             matched_labels=[],
-            detections=[],
+            detections=list(detections),
         )
         return None
 
