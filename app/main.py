@@ -3341,6 +3341,14 @@ def ai_settings_page():
     return root()
 
 
+@app.get('/yamnet')
+def yamnet_page():
+    yamnet_path = web_dir / 'yamnet.html'
+    if yamnet_path.exists():
+        return FileResponse(yamnet_path)
+    return root()
+
+
 @app.get('/profile')
 def profile_page():
     profile_path = web_dir / 'profile.html'

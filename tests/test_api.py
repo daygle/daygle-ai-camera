@@ -2086,6 +2086,63 @@ def test_alerts_endpoint_exposes_event_id_for_grouping(tmp_path):
     assert groups == {event_id: {'cat', 'person'}}
 
 
+def test_event_recordings_include_alert_history_recording_links(tmp_path):
+    """A sound event can extend an existing RTSP recording instead of owning a
+    new recording row. The alert history row still carries the recording_id, so
+    event APIs must surface that clip as linked footage for the event.
+    """
+    from app.database import EventDatabase
+
+    database = EventDatabase(str(tmp_path / 'sound-alert-recording.sqlite3'))
+    now = '2026-06-07T00:00:00+00:00'
+    original_event_id = database.add_event(
+        created_at=now,
+        source='rtsp',
+        snapshot_path=None,
+        detections=[{'label': 'person', 'confidence': 0.9, 'box': {'x': 0, 'y': 0, 'width': 1, 'height': 1}}],
+        alert_triggered=True,
+    )
+    recording_id = database.add_recording(
+        event_id=original_event_id,
+        camera_id='driveway',
+        started_at=now,
+        ended_at='2026-06-07T00:00:30+00:00',
+        duration_seconds=30,
+        file_path=str(tmp_path / 'active-recording.mp4'),
+        thumbnail_path=None,
+        source='rtsp',
+        created_at=now,
+        trigger_type='alert',
+        trigger_label='person',
+        labels=['person'],
+    )
+    sound_event_id = database.add_event(
+        created_at='2026-06-07T00:00:10+00:00',
+        source='sound',
+        snapshot_path=None,
+        detections=[],
+        alert_triggered=True,
+        metadata={'label': 'cat_meow', 'class_label': 'Cat Meow', 'camera_id': 'driveway'},
+    )
+    database.add_alert(
+        created_at='2026-06-07T00:00:10+00:00',
+        rule_name='Cat Meow',
+        event_id=sound_event_id,
+        label='cat_meow',
+        confidence=0.98,
+        message='Cat Meow detected (98% confidence)',
+        recording_id=recording_id,
+    )
+
+    sound_event = database.get_event(sound_event_id)
+    assert sound_event is not None
+    assert sound_event['recording_status'] == 'linked'
+    assert [recording['id'] for recording in sound_event['recordings']] == [recording_id]
+
+    events_with_recordings = database.search_events(with_recording=True)
+    assert sound_event_id in [event['id'] for event in events_with_recordings]
+
+
 def test_recording_labels_join_table_round_trip(tmp_path):
     from app.database import EventDatabase
 

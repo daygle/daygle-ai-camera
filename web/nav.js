@@ -48,6 +48,7 @@ window.showToast = function (message, isError) {
       admin: false,
       links: [
         { href: '/ai', match: '/ai', label: 'AI Settings' },
+        { href: '/yamnet', match: '/yamnet', label: 'YAMNet' },
       ],
     },
     {

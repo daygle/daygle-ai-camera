@@ -522,7 +522,18 @@ class EventDatabase:
                     WHERE ah.event_id = e.id
                 )
             """
-            recording_filter = "AND EXISTS (SELECT 1 FROM recordings WHERE recordings.event_id = e.id)"
+            recording_condition = """
+                (
+                    EXISTS (SELECT 1 FROM recordings WHERE recordings.event_id = e.id)
+                    OR EXISTS (
+                        SELECT 1
+                        FROM alert_history ah
+                        JOIN recordings r ON r.id = ah.recording_id
+                        WHERE ah.event_id = e.id
+                    )
+                )
+            """
+            recording_filter = f"AND {recording_condition}"
             if label:
                 rows = db.execute(
                     f"""
@@ -555,7 +566,7 @@ class EventDatabase:
                 rows = db.execute(
                     f"""
                     SELECT e.* FROM events e
-                    WHERE {recording_filter[4:]}
+                    WHERE {recording_condition}
                     ORDER BY e.created_at DESC
                     LIMIT ?
                     """,
@@ -727,7 +738,21 @@ class EventDatabase:
 
     def _event_with_detections(self, db: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
         detections = db.execute("SELECT * FROM detections WHERE event_id = ? ORDER BY confidence DESC", (row["id"],)).fetchall()
-        recordings = db.execute("SELECT * FROM recordings WHERE event_id = ? ORDER BY started_at DESC", (row["id"],)).fetchall()
+        recordings = db.execute(
+            """
+            SELECT DISTINCT r.*
+            FROM recordings r
+            WHERE r.event_id = ?
+               OR r.id IN (
+                    SELECT ah.recording_id
+                    FROM alert_history ah
+                    WHERE ah.event_id = ?
+                      AND ah.recording_id IS NOT NULL
+               )
+            ORDER BY r.started_at DESC
+            """,
+            (row["id"], row["id"]),
+        ).fetchall()
         event = dict(row)
         event["metadata"] = json.loads(event.get("metadata") or "{}")
         event["detections"] = [dict(detection) for detection in detections]

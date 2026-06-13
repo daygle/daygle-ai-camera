@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>YAMNet - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell page-stack">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Intelligence</p>
+        <h1>YAMNet</h1>
+        <p class="muted">YAMNet backend status and per-camera sound detector diagnostics.</p>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">🔊</div>
+        <div>
+          <h2>Backend Status</h2>
+          <p class="settings-section-subtitle">YAMNet is preferred. Spectral fallback can be noisier and may need higher thresholds.</p>
+        </div>
+      </div>
+      <div id="yamnetMessage" class="muted"></div>
+      <div id="soundStatusPanel" class="status-panel"></div>
+      <div class="button-row">
+        <button id="refreshSoundStatusBtn" class="secondary" type="button">Refresh</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">📡</div>
+        <div>
+          <h2>Camera Sound Detectors</h2>
+          <p class="settings-section-subtitle">Current state, backend, and recent confidence scores for sound-enabled cameras.</p>
+        </div>
+      </div>
+      <div id="soundCameraStatusList"></div>
+    </section>
+  </main>
+  <script src="/static/nav.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/yamnet.js"></script>
+</body>
+</html>
