@@ -109,6 +109,7 @@ class OnnxYoloDetector:
         categories: list[str] | None = None,
         num_threads: int | None = None,
         max_concurrency: int | None = None,
+        device: str = "auto",
     ) -> None:
         self.model_path = Path(model_path)
         self.labels = load_labels(labels_path, categories)
@@ -119,6 +120,7 @@ class OnnxYoloDetector:
         self.input_name: str | None = None
         self.output_names: list[str] = []
         self.unavailable_reason: str | None = None
+        self._device = device.lower() if device else "auto"
 
         cpu_count = os.cpu_count() or 1
         # Let each inference use multiple cores so it finishes fast, then cap how
@@ -144,11 +146,28 @@ class OnnxYoloDetector:
             return
 
         try:
-            providers = ["CPUExecutionProvider"]
+            available_providers = ort.get_available_providers()
+            use_cuda = (
+                self._device == "cuda"
+                or (self._device == "auto" and "CUDAExecutionProvider" in available_providers)
+            )
+            if use_cuda and "CUDAExecutionProvider" not in available_providers:
+                self.unavailable_reason = (
+                    "device=cuda requested but CUDAExecutionProvider is not available. "
+                    "Install onnxruntime-gpu and ensure CUDA drivers are present."
+                )
+                return
+            providers = (
+                ["CUDAExecutionProvider", "CPUExecutionProvider"]
+                if use_cuda
+                else ["CPUExecutionProvider"]
+            )
             session_options = ort.SessionOptions()
             session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-            session_options.intra_op_num_threads = self._num_threads
-            session_options.inter_op_num_threads = 1
+            if not use_cuda:
+                # Thread tuning only relevant for CPU execution.
+                session_options.intra_op_num_threads = self._num_threads
+                session_options.inter_op_num_threads = 1
             self.session = ort.InferenceSession(str(self.model_path), sess_options=session_options, providers=providers)
             self.input_name = self.session.get_inputs()[0].name
             self.output_names = [output.name for output in self.session.get_outputs()]
@@ -323,4 +342,5 @@ def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
         categories=ai_config.get("categories", []),
         num_threads=_optional_int("inference_threads"),
         max_concurrency=_optional_int("max_concurrent_inferences"),
+        device=str(ai_config.get("device", "auto")),
     )

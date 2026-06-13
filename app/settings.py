@@ -15,6 +15,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ai": {
         "enabled": True,
         "backend": "onnx",
+        "device": "auto",
         "confidence": 0.45,
         "iou_threshold": 0.45,
         "input_size": 640,
