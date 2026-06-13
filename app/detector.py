@@ -160,7 +160,13 @@ class OnnxYoloDetector:
                 )
                 return
             if use_cuda:
-                cuda_options: dict[str, Any] = {"device_id": 0}
+                cuda_options: dict[str, Any] = {
+                    "device_id": 0,
+                    # Allocate on demand rather than greedily pre-allocating all
+                    # available VRAM — prevents the BFC arena from consuming the
+                    # entire GPU and leaving nothing for cuBLAS or other ops.
+                    "arena_extend_strategy": "kSameAsRequested",
+                }
                 if self._gpu_mem_limit is not None:
                     cuda_options["gpu_mem_limit"] = self._gpu_mem_limit
                 providers: list[Any] = [("CUDAExecutionProvider", cuda_options), "CPUExecutionProvider"]
