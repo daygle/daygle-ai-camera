@@ -4117,8 +4117,8 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if device not in ('auto', 'cpu', 'cuda'):
         raise HTTPException(status_code=400, detail="device must be 'auto', 'cpu', or 'cuda'.")
     updated['device'] = device
-    gpu_mem_limit = updated.get('gpu_mem_limit')
-    if gpu_mem_limit is not None:
+    gpu_mem_limit = payload.get('gpu_mem_limit')
+    if gpu_mem_limit is not None and gpu_mem_limit != '':
         try:
             gpu_mem_limit = int(gpu_mem_limit)
             if gpu_mem_limit < 1:
@@ -4126,6 +4126,8 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
             updated['gpu_mem_limit'] = gpu_mem_limit
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail='gpu_mem_limit must be a positive integer (bytes).') from exc
+    else:
+        updated.pop('gpu_mem_limit', None)
     updated['model_path'] = str(updated.get('model_path') or current.get('model_path') or 'models/yolov8n.onnx')
     updated['labels_path'] = str(updated.get('labels_path') or current.get('labels_path') or 'models/coco.names')
     return updated
