@@ -584,8 +584,9 @@ async function sendPtz(command) {
       method: 'POST',
       body: JSON.stringify({ command }),
     });
-  } catch {
-    // silently ignore — camera may be momentarily unreachable
+  } catch (err) {
+    console.warn('PTZ command failed:', command, err.message);
+    window.showToast?.(`PTZ error: ${err.message}`, true);
   }
 }
 
