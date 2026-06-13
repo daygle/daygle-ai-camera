@@ -9,7 +9,5 @@ ultralytics>=8.3,<9.0
 opencv-python-headless>=4.9,<5.0
 python-multipart>=0.0.9,<1.0
 sounddevice>=0.4,<1.0
-# YAMNet neural audio classifier (accurate sound detection).
-# Substitute tensorflow-cpu for ~150 MB smaller install on CPU-only systems.
-tensorflow>=2.13,<3.0
-tensorflow-hub>=0.15,<1.0
+# CPU-only YAMNet sound classifier runtime.
+ai-edge-litert>=1.2,<2.0

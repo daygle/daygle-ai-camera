@@ -13,7 +13,7 @@
       <div>
         <p class="eyebrow">Intelligence</p>
         <h1>YAMNet</h1>
-        <p class="muted">YAMNet backend status and per-camera sound detector diagnostics.</p>
+        <p class="muted">CPU-only YAMNet TFLite status and per-camera sound detector diagnostics.</p>
       </div>
     </header>
 
@@ -22,7 +22,7 @@
         <div class="settings-section-icon">🔊</div>
         <div>
           <h2>Backend Status</h2>
-          <p class="settings-section-subtitle">YAMNet is preferred. Spectral fallback can be noisier and may need higher thresholds.</p>
+          <p class="settings-section-subtitle">YAMNet TFLite runs on CPU. If it is unavailable, sound alerts are not emitted.</p>
         </div>
       </div>
       <div id="yamnetMessage" class="muted"></div>

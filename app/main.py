@@ -4683,12 +4683,17 @@ def get_sound_status(camera_id: str | None = Query(None)):
         if det is not None:
             status['running'] = det.running
             status['detector_status'] = det.status
+            status['backend'] = det.backend
+            status['backend_reason'] = det.backend_reason
             status['last_confidences'] = {k: round(v, 3) for k, v in det.last_confidences().items()}
         else:
             status['running'] = False
             status['detector_status'] = status.get('state', 'stopped')
             status['last_confidences'] = {}
         return status
+
+    with _sound_detectors_lock:
+        detectors = list(_sound_detectors.values())
 
     if not statuses:
         return {'state': 'disabled', 'running': False, 'detector_status': 'disabled', 'last_confidences': {}}
@@ -4702,8 +4707,13 @@ def get_sound_status(camera_id: str | None = Query(None)):
     if not most_recent:
         most_recent = next(iter(statuses.values()))
     result = dict(most_recent)
-    result['running'] = any(s.get('state') == 'listening' for s in statuses.values())
+    running_detectors = [det for det in detectors if det.running]
+    representative = running_detectors[0] if running_detectors else (detectors[0] if detectors else None)
+    result['running'] = bool(running_detectors) or any(s.get('state') == 'listening' for s in statuses.values())
     result['detector_status'] = most_recent.get('state', 'stopped')
+    if representative is not None:
+        result['backend'] = representative.backend
+        result['backend_reason'] = representative.backend_reason
     result['last_confidences'] = {}
     return result
 
