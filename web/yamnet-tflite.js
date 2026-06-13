@@ -120,7 +120,7 @@ function cameraLabel(camera) {
 
 function renderOverall(status, enabledCameras) {
   const backend = status.backend || 'none';
-  statusPanel.className = `status-panel ${backendTone(backend)}`;
+  statusPanel.className = `status-panel yamnet-status-grid ${backendTone(backend)}`;
   statusPanel.innerHTML = `
     <div><span>Backend</span><strong>${escapeHtml(displayValue(backend, 'None'))}</strong></div>
     <div><span>Running</span><strong>${yesNo(status.running)}</strong></div>
@@ -197,7 +197,7 @@ async function loadSoundStatus() {
     renderCameraStatuses(rows);
   } catch (error) {
     messageEl.textContent = error.message;
-    statusPanel.className = 'status-panel status-error';
+    statusPanel.className = 'status-panel yamnet-status-grid status-error';
     statusPanel.innerHTML = `<div><span>Status</span><strong>${escapeHtml(error.message)}</strong></div>`;
     cameraList.innerHTML = '';
   } finally {

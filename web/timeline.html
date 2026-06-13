@@ -99,6 +99,11 @@
           <span class="field-help">All timeline data is scoped to the selected camera. Default: first camera</span>
         </label>
         <label>
+          <span>Filter</span>
+          <select id="timelineFilterSelect" aria-label="Filter by trigger type"></select>
+          <span class="field-help">Limit clips to a specific trigger or detected object. Default: all recordings</span>
+        </label>
+        <label>
           <span>Day</span>
           <input id="timelineDate" type="date" aria-label="Timeline day" />
           <span class="field-help">Pick the date to visualise. Default: today</span>
@@ -112,11 +117,6 @@
           <span>To</span>
           <input id="timelineToTime" type="time" value="23:59" aria-label="End time" />
           <span class="field-help">Latest time of day to include. Default: 23:59</span>
-        </label>
-        <label>
-          <span>Filter</span>
-          <select id="timelineFilterSelect" aria-label="Filter by trigger type"></select>
-          <span class="field-help">Limit clips to a specific trigger or detected object. Default: all recordings</span>
         </label>
       </form>
     </section>

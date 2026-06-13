@@ -45,11 +45,11 @@
         <div class="settings-section-icon">🎬</div>
         <div>
           <h2>Recordings Library</h2>
-          <p class="settings-section-subtitle">Browse, play, and delete recorded clips. Use the filters to narrow down by camera or object label.</p>
+          <p class="settings-section-subtitle">Browse, play, and delete recorded clips. Use the filters to narrow down by camera, label, date, or time.</p>
         </div>
         <div class="button-row recordings-toolbar-actions">
-          <button id="deleteAllRecordingsBtn" class="secondary delete-btn" type="button" hidden>Delete All Recordings</button>
-          <button id="recordingClearBtn" class="secondary" type="button">Reset Filters</button>
+          <button id="deleteAllRecordingsBtn" class="secondary delete-btn" type="button" hidden><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>Delete All Recordings</button>
+          <button id="recordingClearBtn" class="secondary" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg>Reset Filters</button>
         </div>
       </div>
 
@@ -76,9 +76,19 @@
           <span class="field-help">Earliest capture date (inclusive). Default: any date</span>
         </label>
         <label>
+          <span>From Time</span>
+          <input id="recordingTimeFrom" type="time" value="00:00" aria-label="Filter by start time" />
+          <span class="field-help">Earliest time on the from date. Default: 00:00</span>
+        </label>
+        <label>
           <span>To Date</span>
           <input id="recordingDateTo" type="date" aria-label="Filter by end date" />
           <span class="field-help">Latest capture date (inclusive). Default: any date</span>
+        </label>
+        <label>
+          <span>To Time</span>
+          <input id="recordingTimeTo" type="time" value="23:59" aria-label="Filter by end time" />
+          <span class="field-help">Latest time on the to date. Default: 23:59</span>
         </label>
         <label>
           <span>Sort By</span>

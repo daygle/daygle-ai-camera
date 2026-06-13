@@ -24,6 +24,10 @@ const filter = {
   form: document.getElementById('camerasFilterForm'),
 };
 
+const ICON_EDIT = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>';
+const ICON_REMOVE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+const ICON_VIEW_LIVE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>';
+
 function setMessage(text, isError = false) {
   messageEl.textContent = text;
   messageEl.className = isError ? 'error' : 'muted';
@@ -100,8 +104,8 @@ function renderCameraCard(camera, index) {
         </div>
         <div class="cam-card-actions">
           ${cameraStatusBadge(camera)}
-          <button class="secondary cam-edit-btn" data-index="${index}" type="button">Edit</button>
-          <button class="secondary delete-btn cam-remove-btn" data-index="${index}" type="button">Remove</button>
+          <button class="secondary cam-edit-btn" data-index="${index}" type="button">${ICON_EDIT}Edit</button>
+          <button class="secondary delete-btn cam-remove-btn" data-index="${index}" type="button">${ICON_REMOVE}Remove</button>
         </div>
       </div>
 
@@ -132,7 +136,7 @@ function renderCameraCard(camera, index) {
       </div>
 
       <div class="cam-card-footer">
-        <a class="button-link secondary-link cam-live-link" href="/live?camera=${encodeURIComponent(camera.id || '')}">View Live</a>
+        <a class="button-link secondary-link cam-live-link" href="/live?camera=${encodeURIComponent(camera.id || '')}">${ICON_VIEW_LIVE}View Live</a>
         <div class="cam-footer-links">
           <a class="cam-footer-hint muted" href="/zones?camera=${encodeURIComponent(camera.id || '')}">Zones &amp; Alerts</a>
           <a class="cam-footer-hint muted" href="/sounds?camera=${encodeURIComponent(camera.id || '')}">Sound</a>

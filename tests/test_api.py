@@ -3174,6 +3174,7 @@ def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, m
     assert event_id is not None, "Event must be created for record-only zone detection"
     event = main.database.get_event(event_id)
     assert any(d['label'] == 'cat' for d in event['detections']), "Cat must appear in event detections"
+    assert any(d['label'] == 'cat' and d['zone_name'] == 'Porch' for d in event['detections']), "Cat detection must keep its zone name"
     assert event['recording_status'] == 'linked', "Recording must be linked for record-only zone rule"
 
 
@@ -3229,6 +3230,7 @@ def test_zone_detection_creates_alert_and_recording(tmp_path, monkeypatch, label
     assert event_id is not None
     event = main.database.get_event(event_id)
     assert any(d['label'] == label for d in event['detections'])
+    assert any(d['label'] == label and d['zone_name'] == 'Full Frame' for d in event['detections'])
     assert event['recording_status'] == 'linked'
     assert event['recordings'][0]['trigger_label'] == label
     alerts = main.database.alerts(limit=10)

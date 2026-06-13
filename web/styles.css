@@ -242,6 +242,16 @@ h2 { margin: 0; font-size: 20px; }
 }
 button.secondary, a.secondary { background: var(--panel-strong); color: var(--text); border: 1px solid var(--border); text-decoration: none; }
 a.secondary { display: inline-flex; align-items: center; border-radius: 14px; padding: 12px 16px; font-weight: 800; cursor: pointer; }
+.daygle-icon-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1;
+}
+.daygle-icon-button > svg {
+  display: block;
+  flex-shrink: 0;
+}
 button.delete-btn { color: #f87171; border-color: rgba(248,113,113,.35); }
 button.delete-btn:hover { background: rgba(248,113,113,.12); border-color: #f87171; }
 input,
@@ -341,6 +351,12 @@ input[type="file"] { padding: 10px; }
 .status-panel.status-ok { border: 1px solid rgba(73,230,163,.4); background: rgba(73,230,163,.07); border-radius: 10px; padding: 10px 14px; grid-template-columns: 1fr; }
 .status-panel.status-warning { border: 1px solid rgba(251,191,36,.4); background: rgba(251,191,36,.07); border-radius: 10px; padding: 10px 14px; grid-template-columns: 1fr; }
 .status-panel.status-error { border: 1px solid rgba(248,113,113,.4); background: rgba(248,113,113,.07); border-radius: 10px; padding: 10px 14px; grid-template-columns: 1fr; }
+.yamnet-status-grid.status-panel,
+.yamnet-status-grid.status-panel.status-ok,
+.yamnet-status-grid.status-panel.status-warning,
+.yamnet-status-grid.status-panel.status-error {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
 .update-output { background: rgba(0,0,0,.4); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; font-size: 12px; line-height: 1.6; overflow-x: auto; white-space: pre-wrap; max-height: 320px; overflow-y: auto; margin-top: 12px; color: var(--muted); }
 .danger-zone-card {
   border-color: rgba(248,113,113,.5);
@@ -442,6 +458,7 @@ input[type="file"] { padding: 10px; }
   .recordings-search-row { grid-template-columns: minmax(0, 1fr) auto auto; }
   .recordings-search-row select { grid-column: 1 / -1; }
   .form-grid, .user-row, .status-panel { grid-template-columns: 1fr; }
+  .yamnet-status-grid.status-panel { grid-template-columns: 1fr; }
 }
 .link-button {
   border: 0;
@@ -644,9 +661,9 @@ input[type="file"] { padding: 10px; }
 }
 .clip-overlay {
   position: absolute;
-  inset: 0;
+  inset: 0 0 42px;
   width: 100%;
-  height: 100%;
+  height: auto;
   pointer-events: none;
   border-radius: 16px;
 }
@@ -772,6 +789,18 @@ input[type="file"] { padding: 10px; }
 }
 .zone-object-rule > input { align-self: end; }
 .zone-object-rule button { align-self: end; justify-self: start; }
+.zone-action-btn,
+.zone-editor-footer button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1;
+}
+.zone-action-btn svg,
+.zone-editor-footer button svg {
+  display: block;
+  flex-shrink: 0;
+}
 .compact-empty { padding: 6px 0; }
 .compact-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
 .button-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
@@ -813,6 +842,16 @@ input[type="file"] { padding: 10px; }
   padding: 0;
   border-top: 0;
   justify-content: flex-end;
+}
+.recordings-toolbar-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1;
+}
+.recordings-toolbar-actions button svg {
+  display: block;
+  flex-shrink: 0;
 }
 .recordings-list-status {
   margin: 0;
@@ -1155,9 +1194,20 @@ input[type="file"] { padding: 10px; }
 }
 
 .cam-card-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px 13px;
   border-radius: 11px;
   font-size: 13px;
+  line-height: 1;
+}
+
+.cam-card-actions button svg,
+.cam-live-link svg,
+.cameras-filter-actions button svg {
+  display: block;
+  flex-shrink: 0;
 }
 
 .cam-badge {
@@ -1265,9 +1315,11 @@ input[type="file"] { padding: 10px; }
 }
 
 .cam-live-link {
+  gap: 6px;
   padding: 9px 14px;
   font-size: 13px;
   border-radius: 11px;
+  line-height: 1;
 }
 
 /* Empty state */
@@ -1933,6 +1985,17 @@ input[type="file"] { padding: 10px; }
   border-top: 0;
   justify-content: flex-end;
 }
+.activity-toolbar-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1;
+}
+.activity-toolbar-actions button svg,
+.activity-item-action svg {
+  display: block;
+  flex-shrink: 0;
+}
 .activity-filter-row {
   display: flex;
   align-items: center;
@@ -2544,6 +2607,12 @@ a.activity-item-action {
   padding: 0;
   border-top: 0;
   justify-content: flex-start;
+}
+.cameras-filter-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1;
 }
 .cameras-filter-actions > span:first-child {
   display: block;

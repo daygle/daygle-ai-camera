@@ -224,8 +224,8 @@ let _lastKnownDims = null;
 function resizeOverlayCanvas(canvas, referenceEl) {
   if (!canvas || !referenceEl) return;
   const dpr = window.devicePixelRatio || 1;
-  const cssWidth = Math.max(1, referenceEl.clientWidth);
-  const cssHeight = Math.max(1, referenceEl.clientHeight);
+  const cssWidth = Math.max(1, canvas.clientWidth || referenceEl.clientWidth);
+  const cssHeight = Math.max(1, canvas.clientHeight || referenceEl.clientHeight);
   _lastKnownDims = { cssWidth, cssHeight, dpr };
   const w = Math.max(1, Math.round(cssWidth * dpr));
   const h = Math.max(1, Math.round(cssHeight * dpr));

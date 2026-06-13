@@ -383,6 +383,11 @@ function recordingColorKey(recording) {
 }
 
 function recordingTriggerSummary(recording) {
+  const confidenceSummary = recordingDetectionSummary(recording)
+    .filter((d) => d.confidence > 0)
+    .map((d) => `${titleCase(d.label)} ${Math.round(d.confidence * 100)}%`)
+    .join(' / ');
+  if (confidenceSummary) return confidenceSummary;
   if (isSoundRecording(recording)) {
     return `🔊 ${recordingTypeLabel(recording)}`;
   }
@@ -695,8 +700,8 @@ function renderTimeline(payload) {
         title="${escapeHtml(`${recordingTriggerSummary(recording)} · ${formatClock(origStart)} · ${formatDuration(recording.duration_seconds)}${recordingConfidenceText(recording)}`)}"
         style="left:${left}%;width:${width}%;top:${recording.rowIndex * TIMELINE_ROW_HEIGHT + 8}px;--segment-color:${color};"
       >
-        <span class="timeline-segment-label">${escapeHtml(timelineSegmentLabel(recording))}</span>
-        <span class="timeline-segment-time">${escapeHtml(formatClock(origStart))}</span>
+        <span class="timeline-segment-label" hidden>${escapeHtml(timelineSegmentLabel(recording))}</span>
+        <span class="timeline-segment-time" hidden>${escapeHtml(formatClock(origStart))}</span>
       </button>
     `;
   }).join('');
@@ -746,11 +751,8 @@ function renderRecordingList(recordings) {
   }).join('');
 }
 
-function recordingConfidenceText(recording) {
-  return recordingDetectionSummary(recording)
-    .filter((d) => d.confidence > 0)
-    .map((d) => ` · ${titleCase(d.label)} ${Math.round(d.confidence * 100)}%`)
-    .join('');
+function recordingConfidenceText() {
+  return '';
 }
 
 function renderRecordingDetails(recording) {
@@ -762,11 +764,12 @@ function renderRecordingDetails(recording) {
   const detectionLabel = isSound ? 'Sound' : 'Detections';
   const zones = recordingZoneNames(recording);
   const zoneRow = zones.length ? `<div><span>Zone</span><strong>${zones.map(escapeHtml).join(', ')}</strong></div>` : '';
+  const triggerRow = detections.length ? '' : `<div><span>Trigger</span><strong>${escapeHtml(recordingTriggerSummary(recording))}</strong></div>`;
   els.recordingDetails.innerHTML = `
     <div><span>Recording</span><strong><a href="/recordings?recording_id=${recording.id}" class="timeline-recording-link">#${recording.id} ↗</a></strong></div>
     <div><span>Camera</span><strong>${escapeHtml(cameraLabel(recording))}</strong></div>
     ${zoneRow}
-    <div><span>Trigger</span><strong>${escapeHtml(recordingTriggerSummary(recording))}</strong></div>
+    ${triggerRow}
     <div><span>Started</span><strong>${escapeHtml(formatDateTime(recording.started_at))}</strong></div>
     <div><span>Duration</span><strong>${escapeHtml(formatDuration(recording.duration_seconds))}</strong></div>
     <div class="wide"><span>${detectionLabel}</span><strong class="recording-detail-detections">${detectionBadges}</strong></div>

@@ -2,7 +2,9 @@ const els = {
   recordings: document.getElementById('recordings'),
   cameraFilter: document.getElementById('cameraFilter'),
   recordingDateFrom: document.getElementById('recordingDateFrom'),
+  recordingTimeFrom: document.getElementById('recordingTimeFrom'),
   recordingDateTo: document.getElementById('recordingDateTo'),
+  recordingTimeTo: document.getElementById('recordingTimeTo'),
   recordingSort: document.getElementById('recordingSort'),
   recordingSearchBtn: document.getElementById('recordingSearchBtn'),
   recordingClearBtn: document.getElementById('recordingClearBtn'),
@@ -159,14 +161,32 @@ function updateFilterStat(label, hint) {
   els.statFilterHint.textContent = hint;
 }
 
-function formatIsoDateForFilter(dateString, endOfDay = false) {
+function parseFilterTimeParts(timeString, fallbackHour, fallbackMinute, fallbackSecond = 0, fallbackMillisecond = 0) {
+  const match = String(timeString || '').match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return {
+      hour: fallbackHour,
+      minute: fallbackMinute,
+      second: fallbackSecond,
+      millisecond: fallbackMillisecond,
+    };
+  }
+  const hour = Math.min(23, Math.max(0, Number.parseInt(match[1], 10) || 0));
+  const minute = Math.min(59, Math.max(0, Number.parseInt(match[2], 10) || 0));
+  return { hour, minute, second: fallbackSecond, millisecond: fallbackMillisecond };
+}
+
+function formatIsoDateForFilter(dateString, endOfDay = false, timeString = '') {
   if (!dateString) return '';
   // The browser returns YYYY-MM-DD without a timezone. Anchor from/to bounds
-  // to the start/end of the day in local time so the filter feels intuitive
-  // (a chosen "To" date should include recordings from that day).
+  // in local time so the filter feels intuitive. When a time is provided, it
+  // refines the selected date into an exact local datetime boundary.
   const [year, month, day] = dateString.split('-').map((part) => Number.parseInt(part, 10));
   if (!year || !month || !day) return '';
-  const date = new Date(year, month - 1, day, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0, 0);
+  const fallback = endOfDay
+    ? parseFilterTimeParts(timeString, 23, 59, 59, 999)
+    : parseFilterTimeParts(timeString, 0, 0);
+  const date = new Date(year, month - 1, day, fallback.hour, fallback.minute, fallback.second, fallback.millisecond);
   return date.toISOString();
 }
 
@@ -177,7 +197,9 @@ function currentFilterValues() {
     label: els.labelFilter?.value || '',
     cameraId: els.cameraFilter?.value || '',
     dateFrom: els.recordingDateFrom?.value || '',
+    timeFrom: els.recordingTimeFrom?.value || '00:00',
     dateTo: els.recordingDateTo?.value || '',
+    timeTo: els.recordingTimeTo?.value || '23:59',
     sort: els.recordingSort?.value || 'newest',
   };
 }
@@ -192,8 +214,8 @@ function describeFilters(filters) {
     const cameraOption = Array.from(els.cameraFilter?.options || []).find((o) => o.value === filters.cameraId);
     parts.push(`camera “${cameraOption?.textContent || filters.cameraId}”`);
   }
-  if (filters.dateFrom) parts.push(`from ${formatUserDate(filters.dateFrom)}`);
-  if (filters.dateTo) parts.push(`through ${formatUserDate(filters.dateTo)}`);
+  if (filters.dateFrom) parts.push(`from ${formatUserDate(filters.dateFrom)} ${filters.timeFrom || '00:00'}`);
+  if (filters.dateTo) parts.push(`through ${formatUserDate(filters.dateTo)} ${filters.timeTo || '23:59'}`);
   return parts;
 }
 
@@ -631,9 +653,9 @@ async function loadRecordings(filters = {}) {
   const params = new URLSearchParams();
   if (resolved.label) params.set('label', resolved.label);
   if (resolved.cameraId) params.set('camera_id', resolved.cameraId);
-  const startedAfter = formatIsoDateForFilter(resolved.dateFrom);
+  const startedAfter = formatIsoDateForFilter(resolved.dateFrom, false, resolved.timeFrom);
   if (startedAfter) params.set('started_after', startedAfter);
-  const startedBefore = formatIsoDateForFilter(resolved.dateTo, true);
+  const startedBefore = formatIsoDateForFilter(resolved.dateTo, true, resolved.timeTo);
   if (startedBefore) params.set('started_before', startedBefore);
   if (resolved.sort) params.set('sort', resolved.sort);
   const queryString = params.toString();
@@ -712,7 +734,9 @@ els.recordingClearBtn.addEventListener('click', () => {
   if (els.labelFilter) els.labelFilter.value = '';
   if (els.cameraFilter) els.cameraFilter.value = '';
   if (els.recordingDateFrom) els.recordingDateFrom.value = '';
+  if (els.recordingTimeFrom) els.recordingTimeFrom.value = '00:00';
   if (els.recordingDateTo) els.recordingDateTo.value = '';
+  if (els.recordingTimeTo) els.recordingTimeTo.value = '23:59';
   if (els.recordingSort) els.recordingSort.value = 'newest';
   loadRecordings();
 });

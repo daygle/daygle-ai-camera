@@ -10,6 +10,8 @@ let drawingMode = false;
 let draftPolygon = null;
 let zoneDrag = null;
 
+const ZONE_ICON_REMOVE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+
 function rectanglePoints(zone) {
   const x = clamp(Number(zone.x) || 0);
   const y = clamp(Number(zone.y) || 0);
@@ -183,7 +185,7 @@ function renderObjectRules(zone, zoneIndex) {
       <div class="sound-rule-row">
         <div class="sound-rule-row-header">
           <span class="sound-rule-name">${label}</span>
-          <button class="secondary delete-btn" type="button" data-delete-zone-rule="${key}">Remove</button>
+          <button class="secondary delete-btn zone-action-btn" type="button" data-delete-zone-rule="${key}">${ZONE_ICON_REMOVE}Remove</button>
         </div>
         <div class="sound-rule-row-fields">
           <label class="sound-rule-field">
@@ -238,7 +240,7 @@ function renderZones() {
       <div class="zone-row-main">
         <input data-zone-name="${index}" value="${escapeHtml(zone.name || `Zone ${index + 1}`)}" />
         <label><span>Zone</span><select data-zone-enabled="${index}"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Shown</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
-        <button class="secondary" type="button" data-delete-zone="${index}">Remove</button>
+        <button class="secondary delete-btn zone-action-btn" type="button" data-delete-zone="${index}">${ZONE_ICON_REMOVE}Remove</button>
       </div>
     </div>
   `).join('');

@@ -1025,6 +1025,16 @@ def zone_alert_detections(settings: dict[str, Any], detections: list[dict[str, A
     return matched
 
 
+def zone_name_for_detection(settings: dict[str, Any], detection: dict[str, Any]) -> str | None:
+    for action in ('alert', 'record'):
+        matches = zone_object_rule_matches(settings, detection, action=action)
+        if matches:
+            zone = matches[0][0]
+            zone_name = str(zone.get('name') or zone.get('id') or '').strip()
+            return zone_name or None
+    return None
+
+
 def zone_record_on_detect(detection: dict[str, Any], settings: dict[str, Any]) -> bool:
     return bool(zone_object_rule_matches(settings, detection, action='record'))
 
@@ -1790,9 +1800,8 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _confident_object_detections: list[dict[str, Any]] = []
     if zone_rules:
         for _det in object_detections:
-            _zone_matches = zone_object_rule_matches(settings, _det, action='alert')
-            if _zone_matches or zone_record_on_detect(_det, settings):
-                _zone_name = (str(_zone_matches[0][0].get('name') or _zone_matches[0][0].get('id') or '')) if _zone_matches else None
+            _zone_name = zone_name_for_detection(settings, _det)
+            if _zone_name or zone_record_on_detect(_det, settings):
                 _confident_object_detections.append({**_det, 'zone_name': _zone_name or None})
     else:
         _confident_object_detections = list(object_detections)

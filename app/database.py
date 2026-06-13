@@ -56,6 +56,7 @@ class EventDatabase:
                     snapshot_path TEXT,
                     thumbnail_path TEXT,
                     alert_triggered INTEGER DEFAULT 0,
+                    dismissed INTEGER NOT NULL DEFAULT 0,
                     metadata TEXT DEFAULT '{}'
                 );
 
@@ -68,6 +69,7 @@ class EventDatabase:
                     y REAL NOT NULL,
                     width REAL NOT NULL,
                     height REAL NOT NULL,
+                    zone_name TEXT,
                     FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
                 );
 
@@ -80,6 +82,7 @@ class EventDatabase:
                     confidence REAL NOT NULL,
                     message TEXT NOT NULL,
                     recording_id INTEGER,
+                    dismissed INTEGER NOT NULL DEFAULT 0,
                     FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
                     FOREIGN KEY(recording_id) REFERENCES recordings(id) ON DELETE SET NULL
                 );
