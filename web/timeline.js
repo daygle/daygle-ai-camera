@@ -93,6 +93,11 @@ const GENERIC_TIMELINE_LABELS = new Set(['motion', 'alert', 'human', 'object', '
 
 const DETECTION_EYE_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg>';
 
+function recordingZoneNames(recording) {
+  if (isSoundRecording(recording)) return [];
+  return [...new Set((recording.detections || []).map((d) => d.zone_name).filter(Boolean))];
+}
+
 function detectionPill(label, confidence, isSound) {
   const display = isSound
     ? titleCase(String(label).replace(/_/g, ' '))
@@ -403,9 +408,17 @@ function recordingFilterTokens(recording) {
   return tokens;
 }
 
+function filterDisplayLabel(value) {
+  if (value === '__sound__') return 'Sound';
+  if (value === '__object__') return 'Object';
+  return titleCase(value || '');
+}
+
 function matchesRecordingFilter(recording, filterValue) {
   const normalized = String(filterValue || '').trim().toLowerCase();
   if (!normalized) return true;
+  if (normalized === '__sound__') return isSoundRecording(recording);
+  if (normalized === '__object__') return !isSoundRecording(recording);
   if (normalized === 'motion') {
     const triggerType = recordingTriggerType(recording);
     return !['continuous', 'off', 'none'].includes(triggerType);
@@ -473,8 +486,12 @@ function populateFilterOptions(recordings) {
     labels.forEach((label) => { counts[label] = (counts[label] || 0) + 1; });
   });
 
+  const soundCount = recordings.filter(isSoundRecording).length;
+  const objectCount = recordings.length - soundCount;
   const options = [{ value: '', label: `All recordings${recordings.length ? ` (${recordings.length})` : ''}` }];
-  const seen = new Set(['']);
+  if (soundCount > 0) options.push({ value: '__sound__', label: `Sound (${soundCount})` });
+  if (objectCount > 0) options.push({ value: '__object__', label: `Object (${objectCount})` });
+  const seen = new Set(['', '__sound__', '__object__']);
   const addOption = (value) => {
     const normalized = String(value || '').trim().toLowerCase();
     if (!normalized || seen.has(normalized)) return;
@@ -534,7 +551,7 @@ function renderSummary(payload, totalRecordingCount) {
         els.statClipsSub.textContent = `${recordings.length} of ${totalRecordingCount} clips match the filter`;
       } else {
         els.statClipsSub.textContent = els.filterSelect.value
-          ? `Matching “${els.filterSelect.value}”`
+          ? `Matching “${filterDisplayLabel(els.filterSelect.value)}”`
           : 'Matching the current filter';
       }
     }
@@ -698,6 +715,8 @@ function renderRecordingList(recordings) {
       .map((d) => `${titleCase(d.label)} · ${Math.round(d.confidence * 100)}%`)
       .join('\n');
     const typeLabel = isSound ? 'Sound' : 'Object';
+    const zones = recordingZoneNames(recording);
+    const zoneSuffix = zones.length ? ` · ${zones.map(escapeHtml).join(', ')}` : '';
     return `
       <button class="timeline-recording-item${activeClass}" type="button" data-recording-id="${recording.id}" data-tooltip="${escapeHtml(tooltip)}">
         <span class="timeline-recording-color" style="background:${color}"></span>
@@ -706,7 +725,7 @@ function renderRecordingList(recordings) {
             <span class="activity-item-type">${typeLabel}</span>
             <strong>Recording #${recording.id}</strong>
           </span>
-          <span>${escapeHtml(start)} – ${escapeHtml(end)} · ${camera}</span>
+          <span>${escapeHtml(start)} – ${escapeHtml(end)} · ${camera}${zoneSuffix}</span>
           ${confidenceBadges ? `<span class="timeline-recording-confidence-row">${confidenceBadges}</span>` : ''}
         </span>
         <span class="timeline-recording-meta">
@@ -731,9 +750,12 @@ function renderRecordingDetails(recording) {
     ? detections.map((d) => detectionPill(d.label, d.confidence, isSound)).join(' ')
     : 'none';
   const detectionLabel = isSound ? 'Sound' : 'Detections';
+  const zones = recordingZoneNames(recording);
+  const zoneRow = zones.length ? `<div><span>Zone</span><strong>${zones.map(escapeHtml).join(', ')}</strong></div>` : '';
   els.recordingDetails.innerHTML = `
     <div><span>Recording</span><strong><a href="/recordings?recording_id=${recording.id}" class="timeline-recording-link">#${recording.id} ↗</a></strong></div>
     <div><span>Camera</span><strong>${escapeHtml(cameraLabel(recording))}</strong></div>
+    ${zoneRow}
     <div><span>Trigger</span><strong>${escapeHtml(recordingTriggerSummary(recording))}</strong></div>
     <div><span>Started</span><strong>${escapeHtml(formatDateTime(recording.started_at))}</strong></div>
     <div><span>Duration</span><strong>${escapeHtml(formatDuration(recording.duration_seconds))}</strong></div>
@@ -837,7 +859,7 @@ async function renderFilteredTimeline({ preserveSelection = true } = {}) {
     return;
   }
 
-  const filterLabel = els.filterSelect.value ? ` matching ${titleCase(els.filterSelect.value)}` : '';
+  const filterLabel = els.filterSelect.value ? ` matching ${filterDisplayLabel(els.filterSelect.value)}` : '';
   const { fromSeconds, toSeconds } = getTimeRangeConfig();
   const timeRangeLabel = (fromSeconds > 0 || toSeconds < DAY_SECONDS)
     ? ` from ${formatUserClock(fromSeconds)} to ${formatUserClock(toSeconds)}`

@@ -64,9 +64,18 @@
           <span class="field-help">Limit results to a specific camera. Default: every camera</span>
         </label>
         <label>
-          <span>Object Label</span>
-          <input id="recordingFilter" placeholder="e.g. person, car, dog" />
-          <span class="field-help">Type an object label to keep only clips that detected it. Default: all clips</span>
+          <span>Recording Type</span>
+          <select id="recordingTypeFilter" aria-label="Filter by recording type">
+            <option value="">All Types</option>
+            <option value="object">Object</option>
+            <option value="sound">Sound</option>
+          </select>
+          <span class="field-help">Limit results to object or sound recordings. Default: all types</span>
+        </label>
+        <label>
+          <span>Label</span>
+          <input id="recordingFilter" placeholder="e.g. person, car, cat_meow" />
+          <span class="field-help">Type a label to keep only clips that detected it. Default: all clips</span>
         </label>
         <label>
           <span>From Date</span>

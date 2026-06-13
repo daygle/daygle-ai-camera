@@ -340,6 +340,7 @@ class EventDatabase:
         started_after: str | None = None,
         started_before: str | None = None,
         sort: str = 'newest',
+        source_type: str | None = None,
     ) -> list[dict[str, Any]]:
         with self.connect() as db:
             conditions: list[str] = []
@@ -364,6 +365,10 @@ class EventDatabase:
             if started_before:
                 conditions.append("r.started_at <= ?")
                 params.append(started_before)
+            if source_type == 'sound':
+                conditions.append("EXISTS (SELECT 1 FROM events e WHERE e.id = r.event_id AND e.source = 'sound')")
+            elif source_type == 'object':
+                conditions.append("(r.event_id IS NULL OR NOT EXISTS (SELECT 1 FROM events e WHERE e.id = r.event_id AND e.source = 'sound'))")
 
             where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 

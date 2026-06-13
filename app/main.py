@@ -3671,6 +3671,7 @@ def recordings(
     started_after: str | None = Query(None, description='ISO timestamp; include recordings started at or after this time.'),
     started_before: str | None = Query(None, description='ISO timestamp; include recordings started at or before this time.'),
     sort: str = Query('newest', pattern='^(newest|oldest)$', description='Sort order by started_at. Default: newest.'),
+    source_type: str | None = Query(None, pattern='^(sound|object)$', description='Filter by recording type: sound or object.'),
 ):
     return database.list_recordings(
         label=label,
@@ -3680,6 +3681,7 @@ def recordings(
         started_after=started_after,
         started_before=started_before,
         sort=sort,
+        source_type=source_type,
     )
 
 

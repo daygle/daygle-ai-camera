@@ -1,6 +1,7 @@
 const els = {
   recordings: document.getElementById('recordings'),
   cameraFilter: document.getElementById('cameraFilter'),
+  recordingTypeFilter: document.getElementById('recordingTypeFilter'),
   recordingFilter: document.getElementById('recordingFilter'),
   recordingDateFrom: document.getElementById('recordingDateFrom'),
   recordingDateTo: document.getElementById('recordingDateTo'),
@@ -171,6 +172,7 @@ function formatIsoDateForFilter(dateString, endOfDay = false) {
 
 function currentFilterValues() {
   return {
+    sourceType: els.recordingTypeFilter?.value || '',
     label: els.recordingFilter.value.trim(),
     cameraId: els.cameraFilter?.value || '',
     dateFrom: els.recordingDateFrom?.value || '',
@@ -181,6 +183,7 @@ function currentFilterValues() {
 
 function describeFilters(filters) {
   const parts = [];
+  if (filters.sourceType) parts.push(`type “${filters.sourceType}”`);
   if (filters.label) parts.push(`label “${filters.label}”`);
   if (filters.cameraId) {
     const cameraOption = Array.from(els.cameraFilter?.options || []).find((o) => o.value === filters.cameraId);
@@ -224,7 +227,10 @@ function renderRecordings(recordings) {
     const icon = isSound
       ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>'
       : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>';
-    const metaParts = [`Camera: ${escapeHtml(cameraLabel(recording))}`, `Duration: ${Number(recording.duration_seconds || 0).toFixed(1)}s`];
+    const zones = recordingZoneNames(recording);
+    const metaParts = [`Camera: ${escapeHtml(cameraLabel(recording))}`];
+    if (zones.length) metaParts.push(`Zone: ${zones.map(escapeHtml).join(', ')}`);
+    metaParts.push(`Duration: ${Number(recording.duration_seconds || 0).toFixed(1)}s`);
     if (!mediaReady) metaParts.push('Preparing...');
     const badges = recordingDetectionSummary(recording).map((d) => detectionPill(d.label, d.confidence, isSound)).join('') || '<span class="muted">No detections</span>';
     return `
@@ -272,6 +278,11 @@ function isSoundRecording(recording) {
   return recording?.event?.metadata?.source === 'sound-detection';
 }
 
+function recordingZoneNames(recording) {
+  if (isSoundRecording(recording)) return [];
+  return [...new Set((recording.detections || []).map((d) => d.zone_name).filter(Boolean))];
+}
+
 function triggerBadgeClass(trigger, recording) {
   if (recording && isSoundRecording(recording)) return 'chip-sound';
   const t = String(trigger || '').toLowerCase();
@@ -314,10 +325,13 @@ function renderRecordingDetails(recording) {
     ? detections.map((d) => detectionPill(d.label, d.confidence, isSound)).join(' ')
     : 'none';
   const detectionLabel = isSound ? 'Sound' : 'Detections';
+  const zones = recordingZoneNames(recording);
+  const zoneRow = zones.length ? `<div><span>Zone</span><strong>${zones.map(escapeHtml).join(', ')}</strong></div>` : '';
   els.recordingDetails.innerHTML = `
     <div><span>Recording</span><strong>#${recording.id}</strong></div>
     <div><span>Event</span><strong>${recording.event_id || 'none'}</strong></div>
     <div><span>Camera</span><strong>${escapeHtml(cameraLabel(recording))}</strong></div>
+    ${zoneRow}
     <div><span>Trigger</span><strong>${escapeHtml(recordingDisplayTrigger(recording))}</strong></div>
     <div><span>Started</span><strong>${escapeHtml(formatDateTime(recording.started_at))}</strong></div>
     <div><span>Duration</span><strong>${Number(recording.duration_seconds || 0).toFixed(1)}s</strong></div>
@@ -612,6 +626,7 @@ async function loadRecordings(filters = {}) {
     ? { label: String(filters), cameraId: '' }
     : { ...currentFilterValues(), ...filters };
   const params = new URLSearchParams();
+  if (resolved.sourceType) params.set('source_type', resolved.sourceType);
   if (resolved.label) params.set('label', resolved.label);
   if (resolved.cameraId) params.set('camera_id', resolved.cameraId);
   const startedAfter = formatIsoDateForFilter(resolved.dateFrom);
@@ -686,11 +701,13 @@ if (els.clipOverlayToggle) {
 }
 
 els.cameraFilter?.addEventListener('change', () => loadRecordings());
+els.recordingTypeFilter?.addEventListener('change', () => loadRecordings());
 els.filterForm?.addEventListener('submit', (event) => {
   event.preventDefault();
   loadRecordings();
 });
 els.recordingClearBtn.addEventListener('click', () => {
+  if (els.recordingTypeFilter) els.recordingTypeFilter.value = '';
   els.recordingFilter.value = '';
   if (els.cameraFilter) els.cameraFilter.value = '';
   if (els.recordingDateFrom) els.recordingDateFrom.value = '';
