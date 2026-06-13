@@ -661,9 +661,9 @@ input[type="file"] { padding: 10px; }
 }
 .clip-overlay {
   position: absolute;
-  inset: 0 0 42px;
+  inset: 0;
   width: 100%;
-  height: auto;
+  height: 100%;
   pointer-events: none;
   border-radius: 16px;
 }
