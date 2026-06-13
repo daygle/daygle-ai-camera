@@ -49,11 +49,11 @@ let selectedCamera = null;
 let configuredLabels = null;
 
 const LIVE_AI_TRACK_KEY = 'daygle.live.overlay.track.enabled';
-// Off by default; users opt in per-browser via the toggle. The overlay only
+// On by default; users can opt out per-browser via the toggle. The overlay only
 // replays the background monitor's detections (already computed server-side
 // for alerts/recording), so it never runs its own inference and adds no
 // detector load - just the detection-status JSON poll and canvas drawing.
-let liveAiTrackEnabled = false;
+let liveAiTrackEnabled = true;
 let liveAiTrackDetections = null;
 let liveAiTrackPrevDetections = null;
 // Wall-clock time (ms) at which each sample was received, so the overlay can
@@ -530,7 +530,7 @@ window.addEventListener('resize', drawLiveOverlay);
 
 if (liveEls.liveAiTrackToggle) {
   const savedTrack = localStorage.getItem(LIVE_AI_TRACK_KEY);
-  liveAiTrackEnabled = savedTrack === '1';
+  liveAiTrackEnabled = savedTrack !== '0';
   liveEls.liveAiTrackToggle.checked = liveAiTrackEnabled;
   liveEls.liveAiTrackToggle.addEventListener('change', () => {
     liveAiTrackEnabled = Boolean(liveEls.liveAiTrackToggle.checked);

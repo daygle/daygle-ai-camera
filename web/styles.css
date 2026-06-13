@@ -874,8 +874,13 @@ input[type="file"] { padding: 10px; }
 }
 .recordings-filter-actions > span:first-child {
   display: block;
-  height: 0;
+  min-height: 1.4em;
   visibility: hidden;
+}
+.recordings-filter-actions::after {
+  content: "";
+  display: block;
+  min-height: 2.8em;
 }
 .recordings-list {
   gap: 10px;
@@ -2616,8 +2621,13 @@ a.activity-item-action {
 }
 .cameras-filter-actions > span:first-child {
   display: block;
-  height: 0;
+  min-height: 1.4em;
   visibility: hidden;
+}
+.cameras-filter-actions::after {
+  content: "";
+  display: block;
+  min-height: 2.8em;
 }
 
 .stat-card-value-text {
