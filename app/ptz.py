@@ -3,6 +3,7 @@ from __future__ import annotations
 import socket
 import urllib.request
 import urllib.parse
+import urllib.error
 import logging
 
 logger = logging.getLogger('daygle.ai')
@@ -13,7 +14,7 @@ VALID_COMMANDS = frozenset({
     'zoom_in', 'zoom_out',
 })
 
-# ─── HTTP CGI (HiSilicon / P6S) ───────────────────────────────────────────────
+# ─── HiSilicon hi3510 CGI (-act style) ───────────────────────────────────────
 
 _CGI_ACTS = {
     'stop':      'stop',
@@ -29,13 +30,70 @@ _CGI_ACTS = {
     'zoom_out':  'zoomout',
 }
 
-# Ordered list of CGI paths to try. Many HiSilicon-based cameras expose the
-# same endpoint at multiple paths depending on firmware version.
-_CGI_PATHS = [
-    '/cgi-bin/hi3510/ptzctrl.cgi',
+# Paths tried in order — only those that returned non-404 in probing are listed first.
+_HI3510_PATHS = [
     '/web/cgi-bin/hi3510/ptzctrl.cgi',
+    '/web/cgi-bin/ptzctrl.cgi',
+    '/cgi-bin/hi3510/ptzctrl.cgi',
     '/cgi-bin/ptzctrl.cgi',
+    '/ptz.cgi',
+    '/web/ptz.cgi',
 ]
+
+# ─── Foscam / decoder_control style (numeric command codes) ──────────────────
+
+# Each direction has a start code and a paired stop code.
+_FOSCAM_CMDS = {
+    'up':        (0,  1),
+    'down':      (2,  3),
+    'left':      (4,  5),
+    'right':     (6,  7),
+    'upleft':    (91, 93),   # diagonal codes vary by firmware; fallback below
+    'upright':   (90, 92),
+    'downleft':  (93, 93),
+    'downright': (92, 92),
+    'zoom_in':   (16, 17),
+    'zoom_out':  (18, 19),
+    'stop':      (1,  1),    # stop-up is treated as general stop by most firmware
+}
+
+_FOSCAM_PATHS = [
+    '/decoder_control.cgi',
+    '/cgi-bin/decoder_control.cgi',
+]
+
+
+def _make_request(url: str, auth: str) -> urllib.request.Request:
+    req = urllib.request.Request(url)
+    if auth:
+        req.add_header('Authorization', f'Basic {auth}')
+    return req
+
+
+def _basic_auth(username: str, password: str) -> str:
+    import base64
+    if not username:
+        return ''
+    return base64.b64encode(f'{username}:{password}'.encode()).decode()
+
+
+def _try_url(req: urllib.request.Request) -> int:
+    """Return HTTP status code, 0 on connection error."""
+    try:
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            resp.read()
+            return resp.status
+    except urllib.error.HTTPError as e:
+        return e.code
+    except Exception:
+        return 0
+
+
+def _is_success(code: int) -> bool:
+    # Many P6S / HiSilicon cameras return 502 "CGI was not CGI/1.1 compliant"
+    # even when the PTZ command executed successfully — the scripts run but
+    # don't emit proper HTTP headers, so the web server wraps the result in 502.
+    return code in (200, 201, 204, 302, 502)
 
 
 def send_ptz_command_cgi(
@@ -46,35 +104,39 @@ def send_ptz_command_cgi(
     username: str = '',
     password: str = '',
 ) -> None:
-    """Send PTZ via HTTP CGI (HiSilicon / P6S firmware)."""
-    act = _CGI_ACTS.get(command)
-    if act is None:
-        raise ValueError(f"Unknown PTZ command: {command!r}")
-
+    """Try HiSilicon hi3510 CGI paths, then Foscam decoder_control paths."""
+    auth = _basic_auth(username, password)
     speed = max(1, min(8, int(speed)))
+    act = _CGI_ACTS.get(command, 'stop')
+
+    # --- HiSilicon hi3510 style ---
     params = urllib.parse.urlencode({'-step': 0, '-act': act, '-speed': speed})
-
-    last_exc: Exception | None = None
-    for path in _CGI_PATHS:
+    for path in _HI3510_PATHS:
         url = f'http://{host}:{http_port}{path}?{params}'
-        req = urllib.request.Request(url)
-        if username:
-            import base64
-            creds = base64.b64encode(f'{username}:{password}'.encode()).decode()
-            req.add_header('Authorization', f'Basic {creds}')
-        try:
-            logger.debug("PTZ CGI %s → %s", command, url)
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                resp.read()
+        req = _make_request(url, auth)
+        code = _try_url(req)
+        logger.debug("PTZ hi3510 %s → %s  HTTP %s", command, url, code)
+        if _is_success(code):
             return
-        except Exception as exc:
-            last_exc = exc
-            logger.debug("PTZ CGI path %s failed: %s", path, exc)
 
-    raise OSError(f"All CGI paths failed for {host}:{http_port} — last error: {last_exc}")
+    # --- Foscam / decoder_control style ---
+    start_code, _ = _FOSCAM_CMDS.get(command, (1, 1))
+    foscam_params = urllib.parse.urlencode({'command': start_code, 'onestep': 0})
+    for path in _FOSCAM_PATHS:
+        url = f'http://{host}:{http_port}{path}?{foscam_params}'
+        req = _make_request(url, auth)
+        code = _try_url(req)
+        logger.debug("PTZ foscam %s → %s  HTTP %s", command, url, code)
+        if _is_success(code):
+            return
+
+    raise OSError(
+        f"No PTZ endpoint responded for {host}:{http_port}. "
+        f"Check camera IP and credentials."
+    )
 
 
-# ─── Raw PelcoD over TCP (fallback) ───────────────────────────────────────────
+# ─── Raw PelcoD over TCP (fallback protocol) ─────────────────────────────────
 
 _PELCOD_COMMANDS: dict[str, int] = {
     'stop':      0x00,
@@ -101,7 +163,6 @@ def _pelcod_packet(address: int, command_byte: int, pan_speed: int, tilt_speed: 
 
 
 def send_ptz_command_tcp(host: str, port: int, address: int, command: str, speed: int = 8) -> None:
-    """Send a PelcoD PTZ command over TCP."""
     cmd_byte = _PELCOD_COMMANDS.get(command)
     if cmd_byte is None:
         raise ValueError(f"Unknown PTZ command: {command!r}")
@@ -112,7 +173,7 @@ def send_ptz_command_tcp(host: str, port: int, address: int, command: str, speed
         sock.sendall(packet)
 
 
-# ─── Dispatcher ───────────────────────────────────────────────────────────────
+# ─── Dispatcher ──────────────────────────────────────────────────────────────
 
 def send_ptz_command(
     host: str,
