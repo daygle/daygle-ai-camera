@@ -40,13 +40,13 @@
       </article>
       <article class="card stat-card">
         <div class="stat-card-head">
-          <span class="stat-card-label">AI Backend</span>
+          <span class="stat-card-label">Detection Engines</span>
           <span class="stat-card-icon" id="aiStatusIcon" aria-hidden="true">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           </span>
         </div>
         <strong id="aiModeText" class="stat-card-value ai-mode">Loading…</strong>
-        <small id="aiStatusDetail" class="muted stat-card-sub">Checking detector…</small>
+        <small id="aiStatusDetail" class="muted stat-card-sub">Checking engines…</small>
       </article>
       <article class="card stat-card">
         <div class="stat-card-head">
@@ -60,13 +60,33 @@
       </article>
       <article class="card stat-card">
         <div class="stat-card-head">
-          <span class="stat-card-label">Alerts Triggered</span>
+          <span class="stat-card-label">Sound Detections</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+          </span>
+        </div>
+        <strong id="soundEvents" class="stat-card-value">0</strong>
+        <small class="muted stat-card-sub">Matched sound events</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Object Alerts</span>
           <span class="stat-card-icon" aria-hidden="true">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
           </span>
         </div>
-        <strong id="totalAlerts" class="stat-card-value">0</strong>
-        <small class="muted stat-card-sub">Rule-based notifications</small>
+        <strong id="objectAlerts" class="stat-card-value">0</strong>
+        <small class="muted stat-card-sub">Object rule notifications</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Sound Alerts</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="M2 4l20 16"/></svg>
+          </span>
+        </div>
+        <strong id="soundAlerts" class="stat-card-value">0</strong>
+        <small class="muted stat-card-sub">Sound rule notifications</small>
       </article>
       <article class="card stat-card">
         <div class="stat-card-head">

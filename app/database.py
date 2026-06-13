@@ -588,11 +588,31 @@ class EventDatabase:
         with self.connect() as db:
             total_events = db.execute("SELECT COUNT(*) AS count FROM events").fetchone()["count"]
             total_alerts = db.execute("SELECT COUNT(*) AS count FROM alert_history").fetchone()["count"]
+            sound_detection_events = db.execute(
+                "SELECT COUNT(*) AS count FROM events WHERE source = 'sound'"
+            ).fetchone()["count"]
             matched_object_events = db.execute(
                 """
                 SELECT COUNT(DISTINCT event_id) AS count
                 FROM detections
-                WHERE label != 'motion' AND confidence >= 0.5
+                WHERE label != 'motion'
+                  AND confidence >= 0.5
+                  AND event_id NOT IN (SELECT id FROM events WHERE source = 'sound')
+                """
+            ).fetchone()["count"]
+            object_alerts = db.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM alert_history
+                WHERE event_id IS NULL
+                   OR event_id NOT IN (SELECT id FROM events WHERE source = 'sound')
+                """
+            ).fetchone()["count"]
+            sound_alerts = db.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM alert_history
+                WHERE event_id IN (SELECT id FROM events WHERE source = 'sound')
                 """
             ).fetchone()["count"]
             labels = db.execute(
@@ -607,6 +627,9 @@ class EventDatabase:
                 "total_events": total_events,
                 "total_alerts": total_alerts,
                 "matched_object_events": matched_object_events,
+                "sound_detection_events": sound_detection_events,
+                "object_alerts": object_alerts,
+                "sound_alerts": sound_alerts,
                 "objects": [dict(row) for row in labels],
             }
 

@@ -12,7 +12,7 @@ const liveEls = {
   // Zones-page stats
   statZoneCount: document.getElementById('statZoneCount'),
   statRuleCount: document.getElementById('statRuleCount'),
-  statRecording: document.getElementById('statRecording'),
+  statAlertRules: document.getElementById('statAlertRules'),
   statCameraName: document.getElementById('statCameraName'),
   liveAiTrackToggle: document.getElementById('liveAiTrackToggle'),
   liveAiTrackGroup: document.getElementById('liveAiTrackGroup'),
@@ -419,15 +419,12 @@ function updateZonesStats() {
   if (!isZonesPage) return;
   if (!selectedCamera) return;
   const detection = cameraDetection();
-  const recording = cameraRecording();
   const zones = detection.zones || [];
   const ruleCount = zones.reduce((sum, zone) => sum + (zone.object_rules?.length || 0), 0);
+  const alertCount = zones.reduce((sum, zone) => sum + (zone.object_rules || []).filter((r) => r.email_enabled || r.push_enabled).length, 0);
   if (liveEls.statZoneCount) liveEls.statZoneCount.textContent = String(zones.length);
   if (liveEls.statRuleCount) liveEls.statRuleCount.textContent = String(ruleCount);
-  if (liveEls.statRecording) {
-    const isContinuous = recording.continuous === true;
-    liveEls.statRecording.textContent = isContinuous ? 'Continuous' : 'On Alert';
-  }
+  if (liveEls.statAlertRules) liveEls.statAlertRules.textContent = String(alertCount);
   if (liveEls.statCameraName) {
     liveEls.statCameraName.textContent = selectedCamera.name || selectedCamera.id || '—';
   }

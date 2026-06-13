@@ -6,7 +6,9 @@ const els = {
   aiStatusIcon: document.getElementById('aiStatusIcon'),
   aiStatusDetail: document.getElementById('aiStatusDetail'),
   totalEvents: document.getElementById('totalEvents'),
-  totalAlerts: document.getElementById('totalAlerts'),
+  soundEvents: document.getElementById('soundEvents'),
+  objectAlerts: document.getElementById('objectAlerts'),
+  soundAlerts: document.getElementById('soundAlerts'),
   uptimeText: document.getElementById('uptimeText'),
   activityFeed: document.getElementById('activityFeed'),
   listStatus: document.getElementById('listStatus'),
@@ -121,9 +123,10 @@ function detectionBadges(detections = []) {
     if (!best.has(label) || conf > best.get(label)) best.set(label, conf);
   }
   if (!best.size) return '<span class="muted">No detections</span>';
+  const eyeIcon = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg>';
   return Array.from(best.entries())
     .sort((a, b) => b[1] - a[1])
-    .map(([label, conf]) => `<span class="detection">${escapeHtml(titleCase(label))} · ${Math.round(conf * 100)}%</span>`)
+    .map(([label, conf]) => `<span class="detection detection-object">${eyeIcon} ${escapeHtml(titleCase(label))} · ${Math.round(conf * 100)}%</span>`)
     .join('');
 }
 
@@ -277,7 +280,7 @@ function renderActivityItem(item) {
   const typeClass = isSound ? 'activity-item-sound' : isEvent ? 'activity-item-event' : 'activity-item-alert';
   const typeLabel = isSound ? (isEvent ? 'Sound Detection' : 'Sound Alert') : isEvent ? 'Object Detection' : 'Object Alert';
   const title = isEvent
-    ? (isSound && item.soundMeta ? `🔊 ${item.soundMeta.class_label || titleCase(item.soundMeta.label || 'sound')}` : `Event #${item.id}`)
+    ? `Event #${item.id}`
     : (item.ruleNames?.join(', ') || 'Alert');
   const titleSuffix = !isEvent && item.ruleNames?.length > 1 ? ` <span class="muted">(${item.ruleNames.length} rules)</span>` : '';
   const cameraLine = item.camera ? `Camera: ${escapeHtml(item.camera)}` : 'Camera: unknown';
@@ -384,6 +387,39 @@ function setStatusIconState(el, state) {
   else if (state === 'error') el.classList.add('stat-card-icon-error');
 }
 
+function engineStatusFromAi(aiStatus) {
+  if (!aiStatus) return { state: 'error', label: 'ONNX unavailable' };
+  if (aiStatus.error) return { state: 'error', label: `ONNX error: ${aiStatus.error}` };
+  if (aiStatus.model_loaded) return { state: 'ok', label: 'ONNX ready' };
+  return { state: 'warn', label: 'ONNX not loaded' };
+}
+
+function engineStatusFromSound(soundStatus) {
+  if (!soundStatus) return { state: 'error', label: 'YAMNet TFLite unavailable' };
+  const backend = String(soundStatus.backend || '').toLowerCase();
+  const hasYamnet = backend === 'yamnet' || backend === 'yamnet_tflite';
+  if (!backend || backend === 'none') {
+    return { state: 'warn', label: 'YAMNet TFLite inactive' };
+  }
+  if (backend === 'unavailable') {
+    return { state: 'error', label: soundStatus.backend_reason || 'YAMNet TFLite unavailable' };
+  }
+  if (backend === 'loading') {
+    return { state: 'warn', label: 'YAMNet TFLite loading' };
+  }
+  if (!hasYamnet) {
+    return { state: 'error', label: soundStatus.backend_reason || 'YAMNet TFLite unavailable' };
+  }
+  if (soundStatus.running) return { state: 'ok', label: 'YAMNet TFLite running' };
+  return { state: 'ok', label: 'YAMNet TFLite ready' };
+}
+
+function overallEngineState(engineStatuses) {
+  if (engineStatuses.some((status) => status.state === 'error')) return 'error';
+  if (engineStatuses.some((status) => status.state === 'warn')) return 'warn';
+  return 'ok';
+}
+
 // ─── Status cards ───────────────────────────────────────────────────────────
 function loadStatus() {
   return api('/api/status').then((status) => {
@@ -406,23 +442,28 @@ function loadStatus() {
   });
 }
 
-function loadAiStatus() {
-  return api('/api/status/ai').then((aiStatus) => {
-    const modelLabel = aiStatus.model_name || aiStatus.active_backend || 'unknown';
-    els.aiModeText.textContent = modelLabel;
-    els.aiModeText.className = `stat-card-value ai-mode ${String(aiStatus.mode || '').toLowerCase().replace(/\s+/g, '-')}`;
-    const loadedText = aiStatus.model_loaded ? 'loaded' : 'not loaded';
-    const errorText = aiStatus.error ? ` · ${aiStatus.error}` : '';
-    els.aiStatusDetail.textContent = `${aiStatus.mode} · ${loadedText}${errorText}`;
-    if (aiStatus.model_loaded) setStatusIconState(els.aiStatusIcon, 'ok');
-    else if (aiStatus.error) setStatusIconState(els.aiStatusIcon, 'error');
-    else setStatusIconState(els.aiStatusIcon, 'warn');
-  }).catch((error) => {
-    els.aiModeText.textContent = 'unknown';
-    els.aiModeText.className = 'stat-card-value ai-mode model-failed';
-    els.aiStatusDetail.textContent = error.message;
-    setStatusIconState(els.aiStatusIcon, 'error');
-  });
+async function loadEngineStatus() {
+  const [aiResult, soundResult] = await Promise.allSettled([
+    api('/api/status/ai'),
+    api('/api/sound/status'),
+  ]);
+  const aiStatus = aiResult.status === 'fulfilled' ? aiResult.value : null;
+  const soundStatus = soundResult.status === 'fulfilled' ? soundResult.value : null;
+  const engineStatuses = [
+    aiResult.status === 'fulfilled'
+      ? engineStatusFromAi(aiStatus)
+      : { state: 'error', label: `ONNX error: ${aiResult.reason?.message || 'status unavailable'}` },
+    soundResult.status === 'fulfilled'
+      ? engineStatusFromSound(soundStatus)
+      : { state: 'error', label: `YAMNet TFLite error: ${soundResult.reason?.message || 'status unavailable'}` },
+  ];
+  const readyCount = engineStatuses.filter((status) => status.state === 'ok').length;
+  const overallState = overallEngineState(engineStatuses);
+
+  els.aiModeText.textContent = `${readyCount} / ${engineStatuses.length} Ready`;
+  els.aiModeText.className = `stat-card-value ai-mode engines-${overallState}`;
+  els.aiStatusDetail.textContent = engineStatuses.map((status) => status.label).join(' · ');
+  setStatusIconState(els.aiStatusIcon, overallState);
 }
 
 // ─── Stats + activity data loaders ──────────────────────────────────────────
@@ -430,7 +471,9 @@ async function loadStats() {
   try {
     const stats = await api('/api/stats');
     els.totalEvents.textContent = stats.matched_object_events ?? stats.total_events ?? 0;
-    els.totalAlerts.textContent = stats.total_alerts ?? 0;
+    if (els.soundEvents) els.soundEvents.textContent = stats.sound_detection_events ?? 0;
+    if (els.objectAlerts) els.objectAlerts.textContent = stats.object_alerts ?? stats.total_alerts ?? 0;
+    if (els.soundAlerts) els.soundAlerts.textContent = stats.sound_alerts ?? 0;
     els.cameraCount.textContent = stats.total_cameras ?? 0;
   } catch (error) {
     window.showToast?.(error.message, true);
@@ -577,7 +620,7 @@ els.filterPills.forEach((pill) => {
 
 // ─── Refresh orchestration ──────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([loadStatus(), loadAiStatus(), loadStats(), loadEvents(), loadAlerts()]);
+  await Promise.all([loadStatus(), loadEngineStatus(), loadStats(), loadEvents(), loadAlerts()]);
   renderActivityFeed();
 }
 
@@ -595,7 +638,7 @@ loadAuth()
   })
   .catch((error) => window.showToast?.(error.message, true));
 
-setInterval(() => { loadStatus(); loadAiStatus(); }, 5000);
+setInterval(() => { loadStatus(); loadEngineStatus(); }, 5000);
 setInterval(() => { loadStats().catch(() => {}); }, 10000);
 setInterval(() => {
   Promise.all([loadEvents(), loadAlerts()]).then(renderActivityFeed).catch(() => {});

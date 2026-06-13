@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Sounds - Daygle AI Camera</title>
+  <title>Sound Detection - Daygle AI Camera</title>
   <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
@@ -12,55 +12,115 @@
     <header class="hero">
       <div>
         <p class="eyebrow">Monitoring</p>
-        <h1>Sounds</h1>
-        <p class="muted">Configure per-camera sound detection rules and alert actions.</p>
+        <h1>Sound Detection</h1>
+        <p class="muted">Configure per-camera audio detection and set up sound-based alert rules.</p>
       </div>
       <div class="cam-hero-action">
-        <a class="button-link secondary-link hero-action-link" href="/yamnet-tflite">YAMNet TFLite Status</a>
+        <a class="button-link secondary-link hero-action-link" href="/yamnet-tflite">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+          YAMNet TFLite
+        </a>
       </div>
     </header>
 
-    <section class="card cameras-list-card">
-      <div class="settings-section-header">
-        <div class="settings-section-icon" aria-hidden="true">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+    <section class="grid stats-grid sounds-stats">
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Sound Rules</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          </span>
         </div>
-        <div>
-          <h2>Sound Detection</h2>
-          <p class="settings-section-subtitle">Select a camera, add sounds, and tune thresholds for the RTSP audio track.</p>
+        <strong id="statSoundRules" class="stat-card-value">—</strong>
+        <small class="muted stat-card-sub">Configured for this camera</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Active Rules</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          </span>
         </div>
-      </div>
-
-      <form class="form-grid compact-grid" onsubmit="return false;">
-        <label>
-          <span>Camera</span>
-          <select id="soundCameraSelect" aria-label="Select camera"></select>
-        </label>
-        <label>
-          <span>Sound Detection</span>
-          <select id="soundEnabled" aria-label="Sound detection state">
-            <option value="false">Disabled</option>
-            <option value="true">Enabled (RTSP audio)</option>
-          </select>
-          <span class="field-help">Audio detection uses the camera's RTSP audio stream.</span>
-        </label>
-      </form>
-
-      <div id="soundStatusPanel" class="status-panel" style="margin-top:1rem"></div>
-
-      <div class="rule-select-wrapper" style="margin-top:1rem">
-        <select id="addSoundRuleSelect" aria-label="Add sound rule"></select>
-      </div>
-
-      <div id="soundRulesWrap" style="overflow-x:auto; margin-top:.5rem"></div>
-
-      <p id="soundMessage" class="muted cameras-list-status" aria-live="polite"></p>
-
-      <div class="modal-footer">
-        <button class="secondary" id="reloadSoundsBtn" type="button">Refresh</button>
-        <button id="saveSoundSettingsBtn" type="button">Save Sounds</button>
-      </div>
+        <strong id="statActiveRules" class="stat-card-value">—</strong>
+        <small class="muted stat-card-sub">Rules currently enabled</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Detection</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+          </span>
+        </div>
+        <strong id="statDetection" class="stat-card-value stat-card-value-text">—</strong>
+        <small class="muted stat-card-sub">Audio detection state</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Camera</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          </span>
+        </div>
+        <strong id="statCamera" class="stat-card-value stat-card-value-text">—</strong>
+        <small class="muted stat-card-sub">Currently being configured</small>
+      </article>
     </section>
+
+    <div class="sounds-layout">
+      <section class="card sound-settings-card">
+        <div class="settings-section-header">
+          <div class="settings-section-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+          </div>
+          <div>
+            <h2>Camera Settings</h2>
+            <p class="settings-section-subtitle">Select a camera and enable audio detection on its RTSP stream.</p>
+          </div>
+        </div>
+
+        <form class="form-grid" onsubmit="return false;">
+          <label>
+            <span>Camera</span>
+            <select id="soundCameraSelect" aria-label="Select camera"></select>
+          </label>
+          <label>
+            <span>Sound Detection</span>
+            <select id="soundEnabled" aria-label="Sound detection state">
+              <option value="false">Disabled</option>
+              <option value="true">Enabled (RTSP audio)</option>
+            </select>
+            <span class="field-help">Audio detection uses the camera's RTSP audio stream.</span>
+          </label>
+        </form>
+
+        <div id="soundStatusPanel" style="margin-top:1rem"></div>
+      </section>
+
+      <section class="card sound-rules-card">
+        <div class="settings-section-header">
+          <div class="settings-section-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          </div>
+          <div>
+            <h2>Sound Rules</h2>
+            <p class="settings-section-subtitle">Add sounds to detect. Configure thresholds, recording, and notification preferences per sound.</p>
+          </div>
+        </div>
+
+        <div class="rule-select-wrapper">
+          <select id="addSoundRuleSelect" aria-label="Add sound rule"></select>
+        </div>
+
+        <div id="soundRulesWrap"></div>
+
+        <p id="soundMessage" class="muted cameras-list-status" aria-live="polite"></p>
+
+        <div class="sound-editor-footer">
+          <button class="secondary" id="reloadSoundsBtn" type="button">Refresh</button>
+          <button id="saveSoundSettingsBtn" type="button">Save Sounds</button>
+        </div>
+      </section>
+    </div>
   </main>
 
   <script src="/static/nav.js"></script>

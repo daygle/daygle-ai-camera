@@ -13,6 +13,10 @@ const statusPanel = document.getElementById('soundStatusPanel');
 const messageEl = document.getElementById('soundMessage');
 const saveBtn = document.getElementById('saveSoundSettingsBtn');
 const reloadBtn = document.getElementById('reloadSoundsBtn');
+const statSoundRules = document.getElementById('statSoundRules');
+const statActiveRules = document.getElementById('statActiveRules');
+const statDetection = document.getElementById('statDetection');
+const statCamera = document.getElementById('statCamera');
 
 function setMessage(text, isError = false) {
   messageEl.textContent = text || '';
@@ -84,21 +88,25 @@ function renderCameraSelect() {
 }
 
 function renderStatus() {
-  if (!statusPanel) return;
   const camera = currentCamera();
-  if (!camera) {
-    statusPanel.innerHTML = '<p class="muted empty-message">No cameras are configured.</p>';
+  const rules = (editingSound.rules || []).filter((rule) => rule.enabled).length;
+  const totalRules = (editingSound.rules || []).length;
+
+  if (statSoundRules) statSoundRules.textContent = camera ? String(totalRules) : '—';
+  if (statActiveRules) statActiveRules.textContent = camera ? String(rules) : '—';
+  if (statDetection) statDetection.textContent = !camera ? '—' : editingSound.enabled ? 'Enabled' : 'Disabled';
+  if (statCamera) statCamera.textContent = camera ? (camera.name || camera.id || '—') : '—';
+
+  if (!statusPanel) return;
+  if (!camera || !selectedStatus) {
+    statusPanel.innerHTML = '';
     return;
   }
-  const backend = selectedStatus?.backend || 'none';
-  const running = selectedStatus?.running ? 'Yes' : 'No';
-  const detail = selectedStatus?.backend_reason || selectedStatus?.status_detail || 'No backend status available.';
-  const rules = (editingSound.rules || []).filter((rule) => rule.enabled).length;
-  statusPanel.innerHTML = `
-    <div><span>Backend</span><strong>${escapeHtml(titleCase(backend))}</strong></div>
-    <div><span>Running</span><strong>${running}</strong></div>
-    <div><span>Enabled Rules</span><strong>${rules}</strong></div>
-    <div class="wide"><span>Status Detail</span><strong>${escapeHtml(detail)}</strong></div>`;
+  const running = selectedStatus.running;
+  const detail = selectedStatus.backend_reason || selectedStatus.status_detail || '';
+  const stateClass = running ? 'status-ok' : (detail ? 'status-warning' : '');
+  const stateLabel = running ? 'Detector running' : 'Detector not running';
+  statusPanel.innerHTML = `<div class="status-panel${stateClass ? ` ${stateClass}` : ''}"><span>${stateLabel}${detail ? ` · ${escapeHtml(detail)}` : ''}</span></div>`;
 }
 
 function renderAddRuleSelect() {
@@ -121,46 +129,59 @@ function renderRules() {
     rulesWrap.innerHTML = '<p class="muted empty-message">Add a camera before configuring sound detection.</p>';
     return;
   }
-  const rows = (editingSound.rules || []).map((rule) => {
-    const cls = soundClasses.find((item) => item.id === rule.class);
-    const label = cls ? cls.label : titleCase(String(rule.class || '').replace(/_/g, ' '));
-    return `
-      <tr data-sound-class="${escapeHtml(rule.class)}">
-        <td class="cell-label">${escapeHtml(label)}</td>
-        <td class="cell-center"><input type="checkbox" data-rule-enabled="${escapeHtml(rule.class)}" ${rule.enabled ? 'checked' : ''} /></td>
-        <td class="cell-center"><input type="checkbox" data-rule-record="${escapeHtml(rule.class)}" ${rule.record_on_detect !== false ? 'checked' : ''} /></td>
-        <td><input type="number" data-rule-threshold="${escapeHtml(rule.class)}" value="${escapeHtml(rule.confidence_threshold ?? 0.35)}" min="0.1" max="1.0" step="0.05" /></td>
-        <td><input type="number" data-rule-cooldown="${escapeHtml(rule.class)}" value="${escapeHtml(rule.cooldown_seconds ?? 30)}" min="5" max="3600" step="5" /></td>
-        <td class="cell-center"><input type="checkbox" data-rule-email="${escapeHtml(rule.class)}" ${rule.email_enabled ? 'checked' : ''} /></td>
-        <td class="cell-center"><input type="checkbox" data-rule-push="${escapeHtml(rule.class)}" ${rule.push_enabled ? 'checked' : ''} /></td>
-        <td class="cell-center"><button class="secondary delete-btn" type="button" data-remove-rule="${escapeHtml(rule.class)}">Remove</button></td>
-      </tr>`;
-  }).join('');
-
-  if (!rows) {
+  const rules = editingSound.rules || [];
+  if (!rules.length) {
     rulesWrap.innerHTML = '<p class="muted empty-message">No sound rules configured. Use the dropdown above to add one.</p>';
     return;
   }
 
-  rulesWrap.innerHTML = `
-    <table class="rule-table">
-      <thead>
-        <tr>
-          <th>Sound</th>
-          <th class="cell-center">Enabled</th>
-          <th class="cell-center">Record</th>
-          <th>Threshold</th>
-          <th>Cooldown (s)</th>
-          <th class="cell-center">Email</th>
-          <th class="cell-center">Push</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+  rulesWrap.innerHTML = rules.map((rule) => {
+    const cls = soundClasses.find((item) => item.id === rule.class);
+    const label = cls ? cls.label : titleCase(String(rule.class || '').replace(/_/g, ' '));
+    const id = escapeHtml(rule.class);
+    return `
+      <div class="sound-rule-row ${rule.enabled ? '' : 'sound-rule-row-disabled'}" data-sound-class="${id}">
+        <div class="sound-rule-row-header">
+          <span class="sound-rule-name">${escapeHtml(label)}</span>
+          <button class="secondary delete-btn" type="button" data-remove-rule="${id}">Remove</button>
+        </div>
+        <div class="sound-rule-row-fields">
+          <label class="sound-rule-field">
+            <span>Threshold</span>
+            <input type="number" data-rule-threshold="${id}" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" min="0.1" max="1.0" step="0.05" />
+          </label>
+          <label class="sound-rule-field">
+            <span>Cooldown (s)</span>
+            <input type="number" data-rule-cooldown="${id}" value="${escapeHtml(String(rule.cooldown_seconds ?? 30))}" min="5" max="3600" step="5" />
+          </label>
+          <div class="sound-rule-toggles">
+            <label class="sound-rule-toggle">
+              <input type="checkbox" data-rule-enabled="${id}" ${rule.enabled ? 'checked' : ''} />
+              <span>Enabled</span>
+            </label>
+            <label class="sound-rule-toggle">
+              <input type="checkbox" data-rule-record="${id}" ${rule.record_on_detect !== false ? 'checked' : ''} />
+              <span>Record</span>
+            </label>
+            <label class="sound-rule-toggle">
+              <input type="checkbox" data-rule-email="${id}" ${rule.email_enabled ? 'checked' : ''} />
+              <span>Email</span>
+            </label>
+            <label class="sound-rule-toggle">
+              <input type="checkbox" data-rule-push="${id}" ${rule.push_enabled ? 'checked' : ''} />
+              <span>Push</span>
+            </label>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
 
   rulesWrap.querySelectorAll('[data-rule-enabled]').forEach((input) => {
-    input.addEventListener('change', () => updateRule(input.dataset.ruleEnabled, 'enabled', input.checked));
+    input.addEventListener('change', () => {
+      updateRule(input.dataset.ruleEnabled, 'enabled', input.checked);
+      const row = input.closest('.sound-rule-row');
+      if (row) row.classList.toggle('sound-rule-row-disabled', !input.checked);
+    });
   });
   rulesWrap.querySelectorAll('[data-rule-record]').forEach((input) => {
     input.addEventListener('change', () => updateRule(input.dataset.ruleRecord, 'record_on_detect', input.checked));

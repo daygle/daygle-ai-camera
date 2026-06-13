@@ -49,17 +49,6 @@ function cameraStatusBadge(camera) {
   return '<span class="cam-badge cam-badge-idle"><span class="cam-badge-dot"></span>Configured</span>';
 }
 
-function cameraRecordingChips(camera) {
-  const continuous = camera.recording?.continuous === true;
-  const chips = [];
-  if (continuous) {
-    chips.push('<span class="chip chip-green">Recording On</span><span class="chip">Continuous</span>');
-  } else {
-    chips.push('<span class="chip chip-green">Recording On</span>');
-  }
-  return chips.join('');
-}
-
 function buildDisplayUrl(camera) {
   if (camera.stream_url) return camera.stream_url;
   if (!camera.host) return '';
@@ -70,13 +59,32 @@ function buildDisplayUrl(camera) {
 }
 
 function renderCameraCard(camera, index) {
-  const displayUrl = buildDisplayUrl(camera);
   const name = escapeHtml(camera.name || camera.id || `Camera ${index + 1}`);
-  const url = escapeHtml(displayUrl);
   const backend = camera.backend === 'rtsp' ? 'RTSP' : 'ONVIF';
-  const res = `${camera.width || 1280}×${camera.height || 720}`;
-  const fps = camera.fps || 15;
-  const zoneCount = (camera.detection?.zones || []).length;
+  const url = escapeHtml(buildDisplayUrl(camera));
+  const res = `${camera.width || 1280}×${camera.height || 720} @ ${camera.fps || 15} fps`;
+
+  const zones = camera.detection?.zones || [];
+  const zoneCount = zones.length;
+  const ruleCount = zones.reduce((n, z) => n + (z.object_rules?.length || 0), 0);
+
+  const sound = camera.detection?.sound;
+  const soundEnabled = sound?.enabled === true;
+  const soundRuleCount = (sound?.rules || []).filter((r) => r.enabled === true).length;
+
+  const continuous = camera.recording?.continuous === true;
+
+  const zonesHtml = zoneCount === 0
+    ? '<span class="chip chip-warn">No zones</span>'
+    : `<span class="chip chip-green">${zoneCount} zone${zoneCount !== 1 ? 's' : ''}</span>${ruleCount > 0 ? ` <span class="chip">${ruleCount} rule${ruleCount !== 1 ? 's' : ''}</span>` : ''}`;
+
+  const soundHtml = soundEnabled
+    ? `<span class="chip chip-green">Enabled</span>${soundRuleCount > 0 ? ` <span class="chip">${soundRuleCount} rule${soundRuleCount !== 1 ? 's' : ''}</span>` : ''}`
+    : '<span class="chip">Disabled</span>';
+
+  const recordingHtml = continuous
+    ? '<span class="chip chip-green">Continuous</span>'
+    : '<span class="chip">On Alert</span>';
 
   return `
     <article class="cam-card" data-camera-index="${index}">
@@ -98,35 +106,37 @@ function renderCameraCard(camera, index) {
       </div>
 
       <div class="cam-card-body">
-        <div class="cam-meta-row">
-          <span class="cam-meta-label">Backend</span>
-          <span class="cam-meta-value"><span class="chip">${backend}</span></span>
+        <div class="cam-meta-row cam-url-row">
+          <span class="cam-meta-label">Stream</span>
+          <span class="cam-meta-value">
+            <span class="chip">${backend}</span>
+            ${url ? `<span class="cam-url">${url}</span>` : ''}
+          </span>
         </div>
-        ${url ? `<div class="cam-meta-row cam-url-row">
-          <span class="cam-meta-label">Stream URL</span>
-          <span class="cam-meta-value cam-url">${url}</span>
-        </div>` : ''}
         <div class="cam-meta-row">
           <span class="cam-meta-label">Resolution</span>
-          <span class="cam-meta-value">${escapeHtml(res)} @ ${escapeHtml(fps)} fps</span>
-        </div>
-        <div class="cam-meta-row">
-          <span class="cam-meta-label">Recording</span>
-          <span class="cam-meta-value">${cameraRecordingChips(camera)}</span>
+          <span class="cam-meta-value">${escapeHtml(res)}</span>
         </div>
         <div class="cam-meta-row">
           <span class="cam-meta-label">Zones</span>
-          <span class="cam-meta-value">
-            ${zoneCount > 0
-              ? `<span class="chip chip-green">${zoneCount}</span>`
-              : `<span class="chip chip-warn">No zones</span>`}
-          </span>
+          <span class="cam-meta-value">${zonesHtml}</span>
+        </div>
+        <div class="cam-meta-row">
+          <span class="cam-meta-label">Sound</span>
+          <span class="cam-meta-value">${soundHtml}</span>
+        </div>
+        <div class="cam-meta-row">
+          <span class="cam-meta-label">Recording</span>
+          <span class="cam-meta-value">${recordingHtml}</span>
         </div>
       </div>
 
       <div class="cam-card-footer">
         <a class="button-link secondary-link cam-live-link" href="/live?camera=${encodeURIComponent(camera.id || '')}">View Live</a>
-        <a class="cam-footer-hint muted" href="/zones?camera=${encodeURIComponent(camera.id || '')}">Configure zones &amp; alerts</a>
+        <div class="cam-footer-links">
+          <a class="cam-footer-hint muted" href="/zones?camera=${encodeURIComponent(camera.id || '')}">Zones &amp; Alerts</a>
+          <a class="cam-footer-hint muted" href="/sounds?camera=${encodeURIComponent(camera.id || '')}">Sound</a>
+        </div>
       </div>
     </article>
   `;

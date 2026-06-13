@@ -280,7 +280,8 @@ textarea {
 }
 .item:hover { border-color: rgba(71, 214, 255, 0.2); background: rgba(71, 214, 255, 0.04); }
 .item-title { display: flex; justify-content: space-between; gap: 12px; font-weight: 900; font-size: 14px; }
-.detection { display: inline-flex; margin: 8px 8px 0 0; padding: 6px 9px; border-radius: 999px; background: rgba(139,92,246,.16); color: #c9b8ff; font-weight: 800; font-size: 12px; }
+.detection { display: inline-flex; align-items: center; gap: 5px; margin: 8px 8px 0 0; padding: 6px 9px; border-radius: 999px; background: rgba(139,92,246,.16); color: #c9b8ff; font-weight: 800; font-size: 12px; }
+.detection.detection-object { background: rgba(71,214,255,.1); color: #47d6ff; border: 1px solid rgba(71,214,255,.3); }
 .detection.detection-sound { background: rgba(168,85,247,.2); color: #a855f7; border: 1px solid rgba(168,85,247,.4); }
 .empty { color: var(--muted); padding: 12px; }
 
@@ -1209,12 +1210,9 @@ input[type="file"] { padding: 10px; }
   gap: 6px;
 }
 
-.cam-url-row .cam-meta-value {
+.cam-url {
   font-family: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
   font-size: 12px;
-}
-
-.cam-url {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1242,6 +1240,12 @@ input[type="file"] { padding: 10px; }
   padding: 12px 18px;
   border-top: 1px solid var(--border);
   background: rgba(255,255,255,0.02);
+}
+
+.cam-footer-links {
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 .cam-footer-hint {
@@ -2579,6 +2583,97 @@ input[type="file"] { padding: 10px; }
   display: flex;
   justify-content: flex-end;
 }
+/* ─── Sounds page ───────────────────────────────────────────────────────── */
+.sounds-stats { margin-top: 4px; }
+.sounds-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 28px;
+  align-items: start;
+}
+@media (min-width: 900px) {
+  .sounds-layout { grid-template-columns: 300px 1fr; }
+}
+.sound-settings-card,
+.sound-rules-card { margin-top: 0; }
+
+.sound-rule-row {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-top: 10px;
+  background: rgba(255,255,255,.02);
+  transition: border-color .15s;
+}
+.sound-rule-row:hover { border-color: rgba(71,214,255,.2); }
+.sound-rule-row-disabled { opacity: .55; }
+
+.sound-rule-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.sound-rule-name {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text);
+}
+.sound-rule-row-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px;
+}
+.sound-rule-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sound-rule-field span {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+}
+.sound-rule-field input[type="number"] {
+  width: 5.5rem;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+.sound-rule-toggles {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-left: 4px;
+}
+.sound-rule-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+.sound-rule-toggle span {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.sound-editor-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 16px;
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
 /* ─── Zones page: section dividers ─────────────────────────────────────── */
 .camera-object-detection-settings {
   margin-top: 0;
