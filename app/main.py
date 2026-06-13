@@ -2833,7 +2833,7 @@ def recording_stream_path(file_path: Path) -> Path:
     # Event clips and prebuffer renders are already written as H.264/faststart
     # MP4 — serve them directly. Re-encoding those again doubled storage and
     # delayed first playback by the whole transcode.
-    if file_path.suffix.lower() == '.mp4' and probe_video_codec(file_path) == 'h264':
+    if file_path.suffix.lower() == '.mp4' and mp4_is_browser_playable(file_path):
         return file_path
     # If a previous transcode attempt failed and the source hasn't changed
     # since, skip retrying — every browser range request would otherwise
@@ -2940,6 +2940,15 @@ def _recording_capture_window(recording: dict[str, Any]) -> tuple[float, float] 
 
 def probe_video_codec(file_path: Path) -> str | None:
     """Return the first video stream's codec name (e.g. 'h264', 'hevc'), or None."""
+    return probe_stream_codec(file_path, 'v:0')
+
+
+def probe_audio_codec(file_path: Path) -> str | None:
+    """Return the first audio stream's codec name (e.g. 'aac', 'pcm_mulaw'), or None."""
+    return probe_stream_codec(file_path, 'a:0')
+
+
+def probe_stream_codec(file_path: Path, stream_selector: str) -> str | None:
     if not file_path.exists() or file_path.stat().st_size <= 0:
         return None
     ffprobe = shutil.which('ffprobe')
@@ -2948,7 +2957,7 @@ def probe_video_codec(file_path: Path) -> str | None:
     command = [
         ffprobe,
         '-v', 'error',
-        '-select_streams', 'v:0',
+        '-select_streams', stream_selector,
         '-show_entries', 'stream=codec_name',
         '-of', 'default=noprint_wrappers=1:nokey=1',
         str(file_path),
@@ -2959,6 +2968,13 @@ def probe_video_codec(file_path: Path) -> str | None:
         return None
     codec = (result.stdout or '').strip().lower()
     return codec or None if result.returncode == 0 else None
+
+
+def mp4_is_browser_playable(file_path: Path) -> bool:
+    if probe_video_codec(file_path) != 'h264':
+        return False
+    audio_codec = probe_audio_codec(file_path)
+    return audio_codec in {None, '', 'aac', 'mp3'}
 
 
 def probe_video_duration(file_path: Path) -> float | None:

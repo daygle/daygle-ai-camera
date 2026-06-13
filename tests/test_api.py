@@ -1864,6 +1864,64 @@ def test_playback_transcode_preserves_optional_audio_stream(tmp_path, monkeypatc
     assert output_path.exists()
 
 
+def test_h264_mp4_with_browser_playable_audio_streams_directly(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    source_path = tmp_path / 'source.mp4'
+    source_path.write_bytes(b'input-video')
+    monkeypatch.setattr(main, 'probe_video_codec', lambda _path: 'h264')
+    monkeypatch.setattr(main, 'probe_audio_codec', lambda _path: 'aac')
+
+    def fail_transcode(*_args, **_kwargs):
+        raise AssertionError('browser-playable MP4 should not be transcoded')
+
+    monkeypatch.setattr(main, 'transcode_recording_to_mp4', fail_transcode)
+
+    assert main.recording_stream_path(source_path) == source_path
+
+
+def test_h264_mp4_without_audio_streams_directly(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    source_path = tmp_path / 'source.mp4'
+    source_path.write_bytes(b'input-video')
+    monkeypatch.setattr(main, 'probe_video_codec', lambda _path: 'h264')
+    monkeypatch.setattr(main, 'probe_audio_codec', lambda _path: None)
+
+    def fail_transcode(*_args, **_kwargs):
+        raise AssertionError('video-only MP4 should not be transcoded')
+
+    monkeypatch.setattr(main, 'transcode_recording_to_mp4', fail_transcode)
+
+    assert main.recording_stream_path(source_path) == source_path
+
+
+def test_h264_mp4_with_unsupported_audio_is_transcoded_for_playback(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    source_path = tmp_path / 'source.mp4'
+    source_path.write_bytes(b'input-video')
+    monkeypatch.setattr(main, 'probe_video_codec', lambda _path: 'h264')
+    monkeypatch.setattr(main, 'probe_audio_codec', lambda _path: 'pcm_mulaw')
+
+    transcoded = []
+
+    def fake_transcode(input_path, output_path):
+        transcoded.append((input_path, output_path))
+        output_path.write_bytes(b'playback-video-with-aac')
+
+    monkeypatch.setattr(main, 'transcode_recording_to_mp4', fake_transcode)
+
+    stream_path = main.recording_stream_path(source_path)
+
+    assert stream_path == main.recording_playback_sidecar_path(source_path)
+    assert stream_path.exists()
+    assert transcoded == [(source_path, stream_path)]
+
+
 def test_alerted_only_event_and_recording_queries(tmp_path):
     from app.database import EventDatabase
 
