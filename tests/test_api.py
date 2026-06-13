@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib
 import json
 import os
-import shutil
 import socket
 import sqlite3
 import subprocess
@@ -567,7 +566,7 @@ def test_logout_user_creation_and_password_reset(tmp_path, monkeypatch):
         assert client.request("/api/status")[0] == 401
 
         viewer_client = LocalClient(base_url)
-        viewer_csrf = _login(viewer_client, "viewer", "Viewer456!")
+        _login(viewer_client, "viewer", "Viewer456!")
         assert viewer_client.request("/api/status")[0] == 200
         assert viewer_client.request("/api/users")[0] == 403
 
@@ -1921,6 +1920,57 @@ def test_push_notification_title_lists_all_triggered_labels(monkeypatch):
         assert 'Camera: Front Door' in entry['body']
 
 
+def test_deliver_push_notifications_passes_all_triggered_labels(tmp_path, monkeypatch):
+    _app, _ = _load_app(tmp_path, monkeypatch)
+    main_module = sys.modules["app.main"]
+    captured: list[dict[str, object]] = []
+
+    class FakePushNotificationService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def send_alert(
+            self,
+            alert,
+            *,
+            event_id,
+            camera_name=None,
+            camera_id=None,
+            triggered_labels=None,
+        ):
+            captured.append({
+                'alert': alert,
+                'event_id': event_id,
+                'camera_name': camera_name,
+                'camera_id': camera_id,
+                'triggered_labels': triggered_labels,
+            })
+
+    monkeypatch.setattr(main_module, 'effective_push_notification_settings', lambda: {'enabled': True})
+    monkeypatch.setattr(
+        main_module.database,
+        'get_event',
+        lambda _event_id: {'metadata': {'camera_name': 'Front Door', 'camera_id': 'front'}},
+    )
+    monkeypatch.setattr(main_module, 'PushNotificationService', FakePushNotificationService)
+
+    triggered = [
+        {'label': 'cat', 'rule_name': 'Cat alert', 'confidence': 0.9, 'message': 'Cat matched'},
+        {'label': 'person', 'rule_name': 'Person alert', 'confidence': 0.8, 'message': 'Person matched'},
+    ]
+    rules = [
+        {'name': 'Cat alert', 'push_enabled': True},
+        {'name': 'Person alert', 'push_enabled': True},
+    ]
+
+    main_module.deliver_push_notifications(triggered, 42, rules=rules)
+
+    assert len(captured) == 2
+    assert [entry['triggered_labels'] for entry in captured] == [['cat', 'person'], ['cat', 'person']]
+    assert {entry['camera_name'] for entry in captured} == {'Front Door'}
+    assert {entry['camera_id'] for entry in captured} == {'front'}
+
+
 def test_email_alert_subject_lists_all_triggered_labels():
     """A single event whose detections include both cat and person must produce
     TWO alert emails (one per rule), each citing "Cat, Person detected" in the
@@ -2018,8 +2068,6 @@ def test_alerts_endpoint_exposes_event_id_for_grouping(tmp_path):
         )
 
     # Mirror the join the /api/alerts endpoint performs.
-    from collections import namedtuple
-    Row = namedtuple('Row', ['id', 'event_id', 'rule_name', 'label', 'confidence', 'message', 'recording_id', 'created_at'])
     with database.connect() as db:
         rows = db.execute(
             "SELECT ah.*, r.id AS recording_id FROM alert_history ah "
@@ -2112,7 +2160,7 @@ def test_recording_labels_api_filter_matches_any_recorded_label(tmp_path, monkey
     admin = LocalClient(base_url)
     try:
         _setup_admin(admin)
-        admin_csrf = _login(admin)
+        _login(admin)
         event_time = datetime.now(timezone.utc).isoformat()
         snapshot_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'test.png')
         # Footage-style event: detections include BOTH cat and person, but the
@@ -2824,7 +2872,7 @@ def test_check_model_updates_endpoints(tmp_path, monkeypatch):
     client = LocalClient(base_url)
     try:
         _setup_admin(client)
-        csrf = _login(client)
+        _login(client)
 
         # All versions match — no updates
         monkeypatch.setattr(main_module, "_fetch_models_manifest", lambda: {

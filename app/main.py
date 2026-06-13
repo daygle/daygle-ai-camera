@@ -2572,7 +2572,13 @@ def deliver_push_notifications(triggered: list[dict[str, Any]], event_id: int, r
             logger.debug('Push skipped for event %s rule %r: push_enabled is False', event_id, rule_name)
             continue
         try:
-            notifier.send_alert(alert, event_id=event_id, camera_name=camera_name, camera_id=camera_id)
+            notifier.send_alert(
+                alert,
+                event_id=event_id,
+                camera_name=camera_name,
+                camera_id=camera_id,
+                triggered_labels=all_triggered_labels,
+            )
             logger.info('Push notification sent for event %s rule %r', event_id, rule_name)
         except PushNotificationError as exc:
             logger.error('Failed to send push notification for event %s rule %r: %s', event_id, rule_name, exc)
