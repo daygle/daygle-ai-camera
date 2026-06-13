@@ -39,6 +39,8 @@ const DAYGLE_BUTTON_ICONS = {
   trash: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>',
   upload: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>',
   user: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/></svg>',
+  link: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+  move: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>',
   video: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>',
 };
 
@@ -55,7 +57,7 @@ const DAYGLE_BUTTON_ICON_BY_LABEL = new Map([
   ['check for updates', DAYGLE_BUTTON_ICONS.search],
   ['check model', DAYGLE_BUTTON_ICONS.search],
   ['clear', DAYGLE_BUTTON_ICONS.reset],
-  ['connection', DAYGLE_BUTTON_ICONS.video],
+  ['connection', DAYGLE_BUTTON_ICONS.link],
   ['create user', DAYGLE_BUTTON_ICONS.user],
   ['detections', DAYGLE_BUTTON_ICONS.search],
   ['disable', DAYGLE_BUTTON_ICONS.power],
@@ -68,6 +70,7 @@ const DAYGLE_BUTTON_ICON_BY_LABEL = new Map([
   ['logout', DAYGLE_BUTTON_ICONS.logout],
   ['next', DAYGLE_BUTTON_ICONS.arrowRight],
   ['previous', DAYGLE_BUTTON_ICONS.arrowLeft],
+  ['ptz', DAYGLE_BUTTON_ICONS.move],
   ['recording', DAYGLE_BUTTON_ICONS.video],
   ['refresh', DAYGLE_BUTTON_ICONS.refresh],
   ['reload detector', DAYGLE_BUTTON_ICONS.refresh],
