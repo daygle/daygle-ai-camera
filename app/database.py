@@ -18,7 +18,6 @@ class EventDatabase:
     def connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.database_path)
         connection.row_factory = sqlite3.Row
-        connection.execute('PRAGMA journal_mode=WAL;')
         try:
             yield connection
             connection.commit()
@@ -27,6 +26,7 @@ class EventDatabase:
 
     def init(self) -> None:
         with self.connect() as db:
+            db.execute('PRAGMA journal_mode=WAL;')
             # Migration: add recording_id to alert_history if upgrading from a
             # pre-video-link schema. New installs get it via the CREATE TABLE
             # block below, so use ALTER TABLE for the upgrade path and swallow
@@ -255,12 +255,13 @@ class EventDatabase:
             return
         seen: set[str] = set()
         rows: list[tuple[int, str, str, str]] = []
+        now = datetime.now(timezone.utc).isoformat()
         for raw in labels:
             label = str(raw or '').strip().lower()
             if not label or label in seen:
                 continue
             seen.add(label)
-            rows.append((int(recording_id), label, source, datetime.now(timezone.utc).isoformat()))
+            rows.append((int(recording_id), label, source, now))
         if not rows:
             return
         db.executemany(
@@ -302,7 +303,6 @@ class EventDatabase:
         if own:
             with self.connect() as conn:
                 return self.backfill_recording_labels(conn)
-        assert db is not None
         rows = db.execute(
             """
             SELECT r.id AS recording_id,
@@ -776,15 +776,12 @@ class EventDatabase:
                 (created_at, user_id, username, action, resource, resource_id, json.dumps(details or {}), ip_address, status),
             )
 
-    def list_audit_logs(
-        self,
-        *,
-        limit: int = 50,
-        offset: int = 0,
-        action: str | None = None,
-        username: str | None = None,
-        resource: str | None = None,
-    ) -> list[dict[str, Any]]:
+    @staticmethod
+    def _audit_log_filter(
+        action: str | None,
+        username: str | None,
+        resource: str | None,
+    ) -> tuple[str, list[Any]]:
         conditions: list[str] = []
         params: list[Any] = []
         if action:
@@ -797,6 +794,18 @@ class EventDatabase:
             conditions.append("resource LIKE ?")
             params.append(f"{resource}%")
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        return where, params
+
+    def list_audit_logs(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        action: str | None = None,
+        username: str | None = None,
+        resource: str | None = None,
+    ) -> list[dict[str, Any]]:
+        where, params = self._audit_log_filter(action, username, resource)
         with self.connect() as db:
             rows = db.execute(
                 f"SELECT * FROM audit_log {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
@@ -816,18 +825,7 @@ class EventDatabase:
         username: str | None = None,
         resource: str | None = None,
     ) -> int:
-        conditions: list[str] = []
-        params: list[Any] = []
-        if action:
-            conditions.append("action = ?")
-            params.append(action)
-        if username:
-            conditions.append("username = ?")
-            params.append(username)
-        if resource:
-            conditions.append("resource LIKE ?")
-            params.append(f"{resource}%")
-        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        where, params = self._audit_log_filter(action, username, resource)
         with self.connect() as db:
             row = db.execute(f"SELECT COUNT(*) AS count FROM audit_log {where}", params).fetchone()
             return int(row['count'])

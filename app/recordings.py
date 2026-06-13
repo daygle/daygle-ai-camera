@@ -5,6 +5,7 @@ import logging
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -101,8 +102,6 @@ class RecordingService:
             self.write_event_clip(file_path, event_id, detections, duration_seconds, trigger_type, trigger_label)
 
         mapped_source = 'upload' if source == 'upload' else 'rtsp' if source == 'rtsp' else 'camera'
-        if mapped_source not in self.VALID_SOURCES:
-            mapped_source = 'camera'
         return {
             'event_id': event_id,
             'camera_id': None,
@@ -171,17 +170,21 @@ class RecordingService:
             raise RuntimeError('Recorded RTSP clip contains no decodable video stream.')
         tmp_path.replace(file_path)
 
+    @staticmethod
+    def _stop_worker(worker: dict[str, Any], join_timeout: float = 2.0) -> None:
+        stop_event = worker.get('stop_event')
+        thread = worker.get('thread')
+        if isinstance(stop_event, threading.Event):
+            stop_event.set()
+        if isinstance(thread, threading.Thread):
+            thread.join(timeout=join_timeout)
+
     def stop_prebuffer_workers(self) -> None:
         with self._prebuffer_lock:
-            workers = list(self._prebuffer_workers.items())
+            workers = list(self._prebuffer_workers.values())
             self._prebuffer_workers = {}
-        for _camera_id, worker in workers:
-            stop_event = worker.get('stop_event')
-            thread = worker.get('thread')
-            if isinstance(stop_event, threading.Event):
-                stop_event.set()
-            if isinstance(thread, threading.Thread):
-                thread.join(timeout=2)
+        for worker in workers:
+            self._stop_worker(worker)
 
     def start_continuous_chunk_recording(
         self,
@@ -203,26 +206,15 @@ class RecordingService:
         camera_key = self._camera_key(camera_id)
         with self._continuous_lock:
             worker = self._continuous_workers.pop(camera_key, None)
-        if not worker:
-            return
-        stop_event = worker.get('stop_event')
-        thread = worker.get('thread')
-        if isinstance(stop_event, threading.Event):
-            stop_event.set()
-        if isinstance(thread, threading.Thread):
-            thread.join(timeout=5)
+        if worker:
+            self._stop_worker(worker, join_timeout=5)
 
     def stop_all_continuous_recordings(self) -> None:
         with self._continuous_lock:
-            workers = list(self._continuous_workers.items())
+            workers = list(self._continuous_workers.values())
             self._continuous_workers = {}
-        for _camera_key, worker in workers:
-            stop_event = worker.get('stop_event')
-            thread = worker.get('thread')
-            if isinstance(stop_event, threading.Event):
-                stop_event.set()
-            if isinstance(thread, threading.Thread):
-                thread.join(timeout=3)
+        for worker in workers:
+            self._stop_worker(worker, join_timeout=3)
 
     def _ensure_continuous_chunk_worker(
         self,
@@ -565,10 +557,10 @@ class RecordingService:
                 '1',
                 str(output_pattern),
             ]
-            import tempfile as _tempfile
-            _stderr_file = _tempfile.NamedTemporaryFile(mode='w+', suffix='.log', delete=False, dir=str(self.prebuffer_dir))
-            _stderr_path = _stderr_file.name
-            process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=_stderr_file)
+            stderr_file = tempfile.NamedTemporaryFile(mode='w+', suffix='.log', delete=False, dir=str(self.prebuffer_dir))
+            stderr_path = Path(stderr_file.name)
+            process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=stderr_file)
+            stderr_file.close()
             try:
                 while process.poll() is None and not stop_event.is_set():
                     self._prune_prebuffer_segments(camera_dir, buffer_seconds)
@@ -580,17 +572,13 @@ class RecordingService:
                         process.wait(timeout=2)
                     except subprocess.TimeoutExpired:
                         process.kill()
-                if _stderr_path:
-                    try:
-                        _stderr_content = Path(_stderr_path).read_text(encoding='utf-8', errors='replace')
-                        if _stderr_content.strip():
-                            logger.debug('Prebuffer ffmpeg %s: %s', camera_key, _stderr_content.strip()[:1000])
-                    except OSError:
-                        pass
-                    try:
-                        Path(_stderr_path).unlink(missing_ok=True)
-                    except OSError:
-                        pass
+                try:
+                    stderr_content = stderr_path.read_text(encoding='utf-8', errors='replace')
+                    if stderr_content.strip():
+                        logger.debug('Prebuffer ffmpeg %s: %s', camera_key, stderr_content.strip()[:1000])
+                except OSError:
+                    pass
+                stderr_path.unlink(missing_ok=True)
                 self._prune_prebuffer_segments(camera_dir, buffer_seconds)
             if not stop_event.is_set():
                 time.sleep(1)

@@ -9,6 +9,7 @@ import re
 import socket
 import urllib.error
 import urllib.request
+from html import escape as _xml_escape
 
 logger = logging.getLogger('daygle.ai')
 
@@ -49,7 +50,7 @@ def _wssec_header(username: str, password: str) -> str:
         '<s:Header>'
         '<Security xmlns="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">'
         '<UsernameToken>'
-        f'<Username>{username}</Username>'
+        f'<Username>{_xml_escape(username)}</Username>'
         f'<Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">{digest}</Password>'
         f'<Nonce EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary">{nonce_b64}</Nonce>'
         f'<Created xmlns="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">{created}</Created>'
@@ -144,7 +145,7 @@ def _pelcod_packet(address: int, command_byte: int, speed: int) -> bytes:
     addr = address & 0xFF
     cmd2 = command_byte & 0xFF
     spd = speed & 0x3F
-    checksum = (addr + 0x00 + cmd2 + spd + spd) & 0xFF
+    checksum = (addr + cmd2 + spd + spd) & 0xFF
     return bytes([0xFF, addr, 0x00, cmd2, spd, spd, checksum])
 
 

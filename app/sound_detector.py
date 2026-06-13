@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import logging
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -158,6 +159,7 @@ class _YamnetBackend:
         self._lock = threading.Lock()
         self._available: bool | None = None  # None = not yet attempted
         self._unavailable_reason: str | None = None
+        self._dynamic_target_len: int | None = None
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -244,63 +246,64 @@ class _YamnetBackend:
         """
         if not self._load():
             return {}
-        try:
-            if self._model is None or not self._input_details:
-                return {}
-            waveform = audio.astype(np.float32)
-            if waveform.ndim > 1:
-                waveform = waveform.mean(axis=1)
+        with self._lock:
+            try:
+                waveform = audio.astype(np.float32)
+                if waveform.ndim > 1:
+                    waveform = waveform.mean(axis=1)
 
-            input_detail = self._input_details[0]
-            input_index = int(input_detail['index'])
-            raw_shape = input_detail.get('shape')
-            raw_signature = input_detail.get('shape_signature')
-            input_shape = np.array(raw_shape if raw_shape is not None else [], dtype=np.int32)
-            input_signature = np.array(raw_signature if raw_signature is not None else [], dtype=np.int32)
-            target_len = int(input_shape[-1]) if input_shape.size else len(waveform)
-            if target_len <= 0:
-                target_len = len(waveform)
-            if input_signature.size and int(input_signature[-1]) == -1:
-                target_len = max(len(waveform), 1)
-                if input_signature.size == 1:
-                    new_shape = [target_len]
+                input_detail = self._input_details[0]
+                input_index = int(input_detail['index'])
+                raw_shape = input_detail.get('shape')
+                raw_signature = input_detail.get('shape_signature')
+                input_shape = np.array(raw_shape if raw_shape is not None else [], dtype=np.int32)
+                input_signature = np.array(raw_signature if raw_signature is not None else [], dtype=np.int32)
+                target_len = int(input_shape[-1]) if input_shape.size else len(waveform)
+                if target_len <= 0:
+                    target_len = len(waveform)
+                if input_signature.size and int(input_signature[-1]) == -1:
+                    target_len = max(len(waveform), 1)
+                    if target_len != self._dynamic_target_len:
+                        if input_signature.size == 1:
+                            new_shape = [target_len]
+                        else:
+                            new_shape = [int(v) if int(v) > 0 else 1 for v in input_signature]
+                            new_shape[-1] = target_len
+                        self._model.resize_tensor_input(input_index, new_shape, strict=False)
+                        self._model.allocate_tensors()
+                        self._input_details = self._model.get_input_details()
+                        self._output_details = self._model.get_output_details()
+                        self._dynamic_target_len = target_len
+
+                if len(waveform) < target_len:
+                    waveform = np.pad(waveform, (0, target_len - len(waveform)))
+                elif len(waveform) > target_len:
+                    waveform = waveform[:target_len]
+
+                expected_shape = tuple(int(v) for v in self._input_details[0]['shape'])
+                self._model.set_tensor(input_index, waveform.reshape(expected_shape).astype(np.float32))
+                self._model.invoke()
+
+                scores_array: np.ndarray | None = None
+                for output in self._output_details:
+                    arr = np.asarray(self._model.get_tensor(int(output['index'])))
+                    if arr.ndim >= 1 and int(arr.shape[-1]) >= 521:
+                        scores_array = arr
+                        break
+                if scores_array is None:
+                    raise RuntimeError('YAMNet TFLite scores output was not found.')
+
+                if scores_array.ndim == 1:
+                    mean_scores = scores_array
                 else:
-                    new_shape = [int(v) if int(v) > 0 else 1 for v in input_signature]
-                    new_shape[-1] = target_len
-                self._model.resize_tensor_input(input_index, new_shape, strict=False)
-                self._model.allocate_tensors()
-                self._input_details = self._model.get_input_details()
-                self._output_details = self._model.get_output_details()
-
-            if len(waveform) < target_len:
-                waveform = np.pad(waveform, (0, target_len - len(waveform)))
-            elif len(waveform) > target_len:
-                waveform = waveform[:target_len]
-
-            expected_shape = tuple(int(v) for v in self._input_details[0]['shape'])
-            self._model.set_tensor(input_index, waveform.reshape(expected_shape).astype(np.float32))
-            self._model.invoke()
-
-            scores_array: np.ndarray | None = None
-            for output in self._output_details:
-                arr = np.asarray(self._model.get_tensor(int(output['index'])))
-                if arr.ndim >= 1 and int(arr.shape[-1]) >= 521:
-                    scores_array = arr
-                    break
-            if scores_array is None:
-                raise RuntimeError('YAMNet TFLite scores output was not found.')
-
-            if scores_array.ndim == 1:
-                mean_scores = scores_array
-            else:
-                mean_scores = scores_array.reshape(-1, scores_array.shape[-1]).mean(axis=0)
-            result: dict[str, float] = {}
-            for class_id, idxs in self._class_indices.items():
-                result[class_id] = float(mean_scores[idxs].max()) if idxs else 0.0
-            return result
-        except Exception as exc:
-            logger.debug('YAMNet TFLite inference error: %s', exc)
-            return {}
+                    mean_scores = scores_array.reshape(-1, scores_array.shape[-1]).mean(axis=0)
+                result: dict[str, float] = {}
+                for class_id, idxs in self._class_indices.items():
+                    result[class_id] = float(mean_scores[idxs].max()) if idxs else 0.0
+                return result
+            except Exception as exc:
+                logger.debug('YAMNet TFLite inference error: %s', exc)
+                return {}
 
     # ------------------------------------------------------------------
     def preload(self) -> None:
@@ -455,14 +458,13 @@ class SoundDetector:
         if not yamnet_scores:
             return
 
+        new_confidences: dict[str, float] = {}
         for rule in self.rules:
             if not self._rule_active_now(rule):
                 continue
             class_id = str(rule.get('class') or '')
             confidence = yamnet_scores.get(class_id, 0.0)
-
-            with self._status_lock:
-                self._last_confidences[class_id] = confidence
+            new_confidences[class_id] = confidence
 
             threshold = float(rule.get('confidence_threshold', 0.35))
             if confidence < threshold:
@@ -486,6 +488,9 @@ class SoundDetector:
                 )
             except Exception as exc:
                 logger.error('Sound detection callback failed for %s: %s', class_id, exc)
+        if new_confidences:
+            with self._status_lock:
+                self._last_confidences.update(new_confidences)
         self._set_status('listening')
 
     @staticmethod
@@ -563,6 +568,12 @@ class SoundDetector:
             self._set_status('unavailable: no RTSP URL')
             return
 
+        ffmpeg = shutil.which('ffmpeg')
+        if not ffmpeg:
+            logger.warning('Sound monitor: ffmpeg not found; RTSP audio detection unavailable')
+            self._set_status('unavailable: ffmpeg not found')
+            return
+
         # Preload YAMNet before the FFmpeg pipe starts reading
         preload_thread = threading.Thread(target=_yamnet.preload, daemon=True, name='yamnet-preload')
         preload_thread.start()
@@ -572,7 +583,7 @@ class SoundDetector:
         bytes_per_sample = 2  # s16le
 
         cmd = [
-            'ffmpeg', '-loglevel', 'error',
+            ffmpeg, '-loglevel', 'error',
             '-rtsp_transport', 'tcp',
             '-i', self.rtsp_url,
             '-vn',

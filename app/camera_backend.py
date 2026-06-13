@@ -123,7 +123,7 @@ class OpenCvStreamCamera:
         self.started_at = time.time()
         self.last_error: str | None = None
         self._capture: Any | None = None
-        self._lock = threading.RLock()
+        self._lock = threading.Lock()
 
     @property
     def backend(self) -> str:
@@ -170,6 +170,28 @@ class OpenCvStreamCamera:
             self._capture.release()
             self._capture = None
 
+    def _acquire_raw_frame(self) -> tuple[Any, dict[str, Any]]:
+        """Open capture, read with one reconnect retry, update dimensions and frame counter.
+
+        Must be called while ``self._lock`` is held.
+        """
+        stale_grabs = self._stale_frame_grabs()
+        capture = self._open_capture()
+        ok, image, capture_ts = self._read_latest_frame(capture, stale_grabs, self.fps)
+        if not ok or image is None:
+            self._release_capture()
+            capture = self._open_capture()
+            ok, image, capture_ts = self._read_latest_frame(capture, stale_grabs, self.fps)
+        if not ok or image is None:
+            self._release_capture()
+            self.last_error = "Unable to read a frame from the ONVIF/RTSP stream."
+            raise RuntimeError(self.last_error)
+        height, width = image.shape[:2]
+        self.width = int(width)
+        self.height = int(height)
+        self.frame_number += 1
+        return image, self.get_frame(capture_ts)
+
     def read_frame(self) -> tuple[Any, dict[str, Any]]:
         """Read the latest frame as a raw BGR numpy array, skipping JPEG encoding.
 
@@ -178,52 +200,20 @@ class OpenCvStreamCamera:
         per detection cycle.
         """
         with self._lock:
-            capture = self._open_capture()
-
-            ok, image, capture_ts = self._read_latest_frame(capture, self._stale_frame_grabs(), self.fps)
-            if not ok or image is None:
-                self._release_capture()
-                capture = self._open_capture()
-                ok, image, capture_ts = self._read_latest_frame(capture, self._stale_frame_grabs(), self.fps)
-
-            if not ok or image is None:
-                self._release_capture()
-                self.last_error = "Unable to read a frame from the ONVIF/RTSP stream."
-                raise RuntimeError(self.last_error)
-
-            height, width = image.shape[:2]
-            self.width = int(width)
-            self.height = int(height)
-            self.frame_number += 1
+            image, frame = self._acquire_raw_frame()
         self.last_error = None
-        return image, self.get_frame(capture_ts)
+        return image, frame
 
     def read_jpeg(self) -> tuple[bytes, dict[str, Any]]:
+        import cv2
         with self._lock:
-            capture = self._open_capture()
-            import cv2
-
-            ok, image, capture_ts = self._read_latest_frame(capture, self._stale_frame_grabs(), self.fps)
-            if not ok or image is None:
-                self._release_capture()
-                capture = self._open_capture()
-                ok, image, capture_ts = self._read_latest_frame(capture, self._stale_frame_grabs(), self.fps)
-
-            if not ok or image is None:
-                self._release_capture()
-                self.last_error = "Unable to read a frame from the ONVIF/RTSP stream."
-                raise RuntimeError(self.last_error)
-
-            height, width = image.shape[:2]
-            self.width = int(width)
-            self.height = int(height)
-            self.frame_number += 1
+            image, frame = self._acquire_raw_frame()
             ok, encoded = cv2.imencode(".jpg", image)
             if not ok:
                 self.last_error = "Unable to encode ONVIF/RTSP frame as JPEG."
                 raise RuntimeError(self.last_error)
         self.last_error = None
-        return encoded.tobytes(), self.get_frame(capture_ts)
+        return encoded.tobytes(), frame
 
     def _stale_frame_grabs(self) -> int:
         if self._stale_frame_grabs_configured is not None:
@@ -254,10 +244,9 @@ class OpenCvStreamCamera:
         analyzed frames (and therefore alerts and recordings) lag further and
         further behind reality.
         """
-        if not hasattr(capture, "grab") or stale_frame_grabs <= 0:
-            capture_ts = time.time()
+        if stale_frame_grabs <= 0:
             ok, image = capture.read()
-            return ok, image, capture_ts
+            return ok, image, time.time()
 
         # A grab that had to wait roughly half a frame interval (or more)
         # came from the live edge; faster grabs were buffered backlog.
@@ -273,7 +262,7 @@ class OpenCvStreamCamera:
             if index >= stale_frame_grabs - 1 and waited >= live_edge_seconds:
                 break
         capture_ts = time.time()
-        if grabbed and hasattr(capture, "retrieve"):
+        if grabbed:
             ok, image = capture.retrieve()
             if ok and image is not None:
                 return ok, image, capture_ts
@@ -281,7 +270,7 @@ class OpenCvStreamCamera:
         return ok, image, time.time()
 
     def snapshot(self) -> dict[str, Any]:
-        _jpeg, frame = self.read_jpeg()
+        _, frame = self.read_frame()
         frame["snapshot"] = True
         return frame
 

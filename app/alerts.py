@@ -21,10 +21,9 @@ class AlertEngine:
             self._append_motion_alerts(alerts, strongest_motion, effective_rules)
 
         for detection in detections:
-            label_value = detection.get('label')
-            if not isinstance(label_value, str) or not label_value:
+            label = detection.get('label')
+            if not isinstance(label, str) or not label:
                 continue
-            label = label_value
             label_key = self._normalize_object_label(label)
             confidence = float(detection.get('confidence', 0))
 
@@ -107,7 +106,8 @@ class AlertEngine:
         }
         return aliases.get(label, label)
 
-    def _is_active_now(self, rule: dict[str, Any]) -> bool:
+    @staticmethod
+    def _is_active_now(rule: dict[str, Any]) -> bool:
         start = rule.get('active_start')
         end = rule.get('active_end')
         if not start or not end:

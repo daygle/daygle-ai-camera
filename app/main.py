@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import importlib.util
 import io
 import json
@@ -20,6 +21,7 @@ import time
 import urllib.error
 import urllib.request
 from collections import deque
+from email.mime.text import MIMEText
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from html import escape
@@ -68,8 +70,8 @@ def _configure_file_logging() -> None:
 
 _configure_file_logging()
 
-YOLOV8N_MODEL = 'yolov8n.pt'
-YOLOV8N_ONNX = 'yolov8n.onnx'
+_FFPROBE: str | None = shutil.which('ffprobe')
+_FFMPEG: str | None = shutil.which('ffmpeg')
 
 YOLO_MODELS: dict[str, dict[str, Any]] = {
     'yolov8n': {
@@ -356,14 +358,14 @@ def _update_camera_health(camera_id: str, online: bool) -> None:
 
 
 def _camera_offline_notification_eligible(camera_id: str) -> bool:
+    delay_minutes = int(effective_camera_offline_alert_settings().get('offline_delay_minutes', 1))
+    delay_seconds = max(0, delay_minutes * 60)
     with _camera_health_lock:
         state = _camera_health_state.get(camera_id)
         if not state or state.get('online', True):
             return False
         if state.get('offline_notified'):
             return False
-        delay_minutes = int(effective_camera_offline_alert_settings().get('offline_delay_minutes', 1))
-        delay_seconds = max(0, delay_minutes * 60)
         offline_since = state.get('offline_since')
         if offline_since is None:
             return False
@@ -401,11 +403,9 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
     if event_type == 'offline':
         title = f"Camera Offline: {camera_name}"
         body = f"Camera {camera_name} ({camera_id}) has gone offline."
-        _mark_camera_offline_notified(camera_id)
     else:
         title = f"Camera Online: {camera_name}"
         body = f"Camera {camera_name} ({camera_id}) is back online."
-        _mark_camera_recovery_notified(camera_id)
 
     push_settings_obj = effective_push_notification_settings()
     if push_settings_obj.get('enabled'):
@@ -418,7 +418,6 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
     email_settings_obj = effective_email_alert_settings()
     if email_settings_obj.get('enabled'):
         try:
-            from email.mime.text import MIMEText
             mailer = EmailAlertService(email_settings_obj)
             msg = MIMEText(body, 'plain', 'utf-8')
             msg['Subject'] = title
@@ -429,6 +428,11 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
                 mailer._deliver(msg)
         except Exception as exc:
             logger.warning('Email notify failed for camera %s %s: %s', camera_id, event_type, exc)
+
+    if event_type == 'offline':
+        _mark_camera_offline_notified(camera_id)
+    else:
+        _mark_camera_recovery_notified(camera_id)
 
 
 def _check_cameras_health() -> None:
@@ -869,8 +873,9 @@ def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any], *, m
 
 
 def point_in_polygon(x: float, y: float, points: list[dict[str, Any]]) -> bool:
+    if len(points) < 3:
+        return False
     inside = False
-    vertex_count = len(points)
     previous = points[-1]
     for current in points:
         try:
@@ -889,7 +894,7 @@ def point_in_polygon(x: float, y: float, points: list[dict[str, Any]]) -> bool:
             if x < slope_x:
                 inside = not inside
         previous = current
-    return inside if vertex_count >= 3 else False
+    return inside
 
 
 def point_on_segment(x: float, y: float, x1: float, y1: float, x2: float, y2: float) -> bool:
@@ -1167,11 +1172,11 @@ def record_live_detection_history(camera_id: str, detections: list[dict[str, Any
     ]
     if sample_ts is None:
         sample_ts = time.time()
+    history_minutes = max(1, int(effective_live_config().get("detection_history_minutes", 10)))
+    history_maxlen = max(120, history_minutes * 120)
     with live_detection_history_lock:
         history = live_detection_history.get(camera_id)
         if history is None:
-            history_minutes = max(1, int(effective_live_config().get("detection_history_minutes", 10)))
-            history_maxlen = max(120, history_minutes * 120)
             history = deque(maxlen=history_maxlen)
             live_detection_history[camera_id] = history
         history.append((sample_ts, sample))
@@ -1440,7 +1445,7 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None = None) -> 
             live_detection_last_checked[camera_id] = now
             active_live_detection_cameras.add(camera_id)
 
-        def _detect_bg(cid: str = camera_id, cfg: dict[str, Any] = copy.deepcopy(selected_config)) -> None:
+        def _detect_bg(cid: str = camera_id, cfg: dict[str, Any] = dict(selected_config)) -> None:
             try:
                 cam = get_camera_instance(cid)
                 if not hasattr(cam, 'read_frame'):
@@ -1683,9 +1688,10 @@ def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings
         )
     # Background monitor already performs periodic detection and event creation.
     # Skip snapshot-triggered detection in that mode to avoid duplicate alerts/recordings.
-    if normalize_bool_setting(effective_live_config().get('background_detection_enabled'), True):
+    live_cfg = effective_live_config()
+    if normalize_bool_setting(live_cfg.get('background_detection_enabled'), True):
         return
-    detection_interval_seconds = float(effective_live_config().get('detection_interval_seconds', 0.25))
+    detection_interval_seconds = float(live_cfg.get('detection_interval_seconds', 0.25))
     now = time.time()
     with live_detection_worker_lock:
         if camera_id in active_live_detection_cameras:
@@ -1751,11 +1757,12 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     if not (now - 300 <= frame_capture_ts <= now + 1):
         frame_capture_ts = now
 
+    min_conf = compute_minimum_rule_confidence()
     try:
         if frame_is_numpy and hasattr(detector, 'detect_frame'):
-            detections = detector.detect_frame(image, confidence=compute_minimum_rule_confidence())
+            detections = detector.detect_frame(image, confidence=min_conf)
         else:
-            detections = detector.detect_image(image, confidence=compute_minimum_rule_confidence())
+            detections = detector.detect_image(image, confidence=min_conf)
     except (DetectorUnavailableError, ValueError) as exc:
         logger.warning('Live detection skipped for camera %s: %s', camera_id, exc)
         update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state, detections=[])
@@ -2651,7 +2658,6 @@ def _write_installed_models(data: dict[str, Any]) -> None:
 
 
 def _sha256_file(path: Path) -> str:
-    import hashlib
     h = hashlib.sha256()
     with open(path, 'rb') as f:
         for chunk in iter(lambda: f.read(65536), b''):
@@ -2974,9 +2980,9 @@ def probe_audio_codec(file_path: Path) -> str | None:
 def probe_stream_codec(file_path: Path, stream_selector: str) -> str | None:
     if not file_path.exists() or file_path.stat().st_size <= 0:
         return None
-    ffprobe = shutil.which('ffprobe')
-    if not ffprobe:
+    if not _FFPROBE:
         return None
+    ffprobe = _FFPROBE
     command = [
         ffprobe,
         '-v', 'error',
@@ -3001,9 +3007,9 @@ def mp4_is_browser_playable(file_path: Path) -> bool:
 
 
 def probe_video_duration(file_path: Path) -> float | None:
-    ffprobe = shutil.which('ffprobe')
-    if not ffprobe or not file_path.exists():
+    if not _FFPROBE or not file_path.exists():
         return None
+    ffprobe = _FFPROBE
     command = [
         ffprobe,
         '-v', 'error',
@@ -3019,9 +3025,9 @@ def probe_video_duration(file_path: Path) -> float | None:
 
 
 def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
-    ffmpeg = shutil.which('ffmpeg')
-    if not ffmpeg:
+    if not _FFMPEG:
         raise RuntimeError('ffmpeg is required to convert recordings for browser playback.')
+    ffmpeg = _FFMPEG
     tmp_path = output_path.with_name(f'{output_path.stem}.tmp{output_path.suffix}')
     if tmp_path.exists():
         tmp_path.unlink(missing_ok=True)
@@ -3075,22 +3081,20 @@ def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
 
 
 def mp4_has_video_stream(file_path: Path) -> bool:
-    ffprobe = shutil.which('ffprobe')
-    if not ffprobe:
+    if not _FFPROBE:
         return file_path.exists() and file_path.stat().st_size > 0
     command = [
-        ffprobe,
-        '-v',
-        'error',
-        '-select_streams',
-        'v:0',
-        '-show_entries',
-        'stream=codec_name',
-        '-of',
-        'default=noprint_wrappers=1:nokey=1',
+        _FFPROBE,
+        '-v', 'error',
+        '-select_streams', 'v:0',
+        '-show_entries', 'stream=codec_name',
+        '-of', 'default=noprint_wrappers=1:nokey=1',
         str(file_path),
     ]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
     return result.returncode == 0 and bool((result.stdout or '').strip())
 
 
@@ -3181,7 +3185,7 @@ def refresh_runtime_after_database_restore() -> None:
 
 def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
     recording_settings = effective_recording_config()
-    if not force and not _bool_value(recording_settings.get('auto_purge_enabled', True)):
+    if not force and not normalize_bool_setting(recording_settings.get('auto_purge_enabled', True), True):
         return {'purged': 0, 'files_deleted': 0, 'bytes_deleted': 0, 'recordings': []}
     retention_days = int(recording_settings.get('retention_days', 14))
     max_storage_gb = int(recording_settings.get('max_storage_gb', 20))
@@ -3680,24 +3684,25 @@ def delete_all_objects(request: Request):
 @app.get('/api/config')
 def runtime_config():
     ai_state = ai_status_payload()
+    ai_cfg = effective_ai_config()
     return {
         'server': {'host': config.get('server', {}).get('host'), 'port': config.get('server', {}).get('port')},
         'camera': get_camera_config(None),
         'cameras': effective_cameras_config(),
         'ai': {
-            'enabled': effective_ai_config().get('enabled'),
-            'backend': effective_ai_config().get('backend'),
-            'confidence': effective_ai_config().get('confidence'),
-            'iou_threshold': effective_ai_config().get('iou_threshold'),
-            'input_size': effective_ai_config().get('input_size'),
-            'model_path': effective_ai_config().get('model_path'),
-            'labels_path': effective_ai_config().get('labels_path'),
+            'enabled': ai_cfg.get('enabled'),
+            'backend': ai_cfg.get('backend'),
+            'confidence': ai_cfg.get('confidence'),
+            'iou_threshold': ai_cfg.get('iou_threshold'),
+            'input_size': ai_cfg.get('input_size'),
+            'model_path': ai_cfg.get('model_path'),
+            'labels_path': ai_cfg.get('labels_path'),
             'active_backend': ai_state['active_backend'],
             'mode': ai_state['mode'],
             'available': ai_state['inference_available'],
             'model_loaded': ai_state['model_loaded'],
             'error': ai_state['error'],
-            'categories': effective_ai_config().get('categories', []),
+            'categories': ai_cfg.get('categories', []),
         },
         'alerts': config.get('alerts', {}),
         'auth': {
@@ -4167,7 +4172,7 @@ def validate_push_notification_settings(payload: dict[str, Any]) -> dict[str, An
     for key, value in payload.items():
         if key in allowed:
             updated[key] = value
-    updated['enabled'] = _bool_value(updated.get('enabled', False))
+    updated['enabled'] = normalize_bool_setting(updated.get('enabled', False))
     for key in ('server_url', 'topic', 'priority', 'username', 'password'):
         updated[key] = str(updated.get(key) or '').strip()
     if not updated['server_url']:
@@ -4180,10 +4185,6 @@ def validate_push_notification_settings(payload: dict[str, Any]) -> dict[str, An
     if updated['enabled'] and not updated['topic']:
         raise HTTPException(status_code=400, detail='Topic is required when push notifications are enabled.')
     return updated
-
-
-def _bool_value(value: Any) -> bool:
-    return value.lower() in {'1', 'true', 'yes', 'on'} if isinstance(value, str) else bool(value)
 
 
 def _int_field(payload: dict[str, Any], field: str, default: int, minimum: int, maximum: int) -> int:
@@ -4231,7 +4232,7 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     payload_detection = payload.get('detection') if isinstance(payload.get('detection'), dict) else {}
     detection.update(existing_detection)
     detection.update(payload_detection)
-    detection['object_detection_enabled'] = _bool_value(detection.get('object_detection_enabled', True))
+    detection['object_detection_enabled'] = normalize_bool_setting(detection.get('object_detection_enabled', True), True)
     detection['object_labels'] = normalize_label_list(detection.get('object_labels', []))
     detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
     _migrate_legacy_camera_motion(detection)
@@ -4284,7 +4285,7 @@ def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'chunk_duration_seconds': _int_field(merged, 'chunk_duration_seconds', 3600, 60, 86400),
         'retention_days': _int_field(merged, 'retention_days', 14, 1, 3650),
         'max_storage_gb': _int_field(merged, 'max_storage_gb', 20, 1, 100000),
-        'auto_purge_enabled': _bool_value(merged.get('auto_purge_enabled', True)),
+        'auto_purge_enabled': normalize_bool_setting(merged.get('auto_purge_enabled', True), True),
     }
 
 
@@ -4468,10 +4469,6 @@ def export_yolo_onnx(model_name: str, destination: Path) -> int:
         destination.unlink(missing_ok=True)
         raise RuntimeError('Exported model file is empty.')
     return destination.stat().st_size
-
-
-def export_yolov8n_onnx(destination: Path) -> int:
-    return export_yolo_onnx('yolov8n', destination)
 
 
 def _do_download_model(model_name: str, switch_active: bool = True) -> dict[str, Any]:

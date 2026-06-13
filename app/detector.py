@@ -167,19 +167,15 @@ class OnnxYoloDetector:
         """
         if not self.available:
             raise DetectorUnavailableError(self.unavailable_reason or "ONNX detector is not available")
-
-        effective_confidence = confidence if confidence is not None else self.confidence
-        input_tensor, scale, pad_x, pad_y, original_width, original_height = self._preprocess(image)
-        with self._inference_semaphore:
-            outputs = self.session.run(self.output_names, {self.input_name: input_tensor})  # type: ignore[union-attr,index]
-        return self._postprocess(outputs[0], scale, pad_x, pad_y, original_width, original_height, effective_confidence)
+        return self._run_inference(image, confidence)
 
     def detect_image(self, image_bytes: bytes, confidence: float | None = None) -> list[dict[str, Any]]:
         if not self.available:
             raise DetectorUnavailableError(self.unavailable_reason or "ONNX detector is not available")
+        return self._run_inference(self._decode_image(image_bytes), confidence)
 
+    def _run_inference(self, image: Any, confidence: float | None) -> list[dict[str, Any]]:
         effective_confidence = confidence if confidence is not None else self.confidence
-        image = self._decode_image(image_bytes)
         input_tensor, scale, pad_x, pad_y, original_width, original_height = self._preprocess(image)
         # Cap concurrent inferences so parallel callers (per-camera background
         # detection + live overlay) don't oversubscribe the CPU and slow each other.
@@ -241,51 +237,55 @@ class OnnxYoloDetector:
         if predictions.shape[0] < predictions.shape[1]:
             predictions = predictions.T
 
-        boxes: list[list[float]] = []
-        scores: list[float] = []
-        classes: list[int] = []
-
-        for row in predictions:
-            if row.shape[0] < 5:
-                continue
-
-            class_scores = row[4:]
-            objectness = 1.0
-            if len(self.labels) > 0 and row.shape[0] >= len(self.labels) + 5:
-                objectness = float(row[4])
-                class_scores = row[5:]
-
-            class_id = int(np.argmax(class_scores))
-            score = float(class_scores[class_id]) * objectness
-            if score < confidence:
-                continue
-
-            cx, cy, width, height = map(float, row[:4])
-            x1 = (cx - width / 2 - pad_x) / scale
-            y1 = (cy - height / 2 - pad_y) / scale
-            x2 = (cx + width / 2 - pad_x) / scale
-            y2 = (cy + height / 2 - pad_y) / scale
-            x1 = min(max(x1, 0.0), float(original_width))
-            y1 = min(max(y1, 0.0), float(original_height))
-            x2 = min(max(x2, 0.0), float(original_width))
-            y2 = min(max(y2, 0.0), float(original_height))
-            if x2 <= x1 or y2 <= y1:
-                continue
-            boxes.append([x1, y1, x2, y2])
-            scores.append(score)
-            classes.append(class_id)
-
-        if not boxes:
+        n_cols = predictions.shape[1]
+        if n_cols < 5:
             return []
 
-        box_array = np.array(boxes, dtype=np.float32)
-        score_array = np.array(scores, dtype=np.float32)
-        class_array = np.array(classes, dtype=np.int32)
+        # Detect model format once: YOLOv5 has an explicit objectness column at
+        # index 4; YOLOv8 goes straight from bbox to class scores at index 4.
+        has_objectness = len(self.labels) > 0 and n_cols >= len(self.labels) + 5
+
+        if has_objectness:
+            objectness = predictions[:, 4]
+            class_scores = predictions[:, 5:]
+        else:
+            objectness = None
+            class_scores = predictions[:, 4:]
+
+        class_ids = np.argmax(class_scores, axis=1)
+        raw_scores = class_scores[np.arange(len(class_ids)), class_ids]
+        scores = raw_scores * objectness if objectness is not None else raw_scores
+
+        conf_mask = scores >= confidence
+        if not np.any(conf_mask):
+            return []
+
+        pred_f = predictions[conf_mask]
+        scores_f = scores[conf_mask].astype(np.float32)
+        class_ids_f = class_ids[conf_mask].astype(np.int32)
+
+        cx = pred_f[:, 0]
+        cy = pred_f[:, 1]
+        w = pred_f[:, 2]
+        h = pred_f[:, 3]
+        x1 = np.clip((cx - w / 2 - pad_x) / scale, 0.0, float(original_width))
+        y1 = np.clip((cy - h / 2 - pad_y) / scale, 0.0, float(original_height))
+        x2 = np.clip((cx + w / 2 - pad_x) / scale, 0.0, float(original_width))
+        y2 = np.clip((cy + h / 2 - pad_y) / scale, 0.0, float(original_height))
+
+        valid = (x2 > x1) & (y2 > y1)
+        if not np.any(valid):
+            return []
+
+        box_array = np.stack([x1[valid], y1[valid], x2[valid], y2[valid]], axis=1).astype(np.float32)
+        score_array = scores_f[valid]
+        class_array = class_ids_f[valid]
+
         keep = non_max_suppression(box_array, score_array, class_array, self.iou_threshold)
 
         detections: list[Detection] = []
         for index in sorted(keep, key=lambda idx: float(score_array[idx]), reverse=True):
-            x1, y1, x2, y2 = box_array[index]
+            x1v, y1v, x2v, y2v = box_array[index]
             class_id = int(class_array[index])
             label = self.labels[class_id] if 0 <= class_id < len(self.labels) else f"class_{class_id}"
             detections.append(
@@ -293,10 +293,10 @@ class OnnxYoloDetector:
                     label=label,
                     confidence=float(score_array[index]),
                     box={
-                        "x": round(float(x1) / original_width, 4),
-                        "y": round(float(y1) / original_height, 4),
-                        "width": round(float(x2 - x1) / original_width, 4),
-                        "height": round(float(y2 - y1) / original_height, 4),
+                        "x": round(float(x1v) / original_width, 4),
+                        "y": round(float(y1v) / original_height, 4),
+                        "width": round(float(x2v - x1v) / original_width, 4),
+                        "height": round(float(y2v - y1v) / original_height, 4),
                     },
                 )
             )

@@ -44,7 +44,6 @@ class AuthService:
     def connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.database_path)
         connection.row_factory = sqlite3.Row
-        connection.execute('PRAGMA journal_mode=WAL;')
         try:
             yield connection
             connection.commit()
@@ -56,6 +55,7 @@ class AuthService:
 
     def init(self) -> None:
         with self.connect() as db:
+            db.execute('PRAGMA journal_mode=WAL;')
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS users (
@@ -276,11 +276,17 @@ class AuthService:
         return self.get_user(user_id)  # type: ignore[return-value]
 
     def change_password(self, user_id: int, current_password: str, new_password: str) -> None:
+        errors = self.validate_password_complexity(new_password)
+        if errors:
+            raise AuthError(" ".join(errors))
         with self.connect() as db:
             row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
             if row is None or not self.verify_password(current_password, row["password_hash"]):
                 raise AuthError("Current password is incorrect.")
-        self.update_user(user_id, password=new_password)
+            db.execute(
+                "UPDATE users SET password_hash = ?, failed_attempts = 0, locked_until = NULL, updated_at = ? WHERE id = ?",
+                (self.hash_password(new_password), utc_now(), user_id),
+            )
 
     def too_many_recent_failures(self, db: sqlite3.Connection, username: str, ip_address: str, now: datetime) -> bool:
         window_start = (now - self.lockout).isoformat()
