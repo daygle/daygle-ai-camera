@@ -697,17 +697,20 @@ function renderRecordingList(recordings) {
     const tooltip = detections
       .map((d) => `${titleCase(d.label)} · ${Math.round(d.confidence * 100)}%`)
       .join('\n');
+    const typeLabel = isSound ? 'Sound' : 'Object';
     return `
       <button class="timeline-recording-item${activeClass}" type="button" data-recording-id="${recording.id}" data-tooltip="${escapeHtml(tooltip)}">
         <span class="timeline-recording-color" style="background:${color}"></span>
         <span class="timeline-recording-main">
-          <strong>${escapeHtml(label)}</strong>
-          <span>${escapeHtml(start)} - ${escapeHtml(end)}</span>
+          <span class="timeline-recording-title-row">
+            <span class="activity-item-type">${typeLabel}</span>
+            <strong>Recording #${recording.id}</strong>
+          </span>
+          <span>${escapeHtml(start)} – ${escapeHtml(end)} · ${camera}</span>
           ${confidenceBadges ? `<span class="timeline-recording-confidence-row">${confidenceBadges}</span>` : ''}
         </span>
         <span class="timeline-recording-meta">
           <span>${escapeHtml(duration)}</span>
-          <span>#${recording.id} · ${camera}</span>
         </span>
       </button>
     `;

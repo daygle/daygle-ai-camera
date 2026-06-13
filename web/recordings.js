@@ -218,40 +218,31 @@ function renderRecordings(recordings) {
   }
   els.recordings.innerHTML = recordings.map((recording) => {
     const mediaReady = recording.media_ready !== false;
-    const trigger = recordingDisplayTrigger(recording);
-    const triggerPillClass = triggerBadgeClass(trigger, recording);
-    const triggerTooltip = recordingDetectionSummary(recording)
-      .map((d) => `${titleCase(d.label)} · ${Math.round(d.confidence * 100)}%`)
-      .join('\n');
+    const isSound = isSoundRecording(recording);
+    const typeClass = isSound ? 'activity-item-sound' : 'activity-item-event';
+    const typeLabel = isSound ? 'Sound Recording' : 'Object Recording';
+    const icon = isSound
+      ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>'
+      : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>';
+    const metaParts = [`Camera: ${escapeHtml(cameraLabel(recording))}`, `Duration: ${Number(recording.duration_seconds || 0).toFixed(1)}s`];
+    if (!mediaReady) metaParts.push('Preparing...');
+    const badges = recordingDetectionSummary(recording).map((d) => detectionPill(d.label, d.confidence, isSound)).join('') || '<span class="muted">No detections</span>';
     return `
-      <div class="item recording-row" data-recording-row="${recording.id}">
-        <div class="recording-row-main">
-          <div class="recording-row-header">
-            <div class="recording-row-title">
-              <span class="recording-row-id">Recording #${recording.id}</span>
-              <span class="chip recording-row-trigger ${triggerPillClass}" data-tooltip="${escapeHtml(triggerTooltip)}">${escapeHtml(titleCase(trigger))}</span>
+      <div class="item activity-item ${typeClass}" data-recording-row="${recording.id}">
+        <div class="activity-item-icon">${icon}</div>
+        <div class="activity-item-main">
+          <div class="activity-item-header">
+            <div class="activity-item-title">
+              <span class="activity-item-type">${typeLabel}</span>
+              <span class="activity-item-name">Recording #${recording.id}</span>
             </div>
-            <div class="recording-row-when">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <div class="activity-item-when">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
               <span>${escapeHtml(formatDateTime(recording.started_at))}</span>
             </div>
           </div>
-          <div class="recording-row-meta-grid">
-            <div class="recording-meta-pill">
-              <span class="recording-meta-label">Camera</span>
-              <span class="recording-meta-value">${escapeHtml(cameraLabel(recording))}</span>
-            </div>
-            <div class="recording-meta-pill">
-              <span class="recording-meta-label">Duration</span>
-              <span class="recording-meta-value">${Number(recording.duration_seconds || 0).toFixed(1)}s</span>
-            </div>
-            <div class="recording-meta-pill">
-              <span class="recording-meta-label">Event</span>
-              <span class="recording-meta-value">#${escapeHtml(recording.event_id || 'none')}</span>
-            </div>
-
-          </div>
-          <div class="recording-row-badges">${recordingDetectionSummary(recording).map((d) => detectionPill(d.label, d.confidence, isSoundRecording(recording))).join('') || '<span class="muted">No detections</span>'}</div>
+          <p class="muted activity-item-meta">${metaParts.join(' · ')}</p>
+          <div class="activity-item-badges">${badges}</div>
         </div>
         <div class="recording-row-actions">
           <button class="secondary" data-play-recording="${recording.id}" ${mediaReady ? '' : 'disabled'}>

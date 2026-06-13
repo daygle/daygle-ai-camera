@@ -1785,11 +1785,17 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # Sub-threshold detections must not trigger recordings or appear in the live
     # status panel as matched objects. When no alert rules exist every in-zone
     # detection is already treated as a match, so skip filtering in that case.
-    _confident_object_detections = (
-        [d for d in object_detections
-         if zone_object_rule_matches(settings, d, action='alert') or zone_record_on_detect(d, settings)]
-        if zone_rules else list(object_detections)
-    )
+    # Also annotate each detection with the first zone it matched so the zone
+    # name is stored in the database and surfaced in the dashboard.
+    _confident_object_detections: list[dict[str, Any]] = []
+    if zone_rules:
+        for _det in object_detections:
+            _zone_matches = zone_object_rule_matches(settings, _det, action='alert')
+            if _zone_matches or zone_record_on_detect(_det, settings):
+                _zone_name = (str(_zone_matches[0][0].get('name') or _zone_matches[0][0].get('id') or '')) if _zone_matches else None
+                _confident_object_detections.append({**_det, 'zone_name': _zone_name or None})
+    else:
+        _confident_object_detections = list(object_detections)
     recording_detections = [
         {
             **detection,

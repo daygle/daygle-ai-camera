@@ -267,10 +267,12 @@ function renderActivityItem(item) {
   const icon = isSound ? soundIcon() : isEvent ? eventIcon() : alertIcon();
   const typeClass = isSound ? 'activity-item-sound' : isEvent ? 'activity-item-event' : 'activity-item-alert';
   const typeLabel = isSound ? (isEvent ? 'Sound Detection' : 'Sound Alert') : isEvent ? 'Object Detection' : 'Object Alert';
-  const title = isEvent
-    ? `Event #${item.id}`
-    : (item.ruleNames?.join(', ') || 'Alert');
-  const titleSuffix = !isEvent && item.ruleNames?.length > 1 ? ` <span class="muted">(${item.ruleNames.length} rules)</span>` : '';
+  const title = item.recordingId
+    ? `Recording #${item.recordingId}`
+    : isEvent
+      ? `Event #${item.id}`
+      : 'Alert';
+  const titleSuffix = '';
   const cameraLine = item.camera ? `Camera: ${escapeHtml(item.camera)}` : 'Camera: unknown';
   const zonePart = !isSound && item.zoneNames?.length
     ? ` · Zone: ${item.zoneNames.map(escapeHtml).join(', ')}`
