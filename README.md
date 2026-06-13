@@ -218,9 +218,9 @@ Draw polygon monitoring zones directly on the live camera view. For each zone yo
 
 Zone-based rules replace the global single-camera alert rules when zones are configured for a camera.
 
-### AI Settings
+### ONNX
 
-Route: `/ai`
+Route: `/onnx`
 
 - AI enabled state.
 - Backend: `onnx`.
@@ -235,7 +235,7 @@ Route: `/ai`
 - Check model, reload detector, test detector.
 - Check for and apply model updates from the remote manifest.
 
-AI settings are stored in SQLite under `app_settings.key = ai`.
+ONNX settings are stored in SQLite under `app_settings.key = ai`.
 
 ### System Settings
 
@@ -274,7 +274,7 @@ The default setup expects ONNX detection and a real ONVIF/RTSP camera.
 To enable ONNX inference:
 
 1. Sign in as an admin.
-2. Open `/ai`.
+2. Open `/onnx`.
 3. Select a model size, then click **Download** to export it locally. YOLOv8n is the default starting point; YOLOv8m or larger is recommended for IR or night-vision cameras.
 4. Save AI settings.
 5. Use **Check model**, **Reload detector**, and **Test detector**.
@@ -321,7 +321,7 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `GET` | `/zones` | Admin monitoring zone editor |
 | `GET` | `/profile` | Current user profile |
 | `GET` | `/users` | Admin user management |
-| `GET` | `/ai` | Admin AI settings |
+| `GET` | `/onnx` | Admin ONNX settings |
 | `GET` | `/settings` | Admin system settings (email, push, recording, storage, updates, backup) |
 | `GET` | `/audit` | Admin audit log |
 | `GET` | `/recordings` | Recordings list |
@@ -497,7 +497,7 @@ python -m pytest
 
 - **Cannot log in after first start**: open `/setup` and create the initial admin user.
 - **Setup redirects to login**: a user already exists; sign in with an admin account.
-- **Dashboard shows MODEL MISSING**: open `/ai`, download a YOLO model or set a readable model path, then reload the detector.
+- **Dashboard shows MODEL MISSING**: open `/onnx`, download a YOLO model or set a readable model path, then reload the detector.
 - **ONNX fails to load**: confirm model and labels paths are readable and ONNX Runtime is installed.
 - **Email alerts do not send**: open `/settings`, check SMTP host/port/auth/from address, and confirm the alert rule has email enabled and recipients. Confirm **Background detection** is enabled in Live settings so rules continue checking when the Live Cameras page is closed.
 - **Push notifications not arriving**: open `/settings` → **Push Notifications**, verify server URL and topic, then send a test notification.

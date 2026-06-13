@@ -38,8 +38,9 @@ window.showToast = function (message, isError) {
       label: 'Monitoring',
       admin: false,
       links: [
-        { href: '/zones', match: '/zones', label: 'Zones' },
         { href: '/cameras', match: '/cameras', label: 'Cameras' },
+        { href: '/zones', match: '/zones', label: 'Zones' },
+        { href: '/sounds', match: '/sounds', label: 'Sounds' },
       ],
     },
     {
@@ -47,8 +48,8 @@ window.showToast = function (message, isError) {
       label: 'Intelligence',
       admin: false,
       links: [
-        { href: '/ai', match: '/ai', label: 'AI Settings' },
-        { href: '/yamnet', match: '/yamnet', label: 'YAMNet' },
+        { href: '/onnx', match: '/onnx', label: 'ONNX' },
+        { href: '/yamnet-tflite', match: '/yamnet-tflite', label: 'YAMNet TFLite' },
       ],
     },
     {

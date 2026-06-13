@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sounds - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell page-stack">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Monitoring</p>
+        <h1>Sounds</h1>
+        <p class="muted">Configure per-camera sound detection rules and alert actions.</p>
+      </div>
+      <div class="cam-hero-action">
+        <a class="button-link secondary-link hero-action-link" href="/yamnet-tflite">YAMNet TFLite Status</a>
+      </div>
+    </header>
+
+    <section class="card cameras-list-card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+        </div>
+        <div>
+          <h2>Sound Detection</h2>
+          <p class="settings-section-subtitle">Select a camera, add sounds, and tune thresholds for the RTSP audio track.</p>
+        </div>
+      </div>
+
+      <form class="form-grid compact-grid" onsubmit="return false;">
+        <label>
+          <span>Camera</span>
+          <select id="soundCameraSelect" aria-label="Select camera"></select>
+        </label>
+        <label>
+          <span>Sound Detection</span>
+          <select id="soundEnabled" aria-label="Sound detection state">
+            <option value="false">Disabled</option>
+            <option value="true">Enabled (RTSP audio)</option>
+          </select>
+          <span class="field-help">Audio detection uses the camera's RTSP audio stream.</span>
+        </label>
+      </form>
+
+      <div id="soundStatusPanel" class="status-panel" style="margin-top:1rem"></div>
+
+      <div class="rule-select-wrapper" style="margin-top:1rem">
+        <select id="addSoundRuleSelect" aria-label="Add sound rule"></select>
+      </div>
+
+      <div id="soundRulesWrap" style="overflow-x:auto; margin-top:.5rem"></div>
+
+      <p id="soundMessage" class="muted cameras-list-status" aria-live="polite"></p>
+
+      <div class="modal-footer">
+        <button class="secondary" id="reloadSoundsBtn" type="button">Refresh</button>
+        <button id="saveSoundSettingsBtn" type="button">Save Sounds</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/nav.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/sounds.js"></script>
+</body>
+</html>

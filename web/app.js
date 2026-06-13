@@ -275,7 +275,7 @@ function renderActivityItem(item) {
   const isSound = Boolean(item.isSound);
   const icon = isSound ? soundIcon() : isEvent ? eventIcon() : alertIcon();
   const typeClass = isSound ? 'activity-item-sound' : isEvent ? 'activity-item-event' : 'activity-item-alert';
-  const typeLabel = isSound ? (isEvent ? 'Sound Detection' : 'Sound Alert') : isEvent ? 'Detection' : 'Alert';
+  const typeLabel = isSound ? (isEvent ? 'Sound Detection' : 'Sound Alert') : isEvent ? 'Object Detection' : 'Object Alert';
   const title = isEvent
     ? (isSound && item.soundMeta ? `🔊 ${item.soundMeta.class_label || titleCase(item.soundMeta.label || 'sound')}` : `Event #${item.id}`)
     : (item.ruleNames?.join(', ') || 'Alert');

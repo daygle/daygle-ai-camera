@@ -8,8 +8,6 @@ const emptyEl = document.getElementById('cameraEmpty');
 const modal = document.getElementById('cameraModal');
 const deleteModal = document.getElementById('deleteModal');
 const editForm = document.getElementById('cameraEditForm');
-let soundClasses = [];
-let editingSound = null;
 
 // Stats + filter state
 const stats = {
@@ -270,18 +268,12 @@ function fillModal(camera, index) {
   document.getElementById('rtspManualFields').hidden = !manual;
   document.getElementById('onvifFields').hidden = manual;
 
-  // Sound detection
-  editingSound = camera.detection?.sound
-    ? JSON.parse(JSON.stringify(camera.detection.sound))
-    : { enabled: false, rules: [] };
-  renderModalSoundSettings();
-
   switchTab('connection');
 }
 
 function openEditModal(index) {
   const camera = index === null
-    ? { id: `camera-${cameras.length + 1}`, name: `Camera ${cameras.length + 1}`, backend: 'onvif', port: 554, path: 'stream1', width: 1280, height: 720, fps: 15, recording: { continuous: false }, detection: { sound: { enabled: false, rules: [] } } }
+    ? { id: `camera-${cameras.length + 1}`, name: `Camera ${cameras.length + 1}`, backend: 'onvif', port: 554, path: 'stream1', width: 1280, height: 720, fps: 15, recording: { continuous: false }, detection: {} }
     : cameras[index];
   fillModal(camera, index);
   openModal(modal);
@@ -308,9 +300,7 @@ function collectModalData() {
     recording: {
       continuous: document.getElementById('editContinuous').value === 'true',
     },
-    detection: {
-      sound: editingSound || { enabled: false, rules: [] },
-    },
+    detection: {},
   };
 }
 
@@ -405,138 +395,6 @@ filter.form?.addEventListener('submit', (e) => e.preventDefault());
 // but keeps the page consistent with the rest of the app).
 window.daygleDatePrefsChanged = function daygleDatePrefsChanged() { /* no-op */ };
 
-// ─── Sound Detection (per-camera, in the modal) ───────────────────────────────
-
-function _soundRuleOptions() {
-  const activeIds = new Set((editingSound?.rules || []).map((r) => r.class));
-  const available = soundClasses.filter((cls) => !activeIds.has(cls.id));
-  const options = available.map((cls) => `<option value="${escapeHtml(cls.id)}">${escapeHtml(cls.label)}</option>`).join('');
-  return `<option value="">Add Sound…</option>${options}`;
-}
-
-function _defaultSoundRule(cls) {
-  return {
-    class: cls.id,
-    name: cls.label,
-    enabled: false,
-    record_on_detect: true,
-    confidence_threshold: cls.default_threshold,
-    cooldown_seconds: cls.default_cooldown,
-    email_enabled: false,
-    push_enabled: false,
-  };
-}
-
-function _updateSoundRule(classId, field, value) {
-  let rule = (editingSound?.rules || []).find((r) => r.class === classId);
-  if (!rule) {
-    const cls = soundClasses.find((c) => c.id === classId);
-    if (!cls) return;
-    rule = _defaultSoundRule(cls);
-    editingSound.rules.push(rule);
-  }
-  rule[field] = value;
-}
-
-function renderModalSoundSettings() {
-  const container = document.getElementById('cameraModalSoundSettings');
-  if (!container) return;
-  if (!soundClasses.length) {
-    container.innerHTML = '<p class="muted">Sound classes unavailable.</p>';
-    return;
-  }
-  const sound = editingSound || { enabled: false, rules: [] };
-  const enabledSel = sound.enabled ? 'selected' : '';
-  const disabledSel = sound.enabled ? '' : 'selected';
-
-  const rows = (sound.rules || []).map((rule) => {
-    const cls = soundClasses.find((c) => c.id === rule.class);
-    const label = cls ? cls.label : titleCase(rule.class.replace(/_/g, ' '));
-    return `
-      <tr data-sound-class="${escapeHtml(rule.class)}">
-        <td class="cell-label">${escapeHtml(label)}</td>
-        <td class="cell-center"><input type="checkbox" data-sound-rule-enabled="${escapeHtml(rule.class)}" ${rule.enabled ? 'checked' : ''} /></td>
-        <td class="cell-center"><input type="checkbox" data-sound-rule-record="${escapeHtml(rule.class)}" ${rule.record_on_detect !== false ? 'checked' : ''} /></td>
-        <td><input type="number" data-sound-rule-threshold="${escapeHtml(rule.class)}" value="${rule.confidence_threshold}" min="0.1" max="1.0" step="0.05" /></td>
-        <td><input type="number" data-sound-rule-cooldown="${escapeHtml(rule.class)}" value="${rule.cooldown_seconds}" min="5" max="3600" step="5" /></td>
-        <td class="cell-center"><input type="checkbox" data-sound-rule-email="${escapeHtml(rule.class)}" ${rule.email_enabled ? 'checked' : ''} /></td>
-        <td class="cell-center"><input type="checkbox" data-sound-rule-push="${escapeHtml(rule.class)}" ${rule.push_enabled ? 'checked' : ''} /></td>
-        <td class="cell-center"><button class="secondary delete-btn" type="button" data-remove-sound-rule="${escapeHtml(rule.class)}">✕</button></td>
-      </tr>`;
-  }).join('');
-
-  container.innerHTML = `
-    <div class="form-grid compact-grid">
-      <label><span>Sound Detection</span>
-        <select id="cameraSoundEnabled">
-          <option value="false" ${disabledSel}>Disabled</option>
-          <option value="true" ${enabledSel}>Enabled (RTSP audio)</option>
-        </select>
-        <span class="field-help">Listens to this camera's RTSP audio track using YAMNet neural detection.</span>
-      </label>
-    </div>
-    <div class="rule-select-wrapper" style="margin-top:1rem">
-      <select id="addSoundRuleSelect">${_soundRuleOptions()}</select>
-    </div>
-    ${rows ? `<div style="overflow-x:auto; margin-top:.5rem">
-      <table class="rule-table">
-        <thead>
-          <tr>
-            <th>Sound</th>
-            <th class="cell-center">Enabled</th>
-            <th class="cell-center">Record</th>
-            <th>Threshold</th>
-            <th>Cooldown (s)</th>
-            <th class="cell-center">Email</th>
-            <th class="cell-center">Push</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>` : '<p class="muted empty-message" style="margin-top:.5rem">No sound rules configured. Use the dropdown above to add one.</p>'}`;
-
-  document.getElementById('cameraSoundEnabled')?.addEventListener('change', (e) => {
-    if (editingSound) editingSound.enabled = e.target.value === 'true';
-  });
-  document.getElementById('addSoundRuleSelect')?.addEventListener('change', (e) => {
-    const classId = e.target.value;
-    if (!classId || !editingSound) return;
-    const cls = soundClasses.find((c) => c.id === classId);
-    if (!cls) return;
-    if (!editingSound.rules.some((r) => r.class === classId)) {
-      editingSound.rules.push(_defaultSoundRule(cls));
-    }
-    renderModalSoundSettings();
-  });
-  container.querySelectorAll('[data-remove-sound-rule]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      if (!editingSound) return;
-      const classId = btn.dataset.removeSoundRule;
-      editingSound.rules = editingSound.rules.filter((r) => r.class !== classId);
-      renderModalSoundSettings();
-    });
-  });
-  container.querySelectorAll('[data-sound-rule-enabled]').forEach((cb) => {
-    cb.addEventListener('change', () => { _updateSoundRule(cb.dataset.soundRuleEnabled, 'enabled', cb.checked); });
-  });
-  container.querySelectorAll('[data-sound-rule-record]').forEach((cb) => {
-    cb.addEventListener('change', () => { _updateSoundRule(cb.dataset.soundRuleRecord, 'record_on_detect', cb.checked); });
-  });
-  container.querySelectorAll('[data-sound-rule-threshold]').forEach((inp) => {
-    inp.addEventListener('change', () => { _updateSoundRule(inp.dataset.soundRuleThreshold, 'confidence_threshold', Math.max(0.1, Math.min(1.0, Number(inp.value) || 0.35))); });
-  });
-  container.querySelectorAll('[data-sound-rule-cooldown]').forEach((inp) => {
-    inp.addEventListener('change', () => { _updateSoundRule(inp.dataset.soundRuleCooldown, 'cooldown_seconds', Math.max(5, Number.parseInt(inp.value, 10) || 30)); });
-  });
-  container.querySelectorAll('[data-sound-rule-email]').forEach((cb) => {
-    cb.addEventListener('change', () => { _updateSoundRule(cb.dataset.soundRuleEmail, 'email_enabled', cb.checked); });
-  });
-  container.querySelectorAll('[data-sound-rule-push]').forEach((cb) => {
-    cb.addEventListener('change', () => { _updateSoundRule(cb.dataset.soundRulePush, 'push_enabled', cb.checked); });
-  });
-}
-
 // ─── Load ─────────────────────────────────────────────────────────────────────
 
 async function loadCameras() {
@@ -544,12 +402,6 @@ async function loadCameras() {
   csrfToken = me.csrf_token;
   const settings = await api('/api/settings/system');
   cameras = settings.cameras || (settings.camera ? [settings.camera] : []);
-  try {
-    const { classes } = await api('/api/sound/classes');
-    soundClasses = classes || [];
-  } catch {
-    soundClasses = [];
-  }
   updateStats();
   renderGrid();
 }

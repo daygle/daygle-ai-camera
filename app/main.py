@@ -2059,7 +2059,7 @@ def log_detector_initialization(context: str = 'startup') -> None:
 
 PUBLIC_PREFIXES = ('/static/',)
 PUBLIC_PATHS = {'/favicon.ico', '/login', '/setup'}
-ADMIN_PATHS = {'/ai', '/cameras', '/settings', '/users', '/zones', '/audit'}
+ADMIN_PATHS = {'/onnx', '/yamnet-tflite', '/ai', '/cameras', '/settings', '/users', '/zones', '/sounds', '/audit'}
 MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
 
@@ -3302,6 +3302,14 @@ def zones_page():
     return root()
 
 
+@app.get('/sounds')
+def sounds_page():
+    sounds_path = web_dir / 'sounds.html'
+    if sounds_path.exists():
+        return FileResponse(sounds_path)
+    return root()
+
+
 @app.get('/cameras')
 def cameras_page():
     cameras_path = web_dir / 'cameras.html'
@@ -3333,20 +3341,30 @@ def recordings_timeline_page():
     return root()
 
 
-@app.get('/ai')
-def ai_settings_page():
-    ai_path = web_dir / 'ai.html'
+@app.get('/onnx')
+def onnx_page():
+    ai_path = web_dir / 'onnx.html'
     if ai_path.exists():
         return FileResponse(ai_path)
     return root()
 
 
-@app.get('/yamnet')
-def yamnet_page():
-    yamnet_path = web_dir / 'yamnet.html'
+@app.get('/ai')
+def ai_settings_page():
+    return RedirectResponse('/onnx', status_code=308)
+
+
+@app.get('/yamnet-tflite')
+def yamnet_tflite_page():
+    yamnet_path = web_dir / 'yamnet-tflite.html'
     if yamnet_path.exists():
         return FileResponse(yamnet_path)
     return root()
+
+
+@app.get('/yamnet')
+def yamnet_page():
+    return RedirectResponse('/yamnet-tflite', status_code=308)
 
 
 @app.get('/profile')
