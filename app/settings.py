@@ -16,7 +16,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": True,
         "backend": "onnx",
         "device": "auto",
-        "gpu_mem_limit": 6 * 1024 * 1024 * 1024,
         "confidence": 0.45,
         "iou_threshold": 0.45,
         "input_size": 640,
