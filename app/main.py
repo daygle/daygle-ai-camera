@@ -2087,14 +2087,17 @@ def ai_status_payload(ai_settings: dict[str, Any] | None = None) -> dict[str, An
 
 def log_detector_initialization(context: str = 'startup') -> None:
     ai_status = ai_status_payload()
+    active_providers = getattr(detector, 'active_providers', None)
+    providers_str = ','.join(active_providers) if active_providers else '<none>'
     logger.info(
         'AI detector %s: active_backend=%s configured_backend=%s model_loaded=%s '
-        'inference_available=%s model_path=%s labels_path=%s error=%s',
+        'inference_available=%s providers=%s model_path=%s labels_path=%s error=%s',
         context,
         ai_status['active_backend'],
         ai_status['configured_backend'],
         ai_status['model_loaded'],
         ai_status['inference_available'],
+        providers_str,
         ai_status['model_path'] or '<none>',
         ai_status['labels_path'] or '<none>',
         ai_status['error'] or '<none>',
