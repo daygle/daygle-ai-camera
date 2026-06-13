@@ -2779,6 +2779,7 @@ def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
                 recording_playback_sidecar_path(file_path),
                 recording_track_sidecar_path(file_path),
                 file_path.with_name(f'{file_path.stem}.playback.failed'),
+                file_path.with_name(f'{file_path.stem}.h264.mp4'),
                 file_path.with_name(f'{file_path.stem}.browser.mp4'),
                 file_path.with_name(f'{file_path.stem}.playback.mp4'),
             ]
@@ -2813,7 +2814,7 @@ def clear_runtime_media_directory(path_value: str | None) -> int:
 
 
 def recording_playback_sidecar_path(file_path: Path) -> Path:
-    return file_path.with_name(f'{file_path.stem}.h264.mp4')
+    return file_path.with_name(f'{file_path.stem}.h264-audio.mp4')
 
 
 def recording_stream_path(file_path: Path) -> Path:
@@ -2987,9 +2988,14 @@ def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
         str(source_path),
         '-map',
         '0:v:0',
-        '-an',
+        '-map',
+        '0:a:0?',
         '-c:v',
         'libx264',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '128k',
         '-preset',
         'veryfast',
         '-profile:v',

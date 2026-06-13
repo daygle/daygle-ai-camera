@@ -328,6 +328,16 @@ input[type="file"] { padding: 10px; }
 .status-panel .wide { grid-column: 1 / -1; }
 .status-panel span { display: block; color: var(--muted); font-size: 12px; font-weight: 800; margin-bottom: 5px; }
 .status-panel strong { overflow-wrap: anywhere; }
+.status-panel .recording-detail-detections {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.status-panel .recording-detail-detections .detection {
+  margin: 0;
+  width: fit-content;
+}
 .status-panel.status-ok { border: 1px solid rgba(73,230,163,.4); background: rgba(73,230,163,.07); border-radius: 10px; padding: 10px 14px; grid-template-columns: 1fr; }
 .status-panel.status-warning { border: 1px solid rgba(251,191,36,.4); background: rgba(251,191,36,.07); border-radius: 10px; padding: 10px 14px; grid-template-columns: 1fr; }
 .status-panel.status-error { border: 1px solid rgba(248,113,113,.4); background: rgba(248,113,113,.07); border-radius: 10px; padding: 10px 14px; grid-template-columns: 1fr; }
@@ -2086,13 +2096,17 @@ input[type="file"] { padding: 10px; }
   gap: 8px;
   flex-shrink: 0;
 }
-.activity-item-action {
+.activity-item-action,
+button.activity-item-action,
+a.activity-item-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   padding: 8px 12px;
   border-radius: 11px;
   font-size: 13px;
+  font-weight: 800;
   text-decoration: none;
   white-space: nowrap;
 }

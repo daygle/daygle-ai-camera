@@ -1833,6 +1833,37 @@ def test_write_rtsp_clip_keeps_clip_with_video_stream(tmp_path, monkeypatch):
     assert not file_path.with_name(f'{file_path.stem}.recording.tmp{file_path.suffix}').exists()
 
 
+def test_playback_transcode_preserves_optional_audio_stream(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    commands = []
+
+    def fake_run(command, *_args, **_kwargs):
+        commands.append(command)
+        Path(command[-1]).write_bytes(b'playback-video')
+        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+
+    monkeypatch.setattr(main.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(main.subprocess, 'run', fake_run)
+    monkeypatch.setattr(main, 'probe_video_duration', lambda _path: 5.0)
+    monkeypatch.setattr(main, 'mp4_has_video_stream', lambda _path: True)
+
+    source_path = tmp_path / 'source.mkv'
+    output_path = main.recording_playback_sidecar_path(source_path)
+    source_path.write_bytes(b'input-video')
+
+    main.transcode_recording_to_mp4(source_path, output_path)
+
+    command = commands[0]
+    assert output_path.name == 'source.h264-audio.mp4'
+    assert '-an' not in command
+    assert command[command.index('-map') + 1] == '0:v:0'
+    assert '0:a:0?' in command
+    assert command[command.index('-c:a') + 1] == 'aac'
+    assert output_path.exists()
+
+
 def test_alerted_only_event_and_recording_queries(tmp_path):
     from app.database import EventDatabase
 

@@ -338,7 +338,7 @@ function renderRecordingDetails(recording) {
     <div><span>Trigger</span><strong>${escapeHtml(recordingDisplayTrigger(recording))}</strong></div>
     <div><span>Started</span><strong>${escapeHtml(formatDateTime(recording.started_at))}</strong></div>
     <div><span>Duration</span><strong>${Number(recording.duration_seconds || 0).toFixed(1)}s</strong></div>
-    <div class="wide"><span>${detectionLabel}</span><strong>${detectionBadges}</strong></div>
+    <div class="wide"><span>${detectionLabel}</span><strong class="recording-detail-detections">${detectionBadges}</strong></div>
   `;
 }
 
