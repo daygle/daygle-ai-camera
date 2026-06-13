@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import base64
+import datetime
+import hashlib
+import logging
+import os
+import re
 import socket
+import urllib.error
 import urllib.request
 import urllib.parse
-import urllib.error
-import logging
 
 logger = logging.getLogger('daygle.ai')
 
@@ -14,178 +19,159 @@ VALID_COMMANDS = frozenset({
     'zoom_in', 'zoom_out',
 })
 
-# ─── HiSilicon hi3510 CGI (-act style) ───────────────────────────────────────
+# ─── ONVIF PTZ (primary — confirmed working on P6S cameras) ──────────────────
 
-_CGI_ACTS = {
-    'stop':      'stop',
-    'up':        'up',
-    'down':      'down',
-    'left':      'left',
-    'right':     'right',
-    'upleft':    'leftup',
-    'upright':   'rightup',
-    'downleft':  'leftdown',
-    'downright': 'rightdown',
-    'zoom_in':   'zoomin',
-    'zoom_out':  'zoomout',
+# (pan, tilt, zoom) unit vectors; scaled by speed at send time.
+_ONVIF_VELOCITY: dict[str, tuple[float, float, float]] = {
+    'up':        ( 0.0,  1.0,  0.0),
+    'down':      ( 0.0, -1.0,  0.0),
+    'left':      (-1.0,  0.0,  0.0),
+    'right':     ( 1.0,  0.0,  0.0),
+    'upleft':    (-0.7,  0.7,  0.0),
+    'upright':   ( 0.7,  0.7,  0.0),
+    'downleft':  (-0.7, -0.7,  0.0),
+    'downright': ( 0.7, -0.7,  0.0),
+    'zoom_in':   ( 0.0,  0.0,  1.0),
+    'zoom_out':  ( 0.0,  0.0, -1.0),
+    'stop':      ( 0.0,  0.0,  0.0),
 }
 
-# Paths tried in order — only those that returned non-404 in probing are listed first.
-_HI3510_PATHS = [
-    '/web/cgi-bin/hi3510/ptzctrl.cgi',
-    '/web/cgi-bin/ptzctrl.cgi',
-    '/cgi-bin/hi3510/ptzctrl.cgi',
-    '/cgi-bin/ptzctrl.cgi',
-    '/ptz.cgi',
-    '/web/ptz.cgi',
-]
-
-# ─── Foscam / decoder_control style (numeric command codes) ──────────────────
-
-# Each direction has a start code and a paired stop code.
-_FOSCAM_CMDS = {
-    'up':        (0,  1),
-    'down':      (2,  3),
-    'left':      (4,  5),
-    'right':     (6,  7),
-    'upleft':    (91, 93),   # diagonal codes vary by firmware; fallback below
-    'upright':   (90, 92),
-    'downleft':  (93, 93),
-    'downright': (92, 92),
-    'zoom_in':   (16, 17),
-    'zoom_out':  (18, 19),
-    'stop':      (1,  1),    # stop-up is treated as general stop by most firmware
-}
-
-_FOSCAM_PATHS = [
-    '/decoder_control.cgi',
-    '/cgi-bin/decoder_control.cgi',
-]
+# Profile token cache keyed by (host, port) — avoids a GetProfiles round-trip
+# on every button press.
+_profile_token_cache: dict[tuple[str, int], str] = {}
 
 
-def _make_request(url: str, auth: str) -> urllib.request.Request:
-    req = urllib.request.Request(url)
-    if auth:
-        req.add_header('Authorization', f'Basic {auth}')
-    return req
-
-
-def _basic_auth(username: str, password: str) -> str:
-    import base64
-    if not username:
-        return ''
-    return base64.b64encode(f'{username}:{password}'.encode()).decode()
-
-
-def _try_url(req: urllib.request.Request) -> int:
-    """Return HTTP status code, 0 on connection error."""
-    try:
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            resp.read()
-            return resp.status
-    except urllib.error.HTTPError as e:
-        return e.code
-    except Exception:
-        return 0
-
-
-def _is_success(code: int) -> bool:
-    # Many P6S / HiSilicon cameras return 502 "CGI was not CGI/1.1 compliant"
-    # even when the PTZ command executed successfully — the scripts run but
-    # don't emit proper HTTP headers, so the web server wraps the result in 502.
-    return code in (200, 201, 204, 302, 502)
-
-
-def send_ptz_command_cgi(
-    host: str,
-    http_port: int,
-    command: str,
-    speed: int,
-    username: str = '',
-    password: str = '',
-) -> None:
-    """Try HiSilicon hi3510 CGI paths, then Foscam decoder_control paths."""
-    auth = _basic_auth(username, password)
-    speed = max(1, min(8, int(speed)))
-    act = _CGI_ACTS.get(command, 'stop')
-
-    # --- HiSilicon hi3510 style ---
-    params = urllib.parse.urlencode({'-step': 0, '-act': act, '-speed': speed})
-    for path in _HI3510_PATHS:
-        url = f'http://{host}:{http_port}{path}?{params}'
-        req = _make_request(url, auth)
-        code = _try_url(req)
-        logger.debug("PTZ hi3510 %s → %s  HTTP %s", command, url, code)
-        if _is_success(code):
-            return
-
-    # --- Foscam / decoder_control style ---
-    start_code, _ = _FOSCAM_CMDS.get(command, (1, 1))
-    foscam_params = urllib.parse.urlencode({'command': start_code, 'onestep': 0})
-    for path in _FOSCAM_PATHS:
-        url = f'http://{host}:{http_port}{path}?{foscam_params}'
-        req = _make_request(url, auth)
-        code = _try_url(req)
-        logger.debug("PTZ foscam %s → %s  HTTP %s", command, url, code)
-        if _is_success(code):
-            return
-
-    raise OSError(
-        f"No PTZ endpoint responded for {host}:{http_port}. "
-        f"Check camera IP and credentials."
+def _wssec_header(username: str, password: str) -> str:
+    nonce = os.urandom(16)
+    created = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    digest = base64.b64encode(
+        hashlib.sha1(nonce + created.encode() + password.encode()).digest()
+    ).decode()
+    nonce_b64 = base64.b64encode(nonce).decode()
+    return (
+        '<s:Header>'
+        '<Security xmlns="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">'
+        '<UsernameToken>'
+        f'<Username>{username}</Username>'
+        f'<Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">{digest}</Password>'
+        f'<Nonce EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary">{nonce_b64}</Nonce>'
+        f'<Created xmlns="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">{created}</Created>'
+        '</UsernameToken>'
+        '</Security>'
+        '</s:Header>'
     )
 
 
-# ─── Raw PelcoD over TCP (fallback protocol) ─────────────────────────────────
+def _soap(url: str, body: str, username: str, password: str) -> str:
+    header = _wssec_header(username, password) if username else '<s:Header/>'
+    envelope = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<s:Envelope'
+        ' xmlns:s="http://www.w3.org/2003/05/soap-envelope"'
+        ' xmlns:trt="http://www.onvif.org/ver10/media/wsdl"'
+        ' xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl"'
+        ' xmlns:tt="http://www.onvif.org/ver10/schema">'
+        f'{header}'
+        f'<s:Body>{body}</s:Body>'
+        '</s:Envelope>'
+    )
+    req = urllib.request.Request(url, data=envelope.encode('utf-8'), method='POST')
+    req.add_header('Content-Type', 'application/soap+xml; charset=utf-8')
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.read().decode('utf-8', errors='replace')
+    except urllib.error.HTTPError as exc:
+        body_bytes = exc.read(512) if exc.fp else b''
+        raise OSError(f'ONVIF HTTP {exc.code}: {body_bytes.decode(errors="replace")[:120]}') from exc
+
+
+def _get_profile_token(host: str, http_port: int, username: str, password: str) -> str:
+    key = (host, http_port)
+    if key in _profile_token_cache:
+        return _profile_token_cache[key]
+
+    url = f'http://{host}:{http_port}/onvif/media_service'
+    response = _soap(url, '<trt:GetProfiles/>', username, password)
+
+    # The token is an XML attribute: <trt:Profiles token="..."> or token='...'
+    match = re.search(r'<[^>]*Profiles[^>]+token=["\']([^"\']+)["\']', response)
+    if not match:
+        match = re.search(r'token=["\']([^"\']+)["\']', response)
+    if not match:
+        raise OSError('Could not find ONVIF media profile token. Check credentials.')
+
+    token = match.group(1)
+    logger.debug('ONVIF profile token for %s:%d → %s', host, http_port, token)
+    _profile_token_cache[key] = token
+    return token
+
+
+def send_ptz_command_onvif(
+    host: str, http_port: int, command: str, speed: int, username: str, password: str,
+) -> None:
+    token = _get_profile_token(host, http_port, username, password)
+    ptz_url = f'http://{host}:{http_port}/onvif/ptz_service'
+    speed_factor = max(0.1, min(1.0, int(speed) / 8.0))
+
+    if command == 'stop':
+        body = (
+            '<tptz:Stop>'
+            f'<tptz:ProfileToken>{token}</tptz:ProfileToken>'
+            '<tptz:PanTilt>true</tptz:PanTilt>'
+            '<tptz:Zoom>true</tptz:Zoom>'
+            '</tptz:Stop>'
+        )
+    else:
+        pan, tilt, zoom = _ONVIF_VELOCITY.get(command, (0.0, 0.0, 0.0))
+        pv = pan * speed_factor
+        tv = tilt * speed_factor
+        zv = zoom * speed_factor
+        body = (
+            '<tptz:ContinuousMove>'
+            f'<tptz:ProfileToken>{token}</tptz:ProfileToken>'
+            '<tptz:Velocity>'
+            f'<tt:PanTilt x="{pv:.3f}" y="{tv:.3f}"/>'
+            f'<tt:Zoom x="{zv:.3f}"/>'
+            '</tptz:Velocity>'
+            '</tptz:ContinuousMove>'
+        )
+
+    _soap(ptz_url, body, username, password)
+    logger.debug('ONVIF PTZ %s sent to %s:%d', command, host, http_port)
+
+
+# ─── Raw PelcoD over TCP / UDP (fallback options) ─────────────────────────────
 
 _PELCOD_COMMANDS: dict[str, int] = {
-    'stop':      0x00,
-    'right':     0x02,
-    'left':      0x04,
-    'up':        0x08,
-    'down':      0x10,
-    'upright':   0x0A,
-    'upleft':    0x0C,
-    'downright': 0x12,
-    'downleft':  0x14,
-    'zoom_in':   0x20,
-    'zoom_out':  0x40,
+    'stop':      0x00, 'right':     0x02, 'left':      0x04,
+    'up':        0x08, 'down':      0x10, 'upright':   0x0A,
+    'upleft':    0x0C, 'downright': 0x12, 'downleft':  0x14,
+    'zoom_in':   0x20, 'zoom_out':  0x40,
 }
 
 
-def _pelcod_packet(address: int, command_byte: int, pan_speed: int, tilt_speed: int) -> bytes:
+def _pelcod_packet(address: int, command_byte: int, speed: int) -> bytes:
     addr = address & 0xFF
     cmd2 = command_byte & 0xFF
-    spd1 = pan_speed & 0x3F
-    spd2 = tilt_speed & 0x3F
-    checksum = (addr + 0x00 + cmd2 + spd1 + spd2) & 0xFF
-    return bytes([0xFF, addr, 0x00, cmd2, spd1, spd2, checksum])
+    spd = speed & 0x3F
+    checksum = (addr + 0x00 + cmd2 + spd + spd) & 0xFF
+    return bytes([0xFF, addr, 0x00, cmd2, spd, spd, checksum])
 
 
-def send_ptz_command_tcp(host: str, port: int, address: int, command: str, speed: int = 8) -> None:
-    cmd_byte = _PELCOD_COMMANDS.get(command)
-    if cmd_byte is None:
-        raise ValueError(f"Unknown PTZ command: {command!r}")
-    speed = max(0, min(63, int(speed)))
-    packet = _pelcod_packet(int(address), cmd_byte, speed, speed)
-    logger.debug("PTZ TCP %s → %s:%d pkt=%s", command, host, port, packet.hex())
+def send_ptz_command_tcp(host: str, port: int, address: int, command: str, speed: int) -> None:
+    packet = _pelcod_packet(address, _PELCOD_COMMANDS[command], speed)
     with socket.create_connection((host, port), timeout=2.0) as sock:
         sock.sendall(packet)
 
 
-def send_ptz_command_udp(host: str, port: int, address: int, command: str, speed: int = 8) -> None:
-    cmd_byte = _PELCOD_COMMANDS.get(command)
-    if cmd_byte is None:
-        raise ValueError(f"Unknown PTZ command: {command!r}")
-    speed = max(0, min(63, int(speed)))
-    packet = _pelcod_packet(int(address), cmd_byte, speed, speed)
-    logger.debug("PTZ UDP %s → %s:%d pkt=%s", command, host, port, packet.hex())
+def send_ptz_command_udp(host: str, port: int, address: int, command: str, speed: int) -> None:
+    packet = _pelcod_packet(address, _PELCOD_COMMANDS[command], speed)
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.settimeout(1.0)
         sock.sendto(packet, (host, port))
 
 
-# ─── Dispatcher ──────────────────────────────────────────────────────────────
+# ─── Dispatcher ───────────────────────────────────────────────────────────────
 
 def send_ptz_command(
     host: str,
@@ -200,10 +186,10 @@ def send_ptz_command(
     password: str = '',
 ) -> None:
     if command not in VALID_COMMANDS:
-        raise ValueError(f"Unknown PTZ command: {command!r}")
+        raise ValueError(f'Unknown PTZ command: {command!r}')
     if protocol == 'tcp_pelcod':
-        send_ptz_command_tcp(host, tcp_port, address, command, speed)
+        send_ptz_command_tcp(host, tcp_port, address, command, max(0, min(63, speed)))
     elif protocol == 'udp_pelcod':
-        send_ptz_command_udp(host, tcp_port, address, command, speed)
+        send_ptz_command_udp(host, tcp_port, address, command, max(0, min(63, speed)))
     else:
-        send_ptz_command_cgi(host, http_port, command, speed, username, password)
+        send_ptz_command_onvif(host, http_port, command, speed, username, password)

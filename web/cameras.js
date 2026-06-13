@@ -280,7 +280,7 @@ function fillModal(camera, index) {
 
   const ptz = camera.ptz || {};
   document.getElementById('editPtzEnabled').value = String(ptz.enabled === true);
-  document.getElementById('editPtzProtocol').value = ptz.protocol || 'http_cgi';
+  document.getElementById('editPtzProtocol').value = ptz.protocol || 'onvif';
   document.getElementById('editPtzHttpPort').value = ptz.http_port || 80;
   document.getElementById('editPtzPort').value = ptz.port || 6060;
   document.getElementById('editPtzAddress').value = ptz.address || 1;
