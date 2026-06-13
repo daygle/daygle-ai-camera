@@ -17,6 +17,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import gc
 import time
 import urllib.error
 import urllib.request
@@ -4392,6 +4393,14 @@ def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
     global detector, last_detector_error, _min_rule_confidence_cache
     _min_rule_confidence_cache = None
     previous_detector = detector
+    # Release the old InferenceSession before creating a new one so the CUDA
+    # provider frees its cuBLAS handle; without this, cublasCreate fails with
+    # CUBLAS_STATUS_INTERNAL_ERROR when two sessions briefly coexist on GPU.
+    old_session = getattr(previous_detector, 'session', None)
+    if old_session is not None:
+        previous_detector.session = None
+        del old_session
+        gc.collect()
     candidate = create_detector(ai_settings)
     candidate_error = getattr(candidate, 'unavailable_reason', None)
     if ai_settings['backend'] == 'onnx' and not getattr(candidate, 'available', False):
