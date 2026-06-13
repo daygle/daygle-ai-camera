@@ -3375,101 +3375,14 @@ def profile_page():
     return root()
 
 
-def _settings_section_update() -> str:
-    version_file = BASE_DIR / 'VERSION'
-    current_version = version_file.read_text(encoding='utf-8').strip() if version_file.exists() else 'unknown'
-    return (
-        f'<section class="card" id="updateSection">'
-        f'<div class="settings-section-header"><div class="settings-section-icon">🔄</div><div><h2>Software Updates</h2><p class="settings-section-subtitle">Current version: <strong id="currentVersion">{escape(current_version)}</strong>. Check for and apply updates from GitHub.</p></div></div>'
-        f'<div id="updateStatus" class="status-panel" style="display:none"></div>'
-        f'<div class="button-row">'
-        f'<button id="checkUpdateBtn" type="button">Check for Updates</button>'
-        f'<button id="applyUpdateBtn" class="secondary" type="button" style="display:none">Apply Update</button>'
-        f'</div>'
-        f'<pre id="updateOutput" class="update-output" style="display:none"></pre>'
-        f'</section>'
-    )
-
-
-def _settings_section_recording() -> str:
-    return (
-        '<section class="card">'
-        '<div class="settings-section-header"><div class="settings-section-icon">🎬</div><div><h2>Recording Clips</h2><p class="settings-section-subtitle">Control how event recordings are captured. Per-rule Record toggles are on the Zones page; Continuous Recording is per camera on the Cameras page.</p></div></div>'
-        '<form id="recordingSettingsForm" class="form-grid">'
-        '<label><span>Pre-Event Seconds</span><input name="pre_event_seconds" type="number" min="0" max="300" placeholder="10" /><span class="field-help">Seconds of footage to include before the trigger event. Default: 10s</span></label>'
-        '<label><span>Post-Event Seconds</span><input name="post_event_seconds" type="number" min="0" max="300" placeholder="15" /><span class="field-help">Seconds to continue recording after the last detection. Default: 15s</span></label>'
-        '<label><span>Extend On Motion (s)</span><input name="extension_step_seconds" type="number" min="0" max="300" placeholder="10" /><span class="field-help">Each time motion continues, the recording is extended by this many seconds. Default: 45s</span></label>'
-        '<label><span>Max Clip Duration (s)</span><input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="300" /><span class="field-help">Maximum total clip length. Prevents extremely long recordings. Default: 300s</span></label>'
-        '<label><span>Format</span><input name="format" placeholder="mp4" /><span class="field-help">Video container format. mp4 is recommended for best compatibility. Default: mp4</span></label>'
-        '</form>'
-        '<div class="button-row"><button type="submit" form="recordingSettingsForm">Save Clip Settings</button></div>'
-        '</section>'
-    )
-
-
-def _settings_section_retention() -> str:
-    return (
-        '<section class="card">'
-        '<div class="settings-section-header"><div class="settings-section-icon">🧹</div><div><h2>Retention</h2><p class="settings-section-subtitle">Automatically clean up old recordings and events to manage disk usage.</p></div></div>'
-        '<form id="retentionSettingsForm" class="form-grid">'
-        '<label><span>Auto Purge</span><select name="auto_purge_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select><span class="field-help">Automatically delete recordings and events that exceed retention limits. Default: Enabled</span></label>'
-        '<label><span>Retention Days</span><input name="retention_days" type="number" min="1" max="3650" placeholder="30" /><span class="field-help">Delete recordings older than this many days. Default: 14 days</span></label>'
-        '<label><span>Max Storage (GB)</span><input name="max_storage_gb" type="number" min="1" max="100000" placeholder="50" /><span class="field-help">Oldest recordings are deleted first when this limit is reached. Default: 20 GB</span></label>'
-        '</form>'
-        '<div class="button-row"><button type="submit" form="retentionSettingsForm">Save Retention</button><button id="purgeRecordingsBtn" class="secondary" type="button">Run Purge Now</button></div>'
-        '</section>'
-    )
-
-
-def _settings_section_storage() -> str:
-    return (
-        '<section class="card">'
-        '<div class="settings-section-header"><div class="settings-section-icon">📁</div><div><h2>Storage</h2><p class="settings-section-subtitle">Configure where Daygle stores data on disk. Changes take effect after saving.</p></div></div>'
-        '<form id="storageSettingsForm" class="form-grid">'
-        '<label><span>Data Directory</span><input name="data_dir" placeholder="/opt/daygle/data" /><span class="field-help">Root directory for all application data. Default: data</span></label>'
-        '<label><span>Snapshots Directory</span><input name="snapshots_dir" placeholder="/opt/daygle/data/snapshots" /><span class="field-help">Where event snapshot images are saved. Default: data/snapshots</span></label>'
-        '<label><span>Events Directory</span><input name="events_dir" placeholder="/opt/daygle/data/events" /><span class="field-help">Where event clip videos are saved. Default: data/events</span></label>'
-        '<label><span>Recordings Directory</span><input name="recordings_dir" placeholder="/opt/daygle/data/recordings" /><span class="field-help">Where continuous recordings are saved. Default: data/recordings</span></label>'
-        '</form>'
-        '<div class="button-row"><button type="submit" form="storageSettingsForm">Save Storage</button></div>'
-        '</section>'
-    )
-
-
-def _settings_section_auth() -> str:
-    return (
-        '<section class="card">'
-        '<div class="settings-section-header"><div class="settings-section-icon">🔒</div><div><h2>Login Security</h2><p class="settings-section-subtitle">Protect against brute-force attacks and manage session duration.</p></div></div>'
-        '<form id="authSettingsForm" class="form-grid">'
-        '<label><span>Session Timeout (hours)</span><input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="12" /><span class="field-help">How long a user stays logged in before re-authentication is required. Default: 12 hours</span></label>'
-        '<label><span>Max Login Attempts</span><input name="max_login_attempts" type="number" min="1" max="100" placeholder="5" /><span class="field-help">Number of failed attempts before the account is temporarily locked. Default: 5</span></label>'
-        '<label><span>Lockout Minutes</span><input name="lockout_minutes" type="number" min="1" max="1440" placeholder="15" /><span class="field-help">How long the account is locked after exceeding max login attempts. Default: 15 minutes</span></label>'
-        '</form>'
-        '<div class="button-row"><button type="submit" form="authSettingsForm">Save Login Security</button></div>'
-        '</section>'
-    )
 
 
 @app.get('/settings')
 def system_settings_page():
-    sections = ''.join([
-        _settings_section_update(),
-        _settings_section_recording(),
-        _settings_section_retention(),
-        _settings_section_storage(),
-        _settings_section_auth(),
-    ])
-    html = (
-        '<!doctype html><html lang="en"><head><meta charset="utf-8" />'
-        '<meta name="viewport" content="width=device-width, initial-scale=1" /><title>Settings - Daygle AI Camera</title>'
-        '<link rel="stylesheet" href="/static/styles.css" /></head><body><main class="shell page-stack">'
-        '<header class="hero"><div><p class="eyebrow">Administration</p><h1>Settings</h1>'
-        '<p class="muted">Move day-to-day camera, recording, storage, and login settings out of YAML.</p></div></header>'
-        '<div id="systemMessage" class="muted"></div>'
-        f'{sections}'
-        '</main><script src="/static/nav.js"></script><script src="/static/utils.js"></script><script src="/static/settings.js"></script></body></html>'
-    )
-    return HTMLResponse(html)
+    settings_path = web_dir / 'settings.html'
+    if settings_path.exists():
+        return FileResponse(settings_path)
+    return root()
 
 @app.get('/users')
 def users_page():
@@ -4738,7 +4651,10 @@ def get_sound_status(camera_id: str | None = Query(None)):
 
 @app.get('/api/settings/system')
 def get_system_settings():
+    version_file = BASE_DIR / 'VERSION'
+    current_version = version_file.read_text(encoding='utf-8').strip() if version_file.exists() else 'unknown'
     return {
+        'version': current_version,
         'camera': get_camera_config(None),
         'cameras': effective_cameras_config(),
         'live': effective_live_config(),

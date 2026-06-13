@@ -84,11 +84,24 @@ function renderStatus(status) {
   `;
 }
 
+function renderLabels(labels) {
+  const el = document.getElementById('labelsList');
+  if (!el) return;
+  if (!labels || !labels.length) {
+    el.innerHTML = '<p class="muted">No labels loaded.</p>';
+    return;
+  }
+  el.innerHTML = labels.map((label) =>
+    `<span class="label-tag">${escapeHtml(titleCaseWords(label))}</span>`
+  ).join('');
+}
+
 function renderAi(settings) {
   for (const [key, value] of Object.entries(settings)) {
     if (aiForm.elements[key]) aiForm.elements[key].value = String(value ?? '');
   }
   renderStatus(settings);
+  renderLabels(settings.available_labels);
   if (settings.reload_succeeded === false) setMessage(`Settings saved, but detector reload failed: ${settings.reload_error || settings.last_detector_error}`);
   else messageEl.textContent = settings.last_detector_error ? `Detector warning: ${settings.last_detector_error}` : '';
 }

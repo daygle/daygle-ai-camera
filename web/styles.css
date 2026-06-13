@@ -509,6 +509,7 @@ input[type="file"] { padding: 10px; }
   font-weight: 800;
   line-height: 1.4;
   padding: 12px 14px;
+  margin-top: 10px;
 }
 @media (max-width: 900px) {
   .toggle-control { justify-content: center; }
@@ -722,10 +723,10 @@ input[type="file"] { padding: 10px; }
 .close-draft-point:active { cursor: pointer; }
 .zones-hero-controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; align-self: flex-end; }
 .zones-hero-controls label { display: flex; align-items: center; gap: 8px; }
-.zones-layout { display: grid; grid-template-columns: 1fr; gap: 28px; align-items: start; }
+.zones-layout { display: grid; grid-template-columns: 1fr; align-items: start; }
 .zones-shell .live-frame { height: min(68vh, 720px); }
 .zone-editor-card { margin-top: 18px; }
-.zones-layout .zone-editor-card { margin-top: 0; }
+.zones-layout .zone-editor-card { margin-top: 28px; }
 .zone-editor-card .form-grid + .list { margin-top: 18px; }
 .zones-list { max-height: none; }
 .zone-row { display: grid; gap: 14px; align-items: stretch; }
@@ -1443,6 +1444,24 @@ input[type="file"] { padding: 10px; }
 .badge-active { background: var(--accent); color: #000; }
 .badge-installed { background: var(--panel-strong); color: var(--text-muted); border: 1px solid var(--border); }
 .badge-update { background: rgba(248, 197, 93, 0.15); color: rgb(248, 197, 93); border: 1px solid rgba(248, 197, 93, 0.4); }
+
+/* ─── Labels list ───────────────────────────────────────────────────────────── */
+.labels-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.label-tag {
+  display: inline-block;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
 
 /* ─── Toast notifications ───────────────────────────────────────────────────── */
 .toast-container {
@@ -2550,7 +2569,7 @@ input[type="file"] { padding: 10px; }
 
 .zones-frame-card { margin-top: 0; }
 .zones-frame-wrap { min-height: 360px; }
-.zones-layout .zone-editor-card { margin-top: 0; }
+.zones-layout .zone-editor-card { margin-top: 28px; }
 .zones-frame-wrap .live-frame { height: min(60vh, 600px); min-height: 360px; }
 
 .zone-editor-card .form-grid + .list { margin-top: 16px; }

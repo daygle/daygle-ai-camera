@@ -98,6 +98,17 @@
         <button type="submit" form="aiSettingsForm">Save ONNX Settings</button>
       </div>
     </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">🏷️</div>
+        <div>
+          <h2>Loaded Labels</h2>
+          <p class="settings-section-subtitle">Object classes the current detector can identify, loaded from <code>models/coco.names</code>. These are the 80 standard COCO categories.</p>
+        </div>
+      </div>
+      <div id="labelsList" class="labels-list"></div>
+    </section>
   </main>
   <script src="/static/nav.js"></script>
   <script src="/static/utils.js"></script>

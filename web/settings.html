@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Settings - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell page-stack">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Administration</p>
+        <h1>Settings</h1>
+        <p class="muted">Manage camera, recording, storage, notifications, and login settings.</p>
+      </div>
+    </header>
+
+    <div id="systemMessage" class="muted" aria-live="polite"></div>
+
+    <section class="card" id="updateSection">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🔄</div>
+        <div>
+          <h2>Software Updates</h2>
+          <p class="settings-section-subtitle">Current version: <strong id="currentVersion">Loading…</strong>. Check for and apply updates from GitHub.</p>
+        </div>
+      </div>
+      <div id="updateStatus" class="status-panel" style="display:none"></div>
+      <div class="button-row">
+        <button id="checkUpdateBtn" type="button">Check for Updates</button>
+        <button id="applyUpdateBtn" class="secondary" type="button" style="display:none">Apply Update</button>
+      </div>
+      <pre id="updateOutput" class="update-output" style="display:none"></pre>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">⚡</div>
+        <div>
+          <h2>Live Performance</h2>
+          <p class="settings-section-subtitle">Tune refresh rates and detection frequency to balance responsiveness with resource usage.</p>
+        </div>
+      </div>
+      <form id="liveSettingsForm" class="form-grid">
+        <label>
+          <span>Snapshot Refresh</span>
+          <input name="snapshot_refresh_ms" type="number" min="150" max="5000" step="10" placeholder="500" />
+          <span class="field-help">How often the live camera image updates. Lower = more responsive, higher = less bandwidth. Default: 500ms</span>
+        </label>
+        <label>
+          <span>Detection Status Refresh</span>
+          <input name="detection_status_refresh_ms" type="number" min="500" max="15000" step="100" placeholder="2000" />
+          <span class="field-help">How often the detection summary panel updates with new object counts. Default: 2000ms</span>
+        </label>
+        <label>
+          <span>Detection Interval</span>
+          <input name="detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="0.25" />
+          <span class="field-help">How often AI checks each camera for motion and objects. Lower = faster alerts, higher CPU. Default: 0.5s</span>
+        </label>
+        <label>
+          <span>Fallback Event Merge (s)</span>
+          <input name="event_debounce_seconds" type="number" min="0" max="300" step="1" placeholder="10" />
+          <span class="field-help">Merges detections within this window into one event. Per-object cooldowns on the Zones page override this. Default: 10s</span>
+        </label>
+        <label>
+          <span>Background Alerts</span>
+          <select name="background_detection_enabled">
+            <option value="true">Enabled</option>
+            <option value="false">Disabled</option>
+          </select>
+          <span class="field-help">Keep checking cameras even when no Live Cameras page is open. Default: Enabled</span>
+        </label>
+        <label>
+          <span>Detection History (min)</span>
+          <input name="detection_history_minutes" type="number" min="1" max="120" step="1" placeholder="10" />
+          <span class="field-help">How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min</span>
+        </label>
+      </form>
+      <div class="button-row">
+        <button type="submit" form="liveSettingsForm">Save Live Settings</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🎬</div>
+        <div>
+          <h2>Recording Clips</h2>
+          <p class="settings-section-subtitle">Control how event recordings are captured. Per-rule Record toggles are on the Zones page; Continuous Recording is per camera on the Cameras page.</p>
+        </div>
+      </div>
+      <form id="recordingSettingsForm" class="form-grid">
+        <label>
+          <span>Pre-Event Seconds</span>
+          <input name="pre_event_seconds" type="number" min="0" max="300" placeholder="10" />
+          <span class="field-help">Seconds of footage to include before the trigger event. Default: 10s</span>
+        </label>
+        <label>
+          <span>Post-Event Seconds</span>
+          <input name="post_event_seconds" type="number" min="0" max="300" placeholder="15" />
+          <span class="field-help">Seconds to continue recording after the last detection. Default: 15s</span>
+        </label>
+        <label>
+          <span>Extend On Motion (s)</span>
+          <input name="extension_step_seconds" type="number" min="0" max="300" placeholder="45" />
+          <span class="field-help">Each time motion continues, the recording is extended by this many seconds. Default: 45s</span>
+        </label>
+        <label>
+          <span>Max Clip Duration (s)</span>
+          <input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="300" />
+          <span class="field-help">Maximum total clip length. Prevents extremely long recordings. Default: 300s</span>
+        </label>
+        <label>
+          <span>Format</span>
+          <input name="format" placeholder="mp4" />
+          <span class="field-help">Video container format. mp4 is recommended for best compatibility. Default: mp4</span>
+        </label>
+      </form>
+      <div class="button-row">
+        <button type="submit" form="recordingSettingsForm">Save Clip Settings</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🧹</div>
+        <div>
+          <h2>Retention</h2>
+          <p class="settings-section-subtitle">Automatically clean up old recordings and events to manage disk usage.</p>
+        </div>
+      </div>
+      <form id="retentionSettingsForm" class="form-grid">
+        <label>
+          <span>Auto Purge</span>
+          <select name="auto_purge_enabled">
+            <option value="true">Enabled</option>
+            <option value="false">Disabled</option>
+          </select>
+          <span class="field-help">Automatically delete recordings and events that exceed retention limits. Default: Enabled</span>
+        </label>
+        <label>
+          <span>Retention Days</span>
+          <input name="retention_days" type="number" min="1" max="3650" placeholder="30" />
+          <span class="field-help">Delete recordings older than this many days. Default: 14 days</span>
+        </label>
+        <label>
+          <span>Max Storage (GB)</span>
+          <input name="max_storage_gb" type="number" min="1" max="100000" placeholder="50" />
+          <span class="field-help">Oldest recordings are deleted first when this limit is reached. Default: 20 GB</span>
+        </label>
+      </form>
+      <div class="button-row">
+        <button type="submit" form="retentionSettingsForm">Save Retention</button>
+        <button id="purgeRecordingsBtn" class="secondary" type="button">Run Purge Now</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">📁</div>
+        <div>
+          <h2>Storage</h2>
+          <p class="settings-section-subtitle">Configure where Daygle stores data on disk. Changes take effect after saving.</p>
+        </div>
+      </div>
+      <form id="storageSettingsForm" class="form-grid">
+        <label>
+          <span>Data Directory</span>
+          <input name="data_dir" placeholder="/opt/daygle/data" />
+          <span class="field-help">Root directory for all application data. Default: data</span>
+        </label>
+        <label>
+          <span>Snapshots Directory</span>
+          <input name="snapshots_dir" placeholder="/opt/daygle/data/snapshots" />
+          <span class="field-help">Where event snapshot images are saved. Default: data/snapshots</span>
+        </label>
+        <label>
+          <span>Events Directory</span>
+          <input name="events_dir" placeholder="/opt/daygle/data/events" />
+          <span class="field-help">Where event clip videos are saved. Default: data/events</span>
+        </label>
+        <label>
+          <span>Recordings Directory</span>
+          <input name="recordings_dir" placeholder="/opt/daygle/data/recordings" />
+          <span class="field-help">Where continuous recordings are saved. Default: data/recordings</span>
+        </label>
+      </form>
+      <div class="button-row">
+        <button type="submit" form="storageSettingsForm">Save Storage</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">💾</div>
+        <div>
+          <h2>Database Backup &amp; Restore</h2>
+          <p class="settings-section-subtitle">Download a snapshot of your database or restore from a previous backup. A safety backup is automatically created before every restore.</p>
+        </div>
+      </div>
+      <form id="databaseRestoreForm" class="form-grid">
+        <label>
+          <span>Restore backup file</span>
+          <input name="file" type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3,application/x-sqlite3" required />
+          <span class="field-help">Select a previously downloaded .sqlite backup file to restore. Restores replace events, users, settings, alert rules, and sessions with the backup contents.</span>
+        </label>
+      </form>
+      <div class="button-row">
+        <a class="secondary" href="/api/settings/system/database/backup">Download Database Backup</a>
+        <button class="secondary" type="submit" form="databaseRestoreForm">Restore Database</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🔔</div>
+        <div>
+          <h2>Push Notifications</h2>
+          <p class="settings-section-subtitle">Get instant alerts on your Android device via the ntfy app. Per-rule push toggles are on the Zones page. Install the <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy app</a> on your Android device and subscribe to your topic to receive alerts.</p>
+        </div>
+      </div>
+      <form id="pushSettingsForm" class="form-grid">
+        <label>
+          <span>Push Alerts</span>
+          <select name="enabled">
+            <option value="false">Disabled</option>
+            <option value="true">Enabled</option>
+          </select>
+          <span class="field-help">Master toggle for push notifications. Default: Disabled</span>
+        </label>
+        <label>
+          <span>Server URL</span>
+          <input name="server_url" placeholder="https://ntfy.sh" />
+          <span class="field-help">NTFY server address. Use <code>https://ntfy.sh</code> for the free hosted service. Default: https://ntfy.sh</span>
+        </label>
+        <label>
+          <span>Topic Name</span>
+          <input name="topic" placeholder="my-camera-alerts" />
+          <span class="field-help">Subscribe your phone to this exact topic name to receive alerts. Default: (none)</span>
+        </label>
+        <label>
+          <span>Priority</span>
+          <select name="priority">
+            <option value="default">Default</option>
+            <option value="min">Min</option>
+            <option value="low">Low</option>
+            <option value="high">High</option>
+            <option value="urgent">Urgent</option>
+          </select>
+          <span class="field-help">Controls how the notification is presented on your device. Default: Default</span>
+        </label>
+        <label>
+          <span>Username</span>
+          <input name="username" placeholder="Optional" autocomplete="off" />
+          <span class="field-help">Required only if your NTFY server requires authentication. Default: (none)</span>
+        </label>
+        <label>
+          <span>Password</span>
+          <input name="password" type="password" placeholder="Optional" autocomplete="new-password" />
+          <span class="field-help">Required only if your NTFY server requires authentication.</span>
+        </label>
+      </form>
+      <div class="button-row">
+        <button id="testPushBtn" class="secondary" type="button">Send Test Notification</button>
+        <button type="submit" form="pushSettingsForm">Save Push Settings</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">📡</div>
+        <div>
+          <h2>Camera Offline Notifications</h2>
+          <p class="settings-section-subtitle">Get notified when a camera goes offline or recovers. Works with both email and push notification channels.</p>
+        </div>
+      </div>
+      <form id="cameraOfflineForm" class="form-grid">
+        <label>
+          <span>Offline Alerts</span>
+          <select name="enabled">
+            <option value="false">Disabled</option>
+            <option value="true">Enabled</option>
+          </select>
+          <span class="field-help">Master toggle for camera offline notifications. When enabled, you'll be notified when a camera stays offline past the delay period. Default: Disabled</span>
+        </label>
+        <label>
+          <span>Offline Delay (minutes)</span>
+          <input name="offline_delay_minutes" type="number" min="1" max="60" step="1" placeholder="1" />
+          <span class="field-help">How long a camera must be unreachable before sending an offline notification. Set higher to avoid alerts from brief connection blips. Default: 1 min</span>
+        </label>
+      </form>
+      <div class="button-row">
+        <button type="submit" form="cameraOfflineForm">Save Offline Alert Settings</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">✉️</div>
+        <div>
+          <h2>Email Delivery</h2>
+          <p class="settings-section-subtitle">Configure your SMTP mail server to send alert emails. Per-rule email toggles are on the Zones page.</p>
+        </div>
+      </div>
+      <form id="emailSettingsForm" class="form-grid">
+        <label>
+          <span>Email Alerts</span>
+          <select name="enabled">
+            <option value="true">Enabled</option>
+            <option value="false">Disabled</option>
+          </select>
+          <span class="field-help">Master toggle for email notifications. Default: Disabled</span>
+        </label>
+        <label>
+          <span>SMTP Host</span>
+          <input name="host" placeholder="smtp.gmail.com" />
+          <span class="field-help">Your mail server hostname (e.g. smtp.gmail.com, smtp-mail.outlook.com). Default: (none)</span>
+        </label>
+        <label>
+          <span>SMTP Port</span>
+          <input name="port" type="number" min="1" max="65535" placeholder="587" />
+          <span class="field-help">Common ports: 587 (STARTTLS), 465 (SSL), 25 (unencrypted). Default: 587</span>
+        </label>
+        <label>
+          <span>From Address</span>
+          <input name="from_address" type="email" placeholder="alerts@example.com" />
+          <span class="field-help">The sender address that appears in outgoing alert emails. Default: (none)</span>
+        </label>
+        <label>
+          <span>SMTP Username</span>
+          <input name="username" placeholder="Your login" />
+          <span class="field-help">Authentication username for your mail server. Default: (none)</span>
+        </label>
+        <label>
+          <span>SMTP Password</span>
+          <input name="password" type="password" placeholder="Your password" autocomplete="new-password" />
+          <span class="field-help">Authentication password or app password for your mail server. Default: (none)</span>
+        </label>
+        <label>
+          <span>STARTTLS</span>
+          <select name="use_tls">
+            <option value="true">Enabled</option>
+            <option value="false">Disabled</option>
+          </select>
+          <span class="field-help">Encrypts the connection using STARTTLS (recommended for port 587). Default: Enabled</span>
+        </label>
+        <label>
+          <span>SSL</span>
+          <select name="use_ssl">
+            <option value="false">Disabled</option>
+            <option value="true">Enabled</option>
+          </select>
+          <span class="field-help">Encrypts the connection using implicit SSL (recommended for port 465). Default: Disabled</span>
+        </label>
+        <label>
+          <span>Test Recipient</span>
+          <input id="testEmailRecipient" type="email" placeholder="you@example.com" />
+          <span class="field-help">Enter an address to send a test email to.</span>
+        </label>
+      </form>
+      <div class="button-row">
+        <button id="testEmailBtn" class="secondary" type="button">Send Test Email</button>
+        <button type="submit" form="emailSettingsForm">Save Mail Server</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🔒</div>
+        <div>
+          <h2>Login Security</h2>
+          <p class="settings-section-subtitle">Protect against brute-force attacks and manage session duration.</p>
+        </div>
+      </div>
+      <form id="authSettingsForm" class="form-grid">
+        <label>
+          <span>Session Timeout (hours)</span>
+          <input name="session_timeout_hours" type="number" min="0.25" max="720" step="0.25" placeholder="12" />
+          <span class="field-help">How long a user stays logged in before re-authentication is required. Default: 12 hours</span>
+        </label>
+        <label>
+          <span>Max Login Attempts</span>
+          <input name="max_login_attempts" type="number" min="1" max="100" placeholder="5" />
+          <span class="field-help">Number of failed attempts before the account is temporarily locked. Default: 5</span>
+        </label>
+        <label>
+          <span>Lockout Minutes</span>
+          <input name="lockout_minutes" type="number" min="1" max="1440" placeholder="15" />
+          <span class="field-help">How long the account is locked after exceeding max login attempts. Default: 15 minutes</span>
+        </label>
+      </form>
+      <div class="button-row">
+        <button type="submit" form="authSettingsForm">Save Login Security</button>
+      </div>
+    </section>
+
+    <section class="card danger-zone-card">
+      <div class="settings-section-header settings-section-header-danger">
+        <div class="settings-section-icon settings-section-icon-danger" aria-hidden="true">⚠️</div>
+        <div>
+          <div class="danger-zone-header">
+            <h2>Danger Zone</h2>
+            <span class="danger-zone-badge">Irreversible</span>
+          </div>
+          <p class="settings-section-subtitle">Start clean removes all operational data so you can begin fresh.</p>
+        </div>
+      </div>
+      <p class="muted">This action deletes <strong>events, recordings, and alert history</strong>.</p>
+      <p class="muted danger-zone-warning"><strong>Settings, users, sessions, and alert rules are preserved.</strong> This action cannot be undone.</p>
+      <p class="danger-zone-confirm-hint">Confirmation required: type START CLEAN when prompted.</p>
+      <div class="button-row">
+        <button id="startCleanBtn" class="secondary delete-btn" type="button">Start Clean</button>
+      </div>
+    </section>
+
+  </main>
+  <script src="/static/nav.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/settings.js"></script>
+</body>
+</html>

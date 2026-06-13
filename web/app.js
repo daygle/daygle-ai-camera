@@ -1,15 +1,9 @@
 // ─── DOM handles ────────────────────────────────────────────────────────────
 const els = {
-  cameraCount: document.getElementById('cameraCount'),
-  cameraStatus: document.getElementById('cameraStatus'),
-  aiModeText: document.getElementById('aiModeText'),
-  aiStatusIcon: document.getElementById('aiStatusIcon'),
-  aiStatusDetail: document.getElementById('aiStatusDetail'),
   totalEvents: document.getElementById('totalEvents'),
   soundEvents: document.getElementById('soundEvents'),
   objectAlerts: document.getElementById('objectAlerts'),
   soundAlerts: document.getElementById('soundAlerts'),
-  uptimeText: document.getElementById('uptimeText'),
   activityFeed: document.getElementById('activityFeed'),
   listStatus: document.getElementById('listStatus'),
   deleteAllEventsBtn: document.getElementById('deleteAllEventsBtn'),
@@ -65,15 +59,6 @@ function eventSourceLabel(event) {
   return String(event?.source || 'unknown');
 }
 
-function formatUptime(seconds) {
-  if (!seconds && seconds !== 0) return '-';
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
 
 function timeAgo(isoString) {
   if (!isoString) return '';
@@ -293,9 +278,6 @@ function renderActivityItem(item) {
   } else if (!isEvent && item.recordingId) {
     actions.push(recordingLink(item.recordingId, 'View Footage'));
   }
-  if (isEvent) {
-    actions.push(`<button class="secondary delete-btn activity-item-action" data-delete-event="${item.id}" type="button">Delete</button>`);
-  }
   return `
     <article class="item activity-item ${typeClass}" data-activity-id="${escapeHtml(String(item.id))}" data-activity-type="${item.type}">
       <div class="activity-item-icon">${icon}</div>
@@ -345,7 +327,6 @@ function renderActivityFeed() {
   }
   els.activityFeed.innerHTML = items.map(renderActivityItem).join('');
   updateListStatus(items.length);
-  bindActivityActions();
 }
 
 function updateListStatus(count) {
@@ -359,113 +340,6 @@ function updateListStatus(count) {
   }
 }
 
-function bindActivityActions() {
-  els.activityFeed.querySelectorAll('[data-delete-event]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const id = button.dataset.deleteEvent;
-      openDeleteModal({
-        kind: 'event',
-        id,
-        body: `Delete event #${id}? This cannot be undone.`,
-        onConfirm: async () => {
-          await api(`/api/events/${id}`, { method: 'DELETE' });
-          window.showToast?.(`Deleted event #${id}.`);
-          await Promise.all([loadStats(), loadEvents()]);
-          renderActivityFeed();
-        },
-      });
-    });
-  });
-}
-
-// ─── Status icon helper ──────────────────────────────────────────────────────
-function setStatusIconState(el, state) {
-  if (!el) return;
-  el.className = 'stat-card-icon';
-  if (state === 'ok') el.classList.add('stat-card-icon-ok');
-  else if (state === 'warn') el.classList.add('stat-card-icon-warn');
-  else if (state === 'error') el.classList.add('stat-card-icon-error');
-}
-
-function engineStatusFromAi(aiStatus) {
-  if (!aiStatus) return { state: 'error', label: 'ONNX unavailable' };
-  if (aiStatus.error) return { state: 'error', label: `ONNX error: ${aiStatus.error}` };
-  if (aiStatus.model_loaded) return { state: 'ok', label: 'ONNX ready' };
-  return { state: 'warn', label: 'ONNX not loaded' };
-}
-
-function engineStatusFromSound(soundStatus) {
-  if (!soundStatus) return { state: 'error', label: 'YAMNet TFLite unavailable' };
-  const backend = String(soundStatus.backend || '').toLowerCase();
-  const hasYamnet = backend === 'yamnet' || backend === 'yamnet_tflite';
-  if (!backend || backend === 'none') {
-    return { state: 'warn', label: 'YAMNet TFLite inactive' };
-  }
-  if (backend === 'unavailable') {
-    return { state: 'error', label: soundStatus.backend_reason || 'YAMNet TFLite unavailable' };
-  }
-  if (backend === 'loading') {
-    return { state: 'warn', label: 'YAMNet TFLite loading' };
-  }
-  if (!hasYamnet) {
-    return { state: 'error', label: soundStatus.backend_reason || 'YAMNet TFLite unavailable' };
-  }
-  if (soundStatus.running) return { state: 'ok', label: 'YAMNet TFLite running' };
-  return { state: 'ok', label: 'YAMNet TFLite ready' };
-}
-
-function overallEngineState(engineStatuses) {
-  if (engineStatuses.some((status) => status.state === 'error')) return 'error';
-  if (engineStatuses.some((status) => status.state === 'warn')) return 'warn';
-  return 'ok';
-}
-
-// ─── Status cards ───────────────────────────────────────────────────────────
-function loadStatus() {
-  return api('/api/status').then((status) => {
-    els.uptimeText.textContent = formatUptime(status.uptime_seconds);
-    const rawStatus = String(status.status || '').toLowerCase();
-    const displayStatus = rawStatus === 'online' || rawStatus === 'active' ? 'Online' : 'Offline';
-    if (els.cameraStatus) {
-      els.cameraStatus.textContent = displayStatus;
-      els.cameraStatus.className = 'chip';
-      if (displayStatus === 'Online') els.cameraStatus.classList.add('chip-green');
-      else els.cameraStatus.classList.add('chip-warn');
-    }
-  }).catch((error) => {
-    els.uptimeText.textContent = '-';
-    if (els.cameraStatus) {
-      els.cameraStatus.textContent = 'Offline';
-      els.cameraStatus.className = 'chip chip-warn';
-    }
-    window.showToast?.(error.message, true);
-  });
-}
-
-async function loadEngineStatus() {
-  const [aiResult, soundResult] = await Promise.allSettled([
-    api('/api/status/ai'),
-    api('/api/sound/status'),
-  ]);
-  const aiStatus = aiResult.status === 'fulfilled' ? aiResult.value : null;
-  const soundStatus = soundResult.status === 'fulfilled' ? soundResult.value : null;
-  const engineStatuses = [
-    aiResult.status === 'fulfilled'
-      ? engineStatusFromAi(aiStatus)
-      : { state: 'error', label: `ONNX error: ${aiResult.reason?.message || 'status unavailable'}` },
-    soundResult.status === 'fulfilled'
-      ? engineStatusFromSound(soundStatus)
-      : { state: 'error', label: `YAMNet TFLite error: ${soundResult.reason?.message || 'status unavailable'}` },
-  ];
-  const readyCount = engineStatuses.filter((status) => status.state === 'ok').length;
-  const overallState = overallEngineState(engineStatuses);
-
-  els.aiModeText.textContent = `${readyCount} / ${engineStatuses.length} Ready`;
-  els.aiModeText.className = `stat-card-value ai-mode engines-${overallState}`;
-  els.aiStatusDetail.textContent = engineStatuses.map((status) => status.label).join(' · ');
-  setStatusIconState(els.aiStatusIcon, overallState);
-}
-
 // ─── Stats + activity data loaders ──────────────────────────────────────────
 async function loadStats() {
   try {
@@ -474,7 +348,6 @@ async function loadStats() {
     if (els.soundEvents) els.soundEvents.textContent = stats.sound_detection_events ?? 0;
     if (els.objectAlerts) els.objectAlerts.textContent = stats.object_alerts ?? stats.total_alerts ?? 0;
     if (els.soundAlerts) els.soundAlerts.textContent = stats.sound_alerts ?? 0;
-    els.cameraCount.textContent = stats.total_cameras ?? 0;
   } catch (error) {
     window.showToast?.(error.message, true);
   }
@@ -620,7 +493,7 @@ els.filterPills.forEach((pill) => {
 
 // ─── Refresh orchestration ──────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([loadStatus(), loadEngineStatus(), loadStats(), loadEvents(), loadAlerts()]);
+  await Promise.all([loadStats(), loadEvents(), loadAlerts()]);
   renderActivityFeed();
 }
 
@@ -638,7 +511,6 @@ loadAuth()
   })
   .catch((error) => window.showToast?.(error.message, true));
 
-setInterval(() => { loadStatus(); loadEngineStatus(); }, 5000);
 setInterval(() => { loadStats().catch(() => {}); }, 10000);
 setInterval(() => {
   Promise.all([loadEvents(), loadAlerts()]).then(renderActivityFeed).catch(() => {});
