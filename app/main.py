@@ -606,7 +606,7 @@ def normalize_camera_recording_settings(settings: Any) -> dict[str, Any]:
 def normalize_camera_ptz_settings(settings: Any) -> dict[str, Any]:
     raw = settings if isinstance(settings, dict) else {}
     protocol = str(raw.get('protocol') or 'http_cgi').strip().lower()
-    if protocol not in {'http_cgi', 'tcp_pelcod'}:
+    if protocol not in {'http_cgi', 'tcp_pelcod', 'udp_pelcod'}:
         protocol = 'http_cgi'
     return {
         'enabled': normalize_bool_setting(raw.get('enabled'), False),

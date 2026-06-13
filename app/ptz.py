@@ -173,6 +173,18 @@ def send_ptz_command_tcp(host: str, port: int, address: int, command: str, speed
         sock.sendall(packet)
 
 
+def send_ptz_command_udp(host: str, port: int, address: int, command: str, speed: int = 8) -> None:
+    cmd_byte = _PELCOD_COMMANDS.get(command)
+    if cmd_byte is None:
+        raise ValueError(f"Unknown PTZ command: {command!r}")
+    speed = max(0, min(63, int(speed)))
+    packet = _pelcod_packet(int(address), cmd_byte, speed, speed)
+    logger.debug("PTZ UDP %s → %s:%d pkt=%s", command, host, port, packet.hex())
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.settimeout(1.0)
+        sock.sendto(packet, (host, port))
+
+
 # ─── Dispatcher ──────────────────────────────────────────────────────────────
 
 def send_ptz_command(
@@ -191,5 +203,7 @@ def send_ptz_command(
         raise ValueError(f"Unknown PTZ command: {command!r}")
     if protocol == 'tcp_pelcod':
         send_ptz_command_tcp(host, tcp_port, address, command, speed)
+    elif protocol == 'udp_pelcod':
+        send_ptz_command_udp(host, tcp_port, address, command, speed)
     else:
         send_ptz_command_cgi(host, http_port, command, speed, username, password)

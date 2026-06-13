@@ -206,7 +206,8 @@
             </label>
             <label class="full-width"><span>Protocol</span>
               <select id="editPtzProtocol" name="ptz_protocol">
-                <option value="http_cgi">HTTP CGI (HiSilicon / P6S — recommended)</option>
+                <option value="http_cgi">HTTP CGI (HiSilicon / P6S)</option>
+                <option value="udp_pelcod">UDP PelcoD (P6S Command Port)</option>
                 <option value="tcp_pelcod">TCP PelcoD (raw serial-over-IP)</option>
               </select>
               <span class="field-help">HTTP CGI uses the camera's web port (80). TCP PelcoD sends raw PelcoD packets to the Command Port.</span>
