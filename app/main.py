@@ -3662,6 +3662,33 @@ def runtime_config():
     }
 
 
+
+
+@app.get('/api/labels')
+def available_labels():
+    """Return available labels for the recordings filter dropdown."""
+    # Load COCO object labels
+    object_labels: list[str] = []
+    ai_config = effective_ai_config()
+    labels_path = ai_config.get('labels_path', 'models/coco.names')
+    try:
+        p = Path(labels_path)
+        if p.exists():
+            object_labels = [line.strip() for line in p.read_text(encoding='utf-8').splitlines() if line.strip()]
+    except Exception:
+        pass
+
+    # Sound labels
+    sound_labels = [
+        {'id': class_id, 'label': meta['label'], 'description': meta.get('description', '')}
+        for class_id, meta in SOUND_CLASSES.items()
+    ]
+
+    return {
+        'objects': object_labels,
+        'sounds': sound_labels,
+    }
+
 @app.get('/api/recordings')
 def recordings(
     label: str | None = None,
@@ -3673,8 +3700,12 @@ def recordings(
     sort: str = Query('newest', pattern='^(newest|oldest)$', description='Sort order by started_at. Default: newest.'),
     source_type: str | None = Query(None, pattern='^(sound|object)$', description='Filter by recording type: sound or object.'),
 ):
+    # Support comma-separated labels (e.g. ?label=person,car,cat_meow)
+    labels: list[str] | None = None
+    if label:
+        labels = [l.strip().lower() for l in str(label).split(',') if l.strip()]
     return database.list_recordings(
-        label=label,
+        labels=labels,
         camera_id=camera_id,
         limit=limit,
         alerted_only=alerted_only,

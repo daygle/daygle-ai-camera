@@ -258,7 +258,8 @@ function soundIcon() {
 
 function recordingLink(recordingId, label) {
   if (!recordingId) return '';
-  return `<a class="button-link secondary-link activity-item-action" href="/recordings?recording_id=${encodeURIComponent(recordingId)}">${escapeHtml(label)}</a>`;
+  const playIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg>';
+  return `<a class="button-link secondary-link activity-item-action" href="/recordings?recording_id=${encodeURIComponent(recordingId)}">${playIcon} ${escapeHtml(label)}</a>`;
 }
 
 function renderActivityItem(item) {
@@ -280,14 +281,15 @@ function renderActivityItem(item) {
   const metaLine = `${cameraLine}${zonePart}`;
   const actions = [];
   if (isEvent && item.recordingId) {
-    actions.push(recordingLink(item.recordingId, 'View Recording'));
+    actions.push(recordingLink(item.recordingId, 'Recording'));
   } else if (!isEvent && item.recordingId) {
-    actions.push(recordingLink(item.recordingId, 'View Footage'));
+    actions.push(recordingLink(item.recordingId, 'Footage'));
   }
   const dismissAttr = isEvent
     ? `data-dismiss-event="${escapeHtml(String(item.id))}"`
     : `data-dismiss-alert="${escapeHtml(String(item.id))}"`;
-  actions.push(`<button class="secondary activity-item-action" ${dismissAttr} type="button">Dismiss</button>`);
+  const dismissIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+  actions.push(`<button class="secondary activity-item-action" ${dismissAttr} type="button">${dismissIcon} Dismiss</button>`);
   return `
     <article class="item activity-item ${typeClass}" data-activity-id="${escapeHtml(String(item.id))}" data-activity-type="${item.type}">
       <div class="activity-item-icon">${icon}</div>

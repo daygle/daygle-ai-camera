@@ -458,7 +458,7 @@ class RecordingService:
         finally:
             list_path.unlink(missing_ok=True)
         # clip_has_video_stream (ffprobe) is checked last so it only runs once the
-        # cheap return-code/size checks have passed — i.e. when ffmpeg claims success
+        # cheap return-code/size checks have passed - i.e. when ffmpeg claims success
         # but may have discarded all corrupt frames into a videoless output.
         if (
             result is None
@@ -587,7 +587,7 @@ class RecordingService:
         """Return the segments whose footage overlaps [start_ts, end_ts] plus
         the wall-clock timestamp where the first segment's content begins.
 
-        A segment's mtime marks when ffmpeg finished writing it — its content
+        A segment's mtime marks when ffmpeg finished writing it - its content
         END. Its content START is the previous segment's mtime while the
         stream is continuous (segments split on keyframes, so they can exceed
         the nominal 1s). Selecting by content overlap keeps footage from

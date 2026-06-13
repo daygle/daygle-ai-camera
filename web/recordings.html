@@ -20,17 +20,17 @@
     <div class="grid stats-grid recordings-stats">
       <article class="card">
         <span>Total Clips</span>
-        <strong id="statTotalClips">—</strong>
+        <strong id="statTotalClips">-</strong>
         <small class="muted">All recordings on disk</small>
       </article>
       <article class="card">
         <span>Captured Footage</span>
-        <strong id="statTotalDuration">—</strong>
+        <strong id="statTotalDuration">-</strong>
         <small class="muted">Combined clip length</small>
       </article>
       <article class="card">
         <span>Cameras</span>
-        <strong id="statCameraCount">—</strong>
+        <strong id="statCameraCount">-</strong>
         <small class="muted">With at least one recording</small>
       </article>
       <article class="card">
@@ -44,7 +44,7 @@
       <div class="settings-section-header">
         <div class="settings-section-icon">🎬</div>
         <div>
-          <h2>Clip Library</h2>
+          <h2>Recordings Library</h2>
           <p class="settings-section-subtitle">Browse, play, and delete recorded clips. Use the filters to narrow down by camera or object label.</p>
         </div>
         <div class="button-row recordings-toolbar-actions">
@@ -64,18 +64,27 @@
           <span class="field-help">Limit results to a specific camera. Default: every camera</span>
         </label>
         <label>
-          <span>Recording Type</span>
-          <select id="recordingTypeFilter" aria-label="Filter by recording type">
-            <option value="">All Types</option>
-            <option value="object">Object</option>
-            <option value="sound">Sound</option>
-          </select>
-          <span class="field-help">Limit results to object or sound recordings. Default: all types</span>
-        </label>
-        <label>
           <span>Label</span>
-          <input id="recordingFilter" placeholder="e.g. person, car, cat_meow" />
-          <span class="field-help">Type a label to keep only clips that detected it. Default: all clips</span>
+          <div class="multi-select" id="labelMultiSelect">
+            <button class="multi-select-trigger" id="labelSelectTrigger" type="button">
+              <span class="multi-select-text" id="labelSelectText">All Labels</span>
+              <svg class="multi-select-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <div class="multi-select-dropdown" id="labelSelectDropdown" hidden>
+              <div class="multi-select-search">
+                <input id="labelSelectSearch" placeholder="Search labels..." autocomplete="off" />
+              </div>
+              <div class="multi-select-group" id="labelGroupObjects">
+                <div class="multi-select-group-label">Objects</div>
+                <div class="multi-select-options" id="labelOptionsObjects"></div>
+              </div>
+              <div class="multi-select-group" id="labelGroupSounds">
+                <div class="multi-select-group-label">Sounds</div>
+                <div class="multi-select-options" id="labelOptionsSounds"></div>
+              </div>
+            </div>
+          </div>
+          <span class="field-help">Select one or more labels to filter clips. Default: all clips</span>
         </label>
         <label>
           <span>From Date</span>

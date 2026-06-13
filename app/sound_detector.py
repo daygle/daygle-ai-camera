@@ -28,7 +28,7 @@ _YAMNET_CLASS_MAP_URL = 'https://raw.githubusercontent.com/tensorflow/models/mas
 # ─── Sound class catalogue ────────────────────────────────────────────────────
 #
 # yamnet_terms: matched against AudioSet display names using word-boundary
-#   matching — a YAMNet class is included when ANY term appears as a whole
+#   matching - a YAMNet class is included when ANY term appears as a whole
 #   word in its name (e.g. 'cat' matches 'Cat' but not 'Cattle, bovinae').
 #   YAMNet default_threshold values are calibrated around neural model
 #   probabilities (0.0-1.0), not hand-written audio heuristics.
@@ -228,7 +228,7 @@ class _YamnetBackend:
                 self._class_indices = self._build_class_indices(class_names)
                 self._available = True
                 self._unavailable_reason = None
-                logger.info('YAMNet TFLite ready — classifying against %d AudioSet classes', len(class_names))
+                logger.info('YAMNet TFLite ready - classifying against %d AudioSet classes', len(class_names))
             except Exception as exc:
                 self._unavailable_reason = f'YAMNet TFLite unavailable: {exc}'
                 logger.warning('YAMNet TFLite unavailable: %s', exc)

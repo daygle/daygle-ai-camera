@@ -292,7 +292,7 @@ class EventDatabase:
     def backfill_recording_labels(self, db: sqlite3.Connection | None = None) -> int:
         """One-shot migration: seed recording_labels from existing detections
         and trigger_label columns for installs upgrading from a pre-multi-label
-        schema. Safe to call on every init() — does nothing if the join table
+        schema. Safe to call on every init() - does nothing if the join table
         is already populated for a recording.
         """
         own = db is None
@@ -334,6 +334,7 @@ class EventDatabase:
     def list_recordings(
         self,
         label: str | None = None,
+        labels: list[str] | None = None,
         camera_id: str | None = None,
         limit: int = 50,
         alerted_only: bool = False,
@@ -346,12 +347,20 @@ class EventDatabase:
             conditions: list[str] = []
             params: list[Any] = []
 
+            # Normalize: accept either a single label string or a list of labels.
+            resolved_labels: list[str] = []
             if label:
+                resolved_labels = [str(label).strip().lower()]
+            elif labels:
+                resolved_labels = [str(l).strip().lower() for l in labels if str(l).strip()]
+
+            if resolved_labels:
                 # Join against recording_labels (the authoritative "labels that
                 # appeared in this recording" table) rather than detections, so
                 # labels added by extension / trigger updates still match.
-                conditions.append("rl.label = ?")
-                params.append(label)
+                placeholders = ','.join('?' * len(resolved_labels))
+                conditions.append(f"rl.label IN ({placeholders})")
+                params.extend(resolved_labels)
             if camera_id:
                 conditions.append("r.camera_id = ?")
                 params.append(camera_id)
@@ -372,7 +381,7 @@ class EventDatabase:
 
             where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
-            # Sort must be a fixed allowlist — never inject user input into the
+            # Sort must be a fixed allowlist - never inject user input into the
             # ORDER BY clause. Whitelisting the column and direction keeps the
             # query safe while still letting callers pick newest/oldest.
             sort_normalized = (sort or 'newest').strip().lower()
@@ -380,7 +389,7 @@ class EventDatabase:
                 sort_normalized = 'newest'
             order_by = 'r.started_at DESC' if sort_normalized == 'newest' else 'r.started_at ASC'
 
-            if label:
+            if resolved_labels:
                 sql = f"SELECT DISTINCT r.* FROM recordings r LEFT JOIN recording_labels rl ON rl.recording_id = r.id {where} ORDER BY {order_by}, r.id DESC LIMIT ?"
             else:
                 sql = f"SELECT r.* FROM recordings r {where} ORDER BY {order_by}, r.id DESC LIMIT ?"

@@ -29,7 +29,7 @@ function buildQuery(offset) {
 }
 
 function formatTime(iso) {
-  if (!iso) return '—';
+  if (!iso) return '-';
   try {
     return new Date(iso).toLocaleString(undefined, {
       year: 'numeric', month: 'short', day: 'numeric',
@@ -41,7 +41,7 @@ function formatTime(iso) {
 }
 
 function formatDetails(details) {
-  if (!details || typeof details !== 'object' || Object.keys(details).length === 0) return '—';
+  if (!details || typeof details !== 'object' || Object.keys(details).length === 0) return '-';
   return Object.entries(details)
     .map(([k, v]) => `${k}: ${v === true ? 'yes' : v === false ? 'no' : v}`)
     .join(' · ');
@@ -98,12 +98,12 @@ function renderEntries(entries) {
     const tr = document.createElement('tr');
     const statusClass = entry.status === 'success' ? 'status-success' : 'status-failed';
     tr.appendChild(makeCell(formatTime(entry.created_at), { noWrap: true }));
-    tr.appendChild(makeCell(entry.username || '—'));
-    tr.appendChild(makeCell(entry.action || '—', { code: true }));
-    tr.appendChild(makeCell(entry.resource || '—', { code: true }));
-    tr.appendChild(makeCell(entry.resource_id != null ? String(entry.resource_id) : '—'));
+    tr.appendChild(makeCell(entry.username || '-'));
+    tr.appendChild(makeCell(entry.action || '-', { code: true }));
+    tr.appendChild(makeCell(entry.resource || '-', { code: true }));
+    tr.appendChild(makeCell(entry.resource_id != null ? String(entry.resource_id) : '-'));
     tr.appendChild(makeCell(entry.status || 'success', { badge: statusClass }));
-    tr.appendChild(makeCell(entry.ip_address || '—', { noWrap: true }));
+    tr.appendChild(makeCell(entry.ip_address || '-', { noWrap: true }));
     tr.appendChild(makeCell(formatDetails(entry.details), { className: 'details-cell' }));
     tbody.appendChild(tr);
   }

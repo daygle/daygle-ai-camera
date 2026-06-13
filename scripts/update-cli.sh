@@ -64,7 +64,7 @@ step()  { echo -e "\n${BOLD}${CYAN}▸${RESET} ${BOLD}$*${RESET}"; }
 
 # ── Pre-flight ───────────────────────────────────────────────────────────────
 
-step "Daygle AI Camera — CLI Updater"
+step "Daygle AI Camera - CLI Updater"
 echo -e "${DIM}App directory: ${APP_DIR}${RESET}"
 
 if ! git -C "${APP_DIR}" rev-parse --git-dir >/dev/null 2>&1; then
@@ -80,7 +80,7 @@ if ! git -C "${APP_DIR}" diff --quiet HEAD 2>/dev/null; then
     git -C "${APP_DIR}" stash push -m "auto-stash before CLI update"
     info "Changes stashed."
   else
-    warn "Proceeding without stashing — git pull may fail."
+    warn "Proceeding without stashing - git pull may fail."
   fi
 fi
 
@@ -157,7 +157,7 @@ git -C "${APP_DIR}" pull origin "${CURRENT_BRANCH}"
 NEW_COMMIT=$(git -C "${APP_DIR}" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
 if [[ "${CURRENT_COMMIT_BEFORE}" == "${NEW_COMMIT}" ]]; then
-  warn "No new commits — you may already be up to date."
+  warn "No new commits - you may already be up to date."
 fi
 
 echo -e "Updated: ${DIM}${CURRENT_COMMIT_BEFORE}${RESET} → ${GREEN}${NEW_COMMIT}${RESET}"

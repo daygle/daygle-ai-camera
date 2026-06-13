@@ -247,7 +247,7 @@ class OpenCvStreamCamera:
 
         The drain is adaptive rather than a fixed count: it always discards
         ``stale_frame_grabs`` frames (the historical behaviour), then keeps
-        draining while grabs return faster than ~half a frame interval —
+        draining while grabs return faster than ~half a frame interval -
         a fast grab means the frame came from the buffer, not the live edge.
         Without the adaptive part the buffer grows without bound whenever
         detection cycles run slower than the stream's frame rate, and the

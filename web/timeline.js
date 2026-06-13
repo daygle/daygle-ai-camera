@@ -534,14 +534,26 @@ function filteredRecordings() {
 function renderSummary(payload, totalRecordingCount) {
   const recordings = payload.recordings || [];
   const totalSeconds = recordings.reduce((sum, recording) => sum + Number(recording.timeline_duration_seconds || recording.duration_seconds || 0), 0);
-  const uniqueTriggers = new Set(recordings.map((recording) => recordingTypeLabel(recording).toLowerCase()));
   const clipLabel = totalRecordingCount > recordings.length ? `${recordings.length} of ${totalRecordingCount}` : `${recordings.length}`;
+
+  // Separate object vs sound trigger counts
+  const objectTriggers = new Set();
+  const soundTriggers = new Set();
+  recordings.forEach((recording) => {
+    const label = recordingTypeLabel(recording).toLowerCase();
+    if (isSoundRecording(recording)) {
+      soundTriggers.add(label);
+    } else {
+      objectTriggers.add(label);
+    }
+  });
+
   els.timelineSummary.innerHTML = `
     <div><span>Camera</span><strong>${escapeHtml(payload.camera?.name || payload.camera?.id || 'Unknown')}</strong></div>
     <div><span>Day</span><strong>${escapeHtml(formatUserDate(payload.day || ''))}</strong></div>
     <div><span>Clips</span><strong>${escapeHtml(clipLabel)}</strong></div>
     <div><span>Coverage</span><strong>${escapeHtml(formatDuration(totalSeconds))}</strong></div>
-    <div class="wide"><span>Triggers</span><strong>${recordings.length ? escapeHtml(Array.from(uniqueTriggers).join(', ')) : 'none'}</strong></div>
+    <div class="wide"><span>Triggers</span><strong>${recordings.length ? `${objectTriggers.size} objects / ${soundTriggers.size} sounds` : 'none'}</strong></div>
   `;
   // Also feed the top stats grid.
   if (els.statClips) {
@@ -560,9 +572,7 @@ function renderSummary(payload, totalRecordingCount) {
     els.statCoverage.textContent = formatDuration(totalSeconds);
   }
   if (els.statTriggers) {
-    els.statTriggers.textContent = recordings.length
-      ? Array.from(uniqueTriggers).map(titleCase).join(', ')
-      : 'none';
+    els.statTriggers.textContent = `${objectTriggers.size}/${soundTriggers.size}`;
   }
   if (els.statCamera) {
     els.statCamera.textContent = payload.camera?.name || payload.camera?.id || 'Unknown';

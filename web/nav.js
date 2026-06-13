@@ -44,21 +44,21 @@ window.showToast = function (message, isError) {
       ],
     },
     {
-      id: 'navIntel',
-      label: 'Intelligence',
-      admin: false,
-      links: [
-        { href: '/onnx', match: '/onnx', label: 'ONNX' },
-        { href: '/yamnet-tflite', match: '/yamnet-tflite', label: 'YAMNet TFLite' },
-      ],
-    },
-    {
       id: 'navData',
       label: 'Data',
       admin: false,
       links: [
         { href: '/recordings', match: '/recordings', label: 'Recordings' },
         { href: '/recordings/timeline', match: '/recordings/timeline', label: 'Timeline' },
+      ],
+    },
+    {
+      id: 'navIntel',
+      label: 'Intelligence',
+      admin: false,
+      links: [
+        { href: '/onnx', match: '/onnx', label: 'ONNX' },
+        { href: '/yamnet-tflite', match: '/yamnet-tflite', label: 'YAMNet TFLite' },
       ],
     },
     {
@@ -231,7 +231,7 @@ window.showToast = function (message, isError) {
     const csrfToken = payload.csrf_token || '';
     // Propagate display preferences so utils.formatDate honours the
     // user's chosen date_format / time_format on every page (dashboard,
-    // events, alerts, recordings, etc.) — not just the ones that already
+    // events, alerts, recordings, etc.) - not just the ones that already
     // implemented their own local formatters.
     if (typeof window.setDaygleDatePrefs === 'function') {
       window.setDaygleDatePrefs({

@@ -9,7 +9,7 @@ const liveEls = {
   detectionStatus: document.getElementById('liveDetectionStatus'),
   detectionChips: document.getElementById('liveDetectionChips'),
   detectionState: document.getElementById('liveDetectionState'),
-  // Zones-page stats (null on live page — harmless)
+  // Zones-page stats (null on live page - harmless)
   statZoneCount: document.getElementById('statZoneCount'),
   statRuleCount: document.getElementById('statRuleCount'),
   statAlertRules: document.getElementById('statAlertRules'),
@@ -20,7 +20,7 @@ const liveEls = {
   cameraSelect: document.getElementById('cameraSelect'),
   cameraControlGroup: document.getElementById('cameraControlGroup'),
   cameraGrid: document.getElementById('cameraGrid'),
-  // Zones-page drawing elements (null on live page — harmless)
+  // Zones-page drawing elements (null on live page - harmless)
   zoneOverlay: document.getElementById('zoneOverlay'),
   zoneList: document.getElementById('zoneList'),
   addZoneBtn: document.getElementById('addZoneBtn'),
@@ -52,7 +52,7 @@ const LIVE_AI_TRACK_KEY = 'daygle.live.overlay.track.enabled';
 // Off by default; users opt in per-browser via the toggle. The overlay only
 // replays the background monitor's detections (already computed server-side
 // for alerts/recording), so it never runs its own inference and adds no
-// detector load — just the detection-status JSON poll and canvas drawing.
+// detector load - just the detection-status JSON poll and canvas drawing.
 let liveAiTrackEnabled = false;
 let liveAiTrackDetections = null;
 let liveAiTrackPrevDetections = null;
@@ -323,7 +323,7 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
     ? chips.map((c) => c.confidence > 0 ? `${titleCase(c.label)} (${Math.round(c.confidence * 100)}%)` : titleCase(c.label)).join(', ')
     : null;
 
-  // Persistent sound status chip — always shown to indicate whether sound
+  // Persistent sound status chip - always shown to indicate whether sound
   // detection is enabled, idle, or recently fired.
   if (soundEnabled) {
     if (soundStatus && soundStatus.last_detected_at) {
@@ -344,7 +344,7 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
 
   if (payload.state === 'alerted') {
     const alerts = (payload.triggered_alerts || []).map((a) => a.rule_name).join(', ') || 'unknown rule';
-    const parts = [`Alert triggered — ${alerts}`];
+    const parts = [`Alert triggered - ${alerts}`];
     if (labelStr) parts.push(`detected ${labelStr}`);
     if (payload.recording_state) parts.push(`recording ${payload.recording_state}${payload.recording_id ? ` #${payload.recording_id}` : ''}`);
     return { state: 'alerted', stateLabel: 'Alerted', chips, message: parts.join('; ') + '.' };
@@ -361,7 +361,7 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
     else if (/no alert rule|no matching|no new alert/i.test(reason)) suffix = 'no matching alert rule';
     else if (/no detections matched/i.test(reason)) suffix = 'outside monitored zones';
     else suffix = reason || 'no alert triggered';
-    return { state: 'detected', stateLabel: 'Detected', chips, message: `Detected ${labelStr} — ${suffix}.` };
+    return { state: 'detected', stateLabel: 'Detected', chips, message: `Detected ${labelStr} - ${suffix}.` };
   }
 
   const fallback = String(payload.reason || payload.ai_error || 'waiting for frames');
@@ -369,7 +369,7 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
     state: payload.state || 'idle',
     stateLabel: payload.state ? payload.state[0].toUpperCase() + payload.state.slice(1) : 'Idle',
     chips,
-    message: `Live AI: ${payload.state || 'waiting'} — ${fallback}`,
+    message: `Live AI: ${payload.state || 'waiting'} - ${fallback}`,
   };
 }
 

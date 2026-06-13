@@ -227,11 +227,11 @@ Route: `/onnx`
 - Confidence threshold, IOU threshold, and input size.
 - Model path and labels path.
 - Model selector: download and switch between YOLOv8 model sizes:
-  - **YOLOv8n · Nano** (~6 MB) — fastest inference, lowest accuracy.
-  - **YOLOv8s · Small** (~22 MB) — good balance of speed and accuracy.
-  - **YOLOv8m · Medium** (~52 MB) — significantly better accuracy; recommended for IR/night-vision cameras.
-  - **YOLOv8l · Large** (~87 MB) — high accuracy; requires a capable CPU or GPU.
-  - **YOLOv8x · Extra Large** (~131 MB) — best accuracy; GPU strongly recommended.
+  - **YOLOv8n · Nano** (~6 MB) - fastest inference, lowest accuracy.
+  - **YOLOv8s · Small** (~22 MB) - good balance of speed and accuracy.
+  - **YOLOv8m · Medium** (~52 MB) - significantly better accuracy; recommended for IR/night-vision cameras.
+  - **YOLOv8l · Large** (~87 MB) - high accuracy; requires a capable CPU or GPU.
+  - **YOLOv8x · Extra Large** (~131 MB) - best accuracy; GPU strongly recommended.
 - Check model, reload detector, test detector.
 - Check for and apply model updates from the remote manifest.
 

@@ -1714,7 +1714,7 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
 def test_rtsp_capture_anchors_timing_and_track_to_actual_media_window(tmp_path, monkeypatch):
     """After capture, the recording's stored started_at/ended_at and the baked
     detection track must describe the window the written media actually covers,
-    not the nominal triggered_at - pre_seconds — any mismatch shows up as
+    not the nominal triggered_at - pre_seconds - any mismatch shows up as
     overlay boxes drifting against the video during playback."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
@@ -2005,7 +2005,7 @@ def test_email_alert_subject_lists_all_triggered_labels():
         })
 
         all_triggered_labels = ['cat', 'person']
-        # Two rules, two alerts — one per label — both with email enabled.
+        # Two rules, two alerts - one per label - both with email enabled.
         for label in all_triggered_labels:
             service.send_alert(
                 {'label': label, 'rule_name': f'{label.title()} alert', 'confidence': 0.9,
@@ -2297,7 +2297,7 @@ def test_recording_labels_backfill_seeds_existing_recordings(tmp_path):
     with database.connect() as db:
         db.execute("DELETE FROM recording_labels WHERE recording_id = ?", (recording_id,))
 
-    # Re-open the database — init() should re-seed recording_labels from the
+    # Re-open the database - init() should re-seed recording_labels from the
     # existing detections and trigger_label.
     reopened = EventDatabase(str(tmp_path / 'legacy.sqlite3'))
     recording = reopened.list_recordings()[0]
@@ -2931,7 +2931,7 @@ def test_check_model_updates_endpoints(tmp_path, monkeypatch):
         _setup_admin(client)
         _login(client)
 
-        # All versions match — no updates
+        # All versions match - no updates
         monkeypatch.setattr(main_module, "_fetch_models_manifest", lambda: {
             "updated_at": "2026-06-08",
             "models": {mid: {"version": "1.0.0"} for mid in ["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"]},
@@ -2947,7 +2947,7 @@ def test_check_model_updates_endpoints(tmp_path, monkeypatch):
         assert n_row["installed_version"] == "1.0.0"
         assert n_row["latest_version"] == "1.0.0"
 
-        # Manifest bumped to 2.0.0 — update available
+        # Manifest bumped to 2.0.0 - update available
         monkeypatch.setattr(main_module, "_fetch_models_manifest", lambda: {
             "updated_at": "2026-06-09",
             "models": {mid: {"version": "2.0.0"} for mid in ["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"]},
@@ -2959,7 +2959,7 @@ def test_check_model_updates_endpoints(tmp_path, monkeypatch):
         assert n_row["update_available"] is True
         assert n_row["latest_version"] == "2.0.0"
 
-        # Unknown installed version (legacy install) — treated as needing update
+        # Unknown installed version (legacy install) - treated as needing update
         monkeypatch.setattr(main_module, "_read_installed_models", lambda: {
             "yolov8n": {"version": "unknown", "installed_at": "2026-06-08T00:00:00Z", "sha256": "abc"},
         })
@@ -2968,7 +2968,7 @@ def test_check_model_updates_endpoints(tmp_path, monkeypatch):
         n_row = next(m for m in payload["models"] if m["id"] == "yolov8n")
         assert n_row["update_available"] is True
 
-        # Manifest fetch failure — returns 200 with readable error field, not 502
+        # Manifest fetch failure - returns 200 with readable error field, not 502
         def _raise():
             raise RuntimeError("Connection refused")
         monkeypatch.setattr(main_module, "_fetch_models_manifest", _raise)
@@ -3205,7 +3205,7 @@ def test_zone_detection_creates_alert_and_recording(tmp_path, monkeypatch, label
 
 
 def test_person_and_cat_in_zone_each_create_independent_events(tmp_path, monkeypatch):
-    """Two successive detections — first person, then cat — in the same zone each produce
+    """Two successive detections - first person, then cat - in the same zone each produce
     their own event and recording when both have zero cooldown."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
@@ -3509,7 +3509,7 @@ def test_debounce_window_refreshes_while_activity_continues(tmp_path, monkeypatc
     refreshed_ts = main.live_event_last_emitted['camera-1']['timestamp']
     assert time.time() - refreshed_ts < 5, 'suppressed detection must refresh the debounce window'
 
-    # 25s later again (would be 50s after the original event — past the old anchor)
+    # 25s later again (would be 50s after the original event - past the old anchor)
     # the same ongoing activity must STILL be suppressed thanks to the refresh.
     main.live_event_last_emitted['camera-1']['timestamp'] = time.time() - 25
     still_suppressed = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
@@ -3544,7 +3544,7 @@ def test_empty_detection_track_is_marker_only(tmp_path, monkeypatch):
 
 def test_build_track_from_live_history_slices_capture_window(tmp_path, monkeypatch):
     """Recording tracks are sliced from the live monitor's in-memory detection
-    history — no clip decoding, no re-inference — with timestamps rebased onto
+    history - no clip decoding, no re-inference - with timestamps rebased onto
     the capture window."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
