@@ -3564,6 +3564,20 @@ def delete_all_events(request: Request):
     return {'ok': True, 'deleted': deleted}
 
 
+@app.post('/api/events/dismiss-all')
+def dismiss_all_events_route():
+    dismissed = database.dismiss_all_events()
+    return {'ok': True, 'dismissed': dismissed}
+
+
+@app.post('/api/events/{event_id}/dismiss')
+def dismiss_event_route(event_id: int):
+    ok = database.dismiss_event(event_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail='Event not found')
+    return {'ok': True}
+
+
 @app.get('/api/alerts')
 def alert_history(limit: int = Query(25, ge=1, le=200)):
     return database.alerts(limit=limit)
@@ -3575,6 +3589,18 @@ def delete_all_alert_history(request: Request):
     deleted = database.delete_all_alerts()
     write_audit_log(request, 'delete_all', 'alert_history', details={'count': deleted})
     return {'ok': True, 'deleted': deleted}
+
+
+@app.post('/api/alerts/dismiss-all')
+def dismiss_all_alerts_route():
+    dismissed = database.dismiss_all_alerts()
+    return {'ok': True, 'dismissed': dismissed}
+
+
+@app.post('/api/alerts/{group_key}/dismiss')
+def dismiss_alert_group_route(group_key: str):
+    dismissed = database.dismiss_alert_group(group_key)
+    return {'ok': True, 'dismissed': dismissed}
 
 
 @app.get('/api/stats')

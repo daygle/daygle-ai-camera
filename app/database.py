@@ -35,6 +35,14 @@ class EventDatabase:
                 db.execute("ALTER TABLE alert_history ADD COLUMN recording_id INTEGER REFERENCES recordings(id) ON DELETE SET NULL")
             except sqlite3.OperationalError:
                 pass
+            try:
+                db.execute("ALTER TABLE events ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                db.execute("ALTER TABLE alert_history ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS events (
@@ -540,6 +548,7 @@ class EventDatabase:
                     SELECT DISTINCT e.* FROM events e
                     JOIN detections d ON d.event_id = e.id
                     WHERE d.label = ?
+                    AND e.dismissed = 0
                     {alert_filter if alerted_only else ''}
                     {recording_filter if with_recording else ''}
                     ORDER BY e.created_at DESC
@@ -551,7 +560,8 @@ class EventDatabase:
                 rows = db.execute(
                     f"""
                     SELECT e.* FROM events e
-                    WHERE EXISTS (
+                    WHERE e.dismissed = 0
+                    AND EXISTS (
                         SELECT 1
                         FROM alert_history ah
                         WHERE ah.event_id = e.id
@@ -566,14 +576,15 @@ class EventDatabase:
                 rows = db.execute(
                     f"""
                     SELECT e.* FROM events e
-                    WHERE {recording_condition}
+                    WHERE e.dismissed = 0
+                    AND {recording_condition}
                     ORDER BY e.created_at DESC
                     LIMIT ?
                     """,
                     (limit,),
                 ).fetchall()
             else:
-                rows = db.execute("SELECT * FROM events ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+                rows = db.execute("SELECT * FROM events WHERE dismissed = 0 ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
 
             return [self._event_with_detections(db, row) for row in rows]
 
@@ -640,12 +651,52 @@ class EventDatabase:
                 SELECT ah.*, r.id AS recording_id
                 FROM alert_history ah
                 LEFT JOIN recordings r ON r.id = ah.recording_id
+                WHERE ah.dismissed = 0
                 ORDER BY ah.created_at DESC
                 LIMIT ?
                 """,
                 (limit,),
             ).fetchall()
             return [dict(row) for row in rows]
+
+    def dismiss_event(self, event_id: int) -> bool:
+        with self.connect() as db:
+            cursor = db.execute("UPDATE events SET dismissed = 1 WHERE id = ?", (event_id,))
+            return cursor.rowcount > 0
+
+    def dismiss_all_events(self) -> int:
+        with self.connect() as db:
+            cursor = db.execute("UPDATE events SET dismissed = 1 WHERE dismissed = 0")
+            return cursor.rowcount
+
+    def dismiss_alert_group(self, group_key: str) -> int:
+        parts = group_key.split('-', 1)
+        if len(parts) != 2:
+            return 0
+        kind, raw_id = parts
+        try:
+            id_val = int(raw_id)
+        except ValueError:
+            return 0
+        with self.connect() as db:
+            if kind == 'event':
+                cursor = db.execute(
+                    "UPDATE alert_history SET dismissed = 1 WHERE event_id = ? AND dismissed = 0",
+                    (id_val,),
+                )
+            elif kind == 'alert':
+                cursor = db.execute(
+                    "UPDATE alert_history SET dismissed = 1 WHERE id = ? AND dismissed = 0",
+                    (id_val,),
+                )
+            else:
+                return 0
+            return cursor.rowcount
+
+    def dismiss_all_alerts(self) -> int:
+        with self.connect() as db:
+            cursor = db.execute("UPDATE alert_history SET dismissed = 1 WHERE dismissed = 0")
+            return cursor.rowcount
 
     def delete_all_alerts(self) -> int:
         with self.connect() as db:

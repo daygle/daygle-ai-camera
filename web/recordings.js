@@ -63,16 +63,17 @@ async function api(path, options = {}) {
   return payload;
 }
 
-function detectionBadges(detections = []) {
-  if (!detections.length) return '<span class="muted">No detections</span>';
-  const normalized = detections
-    .map((detection) => ({
-      label: String(detection.label || '').trim().toLowerCase(),
-      confidence: Number(detection.confidence || 0),
-    }))
-    .filter((detection) => detection.label && (!configuredLabels || (configuredLabels.has(detection.label) && detection.confidence >= (configuredLabels.get(detection.label) ?? 0))));
-  if (!normalized.length) return '<span class="muted">No detections</span>';
-  return normalized.map((detection) => `<span class="detection">${escapeHtml(titleCase(detection.label))} · ${Math.round(detection.confidence * 100)}%</span>`).join('');
+const DETECTION_EYE_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg>';
+
+function detectionPill(label, confidence, isSound) {
+  const display = isSound
+    ? titleCase(String(label).replace(/_/g, ' '))
+    : titleCase(String(label));
+  const pct = Math.round(Number(confidence) * 100);
+  if (isSound) {
+    return `<span class="detection detection-sound">🔊 ${escapeHtml(display)} · ${pct}%</span>`;
+  }
+  return `<span class="detection detection-object">${DETECTION_EYE_ICON} ${escapeHtml(display)} · ${pct}%</span>`;
 }
 
 function cameraLabel(recording) {
@@ -250,7 +251,7 @@ function renderRecordings(recordings) {
             </div>
 
           </div>
-          <div class="recording-row-badges">${recordingDetectionSummary(recording).map((d) => `<span class="detection">${escapeHtml(titleCase(d.label))} · ${Math.round(d.confidence * 100)}%</span>`).join('') || '<span class="muted">No detections</span>'}</div>
+          <div class="recording-row-badges">${recordingDetectionSummary(recording).map((d) => detectionPill(d.label, d.confidence, isSoundRecording(recording))).join('') || '<span class="muted">No detections</span>'}</div>
         </div>
         <div class="recording-row-actions">
           <button class="secondary" data-play-recording="${recording.id}" ${mediaReady ? '' : 'disabled'}>
@@ -319,9 +320,7 @@ function renderRecordingDetails(recording) {
   const detections = recordingDetectionSummary(recording);
   const isSound = isSoundRecording(recording);
   const detectionBadges = detections.length
-    ? detections
-        .map((d) => `<span class="detection ${isSound ? 'detection-sound' : ''}">${escapeHtml(titleCase(d.label))} (${Math.round(d.confidence * 100)}%)</span>`)
-        .join(' ')
+    ? detections.map((d) => detectionPill(d.label, d.confidence, isSound)).join(' ')
     : 'none';
   const detectionLabel = isSound ? 'Sound' : 'Detections';
   els.recordingDetails.innerHTML = `

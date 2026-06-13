@@ -91,6 +91,19 @@ const SEGMENT_COLORS = [
 
 const GENERIC_TIMELINE_LABELS = new Set(['motion', 'alert', 'human', 'object', 'none', 'off', 'continuous']);
 
+const DETECTION_EYE_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg>';
+
+function detectionPill(label, confidence, isSound) {
+  const display = isSound
+    ? titleCase(String(label).replace(/_/g, ' '))
+    : titleCase(String(label));
+  const pct = Math.round(Number(confidence) * 100);
+  if (isSound) {
+    return `<span class="detection detection-sound">🔊 ${escapeHtml(display)} · ${pct}%</span>`;
+  }
+  return `<span class="detection detection-object">${DETECTION_EYE_ICON} ${escapeHtml(display)} · ${pct}%</span>`;
+}
+
 function filterByConfiguredLabels(detections) {
   if (!configuredLabels) return detections;
   return detections.filter((d) => {
@@ -679,11 +692,7 @@ function renderRecordingList(recordings) {
     const isSound = isSoundRecording(recording);
     const confidenceBadges = detections
       .filter((d) => d.confidence > 0)
-      .map((d) => {
-        const displayLabel = isSound ? titleCase(d.label.replace(/_/g, ' ')) : titleCase(d.label);
-        const prefix = isSound ? '🔊 ' : '';
-        return `<span class="timeline-recording-confidence${isSound ? ' timeline-recording-confidence-sound' : ''}" title="${escapeHtml(displayLabel)} confidence">${prefix}${escapeHtml(displayLabel)} <strong>${Math.round(d.confidence * 100)}%</strong></span>`;
-      })
+      .map((d) => detectionPill(d.label, d.confidence, isSound))
       .join('');
     const tooltip = detections
       .map((d) => `${titleCase(d.label)} · ${Math.round(d.confidence * 100)}%`)
@@ -716,12 +725,7 @@ function renderRecordingDetails(recording) {
   const isSound = isSoundRecording(recording);
   const detections = recordingDetectionSummary(recording);
   const detectionBadges = detections.length
-    ? detections
-        .map((d) => {
-          const label = isSound ? titleCase(d.label.replace(/_/g, ' ')) : titleCase(d.label);
-          return `<span class="detection ${isSound ? 'detection-sound' : ''}">${isSound ? '🔊 ' : ''}${escapeHtml(label)} (${Math.round(d.confidence * 100)}%)</span>`;
-        })
-        .join(' ')
+    ? detections.map((d) => detectionPill(d.label, d.confidence, isSound)).join(' ')
     : 'none';
   const detectionLabel = isSound ? 'Sound' : 'Detections';
   els.recordingDetails.innerHTML = `

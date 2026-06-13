@@ -6,13 +6,8 @@ const els = {
   soundAlerts: document.getElementById('soundAlerts'),
   activityFeed: document.getElementById('activityFeed'),
   listStatus: document.getElementById('listStatus'),
-  deleteAllEventsBtn: document.getElementById('deleteAllEventsBtn'),
-  deleteAllAlertsBtn: document.getElementById('deleteAllAlertsBtn'),
-  deleteModal: document.getElementById('deleteModal'),
-  deleteModalBody: document.getElementById('deleteModalBody'),
-  deleteModalCloseBtn: document.getElementById('deleteModalCloseBtn'),
-  deleteCancelBtn: document.getElementById('deleteCancelBtn'),
-  deleteConfirmBtn: document.getElementById('deleteConfirmBtn'),
+  dismissAllEventsBtn: document.getElementById('dismissAllEventsBtn'),
+  dismissAllAlertsBtn: document.getElementById('dismissAllAlertsBtn'),
   filterPills: document.querySelectorAll('.activity-filter-pill'),
 };
 
@@ -24,7 +19,6 @@ const SOUND_CLASS_IDS = new Set(['cat_meow', 'dog_bark', 'glass_breaking', 'smok
 let events = [];
 let alertGroups = [];
 let activeFilter = 'all';
-let pendingDelete = null; // { kind: 'event'|'events'|'alerts', id?: number }
 
 // ─── API helper (shared pattern with cameras.js / recordings.js) ───────────
 async function api(path, options = {}) {
@@ -278,6 +272,10 @@ function renderActivityItem(item) {
   } else if (!isEvent && item.recordingId) {
     actions.push(recordingLink(item.recordingId, 'View Footage'));
   }
+  const dismissAttr = isEvent
+    ? `data-dismiss-event="${escapeHtml(String(item.id))}"`
+    : `data-dismiss-alert="${escapeHtml(String(item.id))}"`;
+  actions.push(`<button class="secondary activity-item-action" ${dismissAttr} type="button">Dismiss</button>`);
   return `
     <article class="item activity-item ${typeClass}" data-activity-id="${escapeHtml(String(item.id))}" data-activity-type="${item.type}">
       <div class="activity-item-icon">${icon}</div>
@@ -323,10 +321,13 @@ function renderActivityFeed() {
   if (!items.length) {
     els.activityFeed.innerHTML = renderEmptyState();
     updateListStatus(0);
+    updateDismissButtons();
     return;
   }
   els.activityFeed.innerHTML = items.map(renderActivityItem).join('');
   updateListStatus(items.length);
+  bindActivityActions();
+  updateDismissButtons();
 }
 
 function updateListStatus(count) {
@@ -338,6 +339,42 @@ function updateListStatus(count) {
   } else {
     els.listStatus.textContent = `Showing ${count} ${label}`;
   }
+}
+
+function bindActivityActions() {
+  els.activityFeed.querySelectorAll('[data-dismiss-event]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.dismissEvent;
+      btn.disabled = true;
+      try {
+        await api(`/api/events/${id}/dismiss`, { method: 'POST' });
+        events = events.filter((e) => String(e.id) !== String(id));
+        renderActivityFeed();
+      } catch (error) {
+        window.showToast?.(error.message, true);
+        btn.disabled = false;
+      }
+    });
+  });
+  els.activityFeed.querySelectorAll('[data-dismiss-alert]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const key = btn.dataset.dismissAlert;
+      btn.disabled = true;
+      try {
+        await api(`/api/alerts/${encodeURIComponent(key)}/dismiss`, { method: 'POST' });
+        alertGroups = alertGroups.filter((g) => String(g.key) !== String(key));
+        renderActivityFeed();
+      } catch (error) {
+        window.showToast?.(error.message, true);
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+function updateDismissButtons() {
+  if (els.dismissAllEventsBtn) els.dismissAllEventsBtn.hidden = events.length === 0;
+  if (els.dismissAllAlertsBtn) els.dismissAllAlertsBtn.hidden = alertGroups.length === 0;
 }
 
 // ─── Stats + activity data loaders ──────────────────────────────────────────
@@ -366,10 +403,6 @@ async function loadAlerts() {
   try {
     const alerts = await api('/api/alerts');
     alertGroups = groupAlertsByEvent(alerts);
-    if (els.deleteAllAlertsBtn) {
-      const canManage = authState.user?.role === 'admin';
-      els.deleteAllAlertsBtn.hidden = !(canManage && alerts.length > 0);
-    }
   } catch (error) {
     alertGroups = [];
     window.showToast?.(error.message, true);
@@ -400,82 +433,36 @@ async function loadConfiguredLabels() {
   }
 }
 
-// ─── Auth & admin-only controls ─────────────────────────────────────────────
+// ─── Auth ────────────────────────────────────────────────────────────────────
 async function loadAuth() {
   const authInfo = await api('/api/auth/me');
   authState = { user: authInfo.user, csrfToken: authInfo.csrf_token };
-  const isAdmin = authInfo.user?.role === 'admin';
-  if (els.deleteAllEventsBtn) {
-    els.deleteAllEventsBtn.hidden = !isAdmin;
-    if (isAdmin) {
-      els.deleteAllEventsBtn.addEventListener('click', () => {
-        openDeleteModal({
-          kind: 'events',
-          body: 'Delete ALL events? This cannot be undone.',
-          onConfirm: async () => {
-            await api('/api/events', { method: 'DELETE' });
-            window.showToast?.('All events cleared.');
-            await Promise.all([loadStats(), loadEvents()]);
-            renderActivityFeed();
-          },
-        });
-      });
-    }
-  }
-  if (els.deleteAllAlertsBtn) {
-    els.deleteAllAlertsBtn.hidden = !isAdmin;
-  }
-  if (els.deleteAllAlertsBtn && isAdmin) {
-    els.deleteAllAlertsBtn.addEventListener('click', () => {
-      openDeleteModal({
-        kind: 'alerts',
-        body: 'Delete ALL alert history? This cannot be undone.',
-        onConfirm: async () => {
-          await api('/api/alerts', { method: 'DELETE' });
-          window.showToast?.('All alerts cleared.');
-          await Promise.all([loadAlerts(), loadStats()]);
-          renderActivityFeed();
-        },
-      });
-    });
-  }
 }
 
-// ─── Delete confirmation modal (mirrors cameras.js / recordings.js) ────────
-function openDeleteModal({ kind, id, body, onConfirm }) {
-  pendingDelete = { kind, id, onConfirm };
-  els.deleteModalBody.textContent = body;
-  els.deleteModal.hidden = false;
-  document.body.classList.add('modal-open');
-  els.deleteConfirmBtn.focus();
-}
-
-function closeDeleteModal() {
-  els.deleteModal.hidden = true;
-  document.body.classList.remove('modal-open');
-  pendingDelete = null;
-}
-
-els.deleteModalCloseBtn?.addEventListener('click', closeDeleteModal);
-els.deleteCancelBtn?.addEventListener('click', closeDeleteModal);
-els.deleteModal?.addEventListener('click', (e) => {
-  if (e.target === els.deleteModal) closeDeleteModal();
-});
-els.deleteConfirmBtn?.addEventListener('click', async () => {
-  if (!pendingDelete?.onConfirm) {
-    closeDeleteModal();
-    return;
-  }
-  const { onConfirm } = pendingDelete;
-  closeDeleteModal();
+els.dismissAllEventsBtn?.addEventListener('click', async () => {
+  els.dismissAllEventsBtn.disabled = true;
   try {
-    await onConfirm();
+    await api('/api/events/dismiss-all', { method: 'POST' });
+    events = [];
+    renderActivityFeed();
   } catch (error) {
     window.showToast?.(error.message, true);
+  } finally {
+    els.dismissAllEventsBtn.disabled = false;
   }
 });
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !els.deleteModal.hidden) closeDeleteModal();
+
+els.dismissAllAlertsBtn?.addEventListener('click', async () => {
+  els.dismissAllAlertsBtn.disabled = true;
+  try {
+    await api('/api/alerts/dismiss-all', { method: 'POST' });
+    alertGroups = [];
+    renderActivityFeed();
+  } catch (error) {
+    window.showToast?.(error.message, true);
+  } finally {
+    els.dismissAllAlertsBtn.disabled = false;
+  }
 });
 
 // ─── Filter pills ───────────────────────────────────────────────────────────
