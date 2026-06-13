@@ -23,15 +23,8 @@ const els = {
   statCameraCount: document.getElementById('statCameraCount'),
   statFilterStatus: document.getElementById('statFilterStatus'),
   statFilterHint: document.getElementById('statFilterHint'),
-  // Multi-select label dropdown
-  labelSelectTrigger: document.getElementById('labelSelectTrigger'),
-  labelSelectText: document.getElementById('labelSelectText'),
-  labelSelectDropdown: document.getElementById('labelSelectDropdown'),
-  labelSelectSearch: document.getElementById('labelSelectSearch'),
-  labelOptionsObjects: document.getElementById('labelOptionsObjects'),
-  labelOptionsSounds: document.getElementById('labelOptionsSounds'),
-  labelGroupObjects: document.getElementById('labelGroupObjects'),
-  labelGroupSounds: document.getElementById('labelGroupSounds'),
+  // Label filter select
+  labelFilter: document.getElementById('labelFilter'),
 };
 
 let authState = { user: null, csrfToken: null };
@@ -177,14 +170,11 @@ function formatIsoDateForFilter(dateString, endOfDay = false) {
   return date.toISOString();
 }
 
-// ── Multi-select label state ────────────────────────────────────────────
-let selectedLabels = new Set();
-let allLabelOptions = []; // { value, label, group: 'objects'|'sounds' }
+// ── Label filter state ────────────────────────────────────────────
 
 function currentFilterValues() {
   return {
-    sourceType: '',
-    label: [...selectedLabels].join(','),
+    label: els.labelFilter?.value || '',
     cameraId: els.cameraFilter?.value || '',
     dateFrom: els.recordingDateFrom?.value || '',
     dateTo: els.recordingDateTo?.value || '',
@@ -194,15 +184,9 @@ function currentFilterValues() {
 
 function describeFilters(filters) {
   const parts = [];
-  if (filters.sourceType) parts.push(`type “${filters.sourceType}”`);
   if (filters.label) {
-    const labelList = filters.label.split(',').filter(Boolean);
-    if (labelList.length === 1) {
-      const opt = allLabelOptions.find((o) => o.value === labelList[0]);
-      parts.push(`label “${opt ? opt.label : labelList[0]}”`);
-    } else if (labelList.length > 1) {
-      parts.push(`labels (${labelList.length})`);
-    }
+    const option = els.labelFilter?.querySelector(`option[value="${escapeHtml(filters.label)}"]`);
+    parts.push(`label “${option?.textContent || filters.label}”`);
   }
   if (filters.cameraId) {
     const cameraOption = Array.from(els.cameraFilter?.options || []).find((o) => o.value === filters.cameraId);
@@ -645,12 +629,11 @@ async function loadRecordings(filters = {}) {
     ? { label: String(filters), cameraId: '' }
     : { ...currentFilterValues(), ...filters };
   const params = new URLSearchParams();
-  if (resolved.sourceType) params.set('source_type', resolved.sourceType);
   if (resolved.label) params.set('label', resolved.label);
   if (resolved.cameraId) params.set('camera_id', resolved.cameraId);
   const startedAfter = formatIsoDateForFilter(resolved.dateFrom);
   if (startedAfter) params.set('started_after', startedAfter);
-  const startedBefore = formatIsoDateForFilter(resolved.dateTo, { endOfDay: true });
+  const startedBefore = formatIsoDateForFilter(resolved.dateTo, true);
   if (startedBefore) params.set('started_before', startedBefore);
   if (resolved.sort) params.set('sort', resolved.sort);
   const queryString = params.toString();
@@ -720,12 +703,13 @@ if (els.clipOverlayToggle) {
 }
 
 els.cameraFilter?.addEventListener('change', () => loadRecordings());
+els.labelFilter?.addEventListener('change', () => loadRecordings());
 els.filterForm?.addEventListener('submit', (event) => {
   event.preventDefault();
   loadRecordings();
 });
 els.recordingClearBtn.addEventListener('click', () => {
-  clearLabelSelection();
+  if (els.labelFilter) els.labelFilter.value = '';
   if (els.cameraFilter) els.cameraFilter.value = '';
   if (els.recordingDateFrom) els.recordingDateFrom.value = '';
   if (els.recordingDateTo) els.recordingDateTo.value = '';
@@ -733,158 +717,54 @@ els.recordingClearBtn.addEventListener('click', () => {
   loadRecordings();
 });
 
-// ── Multi-select dropdown ────────────────────────────────────────────────
+// ── Label filter options ────────────────────────────────────────────────
 
-function clearLabelSelection() {
-  selectedLabels.clear();
-  updateLabelSelectDisplay();
-  const checkboxes = document.querySelectorAll('#labelOptionsObjects input[type="checkbox"], #labelOptionsSounds input[type="checkbox"]');
-  checkboxes.forEach((cb) => { cb.checked = false; });
-}
-
-function updateLabelSelectDisplay() {
-  if (!els.labelSelectText) return;
-  if (selectedLabels.size === 0) {
-    els.labelSelectText.textContent = 'All Labels';
-  } else if (selectedLabels.size === 1) {
-    const label = [...selectedLabels][0];
-    const opt = allLabelOptions.find((o) => o.value === label);
-    els.labelSelectText.textContent = opt ? opt.label : label;
-  } else {
-    els.labelSelectText.textContent = `${selectedLabels.size} labels selected`;
-  }
-}
-
-function renderLabelCheckboxes(searchText) {
-  if (!els.labelOptionsObjects || !els.labelOptionsSounds) return;
-  const query = (searchText || '').trim().toLowerCase();
-
-  let objectHtml = '';
-  let soundHtml = '';
-  let hasObjectMatch = false;
-  let hasSoundMatch = false;
-
-  for (const opt of allLabelOptions) {
-    if (query && !opt.value.includes(query) && !opt.label.toLowerCase().includes(query)) continue;
-    const checked = selectedLabels.has(opt.value) ? ' checked' : '';
-    const escaped = escapeHtml(opt.label);
-    const item = `<label class="multi-select-option"><input type="checkbox" value="${escapeHtml(opt.value)}"${checked} /><span>${escaped}</span></label>`;
-    if (opt.group === 'objects') {
-      objectHtml += item;
-      hasObjectMatch = true;
-    } else {
-      soundHtml += item;
-      hasSoundMatch = true;
-    }
-  }
-
-  els.labelOptionsObjects.innerHTML = objectHtml || '<span class="multi-select-empty">No matching objects</span>';
-  els.labelOptionsSounds.innerHTML = soundHtml || '<span class="multi-select-empty">No matching sounds</span>';
-  els.labelGroupObjects.hidden = !hasObjectMatch;
-  els.labelGroupSounds.hidden = !hasSoundMatch;
-
-  // Bind checkbox events
-  els.labelOptionsObjects.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
-    cb.addEventListener('change', () => {
-      if (cb.checked) selectedLabels.add(cb.value);
-      else selectedLabels.delete(cb.value);
-      updateLabelSelectDisplay();
-    });
-  });
-  els.labelOptionsSounds.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
-    cb.addEventListener('change', () => {
-      if (cb.checked) selectedLabels.add(cb.value);
-      else selectedLabels.delete(cb.value);
-      updateLabelSelectDisplay();
-    });
-  });
-}
-
-function openLabelDropdown() {
-  if (!els.labelSelectDropdown) return;
-  els.labelSelectDropdown.hidden = false;
-  els.labelSelectTrigger.classList.add('open');
-  if (els.labelSelectSearch) {
-    els.labelSelectSearch.value = '';
-    els.labelSelectSearch.focus();
-  }
-  renderLabelCheckboxes('');
-}
-
-function closeLabelDropdown() {
-  if (!els.labelSelectDropdown) return;
-  els.labelSelectDropdown.hidden = true;
-  els.labelSelectTrigger.classList.remove('open');
-}
-
-function toggleLabelDropdown() {
-  if (!els.labelSelectDropdown) return;
-  if (els.labelSelectDropdown.hidden) {
-    openLabelDropdown();
-  } else {
-    closeLabelDropdown();
-  }
-}
-
-async function loadLabelOptions() {
+async function populateLabelFilterOptionsFromApi() {
+  if (!els.labelFilter) return;
   try {
-    const data = await api('/api/labels');
-    allLabelOptions = [];
-    if (Array.isArray(data.objects)) {
-      for (const label of data.objects) {
-        allLabelOptions.push({ value: label.toLowerCase(), label: titleCase(label), group: 'objects' });
-      }
-    }
-    if (Array.isArray(data.sounds)) {
-      for (const sound of data.sounds) {
-        allLabelOptions.push({ value: sound.id.toLowerCase(), label: sound.label, group: 'sounds' });
-      }
-    }
-    // Sort alphabetically within groups
-    allLabelOptions.sort((a, b) => {
-      if (a.group !== b.group) return a.group === 'objects' ? -1 : 1;
-      return a.label.localeCompare(b.label);
-    });
-    renderLabelCheckboxes('');
+    // Load all recordings without any filter to populate the full label list
+    const allRecordings = await api('/api/recordings?limit=500');
+    populateLabelFilterOptions(allRecordings);
   } catch (_error) {
-    // Labels will remain empty; dropdown shows empty state.
+    // Keep placeholder options if API fails
   }
 }
 
-// Bind multi-select events
-if (els.labelSelectTrigger) {
-  els.labelSelectTrigger.addEventListener('click', (e) => {
-    e.preventDefault();
-    toggleLabelDropdown();
+function populateLabelFilterOptions(recordings) {
+  if (!els.labelFilter) return;
+  const currentFilter = els.labelFilter.value || new URLSearchParams(window.location.search).get('label') || '';
+  const counts = {};
+  recordings.forEach((recording) => {
+    recordingDetectionLabels(recording).forEach((label) => { counts[label] = (counts[label] || 0) + 1; });
   });
+
+  const options = [{ value: '', label: `All Labels${recordings.length ? ` (${recordings.length})` : ''}` }];
+  const seen = new Set(['']);
+  const addOption = (value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    const count = counts[normalized];
+    options.push({ value: normalized, label: count ? `${titleCase(normalized)} (${count})` : titleCase(normalized) });
+  };
+
+  recordings.forEach((recording) => {
+    recordingDetectionLabels(recording).forEach(addOption);
+  });
+  if (recordings.length) addOption('motion');
+
+  const ordered = [options[0], ...options.slice(1).sort((left, right) => {
+    if (left.value === 'motion') return -1;
+    if (right.value === 'motion') return 1;
+    return left.label.localeCompare(right.label);
+  })];
+  els.labelFilter.innerHTML = ordered.map((option) => (
+    `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`
+  )).join('');
+
+  const availableValues = new Set(ordered.map((option) => option.value));
+  els.labelFilter.value = availableValues.has(currentFilter) ? currentFilter : '';
 }
-
-if (els.labelSelectSearch) {
-  els.labelSelectSearch.addEventListener('input', () => {
-    renderLabelCheckboxes(els.labelSelectSearch.value);
-  });
-  els.labelSelectSearch.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeLabelDropdown();
-  });
-}
-
-// Close dropdown on outside click
-document.addEventListener('click', (e) => {
-  if (!els.labelSelectDropdown || els.labelSelectDropdown.hidden) return;
-  const trigger = els.labelSelectTrigger;
-  const dropdown = els.labelSelectDropdown;
-  if (!trigger.contains(e.target) && !dropdown.contains(e.target)) {
-    closeLabelDropdown();
-  }
-});
-
-// Close on Escape
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && els.labelSelectDropdown && !els.labelSelectDropdown.hidden) {
-    closeLabelDropdown();
-    if (els.labelSelectTrigger) els.labelSelectTrigger.focus();
-  }
-});
 
 els.videoModalClose.addEventListener('click', () => closeVideoModal());
 
@@ -906,7 +786,8 @@ window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
 };
 
 loadAuth().then(async () => {
-  await Promise.all([loadCameras(), loadLiveSettings(), loadLabelOptions()]);
+  await Promise.all([loadCameras(), loadLiveSettings()]);
+  await populateLabelFilterOptionsFromApi();
   await loadRecordings();
   const selected = new URLSearchParams(window.location.search).get('recording_id');
   if (selected) playRecording(selected).catch((error) => { els.listStatus.textContent = error.message; });
