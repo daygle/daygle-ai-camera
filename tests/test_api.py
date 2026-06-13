@@ -3549,6 +3549,66 @@ def test_object_detection_with_email_rule_delivers_email(tmp_path, monkeypatch, 
     assert label in sent[0]['Subject'].lower()
 
 
+def test_sound_rule_normalization_keeps_email_recipients_and_active_window(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    camera = main.normalize_camera_settings({
+        'id': 'sound-cam',
+        'detection': {
+            'sound': {
+                'enabled': True,
+                'rules': [{
+                    'class': 'cat_meow',
+                    'enabled': True,
+                    'email_enabled': True,
+                    'email_recipients': 'alerts@example.test, bad-address',
+                    'active_start': '07:00',
+                    'active_end': '18:00',
+                }],
+            },
+        },
+    })
+
+    rule = camera['detection']['sound']['rules'][0]
+    assert rule['email_enabled'] is True
+    assert rule['email_recipients'] == ['alerts@example.test']
+    assert rule['active_start'] == '07:00'
+    assert rule['active_end'] == '18:00'
+
+
+def test_sound_detection_with_email_rule_delivers_to_rule_recipients(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    sent = _email_alert_capture(main, monkeypatch)
+    main.cameras_config = [{
+        'id': 'sound-cam',
+        'name': 'Sound Camera',
+        'detection': {
+            'sound': {
+                'enabled': True,
+                'rules': [{
+                    'class': 'cat_meow',
+                    'name': 'Cat meow alert',
+                    'enabled': True,
+                    'record_on_detect': False,
+                    'email_enabled': True,
+                    'email_recipients': ['alerts@example.test'],
+                    'push_enabled': False,
+                }],
+            },
+        },
+    }]
+
+    main._on_sound_detected('sound-cam', 'cat_meow', 'Cat meow alert', 0.92, {'backend': 'test'})
+    main.wait_for_pending_alert_notifications()
+
+    assert len(sent) == 1
+    assert sent[0]['To'] == 'alerts@example.test'
+    assert 'cat_meow' in sent[0]['Subject'].lower()
+
+
 def test_object_detection_without_global_email_enabled_sends_nothing(tmp_path, monkeypatch):
     """A per-rule email_enabled flag must not deliver mail when global SMTP is disabled.
 

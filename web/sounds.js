@@ -46,6 +46,11 @@ function cloneSound(sound) {
   return JSON.parse(JSON.stringify(sound || { enabled: false, rules: [] }));
 }
 
+function normalizeEmailList(value) {
+  const source = Array.isArray(value) ? value : String(value || '').split(',');
+  return source.map((recipient) => String(recipient).trim()).filter(Boolean);
+}
+
 function currentCamera() {
   return cameras.find((camera) => camera.id === selectedCameraId) || cameras[0] || null;
 }
@@ -54,6 +59,14 @@ function normalisedSound(sound) {
   const next = cloneSound(sound);
   if (!Array.isArray(next.rules)) next.rules = [];
   next.enabled = next.enabled === true;
+  next.rules = next.rules.map((rule) => ({
+    ...rule,
+    email_enabled: rule.email_enabled === true,
+    email_recipients: normalizeEmailList(rule.email_recipients),
+    push_enabled: rule.push_enabled === true,
+    active_start: rule.active_start || null,
+    active_end: rule.active_end || null,
+  }));
   return next;
 }
 
@@ -66,7 +79,10 @@ function defaultSoundRule(cls) {
     confidence_threshold: cls.default_threshold,
     cooldown_seconds: cls.default_cooldown,
     email_enabled: false,
+    email_recipients: [],
     push_enabled: true,
+    active_start: null,
+    active_end: null,
   };
 }
 
@@ -154,6 +170,18 @@ function renderRules() {
             <span>Cooldown (s)</span>
             <input type="number" data-rule-cooldown="${id}" value="${escapeHtml(String(rule.cooldown_seconds ?? 30))}" min="5" max="3600" step="5" />
           </label>
+          <label class="sound-rule-field sound-rule-email-field">
+            <span>Email recipients</span>
+            <input type="email" data-rule-email-recipients="${id}" value="${escapeHtml(normalizeEmailList(rule.email_recipients).join(', '))}" placeholder="alerts@example.com" multiple />
+          </label>
+          <label class="sound-rule-field">
+            <span>From</span>
+            <input type="time" data-rule-active-start="${id}" value="${escapeHtml(rule.active_start || '')}" />
+          </label>
+          <label class="sound-rule-field">
+            <span>To</span>
+            <input type="time" data-rule-active-end="${id}" value="${escapeHtml(rule.active_end || '')}" />
+          </label>
           <div class="sound-rule-toggles">
             <label class="sound-rule-toggle">
               <input type="checkbox" data-rule-enabled="${id}" ${rule.enabled ? 'checked' : ''} />
@@ -194,6 +222,15 @@ function renderRules() {
   });
   rulesWrap.querySelectorAll('[data-rule-email]').forEach((input) => {
     input.addEventListener('change', () => updateRule(input.dataset.ruleEmail, 'email_enabled', input.checked));
+  });
+  rulesWrap.querySelectorAll('[data-rule-email-recipients]').forEach((input) => {
+    input.addEventListener('change', () => updateRule(input.dataset.ruleEmailRecipients, 'email_recipients', normalizeEmailList(input.value)));
+  });
+  rulesWrap.querySelectorAll('[data-rule-active-start]').forEach((input) => {
+    input.addEventListener('change', () => updateRule(input.dataset.ruleActiveStart, 'active_start', input.value || null));
+  });
+  rulesWrap.querySelectorAll('[data-rule-active-end]').forEach((input) => {
+    input.addEventListener('change', () => updateRule(input.dataset.ruleActiveEnd, 'active_end', input.value || null));
   });
   rulesWrap.querySelectorAll('[data-rule-push]').forEach((input) => {
     input.addEventListener('change', () => updateRule(input.dataset.rulePush, 'push_enabled', input.checked));

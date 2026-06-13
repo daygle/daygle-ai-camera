@@ -196,6 +196,18 @@ function renderObjectRules(zone, zoneIndex) {
             <span>Cooldown (s)</span>
             <input type="number" data-zone-rule-cooldown="${key}" value="${rule.cooldown_seconds}" min="0" max="3600" step="5" />
           </label>
+          <label class="sound-rule-field sound-rule-email-field">
+            <span>Email recipients</span>
+            <input type="email" data-zone-rule-email-recipients="${key}" value="${escapeHtml(normalizeEmailList(rule.email_recipients).join(', '))}" placeholder="alerts@example.com" multiple />
+          </label>
+          <label class="sound-rule-field">
+            <span>From</span>
+            <input type="time" data-zone-rule-active-start="${key}" value="${escapeHtml(rule.active_start || '')}" />
+          </label>
+          <label class="sound-rule-field">
+            <span>To</span>
+            <input type="time" data-zone-rule-active-end="${key}" value="${escapeHtml(rule.active_end || '')}" />
+          </label>
           <div class="sound-rule-toggles">
             <label class="sound-rule-toggle">
               <input type="checkbox" data-zone-rule-enabled="${key}" ${rule.enabled !== false ? 'checked' : ''} />
@@ -369,6 +381,27 @@ function bindRuleFields() {
         const { zoneIndex, rule } = parseZoneRuleKey(inp.dataset[datasetKey]);
         if (!rule) return;
         rule[ruleKey] = transform(inp.value);
+        cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
+      });
+    });
+  });
+  document.querySelectorAll('input[data-zone-rule-email-recipients]').forEach((input) => {
+    input.addEventListener('change', () => {
+      const { zoneIndex, rule } = parseZoneRuleKey(input.dataset.zoneRuleEmailRecipients);
+      if (!rule) return;
+      rule.email_recipients = normalizeEmailList(input.value);
+      cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
+    });
+  });
+  [
+    ['zoneRuleActiveStart', 'active_start'],
+    ['zoneRuleActiveEnd', 'active_end'],
+  ].forEach(([datasetKey, ruleKey]) => {
+    document.querySelectorAll(`input[type="time"][data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((input) => {
+      input.addEventListener('change', () => {
+        const { zoneIndex, rule } = parseZoneRuleKey(input.dataset[datasetKey]);
+        if (!rule) return;
+        rule[ruleKey] = input.value || null;
         cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
       });
     });

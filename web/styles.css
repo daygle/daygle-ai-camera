@@ -2761,10 +2761,20 @@ a.activity-item-action {
   letter-spacing: .05em;
   color: var(--muted);
 }
-.sound-rule-field input[type="number"] {
+.sound-rule-field input[type="number"],
+.sound-rule-field input[type="time"] {
   width: 5.5rem;
   padding: 6px 8px;
   font-size: 13px;
+}
+.sound-rule-field input[type="email"] {
+  width: min(18rem, 100%);
+  padding: 6px 8px;
+  font-size: 13px;
+}
+.sound-rule-email-field {
+  flex: 1 1 16rem;
+  min-width: min(16rem, 100%);
 }
 .sound-rule-toggles {
   display: flex;

@@ -6,6 +6,7 @@ import re
 import subprocess
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 from urllib.request import urlretrieve
@@ -455,6 +456,8 @@ class SoundDetector:
             return
 
         for rule in self.rules:
+            if not self._rule_active_now(rule):
+                continue
             class_id = str(rule.get('class') or '')
             confidence = yamnet_scores.get(class_id, 0.0)
 
@@ -484,6 +487,19 @@ class SoundDetector:
             except Exception as exc:
                 logger.error('Sound detection callback failed for %s: %s', class_id, exc)
         self._set_status('listening')
+
+    @staticmethod
+    def _rule_active_now(rule: dict[str, Any]) -> bool:
+        start = rule.get('active_start')
+        end = rule.get('active_end')
+        if not start or not end:
+            return True
+        now = datetime.now().strftime('%H:%M')
+        start_text = str(start)
+        end_text = str(end)
+        if start_text <= end_text:
+            return start_text <= now <= end_text
+        return now >= start_text or now <= end_text
 
     # ------------------------------------------------------------------
     def _run_microphone(self) -> None:

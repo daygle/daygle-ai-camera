@@ -705,7 +705,10 @@ def _normalize_camera_sound_settings(raw: Any) -> dict[str, Any]:
             'confidence_threshold': threshold,
             'cooldown_seconds': cooldown,
             'email_enabled': normalize_bool_setting(r.get('email_enabled'), False),
+            'email_recipients': normalize_email_recipients(r.get('email_recipients', [])),
             'push_enabled': normalize_bool_setting(r.get('push_enabled'), False),
+            'active_start': str(r.get('active_start') or '').strip() or None,
+            'active_end': str(r.get('active_end') or '').strip() or None,
         })
     return {'enabled': enabled, 'rules': rules}
 
@@ -1493,6 +1496,7 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
     sound_rules = cam_settings.get('detection', {}).get('sound', {}).get('rules', []) if cam_settings else []
     fired_rule = next((r for r in sound_rules if r.get('class') == class_id), {})
     email_enabled = normalize_bool_setting(fired_rule.get('email_enabled'), False)
+    email_recipients = normalize_email_recipients(fired_rule.get('email_recipients', []))
     push_enabled = normalize_bool_setting(fired_rule.get('push_enabled'), False)
 
     event_id = database.add_event(
@@ -1562,7 +1566,7 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
         'name': rule_name,
         'email_enabled': email_enabled,
         'push_enabled': push_enabled,
-        'email_recipients': [],
+        'email_recipients': email_recipients,
     }
     notify_thread = threading.Thread(
         target=_deliver_sound_alert_notifications,
