@@ -280,9 +280,11 @@ function fillModal(camera, index) {
 
   const ptz = camera.ptz || {};
   document.getElementById('editPtzEnabled').value = String(ptz.enabled === true);
+  document.getElementById('editPtzProtocol').value = ptz.protocol || 'http_cgi';
+  document.getElementById('editPtzHttpPort').value = ptz.http_port || 80;
   document.getElementById('editPtzPort').value = ptz.port || 6060;
   document.getElementById('editPtzAddress').value = ptz.address || 1;
-  document.getElementById('editPtzSpeed').value = ptz.speed || 8;
+  document.getElementById('editPtzSpeed').value = ptz.speed || 5;
 
   const manual = camera.backend === 'rtsp';
   document.getElementById('rtspManualFields').hidden = !manual;
@@ -322,9 +324,11 @@ function collectModalData() {
     },
     ptz: {
       enabled: document.getElementById('editPtzEnabled').value === 'true',
+      protocol: document.getElementById('editPtzProtocol').value,
+      http_port: parseInt(document.getElementById('editPtzHttpPort').value || '80', 10),
       port: parseInt(document.getElementById('editPtzPort').value || '6060', 10),
       address: parseInt(document.getElementById('editPtzAddress').value || '1', 10),
-      speed: parseInt(document.getElementById('editPtzSpeed').value || '8', 10),
+      speed: parseInt(document.getElementById('editPtzSpeed').value || '5', 10),
     },
     detection: {},
   };

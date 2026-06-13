@@ -605,11 +605,16 @@ def normalize_camera_recording_settings(settings: Any) -> dict[str, Any]:
 
 def normalize_camera_ptz_settings(settings: Any) -> dict[str, Any]:
     raw = settings if isinstance(settings, dict) else {}
+    protocol = str(raw.get('protocol') or 'http_cgi').strip().lower()
+    if protocol not in {'http_cgi', 'tcp_pelcod'}:
+        protocol = 'http_cgi'
     return {
         'enabled': normalize_bool_setting(raw.get('enabled'), False),
+        'protocol': protocol,
+        'http_port': max(1, min(65535, int(raw.get('http_port') or 80))),
         'port': max(1, min(65535, int(raw.get('port') or 6060))),
         'address': max(1, min(255, int(raw.get('address') or 1))),
-        'speed': max(1, min(63, int(raw.get('speed') or 8))),
+        'speed': max(1, min(8, int(raw.get('speed') or 5))),
     }
 
 
@@ -4930,17 +4935,24 @@ async def camera_ptz(camera_id: str, request: Request):
 
     host = cam.get('host') or ''
     if not host and cam.get('stream_url'):
-        from urllib.parse import urlsplit as _urlsplit
-        host = _urlsplit(cam['stream_url']).hostname or ''
+        host = urlsplit(cam['stream_url']).hostname or ''
     if not host:
         raise HTTPException(status_code=400, detail='Cannot determine camera host for PTZ.')
 
-    port = int(ptz.get('port') or 6060)
+    protocol = str(ptz.get('protocol') or 'http_cgi')
+    http_port = int(ptz.get('http_port') or 80)
+    tcp_port = int(ptz.get('port') or 6060)
     address = int(ptz.get('address') or 1)
-    speed = int(ptz.get('speed') or 8)
+    speed = int(ptz.get('speed') or 5)
+    username = str(cam.get('username') or '')
+    password = str(cam.get('password') or '')
 
     try:
-        await run_in_threadpool(send_ptz_command, host, port, address, command, speed)
+        await run_in_threadpool(
+            send_ptz_command, host, command, speed, protocol,
+            http_port=http_port, tcp_port=tcp_port, address=address,
+            username=username, password=password,
+        )
     except OSError as exc:
         raise HTTPException(status_code=502, detail=f'PTZ connection failed: {exc}') from exc
     except ValueError as exc:

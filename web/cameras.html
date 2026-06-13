@@ -204,11 +204,19 @@
                 <option value="true">Enabled</option>
               </select>
             </label>
-            <label><span>Command Port</span><input id="editPtzPort" name="ptz_port" type="number" min="1" max="65535" placeholder="6060" /><span class="field-help">Port the camera listens on for PelcoD commands (default 6060).</span></label>
-            <label><span>PTZ Address</span><input id="editPtzAddress" name="ptz_address" type="number" min="1" max="255" placeholder="1" /><span class="field-help">PelcoD device address configured on the camera (default 1).</span></label>
-            <label><span>Speed</span><input id="editPtzSpeed" name="ptz_speed" type="number" min="1" max="63" placeholder="8" /><span class="field-help">Movement speed sent in PelcoD packets (1–63, default 8).</span></label>
+            <label class="full-width"><span>Protocol</span>
+              <select id="editPtzProtocol" name="ptz_protocol">
+                <option value="http_cgi">HTTP CGI (HiSilicon / P6S — recommended)</option>
+                <option value="tcp_pelcod">TCP PelcoD (raw serial-over-IP)</option>
+              </select>
+              <span class="field-help">HTTP CGI uses the camera's web port (80). TCP PelcoD sends raw PelcoD packets to the Command Port.</span>
+            </label>
+            <label><span>HTTP Port</span><input id="editPtzHttpPort" name="ptz_http_port" type="number" min="1" max="65535" placeholder="80" /><span class="field-help">Camera web port used by HTTP CGI (default 80).</span></label>
+            <label><span>Command Port</span><input id="editPtzPort" name="ptz_port" type="number" min="1" max="65535" placeholder="6060" /><span class="field-help">Port for TCP PelcoD only (default 6060).</span></label>
+            <label><span>PTZ Address</span><input id="editPtzAddress" name="ptz_address" type="number" min="1" max="255" placeholder="1" /><span class="field-help">PelcoD device address (default 1, TCP PelcoD only).</span></label>
+            <label><span>Speed</span><input id="editPtzSpeed" name="ptz_speed" type="number" min="1" max="8" placeholder="5" /><span class="field-help">Movement speed (1–8, default 5).</span></label>
           </div>
-          <p class="form-help muted">PTZ sends PelcoD commands over TCP to the camera's Command Port. Enable PTZ and save the camera to show the control pad on the Live page.</p>
+          <p class="form-help muted">Enable PTZ and save to show the control pad on the Live page. The camera's username and password from the Connection tab are used for HTTP CGI authentication.</p>
         </div>
 
         <!-- Advanced Tab -->
