@@ -4086,7 +4086,7 @@ async def update_user(user_id: int, request: Request):
 
 def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_ai_config()
-    allowed = {'enabled', 'backend', 'confidence', 'iou_threshold', 'input_size', 'model_path', 'labels_path'}
+    allowed = {'enabled', 'backend', 'confidence', 'iou_threshold', 'input_size', 'model_path', 'labels_path', 'device', 'gpu_mem_limit'}
     updated = {key: current.get(key) for key in allowed if key in current}
     for key, value in payload.items():
         if key in allowed:
@@ -4113,6 +4113,19 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail='input_size must be an integer.') from exc
     if updated['input_size'] < 32 or updated['input_size'] > 2048:
         raise HTTPException(status_code=400, detail='input_size must be between 32 and 2048.')
+    device = str(updated.get('device', 'auto')).lower()
+    if device not in ('auto', 'cpu', 'cuda'):
+        raise HTTPException(status_code=400, detail="device must be 'auto', 'cpu', or 'cuda'.")
+    updated['device'] = device
+    gpu_mem_limit = updated.get('gpu_mem_limit')
+    if gpu_mem_limit is not None:
+        try:
+            gpu_mem_limit = int(gpu_mem_limit)
+            if gpu_mem_limit < 1:
+                raise ValueError
+            updated['gpu_mem_limit'] = gpu_mem_limit
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail='gpu_mem_limit must be a positive integer (bytes).') from exc
     updated['model_path'] = str(updated.get('model_path') or current.get('model_path') or 'models/yolov8n.onnx')
     updated['labels_path'] = str(updated.get('labels_path') or current.get('labels_path') or 'models/coco.names')
     return updated

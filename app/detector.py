@@ -110,6 +110,7 @@ class OnnxYoloDetector:
         num_threads: int | None = None,
         max_concurrency: int | None = None,
         device: str = "auto",
+        gpu_mem_limit: int | None = None,
     ) -> None:
         self.model_path = Path(model_path)
         self.labels = load_labels(labels_path, categories)
@@ -119,6 +120,7 @@ class OnnxYoloDetector:
         self.session: Any | None = None
         self.input_name: str | None = None
         self.output_names: list[str] = []
+        self._gpu_mem_limit = gpu_mem_limit
         self.unavailable_reason: str | None = None
         self._device = device.lower() if device else "auto"
 
@@ -157,11 +159,13 @@ class OnnxYoloDetector:
                     "Install onnxruntime-gpu and ensure CUDA drivers are present."
                 )
                 return
-            providers = (
-                ["CUDAExecutionProvider", "CPUExecutionProvider"]
-                if use_cuda
-                else ["CPUExecutionProvider"]
-            )
+            if use_cuda:
+                cuda_options: dict[str, Any] = {"device_id": 0}
+                if self._gpu_mem_limit is not None:
+                    cuda_options["gpu_mem_limit"] = self._gpu_mem_limit
+                providers: list[Any] = [("CUDAExecutionProvider", cuda_options), "CPUExecutionProvider"]
+            else:
+                providers = ["CPUExecutionProvider"]
             session_options = ort.SessionOptions()
             session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
             if not use_cuda:
@@ -344,4 +348,5 @@ def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
         num_threads=_optional_int("inference_threads"),
         max_concurrency=_optional_int("max_concurrent_inferences"),
         device=str(ai_config.get("device", "auto")),
+        gpu_mem_limit=_optional_int("gpu_mem_limit"),
     )

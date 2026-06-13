@@ -74,6 +74,20 @@
           <span class="field-help">Inference backend. ONNX Runtime is the recommended option. Default: ONNX</span>
         </label>
         <label>
+          <span>Device</span>
+          <select name="device">
+            <option value="auto">Auto (use GPU if available)</option>
+            <option value="cuda">CUDA (GPU)</option>
+            <option value="cpu">CPU</option>
+          </select>
+          <span class="field-help">Inference device. Auto detects a CUDA GPU at startup and falls back to CPU. Default: Auto</span>
+        </label>
+        <label>
+          <span>GPU Memory Limit (GiB)</span>
+          <input name="gpu_mem_limit_gb" type="number" min="1" max="128" step="0.5" />
+          <span class="field-help">Maximum GPU memory ONNX Runtime may use. Leaving headroom prevents cuBLAS allocation errors. Default: 6 GiB</span>
+        </label>
+        <label>
           <span>IoU Threshold</span>
           <input name="iou_threshold" type="number" min="0" max="1" step="0.01" />
           <span class="field-help">Intersection-over-union threshold for merging overlapping detections. Default: 0.45</span>

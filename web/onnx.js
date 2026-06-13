@@ -64,6 +64,10 @@ function formPayload(form) {
   data.enabled = data.enabled === 'true';
   for (const key of ['iou_threshold']) if (data[key] !== '') data[key] = Number(data[key]);
   if (data.input_size !== '') data.input_size = Number.parseInt(data.input_size, 10);
+  if (data.gpu_mem_limit_gb !== '') {
+    data.gpu_mem_limit = Math.round(parseFloat(data.gpu_mem_limit_gb) * 1024 * 1024 * 1024);
+  }
+  delete data.gpu_mem_limit_gb;
   return data;
 }
 
@@ -99,6 +103,9 @@ function renderLabels(labels) {
 function renderAi(settings) {
   for (const [key, value] of Object.entries(settings)) {
     if (aiForm.elements[key]) aiForm.elements[key].value = String(value ?? '');
+  }
+  if (aiForm.elements['gpu_mem_limit_gb'] && settings.gpu_mem_limit != null) {
+    aiForm.elements['gpu_mem_limit_gb'].value = (settings.gpu_mem_limit / (1024 * 1024 * 1024)).toFixed(1);
   }
   renderStatus(settings);
   renderLabels(settings.available_labels);
