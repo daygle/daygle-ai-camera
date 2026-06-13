@@ -1707,8 +1707,51 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
     # content starts at the previous segment's end: now-15.5.
     assert content_start == pytest.approx(now - 15.5, abs=0.1)
     assert content_seconds == pytest.approx(15.5, abs=0.1)
+    command = commands[0]
+    assert command[command.index('-map') + 1] == '0:v:0'
+    assert '0:a:0?' in command
+    assert command[command.index('-c:a') + 1] == 'aac'
+    assert command[command.index('-b:a') + 1] == '128k'
     render_seconds = float(commands[0][commands[0].index('-t') + 1])
     assert render_seconds == pytest.approx(content_seconds, abs=0.01)
+
+
+def test_continuous_chunk_recording_maps_optional_audio_to_aac(tmp_path, monkeypatch):
+    import app.recordings as recordings_module
+    from app.recordings import RecordingService
+
+    service = RecordingService({
+        'storage': {'recordings_dir': str(tmp_path / 'recordings')},
+        'recording': {'format': 'mp4'},
+    })
+    stop_event = threading.Event()
+    commands = []
+
+    class FakeProcess:
+        def __init__(self, command, *_args, **_kwargs):
+            commands.append(command)
+            stop_event.set()
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(recordings_module.subprocess, 'Popen', FakeProcess)
+
+    service._run_continuous_chunk_worker(
+        'camera-1',
+        'rtsp://example/stream',
+        tmp_path / 'recordings' / 'continuous-camera-1',
+        60,
+        None,
+        stop_event,
+    )
+
+    command = commands[0]
+    assert command[command.index('-map') + 1] == '0:v:0'
+    assert '0:a:0?' in command
+    assert command[command.index('-c:a') + 1] == 'aac'
+    assert command[command.index('-b:a') + 1] == '128k'
 
 
 def test_rtsp_capture_anchors_timing_and_track_to_actual_media_window(tmp_path, monkeypatch):
@@ -1831,6 +1874,35 @@ def test_write_rtsp_clip_keeps_clip_with_video_stream(tmp_path, monkeypatch):
 
     assert file_path.exists()
     assert not file_path.with_name(f'{file_path.stem}.recording.tmp{file_path.suffix}').exists()
+
+
+def test_write_rtsp_clip_explicitly_records_optional_audio_as_aac(tmp_path, monkeypatch):
+    import app.recordings as recordings_module
+    from app.recordings import RecordingService
+
+    service = RecordingService({
+        'storage': {'recordings_dir': str(tmp_path / 'recordings')},
+        'recording': {'format': 'mp4'},
+    })
+
+    commands = []
+
+    def fake_run(command, *_args, **_kwargs):
+        commands.append(command)
+        Path(command[-1]).write_bytes(b'valid-video-bytes')
+        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+    monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _path: True))
+
+    service.write_rtsp_clip('rtsp://example/stream', tmp_path / 'recordings' / 'event_audio.mp4', 5.0)
+
+    command = commands[0]
+    assert command[command.index('-map') + 1] == '0:v:0'
+    assert '0:a:0?' in command
+    assert command[command.index('-c:a') + 1] == 'aac'
+    assert command[command.index('-b:a') + 1] == '128k'
 
 
 def test_playback_transcode_preserves_optional_audio_stream(tmp_path, monkeypatch):
