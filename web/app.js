@@ -285,11 +285,13 @@ function renderActivityItem(item) {
   } else if (!isEvent && item.recordingId) {
     actions.push(recordingLink(item.recordingId, 'Footage'));
   }
-  const dismissAttr = isEvent
-    ? `data-dismiss-event="${escapeHtml(String(item.id))}"`
-    : `data-dismiss-alert="${escapeHtml(String(item.id))}"`;
-  const dismissIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-  actions.push(`<button class="secondary delete-btn activity-item-action" ${dismissAttr} type="button">${dismissIcon} Dismiss</button>`);
+  if (authState.user?.role === 'admin') {
+    const dismissAttr = isEvent
+      ? `data-dismiss-event="${escapeHtml(String(item.id))}"`
+      : `data-dismiss-alert="${escapeHtml(String(item.id))}"`;
+    const dismissIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    actions.push(`<button class="secondary delete-btn activity-item-action" ${dismissAttr} type="button">${dismissIcon} Dismiss</button>`);
+  }
   return `
     <article class="item activity-item ${typeClass}" data-activity-id="${escapeHtml(String(item.id))}" data-activity-type="${item.type}">
       <div class="activity-item-icon">${icon}</div>
@@ -387,8 +389,9 @@ function bindActivityActions() {
 }
 
 function updateDismissButtons() {
-  if (els.dismissAllEventsBtn) els.dismissAllEventsBtn.hidden = events.length === 0;
-  if (els.dismissAllAlertsBtn) els.dismissAllAlertsBtn.hidden = alertGroups.length === 0;
+  const isAdmin = authState.user?.role === 'admin';
+  if (els.dismissAllEventsBtn) els.dismissAllEventsBtn.hidden = !isAdmin || events.length === 0;
+  if (els.dismissAllAlertsBtn) els.dismissAllAlertsBtn.hidden = !isAdmin || alertGroups.length === 0;
 }
 
 // ─── Stats + activity data loaders ──────────────────────────────────────────

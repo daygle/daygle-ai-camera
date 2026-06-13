@@ -2402,6 +2402,57 @@ a.activity-item-action {
   box-shadow: 0 0 0 3px rgba(255, 92, 138, 0.22);
 }
 
+/* PTZ overlay d-pad */
+.ptz-overlay {
+  position: absolute;
+  bottom: 48px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 20;
+  user-select: none;
+}
+.ptz-dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 40px);
+  grid-template-rows: repeat(3, 40px);
+  gap: 3px;
+}
+.ptz-zoom {
+  display: flex;
+  gap: 6px;
+}
+.ptz-btn {
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s, transform 0.08s;
+  padding: 0;
+  touch-action: none;
+}
+.ptz-btn:hover { background: rgba(255, 255, 255, 0.18); }
+.ptz-btn:active { background: rgba(255, 255, 255, 0.28); transform: scale(0.93); }
+.ptz-upleft  { grid-column: 1; grid-row: 1; }
+.ptz-up      { grid-column: 2; grid-row: 1; }
+.ptz-upright { grid-column: 3; grid-row: 1; }
+.ptz-left    { grid-column: 1; grid-row: 2; }
+.ptz-stop    { grid-column: 2; grid-row: 2; }
+.ptz-right   { grid-column: 3; grid-row: 2; }
+.ptz-downleft  { grid-column: 1; grid-row: 3; }
+.ptz-down      { grid-column: 2; grid-row: 3; }
+.ptz-downright { grid-column: 3; grid-row: 3; }
+.ptz-zoom-in, .ptz-zoom-out { width: 60px; }
+
 /* All-cameras grid + per-tile info footer */
 .live-camera-grid { padding: 16px; }
 .live-camera-tile {

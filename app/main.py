@@ -40,6 +40,7 @@ from app.detector import DetectorUnavailableError, create_detector, load_labels
 from app.email_alerts import EmailAlertError, EmailAlertService
 from app.push_notifications import PushNotificationError, PushNotificationService
 from app.camera_backend import OpenCvStreamCamera
+from app.ptz import send_ptz_command, VALID_COMMANDS as PTZ_VALID_COMMANDS
 from app.recordings import RecordingService
 from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, load_settings
 from app.sound_detector import SoundDetector, SOUND_CLASSES, DEFAULT_RULES
@@ -602,6 +603,16 @@ def normalize_camera_recording_settings(settings: Any) -> dict[str, Any]:
     return {'continuous': normalize_bool_setting(raw.get('continuous'), False)}
 
 
+def normalize_camera_ptz_settings(settings: Any) -> dict[str, Any]:
+    raw = settings if isinstance(settings, dict) else {}
+    return {
+        'enabled': normalize_bool_setting(raw.get('enabled'), False),
+        'port': max(1, min(65535, int(raw.get('port') or 6060))),
+        'address': max(1, min(255, int(raw.get('address') or 1))),
+        'speed': max(1, min(63, int(raw.get('speed') or 8))),
+    }
+
+
 def normalize_zone_point(point: Any) -> dict[str, float] | None:
     if not isinstance(point, dict):
         return None
@@ -762,6 +773,7 @@ def normalize_camera_settings(settings: dict[str, Any], index: int = 1) -> dict[
     _migrate_legacy_camera_motion(detection)
     camera_settings['detection'] = detection
     camera_settings['recording'] = normalize_camera_recording_settings(camera_settings.get('recording'))
+    camera_settings['ptz'] = normalize_camera_ptz_settings(camera_settings.get('ptz'))
     return camera_settings
 
 
@@ -2112,6 +2124,8 @@ async def authentication_middleware(request: Request, call_next):
         path.startswith('/api/settings/alert-push') and request.method in MUTATING_METHODS
     ) or (
         path.startswith('/api/settings/camera-offline') and request.method in MUTATING_METHODS
+    ) or (
+        (path.startswith('/api/events') or path.startswith('/api/alerts')) and 'dismiss' in path and request.method in MUTATING_METHODS
     )
     if admin_required and session['user']['role'] != 'admin':
         return JSONResponse({'detail': 'Admin access required'}, status_code=403)
@@ -4221,6 +4235,10 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     existing_recording = current.get('recording') if isinstance(current.get('recording'), dict) else {}
     payload_recording = payload.get('recording') if isinstance(payload.get('recording'), dict) else {}
     updated['recording'] = normalize_camera_recording_settings({**existing_recording, **payload_recording})
+
+    existing_ptz = current.get('ptz') if isinstance(current.get('ptz'), dict) else {}
+    payload_ptz = payload.get('ptz') if isinstance(payload.get('ptz'), dict) else {}
+    updated['ptz'] = normalize_camera_ptz_settings({**existing_ptz, **payload_ptz})
     return updated
 
 
@@ -4895,6 +4913,40 @@ async def update_camera(camera_id: str, request: Request):
     apply_cameras_settings(settings_list)
     write_audit_log(request, 'create', 'settings.camera', normalized, {'camera_name': created.get('name')})
     return created
+
+
+@app.post('/api/cameras/{camera_id}/ptz')
+async def camera_ptz(camera_id: str, request: Request):
+    require_admin(request)
+    payload = await request.json()
+    command = str(payload.get('command', '')).strip().lower()
+    if command not in PTZ_VALID_COMMANDS:
+        raise HTTPException(status_code=400, detail=f'Invalid PTZ command. Valid: {sorted(PTZ_VALID_COMMANDS)}')
+
+    cam = get_camera_config(camera_id)
+    ptz = cam.get('ptz') or {}
+    if not ptz.get('enabled'):
+        raise HTTPException(status_code=400, detail='PTZ is not enabled for this camera.')
+
+    host = cam.get('host') or ''
+    if not host and cam.get('stream_url'):
+        from urllib.parse import urlsplit as _urlsplit
+        host = _urlsplit(cam['stream_url']).hostname or ''
+    if not host:
+        raise HTTPException(status_code=400, detail='Cannot determine camera host for PTZ.')
+
+    port = int(ptz.get('port') or 6060)
+    address = int(ptz.get('address') or 1)
+    speed = int(ptz.get('speed') or 8)
+
+    try:
+        await run_in_threadpool(send_ptz_command, host, port, address, command, speed)
+    except OSError as exc:
+        raise HTTPException(status_code=502, detail=f'PTZ connection failed: {exc}') from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {'ok': True, 'command': command}
 
 
 @app.put('/api/settings/system/live')

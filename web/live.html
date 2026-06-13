@@ -67,6 +67,37 @@
         <img id="liveFrame" class="live-frame" alt="Live camera footage" />
         <canvas id="liveAiTrackCanvas" class="clip-overlay" aria-hidden="true"></canvas>
         <div id="liveStatus" class="live-status-pill">Connecting to camera…</div>
+        <div id="ptzOverlay" class="ptz-overlay" hidden aria-label="PTZ controls">
+          <div class="ptz-dpad">
+            <button class="ptz-btn ptz-upleft"  data-ptz="upleft"   data-ptz-stop="stop" type="button" aria-label="Up-left"></button>
+            <button class="ptz-btn ptz-up"       data-ptz="up"       data-ptz-stop="stop" type="button" aria-label="Up">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15"/></svg>
+            </button>
+            <button class="ptz-btn ptz-upright" data-ptz="upright"  data-ptz-stop="stop" type="button" aria-label="Up-right"></button>
+            <button class="ptz-btn ptz-left"     data-ptz="left"     data-ptz-stop="stop" type="button" aria-label="Left">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <button class="ptz-btn ptz-stop"     data-ptz="stop"     type="button" aria-label="Stop">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+            </button>
+            <button class="ptz-btn ptz-right"    data-ptz="right"    data-ptz-stop="stop" type="button" aria-label="Right">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+            <button class="ptz-btn ptz-downleft"  data-ptz="downleft"  data-ptz-stop="stop" type="button" aria-label="Down-left"></button>
+            <button class="ptz-btn ptz-down"      data-ptz="down"      data-ptz-stop="stop" type="button" aria-label="Down">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <button class="ptz-btn ptz-downright" data-ptz="downright" data-ptz-stop="stop" type="button" aria-label="Down-right"></button>
+          </div>
+          <div class="ptz-zoom">
+            <button class="ptz-btn ptz-zoom-in"  data-ptz="zoom_in"  data-ptz-stop="stop" type="button" aria-label="Zoom in">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+            </button>
+            <button class="ptz-btn ptz-zoom-out" data-ptz="zoom_out" data-ptz-stop="stop" type="button" aria-label="Zoom out">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+            </button>
+          </div>
+        </div>
       </div>
       <div id="cameraGrid" class="live-camera-grid" hidden></div>
       <div id="liveCameraEmpty" class="live-empty-state" hidden>

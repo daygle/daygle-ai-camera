@@ -266,6 +266,7 @@ function syncViewMode() {
   }
   restartDetectionStatusTimer();
   refreshDetectionStatus();
+  updatePtzVisibility();
 }
 
 function updateFrameHeader(camera) {
@@ -488,6 +489,7 @@ function setSelectedCamera(cameraId) {
   }
   refreshFrame();
   refreshDetectionStatus();
+  updatePtzVisibility();
 }
 
 function renderCameraOptions() {
@@ -563,6 +565,57 @@ document.querySelectorAll('[data-view-mode]').forEach((btn) => {
     syncViewMode();
   });
 });
+
+// ─── PTZ Controls ─────────────────────────────────────────────────────────────
+
+const ptzOverlay = document.getElementById('ptzOverlay');
+let ptzActive = false;
+
+function updatePtzVisibility() {
+  if (!ptzOverlay) return;
+  const enabled = selectedCamera?.ptz?.enabled === true;
+  ptzOverlay.hidden = !enabled || isAllCameraMode();
+}
+
+async function sendPtz(command) {
+  if (!selectedCamera) return;
+  try {
+    await api(`/api/cameras/${encodeURIComponent(selectedCamera.id)}/ptz`, {
+      method: 'POST',
+      body: JSON.stringify({ command }),
+    });
+  } catch {
+    // silently ignore — camera may be momentarily unreachable
+  }
+}
+
+if (ptzOverlay) {
+  ptzOverlay.querySelectorAll('[data-ptz]').forEach((btn) => {
+    const startCmd = btn.dataset.ptz;
+    const stopCmd = btn.dataset.ptzStop;
+
+    const start = (e) => {
+      e.preventDefault();
+      if (ptzActive && startCmd !== 'stop') return;
+      ptzActive = startCmd !== 'stop';
+      sendPtz(startCmd);
+    };
+
+    const stop = (e) => {
+      e.preventDefault();
+      if (!stopCmd || startCmd === 'stop') return;
+      ptzActive = false;
+      sendPtz(stopCmd);
+    };
+
+    btn.addEventListener('mousedown', start);
+    btn.addEventListener('touchstart', start, { passive: false });
+    btn.addEventListener('mouseup', stop);
+    btn.addEventListener('mouseleave', stop);
+    btn.addEventListener('touchend', stop);
+    btn.addEventListener('touchcancel', stop);
+  });
+}
 
 async function init() {
   const me = await api('/api/auth/me');

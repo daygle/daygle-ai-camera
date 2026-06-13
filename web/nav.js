@@ -171,7 +171,7 @@ if (document.readyState === 'loading') {
 
   const dropdowns = [    { id: 'navMonitor',
       label: 'Monitoring',
-      admin: false,
+      admin: true,
       links: [
         { href: '/cameras', match: '/cameras', label: 'Cameras' },
         { href: '/zones', match: '/zones', label: 'Zones' },
@@ -190,7 +190,7 @@ if (document.readyState === 'loading') {
     {
       id: 'navIntel',
       label: 'Intelligence',
-      admin: false,
+      admin: true,
       links: [
         { href: '/onnx', match: '/onnx', label: 'ONNX' },
         { href: '/yamnet-tflite', match: '/yamnet-tflite', label: 'YAMNet TFLite' },

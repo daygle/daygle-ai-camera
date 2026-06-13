@@ -143,6 +143,7 @@
       <div class="modal-tabs" role="tablist">
         <button class="modal-tab active" data-tab="connection" role="tab" aria-selected="true">Connection</button>
         <button class="modal-tab" data-tab="recording" role="tab" aria-selected="false">Recording</button>
+        <button class="modal-tab" data-tab="ptz" role="tab" aria-selected="false">PTZ</button>
         <button class="modal-tab" data-tab="advanced" role="tab" aria-selected="false">Advanced</button>
       </div>
 
@@ -192,6 +193,22 @@
             </label>
           </div>
           <p class="form-help muted">When enabled, the camera writes an uninterrupted stream regardless of events. Otherwise, clips are recorded per detection rule (configured on the Zones page per object).</p>
+        </div>
+
+        <!-- PTZ Tab -->
+        <div class="modal-tab-panel" data-panel="ptz" hidden>
+          <div class="form-grid">
+            <label><span>PTZ Control</span>
+              <select id="editPtzEnabled" name="ptz_enabled">
+                <option value="false">Disabled</option>
+                <option value="true">Enabled</option>
+              </select>
+            </label>
+            <label><span>Command Port</span><input id="editPtzPort" name="ptz_port" type="number" min="1" max="65535" placeholder="6060" /><span class="field-help">Port the camera listens on for PelcoD commands (default 6060).</span></label>
+            <label><span>PTZ Address</span><input id="editPtzAddress" name="ptz_address" type="number" min="1" max="255" placeholder="1" /><span class="field-help">PelcoD device address configured on the camera (default 1).</span></label>
+            <label><span>Speed</span><input id="editPtzSpeed" name="ptz_speed" type="number" min="1" max="63" placeholder="8" /><span class="field-help">Movement speed sent in PelcoD packets (1–63, default 8).</span></label>
+          </div>
+          <p class="form-help muted">PTZ sends PelcoD commands over TCP to the camera's Command Port. Enable PTZ and save the camera to show the control pad on the Live page.</p>
         </div>
 
         <!-- Advanced Tab -->

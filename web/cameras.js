@@ -278,6 +278,12 @@ function fillModal(camera, index) {
   document.getElementById('editStaleFrameGrabs').value = staleVal != null ? staleVal : '';
   document.getElementById('editContinuous').value = String(camera.recording?.continuous === true);
 
+  const ptz = camera.ptz || {};
+  document.getElementById('editPtzEnabled').value = String(ptz.enabled === true);
+  document.getElementById('editPtzPort').value = ptz.port || 6060;
+  document.getElementById('editPtzAddress').value = ptz.address || 1;
+  document.getElementById('editPtzSpeed').value = ptz.speed || 8;
+
   const manual = camera.backend === 'rtsp';
   document.getElementById('rtspManualFields').hidden = !manual;
   document.getElementById('onvifFields').hidden = manual;
@@ -313,6 +319,12 @@ function collectModalData() {
       : null,
     recording: {
       continuous: document.getElementById('editContinuous').value === 'true',
+    },
+    ptz: {
+      enabled: document.getElementById('editPtzEnabled').value === 'true',
+      port: parseInt(document.getElementById('editPtzPort').value || '6060', 10),
+      address: parseInt(document.getElementById('editPtzAddress').value || '1', 10),
+      speed: parseInt(document.getElementById('editPtzSpeed').value || '8', 10),
     },
     detection: {},
   };
