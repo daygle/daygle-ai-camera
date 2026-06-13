@@ -43,6 +43,10 @@ class EventDatabase:
                 db.execute("ALTER TABLE alert_history ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0")
             except sqlite3.OperationalError:
                 pass
+            try:
+                db.execute("ALTER TABLE detections ADD COLUMN zone_name TEXT")
+            except sqlite3.OperationalError:
+                pass
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS events (
@@ -169,8 +173,8 @@ class EventDatabase:
                 box = detection.get("box", {})
                 db.execute(
                     """
-                    INSERT INTO detections (event_id, label, confidence, x, y, width, height)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO detections (event_id, label, confidence, x, y, width, height, zone_name)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         event_id,
@@ -180,6 +184,7 @@ class EventDatabase:
                         float(box.get("y", 0)),
                         float(box.get("width", 0)),
                         float(box.get("height", 0)),
+                        detection.get("zone_name") or None,
                     ),
                 )
             return event_id

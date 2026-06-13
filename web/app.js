@@ -121,6 +121,7 @@ function groupAlertsByEvent(alerts) {
         key,
         eventId: alert.event_id ?? null,
         ruleNames: [],
+        zones: new Set(),
         labels: new Set(),
         detections: [],
         latestAt: alert.created_at,
@@ -132,6 +133,8 @@ function groupAlertsByEvent(alerts) {
     const group = groups.get(key);
     if (alert.rule_name && !group.ruleNames.includes(alert.rule_name)) {
       group.ruleNames.push(alert.rule_name);
+      const parts = String(alert.rule_name).split(' / ');
+      if (parts.length >= 3) group.zones.add(parts[1]);
     }
     const label = String(alert.label || '').trim().toLowerCase();
     if (label) group.labels.add(label);
@@ -146,7 +149,7 @@ function groupAlertsByEvent(alerts) {
   }
   return order.map((key) => {
     const group = groups.get(key);
-    return { ...group, labels: Array.from(group.labels) };
+    return { ...group, labels: Array.from(group.labels), zones: Array.from(group.zones) };
   });
 }
 
@@ -170,6 +173,7 @@ function buildActivityItems() {
       const confidence = Number(event.metadata.confidence || 0);
       detections = [{ label, confidence }];
     }
+    const zoneNames = isSound ? [] : [...new Set(detections.map((d) => d.zone_name).filter(Boolean))];
     return {
       type: 'event',
       id: event.id,
@@ -179,21 +183,26 @@ function buildActivityItems() {
       recordingId: event.recordings?.[0]?.id ?? null,
       isSound,
       soundMeta: isSound ? event.metadata : null,
+      zoneNames,
     };
   });
-  const alertItems = alertGroups.map((group) => ({
-    type: 'alert',
-    id: group.key,
-    createdAt: group.latestAt,
-    eventId: group.eventId,
-    camera: group.camera, // populated below
-    ruleNames: group.ruleNames,
-    labels: group.labels,
-    detections: group.detections,
-    recordingId: group.recordingId,
-    message: group.message,
-    isSound: group.labels.some((l) => SOUND_CLASS_IDS.has(l)) || group.detections.some((d) => SOUND_CLASS_IDS.has(String(d.label || '').toLowerCase())),
-  }));
+  const alertItems = alertGroups.map((group) => {
+    const isSound = group.labels.some((l) => SOUND_CLASS_IDS.has(l)) || group.detections.some((d) => SOUND_CLASS_IDS.has(String(d.label || '').toLowerCase()));
+    return {
+      type: 'alert',
+      id: group.key,
+      createdAt: group.latestAt,
+      eventId: group.eventId,
+      camera: group.camera, // populated below
+      ruleNames: group.ruleNames,
+      labels: group.labels,
+      detections: group.detections,
+      recordingId: group.recordingId,
+      message: group.message,
+      isSound,
+      zoneNames: isSound ? [] : (group.zones || []),
+    };
+  });
   // Alerts don't carry a camera name in the grouping step; try to surface it
   // from the event's `metadata.camera_name` if we can match by event id.
   const eventsById = new Map(events.map((e) => [e.id, e]));
@@ -263,9 +272,10 @@ function renderActivityItem(item) {
     : (item.ruleNames?.join(', ') || 'Alert');
   const titleSuffix = !isEvent && item.ruleNames?.length > 1 ? ` <span class="muted">(${item.ruleNames.length} rules)</span>` : '';
   const cameraLine = item.camera ? `Camera: ${escapeHtml(item.camera)}` : 'Camera: unknown';
-  const metaLine = isEvent
-    ? cameraLine
-    : (item.message ? `${cameraLine} · ${escapeHtml(item.message)}` : cameraLine);
+  const zonePart = !isSound && item.zoneNames?.length
+    ? ` · Zone: ${item.zoneNames.map(escapeHtml).join(', ')}`
+    : '';
+  const metaLine = `${cameraLine}${zonePart}`;
   const actions = [];
   if (isEvent && item.recordingId) {
     actions.push(recordingLink(item.recordingId, 'View Recording'));
