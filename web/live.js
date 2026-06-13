@@ -297,7 +297,7 @@ function updateEmptyState() {
 
 // Build a structured summary of the monitor's latest cycle so the renderer
 // can split the visual into a state chip, per-label chips, and a status line.
-function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = false) {
+function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = false, soundMinConf = 0) {
   if (!payload) {
     return { state: 'idle', stateLabel: 'Idle', chips: [], message: 'Live AI status unavailable.' };
   }
@@ -329,9 +329,9 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
   if (soundEnabled) {
     if (soundStatus && soundStatus.last_detected_at) {
       const ageMs = Date.now() - Date.parse(soundStatus.last_detected_at);
-      if (ageMs < 60000) {
+      const soundConf = Number(soundStatus.last_confidence || 0);
+      if (ageMs < 60000 && soundConf >= soundMinConf) {
         const soundLabel = soundStatus.last_class_label || soundStatus.last_class || 'sound';
-        const soundConf = Number(soundStatus.last_confidence || 0);
         chips.push({ label: `🔊 ${soundLabel}`, confidence: soundConf, isSound: true });
       } else {
         chips.push({ label: '🔊 Listening', confidence: 0, isSound: true, isIdle: true });
@@ -392,7 +392,7 @@ function renderDetectionStatus(summary) {
     } else {
       const visualHtml = visualChips.map((c) => {
         const variant = summary.state === 'alerted' ? 'detection-chip-alert' : '';
-        const text = c.confidence > 0 ? `${titleCase(c.label)} · ${Math.round(c.confidence * 100)}%` : titleCase(c.label);
+        const text = c.confidence > 0 ? `👁️ ${titleCase(c.label)} · ${Math.round(c.confidence * 100)}%` : `👁️ ${titleCase(c.label)}`;
         return `<span class="detection-chip ${variant}">${escapeHtml(text)}</span>`;
       }).join('');
       const soundHtml = soundChips.map((c) => {
@@ -458,8 +458,15 @@ async function refreshDetectionStatus() {
       api(`/api/live/detection-status?camera_id=${cameraId}`),
       api(`/api/sound/status?camera_id=${cameraId}`).catch(() => null),
     ]);
+    // Resolve minimum confidence for the fired sound class (falls back to lowest enabled rule threshold).
+    const soundRules = selectedCamera.detection?.sound?.rules || [];
+    const lastClass = soundStatus?.last_class;
+    const matchedSoundRule = lastClass ? soundRules.find((r) => r.class === lastClass && r.enabled !== false) : null;
+    const soundMinConf = matchedSoundRule
+      ? Number(matchedSoundRule.confidence_threshold ?? 0.35)
+      : soundRules.filter((r) => r.enabled !== false).reduce((min, r) => Math.min(min, Number(r.confidence_threshold ?? 0.35)), 0.35);
     ingestServerTrackDetections(payload);
-    renderDetectionStatus(summarizeDetectionStatus(payload, soundStatus, soundEnabled));
+    renderDetectionStatus(summarizeDetectionStatus(payload, soundStatus, soundEnabled, soundMinConf));
   } catch (error) {
     renderDetectionStatus({
       state: 'error',
