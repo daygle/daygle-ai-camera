@@ -631,7 +631,6 @@ class EventDatabase:
                 JOIN events e ON e.id = d.event_id
                 WHERE d.label != 'motion'
                   AND e.source != 'sound'
-                  AND e.dismissed = 0
                   AND (
                       EXISTS (SELECT 1 FROM recordings WHERE recordings.event_id = e.id)
                       OR EXISTS (
