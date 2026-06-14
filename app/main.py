@@ -2839,6 +2839,7 @@ def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
                 file_path.with_name(f'{file_path.stem}.h264.mp4'),
                 file_path.with_name(f'{file_path.stem}.browser.mp4'),
                 file_path.with_name(f'{file_path.stem}.playback.mp4'),
+                file_path.with_name(f'{file_path.name}.meta.json'),
             ]
             for playback_path in playback_paths:
                 if playback_path.exists() and playback_path.is_file():
@@ -4513,10 +4514,6 @@ def export_yolo_onnx(model_name: str, destination: Path) -> int:
     return destination.stat().st_size
 
 
-def export_yolov8n_onnx(destination: Path) -> int:
-    return export_yolo_onnx('yolov8n', destination)
-
-
 def _do_download_model(model_name: str, switch_active: bool = True) -> dict[str, Any]:
     if model_name not in YOLO_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
@@ -5194,4 +5191,3 @@ if __name__ == '__main__':
         port=int(server_config.get('port', 8080)),
         reload=False,
     )
-
