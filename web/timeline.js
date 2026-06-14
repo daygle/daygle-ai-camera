@@ -41,8 +41,8 @@ let configuredLabels = null;
 let activeRecording = null;
 
 const OVERLAY_TOGGLE_KEY = 'daygle.timeline.overlay.enabled';
-// Off by default; users opt in per-browser via the toggle.
-let overlayEnabled = false;
+// On by default; users can turn it off per-browser via the toggle.
+let overlayEnabled = true;
 let overlayRafId = null;
 let overlayVfcHandle = null;
 let overlayResizeObserver = null;
@@ -1062,7 +1062,7 @@ if ('ResizeObserver' in window && els.clipPlayer) {
 
 if (els.clipOverlayToggle) {
   const savedValue = localStorage.getItem(OVERLAY_TOGGLE_KEY);
-  overlayEnabled = savedValue === '1';
+  overlayEnabled = savedValue !== '0';
   els.clipOverlayToggle.checked = overlayEnabled;
   els.clipOverlayToggle.addEventListener('change', () => {
     overlayEnabled = Boolean(els.clipOverlayToggle.checked);

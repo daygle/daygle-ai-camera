@@ -39,8 +39,8 @@ let overlayResizeObserver = null;
 // to project detection boxes one frame ahead of the VFC mediaTime.
 let _frameDuration = 1 / 30; // default 30fps, updated on each VFC frame
 const OVERLAY_TOGGLE_KEY = 'daygle.recordings.overlay.enabled';
-// Off by default to save CPU; users opt in per-browser via the toggle.
-let overlayEnabled = false;
+// On by default; users can turn it off per-browser via the toggle.
+let overlayEnabled = true;
 const GENERIC_TRIGGER_LABELS = new Set(['motion', 'alert', 'human', 'object', 'none', 'off', 'continuous']);
 
 function filterByConfiguredLabels(detections) {
@@ -710,7 +710,7 @@ if ('ResizeObserver' in window && els.clipPlayer) {
 
 if (els.clipOverlayToggle) {
   const savedValue = localStorage.getItem(OVERLAY_TOGGLE_KEY);
-  overlayEnabled = savedValue === '1';
+  overlayEnabled = savedValue !== '0';
   els.clipOverlayToggle.checked = overlayEnabled;
   els.clipOverlayToggle.addEventListener('change', () => {
     overlayEnabled = Boolean(els.clipOverlayToggle.checked);
