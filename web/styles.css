@@ -2290,6 +2290,16 @@ a.activity-item-action {
   .activity-filter-group { align-self: flex-start; }
   .hero .cam-hero-action { flex-wrap: wrap; }
   .hero-action-link { flex: 1 1 140px; justify-content: center; }
+  /* Dismiss buttons: wrap onto their own full-width row below the section title */
+  .activity-card .settings-section-header { flex-wrap: wrap; }
+  .activity-toolbar-actions {
+    flex: 0 0 100%;
+    margin: 8px 0 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    justify-content: flex-start;
+  }
+  .activity-toolbar-actions button { flex: 1; justify-content: center; }
 }
 
 /* ─── Live page ───────────────────────────────────────────────────────── */
