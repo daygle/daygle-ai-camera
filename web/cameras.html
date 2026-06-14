@@ -228,6 +228,17 @@
             <label><span>Frame Buffer Drains</span><input id="editStaleFrameGrabs" name="stale_frame_grabs" type="number" min="0" max="20" placeholder="Auto" /><span class="field-help">Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4).</span></label>
           </div>
           <p class="form-help muted">These values are hints passed to the stream decoder. Leave at defaults unless your camera requires specific dimensions.</p>
+
+          <div class="form-group">
+            <p class="form-group-label">Motion Detection Overrides</p>
+            <p class="form-help muted">Override the global motion settings for this camera only. Leave blank to use the global defaults from Live Detection settings.</p>
+            <div class="form-grid">
+              <label><span>Pixel Threshold</span><input id="editMotionPixelThreshold" name="motion_pixel_threshold" type="number" min="1" max="255" step="1" placeholder="Global default (30)" /><span class="field-help">Pixel intensity change required to count as motion (1–255). Raise for noisy IR cameras.</span></label>
+              <label><span>Gate Fraction</span><input id="editMotionGateFraction" name="motion_gate_fraction" type="number" min="0.0001" max="0.5" step="0.0001" placeholder="Global default (0.003)" /><span class="field-help">Minimum fraction of pixels that must change before motion is declared.</span></label>
+              <label><span>Scale Fraction</span><input id="editMotionScaleFraction" name="motion_scale_fraction" type="number" min="0.001" max="1.0" step="0.001" placeholder="Global default (0.10)" /><span class="field-help">Pixel change fraction that maps to 100% motion confidence.</span></label>
+              <label><span>Background Alpha</span><input id="editMotionBackgroundAlpha" name="motion_background_alpha" type="number" min="0.001" max="0.5" step="0.001" placeholder="Global default (0.05)" /><span class="field-help">How fast the background model adapts when no motion is detected.</span></label>
+            </div>
+          </div>
         </div>
 
         <div class="modal-footer">

@@ -923,7 +923,52 @@ def filter_detections_for_camera(detections: list[dict[str, Any]], settings: dic
     return filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects')
 
 
-def zone_motion_detections(detections: list[dict[str, Any]], settings: dict[str, Any], frame_motion_confidence: float = 0.5) -> list[dict[str, Any]]:
+def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
+    """Return the fraction of pixels inside a zone's bounding box that changed.
+
+    ``diff_mask`` is the boolean (H×W) array from ``detect_frame_motion`` at
+    ``_MOTION_FRAME_H × _MOTION_FRAME_W`` resolution.  Zone coordinates are
+    normalised (0–1) and are converted to pixel indices before slicing.
+    """
+    try:
+        import numpy as np
+        x = zone.get('x')
+        y = zone.get('y')
+        w = zone.get('width')
+        h = zone.get('height')
+        # Polygon zones may only carry `points` without an explicit bounding rect.
+        # Derive the bounding box from the polygon vertices so the diff slice is
+        # scoped to the polygon's area rather than the entire frame.
+        points = zone.get('points') or []
+        if (x is None or w is None) and isinstance(points, list) and len(points) >= 2:
+            xs = [float(p.get('x', 0)) for p in points if isinstance(p, dict)]
+            ys = [float(p.get('y', 0)) for p in points if isinstance(p, dict)]
+            if xs and ys:
+                x = x if x is not None else min(xs)
+                y = y if y is not None else min(ys)
+                w = w if w is not None else (max(xs) - float(x))
+                h = h if h is not None else (max(ys) - float(y))
+        x = float(x if x is not None else 0)
+        y = float(y if y is not None else 0)
+        w = float(w if w is not None else 1)
+        h = float(h if h is not None else 1)
+        px1 = max(0, int(x * _MOTION_FRAME_W))
+        py1 = max(0, int(y * _MOTION_FRAME_H))
+        px2 = min(_MOTION_FRAME_W, max(px1 + 1, int(round((x + w) * _MOTION_FRAME_W))))
+        py2 = min(_MOTION_FRAME_H, max(py1 + 1, int(round((y + h) * _MOTION_FRAME_H))))
+        return float(np.mean(diff_mask[py1:py2, px1:px2]))
+    except Exception:
+        return 0.0
+
+
+def zone_motion_detections(
+    settings: dict[str, Any],
+    frame_motion_confidence: float = 0.5,
+    *,
+    diff_mask: Any = None,
+    gate_fraction: float = _MOTION_GATE_FRACTION,
+    scale_fraction: float = _MOTION_SCALE_FRACTION,
+) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
     # monitor_motion is derived from the zone's enabled 'motion' rule during
     # normalization, so motion monitoring is gated per zone — there is no
@@ -937,14 +982,29 @@ def zone_motion_detections(detections: list[dict[str, Any]], settings: dict[str,
         zone_id = str(zone.get('id') or zone.get('name') or id(zone))
         if zone_id in seen_zones:
             continue
+
+        if diff_mask is not None:
+            # Per-zone path: compute pixel-diff fraction only within this zone's
+            # bounding rectangle so motion in other parts of the frame doesn't
+            # raise this zone's confidence score.
+            zone_fraction = _zone_pixel_motion_fraction(diff_mask, zone)
+            if zone_fraction < gate_fraction:
+                continue
+            zone_confidence = round(min(1.0, zone_fraction / max(scale_fraction, 1e-9)), 3)
+        else:
+            # Fallback: diff_mask unavailable (PIL path, error, or first frame).
+            # Use the frame-wide confidence as before.
+            zone_confidence = frame_motion_confidence
+
         conf_threshold = zone_motion_min_confidence(zone)
-        if frame_motion_confidence < conf_threshold:
+        if zone_confidence < conf_threshold:
             continue
+
         seen_zones.add(zone_id)
         # Use the zone's own bounding box so the overlay shows where the motion zone is,
         # not which YOLO object happens to be parked inside it.
         result.append({
-            'confidence': frame_motion_confidence,
+            'confidence': zone_confidence,
             'zone_id': zone_id,
             'box': {
                 'x': float(zone.get('x', 0)),
@@ -1229,8 +1289,8 @@ def detect_frame_motion(
     gate_fraction: float = _MOTION_GATE_FRACTION,
     scale_fraction: float = _MOTION_SCALE_FRACTION,
     background_alpha: float = _MOTION_BACKGROUND_ALPHA,
-) -> tuple[bool, float]:
-    """Adaptive-background motion gate. Returns (has_motion, confidence 0-1).
+) -> tuple[bool, float, Any]:
+    """Adaptive-background motion gate. Returns (has_motion, confidence 0-1, diff_mask).
 
     ``image`` may be a BGR numpy array (from ``read_frame``) or JPEG bytes
     (legacy callers).  When a numpy array is provided the PIL decode is
@@ -1239,6 +1299,12 @@ def detect_frame_motion(
     Threshold parameters default to module-level constants but can be
     overridden via live settings so operators can tune sensitivity without
     touching code.
+
+    Returns ``(has_motion, frame_confidence, diff_mask)`` where ``diff_mask``
+    is a boolean (H×W) numpy array indicating which thumbnail pixels changed by
+    more than ``pixel_threshold``.  Callers can slice ``diff_mask`` to compute
+    per-zone confidence scores instead of using the frame-wide value.
+    ``diff_mask`` is ``None`` on the first frame or when an error occurs.
     """
     try:
         import numpy as np
@@ -1262,10 +1328,13 @@ def detect_frame_motion(
             if background is None:
                 _frame_motion_prev[camera_id] = current
                 _frame_motion_error_cameras.discard(camera_id)
-                return False, 0.0
+                return False, 0.0, None
             # Compute diff inside the lock so background and current are
             # always from the same generation (no concurrent update race).
-            changed_fraction = float(np.mean(np.abs(current - background) > pixel_threshold))
+            # Retain the boolean mask so per-zone confidence can be computed
+            # by slicing it to each zone's pixel bounding box.
+            diff_mask = np.abs(current - background) > pixel_threshold
+            changed_fraction = float(np.mean(diff_mask))
             # Only update the background when there is no significant motion.
             # If we always updated, a stationary subject standing in frame
             # would be absorbed into the background within ~60 frames and
@@ -1276,8 +1345,8 @@ def detect_frame_motion(
 
         _frame_motion_error_cameras.discard(camera_id)
         if changed_fraction < gate_fraction:
-            return False, 0.0
-        return True, round(min(1.0, changed_fraction / scale_fraction), 3)
+            return False, 0.0, diff_mask
+        return True, round(min(1.0, changed_fraction / scale_fraction), 3), diff_mask
     except Exception as exc:
         # Fail open so a persistent error (wrong image format, missing cv2)
         # doesn't silently block ONNX inference. Log once per camera so the
@@ -1285,7 +1354,7 @@ def detect_frame_motion(
         if camera_id not in _frame_motion_error_cameras:
             logger.warning('Motion gate unavailable for camera %s: %s; failing open', camera_id, exc)
             _frame_motion_error_cameras.add(camera_id)
-        return True, 0.4
+        return True, 0.4, None
 
 
 def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: float) -> bool:
@@ -1326,6 +1395,15 @@ def clear_live_camera_backoff(camera_id: str) -> None:
     with _live_backoff_lock:
         live_detection_retry_after.pop(camera_id, None)
         live_detection_failure_count.pop(camera_id, None)
+    # Reset the background model so a reconnected camera (which may have been
+    # physically moved or had its scene change during the outage) doesn't trigger
+    # false motion alerts against a stale background until the EMA resettles.
+    # Also reset the periodic scan timestamp so YOLO runs immediately on the
+    # first frame — catching any subject already in frame on reconnect.
+    with _frame_motion_lock:
+        _frame_motion_prev.pop(camera_id, None)
+    _frame_motion_error_cameras.discard(camera_id)
+    _periodic_scan_last_ts.pop(camera_id, None)
 
 
 def extend_active_rtsp_recording(
@@ -1507,14 +1585,17 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None = None) -> 
 
 
 def _prune_frame_motion_state() -> None:
-    """Remove background model entries for cameras no longer in the active config."""
+    """Remove background model and scan timestamp entries for cameras no longer in the active config."""
     active_ids = {str(cfg.get('id') or '') for cfg in cameras_config if cfg.get('id')}
     with _frame_motion_lock:
         stale = [cid for cid in _frame_motion_prev if cid not in active_ids]
         for cid in stale:
             del _frame_motion_prev[cid]
+    for cid in stale:
+        _periodic_scan_last_ts.pop(cid, None)
+        _frame_motion_error_cameras.discard(cid)
     if stale:
-        logger.debug('Pruned stale motion background state for cameras: %s', stale)
+        logger.debug('Pruned stale motion state for cameras: %s', stale)
 
 
 def live_alert_monitor_loop() -> None:
@@ -1820,6 +1901,22 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _gate_fraction = float(live_settings.get('motion_gate_fraction', _MOTION_GATE_FRACTION))
     _scale_fraction = float(live_settings.get('motion_scale_fraction', _MOTION_SCALE_FRACTION))
     _background_alpha = float(live_settings.get('motion_background_alpha', _MOTION_BACKGROUND_ALPHA))
+    # Per-camera overrides (set in camera Advanced settings) take precedence over
+    # the global live settings, allowing each camera's sensitivity to be tuned
+    # independently without affecting every other camera.
+    _cam_motion = settings.get('motion') or {}
+    if _cam_motion.get('pixel_threshold') is not None:
+        try: _pixel_threshold = float(_cam_motion['pixel_threshold'])
+        except (TypeError, ValueError): pass
+    if _cam_motion.get('gate_fraction') is not None:
+        try: _gate_fraction = float(_cam_motion['gate_fraction'])
+        except (TypeError, ValueError): pass
+    if _cam_motion.get('scale_fraction') is not None:
+        try: _scale_fraction = float(_cam_motion['scale_fraction'])
+        except (TypeError, ValueError): pass
+    if _cam_motion.get('background_alpha') is not None:
+        try: _background_alpha = float(_cam_motion['background_alpha'])
+        except (TypeError, ValueError): pass
 
     # Periodic scan: bypass the pixel-diff gate every N seconds so stationary
     # subjects that have settled into the background are still detected by YOLO.
@@ -1831,7 +1928,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
 
     # Run the cheap pixel-diff motion check before the expensive ONNX inference.
     # Skip only when neither motion nor a periodic scan is due.
-    frame_has_motion, frame_motion_confidence = detect_frame_motion(
+    frame_has_motion, frame_motion_confidence, diff_mask = detect_frame_motion(
         camera_id, image,
         pixel_threshold=_pixel_threshold,
         gate_fraction=_gate_fraction,
@@ -1848,10 +1945,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             detections=[],
         )
         return None
-    # Periodic scan with no pixel motion: run YOLO but report zero motion
-    # confidence so motion-only zone rules don't fire spuriously.
+    # Periodic scan with no pixel motion: run YOLO but set confidence to 0
+    # so motion-only zone rules don't fire spuriously.
     if not frame_has_motion:
         frame_motion_confidence = 0.0
+        diff_mask = None
 
     min_conf = compute_minimum_rule_confidence()
     try:
@@ -1866,9 +1964,15 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
 
     detections = normalize_detection_boxes_for_frame(detections, frame)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
-    # frame_motion_confidence is 0.0 on periodic scans with no pixel-diff motion,
-    # so zone_motion_detections returns [] in that case — object rules still fire.
-    motion_detections = zone_motion_detections(detections, settings, frame_motion_confidence)
+    # Pass diff_mask so each zone's confidence is computed from its own pixel
+    # region rather than the frame-wide score.  diff_mask is None on periodic
+    # scans (no motion) so zone_motion_detections returns [] in that case.
+    motion_detections = zone_motion_detections(
+        settings, frame_motion_confidence,
+        diff_mask=diff_mask,
+        gate_fraction=_gate_fraction,
+        scale_fraction=_scale_fraction,
+    )
     object_detections = filter_detections_for_camera(detections, settings)
     zone_rules = zone_object_alert_rules(settings)
     object_alert_detections = zone_alert_detections(settings, object_detections) if zone_rules else list(object_detections)
@@ -2537,8 +2641,15 @@ def start_rtsp_recording_capture(
                     time.sleep(min(0.5, max(0.05, remaining)))
 
             final_deadline_ts = min(final_deadline_ts, max_deadline_ts)
-            final_duration_seconds = max(1.0, final_deadline_ts - start_capture_ts)
-            dynamic_post_seconds = max(0, int(round(final_deadline_ts - triggered_at.timestamp())))
+            # If detection was slow (inference bottleneck, RTSP lag), the capture
+            # deadline may have passed before this thread even started collecting
+            # footage.  The prebuffer holds several minutes of history, so extend
+            # the search window to *now* (capped at max_deadline_ts) rather than
+            # the original post-event deadline — this recovers segments that were
+            # already written during the event but weren't asked for.
+            actual_end_ts = min(max(time.time(), final_deadline_ts), max_deadline_ts)
+            final_duration_seconds = max(1.0, actual_end_ts - start_capture_ts)
+            dynamic_post_seconds = max(0, int(round(actual_end_ts - triggered_at.timestamp())))
 
             if camera_id and pre_seconds > 0:
                 content_start_ts, content_seconds = recording_service.write_rtsp_clip_with_prebuffer(
@@ -4183,7 +4294,7 @@ async def update_user(user_id: int, request: Request):
 
 def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_ai_config()
-    allowed = {'enabled', 'backend', 'confidence', 'iou_threshold', 'input_size', 'model_path', 'labels_path', 'device', 'gpu_mem_limit'}
+    allowed = {'enabled', 'backend', 'confidence', 'iou_threshold', 'input_size', 'model_path', 'labels_path', 'device', 'gpu_mem_limit', 'inference_threads', 'max_concurrent_inferences'}
     updated = {key: current.get(key) for key in allowed if key in current}
     for key, value in payload.items():
         if key in allowed:
@@ -4225,6 +4336,18 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(status_code=400, detail='gpu_mem_limit must be a positive integer (bytes).') from exc
     else:
         updated.pop('gpu_mem_limit', None)
+    for field, min_val, max_val in (('inference_threads', 1, 32), ('max_concurrent_inferences', 1, 16)):
+        raw = payload.get(field)
+        if raw is not None and raw != '':
+            try:
+                val = int(raw)
+                if not min_val <= val <= max_val:
+                    raise ValueError
+                updated[field] = val
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail=f'{field} must be an integer between {min_val} and {max_val}.') from exc
+        else:
+            updated.pop(field, None)
     updated['model_path'] = str(updated.get('model_path') or current.get('model_path') or 'models/yolov8n.onnx')
     updated['labels_path'] = str(updated.get('labels_path') or current.get('labels_path') or 'models/coco.names')
     return updated
@@ -4361,6 +4484,27 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     existing_ptz = current.get('ptz') if isinstance(current.get('ptz'), dict) else {}
     payload_ptz = payload.get('ptz') if isinstance(payload.get('ptz'), dict) else {}
     updated['ptz'] = normalize_camera_ptz_settings({**existing_ptz, **payload_ptz})
+
+    # Per-camera motion overrides.  When the 'motion' key is absent from the
+    # payload (old API clients), preserve the existing values unchanged.
+    # When present (even as an empty dict), rebuild from the submitted values —
+    # omitting a key removes the per-camera override and falls back to global.
+    if 'motion' in payload:
+        raw_motion = payload.get('motion') if isinstance(payload.get('motion'), dict) else {}
+        cam_motion: dict[str, Any] = {}
+        if raw_motion.get('pixel_threshold') is not None:
+            cam_motion['pixel_threshold'] = _int_field(
+                {'pixel_threshold': raw_motion['pixel_threshold']}, 'pixel_threshold', 30, 1, 255)
+        for _key in ('gate_fraction', 'scale_fraction', 'background_alpha'):
+            if raw_motion.get(_key) is not None:
+                try:
+                    cam_motion[_key] = round(float(raw_motion[_key]), 6)
+                except (TypeError, ValueError):
+                    pass
+        if cam_motion:
+            updated['motion'] = cam_motion
+    elif current.get('motion'):
+        updated['motion'] = current['motion']
     return updated
 
 

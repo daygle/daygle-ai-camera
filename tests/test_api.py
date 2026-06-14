@@ -2987,8 +2987,8 @@ def test_zone_motion_rule_gates_motion_detections(tmp_path, monkeypatch):
     disabled_settings = {'detection': {'zones': make_zones(False)}}
 
     # High-confidence motion frame
-    assert main.zone_motion_detections([], enabled_settings, frame_motion_confidence=0.9) != []
-    assert main.zone_motion_detections([], disabled_settings, frame_motion_confidence=0.9) == []
+    assert main.zone_motion_detections(enabled_settings, frame_motion_confidence=0.9) != []
+    assert main.zone_motion_detections(disabled_settings, frame_motion_confidence=0.9) == []
 
 
 def test_legacy_camera_motion_disabled_migrates_to_zone_rules(tmp_path, monkeypatch):
@@ -3012,7 +3012,7 @@ def test_legacy_camera_motion_disabled_migrates_to_zone_rules(tmp_path, monkeypa
         assert detection['zones'][0]['monitor_motion'] is False
         motion_rule = next(r for r in detection['zones'][0]['object_rules'] if r['label'] == 'motion')
         assert motion_rule['enabled'] is False
-        assert main.zone_motion_detections([], {'detection': detection}, frame_motion_confidence=0.9) == []
+        assert main.zone_motion_detections({'detection': detection}, frame_motion_confidence=0.9) == []
 
     # Cameras without the legacy switch keep motion governed by the zone rule.
     camera = main.normalize_camera_settings({'id': 'cam-2', 'detection': {'zones': [legacy_zone()]}})

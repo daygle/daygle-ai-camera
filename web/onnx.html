@@ -98,6 +98,16 @@
           <span class="field-help">Image resolution fed to the model. Higher = more accurate, slower. Default: 640</span>
         </label>
         <label>
+          <span>Inference Threads</span>
+          <input name="inference_threads" type="number" min="1" max="32" step="1" placeholder="Auto" />
+          <span class="field-help">CPU threads used per inference run. Leave blank to auto-detect (up to 4). Increasing this speeds up each inference but uses more CPU per camera.</span>
+        </label>
+        <label>
+          <span>Concurrent Cameras</span>
+          <input name="max_concurrent_inferences" type="number" min="1" max="16" step="1" placeholder="1" />
+          <span class="field-help">How many cameras can run ONNX inference at the same time. Default: 1 (serialised). Set to your camera count so each camera gets its own inference slot — prevents one slow camera blocking another.</span>
+        </label>
+        <label>
           <span>Model Path</span>
           <input name="model_path" />
           <span class="field-help">Path to the ONNX model file. Use Download &amp; Install above, or set manually. Default: models/yolov8n.onnx</span>

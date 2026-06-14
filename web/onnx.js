@@ -64,6 +64,10 @@ function formPayload(form) {
   data.enabled = data.enabled === 'true';
   for (const key of ['iou_threshold']) if (data[key] !== '') data[key] = Number(data[key]);
   if (data.input_size !== '') data.input_size = Number.parseInt(data.input_size, 10);
+  for (const key of ['inference_threads', 'max_concurrent_inferences']) {
+    if (data[key] !== '') data[key] = Number.parseInt(data[key], 10);
+    else delete data[key];
+  }
   data.gpu_mem_limit = data.gpu_mem_limit_gb !== ''
     ? Math.round(parseFloat(data.gpu_mem_limit_gb) * 1024 * 1024 * 1024)
     : null;
