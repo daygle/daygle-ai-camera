@@ -453,7 +453,8 @@ input[type="file"] { padding: 10px; }
   }
   .nav-dropdown-item { padding: 8px 12px; }
   .hero { flex-direction: column; align-items: stretch; }
-  .stats-grid, .recording-timeline-layout { grid-template-columns: 1fr; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .recording-timeline-layout { grid-template-columns: 1fr; }
   /* Override custom search rows that wouldn't collapse from the base .search-row rule */
   .recordings-search-row { grid-template-columns: minmax(0, 1fr) auto auto; }
   .recordings-search-row select { grid-column: 1 / -1; }
@@ -1127,6 +1128,10 @@ input[type="file"] { padding: 10px; }
   /* Keep buttons full-width in recordings list for easier tapping */
   .recording-row .button-row { flex-direction: column; }
   .recording-row .button-row button { width: 100%; }
+  /* Stat cards: 2×2 grid holds better than a single column on small phones */
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  /* Activity filter pills: drop the full-pill capsule shape when they wrap */
+  .activity-filter-group { border-radius: 14px; }
 }
 
 /* ─── Cameras page ─────────────────────────────────────────────────────────── */
@@ -3036,6 +3041,124 @@ a.activity-item-action {
   line-height: 1.45;
 }
 .timeline-card .status-panel { margin: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+/* ─── Audit log page ──────────────────────────────────────────────────────── */
+.audit-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.audit-filters input,
+.audit-filters select {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.audit-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.audit-table th {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+  color: var(--muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: .05em;
+}
+.audit-table td {
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.audit-table tr:last-child td {
+  border-bottom: none;
+}
+.audit-table tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid;
+}
+.status-success {
+  background: rgba(73, 230, 163, 0.14);
+  color: var(--success);
+  border-color: rgba(73, 230, 163, 0.3);
+}
+.status-failed {
+  background: rgba(255, 92, 138, 0.14);
+  color: var(--danger);
+  border-color: rgba(255, 92, 138, 0.3);
+}
+.details-cell {
+  max-width: 260px;
+  word-break: break-all;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  flex-wrap: wrap;
+}
+#auditEmpty {
+  padding: 2rem 0;
+  text-align: center;
+  color: var(--muted);
+}
+@media (max-width: 600px) {
+  .audit-table { font-size: 0.75rem; }
+  .audit-table th, .audit-table td { padding: 0.35rem 0.5rem; }
+  .details-cell { max-width: 140px; }
+  /* Hide ID (col 5) and IP Address (col 7) on small phones */
+  .audit-table th:nth-child(5),
+  .audit-table td:nth-child(5),
+  .audit-table th:nth-child(7),
+  .audit-table td:nth-child(7) { display: none; }
+}
+@media (max-width: 480px) {
+  /* Also hide Resource (col 4) and Details (col 8) on very small phones;
+     leaves Time, User, Action, Status which are the most scannable columns. */
+  .audit-table th:nth-child(4),
+  .audit-table td:nth-child(4),
+  .audit-table th:nth-child(8),
+  .audit-table td:nth-child(8) { display: none; }
+}
+
+/* ─── YAMNet TFLite page: camera sound-detector table ─────────────────────── */
+@media (max-width: 600px) {
+  /* Hide less-critical columns (Configured, Rules, Last Sound, Recent Scores, Detail)
+     so the essential Camera / Backend / Running / Status columns remain readable. */
+  #soundCameraStatusList .rule-table th:nth-child(2),
+  #soundCameraStatusList .rule-table td:nth-child(2),
+  #soundCameraStatusList .rule-table th:nth-child(3),
+  #soundCameraStatusList .rule-table td:nth-child(3),
+  #soundCameraStatusList .rule-table th:nth-child(7),
+  #soundCameraStatusList .rule-table td:nth-child(7),
+  #soundCameraStatusList .rule-table th:nth-child(8),
+  #soundCameraStatusList .rule-table td:nth-child(8),
+  #soundCameraStatusList .rule-table th:nth-child(9),
+  #soundCameraStatusList .rule-table td:nth-child(9) { display: none; }
+}
 
 /* ─── Custom tooltip ──────────────────────────────────────────────────────── */
 [data-tooltip] {
