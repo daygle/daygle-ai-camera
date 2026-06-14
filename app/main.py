@@ -3044,9 +3044,9 @@ def probe_video_duration(file_path: Path) -> float | None:
 
 
 def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
-    if not _FFMPEG:
+    ffmpeg = _FFMPEG or shutil.which('ffmpeg')
+    if not ffmpeg:
         raise RuntimeError('ffmpeg is required to convert recordings for browser playback.')
-    ffmpeg = _FFMPEG
     tmp_path = output_path.with_name(f'{output_path.stem}.tmp{output_path.suffix}')
     if tmp_path.exists():
         tmp_path.unlink(missing_ok=True)
@@ -4513,6 +4513,10 @@ def export_yolo_onnx(model_name: str, destination: Path) -> int:
     return destination.stat().st_size
 
 
+def export_yolov8n_onnx(destination: Path) -> int:
+    return export_yolo_onnx('yolov8n', destination)
+
+
 def _do_download_model(model_name: str, switch_active: bool = True) -> dict[str, Any]:
     if model_name not in YOLO_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
@@ -5190,6 +5194,4 @@ if __name__ == '__main__':
         port=int(server_config.get('port', 8080)),
         reload=False,
     )
-
-
 

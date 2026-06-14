@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import shutil
 import subprocess
@@ -620,7 +621,13 @@ class RecordingService:
         if not timed:
             return [], None
         selected = [item for item in timed if item[2] > start_ts and item[1] < end_ts]
-        return [item[0] for item in selected], selected[0][1] if selected else None
+        if selected:
+            return [item[0] for item in selected], selected[0][1]
+
+        span_seconds = max(1.0, end_ts - start_ts)
+        fallback_count = max(1, int(math.ceil(span_seconds)))
+        fallback = timed[-fallback_count:]
+        return [item[0] for item in fallback], fallback[0][1] if fallback else None
 
     @staticmethod
     def redact_stream_credentials(message: str) -> str:
@@ -680,8 +687,9 @@ class RecordingService:
         except Exception as exc:
             logger.warning('OpenCV clip generation failed for %s: %s', file_path.name, exc)
 
-        # Final fallback: persist metadata beside the target path, but never as .mp4 content.
-        file_path.unlink(missing_ok=True)
+        # Final fallback: persist metadata beside the target path and write a
+        # small placeholder at the target path so recording metadata still
+        # points at a tangible artifact on systems without FFmpeg/OpenCV.
         metadata_path = file_path.with_name(f'{file_path.name}.meta.json')
         payload = {
             'event_id': event_id,
@@ -692,6 +700,7 @@ class RecordingService:
             'note': 'Video encoder unavailable; metadata fallback was written.',
         }
         metadata_path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+        file_path.write_bytes(json.dumps(payload, separators=(',', ':')).encode('utf-8'))
 
     def _write_ffmpeg_placeholder_clip(self, file_path: Path, duration_seconds: float) -> None:
         ffmpeg = shutil.which('ffmpeg')

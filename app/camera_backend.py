@@ -262,7 +262,7 @@ class OpenCvStreamCamera:
             if index >= stale_frame_grabs - 1 and waited >= live_edge_seconds:
                 break
         capture_ts = time.time()
-        if grabbed:
+        if grabbed and hasattr(capture, 'retrieve'):
             ok, image = capture.retrieve()
             if ok and image is not None:
                 return ok, image, capture_ts
