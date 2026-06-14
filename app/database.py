@@ -627,9 +627,11 @@ class EventDatabase:
             matched_object_events = db.execute(
                 """
                 SELECT COUNT(*) AS count
-                FROM detections
-                WHERE label != 'motion'
-                  AND event_id NOT IN (SELECT id FROM events WHERE source = 'sound')
+                FROM detections d
+                JOIN events e ON e.id = d.event_id
+                WHERE d.label != 'motion'
+                  AND e.source != 'sound'
+                  AND e.dismissed = 0
                 """
             ).fetchone()["count"]
             object_alerts = db.execute(
