@@ -434,6 +434,82 @@ def test_detection_backoff_keeps_prebuffer_warm(tmp_path, monkeypatch):
     assert threads_started == [], 'detection should remain throttled during backoff'
 
 
+def test_camera_diagnostics_log_crud_and_retention(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    db = main.database
+    old = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+
+    db.add_camera_diagnostic(
+        created_at=old, camera_id='front-yard', camera_name='Front Yard',
+        event_type='prebuffer_fallback', severity='warning', message='no buffer',
+        details={'reason': 'no_segments'},
+    )
+    db.add_camera_diagnostic(
+        created_at=old, camera_id='driveway', camera_name='Driveway',
+        event_type='detection_backoff', severity='warning', message='read error',
+    )
+
+    assert db.count_camera_diagnostics() == 2
+    assert db.count_camera_diagnostics(camera_id='front-yard') == 1
+    assert db.count_camera_diagnostics(event_type='prebuffer_fallback') == 1
+    front = db.list_camera_diagnostics(camera_id='front-yard')
+    assert front[0]['details'] == {'reason': 'no_segments'}
+    assert front[0]['camera_name'] == 'Front Yard'
+
+    # Age-based purge removes entries older than the cutoff, keeps recent ones.
+    db.add_camera_diagnostic(
+        created_at=datetime.now(timezone.utc).isoformat(), camera_id='driveway', camera_name='Driveway',
+        event_type='detection_recovered', severity='info', message='recovered',
+    )
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    removed = db.purge_camera_diagnostics_older_than(cutoff)
+    assert removed == 2
+    assert db.count_camera_diagnostics() == 1
+    assert db.list_camera_diagnostics()[0]['event_type'] == 'detection_recovered'
+
+
+def test_camera_diagnostics_purge_follows_retention_days(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    main.database.set_setting('recording', {'retention_days': 3}, main.utc_now())
+    now = datetime.now(timezone.utc)
+    # One event just inside the 3-day window, one well outside it.
+    main.database.add_camera_diagnostic(
+        created_at=(now - timedelta(days=1)).isoformat(), camera_id='front-yard', camera_name='Front Yard',
+        event_type='detection_recovered', severity='info', message='recent',
+    )
+    main.database.add_camera_diagnostic(
+        created_at=(now - timedelta(days=10)).isoformat(), camera_id='front-yard', camera_name='Front Yard',
+        event_type='detection_backoff', severity='warning', message='old',
+    )
+
+    removed = main.purge_camera_diagnostics_by_policy()
+    assert removed == 1
+    remaining = main.database.list_camera_diagnostics()
+    assert len(remaining) == 1
+    assert remaining[0]['message'] == 'recent'
+
+
+def test_detection_backoff_writes_camera_diagnostic(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    main.schedule_live_camera_backoff('front-yard', 'frame read failed')
+    entries = main.database.list_camera_diagnostics(camera_id='front-yard')
+    assert any(e['event_type'] == 'detection_backoff' for e in entries)
+
+    # A second failure in the same streak must not add another row (no flooding).
+    main.schedule_live_camera_backoff('front-yard', 'frame read failed again')
+    assert main.database.count_camera_diagnostics(event_type='detection_backoff') == 1
+
+    # Recovery after a backoff streak logs a recovered event.
+    main.clear_live_camera_backoff('front-yard')
+    assert main.database.count_camera_diagnostics(event_type='detection_recovered') == 1
+
+
 def test_favicon_is_served_publicly(tmp_path, monkeypatch):
     app, _database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)

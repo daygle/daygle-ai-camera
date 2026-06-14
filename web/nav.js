@@ -206,6 +206,7 @@ if (document.readyState === 'loading') {
       links: [
         { href: '/settings', match: '/settings', label: 'Settings' },
         { href: '/users', match: '/users', label: 'Users' },
+        { href: '/camera-log', match: '/camera-log', label: 'Camera Log' },
         { href: '/audit', match: '/audit', label: 'Audit Log' },
       ],
     },

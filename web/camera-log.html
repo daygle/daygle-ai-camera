@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Camera Log - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell page-stack">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Administration</p>
+        <h1>Camera Log</h1>
+        <p class="muted">Operational diagnostics for each camera - detection outages, recovery, recording capture issues, and pre-event buffer fallbacks. Use this to troubleshoot missed or late recordings.</p>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">🎥</div>
+        <div>
+          <h2>Diagnostic Events</h2>
+          <p class="settings-section-subtitle">System-generated camera and recording events. Newest first. Events age out on the same retention window as recordings (and the most recent 10,000 are always kept).</p>
+        </div>
+      </div>
+
+      <div class="audit-filters">
+        <input id="filterCamera" placeholder="Filter by camera id" />
+        <select id="filterEventType">
+          <option value="">All event types</option>
+          <option value="prebuffer_fallback">prebuffer_fallback</option>
+          <option value="capture_failed">capture_failed</option>
+          <option value="detection_backoff">detection_backoff</option>
+          <option value="detection_recovered">detection_recovered</option>
+          <option value="camera_offline">camera_offline</option>
+          <option value="camera_online">camera_online</option>
+        </select>
+        <select id="filterSeverity">
+          <option value="">All severities</option>
+          <option value="info">info</option>
+          <option value="warning">warning</option>
+          <option value="error">error</option>
+        </select>
+        <button id="applyFiltersBtn" type="button">Apply</button>
+        <button id="clearFiltersBtn" class="secondary" type="button">Clear</button>
+      </div>
+
+      <div id="logEmpty" hidden>No camera diagnostic events match the current filters.</div>
+      <div class="audit-table-wrap">
+        <table class="audit-table" id="logTable">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Camera</th>
+              <th>Event</th>
+              <th>Severity</th>
+              <th>Message</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
+
+      <div class="pagination" id="pagination" hidden>
+        <button id="prevBtn" class="secondary" type="button">Previous</button>
+        <span id="pageInfo"></span>
+        <button id="nextBtn" class="secondary" type="button">Next</button>
+      </div>
+
+      <div class="button-row">
+        <button id="refreshBtn" class="secondary" type="button">Refresh</button>
+        <button id="clearLogBtn" class="danger" type="button">Clear Log</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/nav.js"></script>
+  <script src="/static/camera-log.js"></script>
+</body>
+</html>
