@@ -239,8 +239,10 @@ function buildActivityItems() {
 }
 
 function applyFilter(items) {
-  if (activeFilter === 'detections') return items.filter((i) => i.type === 'event');
-  if (activeFilter === 'alerts') return items.filter((i) => i.type === 'alert');
+  if (activeFilter === 'object-detections') return items.filter((i) => i.type === 'event' && !i.isSound);
+  if (activeFilter === 'sound-detections') return items.filter((i) => i.type === 'event' && i.isSound);
+  if (activeFilter === 'object-alerts') return items.filter((i) => i.type === 'alert' && !i.isSound);
+  if (activeFilter === 'sound-alerts') return items.filter((i) => i.type === 'alert' && i.isSound);
   return items;
 }
 
@@ -317,8 +319,10 @@ function renderActivityItem(item) {
 function renderEmptyState() {
   const messages = {
     all: { title: 'No activity yet', subtitle: 'Detections and alerts will appear here as your cameras report them.' },
-    detections: { title: 'No detections yet', subtitle: 'Detected objects will show up here once the AI starts seeing events.' },
-    alerts: { title: 'No alerts yet', subtitle: 'Alerts from your zone rules will appear here when they fire.' },
+    'object-detections': { title: 'No object detections yet', subtitle: 'Detected objects will show up here once the AI starts seeing events.' },
+    'sound-detections': { title: 'No sound detections yet', subtitle: 'Detected sounds will show up here once the AI starts hearing events.' },
+    'object-alerts': { title: 'No object alerts yet', subtitle: 'Object alerts from your zone rules will appear here when they fire.' },
+    'sound-alerts': { title: 'No sound alerts yet', subtitle: 'Sound alerts from your zone rules will appear here when they fire.' },
   };
   const { title, subtitle } = messages[activeFilter] || messages.all;
   return `
@@ -348,7 +352,7 @@ function renderActivityFeed() {
 
 function updateListStatus(count) {
   if (!els.listStatus) return;
-  const labels = { all: 'activity items', detections: 'detections', alerts: 'alerts' };
+  const labels = { all: 'activity items', 'object-detections': 'object detections', 'sound-detections': 'sound detections', 'object-alerts': 'object alerts', 'sound-alerts': 'sound alerts' };
   const label = labels[activeFilter] || 'items';
   if (count === 0) {
     els.listStatus.textContent = '';
