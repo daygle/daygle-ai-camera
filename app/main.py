@@ -3500,12 +3500,12 @@ def purge_camera_diagnostics_by_policy() -> int:
 
     Two bounds keep the log from growing without limit: a hard row cap enforced
     on every insert (see EventDatabase.add_camera_diagnostic) and this
-    time-based purge. Retention follows the recording retention window with a
-    7-day floor, so diagnostics outlive the recordings they explain but never
-    accumulate indefinitely on a camera that's been offline for months.
+    time-based purge. Retention follows the same recording retention window
+    (``retention_days``) so diagnostics age out alongside the recordings they
+    explain.
     """
     try:
-        retention_days = max(7, int(effective_recording_config().get('retention_days', 14)))
+        retention_days = max(1, int(effective_recording_config().get('retention_days', 14)))
         older_than = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
         return database.purge_camera_diagnostics_older_than(older_than)
     except Exception as exc:

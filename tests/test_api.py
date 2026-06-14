@@ -470,6 +470,29 @@ def test_camera_diagnostics_log_crud_and_retention(tmp_path, monkeypatch):
     assert db.list_camera_diagnostics()[0]['event_type'] == 'detection_recovered'
 
 
+def test_camera_diagnostics_purge_follows_retention_days(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    main.database.set_setting('recording', {'retention_days': 3}, main.utc_now())
+    now = datetime.now(timezone.utc)
+    # One event just inside the 3-day window, one well outside it.
+    main.database.add_camera_diagnostic(
+        created_at=(now - timedelta(days=1)).isoformat(), camera_id='front-yard', camera_name='Front Yard',
+        event_type='detection_recovered', severity='info', message='recent',
+    )
+    main.database.add_camera_diagnostic(
+        created_at=(now - timedelta(days=10)).isoformat(), camera_id='front-yard', camera_name='Front Yard',
+        event_type='detection_backoff', severity='warning', message='old',
+    )
+
+    removed = main.purge_camera_diagnostics_by_policy()
+    assert removed == 1
+    remaining = main.database.list_camera_diagnostics()
+    assert len(remaining) == 1
+    assert remaining[0]['message'] == 'recent'
+
+
 def test_detection_backoff_writes_camera_diagnostic(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
