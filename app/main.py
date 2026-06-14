@@ -2839,6 +2839,7 @@ def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
                 file_path.with_name(f'{file_path.stem}.h264.mp4'),
                 file_path.with_name(f'{file_path.stem}.browser.mp4'),
                 file_path.with_name(f'{file_path.stem}.playback.mp4'),
+                file_path.with_name(f'{file_path.name}.meta.json'),
             ]
             for playback_path in playback_paths:
                 if playback_path.exists() and playback_path.is_file():
@@ -3044,9 +3045,9 @@ def probe_video_duration(file_path: Path) -> float | None:
 
 
 def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
-    if not _FFMPEG:
+    ffmpeg = _FFMPEG or shutil.which('ffmpeg')
+    if not ffmpeg:
         raise RuntimeError('ffmpeg is required to convert recordings for browser playback.')
-    ffmpeg = _FFMPEG
     tmp_path = output_path.with_name(f'{output_path.stem}.tmp{output_path.suffix}')
     if tmp_path.exists():
         tmp_path.unlink(missing_ok=True)
@@ -5190,6 +5191,3 @@ if __name__ == '__main__':
         port=int(server_config.get('port', 8080)),
         reload=False,
     )
-
-
-

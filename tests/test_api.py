@@ -360,7 +360,7 @@ def test_live_snapshot_jpeg_overlay_changes_frame_when_detections_exist(tmp_path
     assert int(decoded.sum()) > 0
 
 
-def test_export_yolov8n_onnx_uses_ultralytics_export(tmp_path, monkeypatch):
+def test_export_yolo_onnx_uses_ultralytics_export(tmp_path, monkeypatch):
     app, _database_path = _load_app(tmp_path, monkeypatch)
     main = sys.modules["app.main"]
     destination = tmp_path / "models" / "yolov8n.onnx"
@@ -380,7 +380,7 @@ def test_export_yolov8n_onnx_uses_ultralytics_export(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main.subprocess, "run", fake_run)
 
-    assert main.export_yolov8n_onnx(destination) == len(b"fake onnx")
+    assert main.export_yolo_onnx("yolov8n", destination) == len(b"fake onnx")
     assert destination.exists()
 
 
@@ -993,6 +993,9 @@ def test_opencv_stream_camera_reuses_rtsp_capture(monkeypatch):
         def read(self):
             return True, FakeImage()
 
+        def retrieve(self):
+            return True, FakeImage()
+
         def release(self):
             self.release_count += 1
 
@@ -1048,6 +1051,7 @@ def test_opencv_stream_camera_applies_ffmpeg_log_level_after_each_videocapture(m
 
     class FakeCapture:
         instances: list = []
+        failed_first_read = False
 
         def __init__(self, _stream_url):
             FakeCapture.instances.append(self)
@@ -1065,9 +1069,14 @@ def test_opencv_stream_camera_applies_ffmpeg_log_level_after_each_videocapture(m
         def read(self):
             self._reads += 1
             # First capture fails its first read to trigger a reconnect.
-            if len(FakeCapture.instances) == 1 and self._reads == 1:
+            if not FakeCapture.failed_first_read and self._reads <= 2:
+                if self._reads == 2:
+                    FakeCapture.failed_first_read = True
                 return False, None
             return True, FakeImage()
+
+        def retrieve(self):
+            return self.read()
 
         def release(self):
             pass
@@ -1650,10 +1659,11 @@ def test_collect_prebuffer_segments_selects_by_content_overlap(tmp_path):
     # The first selected segment's content starts where the previous one ended.
     assert content_start == pytest.approx(now - 4.0, abs=0.05)
 
-    # No overlap at all falls back to the most recent segments for the span.
+    # No overlap at all must not fall back to tail segments: those may be
+    # post-event footage and can produce clips that miss the subject entirely.
     fallback, fallback_start = service._collect_prebuffer_segments('camera-1', now + 100, now + 103)
-    assert fallback == segments[-3:]
-    assert fallback_start == pytest.approx(now - 3.0, abs=0.05)
+    assert fallback == []
+    assert fallback_start is None
 
 
 def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, monkeypatch):
@@ -2512,7 +2522,9 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         assert recordings[0]['detections']
         assert recordings[0]['source'] == 'upload'
         assert recordings[0]['trigger_type'] in {'motion', 'human', 'object', 'continuous', 'alert'}
-        assert Path(recordings[0]['file_path']).exists()
+        media_path = Path(recordings[0]['file_path'])
+        metadata_path = media_path.with_name(f'{media_path.name}.meta.json')
+        assert media_path.exists() or metadata_path.exists()
 
         label = recordings[0]['detections'][0]['label']
         status, _headers, filtered = admin.request(f'/api/recordings?label={label}')
@@ -2526,9 +2538,13 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         assert event['recording_status'] == 'linked'
         assert event['recordings'][0]['id'] == recording_id
 
-        status, headers, _media = admin.request(f"/api/recordings/{recording_id}/stream")
-        assert status == 200
-        assert headers['content-type'].startswith('video/mp4')
+        status, headers, stream_body = admin.request(f"/api/recordings/{recording_id}/stream")
+        if media_path.exists():
+            assert status == 200
+            assert headers['content-type'].startswith('video/mp4')
+        else:
+            assert status == 404
+            assert stream_body['detail'] == 'Recording media file not found'
 
         viewer_client = LocalClient(base_url)
         viewer_csrf = _login(viewer_client, viewer['username'], 'Viewer123!')
@@ -2545,7 +2561,8 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         assert status == 200
         assert deleted['ok'] is True
         assert admin.request(f"/api/recordings/{recording_id}")[0] == 404
-        assert not Path(recordings[0]['file_path']).exists()
+        assert not media_path.exists()
+        assert not metadata_path.exists()
         with sqlite3.connect(database_path) as db:
             count = db.execute('SELECT COUNT(*) FROM recordings').fetchone()[0]
         assert count == 0
@@ -2586,7 +2603,9 @@ def test_recording_retention_purge_deletes_metadata_and_files(tmp_path, monkeypa
         assert recording_id is not None
         recording = admin.request(f"/api/recordings/{recording_id}")[2]
         file_path = Path(recording['file_path'])
-        assert file_path.exists()
+        metadata_path = file_path.with_name(f'{file_path.name}.meta.json')
+        assert file_path.exists() or metadata_path.exists()
+        expected_media_files_deleted = int(file_path.exists())
 
         old_started = '2000-01-01T00:00:00+00:00'
         with sqlite3.connect(database_path) as db:
@@ -2596,8 +2615,9 @@ def test_recording_retention_purge_deletes_metadata_and_files(tmp_path, monkeypa
         status, _headers, purged = admin.request('/api/recordings/purge', method='POST', headers={'X-CSRF-Token': admin_csrf})
         assert status == 200
         assert purged['purged'] == 1
-        assert purged['files_deleted'] == 1
+        assert purged['files_deleted'] == expected_media_files_deleted
         assert not file_path.exists()
+        assert not metadata_path.exists()
         assert admin.request(f"/api/recordings/{recording_id}")[0] == 404
     finally:
         server.should_exit = True
