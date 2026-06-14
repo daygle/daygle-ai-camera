@@ -74,6 +74,16 @@
       text-align: center;
       color: var(--text-muted, #64748b);
     }
+    @media (max-width: 600px) {
+      .audit-table { font-size: 0.75rem; }
+      .audit-table th, .audit-table td { padding: 0.35rem 0.5rem; }
+      .details-cell { max-width: 140px; }
+      /* Hide ID and IP Address columns on small screens */
+      .audit-table th:nth-child(5),
+      .audit-table td:nth-child(5),
+      .audit-table th:nth-child(7),
+      .audit-table td:nth-child(7) { display: none; }
+    }
   </style>
 </head>
 <body>
