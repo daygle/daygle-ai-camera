@@ -459,6 +459,13 @@ input[type="file"] { padding: 10px; }
   .recordings-search-row select { grid-column: 1 / -1; }
   .form-grid, .user-row, .status-panel { grid-template-columns: 1fr; }
   .yamnet-status-grid.status-panel { grid-template-columns: 1fr; }
+  .timeline-controls { grid-template-columns: 1fr; }
+  .timeline-controls-actions { margin: 0; width: 100%; justify-content: stretch; flex-wrap: wrap; }
+  .timeline-controls-actions button { flex: 1; justify-content: center; }
+  .settings-test-row { flex-direction: column; align-items: stretch; }
+  .settings-test-row label { flex-direction: column; align-items: stretch; }
+  .settings-test-row label input { width: 100%; }
+  .activity-filter-group { flex-wrap: wrap; }
 }
 .link-button {
   border: 0;
