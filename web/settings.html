@@ -51,8 +51,8 @@
         </label>
         <label>
           <span>Detection Status Refresh</span>
-          <input name="detection_status_refresh_ms" type="number" min="500" max="15000" step="100" placeholder="2000" />
-          <span class="field-help">How often the detection summary panel updates with new object counts. Default: 2000ms</span>
+          <input name="detection_status_refresh_ms" type="number" min="100" max="15000" step="100" placeholder="2000" />
+          <span class="field-help">How often the detection status and live overlay update with new detections. Lower = more responsive overlay, higher = less CPU. Default: 2000ms</span>
         </label>
         <label>
           <span>Detection Interval</span>
