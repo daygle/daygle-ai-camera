@@ -22,6 +22,13 @@ class RecordingService:
     VALID_SOURCES = {'camera', 'upload', 'rtsp'}
     PLAYBACK_FORMAT = 'mp4'
     GENERIC_TRIGGER_LABELS = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous'}
+    # A prebuffer render is "degenerate" when it produced far less video than the
+    # window we asked for - a sign the source segments held no usable continuous
+    # footage (sparse keyframes / corrupt stream). It surfaces as a near-still
+    # clip whose stored duration lies about its real length, so we re-capture
+    # live instead. Only judged for windows long enough to be meaningful.
+    DEGENERATE_MIN_REQUEST_SECONDS = 8.0
+    DEGENERATE_MAX_RENDERED_SECONDS = 3.0
 
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
@@ -371,7 +378,7 @@ class RecordingService:
         if pre_seconds <= 0:
             return False
         camera_key = self._camera_key(camera_id)
-        self._ensure_prebuffer_worker(camera_key, stream_url, self.prebuffer_window_seconds(config))
+        self._ensure_prebuffer_worker(camera_key, stream_url, self.prebuffer_window_seconds(config), camera_id=camera_id)
         return True
 
     def write_rtsp_clip_with_prebuffer(
@@ -397,9 +404,7 @@ class RecordingService:
         max_duration_seconds = max(1.0, float(max_duration_seconds))
 
         if pre_seconds <= 0:
-            content_start_ts = time.time()
-            self.write_rtsp_clip(stream_url, file_path, max_duration_seconds)
-            return content_start_ts, max_duration_seconds
+            return self._live_capture(stream_url, file_path, max_duration_seconds)
 
         # Use the same window the priming path computed, so re-ensuring the worker
         # here never restarts it mid-capture over a mismatched buffer size.
@@ -407,7 +412,7 @@ class RecordingService:
             buffer_seconds = self.prebuffer_window_seconds()
         buffer_seconds = max(int(buffer_seconds), pre_seconds + post_seconds + 5, pre_seconds + 10, 15)
         camera_key = self._camera_key(camera_id)
-        self._ensure_prebuffer_worker(camera_key, stream_url, buffer_seconds)
+        self._ensure_prebuffer_worker(camera_key, stream_url, buffer_seconds, camera_id=camera_id)
 
         end_capture_at = triggered_at.timestamp() + post_seconds
         delay = end_capture_at - time.time()
@@ -427,15 +432,11 @@ class RecordingService:
                 severity='warning',
                 details={'reason': 'no_segments'},
             )
-            fallback_start_ts = time.time()
-            self.write_rtsp_clip(stream_url, file_path, max_duration_seconds)
-            return fallback_start_ts, max_duration_seconds
+            return self._live_capture(stream_url, file_path, max_duration_seconds)
 
         ffmpeg = shutil.which('ffmpeg')
         if not ffmpeg:
-            fallback_start_ts = time.time()
-            self.write_rtsp_clip(stream_url, file_path, max_duration_seconds)
-            return fallback_start_ts, max_duration_seconds
+            return self._live_capture(stream_url, file_path, max_duration_seconds)
 
         if content_start_ts is None:
             content_start_ts = start_ts
@@ -519,25 +520,62 @@ class RecordingService:
                 severity='warning',
                 details={'reason': 'render_failed'},
             )
-            fallback_start_ts = time.time()
-            self.write_rtsp_clip(stream_url, file_path, max_duration_seconds)
-            return fallback_start_ts, max_duration_seconds
+            return self._live_capture(stream_url, file_path, max_duration_seconds)
+
+        # The render can pass the existence/decodability checks above yet still
+        # contain far less video than the requested window (e.g. only a single
+        # surviving keyframe when the stream's keyframes are sparse or corrupt) -
+        # which plays back as a "frozen" near-still clip while the stored duration
+        # claims the full window. Detect that and re-capture live so playback
+        # matches the reported length.
+        rendered_seconds = self.clip_duration_seconds(tmp_path)
+        if self._clip_is_degenerate(rendered_seconds, content_seconds):
+            tmp_path.unlink(missing_ok=True)
+            logger.warning(
+                'Prebuffer render for %s produced only %.1fs of video for a %.0fs window; falling back to live capture.',
+                camera_key, rendered_seconds or 0.0, content_seconds,
+            )
+            self._emit_diagnostic(
+                camera_id,
+                'prebuffer_degenerate',
+                f'Pre-event buffer rendered only {rendered_seconds or 0.0:.1f}s of playable video for a '
+                f'{content_seconds:.0f}s window (likely sparse keyframes or a corrupt stream); captured live instead.',
+                severity='warning',
+                details={'rendered_seconds': round(rendered_seconds or 0.0, 1), 'requested_seconds': round(content_seconds, 1)},
+            )
+            return self._live_capture(stream_url, file_path, max_duration_seconds)
+
         tmp_path.replace(file_path)
-        return content_start_ts, content_seconds
+        # Report the clip's real duration, not the requested window — keyframe
+        # alignment and short source footage make them differ, and a mismatch
+        # shows up as playback that ends well before the stated length.
+        return content_start_ts, (rendered_seconds or content_seconds)
 
     @staticmethod
     def _camera_key(camera_id: str) -> str:
         return re.sub(r'[^a-zA-Z0-9_-]+', '-', str(camera_id or '').strip().lower()).strip('-') or 'camera'
 
-    def _ensure_prebuffer_worker(self, camera_key: str, stream_url: str, buffer_seconds: int) -> None:
+    def _ensure_prebuffer_worker(self, camera_key: str, stream_url: str, buffer_seconds: int, camera_id: str | None = None) -> None:
+        restart_reason: str | None = None
         with self._prebuffer_lock:
             existing = self._prebuffer_workers.get(camera_key)
             if existing and existing.get('stream_url') == stream_url and existing.get('buffer_seconds') == buffer_seconds:
                 thread = existing.get('thread')
                 if isinstance(thread, threading.Thread) and thread.is_alive():
                     return
-            if existing and isinstance(existing.get('stop_event'), threading.Event):
-                existing['stop_event'].set()
+            if existing:
+                existing_thread = existing.get('thread')
+                if isinstance(existing_thread, threading.Thread) and existing_thread.is_alive():
+                    # Replacing a LIVE worker discards its rolling buffer. This is
+                    # expected once after a settings change, but if it keeps
+                    # happening the buffer never fills and events render as near-
+                    # still clips — so surface why, to catch config churn / collisions.
+                    if existing.get('stream_url') != stream_url:
+                        restart_reason = 'stream_url_changed'
+                    elif existing.get('buffer_seconds') != buffer_seconds:
+                        restart_reason = 'buffer_seconds_changed'
+                if isinstance(existing.get('stop_event'), threading.Event):
+                    existing['stop_event'].set()
 
             stop_event = threading.Event()
             thread = threading.Thread(
@@ -553,6 +591,16 @@ class RecordingService:
                 'buffer_seconds': int(buffer_seconds),
             }
             thread.start()
+        if restart_reason:
+            logger.info('Prebuffer worker for %s restarted (%s); rolling buffer was reset.', camera_key, restart_reason)
+            self._emit_diagnostic(
+                camera_id or camera_key,
+                'prebuffer_restart',
+                f'Pre-event buffer worker restarted ({restart_reason}); the rolling buffer was reset. '
+                'Frequent restarts leave events without pre-roll footage.',
+                severity='warning',
+                details={'reason': restart_reason, 'camera_key': camera_key},
+            )
 
     def _run_prebuffer_worker(self, camera_key: str, stream_url: str, buffer_seconds: int, stop_event: threading.Event) -> None:
         ffmpeg = shutil.which('ffmpeg')
@@ -696,6 +744,52 @@ class RecordingService:
         except (OSError, subprocess.SubprocessError):
             return True
         return result.returncode == 0 and bool(result.stdout.strip())
+
+    @staticmethod
+    def clip_duration_seconds(file_path: Path) -> float | None:
+        """Actual decodable duration of a clip in seconds, or None if it can't
+        be determined. Used to store an honest duration (the requested window and
+        the real rendered length diverge when the source footage is short or
+        keyframe-sparse) and to detect degenerate near-still clips."""
+        if not file_path.exists() or file_path.stat().st_size <= 0:
+            return None
+        ffprobe = shutil.which('ffprobe')
+        if not ffprobe:
+            return None
+        command = [
+            ffprobe,
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'csv=p=0',
+            str(file_path),
+        ]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if result.returncode != 0:
+            return None
+        try:
+            value = float(result.stdout.strip())
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+
+    @classmethod
+    def _clip_is_degenerate(cls, rendered_seconds: float | None, requested_seconds: float) -> bool:
+        if rendered_seconds is None or rendered_seconds <= 0:
+            return False
+        return (
+            requested_seconds >= cls.DEGENERATE_MIN_REQUEST_SECONDS
+            and rendered_seconds < cls.DEGENERATE_MAX_RENDERED_SECONDS
+        )
+
+    def _live_capture(self, stream_url: str, file_path: Path, max_duration_seconds: float) -> tuple[float, float]:
+        """Capture live from now and report the clip's real duration. Used as the
+        fallback when the prebuffer can't supply usable pre-event footage."""
+        start_ts = time.time()
+        self.write_rtsp_clip(stream_url, file_path, max_duration_seconds)
+        return start_ts, (self.clip_duration_seconds(file_path) or max_duration_seconds)
 
     def recording_format(self) -> str:
         configured = str(self.recording_config.get('format', self.PLAYBACK_FORMAT)).strip().lstrip('.').lower()

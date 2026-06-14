@@ -510,6 +510,37 @@ def test_detection_backoff_writes_camera_diagnostic(tmp_path, monkeypatch):
     assert main.database.count_camera_diagnostics(event_type='detection_recovered') == 1
 
 
+def test_prebuffer_render_degenerate_detection():
+    from app.recordings import RecordingService
+
+    # A near-still clip (1s) rendered for a real window (65s) is degenerate.
+    assert RecordingService._clip_is_degenerate(1.0, 65.0) is True
+    assert RecordingService._clip_is_degenerate(2.9, 10.0) is True
+    # A clip close to its requested window is fine.
+    assert RecordingService._clip_is_degenerate(63.0, 65.0) is False
+    # A legitimately short window (no full pre-roll yet) is not flagged.
+    assert RecordingService._clip_is_degenerate(1.0, 5.0) is False
+    # Unknown duration (probe unavailable) is never treated as degenerate.
+    assert RecordingService._clip_is_degenerate(None, 65.0) is False
+    assert RecordingService._clip_is_degenerate(0.0, 65.0) is False
+
+
+def test_clip_duration_seconds_reads_real_length(tmp_path, monkeypatch):
+    import shutil as _shutil
+    if not (_shutil.which('ffmpeg') and _shutil.which('ffprobe')):
+        import pytest as _pytest
+        _pytest.skip('ffmpeg/ffprobe not available')
+    _load_app(tmp_path, monkeypatch)
+    from app.recordings import RecordingService
+
+    service = RecordingService({'storage': {'data_dir': str(tmp_path / 'rec')}, 'recording': {}})
+    clip = tmp_path / 'clip.mp4'
+    service._write_ffmpeg_placeholder_clip(clip, 3.0)
+    measured = service.clip_duration_seconds(clip)
+    assert measured is not None
+    assert 2.0 <= measured <= 4.5
+
+
 def test_favicon_is_served_publicly(tmp_path, monkeypatch):
     app, _database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
