@@ -271,9 +271,13 @@ class OnnxYoloDetector:
         if n_cols < 5:
             return []
 
-        # Detect model format once: YOLOv5 has an explicit objectness column at
-        # index 4; YOLOv8 goes straight from bbox to class scores at index 4.
-        has_objectness = len(self.labels) > 0 and n_cols >= len(self.labels) + 5
+        # Detect model format: YOLOv5 has an explicit objectness column at index 4
+        # (total = 4 bbox + 1 obj + N classes = N+5 cols); YOLOv8 goes straight
+        # from bbox to class scores (total = 4 + N = N+4 cols).  Use exact equality
+        # so an extra trailing column from some export tools doesn't trigger a
+        # false-positive.  Requires a labels file; without one we can't distinguish
+        # formats and default to YOLOv8 (no objectness) which is the safer guess.
+        has_objectness = len(self.labels) > 0 and n_cols == len(self.labels) + 5
 
         if has_objectness:
             objectness = predictions[:, 4]
@@ -318,15 +322,17 @@ class OnnxYoloDetector:
             x1v, y1v, x2v, y2v = box_array[index]
             class_id = int(class_array[index])
             label = self.labels[class_id] if 0 <= class_id < len(self.labels) else f"class_{class_id}"
+            box_x = round(max(0.0, min(1.0, float(x1v) / original_width)), 4)
+            box_y = round(max(0.0, min(1.0, float(y1v) / original_height)), 4)
             detections.append(
                 Detection(
                     label=label,
                     confidence=float(score_array[index]),
                     box={
-                        "x": round(float(x1v) / original_width, 4),
-                        "y": round(float(y1v) / original_height, 4),
-                        "width": round(float(x2v - x1v) / original_width, 4),
-                        "height": round(float(y2v - y1v) / original_height, 4),
+                        "x": box_x,
+                        "y": box_y,
+                        "width": round(max(0.0, min(1.0 - box_x, float(x2v - x1v) / original_width)), 4),
+                        "height": round(max(0.0, min(1.0 - box_y, float(y2v - y1v) / original_height)), 4),
                     },
                 )
             )

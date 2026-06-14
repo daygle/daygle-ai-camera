@@ -16,9 +16,8 @@ class AlertEngine:
         effective_rules = rules if rules is not None else self.rules
         alerts: list[dict[str, Any]] = []
         motion_detections = [detection for detection in detections if detection.get('motion_event')]
-        if motion_detections:
-            strongest_motion = max(motion_detections, key=lambda detection: float(detection.get('confidence', 0)))
-            self._append_motion_alerts(alerts, strongest_motion, effective_rules)
+        for motion_detection in motion_detections:
+            self._append_motion_alerts(alerts, motion_detection, effective_rules)
 
         for detection in detections:
             label = detection.get('label')
@@ -69,12 +68,19 @@ class AlertEngine:
 
     def _append_motion_alerts(self, alerts: list[dict[str, Any]], detection: dict[str, Any], rules: list[dict[str, Any]] | None = None) -> None:
         confidence = float(detection.get('confidence', 0))
+        detection_zone_id = str(detection.get('zone_id') or '').strip()
         for rule in (rules if rules is not None else self.rules):
             if not rule.get('enabled', True) or not self._is_motion_rule(rule):
                 continue
             if not self._is_active_now(rule):
                 continue
             if confidence < float(rule.get('min_confidence', 0.0)):
+                continue
+            # Mirror the zone-id check used for object rules (line 43-46) so
+            # a motion rule scoped to Zone A doesn't fire when motion is only
+            # in Zone B.
+            rule_zone_id = str(rule.get('zone_id') or '').strip()
+            if rule_zone_id and rule_zone_id != detection_zone_id:
                 continue
 
             rule_name = str(rule.get('name') or 'Motion')

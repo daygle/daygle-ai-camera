@@ -38,6 +38,11 @@ const FIELD_LABELS = {
   event_debounce_seconds: 'Fallback Event Merge (s)',
   detection_history_minutes: 'Detection History (min)',
   background_detection_enabled: 'Background Alerts',
+  periodic_scan_interval_seconds: 'Periodic Scan Interval (s)',
+  motion_pixel_threshold: 'Motion Pixel Threshold',
+  motion_gate_fraction: 'Motion Gate Fraction',
+  motion_scale_fraction: 'Motion Scale Fraction',
+  motion_background_alpha: 'Motion Background Alpha',
   data_dir: 'Data Directory',
   snapshots_dir: 'Snapshots Directory',
   events_dir: 'Events Directory',
@@ -166,7 +171,13 @@ function payloadFor(form) {
   }
   if ('detection_interval_seconds' in data && data.detection_interval_seconds !== '') data.detection_interval_seconds = Number(data.detection_interval_seconds);
   if ('event_debounce_seconds' in data && data.event_debounce_seconds !== '') data.event_debounce_seconds = Number(data.event_debounce_seconds);
-      if ('detection_history_minutes' in data && data.detection_history_minutes !== '') data.detection_history_minutes = Number(data.detection_history_minutes);
+  if ('detection_history_minutes' in data && data.detection_history_minutes !== '') data.detection_history_minutes = Number(data.detection_history_minutes);
+  for (const key of ['motion_pixel_threshold', 'periodic_scan_interval_seconds']) {
+    if (key in data && data[key] !== '') data[key] = Number.parseInt(data[key], 10);
+  }
+  for (const key of ['motion_gate_fraction', 'motion_scale_fraction', 'motion_background_alpha']) {
+    if (key in data && data[key] !== '') data[key] = Number(data[key]);
+  }
   if ('vehicle_labels' in data) data.vehicle_labels = data.vehicle_labels.split(',').map((label) => label.trim()).filter(Boolean);
   if ('min_confidence' in data && data.min_confidence !== '') data.min_confidence = Number(data.min_confidence);
   if ('session_timeout_hours' in data && data.session_timeout_hours !== '') data.session_timeout_hours = Number(data.session_timeout_hours);

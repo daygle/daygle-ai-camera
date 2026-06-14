@@ -77,6 +77,31 @@
           <input name="detection_history_minutes" type="number" min="1" max="120" step="1" placeholder="10" />
           <span class="field-help">How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min</span>
         </label>
+        <label>
+          <span>Periodic Scan Interval (s)</span>
+          <input name="periodic_scan_interval_seconds" type="number" min="0" max="3600" step="1" placeholder="0" />
+          <span class="field-help">Run a full YOLO scan this often even when no pixel motion is detected. Catches stationary subjects that have settled into the background. 0 = disabled. Default: 0</span>
+        </label>
+        <label>
+          <span>Motion Pixel Threshold</span>
+          <input name="motion_pixel_threshold" type="number" min="1" max="255" step="1" placeholder="30" />
+          <span class="field-help">How much a pixel must change (0–255) to count as motion. Raise on noisy IR/night-vision cameras. Default: 30</span>
+        </label>
+        <label>
+          <span>Motion Gate Fraction</span>
+          <input name="motion_gate_fraction" type="number" min="0.0001" max="0.5" step="0.0001" placeholder="0.003" />
+          <span class="field-help">Fraction of pixels that must change before motion fires (0.003 = 0.3%). Raise to ignore small disturbances. Default: 0.003</span>
+        </label>
+        <label>
+          <span>Motion Scale Fraction</span>
+          <input name="motion_scale_fraction" type="number" min="0.001" max="1.0" step="0.001" placeholder="0.10" />
+          <span class="field-help">Pixel change fraction that maps to 100% motion confidence (0.10 = 10%). Lower = more sensitive confidence scoring. Default: 0.10</span>
+        </label>
+        <label>
+          <span>Motion Background Alpha</span>
+          <input name="motion_background_alpha" type="number" min="0.001" max="0.5" step="0.001" placeholder="0.05" />
+          <span class="field-help">How fast the background adapts to scene changes when no motion is detected (0.05 = 5% per frame). Higher = adapts faster. Default: 0.05</span>
+        </label>
       </form>
       <div class="button-row">
         <button type="submit" form="liveSettingsForm">Save Live Settings</button>

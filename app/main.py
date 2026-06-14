@@ -216,6 +216,15 @@ def effective_live_config() -> dict[str, Any]:
         'event_debounce_seconds': 10.0,
         'background_detection_enabled': True,
         'detection_history_minutes': 10,
+        # Motion gate tuning — exposed in Live Detection settings.
+        'motion_pixel_threshold': 30,
+        'motion_gate_fraction': 0.003,
+        'motion_scale_fraction': 0.10,
+        'motion_background_alpha': 0.05,
+        # Run a full YOLO scan this often even when the pixel-diff gate is quiet,
+        # so stationary subjects that have settled into the background are still
+        # detected. 0 = disabled.
+        'periodic_scan_interval_seconds': 0,
     }
     config_live = config.get('live', {})
     if isinstance(config_live, dict):
@@ -306,13 +315,15 @@ live_detection_worker_lock = threading.Lock()
 active_live_detection_cameras: set[str] = set()
 _frame_motion_prev: dict[str, Any] = {}
 _frame_motion_lock = threading.Lock()
+_frame_motion_error_cameras: set[str] = set()  # cameras where motion gate is currently failing
+_periodic_scan_last_ts: dict[str, float] = {}  # camera_id -> timestamp of last forced full scan
 
 _MOTION_FRAME_W = 160
 _MOTION_FRAME_H = 120
 _MOTION_PIXEL_THRESHOLD = 30    # intensity change per pixel (0–255) to count as changed; 30 filters IR/night-vision sensor noise
 _MOTION_GATE_FRACTION = 0.003   # 0.3% of pixels must change before any motion is reported
 _MOTION_SCALE_FRACTION = 0.10   # 10% of pixels changed maps to confidence 1.0 (less sensitive than 5% for IR cameras)
-_MOTION_BACKGROUND_ALPHA = 0.05 # background learning rate; stationary objects absorbed in ~30s
+_MOTION_BACKGROUND_ALPHA = 0.05 # background learning rate; only updates when no motion so subjects aren't absorbed
 live_alert_monitor_stop = threading.Event()
 live_alert_monitor_thread: threading.Thread | None = None
 
@@ -934,6 +945,7 @@ def zone_motion_detections(detections: list[dict[str, Any]], settings: dict[str,
         # not which YOLO object happens to be parked inside it.
         result.append({
             'confidence': frame_motion_confidence,
+            'zone_id': zone_id,
             'box': {
                 'x': float(zone.get('x', 0)),
                 'y': float(zone.get('y', 0)),
@@ -1155,7 +1167,7 @@ def update_live_detection_status(camera_id: str, **updates: Any) -> None:
         }
 
 
-def record_live_detection_history(camera_id: str, detections: list[dict[str, Any]], sample_ts: float | None = None) -> None:
+def record_live_detection_history(camera_id: str, detections: list[dict[str, Any]], sample_ts: float | None = None, *, live_config: dict[str, Any] | None = None) -> None:
     """Append one monitor cycle's detections to the camera's rolling history.
 
     ``sample_ts`` must be when the analyzed frame was CAPTURED, not when
@@ -1173,7 +1185,7 @@ def record_live_detection_history(camera_id: str, detections: list[dict[str, Any
     ]
     if sample_ts is None:
         sample_ts = time.time()
-    history_minutes = max(1, int(effective_live_config().get("detection_history_minutes", 10)))
+    history_minutes = max(1, int((live_config or effective_live_config()).get("detection_history_minutes", 10)))
     history_maxlen = max(120, history_minutes * 120)
     with live_detection_history_lock:
         history = live_detection_history.get(camera_id)
@@ -1209,12 +1221,24 @@ def detection_label_set(detections: list[dict[str, Any]]) -> set[str]:
     }
 
 
-def detect_frame_motion(camera_id: str, image: Any) -> tuple[bool, float]:
+def detect_frame_motion(
+    camera_id: str,
+    image: Any,
+    *,
+    pixel_threshold: float = _MOTION_PIXEL_THRESHOLD,
+    gate_fraction: float = _MOTION_GATE_FRACTION,
+    scale_fraction: float = _MOTION_SCALE_FRACTION,
+    background_alpha: float = _MOTION_BACKGROUND_ALPHA,
+) -> tuple[bool, float]:
     """Adaptive-background motion gate. Returns (has_motion, confidence 0-1).
 
     ``image`` may be a BGR numpy array (from ``read_frame``) or JPEG bytes
     (legacy callers).  When a numpy array is provided the PIL decode is
     skipped, saving ~5-15 ms per cycle.
+
+    Threshold parameters default to module-level constants but can be
+    overridden via live settings so operators can tune sensitivity without
+    touching code.
     """
     try:
         import numpy as np
@@ -1225,28 +1249,43 @@ def detect_frame_motion(camera_id: str, image: Any) -> tuple[bool, float]:
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             resized = cv2.resize(gray, (_MOTION_FRAME_W, _MOTION_FRAME_H),
                                  interpolation=cv2.INTER_NEAREST)
-            current = np.array(resized, dtype=np.float32)
+            current = resized.astype(np.float32)
         else:
             from PIL import Image as _Image
             img = _Image.open(io.BytesIO(image)).convert('L').resize(
                 (_MOTION_FRAME_W, _MOTION_FRAME_H), _Image.NEAREST
             )
             current = np.array(img, dtype=np.float32)
+
         with _frame_motion_lock:
             background = _frame_motion_prev.get(camera_id)
             if background is None:
                 _frame_motion_prev[camera_id] = current
+                _frame_motion_error_cameras.discard(camera_id)
                 return False, 0.0
-            # Update background model before comparing so the diff reflects
-            # deviation from the learned scene, not just the previous frame.
-            updated_bg = (1.0 - _MOTION_BACKGROUND_ALPHA) * background + _MOTION_BACKGROUND_ALPHA * current
-            _frame_motion_prev[camera_id] = updated_bg
-        changed_fraction = float(np.mean(np.abs(current - background) > _MOTION_PIXEL_THRESHOLD))
-        if changed_fraction < _MOTION_GATE_FRACTION:
+            # Compute diff inside the lock so background and current are
+            # always from the same generation (no concurrent update race).
+            changed_fraction = float(np.mean(np.abs(current - background) > pixel_threshold))
+            # Only update the background when there is no significant motion.
+            # If we always updated, a stationary subject standing in frame
+            # would be absorbed into the background within ~60 frames and
+            # become invisible to this gate.
+            if changed_fraction < gate_fraction:
+                updated_bg = (1.0 - background_alpha) * background + background_alpha * current
+                _frame_motion_prev[camera_id] = updated_bg
+
+        _frame_motion_error_cameras.discard(camera_id)
+        if changed_fraction < gate_fraction:
             return False, 0.0
-        return True, round(min(1.0, changed_fraction / _MOTION_SCALE_FRACTION), 3)
-    except Exception:
-        return True, 0.4  # fail open: allow motion if comparison unavailable
+        return True, round(min(1.0, changed_fraction / scale_fraction), 3)
+    except Exception as exc:
+        # Fail open so a persistent error (wrong image format, missing cv2)
+        # doesn't silently block ONNX inference. Log once per camera so the
+        # operator can diagnose the root cause without log spam.
+        if camera_id not in _frame_motion_error_cameras:
+            logger.warning('Motion gate unavailable for camera %s: %s; failing open', camera_id, exc)
+            _frame_motion_error_cameras.add(camera_id)
+        return True, 0.4
 
 
 def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: float) -> bool:
@@ -1467,11 +1506,27 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None = None) -> 
     return processed
 
 
+def _prune_frame_motion_state() -> None:
+    """Remove background model entries for cameras no longer in the active config."""
+    active_ids = {str(cfg.get('id') or '') for cfg in cameras_config if cfg.get('id')}
+    with _frame_motion_lock:
+        stale = [cid for cid in _frame_motion_prev if cid not in active_ids]
+        for cid in stale:
+            del _frame_motion_prev[cid]
+    if stale:
+        logger.debug('Pruned stale motion background state for cameras: %s', stale)
+
+
 def live_alert_monitor_loop() -> None:
+    _last_prune = 0.0
     while not live_alert_monitor_stop.is_set():
         live_settings = effective_live_config()
         run_live_alert_monitor_once(live_settings)
         _check_cameras_health()
+        now = time.time()
+        if now - _last_prune > 300:
+            _prune_frame_motion_state()
+            _last_prune = now
         interval = max(0.1, float(live_settings.get('detection_interval_seconds', 0.25)))
         live_alert_monitor_stop.wait(interval)
 
@@ -1760,10 +1815,30 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     if not (now - 300 <= frame_capture_ts <= now + 1):
         frame_capture_ts = now
 
+    # Read configurable motion gate thresholds from live settings.
+    _pixel_threshold = float(live_settings.get('motion_pixel_threshold', _MOTION_PIXEL_THRESHOLD))
+    _gate_fraction = float(live_settings.get('motion_gate_fraction', _MOTION_GATE_FRACTION))
+    _scale_fraction = float(live_settings.get('motion_scale_fraction', _MOTION_SCALE_FRACTION))
+    _background_alpha = float(live_settings.get('motion_background_alpha', _MOTION_BACKGROUND_ALPHA))
+
+    # Periodic scan: bypass the pixel-diff gate every N seconds so stationary
+    # subjects that have settled into the background are still detected by YOLO.
+    periodic_scan_interval = float(live_settings.get('periodic_scan_interval_seconds', 0))
+    force_scan = False
+    if periodic_scan_interval > 0 and now - _periodic_scan_last_ts.get(camera_id, 0) >= periodic_scan_interval:
+        force_scan = True
+        _periodic_scan_last_ts[camera_id] = now
+
     # Run the cheap pixel-diff motion check before the expensive ONNX inference.
-    # If nothing changed in the frame there is nothing actionable to detect.
-    frame_has_motion, frame_motion_confidence = detect_frame_motion(camera_id, image)
-    if not frame_has_motion:
+    # Skip only when neither motion nor a periodic scan is due.
+    frame_has_motion, frame_motion_confidence = detect_frame_motion(
+        camera_id, image,
+        pixel_threshold=_pixel_threshold,
+        gate_fraction=_gate_fraction,
+        scale_fraction=_scale_fraction,
+        background_alpha=_background_alpha,
+    )
+    if not frame_has_motion and not force_scan:
         update_live_detection_status(
             camera_id,
             state='checked',
@@ -1773,6 +1848,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             detections=[],
         )
         return None
+    # Periodic scan with no pixel motion: run YOLO but report zero motion
+    # confidence so motion-only zone rules don't fire spuriously.
+    if not frame_has_motion:
+        frame_motion_confidence = 0.0
 
     min_conf = compute_minimum_rule_confidence()
     try:
@@ -1787,7 +1866,9 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
 
     detections = normalize_detection_boxes_for_frame(detections, frame)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
-    motion_detections = zone_motion_detections(detections, settings, frame_motion_confidence) if frame_has_motion else []
+    # frame_motion_confidence is 0.0 on periodic scans with no pixel-diff motion,
+    # so zone_motion_detections returns [] in that case — object rules still fire.
+    motion_detections = zone_motion_detections(detections, settings, frame_motion_confidence)
     object_detections = filter_detections_for_camera(detections, settings)
     zone_rules = zone_object_alert_rules(settings)
     object_alert_detections = zone_alert_detections(settings, object_detections) if zone_rules else list(object_detections)
@@ -1803,6 +1884,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
 
     # Record history only with detections that passed confidence thresholds so playback
     # overlays don't show below-threshold boxes as if they were real alert detections.
+    # Use the strongest motion zone for the single playback overlay box.
     strongest_motion = (
         max(motion_detections, key=lambda d: float(d.get('confidence', 0)))
         if motion_detections else None
@@ -1812,15 +1894,14 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         list(object_alert_detections) + record_only_detections
         + ([{**strongest_motion, 'label': 'motion', 'motion_event': True}] if strongest_motion is not None else []),
         sample_ts=frame_capture_ts,
+        live_config=live_settings,
     )
 
     alert_detections = list(object_alert_detections) + record_only_detections
-    if strongest_motion is not None:
-        alert_detections.append({
-            **strongest_motion,
-            'label': 'motion',
-            'motion_event': True,
-        })
+    # Include each zone's motion detection individually so per-zone alert rules
+    # are scoped correctly — AlertEngine._append_motion_alerts checks zone_id.
+    for _mot in motion_detections:
+        alert_detections.append({**_mot, 'label': 'motion', 'motion_event': True})
     if not alert_detections:
         update_live_detection_status(
             camera_id,
@@ -4377,6 +4458,26 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail='detection_history_minutes must be a whole number.') from exc
     if detection_history_minutes < 1 or detection_history_minutes > 120:
         raise HTTPException(status_code=400, detail='detection_history_minutes must be between 1 and 120.')
+    motion_pixel_threshold = _int_field(merged, 'motion_pixel_threshold', 30, 1, 255)
+    try:
+        motion_gate_fraction = float(merged.get('motion_gate_fraction', 0.003))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='motion_gate_fraction must be a number.') from exc
+    if not (0.0001 <= motion_gate_fraction <= 0.5):
+        raise HTTPException(status_code=400, detail='motion_gate_fraction must be between 0.0001 and 0.5.')
+    try:
+        motion_scale_fraction = float(merged.get('motion_scale_fraction', 0.10))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='motion_scale_fraction must be a number.') from exc
+    if not (0.001 <= motion_scale_fraction <= 1.0):
+        raise HTTPException(status_code=400, detail='motion_scale_fraction must be between 0.001 and 1.0.')
+    try:
+        motion_background_alpha = float(merged.get('motion_background_alpha', 0.05))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='motion_background_alpha must be a number.') from exc
+    if not (0.001 <= motion_background_alpha <= 0.5):
+        raise HTTPException(status_code=400, detail='motion_background_alpha must be between 0.001 and 0.5.')
+    periodic_scan_interval_seconds = _int_field(merged, 'periodic_scan_interval_seconds', 0, 0, 3600)
     return {
         'snapshot_refresh_ms': snapshot_refresh_ms,
         'detection_status_refresh_ms': detection_status_refresh_ms,
@@ -4384,6 +4485,11 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'event_debounce_seconds': event_debounce_seconds,
         'background_detection_enabled': background_detection_enabled,
         'detection_history_minutes': detection_history_minutes,
+        'motion_pixel_threshold': motion_pixel_threshold,
+        'motion_gate_fraction': round(motion_gate_fraction, 6),
+        'motion_scale_fraction': round(motion_scale_fraction, 4),
+        'motion_background_alpha': round(motion_background_alpha, 4),
+        'periodic_scan_interval_seconds': periodic_scan_interval_seconds,
     }
 
 
