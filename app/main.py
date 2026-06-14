@@ -1518,6 +1518,7 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
     cam_settings = next((c for c in cameras_config if str(c.get('id') or '') == camera_id), None)
     sound_rules = cam_settings.get('detection', {}).get('sound', {}).get('rules', []) if cam_settings else []
     fired_rule = next((r for r in sound_rules if r.get('class') == class_id), {})
+    alert_on_detect = normalize_bool_setting(fired_rule.get('alert_on_detect'), True)
     email_enabled = normalize_bool_setting(fired_rule.get('email_enabled'), False)
     email_recipients = normalize_email_recipients(fired_rule.get('email_recipients', []))
     push_enabled = normalize_bool_setting(fired_rule.get('push_enabled'), False)
@@ -1527,7 +1528,7 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
         source='sound',
         snapshot_path=None,
         detections=[],
-        alert_triggered=True,
+        alert_triggered=alert_on_detect,
         metadata={
             'source': 'sound-detection',
             'sound_source': 'rtsp',
@@ -1569,15 +1570,16 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
                 logger.debug('Sound event %s linked to recording %s (camera %s)', event_id, rid, camera_id)
 
     message = f'{class_label} detected ({confidence:.0%} confidence)'
-    database.add_alert(
-        created_at=now_iso,
-        rule_name=rule_name,
-        event_id=event_id,
-        label=class_id,
-        confidence=confidence,
-        message=message,
-        recording_id=recording_ids[0] if recording_ids else None,
-    )
+    if alert_on_detect:
+        database.add_alert(
+            created_at=now_iso,
+            rule_name=rule_name,
+            event_id=event_id,
+            label=class_id,
+            confidence=confidence,
+            message=message,
+            recording_id=recording_ids[0] if recording_ids else None,
+        )
 
     alert_payload = {
         'rule_name': rule_name,
