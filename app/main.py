@@ -1534,11 +1534,14 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None = None) -> 
         camera_id = str(selected_config.get('id') or 'camera')
         if not _camera_has_live_alert_stream(selected_config):
             continue
-        with _live_backoff_lock:
-            retry_after = live_detection_retry_after.get(camera_id, 0)
         now = time.time()
-        if retry_after and now < retry_after:
-            continue
+        # Keep the recording infrastructure (rolling prebuffer + continuous
+        # chunks) warm REGARDLESS of detection backoff. The prebuffer is a cheap
+        # RTSP stream copy that supplies the pre-event footage; the backoff below
+        # only throttles the expensive frame-read + YOLO inference path. Pausing
+        # the prebuffer during a detection hiccup leaves no pre-roll segments, so
+        # the next event falls back to a live forward capture that starts after
+        # the subject has already passed — the event is silently missed.
         stream_url = build_stream_url(selected_config)
         cam_rec_config = camera_event_recording_config(selected_config)
         if stream_url:
@@ -1554,6 +1557,10 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None = None) -> 
                     recording_config=cam_rec_config,
                     on_chunk_complete=_make_continuous_chunk_callback(camera_id),
                 )
+        with _live_backoff_lock:
+            retry_after = live_detection_retry_after.get(camera_id, 0)
+        if retry_after and now < retry_after:
+            continue
         detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 0.25))
         with live_detection_worker_lock:
             if camera_id in active_live_detection_cameras:
