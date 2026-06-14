@@ -4356,7 +4356,7 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_live_config()
     merged = {**current, **payload}
     snapshot_refresh_ms = _int_field(merged, 'snapshot_refresh_ms', 500, 150, 5000)
-    detection_status_refresh_ms = _int_field(merged, 'detection_status_refresh_ms', 2000, 500, 15000)
+    detection_status_refresh_ms = _int_field(merged, 'detection_status_refresh_ms', 2000, 100, 15000)
     background_detection_enabled = normalize_bool_setting(merged.get('background_detection_enabled'), True)
     try:
         detection_interval_seconds = float(merged.get('detection_interval_seconds', 0.25))
