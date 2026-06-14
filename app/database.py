@@ -629,7 +629,6 @@ class EventDatabase:
                 SELECT COUNT(*) AS count
                 FROM detections
                 WHERE label != 'motion'
-                  AND confidence >= 0.5
                   AND event_id NOT IN (SELECT id FROM events WHERE source = 'sound')
                 """
             ).fetchone()["count"]
