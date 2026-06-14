@@ -270,7 +270,10 @@ function fillModal(camera, index) {
   document.getElementById('editPort').value = camera.port || 554;
   document.getElementById('editPath').value = camera.path || 'stream1';
   document.getElementById('editUsername').value = camera.username || '';
-  document.getElementById('editPassword').value = camera.password || '';
+  const pwdField = document.getElementById('editPassword');
+  pwdField.value = '';
+  pwdField.placeholder = camera.has_password ? '(saved — type to change)' : '(no password)';
+  document.getElementById('testConnectionResult').textContent = '';
   document.getElementById('editWidth').value = camera.width || 1280;
   document.getElementById('editHeight').value = camera.height || 720;
   document.getElementById('editFps').value = camera.fps || 15;
@@ -406,6 +409,38 @@ document.getElementById('deleteConfirmBtn').addEventListener('click', async () =
   }
   closeModal(deleteModal);
   pendingDeleteIndex = null;
+});
+
+// ─── Test connection ──────────────────────────────────────────────────────────
+
+document.getElementById('testConnectionBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('testConnectionBtn');
+  const resultEl = document.getElementById('testConnectionResult');
+  const backend = document.getElementById('editBackend').value;
+  const payload = backend === 'rtsp'
+    ? { stream_url: document.getElementById('editStreamUrl').value.trim() }
+    : {
+        host: document.getElementById('editHost').value.trim(),
+        port: parseInt(document.getElementById('editPort').value || '554', 10),
+        path: document.getElementById('editPath').value.trim(),
+        username: document.getElementById('editUsername').value.trim(),
+        password: document.getElementById('editPassword').value,
+      };
+  btn.disabled = true;
+  btn.textContent = 'Testing…';
+  resultEl.textContent = '';
+  resultEl.style.color = '';
+  try {
+    const result = await api('/api/cameras/test-connection', { method: 'POST', body: JSON.stringify(payload) });
+    resultEl.textContent = result.online ? 'Connected' : (result.message || 'Unreachable');
+    resultEl.style.color = result.online ? 'var(--color-success, #22c55e)' : 'var(--color-error, #ef4444)';
+  } catch (err) {
+    resultEl.textContent = err.message || 'Test failed';
+    resultEl.style.color = 'var(--color-error, #ef4444)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Test Connection';
+  }
 });
 
 // ─── Close handlers ───────────────────────────────────────────────────────────

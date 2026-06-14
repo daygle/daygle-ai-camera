@@ -159,6 +159,12 @@ class RecordingService:
         ]
         result = subprocess.run(command, capture_output=True, text=True, timeout=max(30, int(duration_seconds) + 20), check=False)
         if result.returncode != 0:
+            # Stream may have dropped mid-clip; keep partial footage if ffmpeg
+            # wrote a decodable file before dying rather than discarding it.
+            if tmp_path.exists() and tmp_path.stat().st_size > 0 and self.clip_has_video_stream(tmp_path):
+                logger.warning('ffmpeg exited non-zero for RTSP clip but partial footage is usable; keeping it.')
+                tmp_path.replace(file_path)
+                return
             if tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
             error_detail = self.redact_stream_credentials(f'{result.stderr[:500]}\n...\n{result.stderr[-1000:]}')

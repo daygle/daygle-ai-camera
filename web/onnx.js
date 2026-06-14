@@ -280,7 +280,13 @@ document.querySelectorAll('.field-help').forEach((el) => {
 aiForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
-    renderAi(await api('/api/settings/ai', { method: 'PUT', body: JSON.stringify(formPayload(aiForm)) }));
+    const result = await api('/api/settings/ai', { method: 'PUT', body: JSON.stringify(formPayload(aiForm)) });
+    renderAi(result);
+    if (result.reload_succeeded !== false) {
+      setMessage(result.last_detector_error
+        ? `Settings saved. Detector warning: ${result.last_detector_error}`
+        : 'Settings saved.');
+    }
     await loadModels();
   } catch (error) { setMessage(error.message, true); }
 });

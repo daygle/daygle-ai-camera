@@ -4459,6 +4459,10 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     for key in ('stream_url', 'host', 'path', 'username', 'password'):
         if key in updated:
             updated[key] = str(updated.get(key) or '').strip()
+    # Blank password in the payload means "keep existing" — the GET response
+    # redacts the real value so the edit form always submits an empty field.
+    if not updated.get('password') and current.get('password'):
+        updated['password'] = current['password']
     if backend in {'onvif', 'rtsp'} and not build_stream_url(updated):
         raise HTTPException(status_code=400, detail='stream_url is required for ONVIF/RTSP cameras, or provide host plus optional username, password, port, and path.')
     flip = str(updated.get('flip', 'none')).lower()
@@ -4635,6 +4639,25 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'motion_background_alpha': round(motion_background_alpha, 4),
         'periodic_scan_interval_seconds': periodic_scan_interval_seconds,
     }
+
+
+def _migrate_camera_id(old_id: str, new_id: str) -> None:
+    old_key = RecordingService._camera_key(old_id)
+    new_key = RecordingService._camera_key(new_id)
+    with live_detection_history_lock:
+        if old_id in live_detection_history:
+            live_detection_history[new_id] = live_detection_history.pop(old_id)
+    with _frame_motion_lock:
+        if old_id in _frame_motion_prev:
+            _frame_motion_prev[new_id] = _frame_motion_prev.pop(old_id)
+    if recording_service is not None:
+        old_dir = recording_service.prebuffer_dir / old_key
+        new_dir = recording_service.prebuffer_dir / new_key
+        if old_dir.exists() and not new_dir.exists():
+            try:
+                old_dir.rename(new_dir)
+            except OSError as exc:
+                logger.warning('Could not rename prebuffer dir %s → %s: %s', old_key, new_key, exc)
 
 
 def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
@@ -5148,9 +5171,15 @@ async def restore_database(request: Request, file: UploadFile = File(...)):
         await file.close()
 
 
+def _redact_camera(cam: dict[str, Any]) -> dict[str, Any]:
+    out = {k: v for k, v in cam.items() if k != 'password'}
+    out['has_password'] = bool(cam.get('password'))
+    return out
+
+
 @app.get('/api/cameras')
 def list_cameras():
-    return {'cameras': effective_cameras_config()}
+    return {'cameras': [_redact_camera(c) for c in effective_cameras_config()]}
 
 
 @app.get('/api/cameras/health')
@@ -5181,10 +5210,14 @@ def cameras_health():
 async def update_cameras(request: Request):
     require_admin(request)
     settings = validate_cameras_settings(await request.json())
+    old_configs = list(cameras_config)
+    for old, new in zip(old_configs, settings):
+        if old.get('id') and new.get('id') and old['id'] != new['id']:
+            _migrate_camera_id(old['id'], new['id'])
     database.set_setting('cameras', settings, utc_now())
     apply_cameras_settings(settings)
     write_audit_log(request, 'update', 'settings.cameras', details={'count': len(settings)})
-    return {'cameras': settings}
+    return {'cameras': [_redact_camera(c) for c in settings]}
 
 
 @app.put('/api/cameras/{camera_id}')
@@ -5199,7 +5232,7 @@ async def update_camera(camera_id: str, request: Request):
             database.set_setting('cameras', settings_list, utc_now())
             apply_cameras_settings(settings_list)
             write_audit_log(request, 'update', 'settings.camera', normalized, {'camera_name': settings_list[index].get('name')})
-            return settings_list[index]
+            return _redact_camera(settings_list[index])
     # Upsert: a PUT to an unknown id creates the camera (there is no default
     # camera on a clean install anymore).
     created = validate_camera_settings({**payload, 'id': normalized}, index=len(settings_list) + 1)
@@ -5207,7 +5240,29 @@ async def update_camera(camera_id: str, request: Request):
     database.set_setting('cameras', settings_list, utc_now())
     apply_cameras_settings(settings_list)
     write_audit_log(request, 'create', 'settings.camera', normalized, {'camera_name': created.get('name')})
-    return created
+    return _redact_camera(created)
+
+
+@app.post('/api/cameras/test-connection')
+async def test_camera_connection(request: Request):
+    require_admin(request)
+    payload = await request.json()
+    stream_url = build_stream_url(payload)
+    if not stream_url:
+        raise HTTPException(status_code=400, detail='Provide a stream_url or host to test.')
+    ffprobe = shutil.which('ffprobe')
+    if not ffprobe:
+        raise HTTPException(status_code=503, detail='ffprobe is not installed — cannot test connection.')
+    command = [ffprobe, '-v', 'quiet', '-rtsp_transport', 'tcp', '-i', stream_url,
+               '-show_entries', 'stream=codec_type', '-of', 'json']
+    try:
+        result = subprocess.run(command, capture_output=True, timeout=8, check=False)
+        if result.returncode == 0:
+            return {'online': True, 'message': 'Stream is reachable.'}
+        stderr = RecordingService.redact_stream_credentials(result.stderr.decode('utf-8', errors='replace').strip())
+        return {'online': False, 'message': f'Stream unreachable: {stderr[:300]}' if stderr else 'Stream unreachable.'}
+    except subprocess.TimeoutExpired:
+        return {'online': False, 'message': 'Connection timed out (8 s). Check host, port, and credentials.'}
 
 
 @app.post('/api/cameras/{camera_id}/ptz')

@@ -177,8 +177,12 @@
               <label><span>Port</span><input id="editPort" name="port" type="number" min="1" max="65535" placeholder="554" /></label>
               <label><span>Stream path</span><input id="editPath" name="path" placeholder="stream1" /></label>
               <label><span>Username</span><input id="editUsername" name="username" placeholder="admin" autocomplete="off" /></label>
-              <label class="full-width"><span>Password</span><input id="editPassword" name="password" type="password" placeholder="••••••••" autocomplete="new-password" /></label>
+              <label class="full-width"><span>Password</span><input id="editPassword" name="password" type="password" autocomplete="new-password" /></label>
             </div>
+          </div>
+          <div class="button-row" style="margin-top:8px">
+            <button class="secondary" id="testConnectionBtn" type="button">Test Connection</button>
+            <span id="testConnectionResult" class="muted" style="font-size:13px;align-self:center"></span>
           </div>
         </div>
 
