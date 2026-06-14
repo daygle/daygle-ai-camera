@@ -35,6 +35,27 @@ class RecordingService:
         self._prebuffer_workers: dict[str, dict[str, Any]] = {}
         self._continuous_lock = threading.Lock()
         self._continuous_workers: dict[str, dict[str, Any]] = {}
+        # Optional hook the application sets to surface operational events
+        # (e.g. prebuffer fallbacks) into the camera diagnostics log. Signature:
+        # callback(camera_id, event_type, message, severity, details).
+        self.diagnostic_callback: Callable[..., None] | None = None
+
+    def _emit_diagnostic(
+        self,
+        camera_id: str | None,
+        event_type: str,
+        message: str,
+        *,
+        severity: str = 'info',
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        callback = self.diagnostic_callback
+        if callback is None:
+            return
+        try:
+            callback(camera_id, event_type, message, severity=severity, details=details)
+        except Exception as exc:
+            logger.debug('Camera diagnostic callback failed for %s/%s: %s', camera_id, event_type, exc)
 
     def should_record(self, detections: list[dict[str, Any]], recording_config: dict[str, Any] | None = None) -> tuple[bool, str, str | None]:
         config = recording_config or self.recording_config
@@ -398,6 +419,14 @@ class RecordingService:
         segments, content_start_ts = self._collect_prebuffer_segments(camera_key, start_ts, end_ts)
         if not segments:
             logger.info('No prebuffer segments available for %s; falling back to direct RTSP clip capture.', camera_key)
+            self._emit_diagnostic(
+                camera_id,
+                'prebuffer_fallback',
+                'No pre-event buffer was available, so the clip was captured live from the trigger forward — '
+                'the moments before the trigger are missing.',
+                severity='warning',
+                details={'reason': 'no_segments'},
+            )
             fallback_start_ts = time.time()
             self.write_rtsp_clip(stream_url, file_path, max_duration_seconds)
             return fallback_start_ts, max_duration_seconds
@@ -482,6 +511,14 @@ class RecordingService:
         ):
             tmp_path.unlink(missing_ok=True)
             logger.warning('Failed to render clip from prebuffer for %s; falling back to direct RTSP capture.', camera_key)
+            self._emit_diagnostic(
+                camera_id,
+                'prebuffer_fallback',
+                'Pre-event buffer could not be rendered, so the clip was captured live from the trigger forward — '
+                'the moments before the trigger are missing.',
+                severity='warning',
+                details={'reason': 'render_failed'},
+            )
             fallback_start_ts = time.time()
             self.write_rtsp_clip(stream_url, file_path, max_duration_seconds)
             return fallback_start_ts, max_duration_seconds
