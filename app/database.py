@@ -626,7 +626,7 @@ class EventDatabase:
             ).fetchone()["count"]
             matched_object_events = db.execute(
                 """
-                SELECT COUNT(*) AS count
+                SELECT COUNT(DISTINCT e.id) AS count
                 FROM detections d
                 JOIN events e ON e.id = d.event_id
                 WHERE d.label != 'motion'
