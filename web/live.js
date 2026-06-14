@@ -66,7 +66,6 @@ let liveAiTrackPrevCaptureMs = 0;
 // zero out the projection velocity).
 let lastServerTrackUpdatedAt = null;
 let liveRafId = null;
-const OVERLAY_STATUS_REFRESH_MS = 600;
 const LIVE_AI_TRACK_MAX_LEAD_MS = 1500;
 // Stop drawing once the monitor stops reporting (camera backoff, detector
 // stalled) so the last box does not linger after the object has left. The
@@ -433,9 +432,7 @@ function ingestServerTrackDetections(payload) {
 }
 
 function detectionStatusInterval() {
-  return liveAiTrackEnabled && !isAllCameraMode()
-    ? Math.min(detectionStatusRefreshMs, OVERLAY_STATUS_REFRESH_MS)
-    : detectionStatusRefreshMs;
+  return detectionStatusRefreshMs;
 }
 
 function restartDetectionStatusTimer() {
