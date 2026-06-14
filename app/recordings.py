@@ -620,11 +620,7 @@ class RecordingService:
         if not timed:
             return [], None
         selected = [item for item in timed if item[2] > start_ts and item[1] < end_ts]
-        if not selected:
-            # Fallback to most recent segments covering the requested span.
-            window_seconds = max(1, int(end_ts - start_ts))
-            selected = timed[-window_seconds:]
-        return [item[0] for item in selected], selected[0][1]
+        return [item[0] for item in selected], selected[0][1] if selected else None
 
     @staticmethod
     def redact_stream_credentials(message: str) -> str:
