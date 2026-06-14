@@ -632,6 +632,14 @@ class EventDatabase:
                 WHERE d.label != 'motion'
                   AND e.source != 'sound'
                   AND e.dismissed = 0
+                  AND (
+                      EXISTS (SELECT 1 FROM recordings WHERE recordings.event_id = e.id)
+                      OR EXISTS (
+                          SELECT 1 FROM alert_history ah
+                          JOIN recordings r ON r.id = ah.recording_id
+                          WHERE ah.event_id = e.id
+                      )
+                  )
                 """
             ).fetchone()["count"]
             object_alerts = db.execute(
