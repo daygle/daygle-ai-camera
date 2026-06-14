@@ -384,6 +384,56 @@ def test_export_yolo_onnx_uses_ultralytics_export(tmp_path, monkeypatch):
     assert destination.exists()
 
 
+def test_detection_backoff_keeps_prebuffer_warm(tmp_path, monkeypatch):
+    # A camera in *detection* backoff (transient frame-read/inference errors)
+    # must still have its recording prebuffer maintained, otherwise the next
+    # event has no pre-roll footage and is captured too late, missing the
+    # triggering subject.
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    camera = {
+        'id': 'front-yard',
+        'name': 'Front Yard',
+        'backend': 'rtsp',
+        'stream_url': 'rtsp://example/front',
+    }
+    monkeypatch.setattr(main, 'cameras_config', [camera])
+
+    primed: list[str] = []
+    monkeypatch.setattr(
+        main.recording_service,
+        'prime_rtsp_prebuffer',
+        lambda **kwargs: primed.append(kwargs.get('camera_id')) or True,
+    )
+
+    threads_started: list[str] = []
+    real_thread = main.threading.Thread
+
+    def _track_thread(*args, **kwargs):
+        name = str(kwargs.get('name') or '')
+        if name.startswith('live-detection-'):
+            threads_started.append(name)
+
+            class _Noop:
+                def start(self_inner):
+                    return None
+
+            return _Noop()
+        return real_thread(*args, **kwargs)
+
+    monkeypatch.setattr(main.threading, 'Thread', _track_thread)
+
+    # Put the camera into detection backoff.
+    with main._live_backoff_lock:
+        main.live_detection_retry_after['front-yard'] = time.time() + 300
+
+    main.run_live_alert_monitor_once({'background_detection_enabled': True, 'detection_interval_seconds': 0.5})
+
+    assert primed == ['front-yard'], 'prebuffer should be primed despite detection backoff'
+    assert threads_started == [], 'detection should remain throttled during backoff'
+
+
 def test_favicon_is_served_publicly(tmp_path, monkeypatch):
     app, _database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
