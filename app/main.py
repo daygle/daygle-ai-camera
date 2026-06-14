@@ -1758,6 +1758,20 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     if not (now - 300 <= frame_capture_ts <= now + 1):
         frame_capture_ts = now
 
+    # Run the cheap pixel-diff motion check before the expensive ONNX inference.
+    # If nothing changed in the frame there is nothing actionable to detect.
+    frame_has_motion, frame_motion_confidence = detect_frame_motion(camera_id, image)
+    if not frame_has_motion:
+        update_live_detection_status(
+            camera_id,
+            state='checked',
+            reason='No motion detected; ONNX inference skipped.',
+            detected_labels=[],
+            matched_labels=[],
+            detections=[],
+        )
+        return None
+
     min_conf = compute_minimum_rule_confidence()
     try:
         if frame_is_numpy and hasattr(detector, 'detect_frame'):
@@ -1771,7 +1785,6 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
 
     detections = normalize_detection_boxes_for_frame(detections, frame)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
-    frame_has_motion, frame_motion_confidence = detect_frame_motion(camera_id, image)
     motion_detections = zone_motion_detections(detections, settings, frame_motion_confidence) if frame_has_motion else []
     object_detections = filter_detections_for_camera(detections, settings)
     zone_rules = zone_object_alert_rules(settings)
