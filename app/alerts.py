@@ -48,14 +48,15 @@ class AlertEngine:
                     continue
 
                 rule_name = str(rule.get('name') or label)
+                cooldown_key = str(rule.get('cooldown_key') or rule_name)
                 cooldown = int(rule.get('cooldown_seconds', 60))
 
                 now = time.time()
                 with self._lock:
-                    last = self.last_triggered.get(rule_name, 0)
+                    last = self.last_triggered.get(cooldown_key, 0)
                     if now - last < cooldown:
                         continue
-                    self.last_triggered[rule_name] = now
+                    self.last_triggered[cooldown_key] = now
 
                 alerts.append({
                     'rule_name': rule_name,
@@ -84,13 +85,14 @@ class AlertEngine:
                 continue
 
             rule_name = str(rule.get('name') or 'Motion')
+            cooldown_key = str(rule.get('cooldown_key') or rule_name)
             cooldown = int(rule.get('cooldown_seconds', 60))
             now = time.time()
             with self._lock:
-                last = self.last_triggered.get(rule_name, 0)
+                last = self.last_triggered.get(cooldown_key, 0)
                 if now - last < cooldown:
                     continue
-                self.last_triggered[rule_name] = now
+                self.last_triggered[cooldown_key] = now
             alerts.append({
                 'rule_name': rule_name,
                 'label': 'motion',

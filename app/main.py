@@ -1083,6 +1083,7 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
     rules: list[dict[str, Any]] = []
+    camera_key = str(settings.get('id') or settings.get('name') or 'camera').strip() or 'camera'
     for zone in zones:
         zone_id = str(zone.get('id') or zone.get('name') or 'zone')
         for rule in (zone.get('object_rules') or []):
@@ -1093,6 +1094,7 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
                 continue
             rules.append({
                 'name': zone_rule_name(settings, zone, rule),
+                'cooldown_key': f'{camera_key}::{zone_id}::{label}',
                 'object': label,
                 'zone_id': zone_id,
                 'min_confidence': rule.get('min_confidence', 0.5),

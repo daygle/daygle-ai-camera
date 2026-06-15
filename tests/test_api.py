@@ -3953,6 +3953,33 @@ def test_person_and_cat_in_zone_each_create_independent_events(tmp_path, monkeyp
     assert cat_event['recordings'][0]['trigger_label']    == 'cat'
 
 
+def test_alert_cooldown_is_scoped_by_internal_key_even_when_rule_names_match():
+    from app.alerts import AlertEngine
+
+    engine = AlertEngine([])
+    detection = {
+        'label': 'cat',
+        'confidence': 0.92,
+        'zone_id': 'full-frame',
+    }
+    base_rule = {
+        'name': 'Front Door / Full Frame / cat',
+        'object': 'cat',
+        'zone_id': 'full-frame',
+        'min_confidence': 0.5,
+        'cooldown_seconds': 60,
+        'enabled': True,
+    }
+
+    first = engine.process([detection], rules=[{**base_rule, 'cooldown_key': 'front-yard::full-frame::cat'}])
+    second = engine.process([detection], rules=[{**base_rule, 'cooldown_key': 'driveway::full-frame::cat'}])
+    repeated_first = engine.process([detection], rules=[{**base_rule, 'cooldown_key': 'front-yard::full-frame::cat'}])
+
+    assert len(first) == 1
+    assert len(second) == 1
+    assert repeated_first == []
+
+
 def test_coco_labels_load_person_and_cat_at_correct_indices(tmp_path):
     """Verify coco.names resolves COCO class IDs 0→'person' and 15→'cat'."""
     from app.detector import load_labels
