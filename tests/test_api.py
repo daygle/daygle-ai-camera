@@ -668,6 +668,9 @@ def test_shared_ingest_worker_command_fans_out_three_outputs(tmp_path, monkeypat
     assert any(str(a).endswith('latest.jpg') for a in cmd), 'frame output for detection/snapshots'
     assert any('segment-' in str(a) and str(a).endswith('.ts') for a in cmd), 'video segments for events'
     assert any('aud-' in str(a) and str(a).endswith('.wav') for a in cmd), 'audio segments for sound'
+    segment_times = [cmd[index + 1] for index, value in enumerate(cmd) if value == '-segment_time']
+    assert segment_times[0] == str(RecordingService.PREBUFFER_SEGMENT_SECONDS)
+    assert segment_times[1] == '1'
     assert 'image2' in cmd and cmd.count('segment') >= 2  # ts segment + wav segment muxers
 
 

@@ -34,6 +34,10 @@ class RecordingService:
     # detection. The live monitor samples at ~2 Hz by default, so 4 fps keeps a
     # fresh frame available without spending CPU on frames nothing reads.
     INGEST_FRAME_FPS = 4
+    # Event prebuffer video segment length. Tiny 1s stream-copy segments are
+    # fragile with sparse-keyframe RTSP streams; 4s reduces concat boundaries
+    # while keeping event timing reasonably granular.
+    PREBUFFER_SEGMENT_SECONDS = 4
     # How long sidecar audio segments are retained before pruning (sound
     # detection consumes them within ~1s; keep a small safety margin).
     AUDIO_SEGMENT_RETENTION_SECONDS = 20
@@ -724,7 +728,7 @@ class RecordingService:
                 '-f',
                 'segment',
                 '-segment_time',
-                '1',
+                str(self.PREBUFFER_SEGMENT_SECONDS),
                 '-segment_format',
                 'mpegts',
                 '-strftime',
