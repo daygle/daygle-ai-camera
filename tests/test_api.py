@@ -791,6 +791,32 @@ def test_sound_detector_ingest_overlaps_windows_across_segments(tmp_path):
     assert all(n == 16000 for n in captured), 'each classified window is a full 1s of 16 kHz mono'
 
 
+def test_prebuffer_first_segment_uses_full_segment_length(tmp_path):
+    # The first selected segment (no previous mtime to anchor to) must fall back
+    # to the real segment length, not a hardcoded 1s. With 4s segments the old
+    # 1s fallback put content_start ~3s late and mis-stated the concat duration.
+    from app.recordings import RecordingService
+
+    service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'rec')}, 'recording': {}})
+    key = 'cam'
+    cam_dir = service.prebuffer_dir / key
+    cam_dir.mkdir(parents=True)
+    now = time.time()
+    # Two contiguous 4s segments ending at now-4 and now.
+    for index, end in enumerate((now - 4, now)):
+        seg = cam_dir / f'segment-{index:02d}.mp4'
+        seg.write_bytes(b'x')
+        os.utime(seg, (end, end))
+
+    segments, content_start = service._collect_prebuffer_segments(key, now - 7, now)
+    assert len(segments) == 2
+    # First segment has no predecessor, so its content start = end - segment length.
+    assert content_start == pytest.approx((now - 4) - service.PREBUFFER_SEGMENT_SECONDS, abs=0.2)
+
+    durations = service._prebuffer_segment_durations(key, segments)
+    assert durations[segments[0]] == pytest.approx(service.PREBUFFER_SEGMENT_SECONDS, abs=0.2)
+
+
 def test_favicon_is_served_publicly(tmp_path, monkeypatch):
     app, _database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)

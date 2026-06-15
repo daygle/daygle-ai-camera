@@ -868,7 +868,7 @@ class RecordingService:
         A segment's mtime marks when ffmpeg finished writing it - its content
         END. Its content START is the previous segment's mtime while the
         stream is continuous (segments split on keyframes, so they can exceed
-        the nominal 1s). Selecting by content overlap keeps footage from
+        the nominal segment length). Selecting by content overlap keeps footage from
         before the requested window out of the clip, and the returned start
         lets the caller align stored timing and the detection track with what
         the rendered video actually shows."""
@@ -882,8 +882,8 @@ class RecordingService:
                 end = segment.stat().st_mtime
             except OSError:
                 continue
-            # After a gap (worker restart) fall back to the nominal 1s length.
-            start = prev_end if prev_end is not None and 0 < end - prev_end <= 10 else end - 1.0
+            # After a gap (worker restart) fall back to the nominal segment length.
+            start = prev_end if prev_end is not None and 0 < end - prev_end <= 10 else end - self.PREBUFFER_SEGMENT_SECONDS
             timed.append((segment, start, end))
             prev_end = end
         if not timed:
@@ -901,7 +901,7 @@ class RecordingService:
                 end = segment.stat().st_mtime
             except OSError:
                 continue
-            start = prev_end if prev_end is not None and 0 < end - prev_end <= 10 else end - 1.0
+            start = prev_end if prev_end is not None and 0 < end - prev_end <= 10 else end - self.PREBUFFER_SEGMENT_SECONDS
             if segment.resolve() in wanted:
                 durations[segment] = max(0.001, end - start)
             prev_end = end
