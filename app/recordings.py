@@ -29,7 +29,7 @@ class RecordingService:
     # live instead. Only judged for windows long enough to be meaningful.
     DEGENERATE_MIN_REQUEST_SECONDS = 8.0
     DEGENERATE_MAX_RENDERED_SECONDS = 3.0
-    DEGENERATE_MAX_RENDERED_FRACTION = 0.25
+    DEGENERATE_MAX_RENDERED_FRACTION = 0.50
     # Decoded-frame rate the shared ingest writes to latest.jpg for object
     # detection. The live monitor samples at ~2 Hz by default, so 4 fps keeps a
     # fresh frame available without spending CPU on frames nothing reads.
@@ -38,6 +38,7 @@ class RecordingService:
     # fragile with sparse-keyframe RTSP streams; 4s reduces concat boundaries
     # while keeping event timing reasonably granular.
     PREBUFFER_SEGMENT_SECONDS = 4
+    PREBUFFER_SEGMENT_GLOB = 'segment-*.mp4'
     # How long sidecar audio segments are retained before pruning (sound
     # detection consumes them within ~1s; keep a small safety margin).
     AUDIO_SEGMENT_RETENTION_SECONDS = 20
@@ -508,12 +509,11 @@ class RecordingService:
             str(list_path),
             '-map',
             '0:v:0',
-            '-map',
-            '0:a:0?',
+            '-an',
             # The rolling prebuffer segments are already browser-oriented H.264
-            # video with AAC audio. Remux them instead of decoding/re-encoding:
-            # it is much cheaper on small boards and preserves recoverable video
-            # packets from imperfect RTSP segments.
+            # video. Remux it instead of decoding/re-encoding: it is much
+            # cheaper on small boards and preserves recoverable video packets
+            # from imperfect RTSP segments.
             '-c',
             'copy',
             '-avoid_negative_ts',
@@ -685,7 +685,7 @@ class RecordingService:
             return
         camera_dir = self.prebuffer_dir / camera_key
         camera_dir.mkdir(parents=True, exist_ok=True)
-        output_pattern = camera_dir / 'segment-%Y%m%dT%H%M%S.ts'
+        output_pattern = camera_dir / 'segment-%Y%m%dT%H%M%S.mp4'
         # Sidecar outputs for the other consumers of this single connection.
         frames_dir = self.frames_dir / camera_key
         frames_dir.mkdir(parents=True, exist_ok=True)
@@ -714,23 +714,20 @@ class RecordingService:
                 'ignore_err',
                 '-i',
                 stream_url,
-                # Output 1: rolling video+audio segments for event clips.
+                # Output 1: rolling fragmented-MP4 video segments for event clips.
                 '-map',
                 '0:v:0',
-                '-map',
-                '0:a:0?',
                 '-c:v',
                 'copy',
-                '-c:a',
-                'aac',
-                '-b:a',
-                '128k',
+                '-an',
                 '-f',
                 'segment',
                 '-segment_time',
                 str(self.PREBUFFER_SEGMENT_SECONDS),
                 '-segment_format',
-                'mpegts',
+                'mp4',
+                '-segment_format_options',
+                'movflags=+frag_keyframe+empty_moov+default_base_moof',
                 '-strftime',
                 '1',
                 str(output_pattern),
@@ -807,7 +804,7 @@ class RecordingService:
 
     def _prune_prebuffer_segments(self, camera_dir: Path, keep_seconds: int) -> None:
         cutoff = time.time() - max(keep_seconds, 5)
-        for segment in camera_dir.glob('segment-*.ts'):
+        for segment in list(camera_dir.glob(self.PREBUFFER_SEGMENT_GLOB)) + list(camera_dir.glob('segment-*.ts')):
             try:
                 if segment.stat().st_mtime < cutoff:
                     segment.unlink(missing_ok=True)
@@ -879,7 +876,7 @@ class RecordingService:
             return [], None
         timed: list[tuple[Path, float, float]] = []
         prev_end: float | None = None
-        for segment in sorted(camera_dir.glob('segment-*.ts')):
+        for segment in sorted(camera_dir.glob(self.PREBUFFER_SEGMENT_GLOB)):
             try:
                 end = segment.stat().st_mtime
             except OSError:
@@ -898,7 +895,7 @@ class RecordingService:
         wanted = {segment.resolve() for segment in segments}
         durations: dict[Path, float] = {}
         prev_end: float | None = None
-        for segment in sorted(camera_dir.glob('segment-*.ts')):
+        for segment in sorted(camera_dir.glob(self.PREBUFFER_SEGMENT_GLOB)):
             try:
                 end = segment.stat().st_mtime
             except OSError:

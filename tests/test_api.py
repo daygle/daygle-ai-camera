@@ -517,6 +517,7 @@ def test_prebuffer_render_degenerate_detection():
     assert RecordingService._clip_is_degenerate(1.0, 65.0) is True
     assert RecordingService._clip_is_degenerate(2.9, 10.0) is True
     assert RecordingService._clip_is_degenerate(10.0, 87.0) is True
+    assert RecordingService._clip_is_degenerate(15.0, 48.0) is True
     # A clip close to its requested window is fine.
     assert RecordingService._clip_is_degenerate(63.0, 65.0) is False
     # A legitimately short window (no full pre-roll yet) is not flagged.
@@ -666,8 +667,12 @@ def test_shared_ingest_worker_command_fans_out_three_outputs(tmp_path, monkeypat
     cmd = captured['cmd']
     assert cmd.count('-i') == 1, 'a single input == a single RTSP connection'
     assert any(str(a).endswith('latest.jpg') for a in cmd), 'frame output for detection/snapshots'
-    assert any('segment-' in str(a) and str(a).endswith('.ts') for a in cmd), 'video segments for events'
+    assert any('segment-' in str(a) and str(a).endswith('.mp4') for a in cmd), 'video segments for events'
     assert any('aud-' in str(a) and str(a).endswith('.wav') for a in cmd), 'audio segments for sound'
+    video_output_index = next(index for index, value in enumerate(cmd) if 'segment-' in str(value) and str(value).endswith('.mp4'))
+    assert '-an' in cmd[:video_output_index]
+    assert cmd[cmd.index('-segment_format') + 1] == 'mp4'
+    assert cmd[cmd.index('-segment_format_options') + 1] == 'movflags=+frag_keyframe+empty_moov+default_base_moof'
     segment_times = [cmd[index + 1] for index, value in enumerate(cmd) if value == '-segment_time']
     assert segment_times[0] == str(RecordingService.PREBUFFER_SEGMENT_SECONDS)
     assert segment_times[1] == '1'
@@ -2008,7 +2013,7 @@ def test_collect_prebuffer_segments_selects_by_content_overlap(tmp_path):
     segments = []
     for offset in range(7):  # contiguous 1s segments ending at now-6 .. now
         end_ts = now - 6 + offset
-        segment = camera_dir / f'segment-{offset:02d}.ts'
+        segment = camera_dir / f'segment-{offset:02d}.mp4'
         segment.write_bytes(b'ts')
         os.utime(segment, (end_ts, end_ts))
         segments.append(segment)
@@ -2046,7 +2051,7 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
     now = time.time()
     for offset in range(17):  # contiguous 1s segments ending at now-16.5 .. now-0.5
         end_ts = now - 16.5 + offset
-        segment = camera_dir / f'segment-{offset:02d}.ts'
+        segment = camera_dir / f'segment-{offset:02d}.mp4'
         segment.write_bytes(b'ts')
         os.utime(segment, (end_ts, end_ts))
 
@@ -2082,7 +2087,8 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
     assert content_seconds == pytest.approx(15.5, abs=0.1)
     command = commands[0]
     assert command[command.index('-map') + 1] == '0:v:0'
-    assert '0:a:0?' in command
+    assert '-an' in command
+    assert '0:a:0?' not in command
     assert command[command.index('-c') + 1] == 'copy'
     assert 'libx264' not in command
     assert 'aac' not in command
@@ -2129,7 +2135,7 @@ def test_degenerate_prebuffer_render_keeps_partial_clip_instead_of_late_live_cap
     now = time.time()
     for offset in range(12):
         end_ts = now - 11.5 + offset
-        segment = camera_dir / f'segment-{offset:02d}.ts'
+        segment = camera_dir / f'segment-{offset:02d}.mp4'
         segment.write_bytes(b'ts')
         os.utime(segment, (end_ts, end_ts))
 
@@ -2182,7 +2188,7 @@ def test_prebuffer_concat_list_uses_ffmpeg_safe_absolute_paths(tmp_path, monkeyp
     now = time.time()
     for offset in range(4):
         end_ts = now - 3 + offset
-        segment = camera_dir / f"segment-{offset:02d}.ts"
+        segment = camera_dir / f"segment-{offset:02d}.mp4"
         segment.write_bytes(b'ts')
         os.utime(segment, (end_ts, end_ts))
 
