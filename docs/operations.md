@@ -1,0 +1,34 @@
+# Operations Guide
+
+This guide summarizes the admin pages and operational checks that help keep Daygle AI Camera healthy after installation.
+
+## Camera health
+
+Use **Cameras** (`/cameras`) to review each configured camera and the camera health summary. The health endpoint tracks online and offline state so administrators can quickly identify streams that need attention.
+
+Use the camera connection test before saving a new stream URL or ONVIF configuration. If a camera supports PTZ, enable PTZ in the camera editor and verify the protocol, port, address, and speed before sending movement commands.
+
+## Camera log
+
+Use **Camera Log** (`/camera-log`) to investigate operational issues. The log includes:
+
+- `camera_offline` and `camera_online` transitions.
+- `detection_backoff` and `detection_recovered` events.
+- `capture_failed` events.
+- `prebuffer_fallback`, `prebuffer_degenerate`, and `prebuffer_restart` recording events.
+
+Filter by camera ID, event type, or severity when investigating a specific stream. The newest diagnostic events are listed first.
+
+## Offline camera alerts
+
+Open **Settings** (`/settings`) to configure camera offline alert behavior. Offline alerts are useful when cameras are deployed remotely or when recordings are expected to be continuous.
+
+## Logs and backups
+
+- Application logs are written to `data/logs/app.log` with rotation.
+- SQLite backups can be downloaded from **Settings** → **Database**.
+- Restores create a safety backup of the current database before replacing it.
+
+## Update checks
+
+Admins can check for application updates from **Settings** → **Software Updates**. Service installs restart automatically after a successful browser-initiated update.
