@@ -505,13 +505,11 @@ function drawClipOverlay(vfcMediaTime) {
 
 function openVideoModal() {
   els.videoModal.hidden = false;
-  document.body.style.overflow = 'hidden';
   els.videoModalClose.focus();
 }
 
 function closeVideoModal() {
   els.videoModal.hidden = true;
-  document.body.style.overflow = '';
   els.clipPlayer.pause();
   stopOverlayRaf();
   els.clipPlayer.removeAttribute('src');
@@ -792,9 +790,6 @@ function populateLabelFilterOptions(recordings) {
 
 els.videoModalClose.addEventListener('click', () => closeVideoModal());
 
-els.videoModal.addEventListener('click', (event) => {
-  if (event.target === els.videoModal || event.target.classList.contains('video-modal-backdrop')) closeVideoModal();
-});
 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !els.videoModal.hidden) closeVideoModal();
