@@ -2209,8 +2209,12 @@ def test_prebuffer_concat_list_uses_ffmpeg_safe_absolute_paths(tmp_path, monkeyp
     )
 
     assert concat_text
-    for line in concat_text.splitlines():
-        assert line.startswith("file '")
+    file_lines = [line for line in concat_text.splitlines() if line.startswith("file '")]
+    duration_lines = [line for line in concat_text.splitlines() if line.startswith('duration ')]
+    assert file_lines
+    assert len(duration_lines) == len(file_lines)
+    assert all(float(line.split()[1]) > 0 for line in duration_lines)
+    for line in file_lines:
         assert '\\' not in line
         listed_path = line[len("file '"):-1]
         assert Path(listed_path).is_absolute()

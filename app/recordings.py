@@ -478,7 +478,8 @@ class RecordingService:
 
         list_path = file_path.with_name(f'{file_path.stem}.concat.txt')
         tmp_path = file_path.with_name(f'{file_path.stem}.prebuffer.tmp{file_path.suffix}')
-        list_content = ''.join(self._concat_file_line(segment) for segment in segments)
+        segment_durations = self._prebuffer_segment_durations(camera_key, segments)
+        list_content = ''.join(self._concat_file_line(segment, segment_durations.get(segment)) for segment in segments)
         list_path.write_text(list_content, encoding='utf-8')
         if tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
@@ -599,7 +600,7 @@ class RecordingService:
         return re.sub(r'[^a-zA-Z0-9_-]+', '-', str(camera_id or '').strip().lower()).strip('-') or 'camera'
 
     @staticmethod
-    def _concat_file_line(file_path: Path) -> str:
+    def _concat_file_line(file_path: Path, duration_seconds: float | None = None) -> str:
         """Return an ffmpeg concat-demuxer file line for this path.
 
         The concat demuxer parses backslashes as escapes and resolves relative
@@ -609,7 +610,10 @@ class RecordingService:
         fall back to late direct RTSP capture.
         """
         escaped = file_path.resolve().as_posix().replace("'", r"'\''")
-        return f"file '{escaped}'\n"
+        line = f"file '{escaped}'\n"
+        if duration_seconds is not None and duration_seconds > 0:
+            line += f"duration {duration_seconds:.6f}\n"
+        return line
 
     def _worker_ffmpeg_available(self, purpose: str) -> bool:
         if shutil.which('ffmpeg'):
@@ -723,8 +727,6 @@ class RecordingService:
                 '1',
                 '-segment_format',
                 'mpegts',
-                '-reset_timestamps',
-                '1',
                 '-strftime',
                 '1',
                 str(output_pattern),
@@ -886,6 +888,22 @@ class RecordingService:
             return [], None
         selected = [item for item in timed if item[2] > start_ts and item[1] < end_ts]
         return [item[0] for item in selected], selected[0][1] if selected else None
+
+    def _prebuffer_segment_durations(self, camera_key: str, segments: list[Path]) -> dict[Path, float]:
+        camera_dir = self.prebuffer_dir / camera_key
+        wanted = {segment.resolve() for segment in segments}
+        durations: dict[Path, float] = {}
+        prev_end: float | None = None
+        for segment in sorted(camera_dir.glob('segment-*.ts')):
+            try:
+                end = segment.stat().st_mtime
+            except OSError:
+                continue
+            start = prev_end if prev_end is not None and 0 < end - prev_end <= 10 else end - 1.0
+            if segment.resolve() in wanted:
+                durations[segment] = max(0.001, end - start)
+            prev_end = end
+        return durations
 
     @staticmethod
     def redact_stream_credentials(message: str) -> str:
