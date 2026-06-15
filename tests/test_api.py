@@ -1776,6 +1776,56 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
     assert render_seconds == pytest.approx(content_seconds, abs=0.01)
 
 
+def test_prebuffer_concat_list_uses_ffmpeg_safe_absolute_paths(tmp_path, monkeypatch):
+    import app.recordings as recordings_module
+    from app.recordings import RecordingService
+
+    service = RecordingService({
+        'storage': {'recordings_dir': str(tmp_path / 'recordings')},
+        'recording': {'format': 'mp4'},
+    })
+    camera_dir = service.prebuffer_dir / 'cam'
+    camera_dir.mkdir(parents=True, exist_ok=True)
+
+    now = time.time()
+    for offset in range(4):
+        end_ts = now - 3 + offset
+        segment = camera_dir / f"segment-{offset:02d}.ts"
+        segment.write_bytes(b'ts')
+        os.utime(segment, (end_ts, end_ts))
+
+    concat_text = ''
+
+    def fake_run(command, *_args, **_kwargs):
+        nonlocal concat_text
+        list_path = Path(command[command.index('-i') + 1])
+        concat_text = list_path.read_text(encoding='utf-8')
+        Path(command[-1]).write_bytes(b'clip-bytes')
+        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+
+    monkeypatch.setattr(RecordingService, '_ensure_prebuffer_worker', lambda self, *a, **k: None)
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+    monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _path: True))
+
+    service.write_rtsp_clip_with_prebuffer(
+        stream_url='rtsp://example/stream',
+        camera_id='cam',
+        file_path=tmp_path / 'recordings' / 'event_window.mp4',
+        triggered_at=datetime.fromtimestamp(now - 1, tz=timezone.utc),
+        pre_seconds=2,
+        post_seconds=1,
+        max_duration_seconds=3.0,
+    )
+
+    assert concat_text
+    for line in concat_text.splitlines():
+        assert line.startswith("file '")
+        assert '\\' not in line
+        listed_path = line[len("file '"):-1]
+        assert Path(listed_path).is_absolute()
+
+
 def test_continuous_chunk_recording_maps_optional_audio_to_aac(tmp_path, monkeypatch):
     import app.recordings as recordings_module
     from app.recordings import RecordingService

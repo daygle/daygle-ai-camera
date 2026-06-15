@@ -418,7 +418,7 @@ class RecordingService:
 
         list_path = file_path.with_name(f'{file_path.stem}.concat.txt')
         tmp_path = file_path.with_name(f'{file_path.stem}.prebuffer.tmp{file_path.suffix}')
-        list_content = ''.join(f"file '{segment}'\n" for segment in segments)
+        list_content = ''.join(self._concat_file_line(segment) for segment in segments)
         list_path.write_text(list_content, encoding='utf-8')
         if tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
@@ -491,6 +491,19 @@ class RecordingService:
     @staticmethod
     def _camera_key(camera_id: str) -> str:
         return re.sub(r'[^a-zA-Z0-9_-]+', '-', str(camera_id or '').strip().lower()).strip('-') or 'camera'
+
+    @staticmethod
+    def _concat_file_line(file_path: Path) -> str:
+        """Return an ffmpeg concat-demuxer file line for this path.
+
+        The concat demuxer parses backslashes as escapes and resolves relative
+        paths from the list file location. Windows paths like
+        ``data\\recordings\\.prebuffer\\...`` can therefore point at the wrong
+        file or fail to parse, causing otherwise healthy prebuffer segments to
+        fall back to late direct RTSP capture.
+        """
+        escaped = file_path.resolve().as_posix().replace("'", r"'\''")
+        return f"file '{escaped}'\n"
 
     def _ensure_prebuffer_worker(self, camera_key: str, stream_url: str, buffer_seconds: int) -> None:
         with self._prebuffer_lock:
