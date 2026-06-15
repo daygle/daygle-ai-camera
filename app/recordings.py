@@ -43,6 +43,7 @@ class RecordingService:
         self._prebuffer_workers: dict[str, dict[str, Any]] = {}
         self._continuous_lock = threading.Lock()
         self._continuous_workers: dict[str, dict[str, Any]] = {}
+        self._missing_ffmpeg_warnings: set[str] = set()
         # Optional hook the application sets to surface operational events
         # (e.g. prebuffer fallbacks) into the camera diagnostics log. Signature:
         # callback(camera_id, event_type, message, severity, details).
@@ -231,6 +232,8 @@ class RecordingService:
     ) -> bool:
         config = recording_config or self.recording_config
         chunk_seconds = max(60, int(config.get('chunk_duration_seconds', 3600)))
+        if not self._worker_ffmpeg_available('continuous_chunk_recording'):
+            return False
         camera_key = self._camera_key(camera_id)
         chunks_dir = self.recordings_dir / f'continuous-{camera_key}'
         chunks_dir.mkdir(parents=True, exist_ok=True)
@@ -378,6 +381,8 @@ class RecordingService:
         pre_seconds = max(0, int(config.get('pre_event_seconds', 0)))
         if pre_seconds <= 0:
             return False
+        if not self._worker_ffmpeg_available('rolling_prebuffer'):
+            return False
         camera_key = self._camera_key(camera_id)
         self._ensure_prebuffer_worker(camera_key, stream_url, self.prebuffer_window_seconds(config), camera_id=camera_id)
         return True
@@ -483,16 +488,12 @@ class RecordingService:
             '0:v:0',
             '-map',
             '0:a:0?',
-            '-c:v',
-            'libx264',
-            '-c:a',
-            'aac',
-            '-b:a',
-            '128k',
-            '-preset',
-            'veryfast',
-            '-pix_fmt',
-            'yuv420p',
+            # The rolling prebuffer segments are already browser-oriented H.264
+            # video with AAC audio. Remux them instead of decoding/re-encoding:
+            # it is much cheaper on small boards and preserves recoverable video
+            # packets from imperfect RTSP segments.
+            '-c',
+            'copy',
             '-avoid_negative_ts',
             'make_zero',
             '-movflags',
@@ -502,14 +503,13 @@ class RecordingService:
             str(tmp_path),
         ]
         try:
-            # Re-encoding an extended clip (up to max_clip_seconds) can run slower
-            # than realtime on low-power boards; an undersized timeout here would
-            # discard the captured event and fall through to a too-late re-capture.
+            # Remuxing should be far faster than realtime, but keep a generous
+            # ceiling for slow disks and large max_clip_seconds settings.
             result = subprocess.run(
                 command,
                 capture_output=True,
                 text=True,
-                timeout=max(120, int(content_seconds) * 3 + 60),
+                timeout=max(60, int(content_seconds) + 30),
                 check=False,
             )
         except subprocess.TimeoutExpired:
@@ -600,6 +600,15 @@ class RecordingService:
         """
         escaped = file_path.resolve().as_posix().replace("'", r"'\''")
         return f"file '{escaped}'\n"
+
+    def _worker_ffmpeg_available(self, purpose: str) -> bool:
+        if shutil.which('ffmpeg'):
+            self._missing_ffmpeg_warnings.discard(purpose)
+            return True
+        if purpose not in self._missing_ffmpeg_warnings:
+            logger.warning('ffmpeg is required for %s but is not installed.', purpose.replace('_', ' '))
+            self._missing_ffmpeg_warnings.add(purpose)
+        return False
 
     def _ensure_prebuffer_worker(self, camera_key: str, stream_url: str, buffer_seconds: int, camera_id: str | None = None) -> None:
         restart_reason: str | None = None

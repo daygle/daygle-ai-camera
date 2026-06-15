@@ -1900,10 +1900,36 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
     command = commands[0]
     assert command[command.index('-map') + 1] == '0:v:0'
     assert '0:a:0?' in command
-    assert command[command.index('-c:a') + 1] == 'aac'
-    assert command[command.index('-b:a') + 1] == '128k'
+    assert command[command.index('-c') + 1] == 'copy'
+    assert 'libx264' not in command
+    assert 'aac' not in command
     render_seconds = float(commands[0][commands[0].index('-t') + 1])
     assert render_seconds == pytest.approx(content_seconds, abs=0.01)
+
+
+def test_prebuffer_and_continuous_workers_do_not_start_without_ffmpeg(tmp_path, monkeypatch):
+    import app.recordings as recordings_module
+    from app.recordings import RecordingService
+
+    service = RecordingService({
+        'storage': {'recordings_dir': str(tmp_path / 'recordings')},
+        'recording': {'pre_event_seconds': 5, 'max_clip_seconds': 60, 'continuous': True},
+    })
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: None)
+
+    assert service.prime_rtsp_prebuffer(
+        stream_url='rtsp://example/stream',
+        camera_id='cam',
+        recording_config={'pre_event_seconds': 5, 'max_clip_seconds': 60},
+    ) is False
+    assert service.start_continuous_chunk_recording(
+        stream_url='rtsp://example/stream',
+        camera_id='cam',
+        recording_config={'continuous': True, 'chunk_duration_seconds': 60},
+    ) is False
+    assert service._prebuffer_workers == {}
+    assert service._continuous_workers == {}
 
 
 def test_prebuffer_concat_list_uses_ffmpeg_safe_absolute_paths(tmp_path, monkeypatch):
