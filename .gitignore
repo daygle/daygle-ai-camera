@@ -8,3 +8,4 @@ models/*.onnx
 models/*.pt
 data/*
 !data/
+.claude/
