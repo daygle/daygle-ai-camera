@@ -1941,6 +1941,9 @@ input[type="file"] { padding: 10px; }
   .video-panel[hidden] {
     transform: translateY(110%);
   }
+  .video-panel-header {
+    flex-wrap: wrap;
+  }
   .video-panel-actions {
     width: 100%;
     justify-content: stretch;
