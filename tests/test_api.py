@@ -1932,6 +1932,59 @@ def test_prebuffer_and_continuous_workers_do_not_start_without_ffmpeg(tmp_path, 
     assert service._continuous_workers == {}
 
 
+def test_degenerate_prebuffer_render_keeps_partial_clip_instead_of_late_live_capture(tmp_path, monkeypatch):
+    import app.recordings as recordings_module
+    from app.recordings import RecordingService
+
+    service = RecordingService({
+        'storage': {'recordings_dir': str(tmp_path / 'recordings')},
+        'recording': {'format': 'mp4'},
+    })
+    camera_dir = service.prebuffer_dir / 'cam'
+    camera_dir.mkdir(parents=True, exist_ok=True)
+
+    now = time.time()
+    for offset in range(12):
+        end_ts = now - 11.5 + offset
+        segment = camera_dir / f'segment-{offset:02d}.ts'
+        segment.write_bytes(b'ts')
+        os.utime(segment, (end_ts, end_ts))
+
+    def fake_run(command, *_args, **_kwargs):
+        Path(command[-1]).write_bytes(b'partial-prebuffer')
+        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+
+    live_capture_called = False
+
+    def fake_live_capture(*_args, **_kwargs):
+        nonlocal live_capture_called
+        live_capture_called = True
+        return now, 10.0
+
+    monkeypatch.setattr(RecordingService, '_ensure_prebuffer_worker', lambda self, *a, **k: None)
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+    monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _path: True))
+    monkeypatch.setattr(RecordingService, 'clip_duration_seconds', staticmethod(lambda _path: 1.0))
+    monkeypatch.setattr(RecordingService, '_live_capture', fake_live_capture)
+
+    file_path = tmp_path / 'recordings' / 'event_window.mp4'
+    content_start, content_seconds = service.write_rtsp_clip_with_prebuffer(
+        stream_url='rtsp://example/stream',
+        camera_id='cam',
+        file_path=file_path,
+        triggered_at=datetime.fromtimestamp(now - 5, tz=timezone.utc),
+        pre_seconds=5,
+        post_seconds=5,
+        max_duration_seconds=10.0,
+    )
+
+    assert file_path.read_bytes() == b'partial-prebuffer'
+    assert live_capture_called is False
+    assert content_start == pytest.approx(now - 10.5, abs=0.1)
+    assert content_seconds == pytest.approx(1.0)
+
+
 def test_prebuffer_concat_list_uses_ffmpeg_safe_absolute_paths(tmp_path, monkeypatch):
     import app.recordings as recordings_module
     from app.recordings import RecordingService

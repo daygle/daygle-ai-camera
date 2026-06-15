@@ -516,16 +516,11 @@ class RecordingService:
             result = None
         finally:
             list_path.unlink(missing_ok=True)
-        # clip_has_video_stream (ffprobe) is checked last so it only runs once the
-        # cheap return-code/size checks have passed - i.e. when ffmpeg claims success
-        # but may have discarded all corrupt frames into a videoless output.
-        if (
-            result is None
-            or result.returncode != 0
-            or not tmp_path.exists()
-            or tmp_path.stat().st_size <= 0
-            or not self.clip_has_video_stream(tmp_path)
-        ):
+        output_has_video = tmp_path.exists() and tmp_path.stat().st_size > 0 and self.clip_has_video_stream(tmp_path)
+        if result is not None and result.returncode != 0 and output_has_video:
+            logger.warning('ffmpeg exited non-zero for prebuffer render of %s but partial footage is usable; keeping it.', camera_key)
+
+        if result is None or not output_has_video:
             tmp_path.unlink(missing_ok=True)
             logger.warning('Failed to render clip from prebuffer for %s; falling back to direct RTSP capture.', camera_key)
             if result is None:
@@ -557,26 +552,24 @@ class RecordingService:
 
         # The render can pass the existence/decodability checks above yet still
         # contain far less video than the requested window (e.g. only a single
-        # surviving keyframe when the stream's keyframes are sparse or corrupt) -
-        # which plays back as a "frozen" near-still clip while the stored duration
-        # claims the full window. Detect that and re-capture live so playback
-        # matches the reported length.
+        # surviving keyframe when the stream's keyframes are sparse or corrupt).
+        # Keep that partial prebuffer footage instead of starting a live fallback
+        # after the event window has passed; a short clip from the right time is
+        # more useful than a full-length clip of the wrong time.
         rendered_seconds = self.clip_duration_seconds(tmp_path)
         if self._clip_is_degenerate(rendered_seconds, content_seconds):
-            tmp_path.unlink(missing_ok=True)
             logger.warning(
-                'Prebuffer render for %s produced only %.1fs of video for a %.0fs window; falling back to live capture.',
+                'Prebuffer render for %s produced only %.1fs of video for a %.0fs window; keeping partial event footage.',
                 camera_key, rendered_seconds or 0.0, content_seconds,
             )
             self._emit_diagnostic(
                 camera_id,
-                'prebuffer_degenerate',
+                'prebuffer_partial',
                 f'Pre-event buffer rendered only {rendered_seconds or 0.0:.1f}s of playable video for a '
-                f'{content_seconds:.0f}s window (likely sparse keyframes or a corrupt stream); captured live instead.',
+                f'{content_seconds:.0f}s window (likely sparse keyframes or a corrupt stream); saved the partial footage.',
                 severity='warning',
                 details={'rendered_seconds': round(rendered_seconds or 0.0, 1), 'requested_seconds': round(content_seconds, 1)},
             )
-            return self._live_capture(stream_url, file_path, max_duration_seconds)
 
         tmp_path.replace(file_path)
         # Report the clip's real duration, not the requested window — keyframe
