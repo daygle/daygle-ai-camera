@@ -2071,6 +2071,29 @@ def test_write_rtsp_clip_rejects_videoless_output(tmp_path, monkeypatch):
     assert not file_path.with_name(f'{file_path.stem}.recording.tmp{file_path.suffix}').exists()
 
 
+def test_clip_has_video_stream_rejects_declared_stream_with_zero_packets(tmp_path, monkeypatch):
+    import app.recordings as recordings_module
+    from app.recordings import RecordingService
+
+    clip = tmp_path / 'audio_only_with_video_header.mp4'
+    clip.write_bytes(b'not-empty')
+    calls = []
+
+    def fake_run(command, *_args, **_kwargs):
+        calls.append(command)
+        if '-show_entries' in command and command[command.index('-show_entries') + 1] == 'stream=codec_name':
+            return subprocess.CompletedProcess(command, 0, stdout='h264\n', stderr='')
+        if '-show_entries' in command and command[command.index('-show_entries') + 1] == 'stream=nb_read_packets':
+            return subprocess.CompletedProcess(command, 0, stdout='0\n', stderr='')
+        raise AssertionError(f'unexpected ffprobe command: {command}')
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffprobe')
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+
+    assert RecordingService.clip_has_video_stream(clip) is False
+    assert len(calls) == 2
+
+
 def test_write_rtsp_clip_keeps_clip_with_video_stream(tmp_path, monkeypatch):
     import app.recordings as recordings_module
     from app.recordings import RecordingService

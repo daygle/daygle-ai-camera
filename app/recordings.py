@@ -524,9 +524,9 @@ class RecordingService:
                 stderr_tail = ''
                 return_code = None
             else:
-                render_reason = 'render_failed'
                 stderr_tail = self.redact_stream_credentials((result.stderr or '')[-1000:])
                 return_code = result.returncode
+                render_reason = 'no_video_frames' if 'frame= 0' in stderr_tail or 'video:0KiB' in stderr_tail else 'render_failed'
             self._emit_diagnostic(
                 camera_id,
                 'prebuffer_fallback',
@@ -760,8 +760,9 @@ class RecordingService:
 
         ffmpeg can exit 0 while discarding every corrupt video frame (we pass
         +discardcorrupt / ignore_err to survive flaky RTSP), leaving a non-empty
-        file with no video stream. Such a clip is unplayable, so callers verify
-        the output rather than trusting the return code alone."""
+        file with no video stream, or with a declared video stream but zero video
+        packets. Such a clip is unplayable, so callers verify the output rather
+        than trusting the return code alone."""
         if not file_path.exists() or file_path.stat().st_size <= 0:
             return False
         ffprobe = shutil.which('ffprobe')
@@ -780,7 +781,46 @@ class RecordingService:
             result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
         except (OSError, subprocess.SubprocessError):
             return True
-        return result.returncode == 0 and bool(result.stdout.strip())
+        if result.returncode != 0 or not result.stdout.strip():
+            return False
+        packet_count = RecordingService.clip_video_packet_count(file_path)
+        return packet_count is None or packet_count > 0
+
+    @staticmethod
+    def clip_video_packet_count(file_path: Path) -> int | None:
+        """Return video packet count when ffprobe can determine it.
+
+        Some failed renders produce a tiny MP4 with a video stream declaration
+        but no video packets (`frame=0`, `video:0KiB`). Codec-only probing treats
+        that as valid; packet counting catches it.
+        """
+        if not file_path.exists() or file_path.stat().st_size <= 0:
+            return 0
+        ffprobe = shutil.which('ffprobe')
+        if not ffprobe:
+            return None
+        command = [
+            ffprobe,
+            '-v', 'error',
+            '-select_streams', 'v:0',
+            '-count_packets',
+            '-show_entries', 'stream=nb_read_packets',
+            '-of', 'csv=p=0',
+            str(file_path),
+        ]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if result.returncode != 0:
+            return None
+        raw_value = result.stdout.strip()
+        if not raw_value or raw_value.upper() == 'N/A':
+            return None
+        try:
+            return max(0, int(raw_value))
+        except ValueError:
+            return None
 
     @staticmethod
     def clip_duration_seconds(file_path: Path) -> float | None:
