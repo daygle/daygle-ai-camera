@@ -657,7 +657,11 @@ def test_shared_ingest_worker_command_fans_out_three_outputs(tmp_path, monkeypat
     monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
     monkeypatch.setattr(recordings_module.subprocess, 'Popen', fake_popen)
 
-    service._run_prebuffer_worker('cam', 'rtsp://example/stream', 20, stop)
+    service._run_prebuffer_worker('cam', 'rtsp://example/stream', {
+        'stop_event': stop,
+        'stream_url': 'rtsp://example/stream',
+        'buffer_seconds': 20,
+    })
 
     cmd = captured['cmd']
     assert cmd.count('-i') == 1, 'a single input == a single RTSP connection'
@@ -665,6 +669,40 @@ def test_shared_ingest_worker_command_fans_out_three_outputs(tmp_path, monkeypat
     assert any('segment-' in str(a) and str(a).endswith('.ts') for a in cmd), 'video segments for events'
     assert any('aud-' in str(a) and str(a).endswith('.wav') for a in cmd), 'audio segments for sound'
     assert 'image2' in cmd and cmd.count('segment') >= 2  # ts segment + wav segment muxers
+
+
+def test_prebuffer_window_change_updates_worker_without_restart(tmp_path, monkeypatch):
+    import app.recordings as recordings_module
+    from app.recordings import RecordingService
+
+    service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'rec')}, 'recording': {}})
+    started: list[threading.Event] = []
+
+    class _FakeThread:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+            self.started = False
+
+        def start(self):
+            self.started = True
+            target = self.kwargs.get('target')
+            args = self.kwargs.get('args') or ()
+            started.append(args[2]['stop_event'])
+
+        def is_alive(self):
+            return self.started
+
+    monkeypatch.setattr(recordings_module.threading, 'Thread', _FakeThread)
+
+    service._ensure_prebuffer_worker('cam', 'rtsp://example/stream', 120, camera_id='cam')
+    first_worker = service._prebuffer_workers['cam']
+    service._ensure_prebuffer_worker('cam', 'rtsp://example/stream', 75, camera_id='cam')
+
+    assert len(started) == 1
+    assert service._prebuffer_workers['cam'] is first_worker
+    assert first_worker['buffer_seconds'] == 75
+    assert not started[0].is_set()
 
 
 def test_sound_detector_ingest_consumes_audio_segments(tmp_path):

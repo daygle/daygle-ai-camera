@@ -624,9 +624,10 @@ class RecordingService:
         restart_reason: str | None = None
         with self._prebuffer_lock:
             existing = self._prebuffer_workers.get(camera_key)
-            if existing and existing.get('stream_url') == stream_url and existing.get('buffer_seconds') == buffer_seconds:
+            if existing and existing.get('stream_url') == stream_url:
                 thread = existing.get('thread')
                 if isinstance(thread, threading.Thread) and thread.is_alive():
+                    existing['buffer_seconds'] = int(buffer_seconds)
                     return
             if existing:
                 existing_thread = existing.get('thread')
@@ -637,24 +638,23 @@ class RecordingService:
                     # still clips — so surface why, to catch config churn / collisions.
                     if existing.get('stream_url') != stream_url:
                         restart_reason = 'stream_url_changed'
-                    elif existing.get('buffer_seconds') != buffer_seconds:
-                        restart_reason = 'buffer_seconds_changed'
                 if isinstance(existing.get('stop_event'), threading.Event):
                     existing['stop_event'].set()
 
             stop_event = threading.Event()
-            thread = threading.Thread(
-                target=self._run_prebuffer_worker,
-                args=(camera_key, stream_url, int(buffer_seconds), stop_event),
-                name=f'prebuffer-{camera_key}',
-                daemon=True,
-            )
-            self._prebuffer_workers[camera_key] = {
-                'thread': thread,
+            worker_state = {
                 'stop_event': stop_event,
                 'stream_url': stream_url,
                 'buffer_seconds': int(buffer_seconds),
             }
+            thread = threading.Thread(
+                target=self._run_prebuffer_worker,
+                args=(camera_key, stream_url, worker_state),
+                name=f'prebuffer-{camera_key}',
+                daemon=True,
+            )
+            worker_state['thread'] = thread
+            self._prebuffer_workers[camera_key] = worker_state
             thread.start()
         if restart_reason:
             logger.info('Prebuffer worker for %s restarted (%s); rolling buffer was reset.', camera_key, restart_reason)
@@ -667,7 +667,10 @@ class RecordingService:
                 details={'reason': restart_reason, 'camera_key': camera_key},
             )
 
-    def _run_prebuffer_worker(self, camera_key: str, stream_url: str, buffer_seconds: int, stop_event: threading.Event) -> None:
+    def _run_prebuffer_worker(self, camera_key: str, stream_url: str, worker_state: dict[str, Any]) -> None:
+        stop_event = worker_state.get('stop_event')
+        if not isinstance(stop_event, threading.Event):
+            stop_event = threading.Event()
         ffmpeg = shutil.which('ffmpeg')
         if not ffmpeg:
             logger.warning('ffmpeg is required for rolling prebuffer but is not installed.')
@@ -773,7 +776,8 @@ class RecordingService:
             stderr_file.close()
             try:
                 while process.poll() is None and not stop_event.is_set():
-                    self._prune_prebuffer_segments(camera_dir, buffer_seconds)
+                    keep_seconds = int(worker_state.get('buffer_seconds') or 15)
+                    self._prune_prebuffer_segments(camera_dir, keep_seconds)
                     self._prune_audio_segments(audio_camera_dir)
                     time.sleep(1)
             finally:
@@ -790,7 +794,8 @@ class RecordingService:
                 except OSError:
                     pass
                 stderr_path.unlink(missing_ok=True)
-                self._prune_prebuffer_segments(camera_dir, buffer_seconds)
+                keep_seconds = int(worker_state.get('buffer_seconds') or 15)
+                self._prune_prebuffer_segments(camera_dir, keep_seconds)
             if not stop_event.is_set():
                 time.sleep(1)
 
