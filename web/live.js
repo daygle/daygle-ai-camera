@@ -85,28 +85,30 @@ async function api(path, options = {}) {
   return payload;
 }
 
-async function loadConfiguredLabels() {
-  try {
-    const settings = await api('/api/settings/system');
-    const labels = new Map([['motion', 0.45]]);
-    const setMin = (label, conf) => {
-      if (!label) return;
-      if (!labels.has(label) || conf < labels.get(label)) labels.set(label, conf);
-    };
-    for (const camera of (settings?.cameras || [])) {
-      for (const zone of (camera?.detection?.zones || [])) {
-        for (const rule of (zone?.object_rules || [])) {
-          if (rule.enabled !== false && (rule.alert_on_detect !== false || rule.record_on_detect !== false)) {
-            const label = String(rule.label || '').trim().toLowerCase();
-            setMin(label, Number(rule.min_confidence ?? 0.5));
-          }
-        }
+// Build the live overlay's label allow-list from the SELECTED camera's own
+// object rules only. Scoping per camera prevents a label configured on one
+// camera (e.g. a "car" rule on Front Yard) from surfacing detections on a
+// different camera's live view, where the server still reports every class the
+// shared detector found. Rebuilt whenever the selected camera changes.
+function rebuildConfiguredLabels() {
+  if (!selectedCamera) {
+    configuredLabels = null;
+    return;
+  }
+  const labels = new Map([['motion', 0.45]]);
+  const setMin = (label, conf) => {
+    if (!label) return;
+    if (!labels.has(label) || conf < labels.get(label)) labels.set(label, conf);
+  };
+  for (const zone of (selectedCamera?.detection?.zones || [])) {
+    for (const rule of (zone?.object_rules || [])) {
+      if (rule.enabled !== false && (rule.alert_on_detect !== false || rule.record_on_detect !== false)) {
+        const label = String(rule.label || '').trim().toLowerCase();
+        setMin(label, Number(rule.min_confidence ?? 0.5));
       }
     }
-    configuredLabels = labels;
-  } catch {
-    // Show all labels if settings unavailable.
   }
+  configuredLabels = labels;
 }
 
 function clearLiveOverlay() {
@@ -493,6 +495,7 @@ async function refreshDetectionStatus() {
 function setSelectedCamera(cameraId) {
   selectedCamera = cameras.find((camera) => camera.id === cameraId) || cameras[0];
   if (!selectedCamera) return;
+  rebuildConfiguredLabels();
   liveAiTrackDetections = null;
   liveAiTrackPrevDetections = null;
   liveAiTrackCaptureMs = 0;
@@ -658,7 +661,8 @@ async function init() {
       availableLabels = [];
     }
   }
-  await loadConfiguredLabels();
+  // configuredLabels is built per selected camera inside setSelectedCamera
+  // (called from renderCameraOptions below) once the camera list is loaded.
   const payload = await api('/api/cameras');
   cameras = payload.cameras || [];
   updateEmptyState();

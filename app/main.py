@@ -360,13 +360,22 @@ def _update_camera_health(camera_id: str, online: bool) -> None:
         })
         was_online = state.get('online', True)
         state['online'] = online
+        transition: str | None = None
         if not online and was_online:
             state['offline_since'] = state.get('offline_since') or time.time()
             state['recovery_notified'] = False
+            transition = 'offline'
         elif online and not was_online:
             state['offline_since'] = None
             state['offline_notified'] = False
+            transition = 'online'
         _camera_health_state[camera_id] = state
+    # Log transitions outside the lock so the diagnostic write never blocks the
+    # health-check loop.
+    if transition == 'offline':
+        log_camera_diagnostic(camera_id, 'camera_offline', 'Camera went offline (detection unavailable).', severity='warning')
+    elif transition == 'online':
+        log_camera_diagnostic(camera_id, 'camera_online', 'Camera recovered and is back online.', severity='info')
 
 
 def _camera_offline_notification_eligible(camera_id: str) -> bool:
@@ -1393,8 +1402,16 @@ def remember_live_event(camera_id: str, labels: set[str], *, merge: bool = False
 
 def clear_live_camera_backoff(camera_id: str) -> None:
     with _live_backoff_lock:
+        was_backed_off = bool(live_detection_failure_count.get(camera_id))
         live_detection_retry_after.pop(camera_id, None)
         live_detection_failure_count.pop(camera_id, None)
+    if was_backed_off:
+        log_camera_diagnostic(
+            camera_id,
+            'detection_recovered',
+            'Live detection resumed after a successful frame read.',
+            severity='info',
+        )
     # Reset the background model so a reconnected camera (which may have been
     # physically moved or had its scene change during the outage) doesn't trigger
     # false motion alerts against a stale background until the EMA resettles.
@@ -1496,6 +1513,16 @@ def schedule_live_camera_backoff(camera_id: str, message: str) -> float:
         reason=f'{message} Retrying in {int(backoff_seconds)}s.',
         detections=[],
     )
+    # Only log the diagnostic on the first failure of a streak so a camera that
+    # stays down doesn't flood the log every monitor cycle.
+    if failure_count == 1:
+        log_camera_diagnostic(
+            camera_id,
+            'detection_backoff',
+            f'Live detection paused after error: {message}',
+            severity='warning',
+            details={'backoff_seconds': int(backoff_seconds)},
+        )
     return backoff_seconds
 
 
@@ -1614,6 +1641,7 @@ def live_alert_monitor_loop() -> None:
         now = time.time()
         if now - _last_prune > 300:
             _prune_frame_motion_state()
+            purge_camera_diagnostics_by_policy()
             _last_prune = now
         interval = max(0.1, float(live_settings.get('detection_interval_seconds', 0.25)))
         live_alert_monitor_stop.wait(interval)
@@ -2313,7 +2341,7 @@ def log_detector_initialization(context: str = 'startup') -> None:
 
 PUBLIC_PREFIXES = ('/static/',)
 PUBLIC_PATHS = {'/favicon.ico', '/login', '/setup'}
-ADMIN_PATHS = {'/onnx', '/yamnet-tflite', '/ai', '/cameras', '/settings', '/users', '/zones', '/sounds', '/audit'}
+ADMIN_PATHS = {'/onnx', '/yamnet-tflite', '/ai', '/cameras', '/settings', '/users', '/zones', '/sounds', '/audit', '/camera-log'}
 MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
 
@@ -2475,6 +2503,44 @@ def write_audit_log(
         )
     except Exception as exc:
         logger.warning('Failed to write audit log: %s', exc)
+
+
+def log_camera_diagnostic(
+    camera_id: str | None,
+    event_type: str,
+    message: str = '',
+    *,
+    severity: str = 'info',
+    details: dict[str, Any] | None = None,
+    camera_name: str | None = None,
+) -> None:
+    """Record a system-generated camera/recording diagnostic event.
+
+    Best-effort and never raises into the calling path — diagnostics must not
+    be able to break recording or detection. Kept separate from the audit log
+    so operational noise doesn't dilute the security trail.
+    """
+    try:
+        if camera_name is None and camera_id:
+            cfg = next((c for c in cameras_config if str(c.get('id') or '') == str(camera_id)), None)
+            if cfg:
+                camera_name = str(cfg.get('name') or '').strip() or None
+        database.add_camera_diagnostic(
+            created_at=utc_now(),
+            camera_id=str(camera_id) if camera_id else None,
+            camera_name=camera_name,
+            event_type=event_type,
+            severity=severity,
+            message=message,
+            details=details,
+        )
+    except Exception as exc:
+        logger.debug('Failed to write camera diagnostic (%s/%s): %s', camera_id, event_type, exc)
+
+
+# Surface RecordingService operational events (e.g. prebuffer fallbacks) into
+# the camera diagnostics log now that the writer above is defined.
+recording_service.diagnostic_callback = log_camera_diagnostic
 
 
 def _parse_chunk_start_time(file_path: Path) -> datetime | None:
@@ -2692,6 +2758,13 @@ def start_rtsp_recording_capture(
             )
         except Exception as exc:
             logger.warning('RTSP recording capture failed for event %s, writing generated fallback: %s', event_id, exc)
+            log_camera_diagnostic(
+                camera_id,
+                'capture_failed',
+                f'RTSP recording capture failed; wrote a generated placeholder clip instead: {exc}',
+                severity='error',
+                details={'event_id': event_id, 'recording_id': recording_id},
+            )
             write_generated_fallback()
             write_live_history_detection_track(
                 recording_id, file_path, camera_id, start_capture_ts, start_capture_ts + duration_seconds,
@@ -3420,6 +3493,24 @@ def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
             files_deleted += 1
     delete_recording_files(purged)
     return {'purged': len(purged), 'files_deleted': files_deleted, 'bytes_deleted': bytes_deleted, 'recordings': purged}
+
+
+def purge_camera_diagnostics_by_policy() -> int:
+    """Age out old camera diagnostic events.
+
+    Two bounds keep the log from growing without limit: a hard row cap enforced
+    on every insert (see EventDatabase.add_camera_diagnostic) and this
+    time-based purge. Retention follows the same recording retention window
+    (``retention_days``) so diagnostics age out alongside the recordings they
+    explain.
+    """
+    try:
+        retention_days = max(1, int(effective_recording_config().get('retention_days', 14)))
+        older_than = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+        return database.purge_camera_diagnostics_older_than(older_than)
+    except Exception as exc:
+        logger.debug('Camera diagnostics purge failed: %s', exc)
+        return 0
 
 
 @app.get('/login')
@@ -4234,6 +4325,7 @@ def delete_runtime_data(request: Request):
     deleted_events = database.delete_all_events()
     deleted_alerts = database.delete_all_alerts()
     deleted_objects = database.delete_all_objects()
+    deleted_diagnostics = database.delete_all_camera_diagnostics()
     storage_config = effective_storage_config()
     deleted_snapshots = clear_runtime_media_directory(storage_config.get('snapshots_dir'))
     deleted_event_artifacts = clear_runtime_media_directory(storage_config.get('events_dir'))
@@ -4246,6 +4338,7 @@ def delete_runtime_data(request: Request):
             'events': deleted_events,
             'alerts': deleted_alerts,
             'objects': deleted_objects,
+            'camera_diagnostics': deleted_diagnostics,
             'snapshot_files': deleted_snapshots,
             'event_artifacts': deleted_event_artifacts,
         },
@@ -5490,6 +5583,42 @@ def audit_page():
     audit_path = web_dir / 'audit.html'
     if audit_path.exists():
         return FileResponse(audit_path)
+    return root()
+
+
+@app.get('/api/camera-log')
+def list_camera_log(
+    request: Request,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    camera_id: str | None = None,
+    event_type: str | None = None,
+    severity: str | None = None,
+):
+    require_admin(request)
+    entries = database.list_camera_diagnostics(
+        limit=limit, offset=offset,
+        camera_id=camera_id or None, event_type=event_type or None, severity=severity or None,
+    )
+    total = database.count_camera_diagnostics(
+        camera_id=camera_id or None, event_type=event_type or None, severity=severity or None,
+    )
+    return {'entries': entries, 'total': total, 'limit': limit, 'offset': offset}
+
+
+@app.delete('/api/camera-log')
+def clear_camera_log(request: Request):
+    require_admin(request)
+    deleted = database.delete_all_camera_diagnostics()
+    write_audit_log(request, 'delete_all', 'camera_log', details={'count': deleted})
+    return {'ok': True, 'deleted': deleted}
+
+
+@app.get('/camera-log')
+def camera_log_page():
+    page_path = web_dir / 'camera-log.html'
+    if page_path.exists():
+        return FileResponse(page_path)
     return root()
 
 

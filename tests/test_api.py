@@ -434,6 +434,113 @@ def test_detection_backoff_keeps_prebuffer_warm(tmp_path, monkeypatch):
     assert threads_started == [], 'detection should remain throttled during backoff'
 
 
+def test_camera_diagnostics_log_crud_and_retention(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    db = main.database
+    old = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+
+    db.add_camera_diagnostic(
+        created_at=old, camera_id='front-yard', camera_name='Front Yard',
+        event_type='prebuffer_fallback', severity='warning', message='no buffer',
+        details={'reason': 'no_segments'},
+    )
+    db.add_camera_diagnostic(
+        created_at=old, camera_id='driveway', camera_name='Driveway',
+        event_type='detection_backoff', severity='warning', message='read error',
+    )
+
+    assert db.count_camera_diagnostics() == 2
+    assert db.count_camera_diagnostics(camera_id='front-yard') == 1
+    assert db.count_camera_diagnostics(event_type='prebuffer_fallback') == 1
+    front = db.list_camera_diagnostics(camera_id='front-yard')
+    assert front[0]['details'] == {'reason': 'no_segments'}
+    assert front[0]['camera_name'] == 'Front Yard'
+
+    # Age-based purge removes entries older than the cutoff, keeps recent ones.
+    db.add_camera_diagnostic(
+        created_at=datetime.now(timezone.utc).isoformat(), camera_id='driveway', camera_name='Driveway',
+        event_type='detection_recovered', severity='info', message='recovered',
+    )
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    removed = db.purge_camera_diagnostics_older_than(cutoff)
+    assert removed == 2
+    assert db.count_camera_diagnostics() == 1
+    assert db.list_camera_diagnostics()[0]['event_type'] == 'detection_recovered'
+
+
+def test_camera_diagnostics_purge_follows_retention_days(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    main.database.set_setting('recording', {'retention_days': 3}, main.utc_now())
+    now = datetime.now(timezone.utc)
+    # One event just inside the 3-day window, one well outside it.
+    main.database.add_camera_diagnostic(
+        created_at=(now - timedelta(days=1)).isoformat(), camera_id='front-yard', camera_name='Front Yard',
+        event_type='detection_recovered', severity='info', message='recent',
+    )
+    main.database.add_camera_diagnostic(
+        created_at=(now - timedelta(days=10)).isoformat(), camera_id='front-yard', camera_name='Front Yard',
+        event_type='detection_backoff', severity='warning', message='old',
+    )
+
+    removed = main.purge_camera_diagnostics_by_policy()
+    assert removed == 1
+    remaining = main.database.list_camera_diagnostics()
+    assert len(remaining) == 1
+    assert remaining[0]['message'] == 'recent'
+
+
+def test_detection_backoff_writes_camera_diagnostic(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    main.schedule_live_camera_backoff('front-yard', 'frame read failed')
+    entries = main.database.list_camera_diagnostics(camera_id='front-yard')
+    assert any(e['event_type'] == 'detection_backoff' for e in entries)
+
+    # A second failure in the same streak must not add another row (no flooding).
+    main.schedule_live_camera_backoff('front-yard', 'frame read failed again')
+    assert main.database.count_camera_diagnostics(event_type='detection_backoff') == 1
+
+    # Recovery after a backoff streak logs a recovered event.
+    main.clear_live_camera_backoff('front-yard')
+    assert main.database.count_camera_diagnostics(event_type='detection_recovered') == 1
+
+
+def test_prebuffer_render_degenerate_detection():
+    from app.recordings import RecordingService
+
+    # A near-still clip (1s) rendered for a real window (65s) is degenerate.
+    assert RecordingService._clip_is_degenerate(1.0, 65.0) is True
+    assert RecordingService._clip_is_degenerate(2.9, 10.0) is True
+    # A clip close to its requested window is fine.
+    assert RecordingService._clip_is_degenerate(63.0, 65.0) is False
+    # A legitimately short window (no full pre-roll yet) is not flagged.
+    assert RecordingService._clip_is_degenerate(1.0, 5.0) is False
+    # Unknown duration (probe unavailable) is never treated as degenerate.
+    assert RecordingService._clip_is_degenerate(None, 65.0) is False
+    assert RecordingService._clip_is_degenerate(0.0, 65.0) is False
+
+
+def test_clip_duration_seconds_reads_real_length(tmp_path, monkeypatch):
+    import shutil as _shutil
+    if not (_shutil.which('ffmpeg') and _shutil.which('ffprobe')):
+        import pytest as _pytest
+        _pytest.skip('ffmpeg/ffprobe not available')
+    _load_app(tmp_path, monkeypatch)
+    from app.recordings import RecordingService
+
+    service = RecordingService({'storage': {'data_dir': str(tmp_path / 'rec')}, 'recording': {}})
+    clip = tmp_path / 'clip.mp4'
+    service._write_ffmpeg_placeholder_clip(clip, 3.0)
+    measured = service.clip_duration_seconds(clip)
+    assert measured is not None
+    assert 2.0 <= measured <= 4.5
+
+
 def test_favicon_is_served_publicly(tmp_path, monkeypatch):
     app, _database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
@@ -1749,6 +1856,7 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
     monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
     monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
     monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _path: True))
+    monkeypatch.setattr(RecordingService, 'clip_duration_seconds', staticmethod(lambda _path: 15.5))
 
     file_path = tmp_path / 'recordings' / 'event_window.mp4'
     triggered_at = datetime.fromtimestamp(now - 10, tz=timezone.utc)
@@ -1807,6 +1915,7 @@ def test_prebuffer_concat_list_uses_ffmpeg_safe_absolute_paths(tmp_path, monkeyp
     monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
     monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
     monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _path: True))
+    monkeypatch.setattr(RecordingService, 'clip_duration_seconds', staticmethod(lambda _path: 3.0))
 
     service.write_rtsp_clip_with_prebuffer(
         stream_url='rtsp://example/stream',
