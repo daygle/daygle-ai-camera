@@ -3599,6 +3599,9 @@ def setup_page(request: Request, error: str | None = None):
 <h1>Create administrator</h1><p class="muted">This one-time setup is disabled after the first user is created.</p>{error_html}
 <form class="form-stack" method="post" action="/setup">
   <input type="hidden" name="csrf_token" value="{{csrf}}" />
+  <label>First name<input name="first_name" autocomplete="given-name" /></label>
+  <label>Last name<input name="last_name" autocomplete="family-name" /></label>
+  <label>Email<input name="email" type="email" autocomplete="email" /></label>
   <label>Username<input name="username" value="admin" autocomplete="username" required /></label>
   <label>Password<input name="password" type="password" autocomplete="new-password" required /></label>
   <label>Confirm password<input name="confirm_password" type="password" autocomplete="new-password" required /></label>
@@ -3616,7 +3619,14 @@ async def setup(request: Request):
     if data.get('password') != data.get('confirm_password'):
         return setup_page(request, 'Passwords do not match.')
     try:
-        auth.create_user(data.get('username', ''), data.get('password', ''), role='admin')
+        auth.create_user(
+            data.get('username', ''),
+            data.get('password', ''),
+            role='admin',
+            first_name=data.get('first_name', ''),
+            last_name=data.get('last_name', ''),
+            email=data.get('email', ''),
+        )
     except AuthError as exc:
         return setup_page(request, str(exc))
     return RedirectResponse('/login', status_code=303)
