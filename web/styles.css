@@ -3130,7 +3130,8 @@ a.activity-item-action {
   font-size: 0.9rem;
   flex-wrap: wrap;
 }
-#auditEmpty {
+#auditEmpty,
+#logEmpty {
   padding: 2rem 0;
   text-align: center;
   color: var(--muted);
@@ -3140,18 +3141,113 @@ a.activity-item-action {
   .audit-table th, .audit-table td { padding: 0.35rem 0.5rem; }
   .details-cell { max-width: 140px; }
   /* Hide ID (col 5) and IP Address (col 7) on small phones */
-  .audit-table th:nth-child(5),
-  .audit-table td:nth-child(5),
-  .audit-table th:nth-child(7),
-  .audit-table td:nth-child(7) { display: none; }
+  #auditTable th:nth-child(5),
+  #auditTable td:nth-child(5),
+  #auditTable th:nth-child(7),
+  #auditTable td:nth-child(7) { display: none; }
 }
 @media (max-width: 480px) {
   /* Also hide Resource (col 4) and Details (col 8) on very small phones;
      leaves Time, User, Action, Status which are the most scannable columns. */
-  .audit-table th:nth-child(4),
-  .audit-table td:nth-child(4),
-  .audit-table th:nth-child(8),
-  .audit-table td:nth-child(8) { display: none; }
+  #auditTable th:nth-child(4),
+  #auditTable td:nth-child(4),
+  #auditTable th:nth-child(8),
+  #auditTable td:nth-child(8) { display: none; }
+}
+@media (max-width: 700px) {
+  .audit-filters {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .audit-filters input,
+  .audit-filters select {
+    width: 100%;
+  }
+  .audit-filters input,
+  .audit-filters select,
+  .audit-filters button {
+    min-height: 42px;
+  }
+  .audit-filters input,
+  .audit-filters select {
+    grid-column: 1 / -1;
+  }
+  #logTable {
+    display: block;
+    font-size: 0.84rem;
+  }
+  #logTable thead {
+    display: none;
+  }
+  #logTable tbody {
+    display: grid;
+    gap: 10px;
+  }
+  #logTable tr {
+    display: grid;
+    gap: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.035);
+  }
+  #logTable td {
+    display: grid;
+    grid-template-columns: minmax(74px, 34%) minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    padding: 7px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    white-space: normal !important;
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+  #logTable td:last-child {
+    border-bottom: 0;
+  }
+  #logTable td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1.4;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+  #logTable .details-cell {
+    max-width: none;
+    font-size: 0.82rem;
+    line-height: 1.45;
+    word-break: normal;
+  }
+  #logTable code,
+  #logTable .status-badge {
+    width: fit-content;
+    max-width: 100%;
+  }
+  .pagination {
+    justify-content: stretch;
+  }
+  .pagination button {
+    flex: 1 1 120px;
+  }
+  .pagination #pageInfo {
+    flex: 1 0 100%;
+    order: -1;
+    text-align: center;
+  }
+}
+@media (max-width: 420px) {
+  .audit-filters {
+    grid-template-columns: 1fr;
+  }
+  .page-stack .button-row button {
+    flex: 1 1 100%;
+  }
+  #logTable td {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
 }
 
 /* ─── YAMNet TFLite page: camera sound-detector table ─────────────────────── */

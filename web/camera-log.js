@@ -90,6 +90,7 @@ async function loadEntries(offset = 0) {
 
 function makeCell(text, opts = {}) {
   const td = document.createElement('td');
+  if (opts.label) td.dataset.label = opts.label;
   if (opts.noWrap) td.style.whiteSpace = 'nowrap';
   if (opts.className) td.className = opts.className;
   if (opts.code) {
@@ -117,12 +118,12 @@ function renderEntries(entries) {
   for (const entry of entries) {
     const tr = document.createElement('tr');
     const cameraLabel = entry.camera_name || entry.camera_id || '-';
-    tr.appendChild(makeCell(formatTime(entry.created_at), { noWrap: true }));
-    tr.appendChild(makeCell(cameraLabel));
-    tr.appendChild(makeCell(entry.event_type || '-', { code: true }));
-    tr.appendChild(makeCell(entry.severity || 'info', { badge: severityBadgeClass(entry.severity) }));
-    tr.appendChild(makeCell(entry.message || '-', { className: 'details-cell' }));
-    tr.appendChild(makeCell(formatDetails(entry.details), { className: 'details-cell' }));
+    tr.appendChild(makeCell(formatTime(entry.created_at), { label: 'Time', noWrap: true }));
+    tr.appendChild(makeCell(cameraLabel, { label: 'Camera' }));
+    tr.appendChild(makeCell(entry.event_type || '-', { label: 'Event', code: true }));
+    tr.appendChild(makeCell(entry.severity || 'info', { label: 'Severity', badge: severityBadgeClass(entry.severity) }));
+    tr.appendChild(makeCell(entry.message || '-', { label: 'Message', className: 'details-cell' }));
+    tr.appendChild(makeCell(formatDetails(entry.details), { label: 'Details', className: 'details-cell' }));
     tbody.appendChild(tr);
   }
 }
