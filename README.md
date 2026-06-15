@@ -4,6 +4,12 @@ Daygle AI Camera is a self-hosted AI camera platform with a FastAPI backend, SQL
 
 The app is designed to be configured entirely from the web UI. `config.yaml` is only a small bootstrap file for settings the app must know before the database and dashboard can load.
 
+## Documentation
+
+- [Motion Detection Guide](docs/motion-detection.md) explains the pixel-diff motion gate, YOLO object detection, periodic scans, and tuning guidance.
+- [Sound Detection Guide](docs/sound-detection.md) explains RTSP audio monitoring, YAMNet TFLite requirements, sound rules, and tuning guidance.
+- [Operations Guide](docs/operations.md) summarizes camera health, the camera log, offline alerts, logs, backups, and update checks.
+
 ## Features
 
 - Protected browser dashboard with event search, alert history, recordings, playback, and object stats.
@@ -14,6 +20,7 @@ The app is designed to be configured entirely from the web UI. `config.yaml` is 
 - **Monitoring zones**: draw polygon zones on the live view and assign per-zone object rules, motion rules, cooldowns, and email recipients.
 - Web-managed AI settings for ONNX detection. Supports YOLOv8 Nano through Extra-Large (n/s/m/l/x).
 - Web-managed alert rules with optional SMTP email delivery and push notification delivery (ntfy-compatible).
+- **Sound detection**: per-camera RTSP audio monitoring with YAMNet TFLite classification for sounds such as barking, glass breaking, alarms, crying, doorbells, and loud bangs.
 - **Push notifications**: send alerts to any ntfy-compatible server with optional authentication and priority.
 - Web-managed system settings for recording policy, retention, storage directories, and login security.
 - SQLite persistence for events, detections, alerts, users, sessions, runtime settings, alert rules, and audit log.
@@ -21,6 +28,7 @@ The app is designed to be configured entirely from the web UI. `config.yaml` is 
 - **Over-the-air software updates**: check for new releases and apply updates directly from the browser settings page.
 - **Database backup & restore**: download a SQLite backup or upload a previous backup to restore from the browser.
 - **Timeline playback**: visual day-view timeline of recording clips by camera.
+- **Camera health and diagnostics**: camera health checks, offline/online alerts, PTZ controls, and a camera log for detection and recording troubleshooting.
 - Background live AI alert checks continue polling configured RTSP/ONVIF cameras even when no Live Cameras page is open.
 - Debian install script plus a systemd unit for Linux server deployment.
 
@@ -32,6 +40,7 @@ The app is designed to be configured entirely from the web UI. `config.yaml` is 
 - `pip` and optionally `python3-venv`.
 - A modern browser.
 - Optional: an ONNX YOLO model file for object detection.
+- Optional for sound detection: RTSP cameras with audio tracks and a TensorFlow Lite runtime (`ai-edge-litert` or `tflite-runtime`).
 
 ### Debian Server Deployment
 
@@ -203,8 +212,10 @@ Add and manage multiple RTSP/ONVIF cameras. Each camera can have:
 - Per-camera motion detection toggle and email notification toggle.
 - Per-camera object detection enable/disable.
 - Per-camera recording policy (alert-triggered or continuous).
+- Optional PTZ settings for ONVIF or compatible network PTZ controls.
+- Camera health status for online/offline troubleshooting.
 
-After saving cameras, configure per-camera monitoring areas from the Zones page.
+After saving cameras, configure per-camera monitoring areas from the Zones page and optional audio rules from the Sounds page.
 
 ### Zones
 
@@ -217,6 +228,23 @@ Draw polygon monitoring zones directly on the live camera view. For each zone yo
 - Object rules per label: enable/disable, record on detect, alert on detect, minimum confidence, cooldown, email recipients, and active time window.
 
 Zone-based rules replace the global single-camera alert rules when zones are configured for a camera.
+
+
+### Sounds
+
+Route: `/sounds`
+
+Configure per-camera RTSP audio detection. Sound rules can trigger recordings, email notifications, push notifications, and alert history entries independently from video object rules. Built-in rule classes include cat meow, dog bark, glass breaking, smoke alarm, baby crying, doorbell, car alarm, and loud bang.
+
+Route: `/yamnet-tflite`
+
+View the YAMNet TFLite backend status, installed audio model assets, and per-camera sound detection state. The app downloads the YAMNet TFLite model and class map into `models/` when sound detection is first used.
+
+### Camera Log
+
+Route: `/camera-log`
+
+Review operational camera diagnostics, including detection backoff/recovery, camera offline/online transitions, recording capture failures, and pre-event buffer fallbacks. Use this page when investigating missed recordings, late recordings, or unstable camera streams.
 
 ### ONNX
 
@@ -244,6 +272,7 @@ Route: `/settings`
 - Email delivery: SMTP host, port, username, password, from address, STARTTLS, and SSL.
 - Push notifications: ntfy-compatible server URL, topic, priority, and optional username/password.
 - Recording clips: pre-event seconds, post-event seconds, extension step, max clip seconds, and file format.
+- Camera offline alerts: monitor stream failures and notify when cameras go offline or recover.
 - Retention: auto purge, retention days, max storage GB, and manual purge.
 - Storage: data, snapshots, events, and recordings directories.
 - Login security: session timeout, max login attempts, lockout minutes.
@@ -319,11 +348,14 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `GET` | `/live` | Live camera view |
 | `GET` | `/cameras` | Admin camera management |
 | `GET` | `/zones` | Admin monitoring zone editor |
+| `GET` | `/sounds` | Admin sound detection rules |
+| `GET` | `/yamnet-tflite` | Admin YAMNet TFLite status |
 | `GET` | `/profile` | Current user profile |
 | `GET` | `/users` | Admin user management |
 | `GET` | `/onnx` | Admin ONNX settings |
 | `GET` | `/settings` | Admin system settings (email, push, recording, storage, updates, backup) |
 | `GET` | `/audit` | Admin audit log |
+| `GET` | `/camera-log` | Admin camera diagnostics |
 | `GET` | `/recordings` | Recordings list |
 | `GET` | `/recordings/timeline` | Day-view recording timeline |
 | `GET` | `/api/auth/me` | Current user, CSRF token, and session expiry |
@@ -335,8 +367,11 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `GET` | `/api/events` | List/search events |
 | `GET` | `/api/alerts` | Alert history |
 | `GET` | `/api/cameras` | List cameras |
+| `GET` | `/api/cameras/health` | Camera online/offline health summary |
 | `PUT` | `/api/cameras` | Admin update all cameras |
 | `PUT` | `/api/cameras/{camera_id}` | Admin update a single camera |
+| `POST` | `/api/cameras/test-connection` | Admin test camera connection |
+| `POST` | `/api/cameras/{camera_id}/ptz` | Admin send camera PTZ command |
 | `GET` | `/api/recordings` | List recordings |
 | `GET` | `/api/recordings/{id}/stream` | Stream recording media |
 | `POST` | `/api/recordings/purge` | Admin purge using retention settings |
@@ -353,6 +388,9 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `POST` | `/api/settings/alert-email/test` | Send a test email |
 | `GET/PUT` | `/api/settings/alert-push` | Admin push notification settings |
 | `POST` | `/api/settings/alert-push/test` | Send a test push notification |
+| `GET/PUT` | `/api/settings/camera-offline` | Admin camera offline alert settings |
+| `GET` | `/api/sound/classes` | List supported sound classes |
+| `GET` | `/api/sound/status` | Sound detector and per-camera sound status |
 | `GET` | `/api/settings/system` | Admin system settings summary |
 | `GET` | `/api/settings/system/database/backup` | Download SQLite backup |
 | `POST` | `/api/settings/system/database/restore` | Restore from a SQLite backup |
@@ -363,6 +401,8 @@ Password policy requires at least 8 characters with uppercase, lowercase, numeri
 | `GET` | `/api/update/check` | Check for a new software release |
 | `POST` | `/api/update/apply` | Apply a software update via git pull |
 | `GET` | `/api/audit` | Admin audit log entries |
+| `GET` | `/api/camera-log` | Admin camera diagnostic entries |
+| `DELETE` | `/api/camera-log` | Admin clear camera diagnostic log |
 
 ## Database
 
@@ -379,6 +419,7 @@ Core tables:
 - `alert_history`
 - `recordings`
 - `audit_log`
+- `camera_log`
 
 Useful `app_settings` keys:
 
@@ -390,6 +431,8 @@ Useful `app_settings` keys:
 - `recording`
 - `storage`
 - `auth`
+- per-camera `detection.sound` rules inside `cameras`
+- `camera_offline`
 
 ## Recording and Playback
 
@@ -435,6 +478,14 @@ Current limitations:
 - Uploaded-image events create generated footage, not real camera footage.
 - RTSP/ONVIF camera events create linked recording artifacts from the live event path.
 - Retention runs when clips are created or when an admin clicks **Purge now**; there is no background scheduler yet.
+
+## Sound Detection
+
+Sound detection monitors the audio track from each enabled camera's RTSP stream and evaluates per-camera rules. Open `/sounds`, choose a camera, enable sound detection, add one or more sound classes, then set confidence thresholds, cooldowns, recording behavior, and notification behavior.
+
+The YAMNet TFLite backend runs on CPU and uses assets stored under `models/`. Open `/yamnet-tflite` to confirm whether the runtime and model assets are available. Install `ai-edge-litert` or `tflite-runtime` if the page reports that no TensorFlow Lite interpreter is available.
+
+Sound-triggered clips appear in Recordings and can be filtered alongside object-triggered clips.
 
 ## Push Notifications
 
@@ -501,7 +552,10 @@ python -m pytest
 - **ONNX fails to load**: confirm model and labels paths are readable and ONNX Runtime is installed.
 - **Email alerts do not send**: open `/settings`, check SMTP host/port/auth/from address, and confirm the alert rule has email enabled and recipients. Confirm **Background detection** is enabled in Live settings so rules continue checking when the Live Cameras page is closed.
 - **Push notifications not arriving**: open `/settings` → **Push Notifications**, verify server URL and topic, then send a test notification.
-- **Camera not connecting**: open `/cameras`, check the stream URL or ONVIF credentials, and verify the camera is reachable on the network.
+- **Camera not connecting**: open `/cameras`, check the stream URL or ONVIF credentials, use the test connection action, and verify the camera is reachable on the network.
+- **Camera goes offline intermittently**: open `/camera-log` for detection backoff/recovery events and review `/settings` camera offline alert settings.
+- **PTZ commands do not move the camera**: confirm PTZ is enabled for the camera, verify protocol/port/address settings, and test against the camera vendor's ONVIF or PTZ documentation.
+- **Sound detection unavailable**: open `/yamnet-tflite`, confirm `ffmpeg` is installed, confirm the RTSP stream includes audio, and install `ai-edge-litert` or `tflite-runtime` if no TensorFlow Lite runtime is present.
 - **Service cannot write data or models**: check storage paths in `/settings`, then verify `/opt/daygle-ai-camera/models` and the configured data directory exist. The installer runs the systemd service as root and grants write access to config, data, and models paths.
 - **Need service logs**: run `sudo journalctl -u daygle-ai-camera -f`.
 - **Need application logs**: the app writes rotating logs to `data/logs/app.log` (up to 10 MB × 5 files).
