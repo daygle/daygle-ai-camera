@@ -29,6 +29,7 @@ class RecordingService:
     # live instead. Only judged for windows long enough to be meaningful.
     DEGENERATE_MIN_REQUEST_SECONDS = 8.0
     DEGENERATE_MAX_RENDERED_SECONDS = 3.0
+    DEGENERATE_MAX_RENDERED_FRACTION = 0.25
 
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
@@ -824,10 +825,48 @@ class RecordingService:
 
     @staticmethod
     def clip_duration_seconds(file_path: Path) -> float | None:
-        """Actual decodable duration of a clip in seconds, or None if it can't
-        be determined. Used to store an honest duration (the requested window and
-        the real rendered length diverge when the source footage is short or
-        keyframe-sparse) and to detect degenerate near-still clips."""
+        """Actual decodable video duration of a clip in seconds, or None if it
+        can't be determined. Used to store an honest duration (the requested
+        window and the real rendered length diverge when the source footage is
+        short or keyframe-sparse) and to detect degenerate near-still clips."""
+        video_duration = RecordingService.clip_video_duration_seconds(file_path)
+        if video_duration is not None:
+            return video_duration
+        return RecordingService.clip_container_duration_seconds(file_path)
+
+    @staticmethod
+    def clip_video_duration_seconds(file_path: Path) -> float | None:
+        """Duration of the first video stream, ignoring audio/container length."""
+        if not file_path.exists() or file_path.stat().st_size <= 0:
+            return None
+        ffprobe = shutil.which('ffprobe')
+        if not ffprobe:
+            return None
+        command = [
+            ffprobe,
+            '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=duration',
+            '-of', 'csv=p=0',
+            str(file_path),
+        ]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if result.returncode != 0:
+            return None
+        try:
+            value = float(result.stdout.strip())
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+
+    @staticmethod
+    def clip_container_duration_seconds(file_path: Path) -> float | None:
+        """Container duration fallback for files whose video stream duration is
+        not available. This is less reliable for corrupted renders because audio
+        can keep the container duration long after video frames stop."""
         if not file_path.exists() or file_path.stat().st_size <= 0:
             return None
         ffprobe = shutil.which('ffprobe')
@@ -856,9 +895,13 @@ class RecordingService:
     def _clip_is_degenerate(cls, rendered_seconds: float | None, requested_seconds: float) -> bool:
         if rendered_seconds is None or rendered_seconds <= 0:
             return False
+        minimum_usable_seconds = max(
+            cls.DEGENERATE_MAX_RENDERED_SECONDS,
+            requested_seconds * cls.DEGENERATE_MAX_RENDERED_FRACTION,
+        )
         return (
             requested_seconds >= cls.DEGENERATE_MIN_REQUEST_SECONDS
-            and rendered_seconds < cls.DEGENERATE_MAX_RENDERED_SECONDS
+            and rendered_seconds < minimum_usable_seconds
         )
 
     def _live_capture(self, stream_url: str, file_path: Path, max_duration_seconds: float) -> tuple[float, float]:

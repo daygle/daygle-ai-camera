@@ -516,6 +516,7 @@ def test_prebuffer_render_degenerate_detection():
     # A near-still clip (1s) rendered for a real window (65s) is degenerate.
     assert RecordingService._clip_is_degenerate(1.0, 65.0) is True
     assert RecordingService._clip_is_degenerate(2.9, 10.0) is True
+    assert RecordingService._clip_is_degenerate(10.0, 87.0) is True
     # A clip close to its requested window is fine.
     assert RecordingService._clip_is_degenerate(63.0, 65.0) is False
     # A legitimately short window (no full pre-roll yet) is not flagged.
@@ -539,6 +540,27 @@ def test_clip_duration_seconds_reads_real_length(tmp_path, monkeypatch):
     measured = service.clip_duration_seconds(clip)
     assert measured is not None
     assert 2.0 <= measured <= 4.5
+
+
+def test_clip_duration_seconds_prefers_video_stream_duration(tmp_path, monkeypatch):
+    import app.recordings as recordings_module
+    from app.recordings import RecordingService
+
+    clip = tmp_path / 'video_short_audio_long.mp4'
+    clip.write_bytes(b'not-empty')
+
+    def fake_run(command, *_args, **_kwargs):
+        show_entries = command[command.index('-show_entries') + 1]
+        if show_entries == 'stream=duration':
+            return subprocess.CompletedProcess(command, 0, stdout='3.250000\n', stderr='')
+        if show_entries == 'format=duration':
+            return subprocess.CompletedProcess(command, 0, stdout='87.000000\n', stderr='')
+        raise AssertionError(f'unexpected ffprobe command: {command}')
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffprobe')
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+
+    assert RecordingService.clip_duration_seconds(clip) == pytest.approx(3.25)
 
 
 def test_favicon_is_served_publicly(tmp_path, monkeypatch):
