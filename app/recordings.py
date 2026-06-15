@@ -732,6 +732,11 @@ class RecordingService:
                 '0:v:0',
                 '-vf',
                 f'fps={self.INGEST_FRAME_FPS}',
+                # High JPEG quality (2 on mjpeg's 2-31 scale, lower=better) so the
+                # live snapshot matches the old OpenCV-encoded quality; ffmpeg's
+                # mjpeg default is noticeably more compressed.
+                '-q:v',
+                '2',
                 '-update',
                 '1',
                 '-atomic_writing',
