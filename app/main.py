@@ -1550,11 +1550,34 @@ def _camera_has_live_alert_stream(settings: dict[str, Any]) -> bool:
     return bool(build_stream_url(settings))
 
 
+def read_ingest_frame(camera_id: str) -> tuple[Any, dict[str, Any]] | None:
+    """Decode the latest frame the shared per-camera ingest wrote, as
+    ``(bgr_image, frame_dict)``. This is how object detection and snapshots get
+    frames without opening a second RTSP connection. Returns None when no fresh
+    frame is available yet (ingest warming up or camera offline)."""
+    sample = recording_service.latest_frame_jpeg(camera_id)
+    if sample is None:
+        return None
+    jpeg_bytes, captured_ts = sample
+    import cv2
+    import numpy as np
+    image = cv2.imdecode(np.frombuffer(jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        return None
+    height, width = image.shape[:2]
+    frame = {
+        'frame_number': 0,
+        'timestamp': captured_ts,
+        'width': int(width),
+        'height': int(height),
+    }
+    return image, frame
+
+
 def run_live_alert_monitor_once(live_settings: dict[str, Any] | None = None) -> int:
     if live_settings is None:
         live_settings = effective_live_config()
-    if not normalize_bool_setting(live_settings.get('background_detection_enabled'), True):
-        return 0
+    background_detection_enabled = normalize_bool_setting(live_settings.get('background_detection_enabled'), True)
 
     processed = 0
     for selected_config in list(cameras_config):
@@ -1562,13 +1585,10 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None = None) -> 
         if not _camera_has_live_alert_stream(selected_config):
             continue
         now = time.time()
-        # Keep the recording infrastructure (rolling prebuffer + continuous
-        # chunks) warm REGARDLESS of detection backoff. The prebuffer is a cheap
-        # RTSP stream copy that supplies the pre-event footage; the backoff below
-        # only throttles the expensive frame-read + YOLO inference path. Pausing
-        # the prebuffer during a detection hiccup leaves no pre-roll segments, so
-        # the next event falls back to a live forward capture that starts after
-        # the subject has already passed - the event is silently missed.
+        # Keep the per-camera ingest warm REGARDLESS of the background-detection
+        # toggle and detection backoff. It is the SINGLE RTSP connection that
+        # feeds event pre-roll, object detection (latest.jpg) and sound detection
+        # (audio segments); pausing it would starve all three.
         stream_url = build_stream_url(selected_config)
         cam_rec_config = camera_event_recording_config(selected_config)
         if stream_url:
@@ -1584,6 +1604,9 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None = None) -> 
                     recording_config=cam_rec_config,
                     on_chunk_complete=_make_continuous_chunk_callback(camera_id),
                 )
+        if not background_detection_enabled:
+            # Ingest stays warm above; object detection is disabled by config.
+            continue
         with _live_backoff_lock:
             retry_after = live_detection_retry_after.get(camera_id, 0)
         if retry_after and now < retry_after:
@@ -1599,11 +1622,16 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None = None) -> 
 
         def _detect_bg(cid: str = camera_id, cfg: dict[str, Any] = dict(selected_config)) -> None:
             try:
-                cam = get_camera_instance(cid)
-                if not hasattr(cam, 'read_frame'):
-                    update_live_detection_status(cid, state='skipped', reason='Background alerts require a camera that can read frames.', detections=[])
+                # Object detection reads the shared ingest's latest frame rather
+                # than opening its own RTSP connection (one connection per camera).
+                sample = read_ingest_frame(cid)
+                if sample is None:
+                    # No fresh frame: the ingest is warming up or the camera is
+                    # down. Back off so health/offline alerts still fire; the
+                    # ingest reconnects on its own and the next fresh frame clears it.
+                    schedule_live_camera_backoff(cid, 'No fresh frame available from the camera ingest.')
                     return
-                image, frame = cam.read_frame()
+                image, frame = sample
                 clear_live_camera_backoff(cid)
                 process_live_stream_alerts(image, frame, cfg, enforce_interval=False)
             except Exception as exc:
@@ -1825,12 +1853,19 @@ def apply_sound_settings() -> None:
                 _sound_statuses[cam_id] = {'state': 'disabled', 'last_detected_at': None, 'last_confidence': 0.0, 'backend': None}
             continue
 
+        # Make sure the shared ingest is running for this camera so it produces
+        # the audio segments the sound detector consumes (one RTSP connection).
+        recording_service.prime_rtsp_prebuffer(
+            stream_url=stream_url,
+            camera_id=cam_id,
+            recording_config=camera_event_recording_config(cam),
+        )
         det = SoundDetector(
             on_detect=_make_sound_detect_callback(cam_id),
             rules=enabled_rules,
-            source='rtsp',
-            rtsp_url=stream_url,
+            source='ingest',
             sample_duration_seconds=1.0,
+            audio_segment_provider=(lambda after, _cid=cam_id: recording_service.audio_segments_after(_cid, after)),
         )
         det.start()
         with _sound_detectors_lock:
@@ -3857,17 +3892,22 @@ def live_detection_status_api(camera_id: str | None = None):
 
 @app.get('/api/live/snapshot')
 def live_snapshot(camera_id: str | None = None):
-    # Snapshots are served exactly as read from the camera. Detection boxes are
-    # drawn client-side on a canvas from /api/live/detection-status data, so no
-    # per-request JPEG decode/draw/re-encode happens on the server.
-    selected_camera = get_camera_instance(camera_id)
+    # Serve the shared ingest's latest frame so live view does not open a second
+    # RTSP connection. Detection boxes are drawn client-side from
+    # /api/live/detection-status. Falls back to a direct read only while the
+    # ingest is warming up or for non-RTSP backends.
     selected_config = get_camera_config(camera_id)
+    resolved_id = str(selected_config.get('id') or camera_id or '')
+    if resolved_id and build_stream_url(selected_config):
+        sample = recording_service.latest_frame_jpeg(resolved_id)
+        if sample is not None:
+            return Response(content=sample[0], media_type='image/jpeg')
+    selected_camera = get_camera_instance(camera_id)
     if hasattr(selected_camera, 'read_jpeg'):
         try:
             image_bytes, frame = selected_camera.read_jpeg()
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        queue_live_stream_alerts(image_bytes, frame, copy.deepcopy(selected_config))
         return Response(content=image_bytes, media_type='image/jpeg')
     raise HTTPException(status_code=503, detail='Live snapshots require an ONVIF/RTSP camera backend.')
 
@@ -4751,13 +4791,14 @@ def _migrate_camera_id(old_id: str, new_id: str) -> None:
         if old_id in _frame_motion_prev:
             _frame_motion_prev[new_id] = _frame_motion_prev.pop(old_id)
     if recording_service is not None:
-        old_dir = recording_service.prebuffer_dir / old_key
-        new_dir = recording_service.prebuffer_dir / new_key
-        if old_dir.exists() and not new_dir.exists():
-            try:
-                old_dir.rename(new_dir)
-            except OSError as exc:
-                logger.warning('Could not rename prebuffer dir %s → %s: %s', old_key, new_key, exc)
+        for base in (recording_service.prebuffer_dir, recording_service.frames_dir, recording_service.audio_dir):
+            old_dir = base / old_key
+            new_dir = base / new_key
+            if old_dir.exists() and not new_dir.exists():
+                try:
+                    old_dir.rename(new_dir)
+                except OSError as exc:
+                    logger.warning('Could not rename ingest dir %s → %s: %s', old_dir, new_dir, exc)
 
 
 def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:

@@ -563,6 +563,148 @@ def test_clip_duration_seconds_prefers_video_stream_duration(tmp_path, monkeypat
     assert RecordingService.clip_duration_seconds(clip) == pytest.approx(3.25)
 
 
+def test_prime_ingest_runs_without_pre_event_seconds(tmp_path, monkeypatch):
+    # The shared ingest is the single RTSP connection feeding detection + sound +
+    # events, so it must start even when pre_event_seconds is 0 (old prebuffer
+    # gated on pre > 0 and would never start for detection-only setups).
+    from app.recordings import RecordingService
+
+    service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'rec')}, 'recording': {}})
+    calls = []
+    monkeypatch.setattr(RecordingService, '_worker_ffmpeg_available', lambda self, *a, **k: True)
+    monkeypatch.setattr(RecordingService, '_ensure_prebuffer_worker', lambda self, *a, **k: calls.append((a, k)))
+
+    assert service.prime_rtsp_prebuffer(stream_url='rtsp://x/s', camera_id='cam', recording_config={'pre_event_seconds': 0}) is True
+    assert calls, 'ingest worker should be ensured even with pre_event_seconds=0'
+
+
+def test_ingest_frame_and_audio_accessors(tmp_path):
+    from app.recordings import RecordingService
+
+    service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'rec')}, 'recording': {}})
+    key = RecordingService._camera_key('Front Yard')
+
+    frames_dir = service.frames_dir / key
+    frames_dir.mkdir(parents=True)
+    (frames_dir / 'latest.jpg').write_bytes(b'jpeg-bytes')
+    got = service.latest_frame_jpeg('Front Yard')
+    assert got is not None and got[0] == b'jpeg-bytes'
+    # A stale frame is rejected so detection never runs on an old image.
+    old = time.time() - 60
+    os.utime(frames_dir / 'latest.jpg', (old, old))
+    assert service.latest_frame_jpeg('Front Yard', max_age_seconds=10) is None
+
+    audio_dir = service.audio_dir / key
+    audio_dir.mkdir(parents=True)
+    now = time.time()
+    for index in range(3):
+        seg = audio_dir / f'aud-{index:02d}.wav'
+        seg.write_bytes(b'x')
+        os.utime(seg, (now - 3 + index, now - 3 + index))
+    after = service.audio_segments_after('Front Yard', now - 2.5)
+    assert [path.name for path, _mtime in after] == ['aud-01.wav', 'aud-02.wav']
+
+
+def test_read_ingest_frame_decodes_latest_jpeg(tmp_path, monkeypatch):
+    cv2 = pytest.importorskip('cv2')
+    np = pytest.importorskip('numpy')
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    key = main.RecordingService._camera_key('cam1')
+    frames_dir = main.recording_service.frames_dir / key
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    ok, encoded = cv2.imencode('.jpg', np.zeros((48, 64, 3), dtype=np.uint8))
+    assert ok
+    (frames_dir / 'latest.jpg').write_bytes(encoded.tobytes())
+
+    sample = main.read_ingest_frame('cam1')
+    assert sample is not None
+    image, frame = sample
+    assert frame['width'] == 64 and frame['height'] == 48 and frame['timestamp'] > 0
+    assert main.read_ingest_frame('no-such-camera') is None
+
+
+def test_shared_ingest_worker_command_fans_out_three_outputs(tmp_path, monkeypatch):
+    # One ffmpeg invocation, one input (-i), three outputs: video .ts segments,
+    # a latest.jpg frame, and PCM-WAV audio segments. (The 3-output ffmpeg itself
+    # is validated manually; here we assert the command the worker builds.)
+    import app.recordings as recordings_module
+    from app.recordings import RecordingService
+
+    service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'rec')}, 'recording': {}})
+    stop = threading.Event()
+    captured: dict[str, list[str]] = {}
+
+    class _FakeProc:
+        def poll(self):
+            return 0
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            pass
+
+    def fake_popen(cmd, **_kwargs):
+        captured['cmd'] = cmd
+        stop.set()  # one iteration only
+        return _FakeProc()
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(recordings_module.subprocess, 'Popen', fake_popen)
+
+    service._run_prebuffer_worker('cam', 'rtsp://example/stream', 20, stop)
+
+    cmd = captured['cmd']
+    assert cmd.count('-i') == 1, 'a single input == a single RTSP connection'
+    assert any(str(a).endswith('latest.jpg') for a in cmd), 'frame output for detection/snapshots'
+    assert any('segment-' in str(a) and str(a).endswith('.ts') for a in cmd), 'video segments for events'
+    assert any('aud-' in str(a) and str(a).endswith('.wav') for a in cmd), 'audio segments for sound'
+    assert 'image2' in cmd and cmd.count('segment') >= 2  # ts segment + wav segment muxers
+
+
+def test_sound_detector_ingest_consumes_audio_segments(tmp_path):
+    import shutil as _shutil
+    if not _shutil.which('ffmpeg'):
+        pytest.skip('ffmpeg not available')
+    from app.sound_detector import SoundDetector
+
+    wav = tmp_path / 'chunk.wav'
+    subprocess.run([
+        'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=16000',
+        '-t', '1', '-ac', '1', '-acodec', 'pcm_s16le', str(wav),
+    ], check=True)
+
+    captured = []
+    # The ingest writes fresh segments continuously; simulate one arriving after
+    # the detector's startup cutoff by stamping it with the current time once.
+    state = {'served': False}
+
+    def provider(after, _w=wav, _state=state):
+        if _state['served']:
+            return []
+        _state['served'] = True
+        return [(_w, time.time())]
+
+    det = SoundDetector(on_detect=lambda *a, **k: None, rules=[], source='ingest', audio_segment_provider=provider)
+    det._handle_chunk = lambda audio: captured.append(audio)
+    det.start()
+    try:
+        deadline = time.time() + 4
+        while not captured and time.time() < deadline:
+            time.sleep(0.1)
+    finally:
+        det.stop()
+
+    assert captured, 'ingest sound source should classify the audio segment'
+    assert captured[0].shape[0] == 16000  # 1s of 16 kHz mono
+
+
 def test_favicon_is_served_publicly(tmp_path, monkeypatch):
     app, _database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)

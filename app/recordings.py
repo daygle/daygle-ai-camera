@@ -30,6 +30,13 @@ class RecordingService:
     DEGENERATE_MIN_REQUEST_SECONDS = 8.0
     DEGENERATE_MAX_RENDERED_SECONDS = 3.0
     DEGENERATE_MAX_RENDERED_FRACTION = 0.25
+    # Decoded-frame rate the shared ingest writes to latest.jpg for object
+    # detection. The live monitor samples at ~2 Hz by default, so 4 fps keeps a
+    # fresh frame available without spending CPU on frames nothing reads.
+    INGEST_FRAME_FPS = 4
+    # How long sidecar audio segments are retained before pruning (sound
+    # detection consumes them within ~1s; keep a small safety margin).
+    AUDIO_SEGMENT_RETENTION_SECONDS = 20
 
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
@@ -39,6 +46,14 @@ class RecordingService:
         self.recordings_dir.mkdir(parents=True, exist_ok=True)
         self.prebuffer_dir = self.recordings_dir / '.prebuffer'
         self.prebuffer_dir.mkdir(parents=True, exist_ok=True)
+        # Shared-ingest sidecar outputs (one ffmpeg per camera fans out to all
+        # consumers, so each camera holds a single RTSP connection):
+        #   .frames/<key>/latest.jpg  -> object detection + live snapshots
+        #   .audio/<key>/aud-*.wav    -> sound detection (16 kHz mono PCM)
+        self.frames_dir = self.recordings_dir / '.frames'
+        self.frames_dir.mkdir(parents=True, exist_ok=True)
+        self.audio_dir = self.recordings_dir / '.audio'
+        self.audio_dir.mkdir(parents=True, exist_ok=True)
         self._prebuffer_lock = threading.Lock()
         self._prebuffer_workers: dict[str, dict[str, Any]] = {}
         self._continuous_lock = threading.Lock()
@@ -377,11 +392,12 @@ class RecordingService:
         camera_id: str,
         recording_config: dict[str, Any] | None = None,
     ) -> bool:
+        # The per-camera ingest is the SINGLE RTSP connection that feeds event
+        # pre-roll, object detection (latest.jpg) and sound detection (audio
+        # segments), so it runs whenever the camera has a stream — not only when
+        # pre_event_seconds > 0.
         config = recording_config or self.recording_config
-        pre_seconds = max(0, int(config.get('pre_event_seconds', 0)))
-        if pre_seconds <= 0:
-            return False
-        if not self._worker_ffmpeg_available('rolling_prebuffer'):
+        if not self._worker_ffmpeg_available('camera_ingest'):
             return False
         camera_key = self._camera_key(camera_id)
         self._ensure_prebuffer_worker(camera_key, stream_url, self.prebuffer_window_seconds(config), camera_id=camera_id)
@@ -658,6 +674,13 @@ class RecordingService:
         camera_dir = self.prebuffer_dir / camera_key
         camera_dir.mkdir(parents=True, exist_ok=True)
         output_pattern = camera_dir / 'segment-%Y%m%dT%H%M%S.ts'
+        # Sidecar outputs for the other consumers of this single connection.
+        frames_dir = self.frames_dir / camera_key
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        latest_frame_path = frames_dir / 'latest.jpg'
+        audio_camera_dir = self.audio_dir / camera_key
+        audio_camera_dir.mkdir(parents=True, exist_ok=True)
+        audio_pattern = audio_camera_dir / 'aud-%Y%m%dT%H%M%S.wav'
 
         while not stop_event.is_set():
             command = [
@@ -674,6 +697,7 @@ class RecordingService:
                 'ignore_err',
                 '-i',
                 stream_url,
+                # Output 1: rolling video+audio segments for event clips.
                 '-map',
                 '0:v:0',
                 '-map',
@@ -695,6 +719,42 @@ class RecordingService:
                 '-strftime',
                 '1',
                 str(output_pattern),
+                # Output 2: latest decoded frame for object detection + snapshots.
+                # Written to a temp name then atomically renamed so a reader never
+                # sees a half-written JPEG. -update overwrites the same target.
+                '-map',
+                '0:v:0',
+                '-vf',
+                f'fps={self.INGEST_FRAME_FPS}',
+                '-update',
+                '1',
+                '-atomic_writing',
+                '1',
+                '-f',
+                'image2',
+                '-y',
+                str(latest_frame_path),
+                # Output 3: 1s mono 16 kHz PCM-WAV segments for sound detection.
+                '-map',
+                '0:a:0?',
+                '-vn',
+                '-acodec',
+                'pcm_s16le',
+                '-ar',
+                '16000',
+                '-ac',
+                '1',
+                '-f',
+                'segment',
+                '-segment_time',
+                '1',
+                '-segment_format',
+                'wav',
+                '-reset_timestamps',
+                '1',
+                '-strftime',
+                '1',
+                str(audio_pattern),
             ]
             stderr_file = tempfile.NamedTemporaryFile(mode='w+', suffix='.log', delete=False, dir=str(self.prebuffer_dir))
             stderr_path = Path(stderr_file.name)
@@ -703,6 +763,7 @@ class RecordingService:
             try:
                 while process.poll() is None and not stop_event.is_set():
                     self._prune_prebuffer_segments(camera_dir, buffer_seconds)
+                    self._prune_audio_segments(audio_camera_dir)
                     time.sleep(1)
             finally:
                 if process.poll() is None:
@@ -730,6 +791,55 @@ class RecordingService:
                     segment.unlink(missing_ok=True)
             except OSError:
                 continue
+
+    def _prune_audio_segments(self, audio_camera_dir: Path) -> None:
+        cutoff = time.time() - self.AUDIO_SEGMENT_RETENTION_SECONDS
+        for segment in audio_camera_dir.glob('aud-*.wav'):
+            try:
+                if segment.stat().st_mtime < cutoff:
+                    segment.unlink(missing_ok=True)
+            except OSError:
+                continue
+
+    # ── Shared-ingest accessors ──────────────────────────────────────
+    def latest_frame_jpeg(self, camera_id: str, *, max_age_seconds: float = 10.0) -> tuple[bytes, float] | None:
+        """Most recent decoded frame the ingest wrote for this camera, as
+        (jpeg_bytes, captured_ts). ``captured_ts`` is the file mtime — when
+        ffmpeg wrote the frame — so detection samples and playback overlays stay
+        aligned. Returns None when no fresh frame is available (ingest warming
+        up, camera offline, or ffmpeg unavailable)."""
+        path = self.frames_dir / self._camera_key(camera_id) / 'latest.jpg'
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return None
+        if max_age_seconds and (time.time() - mtime) > max_age_seconds:
+            return None
+        try:
+            data = path.read_bytes()
+        except OSError:
+            return None
+        if not data:
+            return None
+        return data, mtime
+
+    def audio_segments_after(self, camera_id: str, after_ts: float) -> list[tuple[Path, float]]:
+        """Audio WAV segments written strictly after ``after_ts``, oldest first,
+        as (path, mtime). Lets the sound detector consume each 1s chunk once
+        without reopening its own RTSP connection."""
+        audio_camera_dir = self.audio_dir / self._camera_key(camera_id)
+        if not audio_camera_dir.exists():
+            return []
+        out: list[tuple[Path, float]] = []
+        for segment in audio_camera_dir.glob('aud-*.wav'):
+            try:
+                mtime = segment.stat().st_mtime
+            except OSError:
+                continue
+            if mtime > after_ts:
+                out.append((segment, mtime))
+        out.sort(key=lambda item: item[1])
+        return out
 
     def _collect_prebuffer_segments(self, camera_key: str, start_ts: float, end_ts: float) -> tuple[list[Path], float | None]:
         """Return the segments whose footage overlaps [start_ts, end_ts] plus

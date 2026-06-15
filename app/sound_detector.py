@@ -389,6 +389,7 @@ class SoundDetector:
         device_index: int | None = None,
         rtsp_url: str | None = None,
         sample_duration_seconds: float = 1.0,
+        audio_segment_provider: Callable[[float], list[tuple[Any, float]]] | None = None,
     ) -> None:
         self.on_detect = on_detect
         self.rules = [r for r in rules if r.get('enabled') and r.get('class') in SOUND_CLASSES]
@@ -396,6 +397,10 @@ class SoundDetector:
         self.device_index = device_index
         self.rtsp_url = rtsp_url
         self.sample_duration_seconds = sample_duration_seconds
+        # For source='ingest': returns audio WAV segments (path, mtime) written
+        # after the given timestamp by the shared per-camera ingest, so sound
+        # detection reuses that single RTSP connection instead of opening its own.
+        self.audio_segment_provider = audio_segment_provider
 
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -431,7 +436,12 @@ class SoundDetector:
         if self._thread and self._thread.is_alive():
             return
         self._stop_event.clear()
-        target = self._run_microphone if self.source == 'microphone' else self._run_rtsp
+        if self.source == 'microphone':
+            target = self._run_microphone
+        elif self.source == 'ingest':
+            target = self._run_ingest
+        else:
+            target = self._run_rtsp
         self._thread = threading.Thread(target=target, name='sound-monitor', daemon=True)
         self._thread.start()
 
@@ -630,6 +640,50 @@ class SoundDetector:
 
             if not self._stop_event.is_set():
                 self._stop_event.wait(5.0)
+
+    def _run_ingest(self) -> None:
+        """Consume 1s PCM-WAV audio segments produced by the shared per-camera
+        ingest, so sound detection adds no extra RTSP connection. Each new
+        segment (16 kHz mono s16le) is read once and classified."""
+        if self.audio_segment_provider is None:
+            logger.warning('Sound monitor: ingest source selected but no audio segment provider')
+            self._set_status('unavailable: no audio provider')
+            return
+
+        import wave
+
+        preload_thread = threading.Thread(target=_yamnet.preload, daemon=True, name='yamnet-preload')
+        preload_thread.start()
+
+        enabled_classes = [r['class'] for r in self.rules]
+        logger.info('Sound monitor started (ingest, classes=%s)', enabled_classes)
+        self._set_status('listening')
+
+        # Only process segments newer than startup so we don't replay stale audio.
+        last_ts = time.time()
+        while not self._stop_event.is_set():
+            try:
+                segments = self.audio_segment_provider(last_ts)
+            except Exception as exc:
+                logger.error('Sound monitor ingest provider error: %s', exc)
+                segments = []
+            for path, mtime in segments:
+                if self._stop_event.is_set():
+                    break
+                last_ts = max(last_ts, mtime)
+                try:
+                    with wave.open(str(path), 'rb') as wav:
+                        frames = wav.readframes(wav.getnframes())
+                except Exception as exc:
+                    logger.debug('Sound monitor could not read audio segment %s: %s', path, exc)
+                    continue
+                if not frames:
+                    continue
+                audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+                if audio.size:
+                    self._handle_chunk(audio)
+            # Segments arrive ~1/s; poll a little faster so detection stays prompt.
+            self._stop_event.wait(0.5)
 
 
 # Backwards-compatible alias
