@@ -39,8 +39,9 @@ class RecordingService:
     # while keeping event timing reasonably granular.
     PREBUFFER_SEGMENT_SECONDS = 4
     PREBUFFER_SEGMENT_GLOB = 'segment-*.mp4'
-    # How long sidecar audio segments are retained before pruning (sound
-    # detection consumes them within ~1s; keep a small safety margin).
+    # Floor for sidecar audio retention. The worker actually retains audio for
+    # the full prebuffer window (pre + max_clip) so long event clips get audio
+    # for their whole length; this is just the minimum when that window is tiny.
     AUDIO_SEGMENT_RETENTION_SECONDS = 20
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -782,7 +783,7 @@ class RecordingService:
                 while process.poll() is None and not stop_event.is_set():
                     keep_seconds = int(worker_state.get('buffer_seconds') or 15)
                     self._prune_prebuffer_segments(camera_dir, keep_seconds)
-                    self._prune_audio_segments(audio_camera_dir)
+                    self._prune_audio_segments(audio_camera_dir, keep_seconds)
                     time.sleep(1)
             finally:
                 if process.poll() is None:
@@ -800,6 +801,7 @@ class RecordingService:
                 stderr_path.unlink(missing_ok=True)
                 keep_seconds = int(worker_state.get('buffer_seconds') or 15)
                 self._prune_prebuffer_segments(camera_dir, keep_seconds)
+                self._prune_audio_segments(audio_camera_dir, keep_seconds)
             if not stop_event.is_set():
                 time.sleep(1)
 
@@ -812,8 +814,14 @@ class RecordingService:
             except OSError:
                 continue
 
-    def _prune_audio_segments(self, audio_camera_dir: Path) -> None:
-        cutoff = time.time() - self.AUDIO_SEGMENT_RETENTION_SECONDS
+    def _prune_audio_segments(self, audio_camera_dir: Path, keep_seconds: int | None = None) -> None:
+        # Retain audio for the SAME window as the video prebuffer (pre + max_clip)
+        # so long event clips have real audio for their whole length, not just
+        # the last AUDIO_SEGMENT_RETENTION_SECONDS. Audio shorter than the video
+        # made the player's buffered bar stop early (buffered = where all tracks
+        # exist). The constant is now just a floor.
+        retain = max(self.AUDIO_SEGMENT_RETENTION_SECONDS, int(keep_seconds or 0), 5)
+        cutoff = time.time() - retain
         for segment in audio_camera_dir.glob('aud-*.wav'):
             try:
                 if segment.stat().st_mtime < cutoff:
@@ -956,6 +964,15 @@ class RecordingService:
             'aac',
             '-b:a',
             '128k',
+            # Pad audio with trailing silence to the video length, then cut at
+            # the video end (-shortest). Without -af apad the audio track ends
+            # earlier than the video for clips longer than the audio we have,
+            # and browsers report the buffered range as the span where BOTH
+            # tracks exist - so the scrubber's loaded bar stopped short of the
+            # end. apad guarantees audio length == video length, keeping the
+            # full video while filling the timeline.
+            '-af',
+            'apad',
             '-shortest',
             '-movflags',
             '+faststart',

@@ -817,6 +817,67 @@ def test_prebuffer_first_segment_uses_full_segment_length(tmp_path):
     assert durations[segments[0]] == pytest.approx(service.PREBUFFER_SEGMENT_SECONDS, abs=0.2)
 
 
+def test_audio_retention_follows_prebuffer_window(tmp_path):
+    # Audio sidecar segments must be retained for the full prebuffer window, not
+    # a fixed 20s — otherwise long event clips get audio shorter than the video
+    # and the player's buffered bar stops short (buffered = where all tracks exist).
+    from app.recordings import RecordingService
+
+    service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'rec')}, 'recording': {}})
+    audio_dir = service.audio_dir / 'cam'
+    audio_dir.mkdir(parents=True)
+    now = time.time()
+    old = audio_dir / 'aud-old.wav'
+    old.write_bytes(b'x')
+    os.utime(old, (now - 60, now - 60))  # 60s old
+
+    # Default floor (20s) prunes the 60s-old segment.
+    service._prune_audio_segments(audio_dir)
+    assert not old.exists()
+
+    # With a large keep window (long max_clip), the same-age segment is retained.
+    old.write_bytes(b'x')
+    os.utime(old, (now - 60, now - 60))
+    service._prune_audio_segments(audio_dir, keep_seconds=200)
+    assert old.exists()
+
+
+def test_mux_prebuffer_audio_pads_audio_to_video(tmp_path, monkeypatch):
+    # The audio mux must pad audio to the video length (-af apad -shortest) so
+    # the audio track never ends before the video, which would leave the
+    # player's buffered bar short of the clip end.
+    import app.recordings as recordings_module
+    from app.recordings import RecordingService
+
+    service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'rec')}, 'recording': {}})
+    audio_dir = service.audio_dir / 'cam'
+    audio_dir.mkdir(parents=True)
+    now = time.time()
+    seg = audio_dir / 'aud-000.wav'
+    seg.write_bytes(b'x')
+    os.utime(seg, (now, now))
+
+    captured = {}
+
+    def fake_run(command, *_args, **_kwargs):
+        captured['cmd'] = command
+        Path(command[-1]).write_bytes(b'muxed')
+        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+    monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _p: True))
+
+    video = tmp_path / 'rec' / 'event.mp4'
+    video.parent.mkdir(parents=True, exist_ok=True)
+    video.write_bytes(b'video')
+    service._mux_prebuffer_audio('cam', video, now - 1, 2.0)
+
+    cmd = captured.get('cmd', [])
+    assert '-af' in cmd and cmd[cmd.index('-af') + 1] == 'apad', 'audio must be padded to video length'
+    assert '-shortest' in cmd
+
+
 def test_favicon_is_served_publicly(tmp_path, monkeypatch):
     app, _database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
