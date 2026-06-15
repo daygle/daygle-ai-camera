@@ -110,10 +110,10 @@ function renderStatus() {
   const rules = (editingSound.rules || []).filter((rule) => rule.enabled).length;
   const totalRules = (editingSound.rules || []).length;
 
-  if (statSoundRules) statSoundRules.textContent = camera ? String(totalRules) : '—';
-  if (statActiveRules) statActiveRules.textContent = camera ? String(rules) : '—';
-  if (statDetection) statDetection.textContent = !camera ? '—' : editingSound.enabled ? 'Enabled' : 'Disabled';
-  if (statCamera) statCamera.textContent = camera ? (camera.name || camera.id || '—') : '—';
+  if (statSoundRules) statSoundRules.textContent = camera ? String(totalRules) : '-';
+  if (statActiveRules) statActiveRules.textContent = camera ? String(rules) : '-';
+  if (statDetection) statDetection.textContent = !camera ? '-' : editingSound.enabled ? 'Enabled' : 'Disabled';
+  if (statCamera) statCamera.textContent = camera ? (camera.name || camera.id || '-') : '-';
 
   if (!statusPanel) return;
   if (!camera || !selectedStatus) {

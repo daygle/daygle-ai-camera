@@ -117,7 +117,7 @@ function formatDate(value) {
   // Slicing the raw ISO string takes the UTC date, which disagrees with the
   // locally-converted time whenever the viewer's timezone crosses midnight
   // relative to UTC (e.g. a UTC+10 morning event is stored as the previous
-  // UTC day) — producing a "Started" date that is a day off from the wall clock.
+  // UTC day) - producing a "Started" date that is a day off from the wall clock.
   const localIso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   return `${formatUserDate(localIso)} ${formatUserTime(date)}`;
 }

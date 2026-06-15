@@ -163,7 +163,7 @@ class OnnxYoloDetector:
                 cuda_options: dict[str, Any] = {
                     "device_id": 0,
                     # Allocate on demand rather than greedily pre-allocating all
-                    # available VRAM — prevents the BFC arena from consuming the
+                    # available VRAM - prevents the BFC arena from consuming the
                     # entire GPU and leaving nothing for cuBLAS or other ops.
                     "arena_extend_strategy": "kSameAsRequested",
                 }

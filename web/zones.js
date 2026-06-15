@@ -1,4 +1,4 @@
-// zones.js — Zone drawing, editing, and object detection rules.
+// zones.js - Zone drawing, editing, and object detection rules.
 // Loaded after live.js on zones.html only. Accesses live.js globals:
 //   isZonesPage, selectedCamera, liveEls, availableLabels,
 //   clamp, normalizePoint, roundCoord, normalizeLabelList,
@@ -137,7 +137,7 @@ function updateZonesStats() {
   if (liveEls.statRuleCount) liveEls.statRuleCount.textContent = String(ruleCount);
   if (liveEls.statAlertRules) liveEls.statAlertRules.textContent = String(alertCount);
   if (liveEls.statCameraName) {
-    liveEls.statCameraName.textContent = selectedCamera.name || selectedCamera.id || '—';
+    liveEls.statCameraName.textContent = selectedCamera.name || selectedCamera.id || '-';
   }
 }
 

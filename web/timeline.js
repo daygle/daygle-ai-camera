@@ -151,7 +151,7 @@ function startOverlayRaf() {
   const video = els.clipPlayer;
   if (!video) return;
   // Uses requestVideoFrameCallback for frame-accurate sync with the video
-  // decoder. The callback provides `mediaTime` — the exact PTS of the frame
+  // decoder. The callback provides `mediaTime` - the exact PTS of the frame
   // being displayed. We project one frame ahead (mediaTime + frameDuration)
   // so the overlay paints boxes where the object will be when the next frame
   // hits the screen, compensating for the 1-frame VFC-to-composite delay.
@@ -320,7 +320,7 @@ function recordingDetectionSummary(recording) {
     const confidence = Number(meta.confidence || 0);
     return [{ label, confidence }];
   }
-  // Build best-confidence map from all detections — historical data, no config filtering.
+  // Build best-confidence map from all detections - historical data, no config filtering.
   const best = new Map();
   for (const d of (recording.detections || [])) {
     const label = String(d.label || '').trim().toLowerCase();
@@ -1034,7 +1034,7 @@ els.clipPlayer.addEventListener('error', () => {
   els.clipPlayerStatus.textContent = messages[error?.code] || 'Unable to play this recording.';
 });
 
-// timeupdate is intentionally omitted — the requestVideoFrameCallback/rAF loop
+// timeupdate is intentionally omitted - the requestVideoFrameCallback/rAF loop
 // already draws the overlay on every frame during playback, making it redundant.
 ['loadedmetadata', 'loadeddata', 'pause', 'seeked'].forEach((eventName) => {
   els.clipPlayer.addEventListener(eventName, () => {
@@ -1100,7 +1100,7 @@ loadAuth().then(async () => {
 // Re-render the timeline (ticks, segments, list, modal) when the user's
 // date_format / time_format changes in another tab. Preserves the
 // currently selected camera / day / filter / time range so the user keeps
-// what they were looking at — only the rendered formatting changes.
+// what they were looking at - only the rendered formatting changes.
 window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
   if (typeof loadTimeline !== 'function' || !state || !state.payload) return;
   loadTimeline({ preserveSelection: true }).catch((error) => {

@@ -31,7 +31,7 @@ const els = {
 
 let authState = { user: null, csrfToken: null };
 // Date/time display preferences are global (utils.daygleDatePrefs) and are
-// populated by nav.js from /api/auth/me — no page-local state to maintain.
+// populated by nav.js from /api/auth/me - no page-local state to maintain.
 let recordingRefreshTimer = null;
 let activeRecording = null;
 let overlayResizeObserver = null;
@@ -325,7 +325,7 @@ function recordingDetectionSummary(recording) {
     return [{ label, confidence }];
   }
 
-  // Build best-confidence map from all detections regardless of current config —
+  // Build best-confidence map from all detections regardless of current config -
   // this is historical data so we show everything that was actually recorded.
   const best = new Map();
   for (const d of (recording.detections || [])) {
@@ -399,7 +399,7 @@ function startOverlayRaf() {
   const video = els.clipPlayer;
   if (!video) return;
   // Uses requestVideoFrameCallback for frame-accurate sync with the video
-  // decoder. The callback provides `mediaTime` — the exact PTS of the frame
+  // decoder. The callback provides `mediaTime` - the exact PTS of the frame
   // being displayed. We project one frame ahead (mediaTime + frameDuration)
   // so the overlay paints boxes where the object will be when the next frame
   // hits the screen, compensating for the 1-frame VFC-to-composite delay.
@@ -682,7 +682,7 @@ els.clipPlayer.addEventListener('error', () => {
   els.clipPlayerStatus.textContent = messages[error?.code] || 'Unable to play this recording.';
 });
 
-// timeupdate is intentionally omitted — the requestVideoFrameCallback/rAF loop
+// timeupdate is intentionally omitted - the requestVideoFrameCallback/rAF loop
 // already draws the overlay on every frame during playback, making it redundant.
 ['loadedmetadata', 'loadeddata', 'pause', 'seeked'].forEach((eventName) => {
   els.clipPlayer.addEventListener(eventName, () => {
@@ -803,7 +803,7 @@ document.addEventListener('keydown', (event) => {
 // Re-render the recordings list (and any open modal's "Started" line)
 // when the user's date_format / time_format changes in another tab. Uses
 // loadRecordings() so the active filter inputs (camera, label, dates,
-// sort) are preserved — only the displayed formatting changes.
+// sort) are preserved - only the displayed formatting changes.
 window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
   if (typeof loadRecordings !== 'function' || !els || !els.listStatus) return;
   loadRecordings().catch((error) => { els.listStatus.textContent = error.message; });

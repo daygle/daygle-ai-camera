@@ -35,7 +35,7 @@ _ONVIF_VELOCITY: dict[str, tuple[float, float, float]] = {
     'stop':      ( 0.0,  0.0,  0.0),
 }
 
-# Profile token cache — avoids a GetProfiles round-trip on every button press.
+# Profile token cache - avoids a GetProfiles round-trip on every button press.
 _profile_token_cache: dict[tuple[str, int], str] = {}
 
 

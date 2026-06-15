@@ -272,7 +272,7 @@ function fillModal(camera, index) {
   document.getElementById('editUsername').value = camera.username || '';
   const pwdField = document.getElementById('editPassword');
   pwdField.value = '';
-  pwdField.placeholder = camera.has_password ? '(saved — type to change)' : '(no password)';
+  pwdField.placeholder = camera.has_password ? '(saved - type to change)' : '(no password)';
   document.getElementById('testConnectionResult').textContent = '';
   document.getElementById('editWidth').value = camera.width || 1280;
   document.getElementById('editHeight').value = camera.height || 720;
@@ -505,7 +505,7 @@ async function updateHealthStats() {
       }
     }
   } catch {
-    // silently ignore — health endpoint may not exist on older versions
+    // silently ignore - health endpoint may not exist on older versions
   }
 }
 

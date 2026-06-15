@@ -92,7 +92,7 @@ function soundDetectionBadges(detections = []) {
 
 function detectionBadges(detections = []) {
   if (!detections.length) return '<span class="muted">No detections</span>';
-  // Deduplicate by label, keep best confidence per label — no config filtering
+  // Deduplicate by label, keep best confidence per label - no config filtering
   // so historical data always shows everything that was actually detected.
   const best = new Map();
   for (const d of detections) {
@@ -213,14 +213,14 @@ function buildActivityItems() {
   }
   // Deduplicate sound events by recordingId: multiple sound detections during
   // the same recording share a recordingId (via extend_active_rtsp_recording),
-  // so collapse them into one entry — matching how object detections appear
+  // so collapse them into one entry - matching how object detections appear
   // once per recording.  Merge detections from all grouped events so every
   // detected sound class shows as a badge on the single entry.
   const seenSoundRecording = new Map();
   const dedupedEventItems = eventItems.filter((item) => {
     if (!item.isSound) return true;
     const recId = item.recordingId;
-    if (!recId) return true; // no recording — keep as-is
+    if (!recId) return true; // no recording - keep as-is
     const prev = seenSoundRecording.get(recId);
     if (prev) {
       // Merge detections into the first (most recent) entry for this recording.

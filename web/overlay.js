@@ -79,8 +79,8 @@ function boxIoU(a, b) {
 }
 
 // Finds the detection in `candidates` that best corresponds to `target`:
-// same label, then highest box overlap (IoU). When nothing overlaps — e.g. a
-// fast-moving object whose boxes don't intersect between samples — it falls
+// same label, then highest box overlap (IoU). When nothing overlaps - e.g. a
+// fast-moving object whose boxes don't intersect between samples - it falls
 // back to the nearest box center. This keeps the correspondence (and velocity
 // estimates) stable when several objects of the same label are present, instead
 // of always matching the first one in the list.
@@ -171,7 +171,7 @@ function sampleTrackAtTime(track, t) {
   // Symmetrically, a track whose first sample falls mid-clip (the monitor only
   // sampled around the event) must not back-fill that box over the whole
   // pre-roll: hold it for ~a few sample intervals before its time, then
-  // nothing — those earlier frames were never analyzed.
+  // nothing - those earlier frames were never analyzed.
   if (time < track[0].t - maxHold) return [];
   if (time <= track[0].t) return track[0].detections || [];
   if (time >= last.t) return last.detections || [];
@@ -297,7 +297,7 @@ function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
 
     const confidence = Math.round(Number(detection.confidence || 0) * 100);
     const label = `${String(detection.label || 'object')} ${confidence}%`;
-    // measureText is cached per unique label string — it's the most expensive
+    // measureText is cached per unique label string - it's the most expensive
     // per-frame canvas operation. Labels like "Person 85%" repeat across
     // frames, so we measure once and reuse.
     const textWidth = _measureTextWidth(ctx, label);

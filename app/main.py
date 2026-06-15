@@ -216,7 +216,7 @@ def effective_live_config() -> dict[str, Any]:
         'event_debounce_seconds': 10.0,
         'background_detection_enabled': True,
         'detection_history_minutes': 10,
-        # Motion gate tuning — exposed in Live Detection settings.
+        # Motion gate tuning - exposed in Live Detection settings.
         'motion_pixel_threshold': 30,
         'motion_gate_fraction': 0.003,
         'motion_scale_fraction': 0.10,
@@ -980,7 +980,7 @@ def zone_motion_detections(
 ) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
     # monitor_motion is derived from the zone's enabled 'motion' rule during
-    # normalization, so motion monitoring is gated per zone — there is no
+    # normalization, so motion monitoring is gated per zone - there is no
     # camera-level motion switch.
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_motion', True)]
     if not zones:
@@ -1242,7 +1242,7 @@ def record_live_detection_history(camera_id: str, detections: list[dict[str, Any
     ``sample_ts`` must be when the analyzed frame was CAPTURED, not when
     inference finished: tracks sliced from this history are replayed against
     the recorded video, and stamping at completion shifts every box late by
-    the inference duration — the playback overlay then trails moving objects.
+    the inference duration - the playback overlay then trails moving objects.
 
     Empty cycles are recorded too: a recording track sliced from the history
     needs "nothing in frame" samples so playback overlays clear when an object
@@ -1318,7 +1318,7 @@ def detect_frame_motion(
     try:
         import numpy as np
         if hasattr(image, 'shape') and hasattr(image, 'dtype'):
-            # Fast path: already a numpy BGR array — convert to grayscale
+            # Fast path: already a numpy BGR array - convert to grayscale
             # using OpenCV (faster than PIL for large frames).
             import cv2
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -1378,7 +1378,7 @@ def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: 
         return False
     # Generic motion right after any event on this camera is the trailing edge of
     # the same physical activity (e.g. the background model re-settling after an
-    # object left), not a new occurrence — suppress it regardless of label overlap.
+    # object left), not a new occurrence - suppress it regardless of label overlap.
     if labels <= {'motion'}:
         return True
     previous_labels = {str(label).strip().lower() for label in previous.get('labels', []) if str(label).strip()}
@@ -1416,7 +1416,7 @@ def clear_live_camera_backoff(camera_id: str) -> None:
     # physically moved or had its scene change during the outage) doesn't trigger
     # false motion alerts against a stale background until the EMA resettles.
     # Also reset the periodic scan timestamp so YOLO runs immediately on the
-    # first frame — catching any subject already in frame on reconnect.
+    # first frame - catching any subject already in frame on reconnect.
     with _frame_motion_lock:
         _frame_motion_prev.pop(camera_id, None)
     _frame_motion_error_cameras.discard(camera_id)
@@ -1568,7 +1568,7 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None = None) -> 
         # only throttles the expensive frame-read + YOLO inference path. Pausing
         # the prebuffer during a detection hiccup leaves no pre-roll segments, so
         # the next event falls back to a live forward capture that starts after
-        # the subject has already passed — the event is silently missed.
+        # the subject has already passed - the event is silently missed.
         stream_url = build_stream_url(selected_config)
         cam_rec_config = camera_event_recording_config(selected_config)
         if stream_url:
@@ -1920,7 +1920,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     frame_is_numpy = hasattr(image, 'shape') and hasattr(image, 'dtype')
 
     # Resolve the frame's capture time BEFORE running inference. The history
-    # sample must be stamped with when the frame was captured — detect_image
+    # sample must be stamped with when the frame was captured - detect_image
     # can take hundreds of ms (seconds on SBC CPUs), and a completion-time
     # stamp makes every baked playback overlay lag the video by that much.
     now = time.time()
@@ -2038,7 +2038,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
 
     alert_detections = list(object_alert_detections) + record_only_detections
     # Include each zone's motion detection individually so per-zone alert rules
-    # are scoped correctly — AlertEngine._append_motion_alerts checks zone_id.
+    # are scoped correctly - AlertEngine._append_motion_alerts checks zone_id.
     for _mot in motion_detections:
         alert_detections.append({**_mot, 'label': 'motion', 'motion_event': True})
     if not alert_detections:
@@ -2188,7 +2188,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # enforced inside deliver_email_alerts / deliver_push_notifications.
     # Deliver notifications off the detection thread: SMTP/ntfy calls block for
     # up to their 10s timeouts, and this thread holds the camera's detection
-    # slot — a slow mail server would stall monitoring (and history sampling,
+    # slot - a slow mail server would stall monitoring (and history sampling,
     # which playback overlays are sliced from) for that whole time.
     if triggered:
         notify_thread = threading.Thread(
@@ -2516,7 +2516,7 @@ def log_camera_diagnostic(
 ) -> None:
     """Record a system-generated camera/recording diagnostic event.
 
-    Best-effort and never raises into the calling path — diagnostics must not
+    Best-effort and never raises into the calling path - diagnostics must not
     be able to break recording or detection. Kept separate from the audit log
     so operational noise doesn't dilute the security trail.
     """
@@ -2681,7 +2681,7 @@ def start_rtsp_recording_capture(
     start_capture_ts = triggered_at.timestamp() - pre_seconds
     initial_deadline_ts = triggered_at.timestamp() + post_seconds
     # Ongoing detections may extend the capture deadline up to the configured
-    # clip ceiling — not just pre+post, which made extensions a no-op and forced
+    # clip ceiling - not just pre+post, which made extensions a no-op and forced
     # continuing activity to spill into brand-new recordings.
     max_clip_seconds = max(1, int((recording_config or effective_recording_config()).get('max_clip_seconds', 60)))
     max_deadline_ts = start_capture_ts + max(duration_seconds, float(max_clip_seconds))
@@ -2718,7 +2718,7 @@ def start_rtsp_recording_capture(
             # deadline may have passed before this thread even started collecting
             # footage.  The prebuffer holds several minutes of history, so extend
             # the search window to *now* (capped at max_deadline_ts) rather than
-            # the original post-event deadline — this recovers segments that were
+            # the original post-event deadline - this recovers segments that were
             # already written during the event but weren't asked for.
             actual_end_ts = min(max(time.time(), final_deadline_ts), max_deadline_ts)
             final_duration_seconds = max(1.0, actual_end_ts - start_capture_ts)
@@ -2743,7 +2743,7 @@ def start_rtsp_recording_capture(
                 content_seconds = final_duration_seconds
 
             # Anchor the stored timing and the detection track to the window the
-            # written media actually covers — keyframe-aligned prebuffer segments
+            # written media actually covers - keyframe-aligned prebuffer segments
             # and fallback captures rarely start exactly at start_capture_ts, and
             # any mismatch here shows up as overlay boxes drifting against the
             # video during playback.
@@ -3152,12 +3152,12 @@ def recording_stream_path(file_path: Path) -> Path:
     if playback_path.exists() and file_path.exists() and playback_path.stat().st_mtime >= file_path.stat().st_mtime:
         return playback_path
     # Event clips and prebuffer renders are already written as H.264/faststart
-    # MP4 — serve them directly. Re-encoding those again doubled storage and
+    # MP4 - serve them directly. Re-encoding those again doubled storage and
     # delayed first playback by the whole transcode.
     if file_path.suffix.lower() == '.mp4' and mp4_is_browser_playable(file_path):
         return file_path
     # If a previous transcode attempt failed and the source hasn't changed
-    # since, skip retrying — every browser range request would otherwise
+    # since, skip retrying - every browser range request would otherwise
     # re-run a doomed ffmpeg process and flood the logs.
     failed_marker = file_path.with_name(f'{file_path.stem}.playback.failed')
     if (
@@ -3216,7 +3216,7 @@ def write_live_history_detection_track(
     This replaces the old post-recording "bake" that re-decoded the clip and ran
     detection on every sampled frame: the background monitor already analyzed
     these frames live, so slicing its history costs nothing. An all-empty slice
-    is still written — it marks the clip as analyzed while the loader keeps
+    is still written - it marks the clip as analyzed while the loader keeps
     reporting it as missing so playback falls back to the static event boxes.
     """
     if not str(file_path):
@@ -3416,7 +3416,7 @@ def create_database_backup(prefix: str = 'daygle-database') -> Path:
         finally:
             source.close()
     except BaseException:
-        # Never leave a partial snapshot behind — a truncated .sqlite3 file in
+        # Never leave a partial snapshot behind - a truncated .sqlite3 file in
         # the backups directory looks like a usable backup but is not.
         backup_path.unlink(missing_ok=True)
         raise
@@ -4205,7 +4205,7 @@ def recording_detail(recording_id: int):
     # Backfill from the live monitor's in-memory history while it still covers
     # the clip's window (e.g. a recording finalized before this feature, viewed
     # shortly after capture). Older clips simply have no track and playback
-    # falls back to the static event boxes — clips are never decoded or
+    # falls back to the static event boxes - clips are never decoded or
     # re-analyzed for overlays.
     if (
         recording['track'] is None
@@ -4559,7 +4559,7 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     for key in ('stream_url', 'host', 'path', 'username', 'password'):
         if key in updated:
             updated[key] = str(updated.get(key) or '').strip()
-    # Blank password in the payload means "keep existing" — the GET response
+    # Blank password in the payload means "keep existing" - the GET response
     # redacts the real value so the edit form always submits an empty field.
     if not updated.get('password') and current.get('password'):
         updated['password'] = current['password']
@@ -4591,7 +4591,7 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
 
     # Per-camera motion overrides.  When the 'motion' key is absent from the
     # payload (old API clients), preserve the existing values unchanged.
-    # When present (even as an empty dict), rebuild from the submitted values —
+    # When present (even as an empty dict), rebuild from the submitted values -
     # omitting a key removes the per-camera override and falls back to global.
     if 'motion' in payload:
         raw_motion = payload.get('motion') if isinstance(payload.get('motion'), dict) else {}
@@ -5264,7 +5264,7 @@ async def restore_database(request: Request, file: UploadFile = File(...)):
     finally:
         DATABASE_RESTORE_LOCK.release()
         # Validation opens the upload directly, so sqlite may have created
-        # WAL sidecar files next to it — remove those along with the upload.
+        # WAL sidecar files next to it - remove those along with the upload.
         restore_temp.unlink(missing_ok=True)
         for sidecar_suffix in ('-wal', '-shm'):
             Path(f'{restore_temp}{sidecar_suffix}').unlink(missing_ok=True)
@@ -5352,7 +5352,7 @@ async def test_camera_connection(request: Request):
         raise HTTPException(status_code=400, detail='Provide a stream_url or host to test.')
     ffprobe = shutil.which('ffprobe')
     if not ffprobe:
-        raise HTTPException(status_code=503, detail='ffprobe is not installed — cannot test connection.')
+        raise HTTPException(status_code=503, detail='ffprobe is not installed - cannot test connection.')
     command = [ffprobe, '-v', 'quiet', '-rtsp_transport', 'tcp', '-i', stream_url,
                '-show_entries', 'stream=codec_type', '-of', 'json']
     try:
