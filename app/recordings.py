@@ -174,8 +174,9 @@ class RecordingService:
         command = [
             ffmpeg,
             '-y',
-            '-fflags',
-            '+discardcorrupt',
+            # Keep glitchy-but-present video on a flaky stream rather than
+            # discarding corrupt packets (which can empty the clip of video);
+            # -err_detect ignore_err keeps the capture alive without dropping it.
             '-err_detect',
             'ignore_err',
             '-rtsp_transport',
@@ -691,8 +692,13 @@ class RecordingService:
                 'error',
                 '-rtsp_transport',
                 'tcp',
-                '-fflags',
-                '+discardcorrupt',
+                # Do NOT use +discardcorrupt here. On a flaky camera link it drops
+                # every corrupt VIDEO packet as it is captured, leaving near
+                # audio-only segments, so the event render later finds no video
+                # (frame=0) and falls back to a late live capture. Keep the
+                # glitchy-but-present frames instead (same principle as the concat
+                # render fix); -err_detect ignore_err keeps ffmpeg alive on the
+                # bad stream without throwing the video away.
                 '-err_detect',
                 'ignore_err',
                 '-i',
