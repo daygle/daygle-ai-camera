@@ -18,6 +18,8 @@ const liveEls = {
   liveAiTrackToggle: document.getElementById('liveAiTrackToggle'),
   liveAiTrackGroup: document.getElementById('liveAiTrackGroup'),
   liveAiTrackCanvas: document.getElementById('liveAiTrackCanvas'),
+  livePtzToggle: document.getElementById('livePtzToggle'),
+  livePtzToggleGroup: document.getElementById('livePtzToggleGroup'),
   cameraSelect: document.getElementById('cameraSelect'),
   cameraControlGroup: document.getElementById('cameraControlGroup'),
   cameraGrid: document.getElementById('cameraGrid'),
@@ -292,6 +294,7 @@ function updateEmptyState() {
     if (liveEls.cameraGrid) liveEls.cameraGrid.hidden = true;
     if (liveEls.cameraControlGroup) liveEls.cameraControlGroup.hidden = true;
     if (liveEls.liveAiTrackGroup) liveEls.liveAiTrackGroup.hidden = true;
+    if (liveEls.livePtzToggleGroup) liveEls.livePtzToggleGroup.hidden = true;
   } else {
     liveEls.cameraEmpty.hidden = true;
   }
@@ -596,8 +599,10 @@ let ptzActive = false;
 
 function updatePtzVisibility() {
   if (!ptzOverlay) return;
-  const enabled = selectedCamera?.ptz?.enabled === true;
-  ptzOverlay.hidden = !enabled || isAllCameraMode();
+  const enabled = selectedCamera?.ptz?.enabled === true && !isAllCameraMode();
+  if (liveEls.livePtzToggleGroup) liveEls.livePtzToggleGroup.hidden = !enabled;
+  const toggled = liveEls.livePtzToggle ? liveEls.livePtzToggle.checked : true;
+  ptzOverlay.hidden = !enabled || !toggled;
 }
 
 async function sendPtz(command) {
@@ -640,6 +645,8 @@ if (ptzOverlay) {
     btn.addEventListener('touchcancel', stop);
   });
 }
+
+liveEls.livePtzToggle?.addEventListener('change', () => updatePtzVisibility());
 
 async function init() {
   const me = await api('/api/auth/me');
