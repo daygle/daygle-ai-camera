@@ -463,10 +463,16 @@ class RecordingService:
         command = [
             ffmpeg,
             '-y',
+            # Do NOT use +discardcorrupt / -err_detect ignore_err on this concat.
+            # Those are for the flaky *live* RTSP feed; on the rolling buffer's own
+            # segments they treat any captured packet corruption as a reason to
+            # drop frames, and once a stream carries some corruption (e.g. a flaky
+            # link) they discard EVERY video packet, yielding a valid-but-videoless
+            # clip (audio only). Verified: corrupted segments rendered 0 video
+            # frames with these flags vs. recovering frames without them. Keep
+            # corrupt frames and just repair timestamps so the video decodes.
             '-fflags',
-            '+discardcorrupt',
-            '-err_detect',
-            'ignore_err',
+            '+genpts',
             '-f',
             'concat',
             '-safe',
@@ -487,6 +493,8 @@ class RecordingService:
             'veryfast',
             '-pix_fmt',
             'yuv420p',
+            '-avoid_negative_ts',
+            'make_zero',
             '-movflags',
             '+faststart',
             '-t',
