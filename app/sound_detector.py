@@ -642,9 +642,16 @@ class SoundDetector:
                 self._stop_event.wait(5.0)
 
     def _run_ingest(self) -> None:
-        """Consume 1s PCM-WAV audio segments produced by the shared per-camera
-        ingest, so sound detection adds no extra RTSP connection. Each new
-        segment (16 kHz mono s16le) is read once and classified."""
+        """Consume PCM-WAV audio segments produced by the shared per-camera
+        ingest, so sound detection adds no extra RTSP connection.
+
+        Segments (16 kHz mono s16le) are appended to a rolling buffer and
+        classified in 50%-overlapping windows — the same sliding-window scheme
+        the microphone/RTSP paths use. Classifying each 1s segment in isolation
+        (the previous behaviour) split short transients across the segment
+        boundary, halving their energy in each window and missing barks, glass
+        breaks, single doorbell chimes, etc. Per-class cooldowns in
+        _handle_chunk prevent the overlap from double-alerting on one sound."""
         if self.audio_segment_provider is None:
             logger.warning('Sound monitor: ingest source selected but no audio segment provider')
             self._set_status('unavailable: no audio provider')
@@ -654,6 +661,14 @@ class SoundDetector:
 
         preload_thread = threading.Thread(target=_yamnet.preload, daemon=True, name='yamnet-preload')
         preload_thread.start()
+
+        chunk_samples = max(1, int(SAMPLE_RATE * self.sample_duration_seconds))
+        overlap_samples = chunk_samples // 2
+        advance_samples = max(1, chunk_samples - overlap_samples)
+        # Cap the buffer so a detection stall / segment gap can't grow it without
+        # bound; keep at most a few windows of recent audio.
+        max_buffer_samples = chunk_samples * 4
+        buffer = np.zeros(0, dtype=np.float32)
 
         enabled_classes = [r['class'] for r in self.rules]
         logger.info('Sound monitor started (ingest, classes=%s)', enabled_classes)
@@ -680,8 +695,15 @@ class SoundDetector:
                 if not frames:
                     continue
                 audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
-                if audio.size:
-                    self._handle_chunk(audio)
+                if not audio.size:
+                    continue
+                buffer = np.concatenate((buffer, audio)) if buffer.size else audio
+                # Classify overlapping windows that straddle segment boundaries.
+                while buffer.size >= chunk_samples:
+                    self._handle_chunk(buffer[:chunk_samples])
+                    buffer = buffer[advance_samples:]
+                if buffer.size > max_buffer_samples:
+                    buffer = buffer[-chunk_samples:]
             # Segments arrive ~1/s; poll a little faster so detection stays prompt.
             self._stop_event.wait(0.5)
 

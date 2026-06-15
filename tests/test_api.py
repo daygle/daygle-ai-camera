@@ -751,6 +751,46 @@ def test_sound_detector_ingest_consumes_audio_segments(tmp_path):
     assert captured[0].shape[0] == 16000  # 1s of 16 kHz mono
 
 
+def test_sound_detector_ingest_overlaps_windows_across_segments(tmp_path):
+    import shutil as _shutil
+    if not _shutil.which('ffmpeg'):
+        pytest.skip('ffmpeg not available')
+    from app.sound_detector import SoundDetector
+
+    wav = tmp_path / 'chunk.wav'
+    subprocess.run([
+        'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=16000',
+        '-t', '1', '-ac', '1', '-acodec', 'pcm_s16le', str(wav),
+    ], check=True)
+
+    captured = []
+    state = {'served': False}
+
+    # Three consecutive 1s segments. With 50% overlap they must yield MORE than
+    # three classification windows (~5), proving sounds crossing a segment
+    # boundary are analysed in a window that spans it.
+    def provider(after, _w=wav, _state=state):
+        if _state['served']:
+            return []
+        _state['served'] = True
+        base = time.time()
+        return [(_w, base + 0.1), (_w, base + 0.2), (_w, base + 0.3)]
+
+    det = SoundDetector(on_detect=lambda *a, **k: None, rules=[], source='ingest', audio_segment_provider=provider)
+    det._handle_chunk = lambda audio: captured.append(audio.shape[0])
+    det.start()
+    try:
+        deadline = time.time() + 4
+        while len(captured) < 4 and time.time() < deadline:
+            time.sleep(0.1)
+    finally:
+        det.stop()
+
+    assert len(captured) >= 4, f'expected overlapping windows (>3) from 3 segments, got {len(captured)}'
+    assert all(n == 16000 for n in captured), 'each classified window is a full 1s of 16 kHz mono'
+
+
 def test_favicon_is_served_publicly(tmp_path, monkeypatch):
     app, _database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
