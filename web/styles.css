@@ -666,6 +666,8 @@ input[type="file"] { padding: 10px; }
 }
 .clip-player-wrap video {
   display: block;
+  width: 100%;
+  height: auto;
 }
 .clip-overlay {
   position: absolute;
