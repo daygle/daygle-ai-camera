@@ -2054,6 +2054,13 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
         segment = camera_dir / f'segment-{offset:02d}.mp4'
         segment.write_bytes(b'ts')
         os.utime(segment, (end_ts, end_ts))
+    audio_dir = service.audio_dir / 'cam'
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    for offset in range(17):
+        end_ts = now - 16.5 + offset
+        segment = audio_dir / f'aud-{offset:02d}.wav'
+        segment.write_bytes(b'wav')
+        os.utime(segment, (end_ts, end_ts))
 
     commands = []
 
@@ -2085,6 +2092,7 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
     # content starts at the previous segment's end: now-15.5.
     assert content_start == pytest.approx(now - 15.5, abs=0.1)
     assert content_seconds == pytest.approx(15.5, abs=0.1)
+    assert len(commands) == 2
     command = commands[0]
     assert command[command.index('-map') + 1] == '0:v:0'
     assert '-an' in command
@@ -2094,6 +2102,11 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
     assert 'aac' not in command
     render_seconds = float(commands[0][commands[0].index('-t') + 1])
     assert render_seconds == pytest.approx(content_seconds, abs=0.01)
+    mux_command = commands[1]
+    assert mux_command[mux_command.index('-map') + 1] == '0:v:0'
+    assert '1:a:0' in mux_command
+    assert mux_command[mux_command.index('-c:v') + 1] == 'copy'
+    assert mux_command[mux_command.index('-c:a') + 1] == 'aac'
 
 
 def test_prebuffer_and_continuous_workers_do_not_start_without_ffmpeg(tmp_path, monkeypatch):

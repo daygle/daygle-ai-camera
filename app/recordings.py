@@ -593,6 +593,7 @@ class RecordingService:
                 details={'rendered_seconds': round(rendered_seconds or 0.0, 1), 'requested_seconds': round(content_seconds, 1)},
             )
 
+        self._mux_prebuffer_audio(camera_key, tmp_path, content_start_ts, rendered_seconds or content_seconds)
         tmp_path.replace(file_path)
         # Report the clip's real duration, not the requested window — keyframe
         # alignment and short source footage make them differ, and a mismatch
@@ -905,6 +906,75 @@ class RecordingService:
                 durations[segment] = max(0.001, end - start)
             prev_end = end
         return durations
+
+    def _collect_audio_segments(self, camera_key: str, start_ts: float, end_ts: float) -> list[Path]:
+        audio_camera_dir = self.audio_dir / camera_key
+        if not audio_camera_dir.exists():
+            return []
+        selected: list[Path] = []
+        for segment in sorted(audio_camera_dir.glob('aud-*.wav')):
+            try:
+                end = segment.stat().st_mtime
+            except OSError:
+                continue
+            start = end - 1.0
+            if end > start_ts and start < end_ts:
+                selected.append(segment)
+        return selected
+
+    def _mux_prebuffer_audio(self, camera_key: str, video_path: Path, start_ts: float, duration_seconds: float) -> bool:
+        ffmpeg = shutil.which('ffmpeg')
+        if not ffmpeg or duration_seconds <= 0:
+            return False
+        audio_segments = self._collect_audio_segments(camera_key, start_ts, start_ts + duration_seconds)
+        if not audio_segments:
+            return False
+
+        audio_list_path = video_path.with_name(f'{video_path.stem}.audio.concat.txt')
+        muxed_path = video_path.with_name(f'{video_path.stem}.audio{video_path.suffix}')
+        audio_list_path.write_text(''.join(self._concat_file_line(segment) for segment in audio_segments), encoding='utf-8')
+        if muxed_path.exists():
+            muxed_path.unlink(missing_ok=True)
+        command = [
+            ffmpeg,
+            '-y',
+            '-i',
+            str(video_path),
+            '-f',
+            'concat',
+            '-safe',
+            '0',
+            '-i',
+            str(audio_list_path),
+            '-map',
+            '0:v:0',
+            '-map',
+            '1:a:0',
+            '-c:v',
+            'copy',
+            '-c:a',
+            'aac',
+            '-b:a',
+            '128k',
+            '-shortest',
+            '-movflags',
+            '+faststart',
+            str(muxed_path),
+        ]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=max(30, int(duration_seconds) + 20), check=False)
+        except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+            result = None
+        finally:
+            audio_list_path.unlink(missing_ok=True)
+
+        if result is None or result.returncode != 0 or not muxed_path.exists() or not self.clip_has_video_stream(muxed_path):
+            muxed_path.unlink(missing_ok=True)
+            if result is not None:
+                logger.warning('Failed to mux prebuffer audio for %s; keeping silent video clip: %s', camera_key, self.redact_stream_credentials((result.stderr or '')[-500:]))
+            return False
+        muxed_path.replace(video_path)
+        return True
 
     @staticmethod
     def redact_stream_credentials(message: str) -> str:
