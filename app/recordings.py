@@ -436,6 +436,13 @@ class RecordingService:
 
         ffmpeg = shutil.which('ffmpeg')
         if not ffmpeg:
+            self._emit_diagnostic(
+                camera_id,
+                'prebuffer_fallback',
+                'ffmpeg is not installed, so the pre-event buffer could not be rendered and the clip was captured live.',
+                severity='warning',
+                details={'reason': 'ffmpeg_missing', 'segment_count': len(segments)},
+            )
             return self._live_capture(stream_url, file_path, max_duration_seconds)
 
         if content_start_ts is None:
@@ -512,13 +519,30 @@ class RecordingService:
         ):
             tmp_path.unlink(missing_ok=True)
             logger.warning('Failed to render clip from prebuffer for %s; falling back to direct RTSP capture.', camera_key)
+            if result is None:
+                render_reason = 'timeout'
+                stderr_tail = ''
+                return_code = None
+            else:
+                render_reason = 'render_failed'
+                stderr_tail = self.redact_stream_credentials((result.stderr or '')[-1000:])
+                return_code = result.returncode
             self._emit_diagnostic(
                 camera_id,
                 'prebuffer_fallback',
                 'Pre-event buffer could not be rendered, so the clip was captured live from the trigger forward — '
                 'the moments before the trigger are missing.',
                 severity='warning',
-                details={'reason': 'render_failed'},
+                details={
+                    'reason': render_reason,
+                    'returncode': return_code,
+                    'segment_count': len(segments),
+                    'requested_seconds': round(content_seconds, 1),
+                    'window_start': datetime.fromtimestamp(start_ts, tz=timezone.utc).isoformat(),
+                    'window_end': datetime.fromtimestamp(end_ts, tz=timezone.utc).isoformat(),
+                    'content_start': datetime.fromtimestamp(content_start_ts, tz=timezone.utc).isoformat(),
+                    'stderr_tail': stderr_tail,
+                },
             )
             return self._live_capture(stream_url, file_path, max_duration_seconds)
 
