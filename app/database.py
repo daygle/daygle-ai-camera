@@ -536,7 +536,7 @@ class EventDatabase:
                     try:
                         existing_with_sizes.append((row, Path(str(row["file_path"])).stat().st_size))
                     except OSError:
-                        continue
+                        purge_ids.add(int(row["id"]))
                 total = sum(size for _, size in existing_with_sizes)
                 for row, size in existing_with_sizes:
                     if total <= max_storage_bytes:

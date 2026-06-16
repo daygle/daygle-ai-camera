@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -120,7 +120,7 @@ class AlertEngine:
         end = rule.get('active_end')
         if not start or not end:
             return True
-        now = datetime.now().strftime('%H:%M')
+        now = datetime.now(timezone.utc).strftime('%H:%M')
         start_text = str(start)
         end_text = str(end)
         if start_text <= end_text:
