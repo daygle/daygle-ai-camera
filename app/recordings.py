@@ -944,7 +944,7 @@ class RecordingService:
             return [], None
         timed: list[tuple[Path, float, float]] = []
         prev_end: float | None = None
-        for segment in sorted(camera_dir.glob(self.PREBUFFER_SEGMENT_GLOB)):
+        for segment in sorted(camera_dir.glob(self.PREBUFFER_SEGMENT_GLOB), key=lambda p: p.stat().st_mtime if p.exists() else 0):
             try:
                 end = segment.stat().st_mtime
             except OSError:
@@ -963,7 +963,7 @@ class RecordingService:
         wanted = {segment.resolve() for segment in segments}
         durations: dict[Path, float] = {}
         prev_end: float | None = None
-        for segment in sorted(camera_dir.glob(self.PREBUFFER_SEGMENT_GLOB)):
+        for segment in sorted(camera_dir.glob(self.PREBUFFER_SEGMENT_GLOB), key=lambda p: p.stat().st_mtime if p.exists() else 0):
             try:
                 end = segment.stat().st_mtime
             except OSError:
