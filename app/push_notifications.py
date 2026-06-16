@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
 from typing import Any
 
 
@@ -57,15 +56,7 @@ class PushNotificationService:
         subject_label = ', '.join(display_labels) if display_labels else display_primary
         title = f"Daygle AI Camera alert: {subject_label} detected"
 
-        detected_at_display: str | None = None
-        if detected_at:
-            try:
-                dt = datetime.fromisoformat(str(detected_at))
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                detected_at_display = dt.strftime('%Y-%m-%d %H:%M:%S UTC')
-            except ValueError:
-                detected_at_display = str(detected_at)
+        detected_at_display = str(detected_at).strip() if detected_at else None
 
         body_lines = [
             str(alert.get("message") or "Alert triggered."),

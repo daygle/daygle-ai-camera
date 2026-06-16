@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import smtplib
-from datetime import datetime, timezone
 from email.message import Message
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
@@ -71,15 +70,7 @@ class EmailAlertService:
         all_triggers_line = (
             f"All triggers: {subject_label}" if ordered_labels and len(ordered_labels) > 1 else None
         )
-        detected_at_display: str | None = None
-        if detected_at:
-            try:
-                dt = datetime.fromisoformat(str(detected_at))
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                detected_at_display = dt.strftime('%Y-%m-%d %H:%M:%S UTC')
-            except ValueError:
-                detected_at_display = str(detected_at)
+        detected_at_display = str(detected_at).strip() if detected_at else None
 
         plain_lines = [
             str(alert.get("message") or "Alert triggered."),
