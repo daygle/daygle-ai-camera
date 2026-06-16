@@ -72,11 +72,14 @@ function detectionPill(label, confidence, isSound) {
   const display = isSound
     ? titleCase(String(label).replace(/_/g, ' '))
     : titleCase(String(label));
-  const pct = Math.round(Number(confidence) * 100);
+  const numericConfidence = Number(confidence);
+  const confidenceText = Number.isFinite(numericConfidence)
+    ? ` · ${Math.round(numericConfidence * 100)}%`
+    : '';
   if (isSound) {
-    return `<span class="detection detection-sound">🔊 ${escapeHtml(display)} · ${pct}%</span>`;
+    return `<span class="detection detection-sound">🔊 ${escapeHtml(display)}${confidenceText}</span>`;
   }
-  return `<span class="detection detection-object">${DETECTION_EYE_ICON} ${escapeHtml(display)} · ${pct}%</span>`;
+  return `<span class="detection detection-object">${DETECTION_EYE_ICON} ${escapeHtml(display)}${confidenceText}</span>`;
 }
 
 function cameraLabel(recording) {
@@ -325,22 +328,29 @@ function recordingDetectionSummary(recording) {
     return [{ label, confidence }];
   }
 
-  // Build best-confidence map from all detections regardless of current config -
-  // this is historical data so we show everything that was actually recorded.
+  // Build best-confidence map from the saved event detections and, when
+  // present, the clip's live detection track. Multi-object recordings can pick
+  // up additional labels while the clip is extended; those labels are persisted
+  // in recording.labels, but their confidence may only exist in the track.
   const best = new Map();
-  for (const d of (recording.detections || [])) {
-    const label = String(d.label || '').trim().toLowerCase();
-    if (!label) continue;
-    const conf = Number(d.confidence || 0);
-    if (!best.has(label) || conf > best.get(label)) best.set(label, conf);
+  const rememberBest = (detection) => {
+    const label = String(detection?.label || '').trim().toLowerCase();
+    if (!label) return;
+    const rawConfidence = Number(detection?.confidence);
+    if (!Number.isFinite(rawConfidence)) return;
+    if (!best.has(label) || rawConfidence > best.get(label)) best.set(label, rawConfidence);
+  };
+  for (const d of (recording.detections || [])) rememberBest(d);
+  for (const sample of (recording.track || [])) {
+    for (const d of (sample?.detections || [])) rememberBest(d);
   }
   // Use recording.labels as the authoritative label list when available.
   const authLabels = Array.isArray(recording.labels) && recording.labels.length
     ? recording.labels.map((l) => String(l || '').trim().toLowerCase()).filter((l) => l && !GENERIC_TRIGGER_LABELS.has(l))
     : Array.from(best.keys()).filter((l) => !GENERIC_TRIGGER_LABELS.has(l));
   return authLabels
-    .map((label) => ({ label, confidence: best.get(label) ?? 0 }))
-    .sort((a, b) => b.confidence - a.confidence);
+    .map((label) => ({ label, confidence: best.has(label) ? best.get(label) : null }))
+    .sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1));
 }
 
 function renderRecordingDetails(recording) {
