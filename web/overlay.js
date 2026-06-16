@@ -10,6 +10,13 @@ const _fontSetupCache = new WeakSet();
 // Labels like "Person 85%" are repeated across frames, so measuring once
 // avoids the expensive text-layout pass on every single frame.
 const _textWidthCache = new Map();
+// Do not interpolate between same-label boxes that are too far apart. When
+// the detector misses an object and later re-acquires it elsewhere, treating
+// those as the same physical object creates a "box grows out from the middle"
+// effect during playback. A quarter-frame center jump is generous enough for
+// normal movement between samples but rejects unrelated/reacquired boxes.
+const MAX_MATCH_CENTER_DISTANCE = 0.25;
+const MAX_MATCH_CENTER_DISTANCE_SQ = MAX_MATCH_CENTER_DISTANCE * MAX_MATCH_CENTER_DISTANCE;
 
 function _getCachedContext(canvas) {
   let ctx = _ctxCache.get(canvas);
@@ -81,9 +88,10 @@ function boxIoU(a, b) {
 // Finds the detection in `candidates` that best corresponds to `target`:
 // same label, then highest box overlap (IoU). When nothing overlaps - e.g. a
 // fast-moving object whose boxes don't intersect between samples - it falls
-// back to the nearest box center. This keeps the correspondence (and velocity
-// estimates) stable when several objects of the same label are present, instead
-// of always matching the first one in the list.
+// back to the nearest box center, but only within a conservative distance.
+// If the nearest same-label box is too far away, it is probably a reacquired
+// detection rather than the same physical object, so interpolation/projection
+// should snap to the new box instead of animating from the wrong location.
 function matchDetection(candidates, target) {
   if (!Array.isArray(candidates) || !candidates.length) return null;
   const targetLabel = String(target?.label || '').toLowerCase();
@@ -111,7 +119,8 @@ function matchDetection(candidates, target) {
       nearest = candidate;
     }
   }
-  return best || nearest;
+  if (best) return best;
+  return nearestDist <= MAX_MATCH_CENTER_DISTANCE_SQ ? nearest : null;
 }
 
 // Projects detections from where they were observed (`curTime`) to a target
