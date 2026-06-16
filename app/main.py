@@ -1629,9 +1629,14 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None = None) -> 
                 # than opening its own RTSP connection (one connection per camera).
                 sample = read_ingest_frame(cid)
                 if sample is None:
-                    # No fresh frame: the ingest is warming up or the camera is
-                    # down. Back off so health/offline alerts still fire; the
-                    # ingest reconnects on its own and the next fresh frame clears it.
+                    if not recording_service.ingest_has_produced_frame(cid):
+                        # Ingest is still warming up — latest.jpg hasn't been
+                        # written yet. Don't penalise a cold start the same way
+                        # as a genuine camera failure; just wait for the next
+                        # detection cycle without incrementing the backoff counter.
+                        return
+                    # Frame file exists but is stale: camera is offline or the
+                    # ingest connection has dropped. Back off so we don't spin.
                     schedule_live_camera_backoff(cid, 'No fresh frame available from the camera ingest.')
                     return
                 image, frame = sample

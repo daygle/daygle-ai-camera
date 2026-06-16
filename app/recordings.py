@@ -705,6 +705,11 @@ class RecordingService:
                 'error',
                 '-rtsp_transport',
                 'tcp',
+                # Socket-level timeout: if the camera stops sending data for
+                # 5 s ffmpeg treats it as an error and exits, triggering an
+                # immediate reconnect rather than hanging indefinitely.
+                '-stimeout',
+                '5000000',
                 # Do NOT use +discardcorrupt here. On a flaky camera link it drops
                 # every corrupt VIDEO packet as it is captured, leaving near
                 # audio-only segments, so the event render later finds no video
@@ -830,7 +835,15 @@ class RecordingService:
                 continue
 
     # ── Shared-ingest accessors ──────────────────────────────────────
-    def latest_frame_jpeg(self, camera_id: str, *, max_age_seconds: float = 10.0) -> tuple[bytes, float] | None:
+    def ingest_has_produced_frame(self, camera_id: str) -> bool:
+        """True if the ingest has written at least one frame for this camera.
+        Used to distinguish a warming-up ingest (file absent) from a stale or
+        failed one (file present but old), so callers can avoid penalising cold
+        starts the same way as genuine camera failures."""
+        path = self.frames_dir / self._camera_key(camera_id) / 'latest.jpg'
+        return path.exists()
+
+    def latest_frame_jpeg(self, camera_id: str, *, max_age_seconds: float = 30.0) -> tuple[bytes, float] | None:
         """Most recent decoded frame the ingest wrote for this camera, as
         (jpeg_bytes, captured_ts). ``captured_ts`` is the file mtime - when
         ffmpeg wrote the frame - so detection samples and playback overlays stay
