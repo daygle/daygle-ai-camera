@@ -310,11 +310,12 @@ To enable ONNX inference:
 
 If the model is missing, the dashboard reports `MODEL MISSING` and upload inference returns a clear API error.
 
-Manual model export remains available. For local development, install the export dependencies first if they are not already present:
+Manual model export remains available through Ultralytics directly if you do not want to use the dashboard/API exporter. For local development, install the export dependencies first if they are not already present:
 
 ```bash
 pip install ultralytics onnx
-python scripts/download_yolov8n_onnx.py --output models/yolov8n.onnx
+python -c "from ultralytics import YOLO; YOLO('yolov8n.pt').export(format='onnx')"
+mkdir -p models && mv yolov8n.onnx models/yolov8n.onnx
 ```
 
 For service installs, the dashboard download/export writes to `/opt/daygle-ai-camera/models/`. The installer creates that directory, preserves existing `*.onnx` and `*.pt` files during reinstall, and allows the root-running service to write there.
