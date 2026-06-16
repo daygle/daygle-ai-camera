@@ -761,6 +761,26 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
         x, y, width, height = zone_bounds(points)
         object_rules = normalize_zone_object_rules(zone)
 
+        # Backward-compatible migration: zones saved with the old monitor_motion=True
+        # flag but no explicit motion rule get a default motion rule inserted.  Without
+        # this, upgrading from an older config format silently disables motion detection
+        # in every zone (monitor_motion would evaluate to False with no motion rule).
+        had_monitor_motion = bool(zone.get('monitor_motion', True))
+        if had_monitor_motion and not any(str(r.get('label') or '').strip().lower() == 'motion' for r in object_rules):
+            object_rules.insert(0, {
+                'label': 'motion',
+                'enabled': True,
+                'record_on_detect': True,
+                'alert_on_detect': True,
+                'min_confidence': 0.45,
+                'cooldown_seconds': 60,
+                'email_enabled': False,
+                'email_recipients': [],
+                'active_start': None,
+                'active_end': None,
+                'push_enabled': False,
+            })
+
         monitor_motion = any(
             str(r.get('label') or '').strip().lower() == 'motion' and r.get('enabled', True)
             for r in object_rules

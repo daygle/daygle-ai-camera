@@ -658,6 +658,7 @@ class RecordingService:
                 'stop_event': stop_event,
                 'stream_url': stream_url,
                 'buffer_seconds': int(buffer_seconds),
+                'camera_id': camera_id or camera_key,
             }
             thread = threading.Thread(
                 target=self._run_prebuffer_worker,
@@ -784,6 +785,7 @@ class RecordingService:
             ]
             stderr_file = tempfile.NamedTemporaryFile(mode='w+', suffix='.log', delete=False, dir=str(self.prebuffer_dir))
             stderr_path = Path(stderr_file.name)
+            ffmpeg_started_at = time.time()
             process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=stderr_file)
             stderr_file.close()
             try:
@@ -793,22 +795,44 @@ class RecordingService:
                     self._prune_audio_segments(audio_camera_dir, keep_seconds)
                     time.sleep(1)
             finally:
-                if process.poll() is None:
+                return_code = process.poll()
+                if return_code is None:
                     process.terminate()
                     try:
                         process.wait(timeout=2)
                     except subprocess.TimeoutExpired:
                         process.kill()
+                    return_code = process.poll()
                 try:
                     stderr_content = stderr_path.read_text(encoding='utf-8', errors='replace')
                     if stderr_content.strip():
                         logger.debug('Prebuffer ffmpeg %s: %s', camera_key, stderr_content.strip()[:1000])
                 except OSError:
-                    pass
+                    stderr_content = ''
                 stderr_path.unlink(missing_ok=True)
                 keep_seconds = int(worker_state.get('buffer_seconds') or 15)
                 self._prune_prebuffer_segments(camera_dir, keep_seconds)
                 self._prune_audio_segments(audio_camera_dir, keep_seconds)
+                # Emit a diagnostic when ffmpeg exits unexpectedly (not via stop_event)
+                # so operators can see frequent restarts that would leave the prebuffer
+                # empty at event time.
+                if not stop_event.is_set() and return_code not in (None, 0):
+                    uptime = time.time() - ffmpeg_started_at
+                    camera_id = worker_state.get('camera_id') or camera_key
+                    stderr_tail = self.redact_stream_credentials((stderr_content or '')[-500:])
+                    self._emit_diagnostic(
+                        camera_id,
+                        'ingest_restart',
+                        f'Camera ingest process exited (code {return_code}) after {uptime:.0f}s — '
+                        'reconnecting. If this happens frequently the pre-event buffer may be empty '
+                        'when recordings are triggered.',
+                        severity='warning',
+                        details={
+                            'return_code': return_code,
+                            'uptime_seconds': round(uptime, 1),
+                            'stderr_tail': stderr_tail,
+                        },
+                    )
             if not stop_event.is_set():
                 time.sleep(1)
 
@@ -864,7 +888,20 @@ class RecordingService:
             mtime = st.st_mtime
             if max_age_seconds and (time.time() - mtime) > max_age_seconds:
                 return None
-            data = os.read(fd, max(st.st_size, 1))
+            # Read in a loop: os.read() may return fewer bytes than requested
+            # on some platforms even for regular files (e.g. EINTR on slow I/O).
+            remaining = st.st_size
+            if remaining <= 0:
+                data = b''
+            else:
+                parts: list[bytes] = []
+                while remaining > 0:
+                    chunk = os.read(fd, min(remaining, 65536))
+                    if not chunk:
+                        break
+                    parts.append(chunk)
+                    remaining -= len(chunk)
+                data = b''.join(parts)
         except OSError:
             return None
         finally:
