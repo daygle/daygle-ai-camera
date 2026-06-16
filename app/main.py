@@ -343,6 +343,7 @@ def effective_camera_offline_alert_settings() -> dict[str, Any]:
     settings = {
         'enabled': False,
         'offline_delay_minutes': 1,
+        'recipients': [],
     }
     override = database.get_setting('camera_offline_alert')
     if isinstance(override, dict):
@@ -441,12 +442,16 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
     if email_settings_obj.get('enabled'):
         try:
             mailer = EmailAlertService(email_settings_obj)
-            msg = MIMEText(body, 'plain', 'utf-8')
-            msg['Subject'] = title
-            msg['From'] = str(email_settings_obj.get('from_address'))
-            to_addr = str(email_settings_obj.get('from_address') or '').strip()
-            if to_addr and '@' in to_addr:
-                msg['To'] = to_addr
+            recipients = [r for r in (settings.get('recipients') or []) if isinstance(r, str) and '@' in r]
+            if not recipients:
+                fallback = str(email_settings_obj.get('from_address') or '').strip()
+                if fallback and '@' in fallback:
+                    recipients = [fallback]
+            if recipients:
+                msg = MIMEText(body, 'plain', 'utf-8')
+                msg['Subject'] = title
+                msg['From'] = str(email_settings_obj.get('from_address'))
+                msg['To'] = ', '.join(recipients)
                 mailer._deliver(msg)
         except Exception as exc:
             logger.warning('Email notify failed for camera %s %s: %s', camera_id, event_type, exc)
@@ -495,7 +500,10 @@ def build_stream_url(settings: dict[str, Any]) -> str:
         return ''
     username = _non_empty_setting(settings, 'username')
     password = _non_empty_setting(settings, 'password')
-    port = int(settings.get('port') or 554)
+    try:
+        port = int(settings.get('port') or 554)
+    except (TypeError, ValueError):
+        port = 554
     path = _non_empty_setting(settings, 'path') or 'stream1'
     path = path.lstrip('/')
     credentials = ''
@@ -634,13 +642,20 @@ def normalize_camera_ptz_settings(settings: Any) -> dict[str, Any]:
     protocol = str(raw.get('protocol') or 'onvif').strip().lower()
     if protocol not in {'onvif', 'tcp_pelcod'}:
         protocol = 'onvif'
+
+    def _int(value: Any, default: int, lo: int, hi: int) -> int:
+        try:
+            return max(lo, min(hi, int(value or default)))
+        except (TypeError, ValueError):
+            return default
+
     return {
         'enabled': normalize_bool_setting(raw.get('enabled'), False),
         'protocol': protocol,
-        'http_port': max(1, min(65535, int(raw.get('http_port') or 80))),
-        'port': max(1, min(65535, int(raw.get('port') or 6060))),
-        'address': max(1, min(255, int(raw.get('address') or 1))),
-        'speed': max(1, min(8, int(raw.get('speed') or 5))),
+        'http_port': _int(raw.get('http_port'), 80, 1, 65535),
+        'port': _int(raw.get('port'), 6060, 1, 65535),
+        'address': _int(raw.get('address'), 1, 1, 255),
+        'speed': _int(raw.get('speed'), 5, 1, 8),
     }
 
 
@@ -681,10 +696,22 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
     for index, zone in enumerate(zones, start=1):
         if not isinstance(zone, dict):
             continue
-        x = max(0.0, min(1.0, float(zone.get('x') or 0)))
-        y = max(0.0, min(1.0, float(zone.get('y') or 0)))
-        width = max(0.01, min(1.0 - x, float(zone.get('width') or 0)))
-        height = max(0.01, min(1.0 - y, float(zone.get('height') or 0)))
+        try:
+            x = max(0.0, min(1.0, float(zone.get('x') or 0)))
+        except (TypeError, ValueError):
+            x = 0.0
+        try:
+            y = max(0.0, min(1.0, float(zone.get('y') or 0)))
+        except (TypeError, ValueError):
+            y = 0.0
+        try:
+            width = max(0.01, min(1.0 - x, float(zone.get('width') or 0)))
+        except (TypeError, ValueError):
+            width = 0.01
+        try:
+            height = max(0.01, min(1.0 - y, float(zone.get('height') or 0)))
+        except (TypeError, ValueError):
+            height = 0.01
         points = [point for point in (normalize_zone_point(point) for point in zone.get('points') or []) if point is not None]
         if len(points) < 3:
             points = rectangle_zone_points(x, y, width, height)

@@ -594,12 +594,13 @@ class RecordingService:
                 details={'rendered_seconds': round(rendered_seconds or 0.0, 1), 'requested_seconds': round(content_seconds, 1)},
             )
 
-        self._mux_prebuffer_audio(camera_key, tmp_path, content_start_ts, rendered_seconds or content_seconds)
+        effective_seconds = rendered_seconds if rendered_seconds is not None else content_seconds
+        self._mux_prebuffer_audio(camera_key, tmp_path, content_start_ts, effective_seconds)
         tmp_path.replace(file_path)
         # Report the clip's real duration, not the requested window - keyframe
         # alignment and short source footage make them differ, and a mismatch
         # shows up as playback that ends well before the stated length.
-        return content_start_ts, (rendered_seconds or content_seconds)
+        return content_start_ts, effective_seconds
 
     @staticmethod
     def _camera_key(camera_id: str) -> str:
