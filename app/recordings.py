@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -851,16 +852,23 @@ class RecordingService:
         aligned. Returns None when no fresh frame is available (ingest warming
         up, camera offline, or ffmpeg unavailable)."""
         path = self.frames_dir / self._camera_key(camera_id) / 'latest.jpg'
+        # Open once and use fstat so the mtime and bytes come from the same
+        # inode — eliminates the TOCTOU race between a separate stat() and
+        # read_bytes() when ffmpeg atomically renames a new frame into place.
         try:
-            mtime = path.stat().st_mtime
+            fd = os.open(str(path), os.O_RDONLY)
         except OSError:
             return None
-        if max_age_seconds and (time.time() - mtime) > max_age_seconds:
-            return None
         try:
-            data = path.read_bytes()
+            st = os.fstat(fd)
+            mtime = st.st_mtime
+            if max_age_seconds and (time.time() - mtime) > max_age_seconds:
+                return None
+            data = os.read(fd, max(st.st_size, 1))
         except OSError:
             return None
+        finally:
+            os.close(fd)
         if not data:
             return None
         return data, mtime
