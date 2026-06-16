@@ -70,7 +70,7 @@ function formPayload(form) {
   }
   data.gpu_mem_limit = data.gpu_mem_limit_gb !== ''
     ? Math.round(parseFloat(data.gpu_mem_limit_gb) * 1024 * 1024 * 1024)
-    : null;
+    : 0;
   delete data.gpu_mem_limit_gb;
   return data;
 }
@@ -108,8 +108,11 @@ function renderAi(settings) {
   for (const [key, value] of Object.entries(settings)) {
     if (aiForm.elements[key]) aiForm.elements[key].value = String(value ?? '');
   }
-  if (aiForm.elements['gpu_mem_limit_gb'] && settings.gpu_mem_limit != null) {
-    aiForm.elements['gpu_mem_limit_gb'].value = (settings.gpu_mem_limit / (1024 * 1024 * 1024)).toFixed(1);
+  if (aiForm.elements['gpu_mem_limit_gb']) {
+    const limitBytes = settings.gpu_mem_limit;
+    aiForm.elements['gpu_mem_limit_gb'].value = (limitBytes != null && limitBytes > 0)
+      ? (limitBytes / (1024 * 1024 * 1024)).toFixed(1)
+      : '0';
   }
   renderStatus(settings);
   renderLabels(settings.available_labels);

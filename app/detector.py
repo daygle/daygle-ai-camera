@@ -167,7 +167,7 @@ class OnnxYoloDetector:
                     # entire GPU and leaving nothing for cuBLAS or other ops.
                     "arena_extend_strategy": "kSameAsRequested",
                 }
-                if self._gpu_mem_limit is not None:
+                if self._gpu_mem_limit:
                     cuda_options["gpu_mem_limit"] = self._gpu_mem_limit
                 providers: list[Any] = [("CUDAExecutionProvider", cuda_options), "CPUExecutionProvider"]
             else:

@@ -4504,17 +4504,18 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if device not in ('auto', 'cpu', 'cuda'):
         raise HTTPException(status_code=400, detail="device must be 'auto', 'cpu', or 'cuda'.")
     updated['device'] = device
-    gpu_mem_limit = payload.get('gpu_mem_limit')
-    if gpu_mem_limit is not None and gpu_mem_limit != '':
-        try:
-            gpu_mem_limit = int(gpu_mem_limit)
-            if gpu_mem_limit < 1:
-                raise ValueError
-            updated['gpu_mem_limit'] = gpu_mem_limit
-        except (TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail='gpu_mem_limit must be a positive integer (bytes).') from exc
-    else:
-        updated.pop('gpu_mem_limit', None)
+    if 'gpu_mem_limit' in payload:
+        gpu_mem_limit = payload['gpu_mem_limit']
+        if gpu_mem_limit is not None and gpu_mem_limit != '':
+            try:
+                gpu_mem_limit = int(gpu_mem_limit)
+                if gpu_mem_limit < 0:
+                    raise ValueError
+                updated['gpu_mem_limit'] = gpu_mem_limit
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail='gpu_mem_limit must be a non-negative integer (bytes), or 0 for unlimited.') from exc
+        else:
+            updated['gpu_mem_limit'] = 0
     for field, min_val, max_val in (('inference_threads', 1, 32), ('max_concurrent_inferences', 1, 16)):
         raw = payload.get(field)
         if raw is not None and raw != '':
