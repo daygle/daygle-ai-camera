@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import hashlib
+import importlib.metadata
 import importlib.util
 import io
 import json
@@ -2958,7 +2959,7 @@ def deliver_push_notifications(triggered: list[dict[str, Any]], event_id: int, r
 
 
 GITHUB_REPO = 'daygle/daygle-ai-camera'
-MODELS_MANIFEST_URL = f'https://raw.githubusercontent.com/{GITHUB_REPO}/main/models-manifest.json'
+PYPI_ULTRALYTICS_URL = 'https://pypi.org/pypi/ultralytics/json'
 _update_in_progress = False
 _update_lock = threading.Lock()
 _installed_models_lock = threading.Lock()
@@ -2993,13 +2994,39 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def _fetch_models_manifest() -> dict[str, Any]:
+def _installed_package_version(package: str) -> str:
+    try:
+        return importlib.metadata.version(package)
+    except importlib.metadata.PackageNotFoundError:
+        return 'unknown'
+
+
+def _fetch_ultralytics_version() -> str:
     req = urllib.request.Request(
-        MODELS_MANIFEST_URL,
+        PYPI_ULTRALYTICS_URL,
         headers={'User-Agent': 'daygle-ai-camera-updater/1.0'},
     )
     with urllib.request.urlopen(req, timeout=10) as response:
-        return json.loads(response.read())
+        payload = json.loads(response.read())
+    version = str(payload.get('info', {}).get('version') or '').strip()
+    if not version:
+        raise RuntimeError('PyPI ultralytics response did not include a version.')
+    return version
+
+
+def _fetch_models_manifest() -> dict[str, Any]:
+    """Return remote YOLO export versions from the upstream Ultralytics package.
+
+    The app exports ONNX files from Ultralytics YOLO weights, so the remote
+    version that matters for update checks is the latest Ultralytics release,
+    not a Daygle-maintained model manifest version.
+    """
+    remote_version = _fetch_ultralytics_version()
+    return {
+        'updated_at': None,
+        'source': 'pypi:ultralytics',
+        'models': {model_id: {'version': remote_version} for model_id in YOLO_MODELS},
+    }
 
 
 def render_live_snapshot_svg(
@@ -4956,11 +4983,7 @@ def _do_download_model(model_name: str, switch_active: bool = True) -> dict[str,
                 f'Details: {exc}'
             ),
         ) from exc
-    try:
-        manifest = _fetch_models_manifest()
-        installed_version = manifest.get('models', {}).get(model_name, {}).get('version') or 'unknown'
-    except Exception:
-        installed_version = 'unknown'
+    installed_version = _installed_package_version('ultralytics')
     with _installed_models_lock:
         installed_meta = _read_installed_models()
         installed_meta[model_name] = {
@@ -5063,6 +5086,7 @@ def check_model_updates(request: Request):
         })
     return {
         'manifest_updated_at': manifest.get('updated_at'),
+        'version_source': manifest.get('source'),
         'models': result,
         'any_updates': any(m['update_available'] for m in result),
     }
