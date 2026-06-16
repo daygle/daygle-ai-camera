@@ -21,6 +21,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "input_size": 640,
         "model_path": "models/yolov8n.onnx",
         "labels_path": "models/coco.names",
+        "gpu_mem_limit": 0,
     },
     "alerts": {
         "enabled": True,

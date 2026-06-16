@@ -84,8 +84,8 @@
         </label>
         <label>
           <span>GPU Memory Limit (GiB)</span>
-          <input name="gpu_mem_limit_gb" type="number" min="1" max="128" step="0.5" />
-          <span class="field-help">Maximum GPU memory ONNX Runtime may use. Leaving headroom prevents cuBLAS allocation errors. Leave blank for no limit.</span>
+          <input name="gpu_mem_limit_gb" type="number" min="0" max="128" step="0.5" placeholder="0" />
+          <span class="field-help">Maximum GPU memory ONNX Runtime may use. Leaving headroom prevents cuBLAS allocation errors. 0 = unlimited (default).</span>
         </label>
         <label>
           <span>IoU Threshold</span>
