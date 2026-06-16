@@ -76,15 +76,19 @@ function soundDetectionBadges(detections = []) {
   for (const d of detections) {
     const label = String(d.label || '').trim().toLowerCase();
     if (!label) continue;
-    const conf = Number(d.confidence || 0);
-    if (!best.has(label) || conf > best.get(label)) best.set(label, conf);
+    const conf = Number(d.confidence);
+    if (!Number.isFinite(conf)) {
+      if (!best.has(label)) best.set(label, null);
+      continue;
+    }
+    if (!best.has(label) || best.get(label) === null || conf > best.get(label)) best.set(label, conf);
   }
   if (!best.size) return '<span class="muted">No sound detections</span>';
   return Array.from(best.entries())
-    .sort((a, b) => b[1] - a[1])
+    .sort((a, b) => (b[1] ?? -1) - (a[1] ?? -1))
     .map(([label, conf]) => {
       const display = titleCase(label.replace(/_/g, ' '));
-      const confText = conf > 0 ? ` · ${Math.round(conf * 100)}%` : '';
+      const confText = Number.isFinite(conf) ? ` · ${Math.round(conf * 100)}%` : '';
       return `<span class="detection detection-sound">🔊 ${escapeHtml(display)}${escapeHtml(confText)}</span>`;
     })
     .join('');
@@ -98,14 +102,21 @@ function detectionBadges(detections = []) {
   for (const d of detections) {
     const label = String(d.label || '').trim().toLowerCase();
     if (!label) continue;
-    const conf = Number(d.confidence || 0);
-    if (!best.has(label) || conf > best.get(label)) best.set(label, conf);
+    const conf = Number(d.confidence);
+    if (!Number.isFinite(conf)) {
+      if (!best.has(label)) best.set(label, null);
+      continue;
+    }
+    if (!best.has(label) || best.get(label) === null || conf > best.get(label)) best.set(label, conf);
   }
   if (!best.size) return '<span class="muted">No detections</span>';
   const eyeIcon = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg>';
   return Array.from(best.entries())
-    .sort((a, b) => b[1] - a[1])
-    .map(([label, conf]) => `<span class="detection detection-object">${eyeIcon} ${escapeHtml(titleCase(label))} · ${Math.round(conf * 100)}%</span>`)
+    .sort((a, b) => (b[1] ?? -1) - (a[1] ?? -1))
+    .map(([label, conf]) => {
+      const confText = Number.isFinite(conf) ? ` · ${Math.round(conf * 100)}%` : '';
+      return `<span class="detection detection-object">${eyeIcon} ${escapeHtml(titleCase(label))}${confText}</span>`;
+    })
     .join('');
 }
 
@@ -138,7 +149,11 @@ function groupAlertsByEvent(alerts) {
     }
     const label = String(alert.label || '').trim().toLowerCase();
     if (label) group.labels.add(label);
-    group.detections.push({ label: label || String(alert.label || ''), confidence: Number(alert.confidence || 0) });
+    const confidence = Number(alert.confidence);
+    group.detections.push({
+      label: label || String(alert.label || ''),
+      confidence: Number.isFinite(confidence) ? confidence : null,
+    });
     if (alert.created_at && (!group.latestAt || String(alert.created_at) > String(group.latestAt))) {
       group.latestAt = alert.created_at;
     }
@@ -170,8 +185,8 @@ function buildActivityItems() {
     let detections = event.detections || [];
     if (isSound && !detections.length && event.metadata) {
       const label = event.metadata.label || event.metadata.class_label || 'sound';
-      const confidence = Number(event.metadata.confidence || 0);
-      detections = [{ label, confidence }];
+      const confidence = Number(event.metadata.confidence);
+      detections = [{ label, confidence: Number.isFinite(confidence) ? confidence : null }];
     }
     const zoneNames = isSound ? [] : [...new Set(detections.map((d) => d.zone_name).filter(Boolean))];
     return {
