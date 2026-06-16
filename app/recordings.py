@@ -401,7 +401,7 @@ class RecordingService:
     ) -> bool:
         # The per-camera ingest is the SINGLE RTSP connection that feeds event
         # pre-roll, object detection (latest.jpg) and sound detection (audio
-        # segments), so it runs whenever the camera has a stream — not only when
+        # segments), so it runs whenever the camera has a stream - not only when
         # pre_event_seconds > 0.
         config = recording_config or self.recording_config
         if not self._worker_ffmpeg_available('camera_ingest'):
@@ -557,7 +557,7 @@ class RecordingService:
             self._emit_diagnostic(
                 camera_id,
                 'prebuffer_fallback',
-                'Pre-event buffer could not be rendered, so the clip was captured live from the trigger forward — '
+                'Pre-event buffer could not be rendered, so the clip was captured live from the trigger forward - '
                 'the moments before the trigger are missing.',
                 severity='warning',
                 details={
@@ -596,7 +596,7 @@ class RecordingService:
 
         self._mux_prebuffer_audio(camera_key, tmp_path, content_start_ts, rendered_seconds or content_seconds)
         tmp_path.replace(file_path)
-        # Report the clip's real duration, not the requested window — keyframe
+        # Report the clip's real duration, not the requested window - keyframe
         # alignment and short source footage make them differ, and a mismatch
         # shows up as playback that ends well before the stated length.
         return content_start_ts, (rendered_seconds or content_seconds)
@@ -645,7 +645,7 @@ class RecordingService:
                     # Replacing a LIVE worker discards its rolling buffer. This is
                     # expected once after a settings change, but if it keeps
                     # happening the buffer never fills and events render as near-
-                    # still clips — so surface why, to catch config churn / collisions.
+                    # still clips - so surface why, to catch config churn / collisions.
                     if existing.get('stream_url') != stream_url:
                         restart_reason = 'stream_url_changed'
                 if isinstance(existing.get('stop_event'), threading.Event):
@@ -832,8 +832,8 @@ class RecordingService:
     # ── Shared-ingest accessors ──────────────────────────────────────
     def latest_frame_jpeg(self, camera_id: str, *, max_age_seconds: float = 10.0) -> tuple[bytes, float] | None:
         """Most recent decoded frame the ingest wrote for this camera, as
-        (jpeg_bytes, captured_ts). ``captured_ts`` is the file mtime — when
-        ffmpeg wrote the frame — so detection samples and playback overlays stay
+        (jpeg_bytes, captured_ts). ``captured_ts`` is the file mtime - when
+        ffmpeg wrote the frame - so detection samples and playback overlays stay
         aligned. Returns None when no fresh frame is available (ingest warming
         up, camera offline, or ffmpeg unavailable)."""
         path = self.frames_dir / self._camera_key(camera_id) / 'latest.jpg'
