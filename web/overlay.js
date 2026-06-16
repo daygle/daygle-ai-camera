@@ -10,6 +10,13 @@ const _fontSetupCache = new WeakSet();
 // Labels like "Person 85%" are repeated across frames, so measuring once
 // avoids the expensive text-layout pass on every single frame.
 const _textWidthCache = new Map();
+// Do not interpolate between same-label boxes that are too far apart. When
+// the detector misses an object and later re-acquires it elsewhere, treating
+// those as the same physical object creates a "box grows out from the middle"
+// effect during playback. A quarter-frame center jump is generous enough for
+// normal movement between samples but rejects unrelated/reacquired boxes.
+const MAX_MATCH_CENTER_DISTANCE = 0.25;
+const MAX_MATCH_CENTER_DISTANCE_SQ = MAX_MATCH_CENTER_DISTANCE * MAX_MATCH_CENTER_DISTANCE;
 
 function _getCachedContext(canvas) {
   let ctx = _ctxCache.get(canvas);
@@ -81,9 +88,10 @@ function boxIoU(a, b) {
 // Finds the detection in `candidates` that best corresponds to `target`:
 // same label, then highest box overlap (IoU). When nothing overlaps - e.g. a
 // fast-moving object whose boxes don't intersect between samples - it falls
-// back to the nearest box center. This keeps the correspondence (and velocity
-// estimates) stable when several objects of the same label are present, instead
-// of always matching the first one in the list.
+// back to the nearest box center, but only within a conservative distance.
+// If the nearest same-label box is too far away, it is probably a reacquired
+// detection rather than the same physical object, so interpolation/projection
+// should snap to the new box instead of animating from the wrong location.
 function matchDetection(candidates, target) {
   if (!Array.isArray(candidates) || !candidates.length) return null;
   const targetLabel = String(target?.label || '').toLowerCase();
@@ -111,7 +119,8 @@ function matchDetection(candidates, target) {
       nearest = candidate;
     }
   }
-  return best || nearest;
+  if (best) return best;
+  return nearestDist <= MAX_MATCH_CENTER_DISTANCE_SQ ? nearest : null;
 }
 
 // Projects detections from where they were observed (`curTime`) to a target
@@ -174,7 +183,17 @@ function sampleTrackAtTime(track, t) {
   // nothing - those earlier frames were never analyzed.
   if (time < track[0].t - maxHold) return [];
   if (time <= track[0].t) return track[0].detections || [];
-  if (time >= last.t) return last.detections || [];
+  if (time >= last.t) {
+    const prev = track.length > 1 ? track[track.length - 2] : null;
+    return projectDetections(
+      prev?.detections || [],
+      last.detections || [],
+      Number(prev?.t),
+      Number(last.t),
+      time,
+      Math.max(0.25, spacing * 1.5)
+    ) || [];
+  }
   let lo = 0;
   let hi = track.length - 1;
   while (lo + 1 < hi) {
@@ -280,7 +299,8 @@ function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
   const offsetY = (cssHeight - renderHeight) / 2;
 
   for (const detection of detections) {
-    const box = detection?.box || detection || {};
+    const box = normalizeDetectionBox(detection?.box || detection || {}, srcW, srcH);
+    if (!box) continue;
     const x = Math.min(Math.max(Number(box.x ?? 0), 0), 1);
     const y = Math.min(Math.max(Number(box.y ?? 0), 0), 1);
     const w = Math.min(Math.max(Number(box.width ?? 0), 0), 1);
