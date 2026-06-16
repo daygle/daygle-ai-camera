@@ -2860,6 +2860,7 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
     metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
     camera_name = str(metadata.get('camera_name') or '').strip() or None
     camera_id = str(metadata.get('camera_id') or '').strip() or None
+    detected_at = str(event.get('created_at') or '').strip() or None
     rules_by_name = {str(rule.get('name')): rule for rule in (rules or [])}
 
     any_email_enabled = any(
@@ -2910,6 +2911,7 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
                 camera_id=camera_id,
                 snapshot_bytes=snapshot_bytes,
                 triggered_labels=all_triggered_labels,
+                detected_at=detected_at,
             )
         except EmailAlertError as exc:
             logger.warning('Failed to send email alert for event %s rule %s: %s', event_id, alert.get('rule_name'), exc)
@@ -2926,6 +2928,7 @@ def deliver_push_notifications(triggered: list[dict[str, Any]], event_id: int, r
     metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
     camera_name = str(metadata.get('camera_name') or '').strip() or None
     camera_id = str(metadata.get('camera_id') or '').strip() or None
+    detected_at = str(event.get('created_at') or '').strip() or None
     rules_by_name = {str(rule.get('name')): rule for rule in (rules or [])}
     notifier = PushNotificationService(push_settings)
     # Collect every label that triggered an alert in this event so the push
@@ -2952,6 +2955,7 @@ def deliver_push_notifications(triggered: list[dict[str, Any]], event_id: int, r
                 camera_name=camera_name,
                 camera_id=camera_id,
                 triggered_labels=all_triggered_labels,
+                detected_at=detected_at,
             )
             logger.info('Push notification sent for event %s rule %r', event_id, rule_name)
         except PushNotificationError as exc:

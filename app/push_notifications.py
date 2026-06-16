@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -25,6 +26,7 @@ class PushNotificationService:
         camera_name: str | None = None,
         camera_id: str | None = None,
         triggered_labels: list[str] | None = None,
+        detected_at: str | None = None,
     ) -> None:
         if not self.configured():
             return
@@ -55,11 +57,23 @@ class PushNotificationService:
         subject_label = ', '.join(display_labels) if display_labels else display_primary
         title = f"Daygle AI Camera alert: {subject_label} detected"
 
+        detected_at_display: str | None = None
+        if detected_at:
+            try:
+                dt = datetime.fromisoformat(str(detected_at))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                detected_at_display = dt.strftime('%Y-%m-%d %H:%M:%S UTC')
+            except ValueError:
+                detected_at_display = str(detected_at)
+
         body_lines = [
             str(alert.get("message") or "Alert triggered."),
             f"Camera: {camera_line}",
             f"Rule: {alert.get('rule_name')}",
         ]
+        if detected_at_display:
+            body_lines.append(f"Detected at: {detected_at_display}")
         if display_labels and len(display_labels) > 1:
             body_lines.append(f"All triggers: {subject_label}")
         body_lines.append(f"Confidence: {float(alert.get('confidence', 0)):.2%}")

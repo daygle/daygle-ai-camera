@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import smtplib
+from datetime import datetime, timezone
 from email.message import Message
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
@@ -30,6 +31,7 @@ class EmailAlertService:
         camera_id: str | None = None,
         snapshot_bytes: bytes | None = None,
         triggered_labels: list[str] | None = None,
+        detected_at: str | None = None,
     ) -> None:
         recipients = [recipient.strip() for recipient in recipients if recipient and recipient.strip()]
         if not recipients or not self.configured():
@@ -69,12 +71,24 @@ class EmailAlertService:
         all_triggers_line = (
             f"All triggers: {subject_label}" if ordered_labels and len(ordered_labels) > 1 else None
         )
+        detected_at_display: str | None = None
+        if detected_at:
+            try:
+                dt = datetime.fromisoformat(str(detected_at))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                detected_at_display = dt.strftime('%Y-%m-%d %H:%M:%S UTC')
+            except ValueError:
+                detected_at_display = str(detected_at)
+
         plain_lines = [
             str(alert.get("message") or "Alert triggered."),
             "",
             f"Camera: {camera_line}",
             f"Rule: {alert.get('rule_name')}",
         ]
+        if detected_at_display:
+            plain_lines.append(f"Detected at: {detected_at_display}")
         if all_triggers_line:
             plain_lines.append(all_triggers_line)
         plain_lines.extend([
@@ -93,6 +107,10 @@ class EmailAlertService:
             f'<tr><td style="padding:4px 0;color:#888">All triggers</td><td style="padding:4px 0">{escape(subject_label)}</td></tr>'
             if all_triggers_line else ''
         )
+        detected_at_row = (
+            f'<tr><td style="padding:4px 0;color:#888">Detected at</td><td style="padding:4px 0">{escape(detected_at_display)}</td></tr>'
+            if detected_at_display else ''
+        )
         html_content = (
             '<!DOCTYPE html><html><body style="font-family:sans-serif;color:#333;max-width:600px;margin:0 auto;padding:16px">'
             f'<h2 style="margin-top:0">{escape(headline)}</h2>'
@@ -100,6 +118,7 @@ class EmailAlertService:
             '<table style="border-collapse:collapse;width:100%;margin:12px 0">'
             f'<tr><td style="padding:4px 0;color:#888;width:120px">Camera</td><td style="padding:4px 0">{escape(camera_line)}</td></tr>'
             f'<tr><td style="padding:4px 0;color:#888">Rule</td><td style="padding:4px 0">{escape(str(alert.get("rule_name") or ""))}</td></tr>'
+            f'{detected_at_row}'
             f'{all_triggers_row}'
             f'<tr><td style="padding:4px 0;color:#888">Trigger</td><td style="padding:4px 0">{escape(str(alert.get("label") or ""))}</td></tr>'
             f'<tr><td style="padding:4px 0;color:#888">Confidence</td><td style="padding:4px 0">{float(alert.get("confidence", 0)):.2%}</td></tr>'
