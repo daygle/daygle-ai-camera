@@ -2774,6 +2774,7 @@ def test_deliver_push_notifications_passes_all_triggered_labels(tmp_path, monkey
             camera_name=None,
             camera_id=None,
             triggered_labels=None,
+            detected_at=None,
         ):
             captured.append({
                 'alert': alert,
@@ -2781,6 +2782,7 @@ def test_deliver_push_notifications_passes_all_triggered_labels(tmp_path, monkey
                 'camera_name': camera_name,
                 'camera_id': camera_id,
                 'triggered_labels': triggered_labels,
+                'detected_at': detected_at,
             })
 
     monkeypatch.setattr(main_module, 'effective_push_notification_settings', lambda: {'enabled': True})

@@ -26,6 +26,7 @@ from collections import deque
 from email.mime.text import MIMEText
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -349,6 +350,48 @@ def effective_camera_offline_alert_settings() -> dict[str, Any]:
         settings.update(override)
     return settings
 
+
+
+def _alert_datetime_prefs() -> tuple[str, str, str]:
+    """Return (timezone_name, date_format, time_format) from the primary admin user."""
+    try:
+        users = auth.list_users()
+        admin = next((u for u in users if u.get('role') == 'admin' and u.get('is_active')), None)
+        if admin is None:
+            admin = next(iter(users), None)
+        if admin:
+            return (
+                str(admin.get('timezone') or 'UTC'),
+                str(admin.get('date_format') or 'iso'),
+                str(admin.get('time_format') or '24h'),
+            )
+    except Exception:
+        pass
+    return ('UTC', 'iso', '24h')
+
+
+def _format_alert_datetime(iso_str: str) -> str:
+    """Format a UTC ISO timestamp for display in alerts using the admin user's preferences."""
+    tz_name, date_fmt, time_fmt = _alert_datetime_prefs()
+    try:
+        dt = datetime.fromisoformat(iso_str)
+    except ValueError:
+        return iso_str
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    try:
+        dt = dt.astimezone(ZoneInfo(tz_name))
+        tz_label = dt.strftime('%Z')
+    except (ZoneInfoNotFoundError, KeyError):
+        dt = dt.astimezone(timezone.utc)
+        tz_label = 'UTC'
+    date_str = dt.strftime({'us': '%m/%d/%Y', 'au': '%d/%m/%Y'}.get(date_fmt, '%Y-%m-%d'))
+    if time_fmt == '12h':
+        hour = str(int(dt.strftime('%I')))
+        time_str = f"{hour}{dt.strftime(':%M:%S %p')}"
+    else:
+        time_str = dt.strftime('%H:%M:%S')
+    return f"{date_str} {time_str} {tz_label}"
 
 
 def _update_camera_health(camera_id: str, online: bool) -> None:
@@ -2860,6 +2903,8 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
     metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
     camera_name = str(metadata.get('camera_name') or '').strip() or None
     camera_id = str(metadata.get('camera_id') or '').strip() or None
+    created_at_raw = str(event.get('created_at') or '').strip()
+    detected_at = _format_alert_datetime(created_at_raw) if created_at_raw else None
     rules_by_name = {str(rule.get('name')): rule for rule in (rules or [])}
 
     any_email_enabled = any(
@@ -2910,6 +2955,7 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
                 camera_id=camera_id,
                 snapshot_bytes=snapshot_bytes,
                 triggered_labels=all_triggered_labels,
+                detected_at=detected_at,
             )
         except EmailAlertError as exc:
             logger.warning('Failed to send email alert for event %s rule %s: %s', event_id, alert.get('rule_name'), exc)
@@ -2926,6 +2972,8 @@ def deliver_push_notifications(triggered: list[dict[str, Any]], event_id: int, r
     metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
     camera_name = str(metadata.get('camera_name') or '').strip() or None
     camera_id = str(metadata.get('camera_id') or '').strip() or None
+    created_at_raw = str(event.get('created_at') or '').strip()
+    detected_at = _format_alert_datetime(created_at_raw) if created_at_raw else None
     rules_by_name = {str(rule.get('name')): rule for rule in (rules or [])}
     notifier = PushNotificationService(push_settings)
     # Collect every label that triggered an alert in this event so the push
@@ -2952,6 +3000,7 @@ def deliver_push_notifications(triggered: list[dict[str, Any]], event_id: int, r
                 camera_name=camera_name,
                 camera_id=camera_id,
                 triggered_labels=all_triggered_labels,
+                detected_at=detected_at,
             )
             logger.info('Push notification sent for event %s rule %r', event_id, rule_name)
         except PushNotificationError as exc:
