@@ -1705,10 +1705,25 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None = None) -> 
                         # as a genuine camera failure; just wait for the next
                         # detection cycle without incrementing the backoff counter.
                         return
-                    # Frame file exists but is stale: camera is offline or the
-                    # ingest connection has dropped. Back off so we don't spin.
-                    schedule_live_camera_backoff(cid, 'No fresh frame available from the camera ingest.')
-                    return
+                    # Stale ingest frame: try a direct camera read before entering
+                    # backoff, mirroring the fallback the live snapshot endpoint
+                    # uses so detection keeps running while the ingest reconnects.
+                    cam_instance = camera_instances.get(cid)
+                    if cam_instance is not None and hasattr(cam_instance, 'read_jpeg'):
+                        try:
+                            import cv2
+                            import numpy as np
+                            jpeg_bytes, _frame_meta = cam_instance.read_jpeg()
+                            img = cv2.imdecode(np.frombuffer(jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+                            if img is not None:
+                                h, w = img.shape[:2]
+                                sample = (img, {'frame_number': 0, 'timestamp': time.time(), 'width': w, 'height': h})
+                        except Exception:
+                            pass
+                    if sample is None:
+                        # Camera is genuinely unreachable. Back off so we don't spin.
+                        schedule_live_camera_backoff(cid, 'No fresh frame available from the camera ingest.')
+                        return
                 image, frame = sample
                 clear_live_camera_backoff(cid)
                 process_live_stream_alerts(image, frame, cfg, enforce_interval=False)
