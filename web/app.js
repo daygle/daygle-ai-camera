@@ -131,6 +131,7 @@ function groupAlertsByEvent(alerts) {
       groups.set(key, {
         key,
         eventId: alert.event_id ?? null,
+        camera: cameraLabel(alert.camera_name, alert.camera_id),
         ruleNames: [],
         zones: new Set(),
         labels: new Set(),

@@ -694,8 +694,12 @@ class EventDatabase:
         with self.connect() as db:
             rows = db.execute(
                 """
-                SELECT ah.*, r.id AS recording_id
+                SELECT ah.*,
+                       r.id AS recording_id,
+                       json_extract(e.metadata, '$.camera_name') AS camera_name,
+                       json_extract(e.metadata, '$.camera_id') AS camera_id
                 FROM alert_history ah
+                LEFT JOIN events e ON e.id = ah.event_id
                 LEFT JOIN recordings r ON r.id = ah.recording_id
                 WHERE ah.dismissed = 0
                 ORDER BY ah.created_at DESC
