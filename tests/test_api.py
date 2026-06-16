@@ -3769,6 +3769,37 @@ def test_zone_label_aliases_match_configured_rules(tmp_path, monkeypatch):
     assert matches[0][1]['label'] == 'person'
 
 
+def test_fetch_models_manifest_uses_remote_ultralytics_version(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    main_module = sys.modules["app.main"]
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'{"info": {"version": "8.4.12"}}'
+
+    requested_urls = []
+
+    def fake_urlopen(request, timeout):
+        requested_urls.append(request.full_url)
+        assert timeout == 10
+        return FakeResponse()
+
+    monkeypatch.setattr(main_module.urllib.request, "urlopen", fake_urlopen)
+
+    manifest = main_module._fetch_models_manifest()
+
+    assert requested_urls == [main_module.PYPI_ULTRALYTICS_URL]
+    assert manifest["source"] == "pypi:ultralytics"
+    assert manifest["models"]
+    assert all(model["version"] == "8.4.12" for model in manifest["models"].values())
+
+
 def test_check_model_updates_endpoints(tmp_path, monkeypatch):
     app, _ = _load_app(tmp_path, monkeypatch)
     main_module = sys.modules["app.main"]
@@ -3784,11 +3815,13 @@ def test_check_model_updates_endpoints(tmp_path, monkeypatch):
             "models": {mid: {"version": "1.0.0"} for mid in ["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"]},
         })
         monkeypatch.setattr(main_module, "_read_installed_models", lambda: {
-            "yolov8n": {"version": "1.0.0", "installed_at": "2026-06-08T00:00:00Z", "sha256": "abc"},
+            mid: {"version": "1.0.0", "installed_at": "2026-06-08T00:00:00Z", "sha256": "abc"}
+            for mid in ["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"]
         })
         status, _, payload = client.request("/api/settings/ai/check-model-updates")
         assert status == 200
         assert payload["any_updates"] is False
+        assert len(payload["models"]) == 5
         n_row = next(m for m in payload["models"] if m["id"] == "yolov8n")
         assert n_row["update_available"] is False
         assert n_row["installed_version"] == "1.0.0"
@@ -3797,11 +3830,16 @@ def test_check_model_updates_endpoints(tmp_path, monkeypatch):
         # Manifest bumped to 2.0.0 - update available
         monkeypatch.setattr(main_module, "_fetch_models_manifest", lambda: {
             "updated_at": "2026-06-09",
+            "source": "pypi:ultralytics",
             "models": {mid: {"version": "2.0.0"} for mid in ["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"]},
         })
         status, _, payload = client.request("/api/settings/ai/check-model-updates")
         assert status == 200
+        assert payload["version_source"] == "pypi:ultralytics"
         assert payload["any_updates"] is True
+        assert len(payload["models"]) == 5
+        assert all(m["update_available"] is True for m in payload["models"])
+        assert all(m["latest_version"] == "2.0.0" for m in payload["models"])
         n_row = next(m for m in payload["models"] if m["id"] == "yolov8n")
         assert n_row["update_available"] is True
         assert n_row["latest_version"] == "2.0.0"
