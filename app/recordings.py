@@ -708,11 +708,6 @@ class RecordingService:
                 'error',
                 '-rtsp_transport',
                 'tcp',
-                # Socket-level timeout: if the camera stops sending data for
-                # 5 s ffmpeg treats it as an error and exits, triggering an
-                # immediate reconnect rather than hanging indefinitely.
-                '-stimeout',
-                '5000000',
                 # Do NOT use +discardcorrupt here. On a flaky camera link it drops
                 # every corrupt VIDEO packet as it is captured, leaving near
                 # audio-only segments, so the event render later finds no video
@@ -789,10 +784,28 @@ class RecordingService:
             process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=stderr_file)
             stderr_file.close()
             try:
+                last_segment_ts = time.time()
                 while process.poll() is None and not stop_event.is_set():
                     keep_seconds = int(worker_state.get('buffer_seconds') or 15)
                     self._prune_prebuffer_segments(camera_dir, keep_seconds)
                     self._prune_audio_segments(audio_camera_dir, keep_seconds)
+                    # Dead-stream detection: if the camera stops sending data
+                    # ffmpeg can hang indefinitely. If no new segment has been
+                    # written within several segment intervals, kill and restart.
+                    try:
+                        newest = max(
+                            (p.stat().st_mtime for p in camera_dir.glob(self.PREBUFFER_SEGMENT_GLOB)),
+                            default=last_segment_ts,
+                        )
+                        if newest > last_segment_ts:
+                            last_segment_ts = newest
+                    except OSError:
+                        pass
+                    stall_seconds = max(self.PREBUFFER_SEGMENT_SECONDS * 5, 20)
+                    if time.time() - last_segment_ts > stall_seconds:
+                        logger.info('Prebuffer ingest for %s stalled (no segment in %.0fs); restarting.', camera_key, stall_seconds)
+                        process.terminate()
+                        break
                     time.sleep(1)
             finally:
                 return_code = process.poll()
