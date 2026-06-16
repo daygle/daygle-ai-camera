@@ -3090,18 +3090,34 @@ def _fetch_ultralytics_version() -> str:
     return version
 
 
+def _parse_semver(v: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(x) for x in v.split('.'))
+    except ValueError:
+        return (0,)
+
+
 def _fetch_models_manifest() -> dict[str, Any]:
     """Return remote YOLO export versions from the upstream Ultralytics package.
 
     The app exports ONNX files from Ultralytics YOLO weights, so the remote
     version that matters for update checks is the latest Ultralytics release,
     not a Daygle-maintained model manifest version.
+
+    The effective version is capped at the locally installed package version:
+    if PyPI has a newer release but the local package hasn't been upgraded yet,
+    re-exporting the model would produce the same file, so no update is shown.
     """
     remote_version = _fetch_ultralytics_version()
+    local_version = _installed_package_version('ultralytics')
+    if local_version != 'unknown' and _parse_semver(local_version) < _parse_semver(remote_version):
+        effective_version = local_version
+    else:
+        effective_version = remote_version
     return {
         'updated_at': None,
         'source': 'pypi:ultralytics',
-        'models': {model_id: {'version': remote_version} for model_id in YOLO_MODELS},
+        'models': {model_id: {'version': effective_version} for model_id in YOLO_MODELS},
     }
 
 
@@ -5602,13 +5618,6 @@ async def update_auth_settings(request: Request):
 def _current_version() -> str:
     version_file = BASE_DIR / 'VERSION'
     return version_file.read_text(encoding='utf-8').strip() if version_file.exists() else 'unknown'
-
-
-def _parse_semver(v: str) -> tuple[int, ...]:
-    try:
-        return tuple(int(x) for x in v.split('.'))
-    except ValueError:
-        return (0,)
 
 
 @app.get('/api/update/check')
