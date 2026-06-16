@@ -174,7 +174,17 @@ function sampleTrackAtTime(track, t) {
   // nothing - those earlier frames were never analyzed.
   if (time < track[0].t - maxHold) return [];
   if (time <= track[0].t) return track[0].detections || [];
-  if (time >= last.t) return last.detections || [];
+  if (time >= last.t) {
+    const prev = track.length > 1 ? track[track.length - 2] : null;
+    return projectDetections(
+      prev?.detections || [],
+      last.detections || [],
+      Number(prev?.t),
+      Number(last.t),
+      time,
+      Math.max(0.25, spacing * 1.5)
+    ) || [];
+  }
   let lo = 0;
   let hi = track.length - 1;
   while (lo + 1 < hi) {
@@ -280,7 +290,8 @@ function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
   const offsetY = (cssHeight - renderHeight) / 2;
 
   for (const detection of detections) {
-    const box = detection?.box || detection || {};
+    const box = normalizeDetectionBox(detection?.box || detection || {}, srcW, srcH);
+    if (!box) continue;
     const x = Math.min(Math.max(Number(box.x ?? 0), 0), 1);
     const y = Math.min(Math.max(Number(box.y ?? 0), 0), 1);
     const w = Math.min(Math.max(Number(box.width ?? 0), 0), 1);
