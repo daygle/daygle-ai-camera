@@ -30,9 +30,9 @@ These results are then matched against your zone rules. If a zone covers the are
 
 ### Layer 3 - Motion zone rules
 
-This is an optional alert that fires directly from Layer 1's confidence score, without caring what YOLO found.
+This is an optional alert that fires from Layer 1's pixel-diff result, without caring what YOLO found.
 
-You configure it by adding a rule with the label **motion** to a zone. When the pixel-diff confidence reaches the rule's minimum threshold, the alert fires immediately - even before YOLO has identified any specific object.
+You configure it by adding a rule with the label **motion** to a zone. When that zone's pixel-diff confidence reaches the rule's minimum threshold, the alert fires immediately - even before YOLO has identified any specific object. The system normally computes this confidence from the changed pixels inside the zone's own rectangle, so motion elsewhere in the camera view does not raise this zone's score.
 
 Use this when you want to be notified any time *anything* moves in an area, regardless of what it is.
 
@@ -72,6 +72,8 @@ This solves the standing-still problem: even if a person has been absorbed into 
 ## Settings reference
 
 All of these are found in **Settings → Live Detection**.
+
+These are global defaults. You can override the four motion gate tuning values - **Motion Pixel Threshold**, **Motion Gate Fraction**, **Motion Scale Fraction**, and **Motion Background Alpha** - for an individual camera from **Cameras → Edit Camera → Advanced → Motion Detection Overrides**. Blank override fields use the global Live Detection value.
 
 ### Detection Interval (s)
 
