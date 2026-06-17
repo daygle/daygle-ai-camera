@@ -61,7 +61,6 @@ function normalisedSound(sound) {
   next.enabled = next.enabled === true;
   next.rules = next.rules.map((rule) => ({
     ...rule,
-    alert_on_detect: rule.alert_on_detect !== false,
     email_enabled: rule.email_enabled === true,
     email_recipients: normalizeEmailList(rule.email_recipients),
     push_enabled: rule.push_enabled === true,
@@ -79,7 +78,6 @@ function defaultSoundRule(cls) {
     name: cls.label,
     enabled: true,
     record_on_detect: true,
-    alert_on_detect: true,
     confidence_threshold: cls.default_threshold,
     cooldown_seconds: cls.default_cooldown,
     email_enabled: false,
@@ -206,10 +204,6 @@ function renderRules() {
               <span>Record</span>
             </label>
             <label class="sound-rule-toggle">
-              <input type="checkbox" data-rule-alert="${id}" ${rule.alert_on_detect !== false ? 'checked' : ''} />
-              <span>Alert</span>
-            </label>
-            <label class="sound-rule-toggle">
               <input type="checkbox" data-rule-email="${id}" ${rule.email_enabled ? 'checked' : ''} />
               <span>Email</span>
             </label>
@@ -231,9 +225,6 @@ function renderRules() {
   });
   rulesWrap.querySelectorAll('[data-rule-record]').forEach((input) => {
     input.addEventListener('change', () => updateRule(input.dataset.ruleRecord, 'record_on_detect', input.checked));
-  });
-  rulesWrap.querySelectorAll('[data-rule-alert]').forEach((input) => {
-    input.addEventListener('change', () => updateRule(input.dataset.ruleAlert, 'alert_on_detect', input.checked));
   });
   rulesWrap.querySelectorAll('[data-rule-threshold]').forEach((input) => {
     input.addEventListener('change', () => updateRule(input.dataset.ruleThreshold, 'confidence_threshold', Math.max(0.1, Math.min(1.0, Number(input.value) || 0.35))));
