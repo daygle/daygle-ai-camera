@@ -5392,6 +5392,36 @@ def list_sound_classes():
     }
 
 
+def _sound_status_reason(diagnostics: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Pick the single most relevant class to explain the current listening
+    state, mirroring how the live object status surfaces an alert reason.
+
+    Prefers the loudest class at/above its threshold (it would alert, but may be
+    held back by cooldown); otherwise the loudest class heard below threshold.
+    Returns None when nothing notable is being heard.
+    """
+    if not diagnostics:
+        return None
+    above = [d for d in diagnostics if d['confidence'] > 0 and d['confidence'] >= d['threshold']]
+    if above:
+        top = above[0]  # diagnostics already sorted by confidence, highest first
+        code = 'cooldown' if top['in_cooldown'] else 'detected'
+    else:
+        below = [d for d in diagnostics if 0 < d['confidence'] < d['threshold']]
+        if not below:
+            return None
+        top = below[0]
+        code = 'below_threshold'
+    return {
+        'code': code,
+        'class': top['class'],
+        'class_label': top['label'],
+        'confidence': top['confidence'],
+        'threshold': top['threshold'],
+        'cooldown_remaining': top['cooldown_remaining'],
+    }
+
+
 @app.get('/api/sound/status')
 def get_sound_status(camera_id: str | None = Query(None)):
     with _sound_statuses_lock:
@@ -5409,6 +5439,11 @@ def get_sound_status(camera_id: str | None = Query(None)):
             status['backend'] = det.backend
             status['backend_reason'] = det.backend_reason
             status['last_confidences'] = {k: round(v, 3) for k, v in det.last_confidences().items()}
+            diagnostics = det.diagnostics()
+            status['diagnostics'] = diagnostics
+            reason = _sound_status_reason(diagnostics)
+            if reason:
+                status['reason'] = reason
         else:
             status['running'] = False
             status['detector_status'] = status.get('state', 'stopped')

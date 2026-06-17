@@ -713,6 +713,43 @@ def test_prebuffer_window_change_updates_worker_without_restart(tmp_path, monkey
     assert not started[0].is_set()
 
 
+def test_sound_detector_diagnostics_and_reason():
+    import app.main as main
+    from app.sound_detector import SoundDetector
+
+    rules = [
+        {'class': 'car_alarm', 'name': 'Car Alarm', 'enabled': True, 'confidence_threshold': 0.35, 'cooldown_seconds': 60},
+        {'class': 'dog_bark', 'name': 'Dog Bark', 'enabled': True, 'confidence_threshold': 0.40, 'cooldown_seconds': 20},
+    ]
+    det = SoundDetector(on_detect=lambda *a, **k: None, rules=rules, source='ingest')
+
+    # Nothing heard yet -> no diagnostics confidence, no reason.
+    assert main._sound_status_reason(det.diagnostics()) is None
+
+    # A class heard below its threshold -> 'below_threshold'.
+    with det._status_lock:
+        det._last_confidences = {'car_alarm': 0.28, 'dog_bark': 0.05}
+    diag = det.diagnostics()
+    assert diag[0]['class'] == 'car_alarm'  # sorted by confidence, highest first
+    reason = main._sound_status_reason(diag)
+    assert reason['code'] == 'below_threshold'
+    assert reason['class'] == 'car_alarm'
+    assert reason['threshold'] == 0.35
+
+    # A class at/above threshold that just fired -> suppressed by 'cooldown'.
+    with det._status_lock:
+        det._last_confidences = {'car_alarm': 0.50}
+        det._last_triggered = {'car_alarm': time.time()}
+    cooldown_reason = main._sound_status_reason(det.diagnostics())
+    assert cooldown_reason['code'] == 'cooldown'
+    assert cooldown_reason['cooldown_remaining'] > 0
+
+    # Same class above threshold once its cooldown has elapsed -> 'detected'.
+    with det._status_lock:
+        det._last_triggered = {'car_alarm': time.time() - 120}
+    assert main._sound_status_reason(det.diagnostics())['code'] == 'detected'
+
+
 def test_sound_detector_ingest_consumes_audio_segments(tmp_path):
     import shutil as _shutil
     if not _shutil.which('ffmpeg'):
