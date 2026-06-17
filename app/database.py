@@ -47,6 +47,14 @@ class EventDatabase:
                 db.execute("ALTER TABLE detections ADD COLUMN zone_name TEXT")
             except sqlite3.OperationalError:
                 pass
+            # Migration: track the best confidence seen for each recording label so
+            # the recordings list can show a percentage for secondary objects that
+            # were only detected after the trigger (their confidence otherwise lives
+            # solely in the saved detection track, which the list does not load).
+            try:
+                db.execute("ALTER TABLE recording_labels ADD COLUMN confidence REAL")
+            except sqlite3.OperationalError:
+                pass
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS events (
@@ -116,6 +124,7 @@ class EventDatabase:
                     label TEXT NOT NULL,
                     source TEXT NOT NULL DEFAULT 'detection',
                     created_at TEXT NOT NULL,
+                    confidence REAL,
                     PRIMARY KEY (recording_id, label),
                     FOREIGN KEY(recording_id) REFERENCES recordings(id) ON DELETE CASCADE
                 );
@@ -224,6 +233,7 @@ class EventDatabase:
         trigger_type: str = "motion",
         trigger_label: str | None = None,
         labels: list[str] | None = None,
+        label_confidences: dict[str, float] | None = None,
     ) -> int:
         with self.connect() as db:
             cursor = db.execute(
@@ -240,17 +250,21 @@ class EventDatabase:
             # the linked event's detections and the trigger_label so the join
             # table filter is robust for recordings created without labels=[...].
             if labels is None and event_id is not None:
-                detection_labels = [
-                    str(row['label']).strip().lower()
-                    for row in db.execute(
-                        "SELECT DISTINCT label FROM detections WHERE event_id = ?",
-                        (int(event_id),),
-                    ).fetchall()
-                ]
+                detection_rows = db.execute(
+                    "SELECT label, MAX(confidence) AS confidence FROM detections WHERE event_id = ? GROUP BY label",
+                    (int(event_id),),
+                ).fetchall()
+                detection_labels = [str(row['label']).strip().lower() for row in detection_rows]
+                if label_confidences is None:
+                    label_confidences = {
+                        str(row['label']).strip().lower(): float(row['confidence'])
+                        for row in detection_rows
+                        if row['confidence'] is not None
+                    }
                 normalized_trigger = str(trigger_label or '').strip().lower()
                 labels = list(dict.fromkeys(detection_labels + ([normalized_trigger] if normalized_trigger else [])))
             if labels:
-                self._insert_recording_labels(db, recording_id, labels, source='detection')
+                self._insert_recording_labels(db, recording_id, labels, source='detection', confidences=label_confidences)
             return recording_id
 
     @staticmethod
@@ -260,36 +274,62 @@ class EventDatabase:
         labels: list[str],
         *,
         source: str = 'detection',
+        confidences: dict[str, float] | None = None,
     ) -> None:
         """Insert unique non-generic labels for a recording.
 
-        Existing rows for the same (recording_id, label) pair are left untouched
-        (the primary key is the composite) so callers can call this freely
-        from extension / trigger-update paths without duplicating entries.
+        Rows are keyed on the composite (recording_id, label). New labels are
+        inserted; for labels that already exist the row's source is preserved but
+        the stored confidence is raised to the best value ever seen, so callers
+        can call this freely from extension / trigger-update paths without
+        duplicating entries or losing a higher confidence captured later.
         """
         if not labels:
             return
+        conf_map = {
+            str(k or '').strip().lower(): float(v)
+            for k, v in (confidences or {}).items()
+            if v is not None
+        }
         seen: set[str] = set()
-        rows: list[tuple[int, str, str, str]] = []
+        rows: list[tuple[int, str, str, str, float | None]] = []
         now = datetime.now(timezone.utc).isoformat()
         for raw in labels:
             label = str(raw or '').strip().lower()
             if not label or label in seen:
                 continue
             seen.add(label)
-            rows.append((int(recording_id), label, source, now))
+            rows.append((int(recording_id), label, source, now, conf_map.get(label)))
         if not rows:
             return
         db.executemany(
-            "INSERT OR IGNORE INTO recording_labels (recording_id, label, source, created_at) VALUES (?, ?, ?, ?)",
+            """
+            INSERT INTO recording_labels (recording_id, label, source, created_at, confidence)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(recording_id, label) DO UPDATE SET
+                confidence = CASE
+                    WHEN excluded.confidence IS NOT NULL
+                         AND (recording_labels.confidence IS NULL OR excluded.confidence > recording_labels.confidence)
+                    THEN excluded.confidence
+                    ELSE recording_labels.confidence
+                END
+            """,
             rows,
         )
 
-    def add_recording_labels(self, recording_id: int, labels: list[str], *, source: str = 'detection') -> int:
+    def add_recording_labels(
+        self,
+        recording_id: int,
+        labels: list[str],
+        *,
+        source: str = 'detection',
+        confidences: dict[str, float] | None = None,
+    ) -> int:
         """Append unique labels to a recording's label set.
 
-        Returns the number of rows newly inserted (existing labels are skipped).
-        Safe to call from extension / trigger-update paths.
+        Returns the number of rows newly inserted. Labels that already exist are
+        not duplicated, but their stored confidence is still raised to any higher
+        value supplied here. Safe to call from extension / trigger-update paths.
         """
         with self.connect() as db:
             existing = {
@@ -299,15 +339,17 @@ class EventDatabase:
                     (int(recording_id),),
                 ).fetchall()
             }
-            new_labels = [
+            normalized = [
                 str(raw or '').strip().lower()
                 for raw in labels
-                if str(raw or '').strip() and str(raw or '').strip().lower() not in existing
+                if str(raw or '').strip()
             ]
-            if not new_labels:
+            if not normalized:
                 return 0
-            self._insert_recording_labels(db, int(recording_id), new_labels, source=source)
-            return len(new_labels)
+            # Upsert every supplied label so existing rows can pick up a higher
+            # confidence, but only count the genuinely new ones.
+            self._insert_recording_labels(db, int(recording_id), normalized, source=source, confidences=confidences)
+            return len([label for label in dict.fromkeys(normalized) if label not in existing])
 
     def backfill_recording_labels(self, db: sqlite3.Connection | None = None) -> int:
         """One-shot migration: seed recording_labels from existing detections
@@ -322,6 +364,7 @@ class EventDatabase:
         rows = db.execute(
             """
             SELECT r.id AS recording_id,
+                   r.event_id,
                    r.trigger_label,
                    (SELECT GROUP_CONCAT(DISTINCT lower(d.label))
                       FROM detections d
@@ -346,7 +389,17 @@ class EventDatabase:
             if trigger_label and trigger_label not in generic and trigger_label not in labels:
                 labels.append(trigger_label)
             if labels:
-                self._insert_recording_labels(db, recording_id, labels, source='backfill')
+                confidences: dict[str, float] = {}
+                if row['event_id'] is not None:
+                    confidences = {
+                        str(crow['label']).strip().lower(): float(crow['confidence'])
+                        for crow in db.execute(
+                            "SELECT label, MAX(confidence) AS confidence FROM detections WHERE event_id = ? GROUP BY label",
+                            (int(row['event_id']),),
+                        ).fetchall()
+                        if crow['confidence'] is not None
+                    }
+                self._insert_recording_labels(db, recording_id, labels, source='backfill', confidences=confidences)
                 total += len(labels)
         return total
 
@@ -988,9 +1041,10 @@ class EventDatabase:
         event["detections"] = [dict(detection) for detection in detections]
         event["recordings"] = [self._recording_row(recording) for recording in recordings]
         if event["recordings"]:
-            label_map = self._fetch_labels_for_recordings(db, [int(rec["id"]) for rec in event["recordings"]])
+            label_map, confidence_map = self._fetch_labels_for_recordings(db, [int(rec["id"]) for rec in event["recordings"]])
             for recording in event["recordings"]:
                 recording["labels"] = label_map.get(int(recording["id"]), [])
+                recording["label_confidences"] = confidence_map.get(int(recording["id"]), {})
         else:
             event["recordings"] = []
         event["recording_status"] = "linked" if recordings else "none"
@@ -1003,7 +1057,7 @@ class EventDatabase:
         recordings = [self._recording_row(row) for row in rows]
         recording_ids = [int(r['id']) for r in recordings]
 
-        labels_map = self._fetch_labels_for_recordings(db, recording_ids)
+        labels_map, confidences_map = self._fetch_labels_for_recordings(db, recording_ids)
 
         event_ids = [int(r['event_id']) for r in recordings if r.get('event_id') is not None]
         events_map: dict[int, Any] = {}
@@ -1028,6 +1082,7 @@ class EventDatabase:
 
         for recording in recordings:
             recording['labels'] = labels_map.get(int(recording['id']), [])
+            recording['label_confidences'] = confidences_map.get(int(recording['id']), {})
             recording['event'] = None
             recording['detections'] = []
             if recording.get('event_id') is not None:
@@ -1037,18 +1092,24 @@ class EventDatabase:
         return recordings
 
     @staticmethod
-    def _fetch_labels_for_recordings(db: sqlite3.Connection, recording_ids: list[int]) -> dict[int, list[str]]:
+    def _fetch_labels_for_recordings(
+        db: sqlite3.Connection, recording_ids: list[int]
+    ) -> tuple[dict[int, list[str]], dict[int, dict[str, float]]]:
         if not recording_ids:
-            return {}
+            return {}, {}
         placeholders = ','.join('?' * len(recording_ids))
         rows = db.execute(
-            f"SELECT recording_id, label FROM recording_labels WHERE recording_id IN ({placeholders}) ORDER BY label ASC",
+            f"SELECT recording_id, label, confidence FROM recording_labels WHERE recording_id IN ({placeholders}) ORDER BY label ASC",
             [int(rid) for rid in recording_ids],
         ).fetchall()
         grouped: dict[int, list[str]] = {int(rid): [] for rid in recording_ids}
+        confidences: dict[int, dict[str, float]] = {int(rid): {} for rid in recording_ids}
         for row in rows:
-            grouped[int(row['recording_id'])].append(str(row['label']))
-        return grouped
+            rid = int(row['recording_id'])
+            grouped[rid].append(str(row['label']))
+            if row['confidence'] is not None:
+                confidences[rid][str(row['label'])] = float(row['confidence'])
+        return grouped, confidences
 
     def _recording_row(self, row: sqlite3.Row) -> dict[str, Any]:
         recording = dict(row)
@@ -1061,10 +1122,15 @@ class EventDatabase:
         recording["event"] = None
         recording["detections"] = []
         label_rows = db.execute(
-            "SELECT label, source FROM recording_labels WHERE recording_id = ? ORDER BY label ASC",
+            "SELECT label, source, confidence FROM recording_labels WHERE recording_id = ? ORDER BY label ASC",
             (recording["id"],),
         ).fetchall()
         recording["labels"] = [str(label_row["label"]) for label_row in label_rows]
+        recording["label_confidences"] = {
+            str(label_row["label"]): float(label_row["confidence"])
+            for label_row in label_rows
+            if label_row["confidence"] is not None
+        }
         if recording.get("event_id") is not None:
             event_row = db.execute("SELECT * FROM events WHERE id = ?", (recording["event_id"],)).fetchone()
             detections = db.execute(

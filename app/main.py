@@ -1555,7 +1555,12 @@ def extend_active_rtsp_recording(
         should_record, trigger_type, trigger_label = recording_service.should_record(detections, config)
         new_labels = detection_label_strings(detections)
         if new_labels:
-            database.add_recording_labels(recording_id, new_labels, source='extension')
+            database.add_recording_labels(
+                recording_id,
+                new_labels,
+                source='extension',
+                confidences=detection_label_confidences(detections),
+            )
         if should_record and trigger_label:
             current_recording = database.get_recording(recording_id) or {}
             current_label = str(current_recording.get('trigger_label') or '').strip().lower()
@@ -1593,6 +1598,30 @@ def detection_label_strings(detections: list[dict[str, Any]]) -> list[str]:
         out.append(label)
     out.sort()
     return out
+
+
+def detection_label_confidences(detections: list[dict[str, Any]]) -> dict[str, float]:
+    """Return the best confidence per non-generic label from a detections list.
+
+    Used to persist a confidence alongside each recording label so the recordings
+    list and timeline can show a percentage for secondary objects, not just the
+    trigger object.
+    """
+    if not detections:
+        return {}
+    generic = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous', ''}
+    best: dict[str, float] = {}
+    for detection in detections:
+        label = str(detection.get('label') or '').strip().lower()
+        if not label or label in generic:
+            continue
+        try:
+            confidence = float(detection.get('confidence'))
+        except (TypeError, ValueError):
+            continue
+        if label not in best or confidence > best[label]:
+            best[label] = confidence
+    return best
 
 
 def schedule_live_camera_backoff(camera_id: str, message: str) -> float:
@@ -2723,14 +2752,23 @@ def _make_continuous_chunk_callback(camera_id: str) -> Any:
                 camera_id, started_at_dt.timestamp(), ended_at_dt.timestamp()
             )
             chunk_labels: list[str] = []
+            chunk_confidences: dict[str, float] = {}
             if chunk_track:
                 _seen: set[str] = set()
                 for _sample in chunk_track:
                     for _det in (_sample.get('detections') or []):
                         _lbl = str(_det.get('label') or '').strip().lower()
-                        if _lbl and _lbl not in _seen:
+                        if not _lbl:
+                            continue
+                        if _lbl not in _seen:
                             _seen.add(_lbl)
                             chunk_labels.append(_lbl)
+                        try:
+                            _conf = float(_det.get('confidence'))
+                        except (TypeError, ValueError):
+                            _conf = None
+                        if _conf is not None and (_lbl not in chunk_confidences or _conf > chunk_confidences[_lbl]):
+                            chunk_confidences[_lbl] = _conf
             recording_id = database.add_recording(
                 event_id=None,
                 camera_id=camera_id,
@@ -2744,6 +2782,7 @@ def _make_continuous_chunk_callback(camera_id: str) -> Any:
                 trigger_type='continuous',
                 trigger_label=None,
                 labels=chunk_labels or None,
+                label_confidences=chunk_confidences or None,
             )
             write_live_history_detection_track(
                 recording_id, file_path, camera_id, started_at_dt.timestamp(), ended_at_dt.timestamp(),
@@ -2779,7 +2818,12 @@ def attach_event_recording(
     if camera_id:
         metadata['camera_id'] = camera_id
     detection_labels = detection_label_strings(detections)
-    recording_id = database.add_recording(created_at=utc_now(), labels=detection_labels or None, **metadata)
+    recording_id = database.add_recording(
+        created_at=utc_now(),
+        labels=detection_labels or None,
+        label_confidences=detection_label_confidences(detections) or None,
+        **metadata,
+    )
     if stream_url:
         start_rtsp_recording_capture(
             stream_url,

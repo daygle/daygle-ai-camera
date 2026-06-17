@@ -102,7 +102,7 @@ function detectionPill(label, confidence, isSound) {
   const display = isSound
     ? titleCase(String(label).replace(/_/g, ' '))
     : titleCase(String(label));
-  const numericConfidence = Number(confidence);
+  const numericConfidence = confidence == null ? NaN : Number(confidence);
   const confidenceText = Number.isFinite(numericConfidence)
     ? ` · ${Math.round(numericConfidence * 100)}%`
     : '';
@@ -338,6 +338,12 @@ function recordingDetectionSummary(recording) {
   for (const d of (recording.detections || [])) rememberBest(d);
   for (const sample of (recording.track || [])) {
     for (const d of (sample?.detections || [])) rememberBest(d);
+  }
+  // Persisted per-label confidence (recording_labels.confidence) covers secondary
+  // objects that only appeared after the trigger, whose confidence is otherwise
+  // absent from the event detections the timeline list endpoint loads.
+  for (const [label, confidence] of Object.entries(recording.label_confidences || {})) {
+    rememberBest({ label, confidence });
   }
   // Use recording.labels as the authoritative label list when available.
   const authLabels = Array.isArray(recording.labels) && recording.labels.length
@@ -733,12 +739,16 @@ function renderRecordingList(recordings) {
     const camera = escapeHtml(cameraLabel(recording));
     const detections = recordingDetectionSummary(recording);
     const isSound = isSoundRecording(recording);
+    // Show a pill per detected object (e.g. Person and Dog), including secondary
+    // objects whose confidence is unknown - detectionPill omits the percentage
+    // when there is no confidence rather than rendering a misleading 0%.
     const confidenceBadges = detections
-      .filter((d) => d.confidence > 0)
       .map((d) => detectionPill(d.label, d.confidence, isSound))
       .join('');
     const tooltip = detections
-      .map((d) => `${titleCase(d.label)} · ${Math.round(d.confidence * 100)}%`)
+      .map((d) => (d.confidence == null
+        ? titleCase(d.label)
+        : `${titleCase(d.label)} · ${Math.round(d.confidence * 100)}%`))
       .join('\n');
     const typeLabel = isSound ? 'Sound' : 'Object';
     const zones = recordingZoneNames(recording);
