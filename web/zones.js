@@ -12,6 +12,14 @@ let zoneDrag = null;
 
 const ZONE_ICON_REMOVE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
 
+// Update only the label text on the Draw Area button so its icon (a sibling
+// <svg>) survives. Setting button.textContent would replace all child nodes,
+// wiping the icon.
+function setAddZoneLabel(text) {
+  const label = liveEls.addZoneBtn?.querySelector('.zone-btn-label');
+  if (label) label.textContent = text;
+}
+
 function rectanglePoints(zone) {
   const x = clamp(Number(zone.x) || 0);
   const y = clamp(Number(zone.y) || 0);
@@ -477,7 +485,7 @@ function finishDraftPolygon() {
   normalizeZone(zones[selectedZoneIndex]);
   draftPolygon = null;
   drawingMode = false;
-  liveEls.addZoneBtn.textContent = 'Draw area';
+  setAddZoneLabel('Draw area');
   renderZones();
   refreshFrame();
 }
@@ -502,7 +510,7 @@ function addFullFrameZone() {
   draftPolygon = null;
   drawingMode = false;
   zoneDrag = null;
-  if (liveEls.addZoneBtn) liveEls.addZoneBtn.textContent = 'Draw area';
+  setAddZoneLabel('Draw area');
   normalizeZone(zones[selectedZoneIndex]);
   renderZones();
   refreshFrame();
@@ -525,7 +533,7 @@ function bindZoneDrawing() {
       draftPolygon ||= { points: [], preview: point };
       draftPolygon.points.push(point);
       draftPolygon.preview = point;
-      liveEls.addZoneBtn.textContent = draftPolygon.points.length >= 3 ? 'Finish area' : 'Cancel drawing';
+      setAddZoneLabel(draftPolygon.points.length >= 3 ? 'Finish area' : 'Cancel drawing');
       renderDraftPolygon();
       liveEls.zoneOverlay.setPointerCapture(event.pointerId);
       return;
@@ -579,7 +587,7 @@ liveEls.addZoneBtn?.addEventListener('click', () => {
   drawingMode = !drawingMode;
   draftPolygon = null;
   zoneDrag = null;
-  liveEls.addZoneBtn.textContent = drawingMode ? 'Cancel drawing' : 'Draw area';
+  setAddZoneLabel(drawingMode ? 'Cancel drawing' : 'Draw area');
   renderZones();
 });
 
@@ -614,7 +622,7 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && drawingMode) {
     drawingMode = false;
     draftPolygon = null;
-    if (liveEls.addZoneBtn) liveEls.addZoneBtn.textContent = 'Draw area';
+    setAddZoneLabel('Draw area');
     renderDraftPolygon();
   }
 });

@@ -82,7 +82,7 @@ function defaultSoundRule(cls) {
     cooldown_seconds: cls.default_cooldown,
     email_enabled: false,
     email_recipients: [],
-    push_enabled: true,
+    push_enabled: false,
     active_start: null,
     active_end: null,
   };
