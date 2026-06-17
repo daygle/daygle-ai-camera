@@ -908,9 +908,19 @@ async function loadTimeline({ preserveSelection = true } = {}) {
   els.timelineStatus.textContent = 'Loading timeline…';
   setTimelineStatusChip({ kind: 'idle', label: 'Loading' });
   const timezoneOffsetMinutes = new Date().getTimezoneOffset();
-  const payload = await api(
-    `/api/recordings/timeline?camera_id=${encodeURIComponent(cameraId)}&day=${encodeURIComponent(day)}&tz_offset_minutes=${timezoneOffsetMinutes}`,
-  );
+  let payload;
+  try {
+    payload = await api(
+      `/api/recordings/timeline?camera_id=${encodeURIComponent(cameraId)}&day=${encodeURIComponent(day)}&tz_offset_minutes=${timezoneOffsetMinutes}`,
+    );
+  } catch (err) {
+    if (err.message === 'No cameras configured') {
+      els.timelineStatus.textContent = 'No cameras configured. Add a camera in Settings to use the timeline.';
+      setTimelineStatusChip({ kind: 'empty', label: 'No cameras' });
+      return;
+    }
+    throw err;
+  }
   state.payload = payload;
   populateControls(payload);
   populateFilterOptions(payload.recordings || []);
