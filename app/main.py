@@ -371,6 +371,31 @@ def _alert_datetime_prefs() -> tuple[str, str, str]:
     return ('UTC', 'iso', '24h')
 
 
+def _rule_notify_active_now(rule: dict[str, Any]) -> bool:
+    """Return True if a rule's email/push window (notify_start/notify_end) covers now.
+
+    This window only limits email and push delivery - detection, recording and
+    in-app alerts are gated by the separate detection/active window and always
+    fire regardless of this one. An empty or partial window means "notify any
+    time". It is evaluated in the admin user's configured timezone so a setting
+    like 22:00 -> 05:00 lines up with the local clock, and windows that wrap past
+    midnight (start > end) are supported.
+    """
+    start = str(rule.get('notify_start') or '').strip()
+    end = str(rule.get('notify_end') or '').strip()
+    if not start or not end:
+        return True
+    tz_name, _, _ = _alert_datetime_prefs()
+    try:
+        now_local = datetime.now(timezone.utc).astimezone(ZoneInfo(tz_name))
+    except (ZoneInfoNotFoundError, KeyError):
+        now_local = datetime.now(timezone.utc)
+    now_hm = now_local.strftime('%H:%M')
+    if start <= end:
+        return start <= now_hm <= end
+    return now_hm >= start or now_hm <= end
+
+
 def _format_alert_datetime(iso_str: str) -> str:
     """Format a UTC ISO timestamp for display in alerts using the admin user's preferences."""
     tz_name, date_fmt, time_fmt = _alert_datetime_prefs()
@@ -658,6 +683,8 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
             'email_recipients': normalize_email_recipients(rule.get('email_recipients', [])),
             'active_start': str(rule.get('active_start') or '').strip() or None,
             'active_end': str(rule.get('active_end') or '').strip() or None,
+            'notify_start': str(rule.get('notify_start') or '').strip() or None,
+            'notify_end': str(rule.get('notify_end') or '').strip() or None,
             'push_enabled': normalize_bool_setting(rule.get('push_enabled'), False),
         })
     return rules
@@ -780,6 +807,8 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
                 'email_recipients': [],
                 'active_start': None,
                 'active_end': None,
+                'notify_start': None,
+                'notify_end': None,
                 'push_enabled': False,
             })
 
@@ -843,6 +872,8 @@ def _normalize_camera_sound_settings(raw: Any) -> dict[str, Any]:
             'push_enabled': normalize_bool_setting(r.get('push_enabled'), False),
             'active_start': str(r.get('active_start') or '').strip() or None,
             'active_end': str(r.get('active_end') or '').strip() or None,
+            'notify_start': str(r.get('notify_start') or '').strip() or None,
+            'notify_end': str(r.get('notify_end') or '').strip() or None,
         })
     return {'enabled': enabled, 'rules': rules}
 
@@ -1198,6 +1229,8 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
                 'push_enabled': bool(rule.get('push_enabled', False)),
                 'active_start': rule.get('active_start'),
                 'active_end': rule.get('active_end'),
+                'notify_start': rule.get('notify_start'),
+                'notify_end': rule.get('notify_end'),
             })
     return rules
 
@@ -1935,6 +1968,8 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
         'email_enabled': email_enabled,
         'push_enabled': push_enabled,
         'email_recipients': email_recipients,
+        'notify_start': str(fired_rule.get('notify_start') or '').strip() or None,
+        'notify_end': str(fired_rule.get('notify_end') or '').strip() or None,
     }
     notify_thread = threading.Thread(
         target=_deliver_sound_alert_notifications,
@@ -2382,7 +2417,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         notify_thread.start()
     email_rules = [
         rule for rule in zone_rules
-        if rule.get('enabled', True) and rule.get('email_enabled') and str(rule.get('name') or '') in {
+        if rule.get('enabled', True) and rule.get('email_enabled') and _rule_notify_active_now(rule) and str(rule.get('name') or '') in {
             str(alert.get('rule_name') or '') for alert in triggered
         }
     ]
@@ -3021,7 +3056,8 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
     rules_by_name = {str(rule.get('name')): rule for rule in (rules or [])}
 
     any_email_enabled = any(
-        rules_by_name.get(str(alert.get('rule_name')), {}).get('email_enabled')
+        (rule := rules_by_name.get(str(alert.get('rule_name')), {})).get('email_enabled')
+        and _rule_notify_active_now(rule)
         for alert in triggered
     )
     snapshot_bytes: bytes | None = None
@@ -3058,6 +3094,12 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
     for alert in triggered:
         rule = rules_by_name.get(str(alert.get('rule_name')))
         if not rule or not rule.get('email_enabled'):
+            continue
+        if not _rule_notify_active_now(rule):
+            logger.debug(
+                'Email skipped for event %s rule %r: outside email/push window %s-%s',
+                event_id, alert.get('rule_name'), rule.get('notify_start'), rule.get('notify_end'),
+            )
             continue
         try:
             mailer.send_alert(
@@ -3105,6 +3147,12 @@ def deliver_push_notifications(triggered: list[dict[str, Any]], event_id: int, r
             continue
         if not rule.get('push_enabled'):
             logger.debug('Push skipped for event %s rule %r: push_enabled is False', event_id, rule_name)
+            continue
+        if not _rule_notify_active_now(rule):
+            logger.debug(
+                'Push skipped for event %s rule %r: outside email/push window %s-%s',
+                event_id, rule_name, rule.get('notify_start'), rule.get('notify_end'),
+            )
             continue
         try:
             notifier.send_alert(

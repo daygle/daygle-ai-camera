@@ -116,6 +116,12 @@ class AlertEngine:
 
     @staticmethod
     def _is_active_now(rule: dict[str, Any]) -> bool:
+        """Return True when the rule's detection/active window covers now.
+
+        This gates whether the rule raises an alert at all (in-app, email and
+        push). The separate email/push notification window (notify_start /
+        notify_end) is applied later, only to email and push delivery.
+        """
         start = rule.get('active_start')
         end = rule.get('active_end')
         if not start or not end:

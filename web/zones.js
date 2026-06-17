@@ -66,6 +66,8 @@ function defaultObjectRule(label = '') {
     push_enabled: false,
     active_start: null,
     active_end: null,
+    notify_start: null,
+    notify_end: null,
   };
 }
 
@@ -86,6 +88,8 @@ function normalizeObjectRules(zone) {
         push_enabled: rule.push_enabled === true,
         active_start: rule.active_start || null,
         active_end: rule.active_end || null,
+        notify_start: rule.notify_start || null,
+        notify_end: rule.notify_end || null,
       }))
       .filter((rule) => {
         if (!rule.label || seen.has(rule.label)) return false;
@@ -208,13 +212,21 @@ function renderObjectRules(zone, zoneIndex) {
             <span>Email recipients</span>
             <input type="email" data-zone-rule-email-recipients="${key}" value="${escapeHtml(normalizeEmailList(rule.email_recipients).join(', '))}" placeholder="alerts@example.com" multiple />
           </label>
-          <label class="sound-rule-field">
-            <span>From</span>
+          <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
+            <span>Active from</span>
             <input type="time" data-zone-rule-active-start="${key}" value="${escapeHtml(rule.active_start || '')}" />
           </label>
-          <label class="sound-rule-field">
-            <span>To</span>
+          <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
+            <span>Active to</span>
             <input type="time" data-zone-rule-active-end="${key}" value="${escapeHtml(rule.active_end || '')}" />
+          </label>
+          <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
+            <span>Email/Push from</span>
+            <input type="time" data-zone-rule-notify-start="${key}" value="${escapeHtml(rule.notify_start || '')}" />
+          </label>
+          <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
+            <span>Email/Push to</span>
+            <input type="time" data-zone-rule-notify-end="${key}" value="${escapeHtml(rule.notify_end || '')}" />
           </label>
           <div class="sound-rule-toggles">
             <label class="sound-rule-toggle">
@@ -404,6 +416,8 @@ function bindRuleFields() {
   [
     ['zoneRuleActiveStart', 'active_start'],
     ['zoneRuleActiveEnd', 'active_end'],
+    ['zoneRuleNotifyStart', 'notify_start'],
+    ['zoneRuleNotifyEnd', 'notify_end'],
   ].forEach(([datasetKey, ruleKey]) => {
     document.querySelectorAll(`input[type="time"][data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((input) => {
       input.addEventListener('change', () => {

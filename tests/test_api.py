@@ -3549,6 +3549,8 @@ def test_monitoring_zones_normalize_object_rules(tmp_path, monkeypatch):
                     'email_recipients': 'alerts@example.test, bad-address',
                     'active_start': '07:00',
                     'active_end': '18:00',
+                    'notify_start': '22:00',
+                    'notify_end': '05:00',
                 }
             ],
         }
@@ -3564,6 +3566,36 @@ def test_monitoring_zones_normalize_object_rules(tmp_path, monkeypatch):
     assert rule['email_recipients'] == ['alerts@example.test']
     assert rule['active_start'] == '07:00'
     assert rule['active_end'] == '18:00'
+    assert rule['notify_start'] == '22:00'
+    assert rule['notify_end'] == '05:00'
+
+
+def test_rule_notify_active_now_window(tmp_path, monkeypatch):
+    """The email/push window gates only when set, supports midnight wrap, and is
+    evaluated in the admin's local timezone."""
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    main = sys.modules["app.main"]
+    monkeypatch.setattr(main, '_alert_datetime_prefs', lambda: ('UTC', 'iso', '24h'))
+
+    import datetime as _dt
+    fixed = _dt.datetime(2026, 1, 1, 23, 30, tzinfo=_dt.timezone.utc)  # 23:30 local
+
+    class _FakeDateTime(_dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed.astimezone(tz) if tz else fixed
+
+    monkeypatch.setattr(main, 'datetime', _FakeDateTime)
+
+    # No window (or partial) means notify any time.
+    assert main._rule_notify_active_now({}) is True
+    assert main._rule_notify_active_now({'notify_start': '22:00'}) is True
+    # Wrap-past-midnight window that covers 23:30.
+    assert main._rule_notify_active_now({'notify_start': '22:00', 'notify_end': '05:00'}) is True
+    # Same-day window that covers 23:30.
+    assert main._rule_notify_active_now({'notify_start': '23:00', 'notify_end': '23:59'}) is True
+    # Window that excludes 23:30.
+    assert main._rule_notify_active_now({'notify_start': '06:00', 'notify_end': '18:00'}) is False
 
 
 def test_zone_object_alert_rules_are_scoped_to_matching_zone(tmp_path, monkeypatch):
@@ -4318,6 +4350,8 @@ def test_sound_rule_normalization_keeps_email_recipients_and_active_window(tmp_p
                     'email_recipients': 'alerts@example.test, bad-address',
                     'active_start': '07:00',
                     'active_end': '18:00',
+                    'notify_start': '22:00',
+                    'notify_end': '05:00',
                 }],
             },
         },
@@ -4328,6 +4362,8 @@ def test_sound_rule_normalization_keeps_email_recipients_and_active_window(tmp_p
     assert rule['email_recipients'] == ['alerts@example.test']
     assert rule['active_start'] == '07:00'
     assert rule['active_end'] == '18:00'
+    assert rule['notify_start'] == '22:00'
+    assert rule['notify_end'] == '05:00'
 
 
 def test_sound_detection_with_email_rule_delivers_to_rule_recipients(tmp_path, monkeypatch):
