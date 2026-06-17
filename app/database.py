@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -531,12 +531,18 @@ class EventDatabase:
             if older_than:
                 purge_ids.update(int(row["id"]) for row in candidates if str(row["started_at"]) < older_than)
             if max_storage_bytes is not None:
+                # Grace period: recordings created in the last 10 minutes may still be
+                # written by a background capture thread. Don't treat a missing file as
+                # an orphan if the record is this new — purging it would leave the file
+                # on disk with no database entry once the thread finishes writing.
+                grace_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
                 existing_with_sizes: list[tuple[dict[str, Any], int]] = []
                 for row in candidates:
                     try:
                         existing_with_sizes.append((row, Path(str(row["file_path"])).stat().st_size))
                     except OSError:
-                        purge_ids.add(int(row["id"]))
+                        if str(row.get("created_at") or "") < grace_cutoff:
+                            purge_ids.add(int(row["id"]))
                 total = sum(size for _, size in existing_with_sizes)
                 for row, size in existing_with_sizes:
                     if total <= max_storage_bytes:
