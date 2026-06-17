@@ -10,6 +10,7 @@ const liveEls = {
   detectionChips: document.getElementById('liveDetectionChips'),
   detectionState: document.getElementById('liveDetectionState'),
   soundState: document.getElementById('liveSoundState'),
+  soundStatus: document.getElementById('liveSoundStatus'),
   detectionMeta: document.querySelector('.live-detection-meta'),
   // Zones-page stats (null on live page - harmless)
   statZoneCount: document.getElementById('statZoneCount'),
@@ -302,35 +303,54 @@ function updateEmptyState() {
 }
 
 // Summarise the sound detector's status the same way as objects: a persistent
-// state chip (Listening / Heard / Sound Off) plus a list of heard-sound pills
-// shown below, mirroring how object detections are presented.
-function summarizeSoundStatus(soundStatus, soundEnabled, soundMinConf, belowThresholdSound) {
+// state chip (Listening / Heard / Sound Off), a list of heard-sound pills, and a
+// diagnostic message explaining why a heard sound did or didn't alert.
+function summarizeSoundStatus(soundStatus, soundEnabled) {
   if (!soundEnabled) {
-    return { soundState: { label: 'Sound Off', state: 'disabled' }, soundChips: [] };
+    return { soundState: { label: 'Sound Off', state: 'disabled' }, soundChips: [], soundMessage: '' };
   }
   const soundChips = [];
   let heard = false;
+  // A sound that fired within the last minute shows as a "Heard" pill.
   if (soundStatus && soundStatus.last_detected_at) {
     const ageMs = Date.now() - Date.parse(soundStatus.last_detected_at);
-    const soundConf = Number(soundStatus.last_confidence || 0);
-    if (ageMs < 60000 && soundConf >= soundMinConf) {
-      soundChips.push({ label: soundStatus.last_class_label || soundStatus.last_class || 'sound', confidence: soundConf });
+    if (ageMs < 60000) {
+      soundChips.push({ label: soundStatus.last_class_label || soundStatus.last_class || 'sound', confidence: Number(soundStatus.last_confidence || 0) });
       heard = true;
     }
   }
-  if (!heard && belowThresholdSound) {
-    soundChips.push({ label: belowThresholdSound.label, confidence: belowThresholdSound.confidence, isBelowThreshold: true });
+  // The server explains the current listening snapshot: a sound heard below its
+  // alert threshold, or one suppressed because its rule is still in cooldown -
+  // the sound counterpart to the object "outside zones / in cooldown" message.
+  let soundMessage = '';
+  const reason = soundStatus && soundStatus.reason;
+  if (reason && (reason.code === 'cooldown' || reason.code === 'below_threshold')) {
+    const label = reason.class_label || reason.class || 'Sound';
+    const conf = Math.round(Number(reason.confidence || 0) * 100);
+    if (reason.code === 'cooldown') {
+      const remain = Math.round(Number(reason.cooldown_remaining || 0));
+      soundMessage = `${label} heard (${conf}%) - alert rule in cooldown${remain ? ` (${remain}s left)` : ''}.`;
+    } else {
+      const thr = Math.round(Number(reason.threshold || 0) * 100);
+      soundMessage = `${label} heard (${conf}%) - below alert threshold (${thr}%).`;
+    }
+    // Surface the heard-but-not-alerted sound as a pill too (faint when it never
+    // crossed the threshold), unless a fired "Heard" pill already covers it.
+    if (!heard) {
+      soundChips.push({ label, confidence: Number(reason.confidence || 0), isBelowThreshold: reason.code === 'below_threshold' });
+    }
   }
   return {
     soundState: heard ? { label: 'Heard', state: 'detected' } : { label: 'Listening', state: 'idle' },
     soundChips,
+    soundMessage,
   };
 }
 
 // Build a structured summary of the monitor's latest cycle so the renderer
 // can split the visual into a state chip, per-label chips, and a status line.
-function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = false, soundMinConf = 0, belowThresholdSound = null) {
-  const sound = summarizeSoundStatus(soundStatus, soundEnabled, soundMinConf, belowThresholdSound);
+function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = false) {
+  const sound = summarizeSoundStatus(soundStatus, soundEnabled);
   if (!payload) {
     return { state: 'idle', stateLabel: 'Idle', chips: [], ...sound, message: 'Live AI status unavailable.' };
   }
@@ -422,10 +442,15 @@ function renderDetectionStatus(summary) {
     }).join('');
     liveEls.detectionChips.innerHTML = objectHtml + soundHtml;
   }
-  // Status line carries alert/diagnostic context only; stays hidden while idle.
+  // Status lines carry alert/diagnostic context only; each stays hidden when it
+  // has nothing to say. Objects and sounds get their own line.
   if (liveEls.detectionStatus) {
     liveEls.detectionStatus.textContent = summary.message || '';
     liveEls.detectionStatus.style.display = summary.message ? '' : 'none';
+  }
+  if (liveEls.soundStatus) {
+    liveEls.soundStatus.textContent = summary.soundMessage || '';
+    liveEls.soundStatus.style.display = summary.soundMessage ? '' : 'none';
   }
 }
 
@@ -471,30 +496,14 @@ async function refreshDetectionStatus() {
     const cameraId = encodeURIComponent(selectedCamera.id);
     // Check camera-level sound detection enabled state
     const soundEnabled = selectedCamera.detection?.sound?.enabled === true;
+    // The sound status endpoint now carries its own diagnostics/reason (heard,
+    // below threshold, in cooldown), so the client no longer re-derives them.
     const [payload, soundStatus] = await Promise.all([
       api(`/api/live/detection-status?camera_id=${cameraId}`),
       api(`/api/sound/status?camera_id=${cameraId}`).catch(() => null),
     ]);
-    // Resolve minimum confidence for the fired sound class (falls back to lowest enabled rule threshold).
-    const soundRules = selectedCamera.detection?.sound?.rules || [];
-    const lastClass = soundStatus?.last_class;
-    const matchedSoundRule = lastClass ? soundRules.find((r) => r.class === lastClass && r.enabled !== false) : null;
-    const soundMinConf = matchedSoundRule
-      ? Number(matchedSoundRule.confidence_threshold ?? 0.35)
-      : soundRules.filter((r) => r.enabled !== false).reduce((min, r) => Math.min(min, Number(r.confidence_threshold ?? 0.35)), 0.35);
-    // Find the highest-scoring sound class currently below its threshold (mirrors "outside zone" for objects).
-    const liveConf = soundStatus?.last_confidences || {};
-    let belowThresholdSound = null;
-    for (const rule of soundRules) {
-      if (rule.enabled === false) continue;
-      const conf = Number(liveConf[rule.class] || 0);
-      const threshold = Number(rule.confidence_threshold ?? 0.35);
-      if (conf > 0 && conf < threshold && (!belowThresholdSound || conf > belowThresholdSound.confidence)) {
-        belowThresholdSound = { label: rule.name || rule.class, confidence: conf };
-      }
-    }
     ingestServerTrackDetections(payload);
-    renderDetectionStatus(summarizeDetectionStatus(payload, soundStatus, soundEnabled, soundMinConf, belowThresholdSound));
+    renderDetectionStatus(summarizeDetectionStatus(payload, soundStatus, soundEnabled));
   } catch (error) {
     renderDetectionStatus({
       state: 'error',

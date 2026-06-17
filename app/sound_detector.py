@@ -419,6 +419,36 @@ class SoundDetector:
         with self._status_lock:
             return dict(self._last_confidences)
 
+    def diagnostics(self) -> list[dict[str, Any]]:
+        """Per-class snapshot of the latest scores against each rule's threshold
+        and cooldown, used by the live status endpoint to explain why a heard
+        sound did or didn't alert. Sorted by confidence, highest first."""
+        now = time.time()
+        with self._status_lock:
+            confidences = dict(self._last_confidences)
+            triggered = dict(self._last_triggered)
+        out: list[dict[str, Any]] = []
+        for rule in self.rules:
+            class_id = str(rule.get('class') or '')
+            if not class_id:
+                continue
+            threshold = float(rule.get('confidence_threshold', 0.35))
+            cooldown = float(rule.get('cooldown_seconds', 30))
+            last = triggered.get(class_id, 0.0)
+            remaining = max(0.0, cooldown - (now - last)) if last else 0.0
+            confidence = float(confidences.get(class_id, 0.0))
+            out.append({
+                'class': class_id,
+                'label': SOUND_CLASSES.get(class_id, {}).get('label', class_id),
+                'confidence': round(confidence, 3),
+                'threshold': round(threshold, 3),
+                'cooldown_seconds': cooldown,
+                'cooldown_remaining': round(remaining, 1),
+                'in_cooldown': remaining > 0,
+            })
+        out.sort(key=lambda d: d['confidence'], reverse=True)
+        return out
+
     @property
     def running(self) -> bool:
         return bool(self._thread and self._thread.is_alive())
@@ -484,7 +514,8 @@ class SoundDetector:
             if now - last < cooldown:
                 continue
 
-            self._last_triggered[class_id] = now
+            with self._status_lock:
+                self._last_triggered[class_id] = now
             self._set_status(f'detected:{class_id}')
             try:
                 self.on_detect(
