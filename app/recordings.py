@@ -808,7 +808,10 @@ class RecordingService:
                     stall_seconds = max(self.PREBUFFER_SEGMENT_SECONDS * 5, 20)
                     if time.time() - last_segment_ts > stall_seconds:
                         logger.info('Prebuffer ingest for %s stalled (no segment in %.0fs); restarting.', camera_key, stall_seconds)
-                        process.terminate()
+                        # SIGKILL rather than SIGTERM: the stream is already dead so
+                        # graceful cleanup is pointless, and ffmpeg can segfault in its
+                        # RTSP teardown path when the connection is in a broken state.
+                        process.kill()
                         break
                     time.sleep(1)
             finally:
@@ -851,7 +854,8 @@ class RecordingService:
                         },
                     )
             if not stop_event.is_set():
-                time.sleep(1)
+                run_seconds = time.time() - ffmpeg_started_at
+                time.sleep(5 if run_seconds < 60 else 1)
 
     def _prune_prebuffer_segments(self, camera_dir: Path, keep_seconds: int) -> None:
         cutoff = time.time() - max(keep_seconds, 5)
