@@ -115,6 +115,10 @@ function detectionBadges(detections = []) {
     .sort((a, b) => (b[1] ?? -1) - (a[1] ?? -1))
     .map(([label, conf]) => {
       const confText = Number.isFinite(conf) ? ` · ${Math.round(conf * 100)}%` : '';
+      // A sound class mixed into an object item gets the speaker icon, not the eye.
+      if (SOUND_CLASS_IDS.has(label)) {
+        return `<span class="detection detection-sound">🔊 ${escapeHtml(titleCase(label.replace(/_/g, ' ')))}${confText}</span>`;
+      }
       return `<span class="detection detection-object">${eyeIcon} ${escapeHtml(titleCase(label))}${confText}</span>`;
     })
     .join('');
