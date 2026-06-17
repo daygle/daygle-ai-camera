@@ -2467,6 +2467,9 @@ a.activity-item-action {
   border-color: var(--border);
   color: var(--muted);
 }
+.detection-chip-faint {
+  opacity: 0.55;
+}
 .live-detection-message {
   margin: 0;
   font-size: 13px;
