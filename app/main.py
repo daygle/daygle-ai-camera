@@ -2224,7 +2224,21 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     )
     object_detections = filter_detections_for_camera(detections, settings)
     zone_rules = zone_object_alert_rules(settings)
-    object_alert_detections = zone_alert_detections(settings, object_detections) if zone_rules else list(object_detections)
+    # Whether this camera has any configured object rules in its zones. Zone-name
+    # annotation, confidence filtering and the alert/record split key off this -
+    # NOT off zone_rules, which only lists rules that raise an alert (email or
+    # push enabled). A zone with record-only rules still must keep its zone name
+    # in the activity feed. Zones that monitor objects but have no object rules
+    # fall through to the camera-label path, same as having no zones at all.
+    has_object_zone_rules = any(
+        zone.get('enabled', True) and zone.get('monitor_objects', True)
+        and any(
+            rule.get('enabled', True) and str(rule.get('label') or '').strip()
+            for rule in (zone.get('object_rules') or [])
+        )
+        for zone in (settings.get('detection') or {}).get('zones', [])
+    )
+    object_alert_detections = zone_alert_detections(settings, object_detections) if has_object_zone_rules else list(object_detections)
 
     # Detections that match a zone recording rule but NOT an alert rule (no email/push enabled).
     # They must still produce an event and recording even though no alert notification fires.
@@ -2232,7 +2246,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # another label has an alert rule (making zone_rules non-empty).
     record_only_detections = (
         [d for d in object_detections if zone_record_on_detect(d, settings) and not zone_object_rule_matches(settings, d, action='alert')]
-        if zone_rules else []
+        if has_object_zone_rules else []
     )
 
     # Record history only with detections that passed confidence thresholds so playback
@@ -2276,7 +2290,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # Also annotate each detection with the first zone it matched so the zone
     # name is stored in the database and surfaced in the dashboard.
     _confident_object_detections: list[dict[str, Any]] = []
-    if zone_rules:
+    if has_object_zone_rules:
         for _det in object_detections:
             _zone_name = zone_name_for_detection(settings, _det)
             if _zone_name or zone_record_on_detect(_det, settings):
@@ -2287,7 +2301,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         {
             **detection,
             'alert_matched': bool(zone_detection_alert_rule_names(settings, detection) & triggered_rule_names)
-            if zone_rules else str(detection.get('label') or '').lower() in triggered_labels,
+            if has_object_zone_rules else str(detection.get('label') or '').lower() in triggered_labels,
             'alert_triggered': zone_record_on_detect(detection, settings),
         }
         for detection in _confident_object_detections
