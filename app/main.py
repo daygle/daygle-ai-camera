@@ -765,7 +765,9 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
         # flag but no explicit motion rule get a default motion rule inserted.  Without
         # this, upgrading from an older config format silently disables motion detection
         # in every zone (monitor_motion would evaluate to False with no motion rule).
-        had_monitor_motion = bool(zone.get('monitor_motion', True))
+        # Only applies when monitor_motion is explicitly present in the saved data —
+        # new zones omit the key entirely, so they should not get motion auto-inserted.
+        had_monitor_motion = 'monitor_motion' in zone and bool(zone['monitor_motion'])
         if had_monitor_motion and not any(str(r.get('label') or '').strip().lower() == 'motion' for r in object_rules):
             object_rules.insert(0, {
                 'label': 'motion',
