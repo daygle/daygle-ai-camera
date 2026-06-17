@@ -4960,11 +4960,19 @@ def test_multi_object_recording_labels_and_trigger_type(tmp_path, monkeypatch):
         assert recording['trigger_type'] == 'alert', f'Expected alert, got {recording["trigger_type"]}'
         # labels must contain ALL non-generic detections
         assert sorted(recording['labels']) == ['cat', 'dog', 'person'], f'Got {sorted(recording["labels"])}'
+        # The list endpoint must expose a confidence for EVERY detected object so
+        # secondary objects render a real percentage instead of a misleading 0%.
+        list_confidences = recording.get('label_confidences') or {}
+        assert round(list_confidences.get('person'), 2) == 0.92
+        assert round(list_confidences.get('cat'), 2) == 0.78
+        assert round(list_confidences.get('dog'), 2) == 0.45
 
         # Verify recording detail endpoint
         status, _, detail = admin.request(f'/api/recordings/{recording_id}')
         assert status == 200
         assert sorted(detail['labels']) == ['cat', 'dog', 'person'], f'Got {sorted(detail["labels"])}'
+        detail_confidences = detail.get('label_confidences') or {}
+        assert round(detail_confidences.get('dog'), 2) == 0.45
 
         # Verify filtering by EACH label works
         for label in ('cat', 'dog', 'person'):
@@ -5030,6 +5038,11 @@ def test_multi_object_recording_labels_and_trigger_type(tmp_path, monkeypatch):
         assert updated_ext is not None
         assert 'bicycle' in updated_ext['labels']
         assert 'dog' in updated_ext['labels']
+        # Confidence captured during extension must be persisted so the list and
+        # timeline can show a percentage for objects added after the trigger.
+        ext_confidences = updated_ext.get('label_confidences') or {}
+        assert round(ext_confidences.get('bicycle'), 2) == 0.85
+        assert round(ext_confidences.get('dog'), 2) == 0.75
 
         with main.active_rtsp_recordings_lock:
             main.active_rtsp_recordings.pop('camera-1', None)

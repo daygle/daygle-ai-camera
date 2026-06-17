@@ -72,7 +72,7 @@ function detectionPill(label, confidence, isSound) {
   const display = isSound
     ? titleCase(String(label).replace(/_/g, ' '))
     : titleCase(String(label));
-  const numericConfidence = Number(confidence);
+  const numericConfidence = confidence == null ? NaN : Number(confidence);
   const confidenceText = Number.isFinite(numericConfidence)
     ? ` · ${Math.round(numericConfidence * 100)}%`
     : '';
@@ -343,6 +343,12 @@ function recordingDetectionSummary(recording) {
   for (const d of (recording.detections || [])) rememberBest(d);
   for (const sample of (recording.track || [])) {
     for (const d of (sample?.detections || [])) rememberBest(d);
+  }
+  // Persisted per-label confidence (recording_labels.confidence) covers secondary
+  // objects that only appeared after the trigger, whose confidence is otherwise
+  // absent from the event detections the list endpoint loads.
+  for (const [label, confidence] of Object.entries(recording.label_confidences || {})) {
+    rememberBest({ label, confidence });
   }
   // Use recording.labels as the authoritative label list when available.
   const authLabels = Array.isArray(recording.labels) && recording.labels.length
