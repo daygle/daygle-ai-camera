@@ -93,20 +93,33 @@ const GENERIC_TIMELINE_LABELS = new Set(['motion', 'alert', 'human', 'object', '
 
 const DETECTION_EYE_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg>';
 
+// Sound class identifiers (mirrors SOUND_CLASSES in app/sound_detector.py). A
+// detection label that matches one of these is a sound, even when it appears on
+// an object recording, so its pill should carry the speaker icon rather than the
+// eye icon.
+const SOUND_CLASS_IDS = new Set(['cat_meow', 'dog_bark', 'glass_breaking', 'smoke_alarm', 'baby_crying', 'doorbell', 'car_alarm', 'loud_bang']);
+
+function isSoundLabel(label) {
+  return SOUND_CLASS_IDS.has(String(label || '').trim().toLowerCase().replace(/\s+/g, '_'));
+}
+
 function recordingZoneNames(recording) {
   if (isSoundRecording(recording)) return [];
   return [...new Set((recording.detections || []).map((d) => d.zone_name).filter(Boolean))];
 }
 
 function detectionPill(label, confidence, isSound) {
-  const display = isSound
+  // The recording type provides a default, but each label decides its own icon:
+  // a sound class shows the speaker icon, an object label shows the eye icon.
+  const labelIsSound = isSound || isSoundLabel(label);
+  const display = labelIsSound
     ? titleCase(String(label).replace(/_/g, ' '))
     : titleCase(String(label));
   const numericConfidence = confidence == null ? NaN : Number(confidence);
   const confidenceText = Number.isFinite(numericConfidence)
     ? ` · ${Math.round(numericConfidence * 100)}%`
     : '';
-  if (isSound) {
+  if (labelIsSound) {
     return `<span class="detection detection-sound">🔊 ${escapeHtml(display)}${confidenceText}</span>`;
   }
   return `<span class="detection detection-object">${DETECTION_EYE_ICON} ${escapeHtml(display)}${confidenceText}</span>`;
