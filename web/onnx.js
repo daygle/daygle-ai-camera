@@ -234,18 +234,25 @@ async function checkForModelUpdates() {
     const result = await api('/api/settings/ai/check-model-updates');
     modelUpdateMap = {};
     for (const m of result.models || []) modelUpdateMap[m.id] = m;
+    let msg;
+    let isError = false;
     if (result.error) {
-      modelUpdatesMessage.textContent = `Update check failed: ${result.error}`;
+      msg = `Update check failed: ${result.error}`;
+      isError = true;
     } else if (result.any_updates) {
-      modelUpdatesMessage.textContent = 'Updates are available for one or more installed models.';
+      msg = 'Updates are available for one or more installed models.';
     } else if ((result.models || []).length === 0) {
-      modelUpdatesMessage.textContent = 'No models installed yet.';
+      msg = 'No models installed yet.';
     } else {
-      modelUpdatesMessage.textContent = 'All installed models are up to date.';
+      msg = 'All installed models are up to date.';
     }
+    modelUpdatesMessage.textContent = msg;
+    window.showToast?.(msg, isError);
     await loadModels();
   } catch (error) {
-    modelUpdatesMessage.textContent = `Update check failed: ${error.message}`;
+    const msg = `Update check failed: ${error.message}`;
+    modelUpdatesMessage.textContent = msg;
+    window.showToast?.(msg, true);
   } finally {
     btn.disabled = false;
     btn.textContent = 'Check for Updates';
