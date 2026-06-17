@@ -67,6 +67,8 @@ function normalisedSound(sound) {
     push_enabled: rule.push_enabled === true,
     active_start: rule.active_start || null,
     active_end: rule.active_end || null,
+    notify_start: rule.notify_start || null,
+    notify_end: rule.notify_end || null,
   }));
   return next;
 }
@@ -85,6 +87,8 @@ function defaultSoundRule(cls) {
     push_enabled: false,
     active_start: null,
     active_end: null,
+    notify_start: null,
+    notify_end: null,
   };
 }
 
@@ -176,13 +180,21 @@ function renderRules() {
             <span>Email recipients</span>
             <input type="email" data-rule-email-recipients="${id}" value="${escapeHtml(normalizeEmailList(rule.email_recipients).join(', '))}" placeholder="alerts@example.com" multiple />
           </label>
-          <label class="sound-rule-field">
-            <span>From</span>
+          <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
+            <span>Active from</span>
             <input type="time" data-rule-active-start="${id}" value="${escapeHtml(rule.active_start || '')}" />
           </label>
-          <label class="sound-rule-field">
-            <span>To</span>
+          <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
+            <span>Active to</span>
             <input type="time" data-rule-active-end="${id}" value="${escapeHtml(rule.active_end || '')}" />
+          </label>
+          <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
+            <span>Email/Push from</span>
+            <input type="time" data-rule-notify-start="${id}" value="${escapeHtml(rule.notify_start || '')}" />
+          </label>
+          <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
+            <span>Email/Push to</span>
+            <input type="time" data-rule-notify-end="${id}" value="${escapeHtml(rule.notify_end || '')}" />
           </label>
           <div class="sound-rule-toggles">
             <label class="sound-rule-toggle">
@@ -240,6 +252,12 @@ function renderRules() {
   });
   rulesWrap.querySelectorAll('[data-rule-active-end]').forEach((input) => {
     input.addEventListener('change', () => updateRule(input.dataset.ruleActiveEnd, 'active_end', input.value || null));
+  });
+  rulesWrap.querySelectorAll('[data-rule-notify-start]').forEach((input) => {
+    input.addEventListener('change', () => updateRule(input.dataset.ruleNotifyStart, 'notify_start', input.value || null));
+  });
+  rulesWrap.querySelectorAll('[data-rule-notify-end]').forEach((input) => {
+    input.addEventListener('change', () => updateRule(input.dataset.ruleNotifyEnd, 'notify_end', input.value || null));
   });
   rulesWrap.querySelectorAll('[data-rule-push]').forEach((input) => {
     input.addEventListener('change', () => updateRule(input.dataset.rulePush, 'push_enabled', input.checked));

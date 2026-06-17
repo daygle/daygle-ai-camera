@@ -225,7 +225,8 @@ Draw polygon monitoring zones directly on the live camera view. For each zone yo
 
 - Zone name and enable/disable state.
 - Motion monitoring: minimum confidence and cooldown.
-- Object rules per label: enable/disable, record on detect, alert on detect, minimum confidence, cooldown, email recipients, and active time window.
+- Object rules per label: enable/disable, record on detect, alert on detect, minimum confidence, cooldown, email recipients, an **active window** (detection/alert hours), and a separate **email/push window**.
+- Two independent time windows per rule: the **active window** (`Active from`/`Active to`) limits when the rule detects, records, and raises alerts at all, while the **email/push window** (`Email/Push from`/`Email/Push to`) limits only when email and push notifications are sent. For example, leave the active window blank so on-site alerts and recordings run all day, and set the email/push window to `22:00`–`05:00` so you are only emailed/pushed overnight. Both windows may wrap past midnight, are evaluated in the admin user's timezone, and an empty window means "any time".
 
 Zone-based rules replace the global single-camera alert rules when zones are configured for a camera.
 
@@ -482,7 +483,7 @@ Current limitations:
 
 ## Sound Detection
 
-Sound detection monitors the audio track from each enabled camera's RTSP stream and evaluates per-camera rules. Open `/sounds`, choose a camera, enable sound detection, add one or more sound classes, then set confidence thresholds, cooldowns, recording behavior, and notification behavior.
+Sound detection monitors the audio track from each enabled camera's RTSP stream and evaluates per-camera rules. Open `/sounds`, choose a camera, enable sound detection, add one or more sound classes, then set confidence thresholds, cooldowns, recording behavior, and notification behavior. Like object rules, each sound rule has an **active window** (`Active from`/`Active to`) that limits when it detects, records, and alerts, plus a separate **email/push window** (`Email/Push from`/`Email/Push to`) that limits only when email and push notifications are sent.
 
 The YAMNet TFLite backend runs on CPU and uses assets stored under `models/`. Open `/yamnet-tflite` to confirm whether the runtime and model assets are available. Install `ai-edge-litert` or `tflite-runtime` if the page reports that no TensorFlow Lite interpreter is available.
 
