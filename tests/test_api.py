@@ -3597,7 +3597,6 @@ def test_monitoring_zones_normalize_object_rules(tmp_path, monkeypatch):
     assert zones[0]['object_labels'] == ['cat']
     assert rule['label'] == 'cat'
     assert rule['record_on_detect'] is False
-    assert rule['alert_on_detect'] is True
     assert rule['min_confidence'] == 0.7
     assert rule['cooldown_seconds'] == 5
     assert rule['email_recipients'] == ['alerts@example.test']
@@ -3647,7 +3646,7 @@ def test_zone_object_alert_rules_are_scoped_to_matching_zone(tmp_path, monkeypat
             'width': 0.5,
             'height': 0.5,
             'monitor_motion': False,
-            'object_rules': [{'label': 'cat', 'alert_on_detect': True, 'record_on_detect': False}],
+            'object_rules': [{'label': 'cat', 'email_enabled': True, 'record_on_detect': False}],
         },
         {
             'id': 'driveway',
@@ -3657,7 +3656,7 @@ def test_zone_object_alert_rules_are_scoped_to_matching_zone(tmp_path, monkeypat
             'width': 0.5,
             'height': 0.5,
             'monitor_motion': False,
-            'object_rules': [{'label': 'cat', 'alert_on_detect': False, 'record_on_detect': True}],
+            'object_rules': [{'label': 'cat', 'record_on_detect': True}],
         },
     ])
     settings = {'id': 'front', 'name': 'Front Door', 'detection': {'zones': zones}}
@@ -3824,7 +3823,7 @@ def test_zone_label_aliases_match_configured_rules(tmp_path, monkeypatch):
             'height': 1.0,
             'monitor_motion': False,
             'monitor_objects': True,
-            'object_rules': [{'label': 'person', 'alert_on_detect': True, 'min_confidence': 0.5}],
+            'object_rules': [{'label': 'person', 'email_enabled': True, 'min_confidence': 0.5}],
         }
     ])
     settings = {'detection': {'zones': zones}}
@@ -4047,8 +4046,8 @@ def test_detection_has_matching_record_rule(tmp_path, monkeypatch):
 
 
 def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, monkeypatch):
-    """Cat with record_on_detect=True but alert_on_detect=False must not be silently dropped
-    when another label has an alert rule (which makes zone_rules non-empty and triggers
+    """Cat with record_on_detect=True but no email/push (record only) must not be silently
+    dropped when another label has an alert rule (which makes zone_rules non-empty and triggers
     zone_alert_detections filtering)."""
     _app, _database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
@@ -4066,8 +4065,8 @@ def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, m
     main.live_detection_last_checked.clear()
 
     # Camera has a zone covering the whole frame:
-    # - cat rule: record_on_detect=True, alert_on_detect=False (record only, no alert)
-    # - person rule: record_on_detect=False, alert_on_detect=True (alert only)
+    # - cat rule: record_on_detect=True, no email/push (record only, no alert)
+    # - person rule: record_on_detect=False, email_enabled=True (alert only)
     # The person alert rule makes zone_rules non-empty, which used to cause zone_alert_detections
     # to filter out the cat entirely (no alert rule for cat).
     event_id = main.process_live_stream_alerts(
@@ -4085,8 +4084,8 @@ def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, m
                         'monitor_motion': False,
                         'monitor_objects': True,
                         'object_rules': [
-                            {'label': 'cat', 'record_on_detect': True, 'alert_on_detect': False, 'min_confidence': 0.5},
-                            {'label': 'person', 'record_on_detect': False, 'alert_on_detect': True, 'min_confidence': 0.5},
+                            {'label': 'cat', 'record_on_detect': True, 'min_confidence': 0.5},
+                            {'label': 'person', 'record_on_detect': False, 'email_enabled': True, 'min_confidence': 0.5},
                         ],
                     },
                 ],
@@ -4148,7 +4147,7 @@ def test_zone_detection_creates_alert_and_recording(tmp_path, monkeypatch, label
     main.alerts.last_triggered.clear()
 
     settings = _zone_camera_settings([
-        {'label': label, 'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
+        {'label': label, 'record_on_detect': True, 'email_enabled': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
     ])
     event_id = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
 

@@ -106,7 +106,7 @@ function rebuildConfiguredLabels() {
   };
   for (const zone of (selectedCamera?.detection?.zones || [])) {
     for (const rule of (zone?.object_rules || [])) {
-      if (rule.enabled !== false && (rule.alert_on_detect !== false || rule.record_on_detect !== false)) {
+      if (rule.enabled !== false && (rule.email_enabled === true || rule.push_enabled === true || rule.record_on_detect !== false)) {
         const label = String(rule.label || '').trim().toLowerCase();
         setMin(label, Number(rule.min_confidence ?? 0.5));
       }

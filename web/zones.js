@@ -58,7 +58,6 @@ function defaultObjectRule(label = '') {
     label: String(label || '').trim().toLowerCase(),
     enabled: true,
     record_on_detect: true,
-    alert_on_detect: true,
     min_confidence: isMotion ? 0.45 : 0.5,
     cooldown_seconds: 60,
     email_enabled: false,
@@ -80,7 +79,6 @@ function normalizeObjectRules(zone) {
         label: String(rule.label || '').trim().toLowerCase(),
         enabled: rule.enabled !== false,
         record_on_detect: rule.record_on_detect !== false,
-        alert_on_detect: rule.alert_on_detect !== false,
         min_confidence: clamp(Number(rule.min_confidence ?? 0.5), 0, 1),
         cooldown_seconds: Math.max(0, Number.parseInt(rule.cooldown_seconds ?? 60, 10) || 0),
         email_enabled: rule.email_enabled === true,
@@ -238,10 +236,6 @@ function renderObjectRules(zone, zoneIndex) {
               <span>Record</span>
             </label>
             <label class="sound-rule-toggle">
-              <input type="checkbox" data-zone-rule-alert="${key}" ${rule.alert_on_detect !== false ? 'checked' : ''} />
-              <span>Alert</span>
-            </label>
-            <label class="sound-rule-toggle">
               <input type="checkbox" data-zone-rule-email="${key}" ${rule.email_enabled === true ? 'checked' : ''} />
               <span>Email</span>
             </label>
@@ -377,7 +371,6 @@ function bindRuleFields() {
   const checkboxBindings = [
     ['zoneRuleEnabled', 'enabled'],
     ['zoneRuleRecord', 'record_on_detect'],
-    ['zoneRuleAlert', 'alert_on_detect'],
     ['zoneRuleEmail', 'email_enabled'],
     ['zoneRulePush', 'push_enabled'],
   ];

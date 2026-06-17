@@ -676,7 +676,6 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
             'label': label,
             'enabled': normalize_bool_setting(rule.get('enabled'), True),
             'record_on_detect': normalize_bool_setting(rule.get('record_on_detect'), True),
-            'alert_on_detect': normalize_bool_setting(rule.get('alert_on_detect'), True),
             'min_confidence': max(0.0, min(1.0, min_confidence)),
             'cooldown_seconds': max(0, cooldown_seconds),
             'email_enabled': normalize_bool_setting(rule.get('email_enabled'), False),
@@ -800,7 +799,6 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
                 'label': 'motion',
                 'enabled': True,
                 'record_on_detect': True,
-                'alert_on_detect': True,
                 'min_confidence': 0.45,
                 'cooldown_seconds': 60,
                 'email_enabled': False,
@@ -1191,7 +1189,7 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
         for rule in (zone.get('object_rules') or []):
             if not rule.get('enabled', True):
                 continue
-            if action == 'alert' and not rule.get('alert_on_detect', True):
+            if action == 'alert' and not (rule.get('email_enabled') or rule.get('push_enabled')):
                 continue
             if action == 'record' and not rule.get('record_on_detect', True):
                 continue
@@ -1211,7 +1209,7 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
     for zone in zones:
         zone_id = str(zone.get('id') or zone.get('name') or 'zone')
         for rule in (zone.get('object_rules') or []):
-            if not rule.get('enabled', True) or not rule.get('alert_on_detect', True):
+            if not rule.get('enabled', True) or not (rule.get('email_enabled') or rule.get('push_enabled')):
                 continue
             label = str(rule.get('label') or '').strip().lower()
             if not label:
@@ -1894,17 +1892,19 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
     cam_settings = next((c for c in cameras_config if str(c.get('id') or '') == camera_id), None)
     sound_rules = cam_settings.get('detection', {}).get('sound', {}).get('rules', []) if cam_settings else []
     fired_rule = next((r for r in sound_rules if r.get('class') == class_id), {})
-    alert_on_detect = normalize_bool_setting(fired_rule.get('alert_on_detect'), True)
     email_enabled = normalize_bool_setting(fired_rule.get('email_enabled'), False)
     email_recipients = normalize_email_recipients(fired_rule.get('email_recipients', []))
     push_enabled = normalize_bool_setting(fired_rule.get('push_enabled'), False)
+    # An alert is raised whenever email or push notification is enabled for the
+    # rule; there is no separate "alert" toggle anymore.
+    notify_enabled = email_enabled or push_enabled
 
     event_id = database.add_event(
         created_at=now_iso,
         source='sound',
         snapshot_path=None,
         detections=[],
-        alert_triggered=alert_on_detect,
+        alert_triggered=notify_enabled,
         metadata={
             'source': 'sound-detection',
             'sound_source': 'rtsp',
@@ -1946,7 +1946,7 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
                 logger.debug('Sound event %s linked to recording %s (camera %s)', event_id, rid, camera_id)
 
     message = f'{class_label} detected ({confidence:.0%} confidence)'
-    if alert_on_detect:
+    if notify_enabled:
         database.add_alert(
             created_at=now_iso,
             rule_name=rule_name,
@@ -2226,7 +2226,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     zone_rules = zone_object_alert_rules(settings)
     object_alert_detections = zone_alert_detections(settings, object_detections) if zone_rules else list(object_detections)
 
-    # Detections that match a zone recording rule but NOT an alert rule (alert_on_detect=False).
+    # Detections that match a zone recording rule but NOT an alert rule (no email/push enabled).
     # They must still produce an event and recording even though no alert notification fires.
     # Without this they hit the early-return below and are silently dropped whenever
     # another label has an alert rule (making zone_rules non-empty).
