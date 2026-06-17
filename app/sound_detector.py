@@ -685,13 +685,16 @@ class SoundDetector:
             for path, mtime in segments:
                 if self._stop_event.is_set():
                     break
-                last_ts = max(last_ts, mtime)
                 try:
                     with wave.open(str(path), 'rb') as wav:
                         frames = wav.readframes(wav.getnframes())
                 except Exception as exc:
+                    # Don't advance last_ts: the tail segment may still be mid-write
+                    # by the ingest, so retry it next poll instead of dropping the
+                    # second of audio permanently.
                     logger.debug('Sound monitor could not read audio segment %s: %s', path, exc)
                     continue
+                last_ts = max(last_ts, mtime)
                 if not frames:
                     continue
                 audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0

@@ -698,6 +698,10 @@ class RecordingService:
         audio_camera_dir = self.audio_dir / camera_key
         audio_camera_dir.mkdir(parents=True, exist_ok=True)
         audio_pattern = audio_camera_dir / 'aud-%Y%m%dT%H%M%S.wav'
+        # Sweep stderr logs orphaned by a previous hard kill (SIGKILL/OOM): the
+        # normal exit path unlinks them in `finally`, but a non-graceful death
+        # leaves them behind and the segment pruner never touches them.
+        self._prune_stale_ingest_logs()
 
         while not stop_event.is_set():
             command = [
@@ -858,6 +862,15 @@ class RecordingService:
             except OSError:
                 continue
 
+    def _prune_stale_ingest_logs(self, max_age_seconds: float = 300.0) -> None:
+        cutoff = time.time() - max_age_seconds
+        for log_path in self.prebuffer_dir.glob('*.log'):
+            try:
+                if log_path.stat().st_mtime < cutoff:
+                    log_path.unlink(missing_ok=True)
+            except OSError:
+                continue
+
     def _prune_audio_segments(self, audio_camera_dir: Path, keep_seconds: int | None = None) -> None:
         # Retain audio for the SAME window as the video prebuffer (pre + max_clip)
         # so long event clips have real audio for their whole length, not just
@@ -941,66 +954,63 @@ class RecordingService:
         out.sort(key=lambda item: item[1])
         return out
 
+    @staticmethod
+    def _segment_timeline(camera_dir: Path, glob_pattern: str, nominal_seconds: float) -> list[tuple[Path, float, float]]:
+        """Return ``(path, content_start_ts, content_end_ts)`` for every segment
+        in ``camera_dir``, oldest first.
+
+        A segment's mtime marks when ffmpeg finished writing it - its content
+        END. Its content START is the previous segment's content end while the
+        stream is continuous (segments split on keyframes, so they can exceed
+        their nominal length); after a gap (worker restart) it falls back to the
+        nominal segment length.
+
+        Each file is stat()'d exactly once inside a try/except: the rolling
+        pruner deletes segments concurrently, so a check-then-stat would race and
+        raise FileNotFoundError out of the sort. Missing files are skipped."""
+        if not camera_dir.exists():
+            return []
+        stamped: list[tuple[Path, float]] = []
+        for segment in camera_dir.glob(glob_pattern):
+            try:
+                stamped.append((segment, segment.stat().st_mtime))
+            except OSError:
+                continue
+        stamped.sort(key=lambda item: item[1])
+        timed: list[tuple[Path, float, float]] = []
+        prev_end: float | None = None
+        for segment, end in stamped:
+            start = prev_end if prev_end is not None and 0 < end - prev_end <= 10 else end - nominal_seconds
+            timed.append((segment, start, end))
+            prev_end = end
+        return timed
+
     def _collect_prebuffer_segments(self, camera_key: str, start_ts: float, end_ts: float) -> tuple[list[Path], float | None]:
         """Return the segments whose footage overlaps [start_ts, end_ts] plus
         the wall-clock timestamp where the first segment's content begins.
 
-        A segment's mtime marks when ffmpeg finished writing it - its content
-        END. Its content START is the previous segment's mtime while the
-        stream is continuous (segments split on keyframes, so they can exceed
-        the nominal segment length). Selecting by content overlap keeps footage from
-        before the requested window out of the clip, and the returned start
-        lets the caller align stored timing and the detection track with what
-        the rendered video actually shows."""
-        camera_dir = self.prebuffer_dir / camera_key
-        if not camera_dir.exists():
-            return [], None
-        timed: list[tuple[Path, float, float]] = []
-        prev_end: float | None = None
-        for segment in sorted(camera_dir.glob(self.PREBUFFER_SEGMENT_GLOB), key=lambda p: p.stat().st_mtime if p.exists() else 0):
-            try:
-                end = segment.stat().st_mtime
-            except OSError:
-                continue
-            # After a gap (worker restart) fall back to the nominal segment length.
-            start = prev_end if prev_end is not None and 0 < end - prev_end <= 10 else end - self.PREBUFFER_SEGMENT_SECONDS
-            timed.append((segment, start, end))
-            prev_end = end
-        if not timed:
-            return [], None
+        Selecting by content overlap keeps footage from before the requested
+        window out of the clip, and the returned start lets the caller align
+        stored timing and the detection track with what the rendered video
+        actually shows."""
+        timed = self._segment_timeline(self.prebuffer_dir / camera_key, self.PREBUFFER_SEGMENT_GLOB, self.PREBUFFER_SEGMENT_SECONDS)
         selected = [item for item in timed if item[2] > start_ts and item[1] < end_ts]
-        return [item[0] for item in selected], selected[0][1] if selected else None
+        if not selected:
+            return [], None
+        return [item[0] for item in selected], selected[0][1]
 
     def _prebuffer_segment_durations(self, camera_key: str, segments: list[Path]) -> dict[Path, float]:
-        camera_dir = self.prebuffer_dir / camera_key
         wanted = {segment.resolve() for segment in segments}
+        timed = self._segment_timeline(self.prebuffer_dir / camera_key, self.PREBUFFER_SEGMENT_GLOB, self.PREBUFFER_SEGMENT_SECONDS)
         durations: dict[Path, float] = {}
-        prev_end: float | None = None
-        for segment in sorted(camera_dir.glob(self.PREBUFFER_SEGMENT_GLOB), key=lambda p: p.stat().st_mtime if p.exists() else 0):
-            try:
-                end = segment.stat().st_mtime
-            except OSError:
-                continue
-            start = prev_end if prev_end is not None and 0 < end - prev_end <= 10 else end - self.PREBUFFER_SEGMENT_SECONDS
+        for segment, start, end in timed:
             if segment.resolve() in wanted:
                 durations[segment] = max(0.001, end - start)
-            prev_end = end
         return durations
 
     def _collect_audio_segments(self, camera_key: str, start_ts: float, end_ts: float) -> list[Path]:
-        audio_camera_dir = self.audio_dir / camera_key
-        if not audio_camera_dir.exists():
-            return []
-        selected: list[Path] = []
-        for segment in sorted(audio_camera_dir.glob('aud-*.wav')):
-            try:
-                end = segment.stat().st_mtime
-            except OSError:
-                continue
-            start = end - 1.0
-            if end > start_ts and start < end_ts:
-                selected.append(segment)
-        return selected
+        timed = self._segment_timeline(self.audio_dir / camera_key, 'aud-*.wav', 1.0)
+        return [segment for segment, start, end in timed if end > start_ts and start < end_ts]
 
     def _mux_prebuffer_audio(self, camera_key: str, video_path: Path, start_ts: float, duration_seconds: float) -> bool:
         ffmpeg = shutil.which('ffmpeg')
