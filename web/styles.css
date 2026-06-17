@@ -612,12 +612,6 @@ input[type="file"] { padding: 10px; }
   margin-top: 10px;
   flex-wrap: wrap;
 }
-.clip-overlay-note {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.35;
-}
-
 .zone-overlay { position: absolute; pointer-events: auto; z-index: 2; touch-action: none; }
 .monitor-zone-polygon { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .monitor-zone-polygon polygon,

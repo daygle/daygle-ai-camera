@@ -842,7 +842,7 @@ async function playRecording(recordingId, updateHistory = true) {
     els.clipPlayerStatus.textContent = `Playing recording #${recording.id}.`;
   } catch (error) {
     if (['AbortError', 'NotAllowedError'].includes(error?.name)) {
-      els.clipPlayerStatus.textContent = `Recording #${recording.id} loaded. Press play to start.`;
+      els.clipPlayerStatus.textContent = `Recording #${recording.id} loaded.`;
       return;
     }
     els.clipPlayerStatus.textContent = `Unable to play recording #${recording.id}: ${error?.message || 'media playback failed'}.`;
