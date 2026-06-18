@@ -1946,7 +1946,7 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
                 logger.debug('Sound event %s linked to recording %s (camera %s)', event_id, rid, camera_id)
 
     message = f'{class_label} detected ({confidence:.0%} confidence)'
-    if notify_enabled:
+    if notify_enabled and _rule_notify_active_now(fired_rule):
         database.add_alert(
             created_at=now_iso,
             rule_name=rule_name,
@@ -2402,7 +2402,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     if recording_id is not None:
         remember_live_event(camera_id, debounced_labels)
 
+    _rule_by_name = {str(r.get('name') or ''): r for r in (zone_rules or [])}
     for alert in triggered:
+        _rule = _rule_by_name.get(str(alert.get('rule_name') or ''), {})
+        if not _rule_notify_active_now(_rule):
+            continue
         database.add_alert(
             created_at=datetime.now(timezone.utc).isoformat(),
             rule_name=alert['rule_name'],
