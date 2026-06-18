@@ -1,6 +1,7 @@
 // window.showToast() is now provided by web/utils.js, which every page loads
-// before nav.js. Keeping the DAYGLE_BUTTON_ICONS / icon decorator below here
-// because they only make sense in the context of the rendered nav bar.
+// after nav.js but before the page's own script. Keeping the
+// DAYGLE_BUTTON_ICONS / icon decorator below here because they only make
+// sense in the context of the rendered nav bar.
 
 const DAYGLE_BUTTON_ICONS = {
   add: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',

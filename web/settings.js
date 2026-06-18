@@ -266,22 +266,24 @@ emailForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
     renderEmail(await api('/api/settings/alert-email', { method: 'PUT', body: JSON.stringify(emailPayload(emailForm)) }));
-    setMessage('Mail server settings saved.');    } catch (error) {
-      // Skip UI updates if api() triggered a 401 redirect
-      if (window.daygleAuth?.redirecting) return;
-      setMessage(error.message, true);
-    }
+    setMessage('Mail server settings saved.');
+  } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    setMessage(error.message, true);
+  }
 });
 
 pushForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
     renderPush(await api('/api/settings/alert-push', { method: 'PUT', body: JSON.stringify(pushPayload(pushForm)) }));
-    setMessage('Push notification settings saved.');    } catch (error) {
-      // Skip UI updates if api() triggered a 401 redirect
-      if (window.daygleAuth?.redirecting) return;
-      setMessage(error.message, true);
-    }
+    setMessage('Push notification settings saved.');
+  } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    setMessage(error.message, true);
+  }
 });
 
 document.getElementById('cameraOfflineForm')?.addEventListener('submit', async (event) => {
@@ -293,11 +295,12 @@ document.getElementById('cameraOfflineForm')?.addEventListener('submit', async (
       offline_delay_minutes: Number.parseInt(form.elements.offline_delay_minutes.value, 10) || 1,
     };
     await api('/api/settings/camera-offline', { method: 'PUT', body: JSON.stringify(data) });
-    setMessage('Camera offline alert settings saved.');    } catch (error) {
-      // Skip UI updates if api() triggered a 401 redirect
-      if (window.daygleAuth?.redirecting) return;
-      setMessage(error.message, true);
-    }
+    setMessage('Camera offline alert settings saved.');
+  } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    setMessage(error.message, true);
+  }
 });
 
 testPushBtn?.addEventListener('click', async () => {
@@ -308,11 +311,12 @@ testPushBtn?.addEventListener('click', async () => {
       method: 'POST',
       body: JSON.stringify({ settings: pushPayload(pushForm) }),
     });
-    setMessage('Test notification sent.');    } catch (error) {
-      // Skip UI updates if api() triggered a 401 redirect
-      if (window.daygleAuth?.redirecting) return;
-      setMessage(error.message, true);
-    } finally {
+    setMessage('Test notification sent.');
+  } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    setMessage(error.message, true);
+  } finally {
     testPushBtn.disabled = false;
   }
 });
@@ -330,11 +334,12 @@ testEmailBtn?.addEventListener('click', async () => {
       method: 'POST',
       body: JSON.stringify({ settings: emailPayload(emailForm), recipient }),
     });
-    setMessage(`Test email sent to ${recipient}.`);    } catch (error) {
-      // Skip UI updates if api() triggered a 401 redirect
-      if (window.daygleAuth?.redirecting) return;
-      setMessage(error.message, true);
-    } finally {
+    setMessage(`Test email sent to ${recipient}.`);
+  } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    setMessage(error.message, true);
+  } finally {
     testEmailBtn.disabled = false;
   }
 });
@@ -342,11 +347,12 @@ testEmailBtn?.addEventListener('click', async () => {
 document.getElementById('purgeRecordingsBtn').addEventListener('click', async () => {
   try {
     const result = await api('/api/recordings/purge', { method: 'POST' });
-    setMessage(`Purged ${result.purged} recording(s), deleted ${result.files_deleted} file(s).`);    } catch (error) {
-      // Skip UI updates if api() triggered a 401 redirect
-      if (window.daygleAuth?.redirecting) return;
-      setMessage(error.message, true);
-    }
+    setMessage(`Purged ${result.purged} recording(s), deleted ${result.files_deleted} file(s).`);
+  } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    setMessage(error.message, true);
+  }
 });
 
 forms.databaseRestore.addEventListener('submit', async (event) => {
@@ -357,11 +363,12 @@ forms.databaseRestore.addEventListener('submit', async (event) => {
     const result = await api('/api/settings/system/database/restore', { method: 'POST', body: formData });
     forms.databaseRestore.reset();
     await loadSettings();
-    setMessage(`${result.message} Safety backup: ${result.safety_backup}`);    } catch (error) {
-      // Skip UI updates if api() triggered a 401 redirect
-      if (window.daygleAuth?.redirecting) return;
-      setMessage(error.message, true);
-    }
+    setMessage(`${result.message} Safety backup: ${result.safety_backup}`);
+  } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    setMessage(error.message, true);
+  }
 });
 
 
@@ -478,11 +485,12 @@ startCleanBtn?.addEventListener('click', async () => {
     const deleted = result?.deleted || {};
     setMessage(
       `Clean start complete. Deleted ${Number(deleted.recordings || 0)} recordings, ${Number(deleted.events || 0)} events, and ${Number(deleted.alerts || 0)} alerts. Settings were preserved.`,
-    );    } catch (error) {
-      // Skip UI updates if api() triggered a 401 redirect
-      if (window.daygleAuth?.redirecting) return;
-      setMessage(error.message, true);
-    } finally {
+    );
+  } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    setMessage(error.message, true);
+  } finally {
     startCleanBtn.disabled = false;
   }
 });

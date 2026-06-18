@@ -54,10 +54,11 @@ async function api(path, options = {}) {
   if (window.daygleAuth.csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
     headers['X-CSRF-Token'] = window.daygleAuth.csrfToken;
   }
-  // Mirror live.js's prior behaviour: when the caller supplies a body but
-  // doesn't set Content-Type, assume JSON. Pages that send other shapes
-  // (FormData, etc.) set the header themselves, so this stays a safe default.
-  if (options.body && !headers['Content-Type']) {
+  // Only auto-set Content-Type for non-FormData bodies. FormData requires the
+  // browser to inject the multipart boundary itself; an explicit
+  // 'application/json' header would strip that boundary and break file uploads
+  // (e.g. the database-restore endpoint in settings.js).
+  if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
   }
   const response = await fetch(path, { ...options, headers });
