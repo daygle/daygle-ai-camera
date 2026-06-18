@@ -4102,6 +4102,56 @@ def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, m
     assert event['recording_status'] == 'linked', "Recording must be linked for record-only zone rule"
 
 
+def test_record_only_zone_with_no_alert_rules_keeps_zone_name(tmp_path, monkeypatch):
+    """A zone whose only rule is record-only (no email/push, so it raises no alert)
+    must still tag its detections with the zone name. Regression: zone-name
+    annotation must key off the presence of object zones, not off whether any
+    rule raises an alert."""
+    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, image_bytes, confidence=None):
+            return [{'label': 'person', 'confidence': 0.82, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.2}}]
+
+    monkeypatch.setattr(main, 'detector', FakeDetector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
+    main.live_detection_last_checked.clear()
+
+    event_id = main.process_live_stream_alerts(
+        b'person-frame',
+        {'width': 1280, 'height': 720},
+        {
+            'id': 'camera-1',
+            'name': 'Driveway',
+            'detection': {
+                'zones': [
+                    {
+                        'id': 'driveway', 'name': 'Driveway (Full)',
+                        'x': 0, 'y': 0, 'width': 1, 'height': 1,
+                        'monitor_motion': False, 'monitor_objects': True,
+                        # Record only: no email_enabled / push_enabled, so no alert is raised.
+                        'object_rules': [{'label': 'person', 'record_on_detect': True, 'min_confidence': 0.5}],
+                    },
+                ],
+            },
+            'recording': {'continuous': False},
+        },
+        enforce_interval=False,
+    )
+
+    assert event_id is not None
+    event = main.database.get_event(event_id)
+    assert any(d['label'] == 'person' and d['zone_name'] == 'Driveway (Full)' for d in event['detections']), \
+        'record-only zone detection must keep its zone name'
+    # No alert should be raised because the rule has neither email nor push enabled.
+    assert not any(a['label'] == 'person' for a in main.database.alerts(limit=10))
+
+
 def _zone_camera_settings(zone_rules: list) -> dict:
     """Return minimal camera settings dict with a full-frame zone using the given rules."""
     return {
