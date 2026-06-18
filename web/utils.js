@@ -6,15 +6,38 @@ function renderTimeSelect(value, dataAttr, dataAttrValue) {
   const [hStr, mStr] = (value || '').split(':');
   const selH = hStr !== undefined && hStr !== '' ? parseInt(hStr, 10) : -1;
   const selM = mStr !== undefined && mStr !== '' ? parseInt(mStr, 10) : -1;
-  const hours = Array.from({ length: 24 }, (_, i) => `<option value="${String(i).padStart(2, '0')}"${selH === i ? ' selected' : ''}>${String(i).padStart(2, '0')}</option>`).join('');
-  const minutes = Array.from({ length: 12 }, (_, i) => i * 5).map((m) => `<option value="${String(m).padStart(2, '0')}"${selM === m ? ' selected' : ''}>${String(m).padStart(2, '0')}</option>`).join('');
-  return `<span class="time-select-wrap" ${dataAttr}="${escapeHtml(dataAttrValue)}"><select class="time-select-hour"><option value="">--</option>${hours}</select><span class="time-select-colon">:</span><select class="time-select-minute"><option value="">--</option>${minutes}</select></span>`;
+  const use12h = (window.daygleDatePrefs || {}).timeFormat === '12h';
+  const minutes = Array.from({ length: 12 }, (_, i) => i * 5)
+    .map((m) => `<option value="${String(m).padStart(2, '0')}"${selM === m ? ' selected' : ''}>${String(m).padStart(2, '0')}</option>`)
+    .join('');
+
+  let hourOpts;
+  let ampmSel = '';
+  if (use12h) {
+    const isPm = selH >= 12;
+    const h12 = selH < 0 ? -1 : selH % 12 === 0 ? 12 : selH % 12;
+    hourOpts = Array.from({ length: 12 }, (_, i) => i + 1)
+      .map((h) => `<option value="${h}"${h12 === h ? ' selected' : ''}>${h}</option>`)
+      .join('');
+    ampmSel = `<select class="time-select-ampm"><option value="am"${!isPm && selH >= 0 ? ' selected' : ''}>AM</option><option value="pm"${isPm ? ' selected' : ''}>PM</option></select>`;
+  } else {
+    hourOpts = Array.from({ length: 24 }, (_, i) => `<option value="${String(i).padStart(2, '0')}"${selH === i ? ' selected' : ''}>${String(i).padStart(2, '0')}</option>`).join('');
+  }
+
+  return `<span class="time-select-wrap" ${dataAttr}="${escapeHtml(dataAttrValue)}"><select class="time-select-hour"><option value="">--</option>${hourOpts}</select><span class="time-select-colon">:</span><select class="time-select-minute"><option value="">--</option>${minutes}</select>${ampmSel}</span>`;
 }
 
 function timeSelectValue(wrap) {
-  const h = wrap.querySelector('.time-select-hour').value;
+  const hRaw = wrap.querySelector('.time-select-hour').value;
   const m = wrap.querySelector('.time-select-minute').value;
-  return h && m ? `${h}:${m}` : null;
+  if (!hRaw || !m) return null;
+  const ampmEl = wrap.querySelector('.time-select-ampm');
+  if (ampmEl) {
+    let h = parseInt(hRaw, 10) % 12;
+    if (ampmEl.value === 'pm') h += 12;
+    return `${String(h).padStart(2, '0')}:${m}`;
+  }
+  return `${hRaw}:${m}`;
 }
 
 function titleCase(value) {

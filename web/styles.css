@@ -2701,6 +2701,9 @@ a.activity-item-action {
   padding: 6px 4px;
   font-size: 13px;
 }
+.time-select-wrap .time-select-ampm {
+  width: 4rem;
+}
 .sound-rule-field input[type="email"] {
   width: min(18rem, 100%);
   padding: 6px 8px;
