@@ -212,19 +212,19 @@ function renderObjectRules(zone, zoneIndex) {
           </label>
           <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
             <span>Active from</span>
-            <input type="time" data-zone-rule-active-start="${key}" value="${escapeHtml(rule.active_start || '')}" />
+            ${renderTimeSelect(rule.active_start, 'data-zone-rule-active-start', key)}
           </label>
           <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
             <span>Active to</span>
-            <input type="time" data-zone-rule-active-end="${key}" value="${escapeHtml(rule.active_end || '')}" />
+            ${renderTimeSelect(rule.active_end, 'data-zone-rule-active-end', key)}
           </label>
           <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
             <span>Email/Push from</span>
-            <input type="time" data-zone-rule-notify-start="${key}" value="${escapeHtml(rule.notify_start || '')}" />
+            ${renderTimeSelect(rule.notify_start, 'data-zone-rule-notify-start', key)}
           </label>
           <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
             <span>Email/Push to</span>
-            <input type="time" data-zone-rule-notify-end="${key}" value="${escapeHtml(rule.notify_end || '')}" />
+            ${renderTimeSelect(rule.notify_end, 'data-zone-rule-notify-end', key)}
           </label>
           <div class="sound-rule-toggles">
             <label class="sound-rule-toggle">
@@ -412,12 +412,15 @@ function bindRuleFields() {
     ['zoneRuleNotifyStart', 'notify_start'],
     ['zoneRuleNotifyEnd', 'notify_end'],
   ].forEach(([datasetKey, ruleKey]) => {
-    document.querySelectorAll(`input[type="time"][data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((input) => {
-      input.addEventListener('change', () => {
-        const { zoneIndex, rule } = parseZoneRuleKey(input.dataset[datasetKey]);
-        if (!rule) return;
-        rule[ruleKey] = input.value || null;
-        cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
+    const attr = `data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}`;
+    document.querySelectorAll(`[${attr}]`).forEach((wrap) => {
+      wrap.querySelectorAll('select').forEach((sel) => {
+        sel.addEventListener('change', () => {
+          const { zoneIndex, rule } = parseZoneRuleKey(wrap.dataset[datasetKey]);
+          if (!rule) return;
+          rule[ruleKey] = timeSelectValue(wrap);
+          cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
+        });
       });
     });
   });

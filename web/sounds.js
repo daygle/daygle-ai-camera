@@ -180,19 +180,19 @@ function renderRules() {
           </label>
           <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
             <span>Active from</span>
-            <input type="time" data-rule-active-start="${id}" value="${escapeHtml(rule.active_start || '')}" />
+            ${renderTimeSelect(rule.active_start, 'data-rule-active-start', id)}
           </label>
           <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
             <span>Active to</span>
-            <input type="time" data-rule-active-end="${id}" value="${escapeHtml(rule.active_end || '')}" />
+            ${renderTimeSelect(rule.active_end, 'data-rule-active-end', id)}
           </label>
           <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
             <span>Email/Push from</span>
-            <input type="time" data-rule-notify-start="${id}" value="${escapeHtml(rule.notify_start || '')}" />
+            ${renderTimeSelect(rule.notify_start, 'data-rule-notify-start', id)}
           </label>
           <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
             <span>Email/Push to</span>
-            <input type="time" data-rule-notify-end="${id}" value="${escapeHtml(rule.notify_end || '')}" />
+            ${renderTimeSelect(rule.notify_end, 'data-rule-notify-end', id)}
           </label>
           <div class="sound-rule-toggles">
             <label class="sound-rule-toggle">
@@ -238,17 +238,17 @@ function renderRules() {
   rulesWrap.querySelectorAll('[data-rule-email-recipients]').forEach((input) => {
     input.addEventListener('change', () => updateRule(input.dataset.ruleEmailRecipients, 'email_recipients', normalizeEmailList(input.value)));
   });
-  rulesWrap.querySelectorAll('[data-rule-active-start]').forEach((input) => {
-    input.addEventListener('change', () => updateRule(input.dataset.ruleActiveStart, 'active_start', input.value || null));
+  rulesWrap.querySelectorAll('[data-rule-active-start]').forEach((wrap) => {
+    wrap.querySelectorAll('select').forEach((sel) => sel.addEventListener('change', () => updateRule(wrap.dataset.ruleActiveStart, 'active_start', timeSelectValue(wrap))));
   });
-  rulesWrap.querySelectorAll('[data-rule-active-end]').forEach((input) => {
-    input.addEventListener('change', () => updateRule(input.dataset.ruleActiveEnd, 'active_end', input.value || null));
+  rulesWrap.querySelectorAll('[data-rule-active-end]').forEach((wrap) => {
+    wrap.querySelectorAll('select').forEach((sel) => sel.addEventListener('change', () => updateRule(wrap.dataset.ruleActiveEnd, 'active_end', timeSelectValue(wrap))));
   });
-  rulesWrap.querySelectorAll('[data-rule-notify-start]').forEach((input) => {
-    input.addEventListener('change', () => updateRule(input.dataset.ruleNotifyStart, 'notify_start', input.value || null));
+  rulesWrap.querySelectorAll('[data-rule-notify-start]').forEach((wrap) => {
+    wrap.querySelectorAll('select').forEach((sel) => sel.addEventListener('change', () => updateRule(wrap.dataset.ruleNotifyStart, 'notify_start', timeSelectValue(wrap))));
   });
-  rulesWrap.querySelectorAll('[data-rule-notify-end]').forEach((input) => {
-    input.addEventListener('change', () => updateRule(input.dataset.ruleNotifyEnd, 'notify_end', input.value || null));
+  rulesWrap.querySelectorAll('[data-rule-notify-end]').forEach((wrap) => {
+    wrap.querySelectorAll('select').forEach((sel) => sel.addEventListener('change', () => updateRule(wrap.dataset.ruleNotifyEnd, 'notify_end', timeSelectValue(wrap))));
   });
   rulesWrap.querySelectorAll('[data-rule-push]').forEach((input) => {
     input.addEventListener('change', () => updateRule(input.dataset.rulePush, 'push_enabled', input.checked));

@@ -2,6 +2,21 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'\"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
 }
 
+function renderTimeSelect(value, dataAttr, dataAttrValue) {
+  const [hStr, mStr] = (value || '').split(':');
+  const selH = hStr !== undefined && hStr !== '' ? parseInt(hStr, 10) : -1;
+  const selM = mStr !== undefined && mStr !== '' ? parseInt(mStr, 10) : -1;
+  const hours = Array.from({ length: 24 }, (_, i) => `<option value="${String(i).padStart(2, '0')}"${selH === i ? ' selected' : ''}>${String(i).padStart(2, '0')}</option>`).join('');
+  const minutes = Array.from({ length: 12 }, (_, i) => i * 5).map((m) => `<option value="${String(m).padStart(2, '0')}"${selM === m ? ' selected' : ''}>${String(m).padStart(2, '0')}</option>`).join('');
+  return `<span class="time-select-wrap" ${dataAttr}="${escapeHtml(dataAttrValue)}"><select class="time-select-hour"><option value="">--</option>${hours}</select><span class="time-select-colon">:</span><select class="time-select-minute"><option value="">--</option>${minutes}</select></span>`;
+}
+
+function timeSelectValue(wrap) {
+  const h = wrap.querySelector('.time-select-hour').value;
+  const m = wrap.querySelector('.time-select-minute').value;
+  return h && m ? `${h}:${m}` : null;
+}
+
 function titleCase(value) {
   return String(value || '')
     .split(/[-_\s]+/)
