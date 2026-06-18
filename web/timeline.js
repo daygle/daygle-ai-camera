@@ -642,12 +642,16 @@ function renderLegend(recordings) {
     els.timelineLegend.innerHTML = '<p class="muted">No recordings match this filter for the selected day.</p>';
     return;
   }
-  els.timelineLegend.innerHTML = unique.map((item) => `
+  els.timelineLegend.innerHTML = unique.map((item) => {
+    const isSound = item.key === '__sound__';
+    const icon = isSound ? '🔊' : DETECTION_EYE_ICON;
+    return `
     <span class="timeline-legend-chip">
       <span class="timeline-legend-swatch" style="background:${item.color}"></span>
-      <span>${escapeHtml(item.label)}</span>
+      ${icon} <span>${escapeHtml(titleCase(item.label))}</span>
     </span>
-  `).join('');
+  `;
+  }).join('');
 }
 
 function buildTimelineLayout(recordings, preEventSeconds = 0) {
