@@ -1,4 +1,3 @@
-let csrfToken = null;
 const messageEl = document.getElementById('systemMessage');
 
 function titleCaseWords(value) {
@@ -136,22 +135,15 @@ const forms = {
   databaseRestore: document.getElementById('databaseRestoreForm'),
 };
 
-async function api(path, options = {}) {
-  const headers = { ...(options.headers || {}) };
-  if (csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((options.method || 'GET').toUpperCase())) {
-    headers['X-CSRF-Token'] = csrfToken;
-  }
-  if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-  const response = await fetch(path, { ...options, headers });
-  if (response.status === 401) window.location.href = '/login';
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.detail || `Request failed: ${response.status}`);
-  return payload;
-}
+// api() is provided by web/utils.js (loaded before this script). It reads
+// window.daygleAuth.csrfToken for state-changing verbs, redirects to /login
+// on 401, and sets Content-Type: application/json on JSON bodies. The local
+// duplicate + page-local csrfToken were removed so every page shares the
+// same fetch contract.
 
 function setMessage(text, isError = false) {
   messageEl.textContent = text;
-  if (text) window.showToast?.(text, isError);
+  if (text) window.showToast(text, isError);
 }
 
 function fillForm(form, values) {
@@ -225,8 +217,10 @@ function renderCameraOffline(settings) {
 
 
 async function loadSettings() {
-  const me = await api('/api/auth/me');
-  csrfToken = me.csrf_token;
+  // nav.js's daygleAuthReady IIFE has already fetched /api/auth/me once at
+  // script-load time and populated window.daygleAuth.{user, csrfToken}; the
+  // shared api() below picks up the CSRF token automatically.
+  await window.daygleAuthReady;
   const [settings, emailSettings, pushSettings, cameraOfflineSettings] = await Promise.all([
     api('/api/settings/system'),
     api('/api/settings/alert-email'),
@@ -255,6 +249,8 @@ function bindForm(name, label, endpointName = name) {
       fillForm(forms[name], updated);
       setMessage(`${label} settings saved.`);
     } catch (error) {
+      // Skip UI updates if api() triggered a 401 redirect
+      if (window.daygleAuth?.redirecting) return;
       setMessage(error.message, true);
     }
   });
@@ -270,20 +266,22 @@ emailForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
     renderEmail(await api('/api/settings/alert-email', { method: 'PUT', body: JSON.stringify(emailPayload(emailForm)) }));
-    setMessage('Mail server settings saved.');
-  } catch (error) {
-    setMessage(error.message, true);
-  }
+    setMessage('Mail server settings saved.');    } catch (error) {
+      // Skip UI updates if api() triggered a 401 redirect
+      if (window.daygleAuth?.redirecting) return;
+      setMessage(error.message, true);
+    }
 });
 
 pushForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
     renderPush(await api('/api/settings/alert-push', { method: 'PUT', body: JSON.stringify(pushPayload(pushForm)) }));
-    setMessage('Push notification settings saved.');
-  } catch (error) {
-    setMessage(error.message, true);
-  }
+    setMessage('Push notification settings saved.');    } catch (error) {
+      // Skip UI updates if api() triggered a 401 redirect
+      if (window.daygleAuth?.redirecting) return;
+      setMessage(error.message, true);
+    }
 });
 
 document.getElementById('cameraOfflineForm')?.addEventListener('submit', async (event) => {
@@ -295,10 +293,11 @@ document.getElementById('cameraOfflineForm')?.addEventListener('submit', async (
       offline_delay_minutes: Number.parseInt(form.elements.offline_delay_minutes.value, 10) || 1,
     };
     await api('/api/settings/camera-offline', { method: 'PUT', body: JSON.stringify(data) });
-    setMessage('Camera offline alert settings saved.');
-  } catch (error) {
-    setMessage(error.message, true);
-  }
+    setMessage('Camera offline alert settings saved.');    } catch (error) {
+      // Skip UI updates if api() triggered a 401 redirect
+      if (window.daygleAuth?.redirecting) return;
+      setMessage(error.message, true);
+    }
 });
 
 testPushBtn?.addEventListener('click', async () => {
@@ -309,10 +308,11 @@ testPushBtn?.addEventListener('click', async () => {
       method: 'POST',
       body: JSON.stringify({ settings: pushPayload(pushForm) }),
     });
-    setMessage('Test notification sent.');
-  } catch (error) {
-    setMessage(error.message, true);
-  } finally {
+    setMessage('Test notification sent.');    } catch (error) {
+      // Skip UI updates if api() triggered a 401 redirect
+      if (window.daygleAuth?.redirecting) return;
+      setMessage(error.message, true);
+    } finally {
     testPushBtn.disabled = false;
   }
 });
@@ -330,10 +330,11 @@ testEmailBtn?.addEventListener('click', async () => {
       method: 'POST',
       body: JSON.stringify({ settings: emailPayload(emailForm), recipient }),
     });
-    setMessage(`Test email sent to ${recipient}.`);
-  } catch (error) {
-    setMessage(error.message, true);
-  } finally {
+    setMessage(`Test email sent to ${recipient}.`);    } catch (error) {
+      // Skip UI updates if api() triggered a 401 redirect
+      if (window.daygleAuth?.redirecting) return;
+      setMessage(error.message, true);
+    } finally {
     testEmailBtn.disabled = false;
   }
 });
@@ -341,10 +342,11 @@ testEmailBtn?.addEventListener('click', async () => {
 document.getElementById('purgeRecordingsBtn').addEventListener('click', async () => {
   try {
     const result = await api('/api/recordings/purge', { method: 'POST' });
-    setMessage(`Purged ${result.purged} recording(s), deleted ${result.files_deleted} file(s).`);
-  } catch (error) {
-    setMessage(error.message, true);
-  }
+    setMessage(`Purged ${result.purged} recording(s), deleted ${result.files_deleted} file(s).`);    } catch (error) {
+      // Skip UI updates if api() triggered a 401 redirect
+      if (window.daygleAuth?.redirecting) return;
+      setMessage(error.message, true);
+    }
 });
 
 forms.databaseRestore.addEventListener('submit', async (event) => {
@@ -355,14 +357,19 @@ forms.databaseRestore.addEventListener('submit', async (event) => {
     const result = await api('/api/settings/system/database/restore', { method: 'POST', body: formData });
     forms.databaseRestore.reset();
     await loadSettings();
-    setMessage(`${result.message} Safety backup: ${result.safety_backup}`);
-  } catch (error) {
-    setMessage(error.message, true);
-  }
+    setMessage(`${result.message} Safety backup: ${result.safety_backup}`);    } catch (error) {
+      // Skip UI updates if api() triggered a 401 redirect
+      if (window.daygleAuth?.redirecting) return;
+      setMessage(error.message, true);
+    }
 });
 
 
-loadSettings().catch((error) => setMessage(error.message, true));
+loadSettings().catch((error) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
+  setMessage(error.message, true);
+});
 
 function initSoftwareUpdateSection() {
   const checkBtn = document.getElementById('checkUpdateBtn');
@@ -410,6 +417,8 @@ function initSoftwareUpdateSection() {
         showUpdateStatus(`You are running the latest version (v${current}).`, 'ok');
       }
     } catch (err) {
+      // Skip UI updates if api() triggered a 401 redirect
+      if (window.daygleAuth?.redirecting) return;
       showUpdateStatus(`Check failed: ${escapeHtml(err.message)}`, 'error');
     } finally {
       checkBtn.disabled = false;
@@ -440,6 +449,8 @@ function initSoftwareUpdateSection() {
         showUpdateStatus('Update failed. See output below for details.', 'error');
       }
     } catch (err) {
+      // Skip UI updates if api() triggered a 401 redirect
+      if (window.daygleAuth?.redirecting) return;
       showUpdateStatus(`Update failed: ${escapeHtml(err.message)}`, 'error');
     } finally {
       applyBtn.disabled = false;
@@ -467,10 +478,11 @@ startCleanBtn?.addEventListener('click', async () => {
     const deleted = result?.deleted || {};
     setMessage(
       `Clean start complete. Deleted ${Number(deleted.recordings || 0)} recordings, ${Number(deleted.events || 0)} events, and ${Number(deleted.alerts || 0)} alerts. Settings were preserved.`,
-    );
-  } catch (error) {
-    setMessage(error.message, true);
-  } finally {
+    );    } catch (error) {
+      // Skip UI updates if api() triggered a 401 redirect
+      if (window.daygleAuth?.redirecting) return;
+      setMessage(error.message, true);
+    } finally {
     startCleanBtn.disabled = false;
   }
 });

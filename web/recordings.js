@@ -29,16 +29,20 @@ const els = {
   labelFilter: document.getElementById('labelFilter'),
 };
 
-let authState = { user: null, csrfToken: null };
-// Date/time display preferences are global (utils.daygleDatePrefs) and are
-// populated by nav.js from /api/auth/me - no page-local state to maintain.
+// CSRF token and current user live on window.daygleAuth set via
+// setApiAuth() (loaded from web/utils.js). Date/time display preferences are
+// also global (window.daygleDatePrefs) and are populated by nav.js from
+// /api/auth/me - no page-local state to maintain.
 let recordingRefreshTimer = null;
 let activeRecording = null;
 let overlayResizeObserver = null;
 // Estimated frame duration (seconds) derived from the video element, used
 // to project detection boxes one frame ahead of the VFC mediaTime.
 let _frameDuration = 1 / 30; // default 30fps, updated on each VFC frame
-const OVERLAY_TOGGLE_KEY = 'daygle.recordings.overlay.enabled';
+// RECORDINGS_OVERLAY_TOGGLE_KEY (and its siblings TIMELINE_OVERLAY_TOGGLE_KEY
+// and LIVE_AI_TRACK_KEY) now live in web/utils.js - exposed on window.daygleUi
+// and visible as bare global constants on every page. Keeping the lookup as a
+// bare name here so call sites read the same way as before.
 // On by default; users can turn it off per-browser via the toggle.
 let overlayEnabled = true;
 const GENERIC_TRIGGER_LABELS = new Set(['motion', 'alert', 'human', 'object', 'none', 'off', 'continuous']);
@@ -54,46 +58,14 @@ let overlayRafId = null;
 let overlayVfcHandle = null;
 let configuredLabels = null; // null = no filter loaded yet
 
-async function api(path, options = {}) {
-  const headers = { ...(options.headers || {}) };
-  if (authState.csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((options.method || 'GET').toUpperCase())) {
-    headers['X-CSRF-Token'] = authState.csrfToken;
-  }
-  const response = await fetch(path, { ...options, headers });
-  if (response.status === 401) { window.location.href = '/login'; throw new Error('Authentication required'); }
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.detail || `Request failed: ${response.status}`);
-  return payload;
-}
+// api() is provided by web/utils.js (loaded before this script) - it reads
+// the CSRF token from window.daygleAuth.csrfToken and handles 401 redirects
+// so every page shares identical auth and error semantics.
 
-const DETECTION_EYE_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg>';
-
-// Sound class identifiers (mirrors SOUND_CLASSES in app/sound_detector.py). A
-// detection label that matches one of these is a sound, even when it appears on
-// an object recording, so its pill should carry the speaker icon rather than the
-// eye icon.
-const SOUND_CLASS_IDS = new Set(['cat_meow', 'dog_bark', 'glass_breaking', 'smoke_alarm', 'baby_crying', 'doorbell', 'car_alarm', 'loud_bang']);
-
-function isSoundLabel(label) {
-  return SOUND_CLASS_IDS.has(String(label || '').trim().toLowerCase().replace(/\s+/g, '_'));
-}
-
-function detectionPill(label, confidence, isSound) {
-  // The recording type provides a default, but each label decides its own icon:
-  // a sound class shows the speaker icon, an object label shows the eye icon.
-  const labelIsSound = isSound || isSoundLabel(label);
-  const display = labelIsSound
-    ? titleCase(String(label).replace(/_/g, ' '))
-    : titleCase(String(label));
-  const numericConfidence = confidence == null ? NaN : Number(confidence);
-  const confidenceText = Number.isFinite(numericConfidence)
-    ? ` · ${Math.round(numericConfidence * 100)}%`
-    : '';
-  if (labelIsSound) {
-    return `<span class="detection detection-sound">🔊 ${escapeHtml(display)}${confidenceText}</span>`;
-  }
-  return `<span class="detection detection-object">${DETECTION_EYE_ICON} ${escapeHtml(display)}${confidenceText}</span>`;
-}
+// detectionPill(), isSoundLabel(), SOUND_CLASS_IDS and DETECTION_EYE_ICON now
+// live in web/utils.js (loaded before this script) so the same rendering is
+// shared with the dashboard and the timeline page. Keeping only the local
+// helpers that are specific to this page (e.g. recording-selection logic).
 
 function cameraLabel(recording) {
   const metadata = recording?.event?.metadata || {};
@@ -584,6 +556,7 @@ async function playRecording(id) {
     await els.clipPlayer.play();
     els.clipPlayerStatus.textContent = `Playing recording #${id}.`;
   } catch (error) {
+    // <video>.play() media error (never an api() throw) - redirect guard skipped by design.
     if (['AbortError', 'NotAllowedError'].includes(error?.name)) {
       els.clipPlayerStatus.textContent = `Recording #${id} loaded.`;
       return;
@@ -605,6 +578,8 @@ function bindRecordingButtons() {
         window.showToast?.(`Deleted recording #${id}.`);
         await loadRecordings();
       } catch (error) {
+        // Skip UI updates if api() triggered a 401 redirect
+        if (window.daygleAuth?.redirecting) return;
         window.showToast?.(`Failed to delete recording: ${error.message}`, true);
       }
     });
@@ -612,11 +587,12 @@ function bindRecordingButtons() {
 }
 
 async function loadAuth() {
-  const authInfo = await api('/api/auth/me');
-  authState = { user: authInfo.user, csrfToken: authInfo.csrf_token };
-  // Date/time display preferences are now set globally by nav.js from the
-  // same /api/auth/me response; nothing page-local to do here.
-  if (authInfo.user.role === 'admin') {
+  // nav.js kicks off the shared /api/auth/me at script load and exposes
+  // the resolved { user, csrfToken } on window.daygleAuth. Awaiting the
+  // shared daygleAuthReady promise here means this page never issues its
+  // own duplicate /api/auth/me on bootstrap.
+  await window.daygleAuthReady;
+  if (window.daygleAuth.user?.role === 'admin') {
     els.deleteAllRecordingsBtn.hidden = false;
     els.deleteAllRecordingsBtn.addEventListener('click', async () => {
       if (!confirm('Delete ALL recordings and media files? Settings, users, and rules will not be changed.')) return;
@@ -626,6 +602,8 @@ async function loadAuth() {
         const deletedCount = Number(result?.deleted || 0);
         window.showToast?.(`Deleted ${deletedCount} recording${deletedCount === 1 ? '' : 's'}. Settings were not changed.`);
       } catch (error) {
+        // Skip UI updates if api() triggered a 401 redirect
+        if (window.daygleAuth?.redirecting) return;
         window.showToast?.(`Failed to delete recordings: ${error.message}`, true);
       }
     });
@@ -653,7 +631,7 @@ async function loadLiveSettings() {
     }
     configuredLabels = labels;
   } catch (_error) {
-    // Keep default if settings unavailable.
+    // Silent api() fallback (no UI mutation) - redirect guard skipped by design.
   }
 }
 
@@ -669,7 +647,7 @@ async function loadCameras() {
       els.cameraFilter.appendChild(option);
     }
   } catch (_error) {
-    // Keep "All Cameras" only if cameras unavailable
+    // Silent api() fallback (no UI mutation) - redirect guard skipped by design.
   }
 }
 
@@ -736,12 +714,12 @@ if ('ResizeObserver' in window && els.clipPlayer) {
 }
 
 if (els.clipOverlayToggle) {
-  const savedValue = localStorage.getItem(OVERLAY_TOGGLE_KEY);
+  const savedValue = localStorage.getItem(RECORDINGS_OVERLAY_TOGGLE_KEY);
   overlayEnabled = savedValue !== '0';
   els.clipOverlayToggle.checked = overlayEnabled;
   els.clipOverlayToggle.addEventListener('change', () => {
     overlayEnabled = Boolean(els.clipOverlayToggle.checked);
-    localStorage.setItem(OVERLAY_TOGGLE_KEY, overlayEnabled ? '1' : '0');
+    localStorage.setItem(RECORDINGS_OVERLAY_TOGGLE_KEY, overlayEnabled ? '1' : '0');
     if (els.clipPlayer && !els.clipPlayer.paused && overlayShouldAnimate()) {
       startOverlayRaf();
     } else if (!overlayEnabled) {
@@ -777,7 +755,7 @@ async function populateLabelFilterOptionsFromApi() {
     const allRecordings = await api('/api/recordings?limit=500');
     populateLabelFilterOptions(allRecordings);
   } catch (_error) {
-    // Keep placeholder options if API fails
+    // Silent api() fallback (no UI mutation) - redirect guard skipped by design.
   }
 }
 

@@ -3,16 +3,12 @@ const statusPanel = document.getElementById('soundStatusPanel');
 const cameraList = document.getElementById('soundCameraStatusList');
 const refreshBtn = document.getElementById('refreshSoundStatusBtn');
 
-async function api(path, options = {}) {
-  const response = await fetch(path, options);
-  if (response.status === 401) {
-    window.location.href = '/login';
-    throw new Error('Authentication required');
-  }
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.detail || `Request failed: ${response.status}`);
-  return payload;
-}
+// api() is provided by web/utils.js (loaded before this script). yamnet-tflite
+// is a read-only status page (no POST/PUT/DELETE), so the CSRF/Content-Type
+// rules in utils.js's api() simply don't fire here. The thin local wrapper
+// that only handled 401 redirects was removed; utils.js's api() throws on 401
+// after redirecting to /login, which is what every refresh path here already
+// surfaces via the .catch(err) on loadSoundStatus().
 
 function titleCaseWords(value) {
   return String(value || '')
@@ -196,6 +192,8 @@ async function loadSoundStatus() {
     renderOverall(overall, enabledCameras);
     renderCameraStatuses(rows);
   } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
     messageEl.textContent = error.message;
     statusPanel.className = 'status-panel yamnet-status-grid status-error';
     statusPanel.innerHTML = `<div><span>Status</span><strong>${escapeHtml(error.message)}</strong></div>`;

@@ -1,4 +1,3 @@
-let csrfToken = null;
 const aiForm = document.getElementById('aiSettingsForm');
 const messageEl = document.getElementById('settingsMessage');
 const statusPanel = document.getElementById('aiStatusPanel');
@@ -6,18 +5,12 @@ const modelList = document.getElementById('modelList');
 const modelUpdatesMessage = document.getElementById('modelUpdatesMessage');
 let modelUpdateMap = {};
 
-async function api(path, options = {}) {
-  const headers = { ...(options.headers || {}) };
-  if (csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((options.method || 'GET').toUpperCase())) {
-    headers['X-CSRF-Token'] = csrfToken;
-  }
-  if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-  const response = await fetch(path, { ...options, headers });
-  if (response.status === 401) window.location.href = '/login';
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.detail || payload.reload_error || `Request failed: ${response.status}`);
-  return payload;
-}
+// api() is provided by web/utils.js (loaded before this script). 401 still
+// throws (after redirecting to /login); reload failures on PUT
+// /api/settings/ai flow through the SUCCESS branch as a 200 payload with
+// `reload_succeeded: false` / `last_detector_error` rendered by renderAi()
+// below, so this page's error messages come from the JSON shape rather than
+// the catch handler. No local api() needed.
 
 function titleCaseWords(value) {
   return String(value || '')
@@ -56,7 +49,7 @@ function displayValue(value, fallback = 'None') {
 function yesNo(value) { return value ? 'Yes' : 'No'; }
 function setMessage(text, isError = false) {
   messageEl.textContent = text;
-  if (text) window.showToast?.(text, isError);
+  if (text) window.showToast(text, isError);
 }
 
 function formPayload(form) {
@@ -168,6 +161,8 @@ function renderModelList(models) {
         setMessage(result.message || `${modelId} installed.`);
         await loadModels();
       } catch (error) {
+        // Skip UI updates if api() triggered a 401 redirect
+        if (window.daygleAuth?.redirecting) return;
         setMessage(error.message, true);
         btn.disabled = false;
         btn.textContent = 'Download & Install';
@@ -189,6 +184,8 @@ function renderModelList(models) {
         setMessage(`Switched to ${modelId}.`);
         await loadModels();
       } catch (error) {
+        // Skip UI updates if api() triggered a 401 redirect
+        if (window.daygleAuth?.redirecting) return;
         setMessage(error.message, true);
         btn.disabled = false;
         btn.textContent = 'Use';
@@ -209,6 +206,8 @@ function renderModelList(models) {
         delete modelUpdateMap[modelId];
         await loadModels();
       } catch (error) {
+        // Skip UI updates if api() triggered a 401 redirect
+        if (window.daygleAuth?.redirecting) return;
         setMessage(error.message, true);
         btn.disabled = false;
         btn.textContent = 'Update';
@@ -247,12 +246,14 @@ async function checkForModelUpdates() {
       msg = 'All installed models are up to date.';
     }
     modelUpdatesMessage.textContent = msg;
-    window.showToast?.(msg, isError);
+    window.showToast(msg, isError);
     await loadModels();
   } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
     const msg = `Update check failed: ${error.message}`;
     modelUpdatesMessage.textContent = msg;
-    window.showToast?.(msg, true);
+    window.showToast(msg, true);
   } finally {
     btn.disabled = false;
     btn.textContent = 'Check for Updates';
@@ -260,8 +261,8 @@ async function checkForModelUpdates() {
 }
 
 async function loadAll() {
-  const me = await api('/api/auth/me');
-  csrfToken = me.csrf_token;
+  // nav.js's daygleAuthReady IIFE has already populated window.daygleAuth.{user, csrfToken}.
+  await window.daygleAuthReady;
   const [aiSettings] = await Promise.all([api('/api/settings/ai'), loadModels()]);
   renderAi(aiSettings);
 }
@@ -276,6 +277,8 @@ async function runAction(buttonId, path, label) {
     setMessage(result.message || `${label} complete.`);
     await loadModels();
   } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
     setMessage(error.message, true);
     renderAi(await api('/api/settings/ai'));
   } finally {
@@ -298,7 +301,11 @@ aiForm.addEventListener('submit', async (event) => {
         : 'Settings saved.');
     }
     await loadModels();
-  } catch (error) { setMessage(error.message, true); }
+  } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    setMessage(error.message, true);
+  }
 });
 
 document.getElementById('checkModelBtn').addEventListener('click', () => runAction('checkModelBtn', '/api/settings/ai/check-model', 'Checking model'));
@@ -306,4 +313,8 @@ document.getElementById('reloadDetectorBtn').addEventListener('click', () => run
 document.getElementById('testDetectorBtn').addEventListener('click', () => runAction('testDetectorBtn', '/api/settings/ai/test-detector', 'Testing detector'));
 document.getElementById('checkModelUpdatesBtn').addEventListener('click', checkForModelUpdates);
 
-loadAll().catch((error) => setMessage(error.message, true));
+loadAll().catch((error) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
+  setMessage(error.message, true);
+});

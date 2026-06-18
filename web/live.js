@@ -46,14 +46,17 @@ let refreshTimer;
 let detectionStatusTimer;
 let snapshotRefreshMs = DEFAULT_SNAPSHOT_REFRESH_MS;
 let detectionStatusRefreshMs = DEFAULT_DETECTION_STATUS_REFRESH_MS;
-let csrfToken = null;
+// CSRF token is now shared via window.daygleAuth (set by loadAuth() via
+// setApiAuth from web/utils.js), so there's no page-local `csrfToken`.
 let cameras = [];
 let availableLabels = [];
 let selectedCamera = null;
 
 let configuredLabels = null;
 
-const LIVE_AI_TRACK_KEY = 'daygle.live.overlay.track.enabled';
+// LIVE_AI_TRACK_KEY now lives in web/utils.js (exposed on window.daygleUi and
+// visible as a bare global constant). This page used to redeclare it locally,
+// which forced every consumer to look in three places for the same string.
 // On by default; users can opt out per-browser via the toggle. The overlay only
 // replays the background monitor's detections (already computed server-side
 // for alerts/recording), so it never runs its own inference and adds no
@@ -76,18 +79,10 @@ const LIVE_AI_TRACK_MAX_LEAD_MS = 1500;
 // window is a few monitor cycles wide; an empty cycle clears boxes sooner.
 const LIVE_AI_TRACK_STALE_MS = 3000;
 
-async function api(path, options = {}) {
-  const headers = { ...(options.headers || {}) };
-  if (csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((options.method || 'GET').toUpperCase())) {
-    headers['X-CSRF-Token'] = csrfToken;
-  }
-  if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-  const response = await fetch(path, { ...options, headers });
-  if (response.status === 401) window.location.href = '/login';
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.detail || `Request failed: ${response.status}`);
-  return payload;
-}
+// api() is provided by web/utils.js (loaded before this script) - it reads
+// the CSRF token from window.daygleAuth.csrfToken, sets Content-Type
+// application/json on JSON-bodied requests, and handles 401 redirects so
+// every page shares identical auth and error semantics.
 
 // Build the live overlay's label allow-list from the SELECTED camera's own
 // object rules only. Scoping per camera prevents a label configured on one
@@ -505,6 +500,8 @@ async function refreshDetectionStatus() {
     ingestServerTrackDetections(payload);
     renderDetectionStatus(summarizeDetectionStatus(payload, soundStatus, soundEnabled));
   } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
     renderDetectionStatus({
       state: 'error',
       stateLabel: 'Error',
@@ -632,6 +629,8 @@ async function sendPtz(command) {
       body: JSON.stringify({ command }),
     });
   } catch (err) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
     console.warn('PTZ command failed:', command, err.message);
     window.showToast?.(`PTZ error: ${err.message}`, true);
   }
@@ -668,8 +667,10 @@ if (ptzOverlay) {
 liveEls.livePtzToggle?.addEventListener('change', () => updatePtzVisibility());
 
 async function init() {
-  const me = await api('/api/auth/me');
-  csrfToken = me.csrf_token;
+  // nav.js kicks off the shared /api/auth/me at script load; awaiting
+  // daygleAuthReady here means this page never issues its own duplicate
+  // /api/auth/me on bootstrap.
+  await window.daygleAuthReady;
   try {
     const runtime = await api('/api/config');
     const live = runtime.live || {};
@@ -699,7 +700,11 @@ async function init() {
   restartDetectionStatusTimer();
 }
 
-init().catch((error) => { liveEls.status.textContent = error.message; });
+init().catch((error) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
+  liveEls.status.textContent = error.message;
+});
 window.addEventListener('beforeunload', () => {
   clearInterval(refreshTimer);
   clearInterval(detectionStatusTimer);

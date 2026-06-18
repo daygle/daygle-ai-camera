@@ -12,29 +12,21 @@ const els = {
 };
 
 // ─── State ──────────────────────────────────────────────────────────────────
-let authState = { user: null, csrfToken: null };
+// CSRF token and current user live on window.daygleAuth (set in loadAuth()
+// via setApiAuth(...) — provided by web/utils.js). Per-page flashes should
+// read auth state from there rather than a local copy.
 let configuredLabels = null;
 
-const SOUND_CLASS_IDS = new Set(['cat_meow', 'dog_bark', 'glass_breaking', 'smoke_alarm', 'baby_crying', 'doorbell', 'car_alarm', 'loud_bang']);
+// SOUND_CLASS_IDS, isSoundLabel, DETECTION_EYE_ICON and detectionPill() are
+// provided by web/utils.js (loaded before this script).
+
 let events = [];
 let alertGroups = [];
 let activeFilter = 'all';
 
-// ─── API helper (shared pattern with cameras.js / recordings.js) ───────────
-async function api(path, options = {}) {
-  const headers = { ...(options.headers || {}) };
-  if (authState.csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((options.method || 'GET').toUpperCase())) {
-    headers['X-CSRF-Token'] = authState.csrfToken;
-  }
-  const response = await fetch(path, { ...options, headers });
-  if (response.status === 401) {
-    window.location.href = '/login';
-    throw new Error('Authentication required');
-  }
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.detail || `Request failed: ${response.status}`);
-  return payload;
-}
+// api() is provided by web/utils.js (loaded before this script) - it reads
+// the CSRF token from window.daygleAuth.csrfToken and handles 401 redirects
+// so every page shares identical auth and error semantics.
 
 // ─── Small utilities (kept local to avoid touching utils.js) ────────────────
 function cameraLabel(cameraName, cameraId) {
@@ -86,11 +78,7 @@ function soundDetectionBadges(detections = []) {
   if (!best.size) return '<span class="muted">No sound detections</span>';
   return Array.from(best.entries())
     .sort((a, b) => (b[1] ?? -1) - (a[1] ?? -1))
-    .map(([label, conf]) => {
-      const display = titleCase(label.replace(/_/g, ' '));
-      const confText = Number.isFinite(conf) ? ` · ${Math.round(conf * 100)}%` : '';
-      return `<span class="detection detection-sound">🔊 ${escapeHtml(display)}${escapeHtml(confText)}</span>`;
-    })
+    .map(([label, conf]) => detectionPill(label, conf, true))
     .join('');
 }
 
@@ -110,17 +98,9 @@ function detectionBadges(detections = []) {
     if (!best.has(label) || best.get(label) === null || conf > best.get(label)) best.set(label, conf);
   }
   if (!best.size) return '<span class="muted">No detections</span>';
-  const eyeIcon = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg>';
   return Array.from(best.entries())
     .sort((a, b) => (b[1] ?? -1) - (a[1] ?? -1))
-    .map(([label, conf]) => {
-      const confText = Number.isFinite(conf) ? ` · ${Math.round(conf * 100)}%` : '';
-      // A sound class mixed into an object item gets the speaker icon, not the eye.
-      if (SOUND_CLASS_IDS.has(label)) {
-        return `<span class="detection detection-sound">🔊 ${escapeHtml(titleCase(label.replace(/_/g, ' ')))}${confText}</span>`;
-      }
-      return `<span class="detection detection-object">${eyeIcon} ${escapeHtml(titleCase(label))}${confText}</span>`;
-    })
+    .map(([label, conf]) => detectionPill(label, conf))
     .join('');
 }
 
@@ -307,7 +287,7 @@ function renderActivityItem(item) {
   } else if (!isEvent && item.recordingId) {
     actions.push(recordingLink(item.recordingId, 'Footage'));
   }
-  if (authState.user?.role === 'admin') {
+  if (window.daygleAuth.user?.role === 'admin') {
     const dismissAttr = isEvent
       ? `data-dismiss-event="${escapeHtml(String(item.id))}"`
       : `data-dismiss-alert="${escapeHtml(String(item.id))}"`;
@@ -391,6 +371,8 @@ function bindActivityActions() {
         events = events.filter((e) => String(e.id) !== String(id));
         renderActivityFeed();
       } catch (error) {
+        // Skip UI updates if api() triggered a 401 redirect
+        if (window.daygleAuth?.redirecting) return;
         window.showToast?.(error.message, true);
         btn.disabled = false;
       }
@@ -405,6 +387,8 @@ function bindActivityActions() {
         alertGroups = alertGroups.filter((g) => String(g.key) !== String(key));
         renderActivityFeed();
       } catch (error) {
+        // Skip UI updates if api() triggered a 401 redirect
+        if (window.daygleAuth?.redirecting) return;
         window.showToast?.(error.message, true);
         btn.disabled = false;
       }
@@ -413,7 +397,7 @@ function bindActivityActions() {
 }
 
 function updateDismissButtons() {
-  const isAdmin = authState.user?.role === 'admin';
+  const isAdmin = window.daygleAuth.user?.role === 'admin';
   if (els.dismissAllEventsBtn) els.dismissAllEventsBtn.hidden = !isAdmin || events.length === 0;
   if (els.dismissAllAlertsBtn) els.dismissAllAlertsBtn.hidden = !isAdmin || alertGroups.length === 0;
 }
@@ -427,6 +411,8 @@ async function loadStats() {
     if (els.objectAlerts) els.objectAlerts.textContent = stats.object_alerts ?? stats.total_alerts ?? 0;
     if (els.soundAlerts) els.soundAlerts.textContent = stats.sound_alerts ?? 0;
   } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
     window.showToast?.(error.message, true);
   }
 }
@@ -476,8 +462,10 @@ async function loadConfiguredLabels() {
 
 // ─── Auth ────────────────────────────────────────────────────────────────────
 async function loadAuth() {
-  const authInfo = await api('/api/auth/me');
-  authState = { user: authInfo.user, csrfToken: authInfo.csrf_token };
+  // nav.js kicks off /api/auth/me at script load and exposes the result on
+  // window.daygleAuth / window.daygleAuthReady. Awaiting here means we
+  // never issue a duplicate /api/auth/me on bootstrap.
+  await window.daygleAuthReady;
 }
 
 els.dismissAllEventsBtn?.addEventListener('click', async () => {
@@ -487,6 +475,8 @@ els.dismissAllEventsBtn?.addEventListener('click', async () => {
     events = [];
     renderActivityFeed();
   } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
     window.showToast?.(error.message, true);
   } finally {
     els.dismissAllEventsBtn.disabled = false;
@@ -500,6 +490,8 @@ els.dismissAllAlertsBtn?.addEventListener('click', async () => {
     alertGroups = [];
     renderActivityFeed();
   } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
     window.showToast?.(error.message, true);
   } finally {
     els.dismissAllAlertsBtn.disabled = false;
@@ -537,7 +529,11 @@ loadAuth()
     await loadConfiguredLabels();
     await refreshAll();
   })
-  .catch((error) => window.showToast?.(error.message, true));
+  .catch((error) => {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    window.showToast?.(error.message, true);
+  });
 
 setInterval(() => { loadStats().catch(() => {}); }, 10000);
 setInterval(() => {

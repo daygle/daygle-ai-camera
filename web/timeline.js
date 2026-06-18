@@ -31,8 +31,10 @@ const els = {
   statCameraSub: document.getElementById('statCameraSub'),
 };
 
+// CSRF token and current user live on window.daygleAuth (loaded by
+// web/utils.js) and are populated by each page's loadAuth() via
+// setApiAuth(...). Page-local state below is timeline-specific.
 const state = {
-  auth: { user: null, csrfToken: null },
   payload: null,
   activeRecordingId: null,
 };
@@ -40,7 +42,11 @@ const state = {
 let configuredLabels = null;
 let activeRecording = null;
 
-const OVERLAY_TOGGLE_KEY = 'daygle.timeline.overlay.enabled';
+// TIMELINE_OVERLAY_TOGGLE_KEY (alongside RECORDINGS_OVERLAY_TOGGLE_KEY from
+// recordings.js and LIVE_AI_TRACK_KEY from live.js) now lives in
+// web/utils.js - exposed on window.daygleUi and visible as bare constants.
+// Kept deliberately independent of RECORDINGS_OVERLAY_TOGGLE_KEY so toggling
+// the overlay on /recordings doesn't flip the same preference on /timeline.
 // On by default; users can turn it off per-browser via the toggle.
 let overlayEnabled = true;
 let overlayRafId = null;
@@ -91,39 +97,10 @@ const SEGMENT_COLORS = [
 
 const GENERIC_TIMELINE_LABELS = new Set(['motion', 'alert', 'human', 'object', 'none', 'off', 'continuous']);
 
-const DETECTION_EYE_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg>';
-
-// Sound class identifiers (mirrors SOUND_CLASSES in app/sound_detector.py). A
-// detection label that matches one of these is a sound, even when it appears on
-// an object recording, so its pill should carry the speaker icon rather than the
-// eye icon.
-const SOUND_CLASS_IDS = new Set(['cat_meow', 'dog_bark', 'glass_breaking', 'smoke_alarm', 'baby_crying', 'doorbell', 'car_alarm', 'loud_bang']);
-
-function isSoundLabel(label) {
-  return SOUND_CLASS_IDS.has(String(label || '').trim().toLowerCase().replace(/\s+/g, '_'));
-}
-
-function recordingZoneNames(recording) {
-  if (isSoundRecording(recording)) return [];
-  return [...new Set((recording.detections || []).map((d) => d.zone_name).filter(Boolean))];
-}
-
-function detectionPill(label, confidence, isSound) {
-  // The recording type provides a default, but each label decides its own icon:
-  // a sound class shows the speaker icon, an object label shows the eye icon.
-  const labelIsSound = isSound || isSoundLabel(label);
-  const display = labelIsSound
-    ? titleCase(String(label).replace(/_/g, ' '))
-    : titleCase(String(label));
-  const numericConfidence = confidence == null ? NaN : Number(confidence);
-  const confidenceText = Number.isFinite(numericConfidence)
-    ? ` · ${Math.round(numericConfidence * 100)}%`
-    : '';
-  if (labelIsSound) {
-    return `<span class="detection detection-sound">🔊 ${escapeHtml(display)}${confidenceText}</span>`;
-  }
-  return `<span class="detection detection-object">${DETECTION_EYE_ICON} ${escapeHtml(display)}${confidenceText}</span>`;
-}
+// DETECTION_EYE_ICON, SOUND_CLASS_IDS, isSoundLabel and detectionPill() all
+// live in web/utils.js now (loaded before this script). Existing call sites
+// call detectionPill() directly with the same (label, confidence, isSound)
+// signature.
 
 function filterByConfiguredLabels(detections) {
   if (!configuredLabels) return detections;
@@ -271,20 +248,9 @@ function drawClipOverlay(vfcMediaTime) {
   drawDetectionBoxesOnCanvas(els.clipOverlay, eventDetections, els.clipPlayer);
 }
 
-async function api(path, options = {}) {
-  const headers = { ...(options.headers || {}) };
-  if (state.auth.csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((options.method || 'GET').toUpperCase())) {
-    headers['X-CSRF-Token'] = state.auth.csrfToken;
-  }
-  const response = await fetch(path, { ...options, headers });
-  if (response.status === 401) {
-    window.location.href = '/login';
-    throw new Error('Authentication required');
-  }
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.detail || `Request failed: ${response.status}`);
-  return payload;
-}
+// api() is provided by web/utils.js (loaded before this script) - it reads
+// the CSRF token from window.daygleAuth.csrfToken and handles 401 redirects
+// so every page shares identical auth and error semantics.
 
 function formatClock(seconds) {
   return formatUserClock(seconds);
@@ -479,6 +445,11 @@ function colorForKey(key) {
     hash |= 0;
   }
   return SEGMENT_COLORS[Math.abs(hash) % SEGMENT_COLORS.length];
+}
+
+function recordingZoneNames(recording) {
+  if (isSoundRecording(recording)) return [];
+  return [...new Set((recording.detections || []).map((d) => d.zone_name).filter(Boolean))];
 }
 
 function timelineParams(overrides = {}) {
@@ -868,6 +839,7 @@ async function playRecording(recordingId, updateHistory = true) {
     await els.clipPlayer.play();
     els.clipPlayerStatus.textContent = `Playing recording #${recording.id}.`;
   } catch (error) {
+    // <video>.play() media error (never an api() throw) - redirect guard skipped by design.
     if (['AbortError', 'NotAllowedError'].includes(error?.name)) {
       els.clipPlayerStatus.textContent = `Recording #${recording.id} loaded.`;
       return;
@@ -941,6 +913,7 @@ async function loadTimeline({ preserveSelection = true } = {}) {
       `/api/recordings/timeline?camera_id=${encodeURIComponent(cameraId)}&day=${encodeURIComponent(day)}&tz_offset_minutes=${timezoneOffsetMinutes}`,
     );
   } catch (err) {
+    // Special-cases benign 'No cameras configured' inline; re-throws to outer guarded .catch().
     if (err.message === 'No cameras configured') {
       els.timelineStatus.textContent = 'No cameras configured. Add a camera in Settings to use the timeline.';
       setTimelineStatusChip({ kind: 'empty', label: 'No cameras' });
@@ -955,10 +928,11 @@ async function loadTimeline({ preserveSelection = true } = {}) {
 }
 
 async function loadAuth() {
-  const authInfo = await api('/api/auth/me');
-  state.auth = { user: authInfo.user, csrfToken: authInfo.csrf_token };
-  // Date/time display preferences are now global (set in nav.js from the
-  // same /api/auth/me response); nothing page-local to do here.
+  // nav.js kicks off the shared /api/auth/me at script load; awaiting the
+  // shared daygleAuthReady promise here means this page never issues its
+  // own duplicate /api/auth/me on bootstrap. Date/time display preferences
+  // are also set globally by nav.js from that response.
+  await window.daygleAuthReady;
 }
 
 async function loadConfiguredLabels() {
@@ -981,15 +955,16 @@ async function loadConfiguredLabels() {
     }
     configuredLabels = labels;
   } catch {
-    // Show all labels if settings unavailable.
+    // Show all labels if settings are unavailable.
   }
 }
 
-els.timelineLoadBtn.addEventListener('click', () => {
-  loadTimeline({ preserveSelection: false }).catch((error) => {
-    els.timelineStatus.textContent = error.message;
-    setTimelineStatusChip({ kind: 'error', label: 'Error' });
-  });
+els.timelineLoadBtn.addEventListener('click', () => {loadTimeline({ preserveSelection: false }).catch((error) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
+  els.timelineStatus.textContent = error.message;
+  setTimelineStatusChip({ kind: 'error', label: 'Error' });
+});
 });
 
 // "Now" shortcut: set Day=today, From=00:00, To=current local time, then reload.
@@ -1000,62 +975,70 @@ els.timelineNowBtn?.addEventListener('click', () => {
   const mm = String(now.getMinutes()).padStart(2, '0');
   els.timelineDate.value = today;
   els.fromTime.value = '00:00';
-  els.toTime.value = `${hh}:${mm}`;
-  loadTimeline({ preserveSelection: false }).catch((error) => {
-    els.timelineStatus.textContent = error.message;
-    setTimelineStatusChip({ kind: 'error', label: 'Error' });
-  });
+  els.toTime.value = `${hh}:${mm}`;loadTimeline({ preserveSelection: false }).catch((error) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
+  els.timelineStatus.textContent = error.message;
+  setTimelineStatusChip({ kind: 'error', label: 'Error' });
+});
 });
 
-els.cameraSelect.addEventListener('change', () => {
-  loadTimeline({ preserveSelection: false }).catch((error) => {
-    els.timelineStatus.textContent = error.message;
-    setTimelineStatusChip({ kind: 'error', label: 'Error' });
-  });
+els.cameraSelect.addEventListener('change', () => {loadTimeline({ preserveSelection: false }).catch((error) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
+  els.timelineStatus.textContent = error.message;
+  setTimelineStatusChip({ kind: 'error', label: 'Error' });
+});
 });
 
-els.timelineDate.addEventListener('change', () => {
-  loadTimeline({ preserveSelection: false }).catch((error) => {
-    els.timelineStatus.textContent = error.message;
-    setTimelineStatusChip({ kind: 'error', label: 'Error' });
-  });
+els.timelineDate.addEventListener('change', () => {loadTimeline({ preserveSelection: false }).catch((error) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
+  els.timelineStatus.textContent = error.message;
+  setTimelineStatusChip({ kind: 'error', label: 'Error' });
+});
 });
 
-els.filterSelect.addEventListener('change', () => {
-  renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
-    els.timelineStatus.textContent = error.message;
-    setTimelineStatusChip({ kind: 'error', label: 'Error' });
-  });
+els.filterSelect.addEventListener('change', () => {renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
+  els.timelineStatus.textContent = error.message;
+  setTimelineStatusChip({ kind: 'error', label: 'Error' });
+});
 });
 
-els.fromTime.addEventListener('change', () => {
-  renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
-    els.timelineStatus.textContent = error.message;
-    setTimelineStatusChip({ kind: 'error', label: 'Error' });
-  });
+els.fromTime.addEventListener('change', () => {renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
+  els.timelineStatus.textContent = error.message;
+  setTimelineStatusChip({ kind: 'error', label: 'Error' });
+});
 });
 
-els.toTime.addEventListener('change', () => {
-  renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
-    els.timelineStatus.textContent = error.message;
-    setTimelineStatusChip({ kind: 'error', label: 'Error' });
-  });
+els.toTime.addEventListener('change', () => {renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
+  els.timelineStatus.textContent = error.message;
+  setTimelineStatusChip({ kind: 'error', label: 'Error' });
+});
 });
 
 els.timelineRows.addEventListener('click', (event) => {
   const button = event.target.closest('[data-recording-id]');
-  if (!button) return;
-  playRecording(button.dataset.recordingId).catch((error) => {
-    els.clipPlayerStatus.textContent = error.message;
-  });
+  if (!button) return;playRecording(button.dataset.recordingId).catch((error) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
+  els.clipPlayerStatus.textContent = error.message;
+});
 });
 
 els.timelineRecordings.addEventListener('click', (event) => {
   const button = event.target.closest('[data-recording-id]');
-  if (!button) return;
-  playRecording(button.dataset.recordingId).catch((error) => {
-    els.clipPlayerStatus.textContent = error.message;
-  });
+  if (!button) return;playRecording(button.dataset.recordingId).catch((error) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
+  els.clipPlayerStatus.textContent = error.message;
+});
 });
 
 els.videoModalClose.addEventListener('click', () => clearPlayback());
@@ -1104,12 +1087,12 @@ if ('ResizeObserver' in window && els.clipPlayer) {
 }
 
 if (els.clipOverlayToggle) {
-  const savedValue = localStorage.getItem(OVERLAY_TOGGLE_KEY);
+  const savedValue = localStorage.getItem(TIMELINE_OVERLAY_TOGGLE_KEY);
   overlayEnabled = savedValue !== '0';
   els.clipOverlayToggle.checked = overlayEnabled;
   els.clipOverlayToggle.addEventListener('change', () => {
     overlayEnabled = Boolean(els.clipOverlayToggle.checked);
-    localStorage.setItem(OVERLAY_TOGGLE_KEY, overlayEnabled ? '1' : '0');
+    localStorage.setItem(TIMELINE_OVERLAY_TOGGLE_KEY, overlayEnabled ? '1' : '0');
     if (els.clipPlayer && !els.clipPlayer.paused && overlayShouldAnimate()) {
       startOverlayRaf();
     } else if (!overlayEnabled) {
@@ -1135,6 +1118,8 @@ loadAuth().then(async () => {
   await loadConfiguredLabels();
   await loadTimeline({ preserveSelection: true });
 }).catch((error) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
   els.timelineStatus.textContent = error.message;
   els.clipPlayerStatus.textContent = error.message;
   setTimelineStatusChip({ kind: 'error', label: 'Error' });
@@ -1145,9 +1130,10 @@ loadAuth().then(async () => {
 // currently selected camera / day / filter / time range so the user keeps
 // what they were looking at - only the rendered formatting changes.
 window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
-  if (typeof loadTimeline !== 'function' || !state || !state.payload) return;
-  loadTimeline({ preserveSelection: true }).catch((error) => {
-    els.timelineStatus.textContent = error.message;
-    setTimelineStatusChip({ kind: 'error', label: 'Error' });
-  });
+  if (typeof loadTimeline !== 'function' || !state || !state.payload) return;loadTimeline({ preserveSelection: true }).catch((error) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
+  els.timelineStatus.textContent = error.message;
+  setTimelineStatusChip({ kind: 'error', label: 'Error' });
+});
 };

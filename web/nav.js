@@ -1,18 +1,6 @@
-window.showToast = function (message, isError) {
-  if (!message) return;
-  let container = document.getElementById('toastContainer');
-  if (!container) {
-    container = document.createElement('div');
-    container.id = 'toastContainer';
-    container.className = 'toast-container';
-    document.body.appendChild(container);
-  }
-  const toast = document.createElement('div');
-  toast.className = 'toast' + (isError ? ' error' : '');
-  toast.textContent = String(message);
-  container.appendChild(toast);
-  setTimeout(() => toast.remove(), 3500);
-};
+// window.showToast() is now provided by web/utils.js, which every page loads
+// before nav.js. Keeping the DAYGLE_BUTTON_ICONS / icon decorator below here
+// because they only make sense in the context of the rendered nav bar.
 
 const DAYGLE_BUTTON_ICONS = {
   add: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
@@ -151,6 +139,47 @@ if (document.readyState === 'loading') {
 } else {
   startDaygleButtonIconDecorator();
 }
+
+// ─── Single /api/auth/me fetch shared with every page ──────────────────
+// Kicked off synchronously at script-load time and exposed as a promise so
+// every page's loadAuth() can simply `await window.daygleAuthReady` instead
+// of issuing its own redundant /api/auth/me. By the time the inner `await`
+// resumes, utils.js (loaded after nav.js) has populated setApiAuth() and
+// window.daygleAuth, so subsequent api() calls see the CSRF token.
+//
+// The try/catch / !response.ok guards leave window.daygleAuth empty when the
+// user is unauthenticated — every page bundle already handles that case.
+window.daygleAuthReady = (async () => {
+  try {
+    const response = await fetch('/api/auth/me');
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const user = payload.user || {};
+    const csrfToken = payload.csrf_token || '';
+    // Pipe into the shared holder. By the time we reach here the fetch has
+    // resolved, so utils.js (which loads synchronously between nav.js and
+    // the page's JS) has registered setApiAuth and the window.daygleUi
+    // registry. setApiAuth() is the canonical writer of window.daygleAuth -
+    // this single call covers the user + csrfToken pairing, so there's no
+    // redundant direct assignment below it.
+    if (typeof setApiAuth === 'function') {
+      setApiAuth(user, csrfToken);
+    }
+    // Propagate display preferences so utils.formatDate honours the
+    // user's chosen date_format / time_format on every page (dashboard,
+    // events, alerts, recordings, etc.) - not just the ones that already
+    // implemented their own local formatters.
+    if (typeof window.setDaygleDatePrefs === 'function') {
+      window.setDaygleDatePrefs({
+        date_format: user.date_format || 'locale',
+        time_format: user.time_format || '24h',
+      });
+    }
+    return { user, csrfToken };
+  } catch {
+    return null;
+  }
+})();
 
 (async function () {
   if (document.querySelector('.app-nav')) return;
@@ -362,45 +391,38 @@ if (document.readyState === 'loading') {
   });
 
   /* ── Auth ── */
-  try {
-    const response = await fetch('/api/auth/me');
-    if (!response.ok) return;
-    const payload = await response.json();
-    const user = payload.user || {};
-    const csrfToken = payload.csrf_token || '';
-    // Propagate display preferences so utils.formatDate honours the
-    // user's chosen date_format / time_format on every page (dashboard,
-    // events, alerts, recordings, etc.) - not just the ones that already
-    // implemented their own local formatters.
-    if (typeof window.setDaygleDatePrefs === 'function') {
-      window.setDaygleDatePrefs({
-        date_format: user.date_format || 'locale',
-        time_format: user.time_format || '24h',
-      });
-    }
-    const navUser = document.getElementById('navUser');
-    const navAvatar = document.getElementById('navAvatar');
-    if (user.username) {
-      if (navUser) navUser.textContent = user.username;
-      if (navAvatar) navAvatar.textContent = user.username.charAt(0).toUpperCase();
-    }
-    if (user.role !== 'admin') {
-      nav.querySelectorAll('[data-admin="true"]').forEach((el) => {
-        el.hidden = true;
-      });
-    }
-    const logoutBtn = document.getElementById('navLogoutBtn');
-    if (logoutBtn && csrfToken) {
-      logoutBtn.addEventListener('click', async () => {
-        try {
-          await fetch('/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } });
-        } catch {
-          // Ignore network errors; the redirect below will clear the session server-side.
-        }
-        window.location.href = '/login';
-      });
-    }
-  } catch {
-    // Protected pages redirect through the server; keep the static nav harmless.
+  // Reuse the single /api/auth/me fetch kicked off at script load above
+  // (window.daygleAuthReady). When it resolves, window.daygleAuth is
+  // populated with { user, csrfToken } and api() in utils.js can attach
+  // X-CSRF-Token to subsequent state-changing calls.
+  await window.daygleAuthReady;
+  if (!window.daygleAuth.user) {
+    // Unauthenticated (e.g. /login or session expired). Leave the static
+    // account dropdown rendered; the server-side redirect handles gating.
+    return;
+  }
+  const user = window.daygleAuth.user;
+  const csrfToken = window.daygleAuth.csrfToken;
+  const navUser = document.getElementById('navUser');
+  const navAvatar = document.getElementById('navAvatar');
+  if (user.username) {
+    if (navUser) navUser.textContent = user.username;
+    if (navAvatar) navAvatar.textContent = user.username.charAt(0).toUpperCase();
+  }
+  if (user.role !== 'admin') {
+    nav.querySelectorAll('[data-admin="true"]').forEach((el) => {
+      el.hidden = true;
+    });
+  }
+  const logoutBtn = document.getElementById('navLogoutBtn');
+  if (logoutBtn && csrfToken) {
+    logoutBtn.addEventListener('click', async () => {
+      try {
+        await fetch('/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } });
+      } catch {
+        // Ignore network errors; the redirect below will clear the session server-side.
+      }
+      window.location.href = '/login';
+    });
   }
 }());

@@ -1,4 +1,3 @@
-let csrfToken = null;
 let cameras = [];
 let soundClasses = [];
 let selectedCameraId = '';
@@ -21,26 +20,14 @@ const statCamera = document.getElementById('statCamera');
 function setMessage(text, isError = false) {
   messageEl.textContent = text || '';
   messageEl.className = isError ? 'error' : 'muted cameras-list-status';
-  if (text) window.showToast?.(text, isError);
+  if (text) window.showToast(text, isError);
 }
 
-async function api(path, options = {}) {
-  const headers = { ...(options.headers || {}) };
-  if (csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((options.method || 'GET').toUpperCase())) {
-    headers['X-CSRF-Token'] = csrfToken;
-  }
-  if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
-    headers['Content-Type'] = 'application/json';
-  }
-  const res = await fetch(path, { ...options, headers });
-  if (res.status === 401) {
-    window.location.href = '/login';
-    return {};
-  }
-  const payload = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(payload.detail || `Request failed: ${res.status}`);
-  return payload;
-}
+// api() is provided by web/utils.js (loaded before this script). It throws
+// on 401 (after redirecting to /login) rather than returning {}, matching
+// what every failsafe caller in this file already expects via try/catch.
+// The local duplicate + page-local csrfToken were removed so every page
+// shares the same fetch contract.
 
 function cloneSound(sound) {
   return JSON.parse(JSON.stringify(sound || { enabled: false, rules: [] }));
@@ -283,6 +270,11 @@ async function refreshStatus() {
   try {
     selectedStatus = await api(`/api/sound/status?camera_id=${encodeURIComponent(camera.id || '')}`);
   } catch (err) {
+    // When api() set window.daygleAuth.redirecting = true, the page is on
+    // its way to /login. Skipping the catch UI mutation (and the renderEditor()
+    // that follows) avoids flashing a fake 'Authentication required' status
+    // onto the panel for a few ms before navigation completes.
+    if (window.daygleAuth?.redirecting) return;
     selectedStatus = { backend_reason: err.message, running: false, backend: 'none' };
   }
   renderEditor();
@@ -321,6 +313,8 @@ async function saveSounds() {
     setMessage('Sound settings saved.');
     await refreshStatus();
   } catch (err) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
     setMessage(err.message, true);
   } finally {
     saveBtn.disabled = false;
@@ -328,8 +322,8 @@ async function saveSounds() {
 }
 
 async function loadSounds() {
-  const me = await api('/api/auth/me');
-  csrfToken = me.csrf_token;
+  // nav.js's daygleAuthReady IIFE has already populated window.daygleAuth.{user, csrfToken}.
+  await window.daygleAuthReady;
   const [settings, classesPayload] = await Promise.all([
     api('/api/settings/system'),
     api('/api/sound/classes'),
@@ -359,6 +353,14 @@ addRuleSelect.addEventListener('change', () => {
   renderEditor();
 });
 saveBtn.addEventListener('click', saveSounds);
-reloadBtn.addEventListener('click', () => loadSounds().catch((err) => setMessage(err.message, true)));
+reloadBtn.addEventListener('click', () => loadSounds().catch((err) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
+  setMessage(err.message, true);
+}));
 
-loadSounds().catch((err) => setMessage(err.message, true));
+loadSounds().catch((err) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
+  setMessage(err.message, true);
+});

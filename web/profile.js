@@ -1,25 +1,16 @@
-let csrfToken = null;
 const profileForm = document.getElementById('profileForm');
 const passwordForm = document.getElementById('passwordForm');
 const messageEl = document.getElementById('profileMessage');
 const summaryEl = document.getElementById('profileSummary');
 
-async function api(path, options = {}) {
-  const headers = { ...(options.headers || {}) };
-  if (csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((options.method || 'GET').toUpperCase())) {
-    headers['X-CSRF-Token'] = csrfToken;
-  }
-  if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-  const response = await fetch(path, { ...options, headers });
-  if (response.status === 401) window.location.href = '/login';
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.detail || `Request failed: ${response.status}`);
-  return payload;
-}
+// api() is provided by web/utils.js (loaded before this script). The local
+// duplicate + page-local csrfToken were removed so every page shares the
+// same fetch contract (CSRF on state-changing verbs, 401 -> /login,
+// JSON Content-Type only on bodies).
 
 function setMessage(text, isError = false) {
   messageEl.textContent = text;
-  if (text) window.showToast?.(text, isError);
+  if (text) window.showToast(text, isError);
 }
 
 function renderProfile(user) {
@@ -42,9 +33,9 @@ function renderProfile(user) {
 }
 
 async function loadProfile() {
-  const me = await api('/api/auth/me');
-  csrfToken = me.csrf_token;
-  renderProfile(me.user);
+  // nav.js's daygleAuthReady IIFE has already populated window.daygleAuth.{user, csrfToken}.
+  await window.daygleAuthReady;
+  renderProfile(window.daygleAuth.user);
 }
 
 profileForm.addEventListener('submit', async (event) => {
@@ -56,20 +47,22 @@ profileForm.addEventListener('submit', async (event) => {
     // Apply the new display preferences locally so this tab's timestamps
     // refresh immediately, then broadcast so every other open Daygle tab
     // re-renders without a manual refresh.
-    if (typeof window.setDaygleDatePrefs === 'function') {
-      window.setDaygleDatePrefs({
-        date_format: updated.date_format,
-        time_format: updated.time_format,
-      });
-    }
-    if (typeof window.broadcastDaygleDatePrefs === 'function') {
-      window.broadcastDaygleDatePrefs({
-        dateFormat: updated.date_format,
-        timeFormat: updated.time_format,
-      });
-    }
+    // utils.js is loaded by profile.html before this script, so
+    // setDaygleDatePrefs + broadcastDaygleDatePrefs are reliably available.
+    window.setDaygleDatePrefs({
+      date_format: updated.date_format,
+      time_format: updated.time_format,
+    });
+    window.broadcastDaygleDatePrefs({
+      dateFormat: updated.date_format,
+      timeFormat: updated.time_format,
+    });
     setMessage('Profile saved.');
-  } catch (error) { setMessage(error.message, true); }
+  } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    setMessage(error.message, true);
+  }
 });
 
 passwordForm.addEventListener('submit', async (event) => {
@@ -84,11 +77,19 @@ passwordForm.addEventListener('submit', async (event) => {
     await api('/api/profile/password', { method: 'POST', body: JSON.stringify(payload) });
     passwordForm.reset();
     setMessage('Password changed.');
-  } catch (error) { setMessage(error.message, true); }
+  } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    setMessage(error.message, true);
+  }
 });
 
 document.querySelectorAll('.field-help').forEach((el) => {
   if (!el.title) el.title = el.textContent;
 });
 
-loadProfile().catch((error) => setMessage(error.message, true));
+loadProfile().catch((error) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
+  setMessage(error.message, true);
+});

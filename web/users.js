@@ -1,23 +1,16 @@
-let csrfToken = null;
 const usersEl = document.getElementById('users');
 const form = document.getElementById('createUserForm');
 const message = document.getElementById('userMessage');
 
-async function api(path, options = {}) {
-  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-  if (csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((options.method || 'GET').toUpperCase())) {
-    headers['X-CSRF-Token'] = csrfToken;
-  }
-  const response = await fetch(path, { ...options, headers });
-  if (response.status === 401) window.location.href = '/login';
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.detail || `Request failed: ${response.status}`);
-  return payload;
-}
+// api() is provided by web/utils.js (loaded before this script). It reads
+// window.daygleAuth.csrfToken for state-changing verbs, redirects to /login
+// on 401, and sets Content-Type: application/json only on JSON bodies (GETs
+// no longer carry a forced Content-Type). The local duplicate + page-local
+// csrfToken were removed so every page shares the same fetch contract.
 
 function setMessage(text, isError = false) {
   message.textContent = text;
-  if (text) window.showToast?.(text, isError);
+  if (text) window.showToast(text, isError);
 }
 
 function roleLabel(value) {
@@ -45,9 +38,9 @@ function renderUsers(users) {
 }
 
 async function loadUsers() {
-  const me = await api('/api/auth/me', { headers: {} });
-  csrfToken = me.csrf_token;
-  renderUsers(await api('/api/users', { headers: {} }));
+  // nav.js's daygleAuthReady IIFE has already populated window.daygleAuth.{user, csrfToken}.
+  await window.daygleAuthReady;
+  renderUsers(await api('/api/users'));
 }
 
 usersEl.addEventListener('change', async (event) => {
@@ -86,4 +79,8 @@ document.querySelectorAll('.field-help').forEach((el) => {
   if (!el.title) el.title = el.textContent;
 });
 
-loadUsers().catch((error) => setMessage(error.message, true));
+loadUsers().catch((error) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
+  setMessage(error.message, true);
+});

@@ -1,7 +1,7 @@
-const PAGE_SIZE = 50;
+// Auth (csrf token + user) lives on window.daygleAuth once loadAuth() runs
+// and is read automatically by the shared api() helper.
 let currentOffset = 0;
 let currentTotal = 0;
-let csrfToken = null;
 
 const tbody = document.getElementById('logBody');
 const logEmpty = document.getElementById('logEmpty');
@@ -21,25 +21,11 @@ function getFilters() {
 
 function buildQuery(offset) {
   const f = getFilters();
-  const params = new URLSearchParams({ limit: PAGE_SIZE, offset });
+  const params = new URLSearchParams({ limit: LOG_PAGE_SIZE, offset });
   if (f.camera_id) params.set('camera_id', f.camera_id);
   if (f.event_type) params.set('event_type', f.event_type);
   if (f.severity) params.set('severity', f.severity);
   return params.toString();
-}
-
-// Convert date AND time together in one local-timezone call so the two never
-// disagree across a UTC midnight boundary (see web/utils.js formatDate).
-function formatTime(iso) {
-  if (!iso) return '-';
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      year: 'numeric', month: 'short', day: 'numeric',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
 }
 
 function formatDetails(details) {
@@ -56,35 +42,26 @@ function severityBadgeClass(severity) {
 }
 
 async function loadAuth() {
-  try {
-    const resp = await fetch('/api/auth/me');
-    if (resp.ok) {
-      const data = await resp.json();
-      csrfToken = data.csrf_token || null;
-    }
-  } catch {
-    /* CSRF token only needed for the Clear button; ignore. */
-  }
+  // nav.js kicks off the shared /api/auth/me at script load; awaiting
+  // daygleAuthReady here means this page never issues its own duplicate
+  // /api/auth/me on bootstrap. The promise never throws (nav.js's IIFE
+  // swallows network errors), so any auth failure here is treated as
+  // anonymous - the api() helper in utils.js redirects to /login on a
+  // real 401, matching the previous try/catch behaviour.
+  await window.daygleAuthReady;
 }
 
 async function loadEntries(offset = 0) {
   currentOffset = offset;
   try {
-    const resp = await fetch(`/api/camera-log?${buildQuery(offset)}`);
-    if (resp.status === 401) {
-      window.location.href = '/login';
-      return;
-    }
-    if (!resp.ok) {
-      window.showToast?.('Failed to load camera log: ' + resp.status, true);
-      return;
-    }
-    const data = await resp.json();
+    const data = await api(`/api/camera-log?${buildQuery(offset)}`);
     currentTotal = data.total || 0;
     renderEntries(data.entries || []);
     renderPagination();
   } catch (err) {
-    window.showToast?.('Error loading camera log', true);
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    window.showToast?.(err.message, true);
   }
 }
 
@@ -118,7 +95,7 @@ function renderEntries(entries) {
   for (const entry of entries) {
     const tr = document.createElement('tr');
     const cameraLabel = entry.camera_name || entry.camera_id || '-';
-    tr.appendChild(makeCell(formatTime(entry.created_at), { label: 'Time', noWrap: true }));
+    tr.appendChild(makeCell(formatLogTime(entry.created_at), { label: 'Time', noWrap: true }));
     tr.appendChild(makeCell(cameraLabel, { label: 'Camera' }));
     tr.appendChild(makeCell(entry.event_type || '-', { label: 'Event', code: true }));
     tr.appendChild(makeCell(entry.severity || 'info', { label: 'Severity', badge: severityBadgeClass(entry.severity) }));
@@ -129,19 +106,19 @@ function renderEntries(entries) {
 }
 
 function renderPagination() {
-  const totalPages = Math.max(1, Math.ceil(currentTotal / PAGE_SIZE));
-  const currentPage = Math.floor(currentOffset / PAGE_SIZE) + 1;
-  pagination.hidden = currentTotal <= PAGE_SIZE;
+  const totalPages = Math.max(1, Math.ceil(currentTotal / LOG_PAGE_SIZE));
+  const currentPage = Math.floor(currentOffset / LOG_PAGE_SIZE) + 1;
+  pagination.hidden = currentTotal <= LOG_PAGE_SIZE;
   pageInfo.textContent = `Page ${currentPage} of ${totalPages} (${currentTotal} total)`;
   prevBtn.disabled = currentOffset <= 0;
-  nextBtn.disabled = currentOffset + PAGE_SIZE >= currentTotal;
+  nextBtn.disabled = currentOffset + LOG_PAGE_SIZE >= currentTotal;
 }
 
 prevBtn.addEventListener('click', () => {
-  if (currentOffset > 0) loadEntries(Math.max(0, currentOffset - PAGE_SIZE));
+  if (currentOffset > 0) loadEntries(Math.max(0, currentOffset - LOG_PAGE_SIZE));
 });
 nextBtn.addEventListener('click', () => {
-  if (currentOffset + PAGE_SIZE < currentTotal) loadEntries(currentOffset + PAGE_SIZE);
+  if (currentOffset + LOG_PAGE_SIZE < currentTotal) loadEntries(currentOffset + LOG_PAGE_SIZE);
 });
 
 document.getElementById('applyFiltersBtn').addEventListener('click', () => loadEntries(0));
@@ -156,19 +133,13 @@ document.getElementById('refreshBtn').addEventListener('click', () => loadEntrie
 document.getElementById('clearLogBtn').addEventListener('click', async () => {
   if (!window.confirm('Clear all camera diagnostic events? This cannot be undone.')) return;
   try {
-    const resp = await fetch('/api/camera-log', {
-      method: 'DELETE',
-      headers: csrfToken ? { 'X-CSRF-Token': csrfToken } : {},
-    });
-    if (!resp.ok) {
-      window.showToast?.('Failed to clear camera log: ' + resp.status, true);
-      return;
-    }
-    const data = await resp.json();
+    const data = await api('/api/camera-log', { method: 'DELETE' });
     window.showToast?.(`Cleared ${data.deleted || 0} camera log event${data.deleted === 1 ? '' : 's'}.`);
     loadEntries(0);
   } catch (err) {
-    window.showToast?.('Error clearing camera log', true);
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    window.showToast?.(err.message, true);
   }
 });
 

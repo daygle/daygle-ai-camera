@@ -616,11 +616,13 @@ liveEls.saveZonesBtn?.addEventListener('click', async () => {
     cameras = payload.cameras || [];
     setSelectedCamera(cameraId);
     liveEls.status.textContent = 'Monitoring areas saved.';
-    window.showToast?.('Monitoring areas saved.');
+    window.showToast('Monitoring areas saved.');
     await refreshDetectionStatus();
   } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
     liveEls.status.textContent = error.message;
-    window.showToast?.(error.message, true);
+    window.showToast(error.message, true);
   } finally {
     liveEls.saveZonesBtn.disabled = false;
   }

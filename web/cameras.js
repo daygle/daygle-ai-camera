@@ -1,4 +1,3 @@
-let csrfToken = null;
 let cameras = [];
 let pendingDeleteIndex = null;
 
@@ -31,21 +30,14 @@ const ICON_VIEW_LIVE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="no
 function setMessage(text, isError = false) {
   messageEl.textContent = text;
   messageEl.className = isError ? 'error' : 'muted';
-  if (text) window.showToast?.(text, isError);
+  if (text) window.showToast(text, isError);
 }
 
-async function api(path, options = {}) {
-  const headers = { ...(options.headers || {}) };
-  if (csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((options.method || 'GET').toUpperCase())) {
-    headers['X-CSRF-Token'] = csrfToken;
-  }
-  if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-  const res = await fetch(path, { ...options, headers });
-  if (res.status === 401) { window.location.href = '/login'; return; }
-  const payload = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(payload.detail || `Request failed: ${res.status}`);
-  return payload;
-}
+// api() is provided by web/utils.js (loaded before this script). It throws on
+// 401 (after redirecting to /login) - callers that previously hit the silent
+// 'return;' branch on 401 still navigate away before any throw is observed.
+// The local duplicate + page-local csrfToken were removed so every page shares
+// the same fetch contract.
 
 function cameraStatusBadge(camera) {
   const url = buildDisplayUrl(camera);
@@ -360,6 +352,13 @@ editForm.addEventListener('submit', async (e) => {
   const data = collectModalData();
   const indexEl = document.getElementById('editCameraIndex').value;
   const index = indexEl === '' ? null : Number(indexEl);
+  // Snapshot local state before any optimistic mutation so the catch block
+  // can restore exactly what was there. Using captured snapshots (rather
+  // than `cameras.slice(0, -1)` or no-op `cameras = cameras`) makes the
+  // restore idempotent if the catch were to fire twice (re-entry), which
+  // would otherwise drop two add-pushes or leave an edit at the wrong value.
+  const camerasBefore = cameras.slice();
+  const editTargetBefore = index === null ? null : cameras[index];
 
   if (index === null) {
     cameras.push(data);
@@ -379,7 +378,15 @@ editForm.addEventListener('submit', async (e) => {
     closeModal(modal);
     setMessage(index === null ? 'Camera added.' : 'Camera updated.');
   } catch (err) {
-    cameras = index === null ? cameras.slice(0, -1) : cameras;
+    // splice-restore from the snapshot. Re-applying the same restore is a
+    // safe no-op, so the catch is safe under re-entry.
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    if (index === null) {
+      cameras.splice(0, cameras.length, ...camerasBefore);
+    } else {
+      cameras.splice(index, 1, editTargetBefore);
+    }
     setMessage(err.message, true);
   }
 });
@@ -397,14 +404,25 @@ function openDeleteModal(index) {
 
 document.getElementById('deleteConfirmBtn').addEventListener('click', async () => {
   if (pendingDeleteIndex === null) return;
-  cameras.splice(pendingDeleteIndex, 1);
+  // Snapshot local state + build the post-delete payload WITHOUT pre-splicing
+  // cameras. The previous ordering spliced before await, then ran api(); any
+  // PUT failure (including the now-thrown 401 from utils.js's shared api())
+  // would leave local state mutated while the server kept the camera - i.e.
+  // local and remote would diverge silently. By only committing on success,
+  // local stays consistent with whatever the server actually accepted.
+  const originalIndex = pendingDeleteIndex;
+  const camerasBefore = cameras.slice();
+  const payloadCameras = camerasBefore.slice(0, originalIndex).concat(camerasBefore.slice(originalIndex + 1));
   try {
-    const result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras }) });
-    cameras = result.cameras || cameras;
+    const result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras: payloadCameras }) });
+    cameras = result.cameras || payloadCameras;
     updateStats();
     renderGrid();
     setMessage('Camera removed.');
   } catch (err) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    // Local state was not mutated, so no restore is required - just report.
     setMessage(err.message, true);
   }
   closeModal(deleteModal);
@@ -435,6 +453,8 @@ document.getElementById('testConnectionBtn').addEventListener('click', async () 
     resultEl.textContent = result.online ? 'Connected' : (result.message || 'Unreachable');
     resultEl.style.color = result.online ? 'var(--color-success, #22c55e)' : 'var(--color-error, #ef4444)';
   } catch (err) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
     resultEl.textContent = err.message || 'Test failed';
     resultEl.style.color = 'var(--color-error, #ef4444)';
   } finally {
@@ -481,8 +501,8 @@ window.daygleDatePrefsChanged = function daygleDatePrefsChanged() { /* no-op */ 
 // ─── Load ─────────────────────────────────────────────────────────────────────
 
 async function loadCameras() {
-  const me = await api('/api/auth/me');
-  csrfToken = me.csrf_token;
+  // nav.js's daygleAuthReady IIFE has already populated window.daygleAuth.{user, csrfToken}.
+  await window.daygleAuthReady;
   const settings = await api('/api/settings/system');
   cameras = settings.cameras || (settings.camera ? [settings.camera] : []);
   updateStats();
@@ -509,6 +529,10 @@ async function updateHealthStats() {
   }
 }
 
-loadCameras().catch((err) => setMessage(err.message, true));
+loadCameras().catch((err) => {
+  // Skip UI updates if api() triggered a 401 redirect
+  if (window.daygleAuth?.redirecting) return;
+  setMessage(err.message, true);
+});
 setInterval(updateHealthStats, 10000);
 updateHealthStats();
