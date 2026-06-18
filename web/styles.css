@@ -2681,11 +2681,28 @@ a.activity-item-action {
   letter-spacing: .05em;
   color: var(--muted);
 }
-.sound-rule-field input[type="number"],
-.sound-rule-field input[type="time"] {
+.sound-rule-field input[type="number"] {
   width: 5.5rem;
   padding: 6px 8px;
   font-size: 13px;
+}
+.time-select-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.time-select-colon {
+  font-size: 13px;
+  color: var(--muted);
+  user-select: none;
+}
+.time-select-wrap select {
+  width: 3.4rem;
+  padding: 6px 4px;
+  font-size: 13px;
+}
+.time-select-wrap .time-select-ampm {
+  width: 4rem;
 }
 .sound-rule-field input[type="email"] {
   width: min(18rem, 100%);
