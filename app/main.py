@@ -3855,7 +3855,6 @@ def purge_camera_diagnostics_by_policy() -> int:
         return 0
 
 
-@app.get('/login')
 def login_page(request: Request, error: str | None = None):
     if auth_enabled and auth.users_exist() and auth.get_session(request.cookies.get(SESSION_COOKIE_NAME)):
         return RedirectResponse('/', status_code=303)
@@ -3870,7 +3869,6 @@ def login_page(request: Request, error: str | None = None):
 </form>""")
 
 
-@app.post('/login')
 async def login(request: Request):
     data = await form_data(request)
     if data.get('csrf_token') != request.cookies.get(CSRF_COOKIE):
@@ -3895,7 +3893,6 @@ async def login(request: Request):
     return response
 
 
-@app.get('/setup')
 def setup_page(request: Request, error: str | None = None):
     if auth_enabled and auth.users_exist():
         return RedirectResponse('/login', status_code=303)
@@ -3914,7 +3911,6 @@ def setup_page(request: Request, error: str | None = None):
 </form>""")
 
 
-@app.post('/setup')
 async def setup(request: Request):
     if auth.users_exist():
         return RedirectResponse('/login', status_code=303)
@@ -3937,14 +3933,12 @@ async def setup(request: Request):
     return RedirectResponse('/login', status_code=303)
 
 
-@app.get('/logout')
 def logout_get(request: Request):
     # GET logout does not delete the session to avoid CSRF via link tricks.
     # The nav uses a JS-driven POST with a CSRF token instead.
     return RedirectResponse('/login', status_code=303)
 
 
-@app.post('/logout')
 def logout_post(request: Request):
     session = require_session(request)
     if request.headers.get(CSRF_HEADER) != session['csrf_token']:
@@ -3996,7 +3990,6 @@ async def _read_uploaded_image(request: Request) -> tuple[bytes, str | None, str
     raise HTTPException(status_code=400, detail='Multipart upload must include a file field named file')
 
 
-@app.get('/')
 def root():
     index_path = web_dir / 'index.html'
     if index_path.exists():
@@ -4004,7 +3997,6 @@ def root():
     return {'application': 'Daygle AI Camera', 'status': 'running'}
 
 
-@app.get('/favicon.ico')
 def favicon():
     favicon_path = web_dir / 'favicon.svg'
     if favicon_path.exists():
@@ -4012,7 +4004,6 @@ def favicon():
     raise HTTPException(status_code=404, detail='Favicon not found')
 
 
-@app.get('/live')
 def live_page():
     live_path = web_dir / 'live.html'
     if live_path.exists():
@@ -4020,7 +4011,6 @@ def live_page():
     return root()
 
 
-@app.get('/zones')
 def zones_page():
     zones_path = web_dir / 'zones.html'
     if zones_path.exists():
@@ -4028,7 +4018,6 @@ def zones_page():
     return root()
 
 
-@app.get('/sounds')
 def sounds_page():
     sounds_path = web_dir / 'sounds.html'
     if sounds_path.exists():
@@ -4036,7 +4025,6 @@ def sounds_page():
     return root()
 
 
-@app.get('/cameras')
 def cameras_page():
     cameras_path = web_dir / 'cameras.html'
     if cameras_path.exists():
@@ -4044,14 +4032,10 @@ def cameras_page():
     return root()
 
 
-@app.get('/events')
-@app.get('/alerts')
-@app.get('/search')
 def dashboard_aliases():
     return root()
 
 
-@app.get('/recordings')
 def recordings_page():
     recordings_path = web_dir / 'recordings.html'
     if recordings_path.exists():
@@ -4059,7 +4043,6 @@ def recordings_page():
     return root()
 
 
-@app.get('/recordings/timeline')
 def recordings_timeline_page():
     timeline_path = web_dir / 'timeline.html'
     if timeline_path.exists():
@@ -4067,7 +4050,6 @@ def recordings_timeline_page():
     return root()
 
 
-@app.get('/onnx')
 def onnx_page():
     ai_path = web_dir / 'onnx.html'
     if ai_path.exists():
@@ -4075,12 +4057,10 @@ def onnx_page():
     return root()
 
 
-@app.get('/ai')
 def ai_settings_page():
     return RedirectResponse('/onnx', status_code=308)
 
 
-@app.get('/yamnet-tflite')
 def yamnet_tflite_page():
     yamnet_path = web_dir / 'yamnet-tflite.html'
     if yamnet_path.exists():
@@ -4088,12 +4068,10 @@ def yamnet_tflite_page():
     return root()
 
 
-@app.get('/yamnet')
 def yamnet_page():
     return RedirectResponse('/yamnet-tflite', status_code=308)
 
 
-@app.get('/profile')
 def profile_page():
     profile_path = web_dir / 'profile.html'
     if profile_path.exists():
@@ -4103,14 +4081,12 @@ def profile_page():
 
 
 
-@app.get('/settings')
 def system_settings_page():
     settings_path = web_dir / 'settings.html'
     if settings_path.exists():
         return FileResponse(settings_path)
     return root()
 
-@app.get('/users')
 def users_page():
     users_path = web_dir / 'users.html'
     if users_path.exists():
@@ -4118,13 +4094,11 @@ def users_page():
     return root()
 
 
-@app.get('/api/auth/me')
 def me(request: Request):
     session = require_session(request)
     return {'user': session['user'], 'csrf_token': session['csrf_token'], 'expires_at': session['expires_at']}
 
 
-@app.put('/api/profile')
 async def update_profile(request: Request):
     user = require_user(request)
     payload = await request.json()
@@ -4145,7 +4119,6 @@ async def update_profile(request: Request):
     return updated
 
 
-@app.post('/api/profile/password')
 async def change_profile_password(request: Request):
     user = require_user(request)
     payload = await request.json()
@@ -4156,7 +4129,6 @@ async def change_profile_password(request: Request):
     return {'ok': True}
 
 
-@app.get('/api/status')
 def status(camera_id: str | None = None):
     if not cameras_config:
         # Clean install: no cameras configured yet, but the app itself is up.
@@ -4197,17 +4169,14 @@ def status(camera_id: str | None = None):
     }
 
 
-@app.get('/api/status/ai')
 def ai_status():
     return ai_status_payload()
 
 
-@app.get('/api/live/detection-status')
 def live_detection_status_api(camera_id: str | None = None):
     return live_detection_status_payload(camera_id)
 
 
-@app.get('/api/live/snapshot')
 def live_snapshot(camera_id: str | None = None):
     # Serve the shared ingest's latest frame so live view does not open a second
     # RTSP connection. Detection boxes are drawn client-side from
@@ -4229,7 +4198,6 @@ def live_snapshot(camera_id: str | None = None):
     raise HTTPException(status_code=503, detail='Live snapshots require an ONVIF/RTSP camera backend.')
 
 
-@app.post('/api/detect/frame')
 async def detect_frame(request: Request):
     image_bytes, _filename, _content_type = await _read_uploaded_image(request)
     if not image_bytes:
@@ -4259,12 +4227,10 @@ async def detect_frame(request: Request):
     }
 
 
-@app.get('/api/events')
 def events(label: str | None = None, limit: int = Query(50, ge=1, le=200), alerted_only: bool = False, with_recording: bool = False):
     return database.search_events(label=label, limit=limit, alerted_only=alerted_only, with_recording=with_recording)
 
 
-@app.get('/api/events/{event_id}')
 def event_detail(event_id: int):
     event = database.get_event(event_id)
     if event is None:
@@ -4272,7 +4238,6 @@ def event_detail(event_id: int):
     return event
 
 
-@app.delete('/api/events/{event_id}')
 def delete_event(event_id: int, request: Request):
     require_admin(request)
     event = database.delete_event(event_id)
@@ -4287,7 +4252,6 @@ def delete_event(event_id: int, request: Request):
     return {'ok': True}
 
 
-@app.delete('/api/events')
 def delete_all_events(request: Request):
     require_admin(request)
     deleted = database.delete_all_events()
@@ -4295,13 +4259,11 @@ def delete_all_events(request: Request):
     return {'ok': True, 'deleted': deleted}
 
 
-@app.post('/api/events/dismiss-all')
 def dismiss_all_events_route():
     dismissed = database.dismiss_all_events()
     return {'ok': True, 'dismissed': dismissed}
 
 
-@app.post('/api/events/{event_id}/dismiss')
 def dismiss_event_route(event_id: int):
     ok = database.dismiss_event(event_id)
     if not ok:
@@ -4309,12 +4271,10 @@ def dismiss_event_route(event_id: int):
     return {'ok': True}
 
 
-@app.get('/api/alerts')
 def alert_history(limit: int = Query(25, ge=1, le=200)):
     return database.alerts(limit=limit)
 
 
-@app.delete('/api/alerts')
 def delete_all_alert_history(request: Request):
     require_admin(request)
     deleted = database.delete_all_alerts()
@@ -4322,33 +4282,28 @@ def delete_all_alert_history(request: Request):
     return {'ok': True, 'deleted': deleted}
 
 
-@app.post('/api/alerts/dismiss-all')
 def dismiss_all_alerts_route():
     dismissed = database.dismiss_all_alerts()
     return {'ok': True, 'dismissed': dismissed}
 
 
-@app.post('/api/alerts/{group_key}/dismiss')
 def dismiss_alert_group_route(group_key: str):
     dismissed = database.dismiss_alert_group(group_key)
     return {'ok': True, 'dismissed': dismissed}
 
 
-@app.get('/api/stats')
 def stats():
     result = database.stats()
     result['total_cameras'] = len(cameras_config)
     return result
 
 
-@app.delete('/api/objects')
 def delete_all_objects(request: Request):
     require_admin(request)
     deleted = database.delete_all_objects()
     return {'ok': True, 'deleted': deleted}
 
 
-@app.get('/api/config')
 def runtime_config():
     ai_state = ai_status_payload()
     ai_cfg = effective_ai_config()
@@ -4390,7 +4345,6 @@ def runtime_config():
 
 
 
-@app.get('/api/labels')
 def available_labels():
     """Return available labels for the recordings filter dropdown."""
     # Load COCO object labels
@@ -4415,7 +4369,6 @@ def available_labels():
         'sounds': sound_labels,
     }
 
-@app.get('/api/recordings')
 def recordings(
     label: str | None = None,
     camera_id: str | None = None,
@@ -4481,7 +4434,6 @@ def _recording_timeline_segment(recording: dict[str, Any], day_start: datetime, 
     }
 
 
-@app.get('/api/recordings/timeline')
 def recordings_timeline(
     camera_id: str | None = None,
     day: str | None = None,
@@ -4546,13 +4498,11 @@ def recordings_timeline(
     }
 
 
-@app.post('/api/recordings/purge')
 def purge_recordings(request: Request):
     require_admin(request)
     return purge_recordings_by_policy(force=True)
 
 
-@app.get('/api/recordings/{recording_id}')
 def recording_detail(recording_id: int):
     recording = database.get_recording(recording_id)
     if recording is None:
@@ -4578,7 +4528,6 @@ def recording_detail(recording_id: int):
     return recording
 
 
-@app.get('/api/recordings/{recording_id}/stream')
 def stream_recording(recording_id: int, request: Request):
     recording = database.get_recording(recording_id)
     if recording is None:
@@ -4633,7 +4582,6 @@ def stream_recording(recording_id: int, request: Request):
     )
 
 
-@app.get('/api/recordings/{recording_id}/download')
 def download_recording(recording_id: int):
     recording = database.get_recording(recording_id)
     if recording is None:
@@ -4654,7 +4602,6 @@ def download_recording(recording_id: int):
     )
 
 
-@app.delete('/api/recordings/{recording_id}')
 def delete_recording(recording_id: int, request: Request):
     require_admin(request)
     recording = database.delete_recording(recording_id)
@@ -4665,7 +4612,6 @@ def delete_recording(recording_id: int, request: Request):
     return {'ok': True}
 
 
-@app.delete('/api/recordings')
 def delete_all_recordings(request: Request):
     require_admin(request)
     recordings = database.delete_all_recordings()
@@ -4674,7 +4620,6 @@ def delete_all_recordings(request: Request):
     return {'ok': True, 'deleted': len(recordings)}
 
 
-@app.delete('/api/system/runtime-data')
 def delete_runtime_data(request: Request):
     require_admin(request)
     recordings = database.delete_all_recordings()
@@ -4705,13 +4650,11 @@ def delete_runtime_data(request: Request):
     return result
 
 
-@app.get('/api/users')
 def list_users(request: Request):
     require_user(request)
     return auth.list_users()
 
 
-@app.post('/api/users')
 async def create_user(request: Request):
     require_admin(request)
     payload = await request.json()
@@ -4730,7 +4673,6 @@ async def create_user(request: Request):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.patch('/api/users/{user_id}')
 async def update_user(user_id: int, request: Request):
     require_admin(request)
     payload = await request.json()
@@ -5147,7 +5089,6 @@ def apply_storage_and_recording_settings() -> None:
             logger.warning("Unexpected error deleting camera: %s", unexpected_exc)
 
 
-@app.get('/api/settings/ai')
 def get_ai_settings():
     return detector_status(effective_ai_config())
 
@@ -5177,7 +5118,6 @@ def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
     return True, last_detector_error
 
 
-@app.put('/api/settings/ai')
 async def update_ai_settings(request: Request):
     require_admin(request)
     payload = await request.json()
@@ -5191,7 +5131,6 @@ async def update_ai_settings(request: Request):
     return response
 
 
-@app.post('/api/settings/ai/reload')
 def reload_ai_detector():
     ai_settings = effective_ai_config()
     reloaded, error = reload_detector(ai_settings)
@@ -5203,7 +5142,6 @@ def reload_ai_detector():
     return response
 
 
-@app.post('/api/settings/ai/check-model')
 def check_ai_model():
     return ai_status_payload(effective_ai_config())
 
@@ -5293,7 +5231,6 @@ def _do_download_model(model_name: str, switch_active: bool = True) -> dict[str,
     }
 
 
-@app.get('/api/settings/ai/models')
 def list_ai_models():
     models_dir = BASE_DIR / 'models'
     active_path = str(effective_ai_config().get('model_path') or '')
@@ -5318,18 +5255,15 @@ def list_ai_models():
     return result
 
 
-@app.post('/api/settings/ai/download-model')
 async def download_ai_model(request: Request):
     body = await request.json()
     return _do_download_model(str(body.get('model') or '').strip().lower())
 
 
-@app.post('/api/settings/ai/download-yolov8n')
 def download_yolov8n_model():
     return _do_download_model('yolov8n')
 
 
-@app.get('/api/settings/ai/check-model-updates')
 def check_model_updates(request: Request):
     require_admin(request)
     installed_meta = _read_installed_models()
@@ -5371,7 +5305,6 @@ def check_model_updates(request: Request):
     }
 
 
-@app.post('/api/settings/ai/update-model')
 async def update_ai_model(request: Request):
     require_admin(request)
     body = await request.json()
@@ -5381,7 +5314,6 @@ async def update_ai_model(request: Request):
     return _do_download_model(model_name, switch_active=False)
 
 
-@app.post('/api/settings/ai/test-detector')
 def test_ai_detector():
     ai_settings = effective_ai_config()
     ai_state = ai_status_payload(ai_settings)
@@ -5399,12 +5331,10 @@ def test_ai_detector():
     return {'ok': ai_error is None, 'backend_used': ai_state['configured_backend'], 'detections': detections, 'status': ai_state, 'ai_error': ai_error}
 
 
-@app.get('/api/settings/alert-email')
 def get_alert_email_settings():
     return effective_email_alert_settings()
 
 
-@app.put('/api/settings/alert-email')
 async def update_alert_email_settings(request: Request):
     require_admin(request)
     payload = await request.json()
@@ -5414,7 +5344,6 @@ async def update_alert_email_settings(request: Request):
     return result
 
 
-@app.post('/api/settings/alert-email/test')
 async def test_alert_email_settings(request: Request):
     payload = await request.json()
     settings = validate_alert_email_settings(payload.get('settings') if isinstance(payload.get('settings'), dict) else payload)
@@ -5428,12 +5357,10 @@ async def test_alert_email_settings(request: Request):
     return {'ok': True, 'recipient': recipient}
 
 
-@app.get('/api/settings/alert-push')
 def get_push_notification_settings():
     return effective_push_notification_settings()
 
 
-@app.put('/api/settings/alert-push')
 async def update_push_notification_settings(request: Request):
     require_admin(request)
     payload = await request.json()
@@ -5443,7 +5370,6 @@ async def update_push_notification_settings(request: Request):
     return result
 
 
-@app.post('/api/settings/alert-push/test')
 async def test_push_notification_settings(request: Request):
     payload = await request.json()
     settings = validate_push_notification_settings(payload.get('settings') if isinstance(payload.get('settings'), dict) else payload)
@@ -5454,12 +5380,10 @@ async def test_push_notification_settings(request: Request):
     return {'ok': True}
 
 
-@app.get('/api/settings/camera-offline')
 def get_camera_offline_alert_settings():
     return effective_camera_offline_alert_settings()
 
 
-@app.put('/api/settings/camera-offline')
 async def update_camera_offline_alert_settings(request: Request):
     require_admin(request)
     payload = await request.json()
@@ -5476,7 +5400,6 @@ async def update_camera_offline_alert_settings(request: Request):
     return result
 
 
-@app.get('/api/settings/system')
 def get_system_settings():
     version_file = BASE_DIR / 'VERSION'
     current_version = version_file.read_text(encoding='utf-8').strip() if version_file.exists() else 'unknown'
@@ -5501,7 +5424,6 @@ def get_system_settings():
     }
 
 
-@app.get('/api/settings/system/database/backup')
 def backup_database(request: Request):
     require_admin(request)
     backup_path = create_database_backup()
@@ -5518,7 +5440,6 @@ def backup_database(request: Request):
     )
 
 
-@app.post('/api/settings/system/database/restore')
 async def restore_database(request: Request, file: UploadFile = File(...)):
     require_admin(request)
     filename = Path(file.filename or '').name
@@ -5568,12 +5489,10 @@ def _redact_camera(cam: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-@app.get('/api/cameras')
 def list_cameras():
     return {'cameras': [_redact_camera(c) for c in effective_cameras_config()]}
 
 
-@app.get('/api/cameras/health')
 def cameras_health():
     with _camera_health_lock:
         states = dict(_camera_health_state)
@@ -5597,7 +5516,6 @@ def cameras_health():
     }
 
 
-@app.put('/api/cameras')
 async def update_cameras(request: Request):
     require_admin(request)
     settings = validate_cameras_settings(await request.json())
@@ -5611,7 +5529,6 @@ async def update_cameras(request: Request):
     return {'cameras': [_redact_camera(c) for c in settings]}
 
 
-@app.put('/api/cameras/{camera_id}')
 async def update_camera(camera_id: str, request: Request):
     require_admin(request)
     normalized = normalize_camera_id(camera_id)
@@ -5634,7 +5551,6 @@ async def update_camera(camera_id: str, request: Request):
     return _redact_camera(created)
 
 
-@app.post('/api/cameras/test-connection')
 async def test_camera_connection(request: Request):
     require_admin(request)
     payload = await request.json()
@@ -5656,7 +5572,6 @@ async def test_camera_connection(request: Request):
         return {'online': False, 'message': 'Connection timed out (8 s). Check host, port, and credentials.'}
 
 
-@app.post('/api/cameras/{camera_id}/ptz')
 async def camera_ptz(camera_id: str, request: Request):
     require_admin(request)
     payload = await request.json()
@@ -5697,7 +5612,6 @@ async def camera_ptz(camera_id: str, request: Request):
     return {'ok': True, 'command': command}
 
 
-@app.put('/api/settings/system/live')
 async def update_live_settings(request: Request):
     require_admin(request)
     settings = validate_live_settings(await request.json())
@@ -5706,7 +5620,6 @@ async def update_live_settings(request: Request):
     return settings
 
 
-@app.put('/api/settings/system/recording')
 async def update_recording_settings(request: Request):
     require_admin(request)
     settings = validate_recording_settings(await request.json())
@@ -5716,7 +5629,6 @@ async def update_recording_settings(request: Request):
     return settings
 
 
-@app.put('/api/settings/system/storage')
 async def update_storage_settings(request: Request):
     require_admin(request)
     settings = validate_storage_settings(await request.json())
@@ -5726,7 +5638,6 @@ async def update_storage_settings(request: Request):
     return settings
 
 
-@app.put('/api/settings/system/auth')
 async def update_auth_settings(request: Request):
     require_admin(request)
     settings = validate_auth_settings(await request.json())
@@ -5741,7 +5652,6 @@ def _current_version() -> str:
     return version_file.read_text(encoding='utf-8').strip() if version_file.exists() else 'unknown'
 
 
-@app.get('/api/update/check')
 def check_update(request: Request):
     require_admin(request)
     current_version = _current_version()
@@ -5777,7 +5687,6 @@ def check_update(request: Request):
         return {'current_version': current_version, 'latest_version': None, 'update_available': False, 'error': str(exc)}
 
 
-@app.post('/api/update/apply')
 def apply_update(request: Request):
     global _update_in_progress
     require_admin(request)
@@ -5847,7 +5756,6 @@ def apply_update(request: Request):
     }
 
 
-@app.get('/api/audit')
 def list_audit_log(
     request: Request,
     limit: int = Query(50, ge=1, le=200),
@@ -5862,7 +5770,6 @@ def list_audit_log(
     return {'entries': entries, 'total': total, 'limit': limit, 'offset': offset}
 
 
-@app.get('/audit')
 def audit_page():
     audit_path = web_dir / 'audit.html'
     if audit_path.exists():
@@ -5870,7 +5777,6 @@ def audit_page():
     return root()
 
 
-@app.get('/api/camera-log')
 def list_camera_log(
     request: Request,
     limit: int = Query(50, ge=1, le=200),
@@ -5890,7 +5796,6 @@ def list_camera_log(
     return {'entries': entries, 'total': total, 'limit': limit, 'offset': offset}
 
 
-@app.delete('/api/camera-log')
 def clear_camera_log(request: Request):
     require_admin(request)
     deleted = database.delete_all_camera_diagnostics()
@@ -5898,7 +5803,6 @@ def clear_camera_log(request: Request):
     return {'ok': True, 'deleted': deleted}
 
 
-@app.get('/camera-log')
 def camera_log_page():
     page_path = web_dir / 'camera-log.html'
     if page_path.exists():
@@ -5911,6 +5815,8 @@ def camera_log_page():
 # the router modules do their top-level import app.main as main.
 from app.api.sound_router import router as sound_router
 app.include_router(sound_router)
+from app.api.settings_ai_router import router as settings_ai_router
+app.include_router(settings_ai_router)
 
 if __name__ == '__main__':
     import uvicorn
