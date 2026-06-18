@@ -909,8 +909,11 @@ class RecordingService:
         # Open once and use fstat so the mtime and bytes come from the same
         # inode — eliminates the TOCTOU race between a separate stat() and
         # read_bytes() when ffmpeg atomically renames a new frame into place.
+        # O_BINARY forces binary mode on Windows; without it os.open defaults to
+        # text mode and reads stop at the first 0x1A (Ctrl-Z) byte, silently
+        # truncating any JPEG stream that contains one early in its bytes.
         try:
-            fd = os.open(str(path), os.O_RDONLY)
+            fd = os.open(str(path), os.O_RDONLY | getattr(os, 'O_BINARY', 0))
         except OSError:
             return None
         try:
