@@ -959,12 +959,13 @@ async function loadConfiguredLabels() {
   }
 }
 
-els.timelineLoadBtn.addEventListener('click', () => {loadTimeline({ preserveSelection: false }).catch((error) => {
-  // Skip UI updates if api() triggered a 401 redirect
-  if (window.daygleAuth?.redirecting) return;
-  els.timelineStatus.textContent = error.message;
-  setTimelineStatusChip({ kind: 'error', label: 'Error' });
-});
+els.timelineLoadBtn.addEventListener('click', () => {
+  loadTimeline({ preserveSelection: false }).catch((error) => {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    els.timelineStatus.textContent = error.message;
+    setTimelineStatusChip({ kind: 'error', label: 'Error' });
+  });
 });
 
 // "Now" shortcut: set Day=today, From=00:00, To=current local time, then reload.
@@ -975,70 +976,78 @@ els.timelineNowBtn?.addEventListener('click', () => {
   const mm = String(now.getMinutes()).padStart(2, '0');
   els.timelineDate.value = today;
   els.fromTime.value = '00:00';
-  els.toTime.value = `${hh}:${mm}`;loadTimeline({ preserveSelection: false }).catch((error) => {
-  // Skip UI updates if api() triggered a 401 redirect
-  if (window.daygleAuth?.redirecting) return;
-  els.timelineStatus.textContent = error.message;
-  setTimelineStatusChip({ kind: 'error', label: 'Error' });
-});
-});
-
-els.cameraSelect.addEventListener('change', () => {loadTimeline({ preserveSelection: false }).catch((error) => {
-  // Skip UI updates if api() triggered a 401 redirect
-  if (window.daygleAuth?.redirecting) return;
-  els.timelineStatus.textContent = error.message;
-  setTimelineStatusChip({ kind: 'error', label: 'Error' });
-});
+  els.toTime.value = `${hh}:${mm}`;
+  loadTimeline({ preserveSelection: false }).catch((error) => {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    els.timelineStatus.textContent = error.message;
+    setTimelineStatusChip({ kind: 'error', label: 'Error' });
+  });
 });
 
-els.timelineDate.addEventListener('change', () => {loadTimeline({ preserveSelection: false }).catch((error) => {
-  // Skip UI updates if api() triggered a 401 redirect
-  if (window.daygleAuth?.redirecting) return;
-  els.timelineStatus.textContent = error.message;
-  setTimelineStatusChip({ kind: 'error', label: 'Error' });
-});
-});
-
-els.filterSelect.addEventListener('change', () => {renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
-  // Skip UI updates if api() triggered a 401 redirect
-  if (window.daygleAuth?.redirecting) return;
-  els.timelineStatus.textContent = error.message;
-  setTimelineStatusChip({ kind: 'error', label: 'Error' });
-});
+els.cameraSelect.addEventListener('change', () => {
+  loadTimeline({ preserveSelection: false }).catch((error) => {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    els.timelineStatus.textContent = error.message;
+    setTimelineStatusChip({ kind: 'error', label: 'Error' });
+  });
 });
 
-els.fromTime.addEventListener('change', () => {renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
-  // Skip UI updates if api() triggered a 401 redirect
-  if (window.daygleAuth?.redirecting) return;
-  els.timelineStatus.textContent = error.message;
-  setTimelineStatusChip({ kind: 'error', label: 'Error' });
-});
+els.timelineDate.addEventListener('change', () => {
+  loadTimeline({ preserveSelection: false }).catch((error) => {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    els.timelineStatus.textContent = error.message;
+    setTimelineStatusChip({ kind: 'error', label: 'Error' });
+  });
 });
 
-els.toTime.addEventListener('change', () => {renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
-  // Skip UI updates if api() triggered a 401 redirect
-  if (window.daygleAuth?.redirecting) return;
-  els.timelineStatus.textContent = error.message;
-  setTimelineStatusChip({ kind: 'error', label: 'Error' });
+els.filterSelect.addEventListener('change', () => {
+  renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    els.timelineStatus.textContent = error.message;
+    setTimelineStatusChip({ kind: 'error', label: 'Error' });
+  });
 });
+
+els.fromTime.addEventListener('change', () => {
+  renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    els.timelineStatus.textContent = error.message;
+    setTimelineStatusChip({ kind: 'error', label: 'Error' });
+  });
+});
+
+els.toTime.addEventListener('change', () => {
+  renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    els.timelineStatus.textContent = error.message;
+    setTimelineStatusChip({ kind: 'error', label: 'Error' });
+  });
 });
 
 els.timelineRows.addEventListener('click', (event) => {
   const button = event.target.closest('[data-recording-id]');
-  if (!button) return;playRecording(button.dataset.recordingId).catch((error) => {
-  // Skip UI updates if api() triggered a 401 redirect
-  if (window.daygleAuth?.redirecting) return;
-  els.clipPlayerStatus.textContent = error.message;
-});
+  if (!button) return;
+  playRecording(button.dataset.recordingId).catch((error) => {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    els.clipPlayerStatus.textContent = error.message;
+  });
 });
 
 els.timelineRecordings.addEventListener('click', (event) => {
   const button = event.target.closest('[data-recording-id]');
-  if (!button) return;playRecording(button.dataset.recordingId).catch((error) => {
-  // Skip UI updates if api() triggered a 401 redirect
-  if (window.daygleAuth?.redirecting) return;
-  els.clipPlayerStatus.textContent = error.message;
-});
+  if (!button) return;
+  playRecording(button.dataset.recordingId).catch((error) => {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    els.clipPlayerStatus.textContent = error.message;
+  });
 });
 
 els.videoModalClose.addEventListener('click', () => clearPlayback());
@@ -1130,10 +1139,11 @@ loadAuth().then(async () => {
 // currently selected camera / day / filter / time range so the user keeps
 // what they were looking at - only the rendered formatting changes.
 window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
-  if (typeof loadTimeline !== 'function' || !state || !state.payload) return;loadTimeline({ preserveSelection: true }).catch((error) => {
-  // Skip UI updates if api() triggered a 401 redirect
-  if (window.daygleAuth?.redirecting) return;
-  els.timelineStatus.textContent = error.message;
-  setTimelineStatusChip({ kind: 'error', label: 'Error' });
-});
+  if (typeof loadTimeline !== 'function' || !state || !state.payload) return;
+  loadTimeline({ preserveSelection: true }).catch((error) => {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    els.timelineStatus.textContent = error.message;
+    setTimelineStatusChip({ kind: 'error', label: 'Error' });
+  });
 };
