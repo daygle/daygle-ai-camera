@@ -335,6 +335,40 @@ _sound_detectors_lock = threading.Lock()
 _sound_statuses: dict[str, dict[str, Any]] = {}
 _sound_statuses_lock = threading.Lock()
 
+def _sound_status_reason(diagnostics: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Pick the single most relevant class to explain the current listening state.
+
+    Mirrors how the live object status surfaces an alert reason: prefer the
+    loudest class at/above its threshold (would alert, possibly held back by
+    cooldown), otherwise the loudest class heard below threshold. Returns None
+    when nothing notable is being heard.
+
+    Kept here (and not solely on app.api.sound_router) so tests that do
+    ``import app.main as main; main._sound_status_reason(...)`` keep working.
+    """
+    if not diagnostics:
+        return None
+    above = [d for d in diagnostics if d['confidence'] > 0 and d['confidence'] >= d['threshold']]
+    if above:
+        top = above[0]
+        code = 'cooldown' if top['in_cooldown'] else 'detected'
+    else:
+        below = [d for d in diagnostics if 0 < d['confidence'] < d['threshold']]
+        if not below:
+            return None
+        top = below[0]
+        code = 'below_threshold'
+    return {
+        'code': code,
+        'class': top['class'],
+        'class_label': top['label'],
+        'confidence': top['confidence'],
+        'threshold': top['threshold'],
+        'cooldown_remaining': top['cooldown_remaining'],
+    }
+
+
+
 # ── Camera offline alert health tracking ─────────────────────────────────
 _camera_health_state: dict[str, dict[str, Any]] = {}
 _camera_health_lock = threading.Lock()
@@ -5442,106 +5476,6 @@ async def update_camera_offline_alert_settings(request: Request):
     return result
 
 
-@app.get('/api/sound/classes')
-def list_sound_classes():
-    return {
-        'classes': [
-            {
-                'id': class_id,
-                'label': meta['label'],
-                'description': meta['description'],
-                'default_threshold': meta['default_threshold'],
-                'default_cooldown': meta['default_cooldown'],
-            }
-            for class_id, meta in SOUND_CLASSES.items()
-        ]
-    }
-
-
-def _sound_status_reason(diagnostics: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Pick the single most relevant class to explain the current listening
-    state, mirroring how the live object status surfaces an alert reason.
-
-    Prefers the loudest class at/above its threshold (it would alert, but may be
-    held back by cooldown); otherwise the loudest class heard below threshold.
-    Returns None when nothing notable is being heard.
-    """
-    if not diagnostics:
-        return None
-    above = [d for d in diagnostics if d['confidence'] > 0 and d['confidence'] >= d['threshold']]
-    if above:
-        top = above[0]  # diagnostics already sorted by confidence, highest first
-        code = 'cooldown' if top['in_cooldown'] else 'detected'
-    else:
-        below = [d for d in diagnostics if 0 < d['confidence'] < d['threshold']]
-        if not below:
-            return None
-        top = below[0]
-        code = 'below_threshold'
-    return {
-        'code': code,
-        'class': top['class'],
-        'class_label': top['label'],
-        'confidence': top['confidence'],
-        'threshold': top['threshold'],
-        'cooldown_remaining': top['cooldown_remaining'],
-    }
-
-
-@app.get('/api/sound/status')
-def get_sound_status(camera_id: str | None = Query(None)):
-    with _sound_statuses_lock:
-        if camera_id:
-            status = dict(_sound_statuses.get(camera_id, {'state': 'disabled', 'last_detected_at': None, 'last_confidence': 0.0, 'backend': None}))
-        else:
-            statuses = dict(_sound_statuses)
-
-    if camera_id:
-        with _sound_detectors_lock:
-            det = _sound_detectors.get(camera_id)
-        if det is not None:
-            status['running'] = det.running
-            status['detector_status'] = det.status
-            status['backend'] = det.backend
-            status['backend_reason'] = det.backend_reason
-            status['last_confidences'] = {k: round(v, 3) for k, v in det.last_confidences().items()}
-            diagnostics = det.diagnostics()
-            status['diagnostics'] = diagnostics
-            reason = _sound_status_reason(diagnostics)
-            if reason:
-                status['reason'] = reason
-        else:
-            status['running'] = False
-            status['detector_status'] = status.get('state', 'stopped')
-            status['last_confidences'] = {}
-        return status
-
-    with _sound_detectors_lock:
-        detectors = list(_sound_detectors.values())
-
-    if not statuses:
-        return {'state': 'disabled', 'running': False, 'detector_status': 'disabled', 'last_confidences': {}}
-    most_recent: dict[str, Any] = {}
-    most_recent_at: str | None = None
-    for s in statuses.values():
-        detected_at = s.get('last_detected_at')
-        if detected_at and (most_recent_at is None or detected_at > most_recent_at):
-            most_recent = s
-            most_recent_at = detected_at
-    if not most_recent:
-        most_recent = next(iter(statuses.values()))
-    result = dict(most_recent)
-    running_detectors = [det for det in detectors if det.running]
-    representative = running_detectors[0] if running_detectors else (detectors[0] if detectors else None)
-    result['running'] = bool(running_detectors) or any(s.get('state') == 'listening' for s in statuses.values())
-    result['detector_status'] = most_recent.get('state', 'stopped')
-    if representative is not None:
-        result['backend'] = representative.backend
-        result['backend_reason'] = representative.backend_reason
-    result['last_confidences'] = {}
-    return result
-
-
 @app.get('/api/settings/system')
 def get_system_settings():
     version_file = BASE_DIR / 'VERSION'
@@ -5971,6 +5905,12 @@ def camera_log_page():
         return FileResponse(page_path)
     return root()
 
+
+# --- Routers extracted from main.py ---
+# Imported at the bottom so globals in app.main are populated before
+# the router modules do their top-level import app.main as main.
+from app.api.sound_router import router as sound_router
+app.include_router(sound_router)
 
 if __name__ == '__main__':
     import uvicorn

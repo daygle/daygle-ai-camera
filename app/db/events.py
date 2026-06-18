@@ -1,0 +1,244 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+from typing import Any
+
+
+class EventsMixin:
+    """CRUD + query helpers for the ``events`` and ``detections`` tables.
+
+    Lives in app.db.events so the EventDatabase class in app.database.py stays
+    small. Public method names + signatures are unchanged; any method already on
+    EventDatabase is still callable with the same arguments.
+    """
+
+    def add_event(
+        self,
+        created_at: str,
+        source: str,
+        snapshot_path: str | None,
+        detections: list[dict[str, Any]],
+        alert_triggered: bool = False,
+        metadata: dict[str, Any] | None = None,
+    ) -> int:
+        with self.connect() as db:
+            cursor = db.execute(
+                """
+                INSERT INTO events (created_at, source, snapshot_path, alert_triggered, metadata)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (created_at, source, snapshot_path, int(alert_triggered), json.dumps(metadata or {})),
+            )
+            if cursor.lastrowid is None:
+                raise RuntimeError("Failed to create event row")
+            event_id = cursor.lastrowid
+            for detection in detections:
+                box = detection.get("box", {})
+                db.execute(
+                    """
+                    INSERT INTO detections (event_id, label, confidence, x, y, width, height, zone_name)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event_id,
+                        detection["label"],
+                        float(detection["confidence"]),
+                        float(box.get("x", 0)),
+                        float(box.get("y", 0)),
+                        float(box.get("width", 0)),
+                        float(box.get("height", 0)),
+                        detection.get("zone_name") or None,
+                    ),
+                )
+            return event_id
+
+    def delete_event(self, event_id: int) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+            if row is None:
+                return None
+            event = dict(row)
+            event["metadata"] = json.loads(event.get("metadata") or "{}")
+            db.execute("DELETE FROM events WHERE id = ?", (event_id,))
+            return event
+
+    def delete_all_events(self) -> int:
+        with self.connect() as db:
+            count = db.execute("SELECT COUNT(*) AS count FROM events").fetchone()["count"]
+            db.execute("DELETE FROM events")
+            return int(count)
+
+    def search_events(self, label: str | None = None, limit: int = 50, alerted_only: bool = False, with_recording: bool = False) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            alert_filter = """
+                AND EXISTS (
+                    SELECT 1
+                    FROM alert_history ah
+                    WHERE ah.event_id = e.id
+                )
+            """
+            recording_condition = """
+                (
+                    EXISTS (SELECT 1 FROM recordings WHERE recordings.event_id = e.id)
+                    OR EXISTS (
+                        SELECT 1
+                        FROM alert_history ah
+                        JOIN recordings r ON r.id = ah.recording_id
+                        WHERE ah.event_id = e.id
+                    )
+                )
+            """
+            recording_filter = f"AND {recording_condition}"
+            if label:
+                rows = db.execute(
+                    f"""
+                    SELECT DISTINCT e.* FROM events e
+                    JOIN detections d ON d.event_id = e.id
+                    WHERE d.label = ?
+                    AND e.dismissed = 0
+                    {alert_filter if alerted_only else ''}
+                    {recording_filter if with_recording else ''}
+                    ORDER BY e.created_at DESC
+                    LIMIT ?
+                    """,
+                    (label, limit),
+                ).fetchall()
+            elif alerted_only:
+                rows = db.execute(
+                    f"""
+                    SELECT e.* FROM events e
+                    WHERE e.dismissed = 0
+                    AND EXISTS (
+                        SELECT 1
+                        FROM alert_history ah
+                        WHERE ah.event_id = e.id
+                    )
+                    {recording_filter if with_recording else ''}
+                    ORDER BY e.created_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+            elif with_recording:
+                rows = db.execute(
+                    f"""
+                    SELECT e.* FROM events e
+                    WHERE e.dismissed = 0
+                    AND {recording_condition}
+                    ORDER BY e.created_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+            else:
+                rows = db.execute("SELECT * FROM events WHERE dismissed = 0 ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+
+            return [self._event_with_detections(db, row) for row in rows]
+
+    def get_event(self, event_id: int) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+            if row is None:
+                return None
+            return self._event_with_detections(db, row)
+
+    def stats(self) -> dict[str, Any]:
+        with self.connect() as db:
+            total_events = db.execute("SELECT COUNT(*) AS count FROM events").fetchone()["count"]
+            total_alerts = db.execute("SELECT COUNT(*) AS count FROM alert_history").fetchone()["count"]
+            sound_detection_events = db.execute(
+                "SELECT COUNT(*) AS count FROM events WHERE source = 'sound'"
+            ).fetchone()["count"]
+            matched_object_events = db.execute(
+                """
+                SELECT COUNT(DISTINCT e.id) AS count
+                FROM detections d
+                JOIN events e ON e.id = d.event_id
+                WHERE d.label != 'motion'
+                  AND e.source != 'sound'
+                  AND (
+                      EXISTS (SELECT 1 FROM recordings WHERE recordings.event_id = e.id)
+                      OR EXISTS (
+                          SELECT 1 FROM alert_history ah
+                          JOIN recordings r ON r.id = ah.recording_id
+                          WHERE ah.event_id = e.id
+                      )
+                  )
+                """
+            ).fetchone()["count"]
+            object_alerts = db.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM alert_history
+                WHERE event_id IS NULL
+                   OR event_id NOT IN (SELECT id FROM events WHERE source = 'sound')
+                """
+            ).fetchone()["count"]
+            sound_alerts = db.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM alert_history
+                WHERE event_id IN (SELECT id FROM events WHERE source = 'sound')
+                """
+            ).fetchone()["count"]
+            labels = db.execute(
+                """
+                SELECT label, COUNT(*) AS count, MAX(confidence) AS max_confidence
+                FROM detections
+                GROUP BY label
+                ORDER BY count DESC
+                """
+            ).fetchall()
+            return {
+                "total_events": total_events,
+                "total_alerts": total_alerts,
+                "matched_object_events": matched_object_events,
+                "sound_detection_events": sound_detection_events,
+                "object_alerts": object_alerts,
+                "sound_alerts": sound_alerts,
+                "objects": [dict(row) for row in labels],
+            }
+
+    def dismiss_event(self, event_id: int) -> bool:
+        with self.connect() as db:
+            cursor = db.execute("UPDATE events SET dismissed = 1 WHERE id = ?", (event_id,))
+            return cursor.rowcount > 0
+
+    def dismiss_all_events(self) -> int:
+        with self.connect() as db:
+            cursor = db.execute("UPDATE events SET dismissed = 1 WHERE dismissed = 0")
+            return cursor.rowcount
+
+    def _event_with_detections(self, db: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+        # Cross-mixin helpers from RecordingsMixin: reached via MRO since
+        # EventDatabase inherits both EventsMixin and RecordingsMixin.
+        detections = db.execute("SELECT * FROM detections WHERE event_id = ? ORDER BY confidence DESC", (row["id"],)).fetchall()
+        recordings = db.execute(
+            """
+            SELECT DISTINCT r.*
+            FROM recordings r
+            WHERE r.event_id = ?
+               OR r.id IN (
+                    SELECT ah.recording_id
+                    FROM alert_history ah
+                    WHERE ah.event_id = ?
+                      AND ah.recording_id IS NOT NULL
+               )
+            ORDER BY r.started_at DESC
+            """,
+            (row["id"], row["id"]),
+        ).fetchall()
+        event = dict(row)
+        event["metadata"] = json.loads(event.get("metadata") or "{}")
+        event["detections"] = [dict(detection) for detection in detections]
+        event["recordings"] = [self._recording_row(recording) for recording in recordings]
+        if event["recordings"]:
+            label_map, confidence_map = self._fetch_labels_for_recordings(db, [int(rec["id"]) for rec in event["recordings"]])
+            for recording in event["recordings"]:
+                recording["labels"] = label_map.get(int(recording["id"]), [])
+                recording["label_confidences"] = confidence_map.get(int(recording["id"]), {})
+        else:
+            event["recordings"] = []
+        event["recording_status"] = "linked" if recordings else "none"
+        return event
