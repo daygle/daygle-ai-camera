@@ -343,41 +343,42 @@ def test_dashboard_aliases_dispatch_to_dashboard_shell_over_http(
     delegation works at the response-body level.
     """
     app, _database_path = _load_app(tmp_path, monkeypatch)
-    server, _thread, base_url = _server(app)
+    _server_obj, _thread, base_url = _server(app)
     client = LocalClient(base_url)
-    try:
-        # Bootstrap to a logged-in state.
-        _setup_admin(client)
-        _login(client)
+    # NOTE: tests/test_api.py's _server helper starts the uvicorn
+    # ``Server`` in a ``daemon=True`` thread. The codebase convention
+    # is to NOT explicitly shut it down between tests -- the thread
+    # dies at pytest process exit. An explicit ``server.shutdown()``
+    # would fire a RuntimeWarning because ``uvicorn.Server.shutdown``
+    # is an async coroutine and the test is sync. We follow the
+    # convention: ``_server_obj`` and ``_thread`` are intentionally
+    # retained only as locals so a future maintainer can plumb an
+    # async shutdown in if they wish.
+    _setup_admin(client)
+    _login(client)
 
-        # GET / -- the dashboard shell that dashboard_aliases delegates to.
-        root_status, root_headers, root_body = client.request("/")
-        assert root_status == 200, (
-            f"GET / should return 200 after login (dashboard shell) "
-            f"but got {root_status}"
+    # GET / -- the dashboard shell that dashboard_aliases delegates to.
+    root_status, root_headers, root_body = client.request("/")
+    assert root_status == 200, (
+        f"GET / should return 200 after login (dashboard shell) "
+        f"but got {root_status}"
+    )
+    root_content_type = LocalClient.header(root_headers, "Content-Type")
+
+    # Each dashboard_aliases path -- should be BYTE-IDENTICAL to /.
+    for path in ("/alerts", "/events", "/search"):
+        status, headers, body = client.request(path)
+        assert status == 200, (
+            f"GET {path} should return 200 after login but got {status}"
         )
-        root_content_type = LocalClient.header(root_headers, "Content-Type")
-
-        # Each dashboard_aliases path -- should be BYTE-IDENTICAL to /.
-        for path in ("/alerts", "/events", "/search"):
-            status, headers, body = client.request(path)
-            assert status == 200, (
-                f"GET {path} should return 200 after login but got {status}"
-            )
-            content_type = LocalClient.header(headers, "Content-Type")
-            assert content_type == root_content_type, (
-                f"GET {path} Content-Type ({content_type!r}) differs "
-                f"from GET / ({root_content_type!r}); "
-                f"dashboard_aliases delegation drift"
-            )
-            assert body == root_body, (
-                f"GET {path} body differs from GET /; "
-                f"dashboard_aliases delegation drift -- the three "
-                f"decorator paths must serve identical content"
-            )
-    finally:
-        # Best-effort shutdown of the uvicorn server. ``_server``
-        # returns a ``server`` object whose ``shutdown`` is safe to call.
-        shutdown = getattr(server, "shutdown", None)
-        if callable(shutdown):
-            shutdown()
+        content_type = LocalClient.header(headers, "Content-Type")
+        assert content_type == root_content_type, (
+            f"GET {path} Content-Type ({content_type!r}) differs "
+            f"from GET / ({root_content_type!r}); "
+            f"dashboard_aliases delegation drift"
+        )
+        assert body == root_body, (
+            f"GET {path} body differs from GET /; "
+            f"dashboard_aliases delegation drift -- the three "
+            f"decorator paths must serve identical content"
+        )
