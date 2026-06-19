@@ -2773,27 +2773,6 @@ def me(request: Request):
     session = require_session(request)
     return {'user': session['user'], 'csrf_token': session['csrf_token'], 'expires_at': session['expires_at']}
 
-@app.put('/api/profile')
-async def update_profile(request: Request):
-    user = require_user(request)
-    payload = await request.json()
-    try:
-        updated = auth.update_profile(int(user['id']), username=payload.get('username'), first_name=payload.get('first_name'), last_name=payload.get('last_name'), email=payload.get('email'), timezone_name=payload.get('timezone'), date_format=payload.get('date_format'), time_format=payload.get('time_format'))
-    except AuthError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    request.state.user = updated
-    return updated
-
-@app.post('/api/profile/password')
-async def change_profile_password(request: Request):
-    user = require_user(request)
-    payload = await request.json()
-    try:
-        auth.change_password(int(user['id']), str(payload.get('current_password') or ''), str(payload.get('new_password') or ''))
-    except AuthError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {'ok': True}
-
 @app.get('/api/status')
 def status(camera_id: str | None=None):
     if not cameras_config:
@@ -2927,40 +2906,6 @@ def delete_runtime_data(request: Request):
     result = {'ok': True, 'deleted': {'recordings': len(recordings), 'events': deleted_events, 'alerts': deleted_alerts, 'objects': deleted_objects, 'camera_diagnostics': deleted_diagnostics, 'snapshot_files': deleted_snapshots, 'event_artifacts': deleted_event_artifacts}, 'preserved': ['settings', 'users', 'sessions', 'rules']}
     write_audit_log(request, 'delete_all', 'runtime_data', details=result['deleted'])
     return result
-
-@app.get('/api/users')
-def list_users(request: Request):
-    require_user(request)
-    return auth.list_users()
-
-@app.post('/api/users')
-async def create_user(request: Request):
-    require_admin(request)
-    payload = await request.json()
-    try:
-        user = auth.create_user(payload.get('username', ''), payload.get('password', ''), payload.get('role', 'viewer'), first_name=payload.get('first_name', ''), last_name=payload.get('last_name', ''), email=payload.get('email', ''))
-        write_audit_log(request, 'create', 'user', user['id'], {'username': user['username'], 'role': user['role']})
-        return user
-    except AuthError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-@app.patch('/api/users/{user_id}')
-async def update_user(user_id: int, request: Request):
-    require_admin(request)
-    payload = await request.json()
-    changes: dict[str, Any] = {}
-    if 'role' in payload:
-        changes['role'] = payload['role']
-    if 'is_active' in payload:
-        changes['is_active'] = payload['is_active']
-    if 'password' in payload:
-        changes['password_changed'] = True
-    try:
-        user = auth.update_user(user_id, role=payload.get('role'), is_active=payload.get('is_active'), password=payload.get('password'))
-        write_audit_log(request, 'update', 'user', user_id, {'target_username': user.get('username'), **changes})
-        return user
-    except AuthError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_ai_config()
@@ -3635,9 +3580,11 @@ if __name__ == '__main__':
     uvicorn.run('app.main:app', host=server_config.get('host', '0.0.0.0'), port=int(server_config.get('port', 8080)), reload=False)
 from app.api.cameras_router import router as cameras_router
 app.include_router(cameras_router)
-
-# Routers extracted from main.py: events + alerts (Phase 5)
 from app.api.events_router import router as events_router
 app.include_router(events_router)
 from app.api.alerts_router import router as alerts_router
 app.include_router(alerts_router)
+
+# Routers extracted from main.py: users + profile (Phase 6)
+from app.api.users_router import router as users_router
+app.include_router(users_router)
