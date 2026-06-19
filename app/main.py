@@ -2561,74 +2561,6 @@ def purge_camera_diagnostics_by_policy() -> int:
         logger.debug('Camera diagnostics purge failed: %s', exc)
         return 0
 
-@app.get('/login')
-def login_page(request: Request, error: str | None=None):
-    if auth_enabled and auth.users_exist() and auth.get_session(request.cookies.get(SESSION_COOKIE_NAME)):
-        return RedirectResponse('/', status_code=303)
-    error_html = f'<p class="error">{escape(error)}</p>' if error else ''
-    return csrf_token_response(request, 'Login', f'\n<h1>Sign In</h1><p class="muted">Enter your Daygle AI Camera credentials.</p>{error_html}\n<form class="form-stack" method="post" action="/login">\n  <input type="hidden" name="csrf_token" value="{{csrf}}" />\n  <label>Username<input name="username" autocomplete="username" required /></label>\n  <label>Password<input name="password" type="password" autocomplete="current-password" required /></label>\n  <button class="primary" type="submit">Sign In</button>\n</form>')
-
-@app.post('/login')
-async def login(request: Request):
-    data = await form_data(request)
-    if data.get('csrf_token') != request.cookies.get(CSRF_COOKIE):
-        return login_page(request, 'Security token expired. Try again.')
-    username = data.get('username', '')
-    ip = _request_ip(request)
-    try:
-        _user, token, _csrf_token, expires_at = auth.authenticate(username, data.get('password', ''), ip)
-    except AuthError as exc:
-        try:
-            database.add_audit_log(created_at=utc_now(), user_id=None, username=username, action='login', resource='session', ip_address=ip, status='failed', details={'reason': str(exc)})
-        except Exception as unexpected_exc:
-            logger.warning('Unexpected error during login callback: %s', unexpected_exc)
-        return login_page(request, str(exc))
-    try:
-        database.add_audit_log(created_at=utc_now(), user_id=int(_user['id']), username=str(_user['username']), action='login', resource='session', ip_address=ip, status='success')
-    except Exception as unexpected_exc:
-        logger.warning('Unexpected error during login: %s', unexpected_exc)
-    response = RedirectResponse('/', status_code=303)
-    set_session_cookie(response, request, token, expires_at)
-    response.delete_cookie(CSRF_COOKIE)
-    return response
-
-@app.get('/setup')
-def setup_page(request: Request, error: str | None=None):
-    if auth_enabled and auth.users_exist():
-        return RedirectResponse('/login', status_code=303)
-    error_html = f'<p class="error">{escape(error)}</p>' if error else ''
-    return csrf_token_response(request, 'Initial setup', f'\n<h1>Create administrator</h1><p class="muted">This one-time setup is disabled after the first user is created.</p>{error_html}\n<form class="form-stack" method="post" action="/setup">\n  <input type="hidden" name="csrf_token" value="{{csrf}}" />\n  <label>First name<input name="first_name" autocomplete="given-name" /></label>\n  <label>Last name<input name="last_name" autocomplete="family-name" /></label>\n  <label>Email<input name="email" type="email" autocomplete="email" /></label>\n  <label>Username<input name="username" value="admin" autocomplete="username" required /></label>\n  <label>Password<input name="password" type="password" autocomplete="new-password" required /></label>\n  <label>Confirm password<input name="confirm_password" type="password" autocomplete="new-password" required /></label>\n  <button class="primary" type="submit">Create Admin Account</button>\n</form>')
-
-@app.post('/setup')
-async def setup(request: Request):
-    if auth.users_exist():
-        return RedirectResponse('/login', status_code=303)
-    data = await form_data(request)
-    if data.get('csrf_token') != request.cookies.get(CSRF_COOKIE):
-        return setup_page(request, 'Security token expired. Try again.')
-    if data.get('password') != data.get('confirm_password'):
-        return setup_page(request, 'Passwords do not match.')
-    try:
-        auth.create_user(data.get('username', ''), data.get('password', ''), role='admin', first_name=data.get('first_name', ''), last_name=data.get('last_name', ''), email=data.get('email', ''))
-    except AuthError as exc:
-        return setup_page(request, str(exc))
-    return RedirectResponse('/login', status_code=303)
-
-@app.get('/logout')
-def logout_get(request: Request):
-    return RedirectResponse('/login', status_code=303)
-
-@app.post('/logout')
-def logout_post(request: Request):
-    session = require_session(request)
-    if request.headers.get(CSRF_HEADER) != session['csrf_token']:
-        return JSONResponse({'detail': 'CSRF token missing or invalid'}, status_code=403)
-    write_audit_log(request, 'logout', 'session')
-    auth.delete_session(request.cookies.get(SESSION_COOKIE_NAME))
-    response = JSONResponse({'ok': True})
-    clear_auth_cookies(response)
-    return response
-
 def _parse_header_value(header: str, key: str) -> str | None:
     for part in header.split(';'):
         part = part.strip()
@@ -2662,111 +2594,6 @@ async def _read_uploaded_image(request: Request) -> tuple[bytes, str | None, str
             payload = payload[:-2]
         return (payload, filename, uploaded_type)
     raise HTTPException(status_code=400, detail='Multipart upload must include a file field named file')
-
-@app.get('/')
-def root():
-    index_path = web_dir / 'index.html'
-    if index_path.exists():
-        return FileResponse(index_path)
-    return {'application': 'Daygle AI Camera', 'status': 'running'}
-
-@app.get('/favicon.ico')
-def favicon():
-    favicon_path = web_dir / 'favicon.svg'
-    if favicon_path.exists():
-        return FileResponse(favicon_path, media_type='image/svg+xml')
-    raise HTTPException(status_code=404, detail='Favicon not found')
-
-@app.get('/live')
-def live_page():
-    live_path = web_dir / 'live.html'
-    if live_path.exists():
-        return FileResponse(live_path)
-    return root()
-
-@app.get('/zones')
-def zones_page():
-    zones_path = web_dir / 'zones.html'
-    if zones_path.exists():
-        return FileResponse(zones_path)
-    return root()
-
-@app.get('/sounds')
-def sounds_page():
-    sounds_path = web_dir / 'sounds.html'
-    if sounds_path.exists():
-        return FileResponse(sounds_path)
-    return root()
-
-@app.get('/cameras')
-def cameras_page():
-    cameras_path = web_dir / 'cameras.html'
-    if cameras_path.exists():
-        return FileResponse(cameras_path)
-    return root()
-
-@app.get('/events')
-@app.get('/alerts')
-@app.get('/search')
-def dashboard_aliases():
-    return root()
-
-@app.get('/recordings')
-def recordings_page():
-    recordings_path = web_dir / 'recordings.html'
-    if recordings_path.exists():
-        return FileResponse(recordings_path)
-    return root()
-
-@app.get('/recordings/timeline')
-def recordings_timeline_page():
-    timeline_path = web_dir / 'timeline.html'
-    if timeline_path.exists():
-        return FileResponse(timeline_path)
-    return root()
-
-@app.get('/onnx')
-def onnx_page():
-    ai_path = web_dir / 'onnx.html'
-    if ai_path.exists():
-        return FileResponse(ai_path)
-    return root()
-
-@app.get('/ai')
-def ai_settings_page():
-    return RedirectResponse('/onnx', status_code=308)
-
-@app.get('/yamnet-tflite')
-def yamnet_tflite_page():
-    yamnet_path = web_dir / 'yamnet-tflite.html'
-    if yamnet_path.exists():
-        return FileResponse(yamnet_path)
-    return root()
-
-@app.get('/yamnet')
-def yamnet_page():
-    return RedirectResponse('/yamnet-tflite', status_code=308)
-
-@app.get('/profile')
-def profile_page():
-    profile_path = web_dir / 'profile.html'
-    if profile_path.exists():
-        return FileResponse(profile_path)
-    return root()
-
-@app.get('/settings')
-def system_settings_page():
-    settings_path = web_dir / 'settings.html'
-    if settings_path.exists():
-        return FileResponse(settings_path)
-    return root()
-
-@app.get('/users')
-def users_page():
-    users_path = web_dir / 'users.html'
-    if users_path.exists():
-        return FileResponse(users_path)
-    return root()
 
 def _parse_iso_datetime(value: Any) -> datetime | None:
     try:
@@ -3222,20 +3049,6 @@ def _redact_camera(cam: dict[str, Any]) -> dict[str, Any]:
 def _current_version() -> str:
     version_file = BASE_DIR / 'VERSION'
     return version_file.read_text(encoding='utf-8').strip() if version_file.exists() else 'unknown'
-
-@app.get('/audit')
-def audit_page():
-    audit_path = web_dir / 'audit.html'
-    if audit_path.exists():
-        return FileResponse(audit_path)
-    return root()
-
-@app.get('/camera-log')
-def camera_log_page():
-    page_path = web_dir / 'camera-log.html'
-    if page_path.exists():
-        return FileResponse(page_path)
-    return root()
 from app.api.sound_router import router as sound_router
 app.include_router(sound_router)
 from app.api.settings_ai_router import router as settings_ai_router
@@ -3275,3 +3088,9 @@ from app.api.update_router import router as update_router
 app.include_router(update_router)
 from app.api.utility_router import router as utility_router
 app.include_router(utility_router)
+from app.api.web_router import router as web_router
+app.include_router(web_router)
+from app.api.auth_router import router as auth_router
+app.include_router(auth_router)
+from app.api.web_router import login_page as login_page
+from app.api.web_router import setup_page as setup_page
