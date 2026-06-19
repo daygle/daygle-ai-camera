@@ -32,7 +32,12 @@ Rules when extracting an endpoint into a router:
    ``main.<attr>`` reachability only against ``tests/test_api.py``,
    not against ``app/api/*.py``, so a missing rebind will not fail at
    module-import time and will silently NameError only when an
-   exercising handler runs.
+   exercising handler runs. When extending a router to use a
+   ``main.<attr>`` not yet on the list above, add the import (or the
+   ``main.<attr> = ...`` assignment) to ``app/main.py`` in the same
+   commit, mirroring Phase-N past practice -- the from-import /
+   import-as / assignment always lives at the top of ``app/main.py``,
+   never in a router file.
 
 To extract the next router, use ``app/api/sound_router.py`` as the template.
 """
