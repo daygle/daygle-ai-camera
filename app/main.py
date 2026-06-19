@@ -1792,27 +1792,7 @@ def csrf_token_response(request: Request, title: str, body_template: str, *, sta
     response.status_code = status_code
     set_csrf_cookie(response, token, request)
     return response
-
-def require_user(request: Request) -> dict[str, Any]:
-    return request.state.user
-
-def require_session(request: Request) -> dict[str, Any]:
-    return request.state.session
-
-def require_admin(request: Request) -> dict[str, Any]:
-    user = require_user(request)
-    if user.get('role') != 'admin':
-        raise HTTPException(status_code=403, detail='Admin access required')
-    return user
 _LOOPBACK = {'127.0.0.1', '::1', 'localhost'}
-
-def _request_ip(request: Request) -> str:
-    direct = request.client.host if request.client else ''
-    if direct in _LOOPBACK:
-        forwarded = request.headers.get('x-forwarded-for')
-        if forwarded:
-            return forwarded.split(',')[0].strip()
-    return direct or 'unknown'
 
 def write_audit_log(request: Request, action: str, resource: str, resource_id: Any=None, details: dict[str, Any] | None=None, status: str='success') -> None:
     user: dict[str, Any] | None = getattr(request.state, 'user', None)
@@ -3026,10 +3006,17 @@ from app.api.auth_router import router as auth_router
 app.include_router(auth_router)
 from app.api.web_router import login_page as login_page
 from app.api.web_router import setup_page as setup_page
+from app.middleware import authentication_middleware, app_navigation_middleware
+app.middleware('http')(authentication_middleware)
+app.middleware('http')(app_navigation_middleware)
 
-from app.middleware import (
-    authentication_middleware,
-    app_navigation_middleware,
+# Phase 16: Pool A from-import rebinds for the auth-gate cluster extracted
+# into app/auth_gates.py. The router files reach these helpers via
+# main.require_admin(...) etc. so the names must exist on app.main
+# without consumers having to migrate to from app.auth_gates import ...
+from app.auth_gates import (
+    _request_ip as _request_ip,
+    require_admin as require_admin,
+    require_session as require_session,
+    require_user as require_user,
 )
-app.middleware("http")(authentication_middleware)
-app.middleware("http")(app_navigation_middleware)
