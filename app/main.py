@@ -89,6 +89,25 @@ from app.recording_settings import (
     normalize_camera_ptz_settings as normalize_camera_ptz_settings,
     normalize_camera_recording_settings as normalize_camera_recording_settings,
 )
+# Phase 20: top-of-file Pool A from-import rebinds for the AI
+# subsystem cluster extracted into app/ai_settings.py. The rebind lives
+# in the regular app.X import section (NOT at the very bottom like
+# Phase 15/16) because internal main.py callers (`live_detection_status_payload`,
+# `process_live_stream_alerts`, `log_detector_initialization`, `detector_status`
+# itself, `_do_download_model`) reference these as bare names inside function
+# bodies. Top-of-file placement ensures the rebind wires ``main.<name>``
+# BEFORE any sibling body evaluates. The 11 Pool C reach sites
+# (main.effective_ai_config, main.detector, main.detector_loaded_for,
+# main.model_exists, main.onnx_runtime_installed, main.last_detector_error,
+# main.YOLO_MODELS, main.active_ai_config_source, main.config,
+# main.load_labels, main.HTTPException via fastapi) are also resolved
+# inside the moved helpers.
+from app.ai_settings import (
+    ai_status_payload as ai_status_payload,
+    detector_status as detector_status,
+    validate_ai_settings as validate_ai_settings,
+)
+
 
 logger = logging.getLogger('daygle.ai')
 
@@ -1623,31 +1642,6 @@ def detector_loaded_for(settings: dict[str, Any]) -> bool:
         return active_backend == 'onnx' and bool(getattr(detector, 'available', False))
     return False
 
-def ai_status_payload(ai_settings: dict[str, Any] | None=None) -> dict[str, Any]:
-    settings = ai_settings or effective_ai_config()
-    active_backend = getattr(detector, 'backend', 'unknown')
-    configured_backend = str(settings.get('backend', 'onnx')).lower()
-    detector_loaded = detector_loaded_for(settings)
-    model_loaded = bool(configured_backend == 'onnx' and active_backend == 'onnx' and getattr(detector, 'available', False))
-    runtime_installed = onnx_runtime_installed()
-    exists = model_exists(settings)
-    detector_reason = getattr(detector, 'unavailable_reason', None)
-    error = last_detector_error or detector_reason
-    if configured_backend == 'onnx' and (not exists):
-        mode = 'MODEL MISSING'
-        error = error or f"ONNX model not found: {settings.get('model_path')}"
-    elif configured_backend == 'onnx' and (not model_loaded):
-        mode = 'MODEL FAILED'
-    elif configured_backend == 'onnx':
-        mode = 'ONNX ACTIVE'
-        error = detector_reason
-    else:
-        mode = 'MODEL FAILED'
-    inference_available = detector_loaded
-    model_path_str = str(settings.get('model_path') or '')
-    model_filename = Path(model_path_str).name if model_path_str else ''
-    model_label = next((info['label'] for info in YOLO_MODELS.values() if info['onnx'] == model_filename), None)
-    return {'active_backend': active_backend, 'configured_backend': configured_backend, 'mode': mode, 'model_loaded': model_loaded, 'detector_loaded': detector_loaded, 'model_path': model_path_str, 'model_name': model_label, 'labels_path': str(settings.get('labels_path') or ''), 'model_exists': exists, 'onnx_runtime_installed': runtime_installed, 'inference_available': inference_available, 'error': error, 'last_detector_error': error, 'active_config_source': active_ai_config_source()}
 
 def log_detector_initialization(context: str='startup') -> None:
     ai_status = ai_status_payload()
@@ -2447,72 +2441,7 @@ def _recording_timeline_segment(recording: dict[str, Any], day_start: datetime, 
     color_key = trigger_label if trigger_type in {'human', 'object', 'alert'} and trigger_label else trigger_type
     return {**recording, 'timeline_start_seconds': max(0.0, (visible_start - day_start).total_seconds()), 'timeline_end_seconds': min(86400.0, (visible_end - day_start).total_seconds()), 'timeline_duration_seconds': max(1.0, (visible_end - visible_start).total_seconds()), 'color_key': color_key, 'color_label': color_key}
 
-def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    current = effective_ai_config()
-    allowed = {'enabled', 'backend', 'confidence', 'iou_threshold', 'input_size', 'model_path', 'labels_path', 'device', 'gpu_mem_limit', 'inference_threads', 'max_concurrent_inferences'}
-    updated = {key: current.get(key) for key in allowed if key in current}
-    for key, value in payload.items():
-        if key in allowed:
-            updated[key] = value
-    enabled_value = updated.get('enabled', True)
-    if isinstance(enabled_value, str):
-        updated['enabled'] = enabled_value.lower() in {'1', 'true', 'yes', 'on'}
-    else:
-        updated['enabled'] = bool(enabled_value)
-    backend = str(updated.get('backend', 'onnx')).lower()
-    if backend != 'onnx':
-        raise HTTPException(status_code=400, detail='AI backend must be onnx.')
-    updated['backend'] = backend
-    for field in ('confidence', 'iou_threshold'):
-        try:
-            updated[field] = float(updated.get(field, 0.45))
-        except (TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail=f'{field} must be a number.') from exc
-        if not 0 <= updated[field] <= 1:
-            raise HTTPException(status_code=400, detail=f'{field} must be between 0 and 1.')
-    try:
-        updated['input_size'] = int(updated.get('input_size', 640))
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail='input_size must be an integer.') from exc
-    if updated['input_size'] < 32 or updated['input_size'] > 2048:
-        raise HTTPException(status_code=400, detail='input_size must be between 32 and 2048.')
-    device = str(updated.get('device', 'auto')).lower()
-    if device not in ('auto', 'cpu', 'cuda'):
-        raise HTTPException(status_code=400, detail="device must be 'auto', 'cpu', or 'cuda'.")
-    updated['device'] = device
-    if 'gpu_mem_limit' in payload:
-        gpu_mem_limit = payload['gpu_mem_limit']
-        if gpu_mem_limit is not None and gpu_mem_limit != '':
-            try:
-                gpu_mem_limit = int(gpu_mem_limit)
-                if gpu_mem_limit < 0:
-                    raise ValueError
-                updated['gpu_mem_limit'] = gpu_mem_limit
-            except (TypeError, ValueError) as exc:
-                raise HTTPException(status_code=400, detail='gpu_mem_limit must be a non-negative integer (bytes), or 0 for unlimited.') from exc
-        else:
-            updated['gpu_mem_limit'] = 0
-    for field, min_val, max_val in (('inference_threads', 1, 32), ('max_concurrent_inferences', 1, 16)):
-        raw = payload.get(field)
-        if raw is not None and raw != '':
-            try:
-                val = int(raw)
-                if not min_val <= val <= max_val:
-                    raise ValueError
-                updated[field] = val
-            except (TypeError, ValueError) as exc:
-                raise HTTPException(status_code=400, detail=f'{field} must be an integer between {min_val} and {max_val}.') from exc
-        else:
-            updated.pop(field, None)
-    updated['model_path'] = str(updated.get('model_path') or current.get('model_path') or 'models/yolov8n.onnx')
-    updated['labels_path'] = str(updated.get('labels_path') or current.get('labels_path') or 'models/coco.names')
-    return updated
 
-def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
-    ai_status = ai_status_payload(ai_settings)
-    categories = ai_settings.get('categories', config.get('ai', {}).get('categories', []))
-    labels = load_labels(ai_settings.get('labels_path'), categories) or list(categories)
-    return {**ai_settings, 'active_backend': ai_status['active_backend'], 'configured_backend': ai_status['configured_backend'], 'mode': ai_status['mode'], 'available': ai_status['inference_available'], 'model_loaded': ai_status['model_loaded'], 'detector_loaded': ai_status['detector_loaded'], 'model_exists': ai_status['model_exists'], 'onnx_runtime_installed': ai_status['onnx_runtime_installed'], 'active_config_source': ai_status['active_config_source'], 'error': ai_status['error'], 'last_detector_error': ai_status['last_detector_error'], 'categories': categories, 'available_labels': labels}
 
 def validate_alert_email_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_email_alert_settings()
