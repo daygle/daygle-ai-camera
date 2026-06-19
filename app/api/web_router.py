@@ -140,7 +140,7 @@ def login_page(request: Request, error: str | None = None):
         'Login',
         '\n<h1>Sign In</h1><p class="muted">Enter your Daygle AI Camera credentials.</p>'
         f'{error_html}\n<form class="form-stack" method="post" action="/login">\n'
-        '  <input type="hidden" name="csrf_token" value="{{csrf}}" />\n'
+        '  <input type="hidden" name="csrf_token" value="{csrf}" />\n'
         '  <label>Username<input name="username" autocomplete="username" required /></label>\n'
         '  <label>Password<input name="password" type="password" autocomplete="current-password" required /></label>\n'
         '  <button class="primary" type="submit">Sign In</button>\n'
@@ -158,7 +158,7 @@ def setup_page(request: Request, error: str | None = None):
         'Initial setup',
         '\n<h1>Create administrator</h1><p class="muted">This one-time setup is disabled after the first user is created.</p>'
         f'{error_html}\n<form class="form-stack" method="post" action="/setup">\n'
-        '  <input type="hidden" name="csrf_token" value="{{csrf}}" />\n'
+        '  <input type="hidden" name="csrf_token" value="{csrf}" />\n'
         '  <label>First name<input name="first_name" autocomplete="given-name" /></label>\n'
         '  <label>Last name<input name="last_name" autocomplete="family-name" /></label>\n'
         '  <label>Email<input name="email" type="email" autocomplete="email" /></label>\n'
