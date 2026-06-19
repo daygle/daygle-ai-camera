@@ -86,7 +86,6 @@ from pathlib import Path
 from typing import Any
 
 import app.state as _state
-from app.config_facades import effective_email_alert_settings, effective_push_notification_settings
 
 logger = logging.getLogger('daygle.ai')
 
@@ -120,7 +119,15 @@ def deliver_email_alerts(
     event_id: int,
     rules: list[dict[str, Any]] | None = None,
 ) -> None:
-    from app.main import _format_alert_datetime, _rule_notify_active_now, compute_minimum_rule_confidence, render_live_snapshot_jpeg_overlay, EmailAlertService, EmailAlertError
+    from app.main import (
+        EmailAlertError,
+        EmailAlertService,
+        _format_alert_datetime,
+        _rule_notify_active_now,
+        compute_minimum_rule_confidence,
+        effective_email_alert_settings,
+        render_live_snapshot_jpeg_overlay,
+    )
     if not triggered:
         return
     event = _state.database.get_event(event_id) or {}
@@ -209,7 +216,13 @@ def deliver_push_notifications(
     event_id: int,
     rules: list[dict[str, Any]] | None = None,
 ) -> None:
-    from app.main import _format_alert_datetime, _rule_notify_active_now, PushNotificationService, PushNotificationError
+    from app.main import (
+        PushNotificationError,
+        PushNotificationService,
+        _format_alert_datetime,
+        _rule_notify_active_now,
+        effective_push_notification_settings,
+    )
     if not triggered:
         return
     push_settings = effective_push_notification_settings()
