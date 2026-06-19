@@ -1,0 +1,530 @@
+"""Phase-21 integration tests for ``app/zone_schema.py``.
+
+Phase 21 extracted the 7 zone/schema normalizers (``normalize_label_list``,
+``normalize_zone_object_rules``, ``zone_motion_min_confidence``,
+``normalize_zone_point``, ``rectangle_zone_points``, ``zone_bounds``,
+``normalize_monitoring_zones``) PLUS the module-private
+``_LABEL_ALIASES`` annotation assignment from ``app/main.py`` into
+``app/zone_schema.py`` using the hybrid-pattern template (same as
+Phase 16 ``app/auth_gates.py``, Phase 17 ``app/config_facades.py``,
+Phase 18 ``app/camera_config.py``, Phase 19 ``app/recording_settings.py``,
+Phase 20 ``app/ai_settings.py``).
+
+Internal ``main.py`` callers (``validate_camera_settings`` L2537-2538,
+``render_live_snapshot_svg`` L2025, ``detection_label_allowed_for_zone``
+L799, ``filter_detections_for_camera_zones`` L815 + L911 + L919)
+reference these as bare names inside function bodies; the top-of-file
+Pool A rebind wires ``main.<name>`` (and ``main._LABEL_ALIASES``)
+before any of those bodies evaluates.
+
+Tests pin three contracts:
+
+1. **Pool A back-compat identity.** The 8 Pool A rebinds (``_LABEL_ALIASES``
+   + 7 cluster helpers) MUST wire ``main.<name>`` to the SAME
+   function/object as ``app.zone_schema.<name>``. Re-resolved via
+   ``sys.modules`` to defeat the ``tests/test_api.py::_load_app``
+   sys-modules-wipe state leak (Phase 17 lesson).
+2. **Behavior of each facade.** Each helper has subtle ordering /
+   fallback semantics:
+   - ``_LABEL_ALIASES``: dict of ``{'human': 'person', 'people':
+     'person', 'pedestrian': 'person'}``.
+   - ``normalize_label_list``: comma-separated string OR list input;
+     applies ``_LABEL_ALIASES`` for canonicalization, dedupes, returns
+     sorted-unique list.
+   - ``normalize_zone_object_rules``: seeds from ``zone.object_rules``
+     OR synthesizes from ``zone.object_labels``; clamps
+     ``min_confidence`` to [0.0, 1.0] (TypeError/ValueError -> 0.5);
+     clamps ``cooldown_seconds`` >= 0 (TypeError/ValueError -> 60);
+     all bool/cooldown/email/push/4 time-window fields normalized.
+   - ``zone_motion_min_confidence``: clamps min_confidence [0.0, 1.0],
+     defaults to 0.45 when no motion rule enabled.
+   - ``normalize_zone_point``: non-dict -> None; clamps x/y to [0.0, 1.0];
+     TypeError -> None.
+   - ``rectangle_zone_points``: 4-corner dict list, rounded 4 dp.
+   - ``zone_bounds``: bounding rect from points (left, top, width, height),
+     minimum 0.01 width/height.
+   - ``normalize_monitoring_zones``: orchestrator; clamps x/y/width/height
+     to [0.0, 1.0]; uses ``zone.points`` (>=3 points) OR falls back to
+     ``rectangle_zone_points``; rebuilds ``object_rules``; folds legacy
+     ``monitor_motion`` into motion rule.
+3. **Top-level preload pattern.** ``import app.main`` BEFORE
+   ``import app.zone_schema`` at module top -- same pattern as
+   Phase 16 / 17 / 18 / 19 / 20 tests. Without this, pytest collection
+   triggers the circular-import gate at ``app.zone_schema`` load time
+   (its top has ``import app.main as main`` for the 3 Pool C reach
+   sites).
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest  # noqa: E402  -- used below
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+# Top-level lazy-ordered preloads to break the Phase-21 circular-import
+# gate (same pattern as the 5 earlier phases' tests). Importing
+# ``app.zone_schema`` FIRST would cause Python's fresh-load chain to run
+# the top-of-file rebind ``from app.zone_schema import (...)`` inside
+# ``app/main.py`` while ``app.zone_schema`` is still mid-load -> ImportError.
+# Preloading ``app.main`` fully first populates ``sys.modules['app.main']``
+# so ``app.zone_schema``'s own ``import app.main as main`` returns the
+# cached module rather than triggering a recursive fresh-load chain.
+import app.main  # noqa: E402  -- must precede the import below
+import app.zone_schema as zone_schema  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# 1. Pool A back-compat identity -- ``main.<name> is zone_schema.<name>``.
+#    Re-resolve via sys.modules per Phase 17 lesson (defeats the
+#    tests/test_api.py::_load_app() sys-modules-wipe state leak).
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def main():
+    """Return the CURRENT ``app.main`` module instance. See the module
+    docstring for why we cannot rely on the test file's module-level
+    globals directly. Centralised as fixtures so the rationale lives
+    in one comment rather than copy-pasted into 8 tests."""
+    return sys.modules["app.main"]
+
+
+@pytest.fixture
+def current_zone_schema():
+    """Return the CURRENT ``app.zone_schema`` module instance. See
+    the ``main`` fixture above for the leak rationale."""
+    return sys.modules["app.zone_schema"]
+
+
+@pytest.fixture
+def zs():
+    """Convenience alias for ``current_zone_schema`` -- used by the
+    behavior tests below to call ``zs.normalize_monitoring_zones(...)``
+    etc. without ``import app.zone_schema as zs`` boilerplate."""
+    return sys.modules["app.zone_schema"]
+
+
+def test_main_LABEL_ALIASES_is_zone_schema_LABEL_ALIASES(main, current_zone_schema):
+    # NOTE: name uses the special `_LABEL_ALIASES` underscore. The Pool A
+    # rebind blocks use ``as _LABEL_ALIASES`` so the bare-name retains the
+    # underscore. Identity here is dict-equality (same key/value pairs).
+    assert main._LABEL_ALIASES == current_zone_schema._LABEL_ALIASES, (
+        "main._LABEL_ALIASES is NOT the same dict as "
+        "app.zone_schema._LABEL_ALIASES -- Pool A rebind wire broke"
+    )
+
+
+def test_main_normalize_label_list_is_zone_schema_normalize_label_list(main, current_zone_schema):
+    assert main.normalize_label_list is current_zone_schema.normalize_label_list
+
+
+def test_main_normalize_monitoring_zones_is_zone_schema_normalize_monitoring_zones(main, current_zone_schema):
+    assert main.normalize_monitoring_zones is current_zone_schema.normalize_monitoring_zones
+
+
+def test_main_normalize_zone_object_rules_is_zone_schema_normalize_zone_object_rules(main, current_zone_schema):
+    assert main.normalize_zone_object_rules is current_zone_schema.normalize_zone_object_rules
+
+
+def test_main_normalize_zone_point_is_zone_schema_normalize_zone_point(main, current_zone_schema):
+    assert main.normalize_zone_point is current_zone_schema.normalize_zone_point
+
+
+def test_main_rectangle_zone_points_is_zone_schema_rectangle_zone_points(main, current_zone_schema):
+    assert main.rectangle_zone_points is current_zone_schema.rectangle_zone_points
+
+
+def test_main_zone_bounds_is_zone_schema_zone_bounds(main, current_zone_schema):
+    assert main.zone_bounds is current_zone_schema.zone_bounds
+
+
+def test_main_zone_motion_min_confidence_is_zone_schema_zone_motion_min_confidence(main, current_zone_schema):
+    assert main.zone_motion_min_confidence is current_zone_schema.zone_motion_min_confidence
+
+
+# ---------------------------------------------------------------------------
+# 2. Helpers -- isolate cross-module deps via monkeypatched helpers.
+# ---------------------------------------------------------------------------
+
+
+class _BoolBool:
+    """Captures ``normalize_bool_setting(raw, default)`` semantics:
+    ``None`` -> default; otherwise return ``bool(raw)``."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def __call__(self, raw, default):
+        self.calls.append((raw, default))
+        if raw is None:
+            return default
+        return bool(raw)
+
+
+class _EmailRecipients:
+    """Captures ``normalize_email_recipients(raw)``: list pass-through;
+    non-list -> ``[]``."""
+
+    def __init__(self) -> None:
+        self.calls: list = []
+
+    def __call__(self, raw):
+        self.calls.append(raw)
+        return list(raw) if isinstance(raw, list) else []
+
+
+class _CameraIdStub:
+    """Captures ``normalize_camera_id(value, fallback)`` semantics:
+    passthrough if non-empty, else fallback."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def __call__(self, value, fallback):
+        self.calls.append((value, fallback))
+        out = str(value or '').strip()
+        return out or fallback
+
+
+def _install_zone_dependencies(
+    monkeypatch,
+    *,
+    normalize_bool_setting=None,
+    normalize_email_recipients=None,
+    normalize_camera_id=None,
+):
+    """Install hermetic stand-ins for the 3 ``main`` attributes that the
+    cluster reaches at call time:
+    - ``main.normalize_bool_setting`` (called 5x in normalize_zone_object_rules)
+    - ``main.normalize_email_recipients`` (called 1x)
+    - ``main.normalize_camera_id`` (called 1x in normalize_monitoring_zones)
+
+    Returns ``(main, bs, er, cid)`` so callers can introspect the
+    captured calls if needed.
+    """
+    import app.main as main
+
+    if normalize_bool_setting is None:
+        normalize_bool_setting = _BoolBool()
+    if normalize_email_recipients is None:
+        normalize_email_recipients = _EmailRecipients()
+    if normalize_camera_id is None:
+        normalize_camera_id = _CameraIdStub()
+
+    monkeypatch.setattr(main, 'normalize_bool_setting', normalize_bool_setting)
+    monkeypatch.setattr(main, 'normalize_email_recipients', normalize_email_recipients)
+    monkeypatch.setattr(main, 'normalize_camera_id', normalize_camera_id)
+
+    return main, normalize_bool_setting, normalize_email_recipients, normalize_camera_id
+
+
+# -- _LABEL_ALIASES ---------------------------------------------------------
+
+def test_label_aliases_contains_expected_human_aliases(zs):
+    """Pin the 3 known aliases -- they exist specifically to canonicalize
+    common alternate human-form labels into the canonical ``person``."""
+    assert zs._LABEL_ALIASES == {
+        'human': 'person',
+        'people': 'person',
+        'pedestrian': 'person',
+    }
+
+
+# -- normalize_label_list --------------------------------------------------
+
+def test_normalize_label_list_returns_empty_for_non_string_non_list(zs):
+    """Anything other than str or list collapses to ``[]``."""
+    assert zs.normalize_label_list(None) == []
+    assert zs.normalize_label_list(42) == []
+    assert zs.normalize_label_list({'any': 'dict'}) == []
+
+
+def test_normalize_label_list_canonicalizes_human_via_aliases(zs):
+    """``human`` / ``people`` / ``pedestrian`` all canonicalize to
+    ``person`` (via ``_LABEL_ALIASES``)."""
+    assert zs.normalize_label_list(['human']) == ['person']
+    assert zs.normalize_label_list(['people', 'pedestrian']) == ['person']
+    # standalone non-alias label
+    assert zs.normalize_label_list(['car']) == ['car']
+
+
+def test_normalize_label_list_splits_comma_separated_string(zs):
+    """String input is split on commas. The implementation preserves
+    ENCOUNTER order (via the ``seen`` set + list append) rather than
+    re-sorting alphabetically -- this matches the orchestrator's
+    expectation that label order mirrors source input (e.g. zone list)."""
+    assert zs.normalize_label_list('person,car,person') == ['person', 'car']
+
+
+def test_normalize_label_list_dedupes_and_lowercases(zs):
+    """Duplicates collapse + lowercase normalization + aliasing."""
+    assert zs.normalize_label_list(['PERSON', 'person', 'human']) == ['person']
+    assert zs.normalize_label_list([' CAR ', 'car']) == ['car']
+
+
+# -- normalize_zone_point --------------------------------------------------
+
+def test_normalize_zone_point_returns_none_for_non_dict(zs):
+    """Non-dict input collapses to ``None``."""
+    assert zs.normalize_zone_point(None) is None
+    assert zs.normalize_zone_point([1, 2]) is None
+    assert zs.normalize_zone_point('not-a-dict') is None
+
+
+def test_normalize_zone_point_clamps_xy_to_unit_square(zs):
+    """``x`` and ``y`` clamp to [0.0, 1.0]; out-of-range values clamped
+    rather than rejected."""
+    out = zs.normalize_zone_point({'x': 1.5, 'y': -0.7})
+    assert out['x'] == 1.0
+    assert out['y'] == 0.0
+
+
+def test_normalize_zone_point_returns_none_for_non_numeric_input(zs):
+    """TypeError/ValueError inside the float coercion -> ``None``."""
+    assert zs.normalize_zone_point({'x': 'oops', 'y': 0.5}) is None
+
+
+def test_normalize_zone_point_rounds_to_4_dp(zs):
+    """Output rounds to 4 decimal places."""
+    out = zs.normalize_zone_point({'x': 0.123456789, 'y': 0.5})
+    assert out == {'x': 0.1235, 'y': 0.5}
+
+
+# -- rectangle_zone_points -------------------------------------------------
+
+def test_rectangle_zone_points_produces_4_corners_rounded(zs):
+    """A rectangle produces 4 dicts: top-left, top-right, bottom-right,
+    bottom-left, each with x/y rounded 4 dp."""
+    pts = zs.rectangle_zone_points(0.1, 0.2, 0.3, 0.4)
+    assert pts == [
+        {'x': 0.1, 'y': 0.2},
+        {'x': 0.4, 'y': 0.2},
+        {'x': 0.4, 'y': 0.6},
+        {'x': 0.1, 'y': 0.6},
+    ]
+
+
+# -- zone_bounds ------------------------------------------------------------
+
+def test_zone_bounds_computes_left_top_width_height(zs):
+    """``zone_bounds`` returns ``(left, top, width, height)`` with
+    minimum 0.01 width/height (collapses degenerate single-point input).
+
+    Float-precision: the source computes ``right - left`` directly
+    (``0.4 - 0.1 = 0.30000000000000004`` in IEEE-754), so use
+    ``pytest.approx`` to tolerate the FP drift while still pinning
+    the structural shape of the result."""
+    # 4 corners of a 0.3 x 0.4 rectangle at origin (0.1, 0.2)
+    pts = zs.rectangle_zone_points(0.1, 0.2, 0.3, 0.4)
+    left, top, width, height = zs.zone_bounds(pts)
+    assert left == pytest.approx(0.1)
+    assert top == pytest.approx(0.2)
+    assert width == pytest.approx(0.3)
+    assert height == pytest.approx(0.4)
+
+
+def test_zone_bounds_collapses_to_minimum_01_when_points_coincident(zs):
+    """Single point (or degenerate points) clamps width/height to a
+    minimum of 0.01."""
+    out = zs.zone_bounds([{'x': 0.5, 'y': 0.5}])
+    assert out[2] == 0.01  # width
+    assert out[3] == 0.01  # height
+
+
+# -- zone_motion_min_confidence ---------------------------------------------
+
+def test_zone_motion_min_confidence_returns_default_when_no_motion_rule(zs):
+    """When no motion rule exists, returns 0.45 (the canonical default)."""
+    zone = {'object_rules': [{'label': 'person', 'min_confidence': 0.9, 'enabled': True}]}
+    assert zs.zone_motion_min_confidence(zone) == 0.45
+
+
+def test_zone_motion_min_confidence_returns_rule_value_when_motion_enabled(zs):
+    """When the motion rule IS in ``object_rules`` AND enabled, returns
+    its ``min_confidence`` (clamped to [0.0, 1.0])."""
+    zone = {
+        'object_rules': [
+            {'label': 'motion', 'min_confidence': 0.7, 'enabled': True},
+        ],
+    }
+    assert zs.zone_motion_min_confidence(zone) == 0.7
+
+
+def test_zone_motion_min_confidence_clamps_out_of_range_value(zs):
+    """Out-of-range ``min_confidence`` values clamp to [0.0, 1.0]."""
+    zone = {'object_rules': [{'label': 'motion', 'min_confidence': 1.5, 'enabled': True}]}
+    assert zs.zone_motion_min_confidence(zone) == 1.0
+
+
+def test_zone_motion_min_confidence_skips_disabled_motion_rule(zs):
+    """If the motion rule exists but is disabled, returns 0.45 (default)
+    -- the rule's enabled flag drives the return."""
+    zone = {'object_rules': [{'label': 'motion', 'min_confidence': 0.9, 'enabled': False}]}
+    assert zs.zone_motion_min_confidence(zone) == 0.45
+
+
+def test_zone_motion_min_confidence_handles_type_error_gracefully(zs):
+    """Non-numeric ``min_confidence`` -> 0.45 fallback."""
+    zone = {'object_rules': [{'label': 'motion', 'min_confidence': 'oops', 'enabled': True}]}
+    assert zs.zone_motion_min_confidence(zone) == 0.45
+
+
+# -- normalize_zone_object_rules -------------------------------------------
+
+def test_normalize_zone_object_rules_seeds_from_object_rules_list(monkeypatch, zs):
+    """When ``zone.object_rules`` is a list, use it as source. Each rule
+    is normalized (label via _LABEL_ALIASES, min_confidence clamp,
+    bool/email/push via main.*, 4 time-window optionals)."""
+    _install_zone_dependencies(monkeypatch)
+    zone = {'object_rules': [
+        {'label': 'person', 'min_confidence': 0.6, 'cooldown_seconds': 30,
+         'email_recipients': ['a@example.com']},
+    ]}
+    rules = zs.normalize_zone_object_rules(zone)
+    assert len(rules) == 1
+    rule = rules[0]
+    assert rule['label'] == 'person'
+    assert rule['min_confidence'] == 0.6
+    assert rule['cooldown_seconds'] == 30
+    assert rule['email_recipients'] == ['a@example.com']
+
+
+def test_normalize_zone_object_rules_synthesizes_from_object_labels_when_no_rules(monkeypatch, zs):
+    """If ``object_rules`` is missing, synthesize 1-row rules from
+    ``object_labels`` (the older UI-driven schema)."""
+    _install_zone_dependencies(monkeypatch)
+    zone = {'object_labels': ['human', 'car']}  # 'human' -> 'person' via alias
+    rules = zs.normalize_zone_object_rules(zone)
+    assert [r['label'] for r in rules] == ['person', 'car']
+    # All synthesized rules use defaults.
+    assert all(r['min_confidence'] == 0.5 for r in rules)
+    assert all(r['cooldown_seconds'] == 60 for r in rules)
+
+
+def test_normalize_zone_object_rules_clamps_min_confidence_and_cooldown(monkeypatch, zs):
+    """TypeError/ValueError -> defaults (0.5 / 60); out-of-range clamps."""
+    _install_zone_dependencies(monkeypatch)
+    zone = {'object_rules': [
+        {'label': 'person', 'min_confidence': 99.0, 'cooldown_seconds': -5},
+        {'label': 'car', 'min_confidence': 'oops', 'cooldown_seconds': 'no'},
+    ]}
+    rules = zs.normalize_zone_object_rules(zone)
+    # First: clamps both to limit/default
+    assert rules[0]['min_confidence'] == 1.0  # 99.0 -> 1.0
+    assert rules[0]['cooldown_seconds'] == 0  # -5 -> 0
+    # Second: TypeError -> defaults
+    assert rules[1]['min_confidence'] == 0.5
+    assert rules[1]['cooldown_seconds'] == 60
+
+
+def test_normalize_zone_object_rules_dedupes_by_label(monkeypatch, zs):
+    """Duplicate labels (case-insensitive, after aliasing) collapse to
+    one rule -- the first occurrence wins."""
+    _install_zone_dependencies(monkeypatch)
+    zone = {'object_rules': [
+        {'label': 'PERSON', 'min_confidence': 0.6},
+        {'label': 'human', 'min_confidence': 0.9},  # dups w/ above via alias
+    ]}
+    rules = zs.normalize_zone_object_rules(zone)
+    labels = [r['label'] for r in rules]
+    assert labels == ['person']
+
+
+def test_normalize_zone_object_rules_drops_non_dict_rules(monkeypatch, zs):
+    """Non-dict entries in ``zone.object_rules`` are silently skipped."""
+    _install_zone_dependencies(monkeypatch)
+    zone = {'object_rules': [
+        'not-a-dict',
+        {'label': 'person'},
+    ]}
+    rules = zs.normalize_zone_object_rules(zone)
+    assert [r['label'] for r in rules] == ['person']
+
+
+# -- normalize_monitoring_zones --------------------------------------------
+
+def test_normalize_monitoring_zones_returns_empty_for_non_list(monkeypatch, zs):
+    """Non-list input collapses to ``[]`` -- the orchestrator's defensive
+    branch."""
+    _install_zone_dependencies(monkeypatch)
+    assert zs.normalize_monitoring_zones(None) == []
+    assert zs.normalize_monitoring_zones('not-a-list') == []
+    assert zs.normalize_monitoring_zones({}) == []
+
+
+def test_normalize_monitoring_zones_skips_non_dict_zones(monkeypatch, zs):
+    """Non-dict entries inside the list are silently skipped."""
+    _install_zone_dependencies(monkeypatch)
+    assert zs.normalize_monitoring_zones(['not-a-dict', 42]) == []
+
+
+def test_normalize_monitoring_zones_clamps_xy_wh(monkeypatch, zs):
+    """All 4 spatial fields (x, y, width, height) clamp to [0.0, 1.0];
+    width/height also have a min of 0.01."""
+    _install_zone_dependencies(monkeypatch)
+    zones = zs.normalize_monitoring_zones([{
+        'x': 1.5, 'y': -0.5, 'width': 99.0, 'height': 0.0001,
+    }])
+    assert zones[0]['x'] == 1.0
+    assert zones[0]['y'] == 0.0
+    assert zones[0]['width'] == 0.01  # clamped from 0.0001 to min
+    assert zones[0]['height'] == 0.01  # clamped from 99.0
+
+
+def test_normalize_monitoring_zones_falls_back_to_rectangle_when_lt3_points(monkeypatch, zs):
+    """When ``zone.points`` has fewer than 3 entries, fall back to
+    ``rectangle_zone_points(x, y, width, height)``."""
+    _install_zone_dependencies(monkeypatch)
+    zones = zs.normalize_monitoring_zones([{
+        'x': 0.2, 'y': 0.3, 'width': 0.4, 'height': 0.5,
+        'points': [{'x': 0.2, 'y': 0.3}, {'x': 0.3, 'y': 0.4}],
+    }])
+    assert len(zones) == 1
+    # The fallback rectangle has 4 corners -> len(points) == 4
+    assert len(zones[0]['points']) == 4
+
+
+def test_normalize_monitoring_zones_folds_legacy_monitor_motion_into_rule(monkeypatch, zs):
+    """When ``zone.monitor_motion`` is True but no motion rule exists
+    in ``object_rules``, a default motion rule is inserted at position 0.
+    """
+    _install_zone_dependencies(monkeypatch)
+    zones = zs.normalize_monitoring_zones([{
+        'monitor_motion': True, 'object_rules': [{'label': 'person'}],
+    }])
+    rules = zones[0]['object_rules']
+    assert rules[0]['label'] == 'motion'  # inserted
+    assert rules[0]['enabled'] is True
+    assert zones[0]['monitor_motion'] is True
+
+
+def test_normalize_monitoring_zones_does_not_insert_motion_when_already_present(monkeypatch, zs):
+    """If a motion rule already exists in object_rules, DO NOT insert
+    another -- even when ``monitor_motion`` is True."""
+    _install_zone_dependencies(monkeypatch)
+    zones = zs.normalize_monitoring_zones([{
+        'monitor_motion': True,
+        'object_rules': [
+            {'label': 'motion', 'enabled': True, 'min_confidence': 0.5},
+        ],
+    }])
+    motion_rules = [r for r in zones[0]['object_rules'] if r['label'] == 'motion']
+    assert len(motion_rules) == 1  # only the original
+
+
+def test_normalize_monitoring_zones_derives_monitor_motion_from_enabled_rule(monkeypatch, zs):
+    """After the rebuild, ``monitor_motion`` reflects whether any motion
+    rule with ``enabled=True`` exists -- not just the legacy field."""
+    _install_zone_dependencies(monkeypatch)
+    # Legacy monitor_motion=False (disabled by user) but a disabled motion
+    # rule was added by migration -> final monitor_motion should be False.
+    zones = zs.normalize_monitoring_zones([{
+        'monitor_motion': False,
+        'object_rules': [{'label': 'motion', 'enabled': False}],
+    }])
+    assert zones[0]['monitor_motion'] is False

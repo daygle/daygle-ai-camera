@@ -107,6 +107,31 @@ from app.ai_settings import (
     detector_status as detector_status,
     validate_ai_settings as validate_ai_settings,
 )
+# Phase 21: top-of-file Pool A from-import rebinds for the zone /
+# schema normalization cluster extracted into app/zone_schema.py. The
+# rebind lives in the regular app.X import section (NOT at the very
+# bottom like Phase 15/16) because internal main.py callers
+# (`validate_camera_settings` L2537-2538, `render_live_snapshot_svg`
+# L2025, `detection_label_allowed_for_zone` L799,
+# `filter_detections_for_camera_zones` L815 + L911 + L919) reference
+# these as bare names inside function bodies. Top-of-file placement
+# ensures the rebind wires ``main.<name>`` BEFORE any sibling body
+# evaluates. The ``_LABEL_ALIASES`` rebind keeps the 4 main.py-internal
+# bare-name references working after the dict move. The 3 Pool C reach
+# sites (``main.normalize_bool_setting``,
+# ``main.normalize_email_recipients``, ``main.normalize_camera_id``)
+# are also resolved inside the moved helpers.
+from app.zone_schema import (
+    _LABEL_ALIASES as _LABEL_ALIASES,
+    normalize_label_list as normalize_label_list,
+    normalize_monitoring_zones as normalize_monitoring_zones,
+    normalize_zone_object_rules as normalize_zone_object_rules,
+    normalize_zone_point as normalize_zone_point,
+    rectangle_zone_points as rectangle_zone_points,
+    zone_bounds as zone_bounds,
+    zone_motion_min_confidence as zone_motion_min_confidence,
+)
+
 
 
 logger = logging.getLogger('daygle.ai')
@@ -512,23 +537,7 @@ def normalize_bool_setting(value: Any, default: bool=False) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in {'1', 'true', 'yes', 'on', 'enabled'}
-_LABEL_ALIASES: dict[str, str] = {'human': 'person', 'people': 'person', 'pedestrian': 'person'}
 
-def normalize_label_list(value: Any) -> list[str]:
-    if isinstance(value, str):
-        raw_labels = value.split(',')
-    elif isinstance(value, list):
-        raw_labels = value
-    else:
-        return []
-    labels: list[str] = []
-    seen: set[str] = set()
-    for raw_label in raw_labels:
-        label = _LABEL_ALIASES.get(str(raw_label).strip().lower(), str(raw_label).strip().lower())
-        if label and label not in seen:
-            labels.append(label)
-            seen.add(label)
-    return labels
 
 def normalize_email_recipients(value: Any) -> list[str]:
     raw_recipients = value.split(',') if isinstance(value, str) else value
@@ -543,102 +552,13 @@ def normalize_email_recipients(value: Any) -> list[str]:
             seen.add(recipient.lower())
     return recipients
 
-def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
-    raw_rules = zone.get('object_rules')
-    if isinstance(raw_rules, list):
-        source_rules = raw_rules
-    else:
-        source_rules = [{'label': label} for label in normalize_label_list(zone.get('object_labels', []))]
-    rules: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for rule in source_rules:
-        if not isinstance(rule, dict):
-            continue
-        labels = normalize_label_list(rule.get('label') or '')
-        if not labels:
-            continue
-        label = labels[0]
-        if label in seen:
-            continue
-        seen.add(label)
-        try:
-            min_confidence = float(rule.get('min_confidence', 0.5))
-        except (TypeError, ValueError):
-            min_confidence = 0.5
-        try:
-            cooldown_seconds = int(rule.get('cooldown_seconds', 60))
-        except (TypeError, ValueError):
-            cooldown_seconds = 60
-        rules.append({'label': label, 'enabled': normalize_bool_setting(rule.get('enabled'), True), 'record_on_detect': normalize_bool_setting(rule.get('record_on_detect'), True), 'min_confidence': max(0.0, min(1.0, min_confidence)), 'cooldown_seconds': max(0, cooldown_seconds), 'email_enabled': normalize_bool_setting(rule.get('email_enabled'), False), 'email_recipients': normalize_email_recipients(rule.get('email_recipients', [])), 'active_start': str(rule.get('active_start') or '').strip() or None, 'active_end': str(rule.get('active_end') or '').strip() or None, 'notify_start': str(rule.get('notify_start') or '').strip() or None, 'notify_end': str(rule.get('notify_end') or '').strip() or None, 'push_enabled': normalize_bool_setting(rule.get('push_enabled'), False)})
-    return rules
-
-def zone_motion_min_confidence(zone: dict[str, Any]) -> float:
-    for rule in zone.get('object_rules', []):
-        if str(rule.get('label') or '').strip().lower() == 'motion' and rule.get('enabled', True):
-            try:
-                return max(0.0, min(1.0, float(rule.get('min_confidence', 0.45))))
-            except (TypeError, ValueError):
-                return 0.45
-    return 0.45
 
 
 
-def normalize_zone_point(point: Any) -> dict[str, float] | None:
-    if not isinstance(point, dict):
-        return None
-    try:
-        x = max(0.0, min(1.0, float(point.get('x') or 0)))
-        y = max(0.0, min(1.0, float(point.get('y') or 0)))
-    except (TypeError, ValueError):
-        return None
-    return {'x': round(x, 4), 'y': round(y, 4)}
 
-def rectangle_zone_points(x: float, y: float, width: float, height: float) -> list[dict[str, float]]:
-    return [{'x': round(x, 4), 'y': round(y, 4)}, {'x': round(x + width, 4), 'y': round(y, 4)}, {'x': round(x + width, 4), 'y': round(y + height, 4)}, {'x': round(x, 4), 'y': round(y + height, 4)}]
 
-def zone_bounds(points: list[dict[str, float]]) -> tuple[float, float, float, float]:
-    xs = [point['x'] for point in points]
-    ys = [point['y'] for point in points]
-    left = min(xs)
-    top = min(ys)
-    right = max(xs)
-    bottom = max(ys)
-    return (left, top, max(0.01, right - left), max(0.01, bottom - top))
 
-def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
-    normalized: list[dict[str, Any]] = []
-    if not isinstance(zones, list):
-        return normalized
-    for index, zone in enumerate(zones, start=1):
-        if not isinstance(zone, dict):
-            continue
-        try:
-            x = max(0.0, min(1.0, float(zone.get('x') or 0)))
-        except (TypeError, ValueError):
-            x = 0.0
-        try:
-            y = max(0.0, min(1.0, float(zone.get('y') or 0)))
-        except (TypeError, ValueError):
-            y = 0.0
-        try:
-            width = max(0.01, min(1.0 - x, float(zone.get('width') or 0)))
-        except (TypeError, ValueError):
-            width = 0.01
-        try:
-            height = max(0.01, min(1.0 - y, float(zone.get('height') or 0)))
-        except (TypeError, ValueError):
-            height = 0.01
-        points = [point for point in (normalize_zone_point(point) for point in zone.get('points') or []) if point is not None]
-        if len(points) < 3:
-            points = rectangle_zone_points(x, y, width, height)
-        x, y, width, height = zone_bounds(points)
-        object_rules = normalize_zone_object_rules(zone)
-        had_monitor_motion = 'monitor_motion' in zone and bool(zone['monitor_motion'])
-        if had_monitor_motion and (not any((str(r.get('label') or '').strip().lower() == 'motion' for r in object_rules))):
-            object_rules.insert(0, {'label': 'motion', 'enabled': True, 'record_on_detect': True, 'min_confidence': 0.45, 'cooldown_seconds': 60, 'email_enabled': False, 'email_recipients': [], 'active_start': None, 'active_end': None, 'notify_start': None, 'notify_end': None, 'push_enabled': False})
-        monitor_motion = any((str(r.get('label') or '').strip().lower() == 'motion' and r.get('enabled', True) for r in object_rules))
-        normalized.append({'id': normalize_camera_id(zone.get('id'), f'zone-{index}'), 'name': str(zone.get('name') or f'Zone {index}').strip() or f'Zone {index}', 'x': round(x, 4), 'y': round(y, 4), 'width': round(width, 4), 'height': round(height, 4), 'points': points, 'enabled': bool(zone.get('enabled', True)), 'monitor_motion': monitor_motion, 'monitor_objects': bool(zone.get('monitor_objects', True)), 'object_labels': [rule['label'] for rule in object_rules if str(rule.get('label') or '').strip().lower() != 'motion'], 'object_rules': object_rules})
-    return normalized
+
 
 
 
