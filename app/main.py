@@ -2768,33 +2768,6 @@ def users_page():
         return FileResponse(users_path)
     return root()
 
-@app.get('/api/stats')
-def stats():
-    result = database.stats()
-    result['total_cameras'] = len(cameras_config)
-    return result
-
-@app.delete('/api/objects')
-def delete_all_objects(request: Request):
-    require_admin(request)
-    deleted = database.delete_all_objects()
-    return {'ok': True, 'deleted': deleted}
-
-@app.get('/api/labels')
-def available_labels():
-    """Return available labels for the recordings filter dropdown."""
-    object_labels: list[str] = []
-    ai_config = effective_ai_config()
-    labels_path = ai_config.get('labels_path', 'models/coco.names')
-    try:
-        p = Path(labels_path)
-        if p.exists():
-            object_labels = [line.strip() for line in p.read_text(encoding='utf-8').splitlines() if line.strip()]
-    except Exception:
-        pass
-    sound_labels = [{'id': class_id, 'label': meta['label'], 'description': meta.get('description', '')} for class_id, meta in SOUND_CLASSES.items()]
-    return {'objects': object_labels, 'sounds': sound_labels}
-
 def _parse_iso_datetime(value: Any) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(str(value or ''))
@@ -3250,92 +3223,12 @@ def _current_version() -> str:
     version_file = BASE_DIR / 'VERSION'
     return version_file.read_text(encoding='utf-8').strip() if version_file.exists() else 'unknown'
 
-@app.get('/api/update/check')
-def check_update(request: Request):
-    require_admin(request)
-    current_version = _current_version()
-    try:
-        req = urllib.request.Request(f'https://api.github.com/repos/{GITHUB_REPO}/releases/latest', headers={'User-Agent': 'daygle-ai-camera-updater/1.0', 'Accept': 'application/vnd.github.v3+json'})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            data = json.loads(response.read())
-        tag_name = str(data.get('tag_name') or '')
-        latest_version = tag_name.lstrip('v')
-        update_available = bool(latest_version and current_version != 'unknown' and (_parse_semver(latest_version) > _parse_semver(current_version)))
-        return {'current_version': current_version, 'latest_version': latest_version, 'tag_name': tag_name, 'html_url': str(data.get('html_url') or ''), 'release_notes': str(data.get('body') or ''), 'published_at': str(data.get('published_at') or ''), 'update_available': update_available}
-    except urllib.error.HTTPError as exc:
-        return {'current_version': current_version, 'latest_version': None, 'update_available': False, 'error': f'GitHub API error {exc.code}: {exc.reason}'}
-    except Exception as exc:
-        return {'current_version': current_version, 'latest_version': None, 'update_available': False, 'error': str(exc)}
-
-@app.post('/api/update/apply')
-def apply_update(request: Request):
-    global _update_in_progress
-    require_admin(request)
-    with _update_lock:
-        if _update_in_progress:
-            raise HTTPException(status_code=409, detail='An update is already in progress.')
-        _update_in_progress = True
-    update_script = BASE_DIR / 'scripts' / 'update.sh'
-    if not update_script.exists():
-        with _update_lock:
-            _update_in_progress = False
-        raise HTTPException(status_code=503, detail='Update script not found.')
-    try:
-        result = subprocess.run(['bash', str(update_script)], capture_output=True, text=True, timeout=300, cwd=str(BASE_DIR))
-    except subprocess.TimeoutExpired:
-        with _update_lock:
-            _update_in_progress = False
-        raise HTTPException(status_code=504, detail='Update timed out after 5 minutes.')
-    except Exception as exc:
-        with _update_lock:
-            _update_in_progress = False
-        raise HTTPException(status_code=500, detail=f'Update failed: {exc}') from exc
-    output = ((result.stdout or '') + ('\n' + result.stderr if result.stderr else '')).strip()
-    service_restart_scheduled = False
-    if result.returncode == 0:
-        check = subprocess.run(['systemctl', 'is-active', 'daygle-ai-camera'], capture_output=True, text=True, timeout=5, check=False)
-        if check.returncode == 0:
-
-            def _delayed_restart() -> None:
-                global _update_in_progress
-                time.sleep(3)
-                try:
-                    subprocess.run(['systemctl', 'restart', 'daygle-ai-camera'], timeout=30, check=False)
-                except Exception as exc:
-                    logger.warning('Service restart after update failed: %s', exc)
-                finally:
-                    with _update_lock:
-                        _update_in_progress = False
-            threading.Thread(target=_delayed_restart, daemon=True, name='update-restart').start()
-            service_restart_scheduled = True
-        else:
-            with _update_lock:
-                _update_in_progress = False
-    else:
-        with _update_lock:
-            _update_in_progress = False
-    return {'ok': result.returncode == 0, 'output': output[-4000:], 'returncode': result.returncode, 'new_version': _current_version(), 'service_restart_scheduled': service_restart_scheduled}
-
 @app.get('/audit')
 def audit_page():
     audit_path = web_dir / 'audit.html'
     if audit_path.exists():
         return FileResponse(audit_path)
     return root()
-
-@app.get('/api/camera-log')
-def list_camera_log(request: Request, limit: int=Query(50, ge=1, le=200), offset: int=Query(0, ge=0), camera_id: str | None=None, event_type: str | None=None, severity: str | None=None):
-    require_admin(request)
-    entries = database.list_camera_diagnostics(limit=limit, offset=offset, camera_id=camera_id or None, event_type=event_type or None, severity=severity or None)
-    total = database.count_camera_diagnostics(camera_id=camera_id or None, event_type=event_type or None, severity=severity or None)
-    return {'entries': entries, 'total': total, 'limit': limit, 'offset': offset}
-
-@app.delete('/api/camera-log')
-def clear_camera_log(request: Request):
-    require_admin(request)
-    deleted = database.delete_all_camera_diagnostics()
-    write_audit_log(request, 'delete_all', 'camera_log', details={'count': deleted})
-    return {'ok': True, 'deleted': deleted}
 
 @app.get('/camera-log')
 def camera_log_page():
@@ -3376,3 +3269,9 @@ from app.api.live_router import router as live_router
 app.include_router(live_router)
 from app.api.admin_router import router as admin_router
 app.include_router(admin_router)
+from app.api.camera_log_router import router as camera_log_router
+app.include_router(camera_log_router)
+from app.api.update_router import router as update_router
+app.include_router(update_router)
+from app.api.utility_router import router as utility_router
+app.include_router(utility_router)
