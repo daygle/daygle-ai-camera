@@ -2768,32 +2768,6 @@ def users_page():
         return FileResponse(users_path)
     return root()
 
-@app.get('/api/auth/me')
-def me(request: Request):
-    session = require_session(request)
-    return {'user': session['user'], 'csrf_token': session['csrf_token'], 'expires_at': session['expires_at']}
-
-@app.post('/api/detect/frame')
-async def detect_frame(request: Request):
-    image_bytes, _filename, _content_type = await _read_uploaded_image(request)
-    if not image_bytes:
-        raise HTTPException(status_code=400, detail='Uploaded image is empty')
-    ai_settings = effective_ai_config()
-    ai_state = ai_status_payload(ai_settings)
-    ai_error: str | None = None
-    min_confidence = compute_minimum_rule_confidence()
-
-    def _run_detection() -> list:
-        return detector.detect_image(image_bytes, confidence=min_confidence)
-    try:
-        detections = await asyncio.get_event_loop().run_in_executor(None, _run_detection)
-    except DetectorUnavailableError as exc:
-        detections = []
-        ai_error = str(exc) or ai_state.get('last_detector_error') or ai_state.get('error') or 'Detector unavailable.'
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {'detections': detections, 'count': len(detections), 'ai_backend': ai_state['active_backend'], 'ai_error': ai_error}
-
 @app.get('/api/stats')
 def stats():
     result = database.stats()
@@ -2805,12 +2779,6 @@ def delete_all_objects(request: Request):
     require_admin(request)
     deleted = database.delete_all_objects()
     return {'ok': True, 'deleted': deleted}
-
-@app.get('/api/config')
-def runtime_config():
-    ai_state = ai_status_payload()
-    ai_cfg = effective_ai_config()
-    return {'server': {'host': config.get('server', {}).get('host'), 'port': config.get('server', {}).get('port')}, 'camera': get_camera_config(None), 'cameras': effective_cameras_config(), 'ai': {'enabled': ai_cfg.get('enabled'), 'backend': ai_cfg.get('backend'), 'confidence': ai_cfg.get('confidence'), 'iou_threshold': ai_cfg.get('iou_threshold'), 'input_size': ai_cfg.get('input_size'), 'model_path': ai_cfg.get('model_path'), 'labels_path': ai_cfg.get('labels_path'), 'active_backend': ai_state['active_backend'], 'mode': ai_state['mode'], 'available': ai_state['inference_available'], 'model_loaded': ai_state['model_loaded'], 'error': ai_state['error'], 'categories': ai_cfg.get('categories', [])}, 'alerts': config.get('alerts', {}), 'auth': {'enabled': auth_enabled, 'session_timeout_hours': effective_auth_config().get('session_timeout_hours'), 'max_login_attempts': effective_auth_config().get('max_login_attempts'), 'lockout_minutes': effective_auth_config().get('lockout_minutes')}, 'storage': {'database': effective_storage_config().get('database'), 'snapshots_dir': effective_storage_config().get('snapshots_dir'), 'recordings_dir': effective_storage_config().get('recordings_dir')}, 'live': effective_live_config(), 'recording': effective_recording_config()}
 
 @app.get('/api/labels')
 def available_labels():
@@ -2852,24 +2820,6 @@ def _recording_timeline_segment(recording: dict[str, Any], day_start: datetime, 
     trigger_label = str(recording.get('trigger_label') or '').strip().lower()
     color_key = trigger_label if trigger_type in {'human', 'object', 'alert'} and trigger_label else trigger_type
     return {**recording, 'timeline_start_seconds': max(0.0, (visible_start - day_start).total_seconds()), 'timeline_end_seconds': min(86400.0, (visible_end - day_start).total_seconds()), 'timeline_duration_seconds': max(1.0, (visible_end - visible_start).total_seconds()), 'color_key': color_key, 'color_label': color_key}
-
-@app.delete('/api/system/runtime-data')
-def delete_runtime_data(request: Request):
-    require_admin(request)
-    recordings = database.delete_all_recordings()
-    delete_recording_files(recordings)
-    deleted_events = database.delete_all_events()
-    deleted_alerts = database.delete_all_alerts()
-    deleted_objects = database.delete_all_objects()
-    deleted_diagnostics = database.delete_all_camera_diagnostics()
-    storage_config = effective_storage_config()
-    deleted_snapshots = clear_runtime_media_directory(storage_config.get('snapshots_dir'))
-    deleted_event_artifacts = clear_runtime_media_directory(storage_config.get('events_dir'))
-    with active_rtsp_recordings_lock:
-        active_rtsp_recordings.clear()
-    result = {'ok': True, 'deleted': {'recordings': len(recordings), 'events': deleted_events, 'alerts': deleted_alerts, 'objects': deleted_objects, 'camera_diagnostics': deleted_diagnostics, 'snapshot_files': deleted_snapshots, 'event_artifacts': deleted_event_artifacts}, 'preserved': ['settings', 'users', 'sessions', 'rules']}
-    write_audit_log(request, 'delete_all', 'runtime_data', details=result['deleted'])
-    return result
 
 def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_ai_config()
@@ -3366,13 +3316,6 @@ def apply_update(request: Request):
             _update_in_progress = False
     return {'ok': result.returncode == 0, 'output': output[-4000:], 'returncode': result.returncode, 'new_version': _current_version(), 'service_restart_scheduled': service_restart_scheduled}
 
-@app.get('/api/audit')
-def list_audit_log(request: Request, limit: int=Query(50, ge=1, le=200), offset: int=Query(0, ge=0), action: str | None=None, username: str | None=None, resource: str | None=None):
-    require_admin(request)
-    entries = database.list_audit_logs(limit=limit, offset=offset, action=action or None, username=username or None, resource=resource or None)
-    total = database.count_audit_logs(action=action or None, username=username or None, resource=resource or None)
-    return {'entries': entries, 'total': total, 'limit': limit, 'offset': offset}
-
 @app.get('/audit')
 def audit_page():
     audit_path = web_dir / 'audit.html'
@@ -3431,3 +3374,5 @@ from app.api.settings_system_router import router as settings_system_router
 app.include_router(settings_system_router)
 from app.api.live_router import router as live_router
 app.include_router(live_router)
+from app.api.admin_router import router as admin_router
+app.include_router(admin_router)
