@@ -2773,27 +2773,6 @@ def me(request: Request):
     session = require_session(request)
     return {'user': session['user'], 'csrf_token': session['csrf_token'], 'expires_at': session['expires_at']}
 
-@app.get('/api/live/detection-status')
-def live_detection_status_api(camera_id: str | None=None):
-    return live_detection_status_payload(camera_id)
-
-@app.get('/api/live/snapshot')
-def live_snapshot(camera_id: str | None=None):
-    selected_config = get_camera_config(camera_id)
-    resolved_id = str(selected_config.get('id') or camera_id or '')
-    if resolved_id and build_stream_url(selected_config):
-        sample = recording_service.latest_frame_jpeg(resolved_id)
-        if sample is not None:
-            return Response(content=sample[0], media_type='image/jpeg')
-    selected_camera = get_camera_instance(camera_id)
-    if hasattr(selected_camera, 'read_jpeg'):
-        try:
-            image_bytes, frame = selected_camera.read_jpeg()
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        return Response(content=image_bytes, media_type='image/jpeg')
-    raise HTTPException(status_code=503, detail='Live snapshots require an ONVIF/RTSP camera backend.')
-
 @app.post('/api/detect/frame')
 async def detect_frame(request: Request):
     image_bytes, _filename, _content_type = await _read_uploaded_image(request)
@@ -3448,6 +3427,7 @@ from app.api.camera_offline_router import router as camera_offline_router
 app.include_router(camera_offline_router)
 from app.api.status_router import router as status_router
 app.include_router(status_router)
-
 from app.api.settings_system_router import router as settings_system_router
 app.include_router(settings_system_router)
+from app.api.live_router import router as live_router
+app.include_router(live_router)
