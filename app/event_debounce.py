@@ -87,7 +87,7 @@ def remember_live_event(camera_id: str, labels: set[str], *, merge: bool=False) 
 
 
 def clear_live_camera_backoff(camera_id: str) -> None:
-    from app.main import log_camera_diagnostic
+    from app.diagnostics import log_camera_diagnostic
     with _state._live_backoff_lock:
         was_backed_off = bool(_state.live_detection_failure_count.get(camera_id))
         _state.live_detection_retry_after.pop(camera_id, None)
@@ -115,7 +115,8 @@ def schedule_live_camera_backoff(camera_id: str, message: str) -> float:
       app.detection_status)
     - ``log_camera_diagnostic`` (top-level helper on main.py at L1265).
     """
-    from app.main import update_live_detection_status, log_camera_diagnostic
+    from app.diagnostics import log_camera_diagnostic
+    from app.main import update_live_detection_status
     with _state._live_backoff_lock:
         failure_count = _state.live_detection_failure_count.get(camera_id, 0) + 1
         _state.live_detection_failure_count[camera_id] = failure_count

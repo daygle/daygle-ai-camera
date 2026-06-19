@@ -126,3 +126,12 @@ _camera_health_state: dict = {}
 
 _notification_threads_lock: threading.Lock = threading.Lock()
 _notification_threads: list = []
+
+# ---------------------------------------------------------------------------
+# Sound-monitor shared state
+# ---------------------------------------------------------------------------
+
+_sound_detectors: dict = {}
+_sound_detectors_lock: threading.Lock = threading.Lock()
+_sound_statuses: dict = {}
+_sound_statuses_lock: threading.Lock = threading.Lock()

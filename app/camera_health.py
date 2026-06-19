@@ -142,7 +142,7 @@ def effective_camera_offline_alert_settings() -> dict[str, Any]:
 
 
 def _update_camera_health(camera_id: str, online: bool) -> None:
-    from app.main import log_camera_diagnostic
+    from app.diagnostics import log_camera_diagnostic
     with _state._camera_health_lock:
         state = _state._camera_health_state.get(camera_id, {'online': True, 'offline_since': None, 'offline_notified': False, 'recovery_notified': False})
         was_online = state.get('online', True)

@@ -82,13 +82,126 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import app.state as _state
-from app.config_facades import effective_email_alert_settings, effective_push_notification_settings
+from app.config_facades import (
+    effective_ai_config,
+    effective_cameras_config,
+    effective_email_alert_settings,
+    effective_push_notification_settings,
+)
 
 logger = logging.getLogger('daygle.ai')
+
+_MIN_RULE_CONFIDENCE_TTL = 5.0
+_min_rule_confidence_cache: tuple[float, float] | None = None
+_min_rule_confidence_lock = threading.Lock()
+
+
+def compute_minimum_rule_confidence(fallback: float | None = None) -> float:
+    """Return the lowest min_confidence across all enabled object rules.
+
+    Result is cached for _MIN_RULE_CONFIDENCE_TTL seconds to avoid a database
+    read on every detection frame (called at ~4 Hz per camera from the hot path).
+    """
+    global _min_rule_confidence_cache
+    cached = _min_rule_confidence_cache
+    if cached is not None:
+        cached_value, cached_at = cached
+        if time.time() - cached_at < _MIN_RULE_CONFIDENCE_TTL:
+            return cached_value
+    with _min_rule_confidence_lock:
+        cached = _min_rule_confidence_cache
+        if cached is not None:
+            cached_value, cached_at = cached
+            if time.time() - cached_at < _MIN_RULE_CONFIDENCE_TTL:
+                return cached_value
+        if fallback is None:
+            fallback = float(effective_ai_config().get('confidence') or 0.45)
+        min_conf: float = fallback
+        for camera in effective_cameras_config():
+            for zone in camera.get('detection', {}).get('zones', []):
+                for rule in zone.get('object_rules', []):
+                    if not rule.get('enabled', True):
+                        continue
+                    if str(rule.get('label') or '').strip().lower() == 'motion':
+                        continue
+                    try:
+                        conf = float(rule.get('min_confidence', fallback))
+                        if conf < min_conf:
+                            min_conf = conf
+                    except (TypeError, ValueError):
+                        pass
+        result = min_conf
+        _min_rule_confidence_cache = (result, time.time())
+        return result
+
+
+def _alert_datetime_prefs() -> tuple[str, str, str]:
+    """Return (timezone_name, date_format, time_format) from the primary admin user."""
+    try:
+        users = _state.auth.list_users()
+        admin = next((u for u in users if u.get('role') == 'admin' and u.get('is_active')), None)
+        if admin is None:
+            admin = next(iter(users), None)
+        if admin:
+            return (
+                str(admin.get('timezone') or 'UTC'),
+                str(admin.get('date_format') or 'iso'),
+                str(admin.get('time_format') or '24h'),
+            )
+    except Exception:
+        pass
+    return ('UTC', 'iso', '24h')
+
+
+def _rule_notify_active_now(rule: dict[str, Any]) -> bool:
+    """Return True if a rule's notify_start/notify_end window covers now.
+
+    An empty or partial window means "notify any time". Evaluated in the admin
+    user's timezone so windows that wrap past midnight (start > end) work.
+    """
+    start = str(rule.get('notify_start') or '').strip()
+    end = str(rule.get('notify_end') or '').strip()
+    if not start or not end:
+        return True
+    tz_name, _, _ = _alert_datetime_prefs()
+    try:
+        now_local = datetime.now(timezone.utc).astimezone(ZoneInfo(tz_name))
+    except (ZoneInfoNotFoundError, KeyError):
+        now_local = datetime.now(timezone.utc)
+    now_hm = now_local.strftime('%H:%M')
+    if start <= end:
+        return start <= now_hm <= end
+    return now_hm >= start or now_hm <= end
+
+
+def _format_alert_datetime(iso_str: str) -> str:
+    """Format a UTC ISO timestamp using the admin user's preferences."""
+    tz_name, date_fmt, time_fmt = _alert_datetime_prefs()
+    try:
+        dt = datetime.fromisoformat(iso_str)
+    except ValueError:
+        return iso_str
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    try:
+        dt = dt.astimezone(ZoneInfo(tz_name))
+        tz_label = dt.strftime('%Z')
+    except (ZoneInfoNotFoundError, KeyError):
+        dt = dt.astimezone(timezone.utc)
+        tz_label = 'UTC'
+    date_str = dt.strftime({'us': '%m/%d/%Y', 'au': '%d/%m/%Y'}.get(date_fmt, '%Y-%m-%d'))
+    if time_fmt == '12h':
+        hour = str(int(dt.strftime('%I')))
+        time_str = f"{hour}{dt.strftime(':%M:%S %p')}"
+    else:
+        time_str = dt.strftime('%H:%M:%S')
+    return f'{date_str} {time_str} {tz_label}'
 
 
 def wait_for_pending_alert_notifications(timeout: float = 10.0) -> None:
@@ -120,7 +233,7 @@ def deliver_email_alerts(
     event_id: int,
     rules: list[dict[str, Any]] | None = None,
 ) -> None:
-    from app.main import _format_alert_datetime, _rule_notify_active_now, compute_minimum_rule_confidence, render_live_snapshot_jpeg_overlay, EmailAlertService, EmailAlertError
+    from app.main import render_live_snapshot_jpeg_overlay, EmailAlertService, EmailAlertError
     if not triggered:
         return
     event = _state.database.get_event(event_id) or {}
@@ -209,7 +322,7 @@ def deliver_push_notifications(
     event_id: int,
     rules: list[dict[str, Any]] | None = None,
 ) -> None:
-    from app.main import _format_alert_datetime, _rule_notify_active_now, PushNotificationService, PushNotificationError
+    from app.main import PushNotificationService, PushNotificationError
     if not triggered:
         return
     push_settings = effective_push_notification_settings()

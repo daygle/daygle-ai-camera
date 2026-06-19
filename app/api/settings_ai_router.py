@@ -10,21 +10,22 @@ import urllib.error
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from app.ai_settings import ai_status_payload, detector_status, validate_ai_settings
+from app.ai_settings import YOLO_MODELS, ai_status_payload, detector_status, validate_ai_settings
 from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.config_facades import effective_ai_config
 from app.deps import get_database
 from app.detector import DetectorUnavailableError
-from app.request_helpers import write_audit_log
-from app.main import (
+from app.model_management import (
     BASE_DIR,
-    ONE_PIXEL_PNG,
-    YOLO_MODELS,
     _do_download_model,
     _fetch_models_manifest,
     _parse_semver,
     _read_installed_models,
+)
+from app.request_helpers import write_audit_log
+from app.main import (
+    ONE_PIXEL_PNG,
     detector,
     reload_detector,
 )
