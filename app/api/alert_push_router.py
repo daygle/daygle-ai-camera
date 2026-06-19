@@ -7,10 +7,11 @@ Same template as ``app/api/settings_ai_router.py`` (Phase 2),
 as main`` at module level, every global / helper read through ``main.<name>``
 *inside* handler bodies.
 
-Handlers moved (2):
+Handlers moved (3):
 
 - GET   /api/settings/alert-push
 - PUT   /api/settings/alert-push
+- POST  /api/settings/alert-push/test
 
 The splice was AST tree-filter + unparse (Phase 2 / Phase 3 / Phase 4 /
 Phase 5 / Phase 6 safe pattern). See ``app/api/__init__.py`` for the
@@ -38,7 +39,7 @@ below on every test run.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 import app.main as main
 
@@ -58,3 +59,18 @@ async def update_push_notification_settings(request: Request):
     result = main.database.set_setting('alert_push', settings, main.utc_now())
     main.write_audit_log(request, 'update', 'settings.alert_push')
     return result
+
+
+@router.post('/api/settings/alert-push/test')
+async def test_push_notification_settings(request: Request):
+    payload = await request.json()
+    settings = main.validate_push_notification_settings(
+        payload.get('settings') if isinstance(payload.get('settings'), dict) else payload
+    )
+    try:
+        main.PushNotificationService(settings).send_test()
+    except main.PushNotificationError as exc:
+        raise HTTPException(
+            status_code=400, detail=f'Test notification failed: {exc}'
+        ) from exc
+    return {'ok': True}

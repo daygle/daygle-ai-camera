@@ -6,10 +6,11 @@ Same template as ``app/api/settings_ai_router.py`` (Phase 2) and
 module level, every global / helper read through ``main.<name>`` *inside*
 handler bodies.
 
-Handlers moved (2):
+Handlers moved (3):
 
 - GET   /api/settings/alert-email
 - PUT   /api/settings/alert-email
+- POST  /api/settings/alert-email/test
 
 The splice was AST tree-filter + unparse (Phase 2 / Phase 3 / Phase 4 /
 Phase 5 / Phase 6 safe pattern). See ``app/api/__init__.py`` for the
@@ -39,7 +40,7 @@ below on every test run.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 import app.main as main
 
@@ -59,3 +60,25 @@ async def update_alert_email_settings(request: Request):
     result = main.database.set_setting('alert_email', settings, main.utc_now())
     main.write_audit_log(request, 'update', 'settings.alert_email')
     return result
+
+
+@router.post('/api/settings/alert-email/test')
+async def test_alert_email_settings(request: Request):
+    payload = await request.json()
+    settings = main.validate_alert_email_settings(
+        payload.get('settings') if isinstance(payload.get('settings'), dict) else payload
+    )
+    recipient = str(
+        payload.get('recipient') or settings.get('from_address') or ''
+    ).strip()
+    if '@' not in recipient:
+        raise HTTPException(
+            status_code=400, detail='Test recipient must be a valid email address.'
+        )
+    try:
+        main.EmailAlertService(settings).send_test(recipient)
+    except main.EmailAlertError as exc:
+        raise HTTPException(
+            status_code=400, detail=f'Test email failed: {exc}'
+        ) from exc
+    return {'ok': True, 'recipient': recipient}

@@ -3018,29 +3018,6 @@ def _do_download_model(model_name: str, switch_active: bool=True) -> dict[str, A
         error = None
     return {'ok': True, 'message': f"Exported {info['label']} ONNX to {destination.relative_to(BASE_DIR)}.", 'model_path': rel_path, 'bytes': exported_bytes, 'reload_succeeded': reloaded, 'reload_error': error, 'status': ai_status_payload(updated)}
 
-@app.post('/api/settings/alert-email/test')
-async def test_alert_email_settings(request: Request):
-    payload = await request.json()
-    settings = validate_alert_email_settings(payload.get('settings') if isinstance(payload.get('settings'), dict) else payload)
-    recipient = str(payload.get('recipient') or settings.get('from_address') or '').strip()
-    if '@' not in recipient:
-        raise HTTPException(status_code=400, detail='Test recipient must be a valid email address.')
-    try:
-        EmailAlertService(settings).send_test(recipient)
-    except EmailAlertError as exc:
-        raise HTTPException(status_code=400, detail=f'Test email failed: {exc}') from exc
-    return {'ok': True, 'recipient': recipient}
-
-@app.post('/api/settings/alert-push/test')
-async def test_push_notification_settings(request: Request):
-    payload = await request.json()
-    settings = validate_push_notification_settings(payload.get('settings') if isinstance(payload.get('settings'), dict) else payload)
-    try:
-        PushNotificationService(settings).send_test()
-    except PushNotificationError as exc:
-        raise HTTPException(status_code=400, detail=f'Test notification failed: {exc}') from exc
-    return {'ok': True}
-
 def _redact_camera(cam: dict[str, Any]) -> dict[str, Any]:
     out = {k: v for k, v in cam.items() if k != 'password'}
     out['has_password'] = bool(cam.get('password'))
