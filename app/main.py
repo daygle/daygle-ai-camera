@@ -47,6 +47,15 @@ from app.recordings import RecordingService
 from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, load_settings
 from app.sound_detector import SoundDetector, SOUND_CLASSES, DEFAULT_RULES
 from app.storage import Storage
+from app.config_facades import (
+    effective_ai_config as effective_ai_config,
+    effective_auth_config as effective_auth_config,
+    effective_cameras_config as effective_cameras_config,
+    effective_live_config as effective_live_config,
+    effective_recording_config as effective_recording_config,
+    effective_storage_config as effective_storage_config,
+    get_camera_config as get_camera_config,
+)
 logger = logging.getLogger('daygle.ai')
 
 def _configure_file_logging() -> None:
@@ -93,13 +102,6 @@ web_dir = BASE_DIR / 'web'
 static_dir = web_dir
 if static_dir.exists():
     app.mount('/static', StaticFiles(directory=static_dir), name='static')
-
-def effective_ai_config() -> dict[str, Any]:
-    settings = copy.deepcopy(config.get('ai', {}))
-    override = database.get_setting('ai')
-    if isinstance(override, dict):
-        settings.update(override)
-    return settings
 _min_rule_confidence_cache: tuple[float, float] | None = None
 _MIN_RULE_CONFIDENCE_TTL = 5.0
 _min_rule_confidence_lock = threading.Lock()
@@ -145,44 +147,11 @@ def compute_minimum_rule_confidence(fallback: float | None=None) -> float:
         _min_rule_confidence_cache = (result, time.time())
         return result
 
-def effective_recording_config() -> dict[str, Any]:
-    settings = copy.deepcopy(config.get('recording', {}))
-    override = database.get_setting('recording')
-    if isinstance(override, dict):
-        settings.update(override)
-    return settings
-
-def effective_live_config() -> dict[str, Any]:
-    settings = {'snapshot_refresh_ms': 500, 'detection_status_refresh_ms': 2000, 'detection_interval_seconds': 0.5, 'event_debounce_seconds': 10.0, 'background_detection_enabled': True, 'detection_history_minutes': 10, 'motion_pixel_threshold': 30, 'motion_gate_fraction': 0.003, 'motion_scale_fraction': 0.1, 'motion_background_alpha': 0.05, 'periodic_scan_interval_seconds': 0}
-    config_live = config.get('live', {})
-    if isinstance(config_live, dict):
-        settings.update(config_live)
-    override = database.get_setting('live')
-    if isinstance(override, dict):
-        settings.update(override)
-    return settings
-
 def camera_event_recording_config(settings: dict[str, Any]) -> dict[str, Any]:
     base = effective_recording_config()
     camera_recording = normalize_camera_recording_settings(settings.get('recording'))
     base.update({'continuous': camera_recording['continuous']})
     return base
-
-def effective_storage_config() -> dict[str, Any]:
-    settings = copy.deepcopy(config.get('storage', {}))
-    override = database.get_setting('storage')
-    if isinstance(override, dict):
-        database_path = settings.get('database')
-        settings.update(override)
-        settings['database'] = database_path
-    return settings
-
-def effective_auth_config() -> dict[str, Any]:
-    settings = copy.deepcopy(auth_config)
-    override = database.get_setting('auth')
-    if isinstance(override, dict):
-        settings.update(override)
-    return settings
 
 def effective_email_alert_settings() -> dict[str, Any]:
     settings = copy.deepcopy(config.get('alerts', {}).get('email', {}))
@@ -715,23 +684,6 @@ def normalize_camera_settings(settings: dict[str, Any], index: int=1) -> dict[st
     camera_settings['recording'] = normalize_camera_recording_settings(camera_settings.get('recording'))
     camera_settings['ptz'] = normalize_camera_ptz_settings(camera_settings.get('ptz'))
     return camera_settings
-
-def effective_cameras_config() -> list[dict[str, Any]]:
-    override = database.get_setting('cameras')
-    if isinstance(override, list) and override:
-        return [normalize_camera_settings(camera_settings, index) for index, camera_settings in enumerate(override, start=1)]
-    return []
-
-def get_camera_config(camera_id: str | None=None) -> dict[str, Any]:
-    if not cameras_config:
-        return camera_config
-    if camera_id:
-        normalized = normalize_camera_id(camera_id)
-        for configured in cameras_config:
-            if configured.get('id') == normalized:
-                return configured
-        raise HTTPException(status_code=404, detail='Camera not found')
-    return cameras_config[0]
 
 def get_camera_instance(camera_id: str | None=None):
     configured = get_camera_config(camera_id)
@@ -3009,14 +2961,6 @@ from app.api.web_router import setup_page as setup_page
 from app.middleware import authentication_middleware, app_navigation_middleware
 app.middleware('http')(authentication_middleware)
 app.middleware('http')(app_navigation_middleware)
+from app.auth_gates import _request_ip as _request_ip, require_admin as require_admin, require_session as require_session, require_user as require_user
 
-# Phase 16: Pool A from-import rebinds for the auth-gate cluster extracted
-# into app/auth_gates.py. The router files reach these helpers via
-# main.require_admin(...) etc. so the names must exist on app.main
-# without consumers having to migrate to from app.auth_gates import ...
-from app.auth_gates import (
-    _request_ip as _request_ip,
-    require_admin as require_admin,
-    require_session as require_session,
-    require_user as require_user,
-)
+
