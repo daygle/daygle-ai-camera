@@ -404,7 +404,7 @@ function initSoftwareUpdateSection() {
     showUpdateStatus('Checking for updates...', '');
     showUpdateOutput('');
     try {
-      const result = await api('/api/update/check');
+      const result = await api('/api/update/check', { method: 'POST' });
       if (result.error) {
         showUpdateStatus(`Could not reach GitHub: ${escapeHtml(result.error)}`, 'error');
         return;
