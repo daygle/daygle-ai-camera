@@ -161,8 +161,46 @@ from app.zone_schema import (
     zone_motion_min_confidence as zone_motion_min_confidence,
 )
 
-
-
+# Phase 23: top-of-file Pool A from-import rebinds for the
+# zone-detection orchestration cluster extracted into
+# app/zone_detection.py. The rebind lives in the regular app.X import
+# section (NOT at the very bottom like Phase 15/16) because internal
+# main.py callers (``process_live_stream_alerts`` L1442-L1467) reference
+# these as bare names inside function bodies, and Pool C reach sites
+# (``main.get_camera_config``, ``main.camera_instances``, ``main.HTTPException``,
+# ``main._MOTION_FRAME_W``, ``main._MOTION_FRAME_H``,
+# ``main.zone_motion_min_confidence``, ``main.normalize_label_list``,
+# ``main._LABEL_ALIASES``, ``main.normalize_email_recipients``,
+# ``main.normalize_bool_setting``) are resolved inside the moved helpers.
+# The default-arg bindings of ``zone_motion_detections`` (gate_fraction and
+# scale_fraction) and ``_zone_pixel_motion_fraction``'s body references to
+# main._MOTION_FRAME_W / main._MOTION_FRAME_H rely on these constants
+# being defined on ``app.main`` BEFORE the rebind block fires, which is
+# true because both module-level constants are populated before the
+# phase 17 row of rebinds.
+from app.zone_detection import (
+    _zone_pixel_motion_fraction as _zone_pixel_motion_fraction,
+    detection_center_in_zone as detection_center_in_zone,
+    detection_has_matching_record_rule as detection_has_matching_record_rule,
+    detection_label_allowed_for_zone as detection_label_allowed_for_zone,
+    detection_matches_zone as detection_matches_zone,
+    detection_overlap_ratio_with_zone_rect as detection_overlap_ratio_with_zone_rect,
+    filter_detections_for_camera as filter_detections_for_camera,
+    filter_detections_for_camera_zones as filter_detections_for_camera_zones,
+    get_camera_instance as get_camera_instance,
+    normalize_detection_boxes_for_frame as normalize_detection_boxes_for_frame,
+    point_in_polygon as point_in_polygon,
+    point_on_segment as point_on_segment,
+    zone_alert_detections as zone_alert_detections,
+    zone_detection_alert_rule_names as zone_detection_alert_rule_names,
+    zone_motion_detections as zone_motion_detections,
+    zone_motion_record_on_detect as zone_motion_record_on_detect,
+    zone_name_for_detection as zone_name_for_detection,
+    zone_object_alert_rules as zone_object_alert_rules,
+    zone_object_rule_matches as zone_object_rule_matches,
+    zone_record_on_detect as zone_record_on_detect,
+    zone_rule_name as zone_rule_name,
+)
 logger = logging.getLogger('daygle.ai')
 
 def _configure_file_logging() -> None:
@@ -592,310 +630,26 @@ def normalize_email_recipients(value: Any) -> list[str]:
 
 
 
-def get_camera_instance(camera_id: str | None=None):
-    configured = get_camera_config(camera_id)
-    instance = camera_instances.get(str(configured['id']))
-    if instance is None:
-        raise HTTPException(status_code=404, detail='Camera not found')
-    return instance
 
-def detection_center_in_zone(detection: dict[str, Any], zone: dict[str, Any]) -> bool:
-    box = detection.get('box') or {}
-    center_x = float(box.get('x') or 0) + float(box.get('width') or 0) / 2
-    center_y = float(box.get('y') or 0) + float(box.get('height') or 0) / 2
-    points = zone.get('points') or []
-    if isinstance(points, list) and len(points) >= 3:
-        return point_in_polygon(center_x, center_y, points)
-    return float(zone['x']) <= center_x <= float(zone['x']) + float(zone['width']) and float(zone['y']) <= center_y <= float(zone['y']) + float(zone['height'])
 
-def detection_overlap_ratio_with_zone_rect(detection: dict[str, Any], zone: dict[str, Any]) -> float:
-    box = detection.get('box') or {}
-    x = float(box.get('x') or 0)
-    y = float(box.get('y') or 0)
-    width = max(0.0, float(box.get('width') or 0))
-    height = max(0.0, float(box.get('height') or 0))
-    if width <= 0 or height <= 0:
-        return 0.0
-    dx1 = x
-    dy1 = y
-    dx2 = x + width
-    dy2 = y + height
-    zx1 = float(zone.get('x') or 0)
-    zy1 = float(zone.get('y') or 0)
-    zw = max(0.0, float(zone.get('width') or 0))
-    zh = max(0.0, float(zone.get('height') or 0))
-    zx2 = zx1 + zw
-    zy2 = zy1 + zh
-    ix1 = max(dx1, zx1)
-    iy1 = max(dy1, zy1)
-    ix2 = min(dx2, zx2)
-    iy2 = min(dy2, zy2)
-    if ix2 <= ix1 or iy2 <= iy1:
-        return 0.0
-    intersection = (ix2 - ix1) * (iy2 - iy1)
-    detection_area = width * height
-    return intersection / detection_area if detection_area > 0 else 0.0
 
-def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any], *, min_overlap_ratio: float=0.2) -> bool:
-    if detection_center_in_zone(detection, zone):
-        return True
-    points = zone.get('points') or []
-    if isinstance(points, list) and len(points) >= 3:
-        return False
-    return detection_overlap_ratio_with_zone_rect(detection, zone) >= min_overlap_ratio
 
-def point_in_polygon(x: float, y: float, points: list[dict[str, Any]]) -> bool:
-    if len(points) < 3:
-        return False
-    inside = False
-    previous = points[-1]
-    for current in points:
-        try:
-            current_x = float(current.get('x') or 0)
-            current_y = float(current.get('y') or 0)
-            previous_x = float(previous.get('x') or 0)
-            previous_y = float(previous.get('y') or 0)
-        except (TypeError, ValueError):
-            previous = current
-            continue
-        if point_on_segment(x, y, previous_x, previous_y, current_x, current_y):
-            return True
-        intersects = (current_y > y) != (previous_y > y)
-        if intersects:
-            slope_x = (previous_x - current_x) * (y - current_y) / (previous_y - current_y or 1e-12) + current_x
-            if x < slope_x:
-                inside = not inside
-        previous = current
-    return inside
 
-def point_on_segment(x: float, y: float, x1: float, y1: float, x2: float, y2: float) -> bool:
-    cross = (y - y1) * (x2 - x1) - (x - x1) * (y2 - y1)
-    if abs(cross) > 1e-09:
-        return False
-    return min(x1, x2) - 1e-09 <= x <= max(x1, x2) + 1e-09 and min(y1, y2) - 1e-09 <= y <= max(y1, y2) + 1e-09
 
-def filter_detections_for_camera(detections: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
-    detection_settings = settings.get('detection') or {}
-    if not detection_settings.get('object_detection_enabled', True):
-        return []
-    return filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects')
 
-def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
-    """Return the fraction of pixels inside a zone's bounding box that changed.
 
-    ``diff_mask`` is the boolean (H×W) array from ``detect_frame_motion`` at
-    ``_MOTION_FRAME_H × _MOTION_FRAME_W`` resolution.  Zone coordinates are
-    normalised (0–1) and are converted to pixel indices before slicing.
-    """
-    try:
-        import numpy as np
-        x = zone.get('x')
-        y = zone.get('y')
-        w = zone.get('width')
-        h = zone.get('height')
-        points = zone.get('points') or []
-        if (x is None or w is None) and isinstance(points, list) and (len(points) >= 2):
-            xs = [float(p.get('x', 0)) for p in points if isinstance(p, dict)]
-            ys = [float(p.get('y', 0)) for p in points if isinstance(p, dict)]
-            if xs and ys:
-                x = x if x is not None else min(xs)
-                y = y if y is not None else min(ys)
-                w = w if w is not None else max(xs) - float(x)
-                h = h if h is not None else max(ys) - float(y)
-        x = float(x if x is not None else 0)
-        y = float(y if y is not None else 0)
-        w = float(w if w is not None else 1)
-        h = float(h if h is not None else 1)
-        px1 = max(0, int(x * _MOTION_FRAME_W))
-        py1 = max(0, int(y * _MOTION_FRAME_H))
-        px2 = min(_MOTION_FRAME_W, max(px1 + 1, int(round((x + w) * _MOTION_FRAME_W))))
-        py2 = min(_MOTION_FRAME_H, max(py1 + 1, int(round((y + h) * _MOTION_FRAME_H))))
-        return float(np.mean(diff_mask[py1:py2, px1:px2]))
-    except Exception:
-        return 0.0
 
-def zone_motion_detections(settings: dict[str, Any], frame_motion_confidence: float=0.5, *, diff_mask: Any=None, gate_fraction: float=_MOTION_GATE_FRACTION, scale_fraction: float=_MOTION_SCALE_FRACTION) -> list[dict[str, Any]]:
-    detection_settings = settings.get('detection') or {}
-    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_motion', True)]
-    if not zones:
-        return []
-    seen_zones: set[str] = set()
-    result: list[dict[str, Any]] = []
-    for zone in zones:
-        zone_id = str(zone.get('id') or zone.get('name') or id(zone))
-        if zone_id in seen_zones:
-            continue
-        if diff_mask is not None:
-            zone_fraction = _zone_pixel_motion_fraction(diff_mask, zone)
-            if zone_fraction < gate_fraction:
-                continue
-            zone_confidence = round(min(1.0, zone_fraction / max(scale_fraction, 1e-09)), 3)
-        else:
-            zone_confidence = frame_motion_confidence
-        conf_threshold = zone_motion_min_confidence(zone)
-        if zone_confidence < conf_threshold:
-            continue
-        seen_zones.add(zone_id)
-        result.append({'confidence': zone_confidence, 'zone_id': zone_id, 'box': {'x': float(zone.get('x', 0)), 'y': float(zone.get('y', 0)), 'width': float(zone.get('width', 1)), 'height': float(zone.get('height', 1))}})
-    return result
 
-def detection_label_allowed_for_zone(detection: dict[str, Any], zone: dict[str, Any], camera_labels: set[str]) -> bool:
-    zone_labels = set(normalize_label_list(zone.get('object_labels', [])))
-    allowed_labels = zone_labels or camera_labels
-    if not allowed_labels:
-        return True
-    label = str(detection.get('label') or '').strip().lower()
-    return _LABEL_ALIASES.get(label, label) in allowed_labels
 
-def filter_detections_for_camera_zones(detections: list[dict[str, Any]], settings: dict[str, Any], *, zone_monitor_key: str, require_zones: bool=False) -> list[dict[str, Any]]:
-    detection_settings = settings.get('detection') or {}
-    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get(zone_monitor_key, True)]
-    camera_labels = set(normalize_label_list(detection_settings.get('object_labels', [])))
-    if not zones:
-        if zone_monitor_key == 'monitor_objects' and camera_labels and (not require_zones):
-            return [detection for detection in detections if str(detection.get('label') or '').strip().lower() in camera_labels]
-        return [] if require_zones else detections
-    return [detection for detection in detections if any((detection_matches_zone(detection, zone) and (zone_monitor_key != 'monitor_objects' or detection_label_allowed_for_zone(detection, zone, camera_labels)) for zone in zones))]
 
-def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any], *, action: str) -> list[tuple[dict[str, Any], dict[str, Any]]]:
-    detection_settings = settings.get('detection') or {}
-    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
-    label = str(detection.get('label') or '').strip().lower()
-    label = _LABEL_ALIASES.get(label, label)
-    if not label:
-        return []
-    matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
-    for zone in zones:
-        if not detection_matches_zone(detection, zone):
-            continue
-        for rule in zone.get('object_rules') or []:
-            if not rule.get('enabled', True):
-                continue
-            if action == 'alert' and (not (rule.get('email_enabled') or rule.get('push_enabled'))):
-                continue
-            if action == 'record' and (not rule.get('record_on_detect', True)):
-                continue
-            if str(rule.get('label') or '').strip().lower() != label:
-                continue
-            if float(detection.get('confidence') or 0) < float(rule.get('min_confidence', 0.5)):
-                continue
-            matches.append((zone, rule))
-    return matches
 
-def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
-    detection_settings = settings.get('detection') or {}
-    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
-    rules: list[dict[str, Any]] = []
-    camera_key = str(settings.get('id') or settings.get('name') or 'camera').strip() or 'camera'
-    for zone in zones:
-        zone_id = str(zone.get('id') or zone.get('name') or 'zone')
-        for rule in zone.get('object_rules') or []:
-            if not rule.get('enabled', True) or not (rule.get('email_enabled') or rule.get('push_enabled')):
-                continue
-            label = str(rule.get('label') or '').strip().lower()
-            if not label:
-                continue
-            rules.append({'name': zone_rule_name(settings, zone, rule), 'cooldown_key': f'{camera_key}::{zone_id}::{label}', 'object': label, 'zone_id': zone_id, 'min_confidence': rule.get('min_confidence', 0.5), 'cooldown_seconds': rule.get('cooldown_seconds', 60), 'enabled': True, 'email_enabled': bool(rule.get('email_enabled', False)), 'email_recipients': normalize_email_recipients(rule.get('email_recipients', [])), 'push_enabled': bool(rule.get('push_enabled', False)), 'active_start': rule.get('active_start'), 'active_end': rule.get('active_end'), 'notify_start': rule.get('notify_start'), 'notify_end': rule.get('notify_end')})
-    return rules
 
-def zone_rule_name(settings: dict[str, Any], zone: dict[str, Any], rule: dict[str, Any]) -> str:
-    camera_name = str(settings.get('name') or settings.get('id') or 'Camera')
-    zone_name = str(zone.get('name') or zone.get('id') or 'Zone')
-    label = str(rule.get('label') or '').strip().lower()
-    return f'{camera_name} / {zone_name} / {label}'
 
-def zone_alert_detections(settings: dict[str, Any], detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    matched: list[dict[str, Any]] = []
-    seen: set[tuple[int, str]] = set()
-    for index, detection in enumerate(detections):
-        for zone, _rule in zone_object_rule_matches(settings, detection, action='alert'):
-            zone_id = str(zone.get('id') or zone.get('name') or 'zone')
-            key = (index, zone_id)
-            if key in seen:
-                continue
-            seen.add(key)
-            matched.append({**detection, 'zone_id': zone_id, 'zone_name': zone.get('name') or zone_id})
-    return matched
 
-def zone_name_for_detection(settings: dict[str, Any], detection: dict[str, Any]) -> str | None:
-    for action in ('alert', 'record'):
-        matches = zone_object_rule_matches(settings, detection, action=action)
-        if matches:
-            zone = matches[0][0]
-            zone_name = str(zone.get('name') or zone.get('id') or '').strip()
-            return zone_name or None
-    return None
 
-def zone_record_on_detect(detection: dict[str, Any], settings: dict[str, Any]) -> bool:
-    return bool(zone_object_rule_matches(settings, detection, action='record'))
 
-def zone_motion_record_on_detect(settings: dict[str, Any]) -> bool:
-    """Return True if any enabled motion-monitoring zone has a motion rule with record_on_detect=True.
 
-    zone_record_on_detect / zone_object_rule_matches filter by monitor_objects=True and therefore
-    skip motion-only zones (monitor_objects=False, monitor_motion=True). This helper checks the
-    correct monitor_motion axis so motion-only zones are not silently excluded from recording.
-    """
-    detection_settings = settings.get('detection') or {}
-    for zone in detection_settings.get('zones', []):
-        if not zone.get('enabled', True) or not zone.get('monitor_motion', True):
-            continue
-        for rule in zone.get('object_rules') or []:
-            if not rule.get('enabled', True):
-                continue
-            if str(rule.get('label') or '').strip().lower() == 'motion' and rule.get('record_on_detect', True):
-                return True
-    return False
 
-def zone_detection_alert_rule_names(settings: dict[str, Any], detection: dict[str, Any]) -> set[str]:
-    return {zone_rule_name(settings, zone, rule) for zone, rule in zone_object_rule_matches(settings, detection, action='alert')}
-
-def detection_has_matching_record_rule(detection: dict[str, Any], rules: list[dict[str, Any]]) -> bool:
-    """Return True if any enabled alert rule covers this detection by label and confidence.
-
-    Cooldown and time-window are intentionally ignored so a recording is created on every
-    matching detection, not only when a new alert notification is emitted.
-    """
-    label = str(detection.get('label') or '').strip().lower()
-    label = _LABEL_ALIASES.get(label, label)
-    if not label:
-        return False
-    confidence = float(detection.get('confidence') or 0)
-    for rule in rules:
-        if not rule.get('enabled', True):
-            continue
-        rule_object = str(rule.get('object') or '').strip().lower()
-        rule_object = _LABEL_ALIASES.get(rule_object, rule_object)
-        if rule_object != label:
-            continue
-        try:
-            min_conf = float(rule.get('min_confidence', 0.0 if label == 'motion' else 0.5))
-        except (TypeError, ValueError):
-            min_conf = 0.0 if label == 'motion' else 0.5
-        if confidence >= min_conf:
-            return True
-    return False
-
-def normalize_detection_boxes_for_frame(detections: list[dict[str, Any]], frame: dict[str, Any]) -> list[dict[str, Any]]:
-    width = float(frame.get('width') or 0)
-    height = float(frame.get('height') or 0)
-    if width <= 0 or height <= 0:
-        return detections
-    normalized: list[dict[str, Any]] = []
-    for detection in detections:
-        box = detection.get('box') or {}
-        if not isinstance(box, dict):
-            normalized.append(detection)
-            continue
-        box_x = float(box.get('x') or 0)
-        box_y = float(box.get('y') or 0)
-        box_width = float(box.get('width') or 0)
-        box_height = float(box.get('height') or 0)
-        if max(box_x, box_y, box_width, box_height) <= 1:
-            normalized.append(detection)
-            continue
-        normalized.append({**detection, 'box': {'x': round(box_x / width, 4), 'y': round(box_y / height, 4), 'width': round(box_width / width, 4), 'height': round(box_height / height, 4)}})
-    return normalized
 
 def update_live_detection_status(camera_id: str, **updates: Any) -> None:
     with live_detection_status_lock:
