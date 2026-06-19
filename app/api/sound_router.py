@@ -8,13 +8,8 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
-from app.main import (
-    _sound_detectors,
-    _sound_detectors_lock,
-    _sound_statuses,
-    _sound_statuses_lock,
-    _sound_status_reason,
-)
+import app.state as _state
+from app.sound_monitor import _sound_status_reason
 
 router = APIRouter()
 
@@ -40,18 +35,18 @@ def list_sound_classes() -> dict[str, Any]:
 def get_sound_status(camera_id: str | None = Query(None)) -> dict[str, Any]:
     # LOCK-ORDER INVARIANT: _sound_statuses_lock taken FIRST and released
     # BEFORE _sound_detectors_lock is taken (sequential, never nested).
-    with _sound_statuses_lock:
+    with _state._sound_statuses_lock:
         if camera_id:
-            status = dict(_sound_statuses.get(
+            status = dict(_state._sound_statuses.get(
                 camera_id,
                 {'state': 'disabled', 'last_detected_at': None, 'last_confidence': 0.0, 'backend': None},
             ))
         else:
-            statuses = dict(_sound_statuses)
+            statuses = dict(_state._sound_statuses)
 
     if camera_id:
-        with _sound_detectors_lock:
-            det = _sound_detectors.get(camera_id)
+        with _state._sound_detectors_lock:
+            det = _state._sound_detectors.get(camera_id)
         if det is not None:
             status['running'] = det.running
             status['detector_status'] = det.status
@@ -69,8 +64,8 @@ def get_sound_status(camera_id: str | None = Query(None)) -> dict[str, Any]:
             status['last_confidences'] = {}
         return status
 
-    with _sound_detectors_lock:
-        detectors = list(_sound_detectors.values())
+    with _state._sound_detectors_lock:
+        detectors = list(_state._sound_detectors.values())
 
     if not statuses:
         return {'state': 'disabled', 'running': False, 'detector_status': 'disabled', 'last_confidences': {}}

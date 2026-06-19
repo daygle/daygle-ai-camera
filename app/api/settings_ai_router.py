@@ -10,14 +10,25 @@ import urllib.error
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from app.ai_settings import ai_status_payload, detector_status, validate_ai_settings
+from app.ai_settings import YOLO_MODELS, ai_status_payload, detector_status, validate_ai_settings
 from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.config_facades import effective_ai_config
 from app.deps import get_database
 from app.detector import DetectorUnavailableError
+from app.model_management import (
+    BASE_DIR,
+    _do_download_model,
+    _fetch_models_manifest,
+    _parse_semver,
+    _read_installed_models,
+)
 from app.request_helpers import write_audit_log
-import app.main as main
+from app.main import (
+    ONE_PIXEL_PNG,
+    detector,
+    reload_detector,
+)
 
 router = APIRouter()
 
@@ -33,7 +44,7 @@ async def update_ai_settings(request: Request, db=Depends(get_database)):
     payload = await request.json()
     new_settings = validate_ai_settings(payload)
     db.set_setting('ai', new_settings, utc_now())
-    reloaded, error = main.reload_detector(new_settings)
+    reloaded, error = reload_detector(new_settings)
     response = detector_status(new_settings)
     response['reload_succeeded'] = reloaded
     response['reload_error'] = error
@@ -47,7 +58,7 @@ async def update_ai_settings(request: Request, db=Depends(get_database)):
 @router.post('/api/settings/ai/reload')
 def reload_ai_detector():
     ai_settings = effective_ai_config()
-    reloaded, error = main.reload_detector(ai_settings)
+    reloaded, error = reload_detector(ai_settings)
     response = detector_status(ai_settings)
     response['reload_succeeded'] = reloaded
     response['reload_error'] = error
@@ -63,13 +74,13 @@ def check_ai_model():
 
 @router.get('/api/settings/ai/models')
 def list_ai_models():
-    models_dir = main.BASE_DIR / 'models'
+    models_dir = BASE_DIR / 'models'
     active_path = str(effective_ai_config().get('model_path') or '')
-    installed_meta = main._read_installed_models()
+    installed_meta = _read_installed_models()
     result = []
-    for model_id, info in main.YOLO_MODELS.items():
+    for model_id, info in YOLO_MODELS.items():
         onnx_path = models_dir / info['onnx']
-        rel_path = str((models_dir / info['onnx']).relative_to(main.BASE_DIR))
+        rel_path = str((models_dir / info['onnx']).relative_to(BASE_DIR))
         installed = onnx_path.exists()
         meta = installed_meta.get(model_id, {})
         result.append({
@@ -89,28 +100,28 @@ def list_ai_models():
 @router.post('/api/settings/ai/download-model')
 async def download_ai_model(request: Request):
     body = await request.json()
-    return main._do_download_model(str(body.get('model') or '').strip().lower())
+    return _do_download_model(str(body.get('model') or '').strip().lower())
 
 
 @router.post('/api/settings/ai/download-yolov8n')
 def download_yolov8n_model():
-    return main._do_download_model('yolov8n')
+    return _do_download_model('yolov8n')
 
 
 @router.get('/api/settings/ai/check-model-updates')
 def check_model_updates(request: Request):
     require_admin(request)
-    installed_meta = main._read_installed_models()
-    models_dir = main.BASE_DIR / 'models'
+    installed_meta = _read_installed_models()
+    models_dir = BASE_DIR / 'models'
     try:
-        manifest = main._fetch_models_manifest()
+        manifest = _fetch_models_manifest()
     except urllib.error.HTTPError as exc:
         return {'error': f'Manifest fetch error {exc.code}: {exc.reason}', 'models': [], 'any_updates': False}
     except Exception as exc:
         return {'error': str(exc), 'models': [], 'any_updates': False}
     manifest_models = manifest.get('models', {})
     result = []
-    for model_id, info in main.YOLO_MODELS.items():
+    for model_id, info in YOLO_MODELS.items():
         onnx_path = models_dir / info['onnx']
         in_meta = model_id in installed_meta
         if not in_meta and not onnx_path.exists():
@@ -122,7 +133,7 @@ def check_model_updates(request: Request):
             remote_version
             and (
                 installed_version == 'unknown'
-                or main._parse_semver(remote_version) > main._parse_semver(installed_version)
+                or _parse_semver(remote_version) > _parse_semver(installed_version)
             )
         )
         result.append({
@@ -144,9 +155,9 @@ async def update_ai_model(request: Request):
     require_admin(request)
     body = await request.json()
     model_name = str(body.get('model') or '').strip().lower()
-    if model_name not in main.YOLO_MODELS:
+    if model_name not in YOLO_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'.")
-    return main._do_download_model(model_name, switch_active=False)
+    return _do_download_model(model_name, switch_active=False)
 
 
 @router.post('/api/settings/ai/test-detector')
@@ -155,11 +166,11 @@ def test_ai_detector():
     ai_state = ai_status_payload(ai_settings)
     ai_error: str | None = None
     detections: list = []
-    if not hasattr(main.detector, 'detect_image'):
+    if not hasattr(detector, 'detect_image'):
         ai_error = 'Configured detector cannot run image inference.'
     else:
         try:
-            detections = main.detector.detect_image(main.ONE_PIXEL_PNG)
+            detections = detector.detect_image(ONE_PIXEL_PNG)
         except DetectorUnavailableError as exc:
             ai_error = str(exc) or ai_state.get('last_detector_error') or 'Detector unavailable.'
         except ValueError as exc:

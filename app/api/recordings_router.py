@@ -17,16 +17,15 @@ from app.auth_gates import require_admin
 from app.camera_config import normalize_camera_id
 from app.config_facades import effective_cameras_config, effective_recording_config
 from app.deps import get_database, get_recording_service
+from app.media_utils import mp4_has_video_stream, recording_stream_path
 from app.recording_extension import load_recording_detection_track, recording_track_sidecar_path
 from app.request_helpers import write_audit_log
+from app.utils import camera_default_name
 from app.main import (
     _recording_capture_window,
     _recording_timeline_segment,
-    camera_default_name,
     delete_recording_files,
-    mp4_has_video_stream,
     purge_recordings_by_policy,
-    recording_stream_path,
     write_live_history_detection_track,
 )
 

@@ -30,16 +30,18 @@ from app.payload_validators import (
     validate_storage_settings,
 )
 from app.request_helpers import write_audit_log
-from app.main import (
-    BASE_DIR,
+from app.backup import (
     DATABASE_RESTORE_LOCK,
-    apply_storage_and_recording_settings,
-    auth_enabled,
-    config,
     create_database_backup,
     overwrite_database_from_file,
     refresh_runtime_after_database_restore,
     validate_restore_database,
+)
+from app.main import (
+    BASE_DIR,
+    apply_storage_and_recording_settings,
+    auth_enabled,
+    config,
     SESSION_COOKIE_NAME,
 )
 

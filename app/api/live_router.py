@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from app.config_facades import get_camera_config
 from app.deps import get_recording_service
 from app.detection_status import live_detection_status_payload
-from app.main import build_stream_url
+from app.utils import build_stream_url
 from app.zone_detection import get_camera_instance
 
 router = APIRouter()

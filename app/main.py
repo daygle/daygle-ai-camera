@@ -147,8 +147,14 @@ from app.recording_settings import (
 # main.load_labels, main.HTTPException via fastapi) are also resolved
 # inside the moved helpers.
 from app.ai_settings import (
+    YOLO_MODELS as YOLO_MODELS,
+    active_ai_config_source as active_ai_config_source,
     ai_status_payload as ai_status_payload,
     detector_status as detector_status,
+    detector_loaded_for as detector_loaded_for,
+    log_detector_initialization as log_detector_initialization,
+    model_exists as model_exists,
+    onnx_runtime_installed as onnx_runtime_installed,
     validate_ai_settings as validate_ai_settings,
 )
 
@@ -372,6 +378,10 @@ from app.event_debounce import (
 # primitives stay on main.py (mirrors the Phase-26 ``live_detection_history``
 # precedent for the in-flight delivery threads).
 from app.alert_dispatch import (
+    _alert_datetime_prefs as _alert_datetime_prefs,
+    _format_alert_datetime as _format_alert_datetime,
+    _rule_notify_active_now as _rule_notify_active_now,
+    compute_minimum_rule_confidence as compute_minimum_rule_confidence,
     deliver_sound_alert_notifications as _deliver_sound_alert_notifications,
     wait_for_pending_alert_notifications as wait_for_pending_alert_notifications,
     deliver_alert_notifications as _deliver_alert_notifications,
@@ -451,20 +461,104 @@ from app.detection_status import (
 # Skipped from this extraction (left in main.py): ``schedule_live_camera_backoff``
 # (backoff scheduling + recording-extension overlap, future Phase-31+).
 from app.recording_extension import (
+    _make_continuous_chunk_callback as _make_continuous_chunk_callback,
+    _parse_chunk_start_time as _parse_chunk_start_time,
+    _recording_capture_window as _recording_capture_window,
+    attach_event_recording as attach_event_recording,
+    clear_runtime_media_directory as clear_runtime_media_directory,
+    delete_recording_files as delete_recording_files,
     extend_active_rtsp_recording as extend_active_rtsp_recording,
-    recording_track_sidecar_path as recording_track_sidecar_path,
-    write_recording_detection_track as write_recording_detection_track,
     load_recording_detection_track as load_recording_detection_track,
+    recording_skip_reason as recording_skip_reason,
+    recording_track_sidecar_path as recording_track_sidecar_path,
+    start_rtsp_recording_capture as start_rtsp_recording_capture,
+    write_live_history_detection_track as write_live_history_detection_track,
+    write_recording_detection_track as write_recording_detection_track,
 )
 
-# Phase 32: top-of-file Pool A from-import rebinds for the
-# live-alert-monitor lifecycle cluster extracted into app/live_monitor.py.
+# Phase 32 + Phase-K: live-alert-monitor lifecycle + live-stream detection
+# helpers extracted into app/live_monitor.py.
 from app.live_monitor import (
     run_live_alert_monitor_once as run_live_alert_monitor_once,
     _prune_frame_motion_state as _prune_frame_motion_state,
     live_alert_monitor_loop as live_alert_monitor_loop,
     start_live_alert_monitor as start_live_alert_monitor,
     stop_live_alert_monitor as stop_live_alert_monitor,
+    queue_live_stream_alerts as queue_live_stream_alerts,
+    _encode_frame_jpeg as _encode_frame_jpeg,
+    process_live_stream_alerts as process_live_stream_alerts,
+)
+# Phase A: pure stateless utility helpers → app/utils.py
+from app.utils import (
+    _non_empty_setting as _non_empty_setting,
+    build_stream_url as build_stream_url,
+    camera_default_name as camera_default_name,
+    default_camera_detection_settings as default_camera_detection_settings,
+    normalize_bool_setting as normalize_bool_setting,
+    normalize_email_recipients as normalize_email_recipients,
+    _parse_iso_datetime as _parse_iso_datetime,
+)
+# Phase D: camera diagnostics helper → app/diagnostics.py
+from app.diagnostics import log_camera_diagnostic as log_camera_diagnostic
+# Phase E: sound-monitor helpers → app/sound_monitor.py
+from app.sound_monitor import (
+    _sound_status_reason as _sound_status_reason,
+    apply_sound_settings as apply_sound_settings,
+    stop_sound_monitor as stop_sound_monitor,
+)
+# Phase F: camera-instance helpers → app/camera_instance.py
+from app.camera_instance import (
+    create_camera as create_camera,
+    create_camera_instances as create_camera_instances,
+    read_ingest_frame as read_ingest_frame,
+)
+# Phase H: media/ffmpeg-ffprobe helpers → app/media_utils.py
+from app.media_utils import (
+    mp4_has_video_stream as mp4_has_video_stream,
+    mp4_is_browser_playable as mp4_is_browser_playable,
+    probe_audio_codec as probe_audio_codec,
+    probe_stream_codec as probe_stream_codec,
+    probe_video_codec as probe_video_codec,
+    probe_video_duration as probe_video_duration,
+    recording_playback_sidecar_path as recording_playback_sidecar_path,
+    recording_stream_path as recording_stream_path,
+    transcode_recording_to_mp4 as transcode_recording_to_mp4,
+)
+# Phase I: YOLO model-management helpers → app/model_management.py
+from app.model_management import (
+    PYPI_ULTRALYTICS_URL as PYPI_ULTRALYTICS_URL,
+    _installed_models_lock as _installed_models_lock,
+    _installed_models_path as _installed_models_path,
+    _read_installed_models as _read_installed_models,
+    _write_installed_models as _write_installed_models,
+    _sha256_file as _sha256_file,
+    _installed_package_version as _installed_package_version,
+    _fetch_ultralytics_version as _fetch_ultralytics_version,
+    _parse_semver as _parse_semver,
+    _fetch_models_manifest as _fetch_models_manifest,
+    export_yolo_onnx as export_yolo_onnx,
+    _do_download_model as _do_download_model,
+)
+# Phase J: database backup + recording-purge helpers → app/backup.py
+from app.backup import (
+    DATABASE_RESTORE_REQUIRED_TABLES as DATABASE_RESTORE_REQUIRED_TABLES,
+    DATABASE_RESTORE_LOCK as DATABASE_RESTORE_LOCK,
+    backup_directory as backup_directory,
+    safe_backup_timestamp as safe_backup_timestamp,
+    create_database_backup as create_database_backup,
+    validate_restore_database as validate_restore_database,
+    overwrite_database_from_file as overwrite_database_from_file,
+    refresh_runtime_after_database_restore as refresh_runtime_after_database_restore,
+    purge_recordings_by_policy as purge_recordings_by_policy,
+    purge_camera_diagnostics_by_policy as purge_camera_diagnostics_by_policy,
+)
+# Sound-monitor state: Pool A rebind from app.state so that
+# app.api.sound_router (and tests) can still reach these via main.<attr>.
+from app.state import (
+    _sound_detectors as _sound_detectors,
+    _sound_detectors_lock as _sound_detectors_lock,
+    _sound_statuses as _sound_statuses,
+    _sound_statuses_lock as _sound_statuses_lock,
 )
 logger = logging.getLogger('daygle.ai')
 
@@ -485,7 +579,6 @@ def _configure_file_logging() -> None:
 _configure_file_logging()
 _FFPROBE: str | None = shutil.which('ffprobe')
 _FFMPEG: str | None = shutil.which('ffmpeg')
-YOLO_MODELS: dict[str, dict[str, Any]] = {'yolov8n': {'pt': 'yolov8n.pt', 'onnx': 'yolov8n.onnx', 'label': 'YOLOv8n · Nano', 'approx_mb': 6, 'description': 'Fastest inference, lowest accuracy. Best for low-power or embedded hardware.'}, 'yolov8s': {'pt': 'yolov8s.pt', 'onnx': 'yolov8s.onnx', 'label': 'YOLOv8s · Small', 'approx_mb': 22, 'description': 'Good balance of speed and accuracy for most systems.'}, 'yolov8m': {'pt': 'yolov8m.pt', 'onnx': 'yolov8m.onnx', 'label': 'YOLOv8m · Medium', 'approx_mb': 52, 'description': 'Significantly better accuracy. Recommended for IR or night-vision cameras.'}, 'yolov8l': {'pt': 'yolov8l.pt', 'onnx': 'yolov8l.onnx', 'label': 'YOLOv8l · Large', 'approx_mb': 87, 'description': 'High accuracy. Requires a capable CPU or GPU.'}, 'yolov8x': {'pt': 'yolov8x.pt', 'onnx': 'yolov8x.onnx', 'label': 'YOLOv8x · Extra Large', 'approx_mb': 131, 'description': 'Best possible accuracy. GPU strongly recommended.'}}
 ONE_PIXEL_PNG = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82'
 config = load_settings()
 _state.config = config
@@ -514,50 +607,6 @@ web_dir = BASE_DIR / 'web'
 static_dir = web_dir
 if static_dir.exists():
     app.mount('/static', StaticFiles(directory=static_dir), name='static')
-_min_rule_confidence_cache: tuple[float, float] | None = None
-_MIN_RULE_CONFIDENCE_TTL = 5.0
-_min_rule_confidence_lock = threading.Lock()
-
-def compute_minimum_rule_confidence(fallback: float | None=None) -> float:
-    """Return the lowest min_confidence across all enabled object rules so YOLO's floor never silently suppresses per-rule thresholds.
-
-    Falls back to the configured global AI confidence when no zone rules define a
-    lower threshold, so the model detection threshold always matches user expectation.
-
-    Result is cached for _MIN_RULE_CONFIDENCE_TTL seconds to avoid a database
-    read on every detection frame (called at ~4 Hz per camera from the hot path).
-    """
-    global _min_rule_confidence_cache
-    cached = _min_rule_confidence_cache
-    if cached is not None:
-        cached_value, cached_at = cached
-        if time.time() - cached_at < _MIN_RULE_CONFIDENCE_TTL:
-            return cached_value
-    with _min_rule_confidence_lock:
-        cached = _min_rule_confidence_cache
-        if cached is not None:
-            cached_value, cached_at = cached
-            if time.time() - cached_at < _MIN_RULE_CONFIDENCE_TTL:
-                return cached_value
-        if fallback is None:
-            fallback = float(effective_ai_config().get('confidence') or 0.45)
-        min_conf: float = fallback
-        for camera in effective_cameras_config():
-            for zone in camera.get('detection', {}).get('zones', []):
-                for rule in zone.get('object_rules', []):
-                    if not rule.get('enabled', True):
-                        continue
-                    if str(rule.get('label') or '').strip().lower() == 'motion':
-                        continue
-                    try:
-                        conf = float(rule.get('min_confidence', fallback))
-                        if conf < min_conf:
-                            min_conf = conf
-                    except (TypeError, ValueError):
-                        pass
-        result = min_conf
-        _min_rule_confidence_cache = (result, time.time())
-        return result
 
 def camera_event_recording_config(settings: dict[str, Any]) -> dict[str, Any]:
     base = effective_recording_config()
@@ -598,96 +647,6 @@ _state.detector = detector
 last_detector_error: str | None = getattr(detector, 'unavailable_reason', None)
 _state.last_detector_error = last_detector_error
 alerts = AlertEngine([])
-_sound_detectors: dict[str, SoundDetector] = {}
-_sound_detectors_lock = threading.Lock()
-_sound_statuses: dict[str, dict[str, Any]] = {}
-_sound_statuses_lock = threading.Lock()
-
-def _sound_status_reason(diagnostics: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Pick the single most relevant class to explain the current listening state.
-
-    Mirrors how the live object status surfaces an alert reason: prefer the
-    loudest class at/above its threshold (would alert, possibly held back by
-    cooldown), otherwise the loudest class heard below threshold. Returns None
-    when nothing notable is being heard.
-
-    Kept here (and not solely on app.api.sound_router) so tests that do
-    ``import app.main as main; main._sound_status_reason(...)`` keep working.
-    """
-    if not diagnostics:
-        return None
-    above = [d for d in diagnostics if d['confidence'] > 0 and d['confidence'] >= d['threshold']]
-    if above:
-        top = above[0]
-        code = 'cooldown' if top['in_cooldown'] else 'detected'
-    else:
-        below = [d for d in diagnostics if 0 < d['confidence'] < d['threshold']]
-        if not below:
-            return None
-        top = below[0]
-        code = 'below_threshold'
-    return {'code': code, 'class': top['class'], 'class_label': top['label'], 'confidence': top['confidence'], 'threshold': top['threshold'], 'cooldown_remaining': top['cooldown_remaining']}
-
-
-def _alert_datetime_prefs() -> tuple[str, str, str]:
-    """Return (timezone_name, date_format, time_format) from the primary admin user."""
-    try:
-        users = auth.list_users()
-        admin = next((u for u in users if u.get('role') == 'admin' and u.get('is_active')), None)
-        if admin is None:
-            admin = next(iter(users), None)
-        if admin:
-            return (str(admin.get('timezone') or 'UTC'), str(admin.get('date_format') or 'iso'), str(admin.get('time_format') or '24h'))
-    except Exception:
-        pass
-    return ('UTC', 'iso', '24h')
-
-def _rule_notify_active_now(rule: dict[str, Any]) -> bool:
-    """Return True if a rule's email/push window (notify_start/notify_end) covers now.
-
-    This window only limits email and push delivery - detection, recording and
-    in-app alerts are gated by the separate detection/active window and always
-    fire regardless of this one. An empty or partial window means "notify any
-    time". It is evaluated in the admin user's configured timezone so a setting
-    like 22:00 -> 05:00 lines up with the local clock, and windows that wrap past
-    midnight (start > end) are supported.
-    """
-    start = str(rule.get('notify_start') or '').strip()
-    end = str(rule.get('notify_end') or '').strip()
-    if not start or not end:
-        return True
-    tz_name, _, _ = _alert_datetime_prefs()
-    try:
-        now_local = datetime.now(timezone.utc).astimezone(ZoneInfo(tz_name))
-    except (ZoneInfoNotFoundError, KeyError):
-        now_local = datetime.now(timezone.utc)
-    now_hm = now_local.strftime('%H:%M')
-    if start <= end:
-        return start <= now_hm <= end
-    return now_hm >= start or now_hm <= end
-
-def _format_alert_datetime(iso_str: str) -> str:
-    """Format a UTC ISO timestamp for display in alerts using the admin user's preferences."""
-    tz_name, date_fmt, time_fmt = _alert_datetime_prefs()
-    try:
-        dt = datetime.fromisoformat(iso_str)
-    except ValueError:
-        return iso_str
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    try:
-        dt = dt.astimezone(ZoneInfo(tz_name))
-        tz_label = dt.strftime('%Z')
-    except (ZoneInfoNotFoundError, KeyError):
-        dt = dt.astimezone(timezone.utc)
-        tz_label = 'UTC'
-    date_str = dt.strftime({'us': '%m/%d/%Y', 'au': '%d/%m/%Y'}.get(date_fmt, '%Y-%m-%d'))
-    if time_fmt == '12h':
-        hour = str(int(dt.strftime('%I')))
-        time_str = f"{hour}{dt.strftime(':%M:%S %p')}"
-    else:
-        time_str = dt.strftime('%H:%M:%S')
-    return f'{date_str} {time_str} {tz_label}'
 
 
 
@@ -696,67 +655,13 @@ def _format_alert_datetime(iso_str: str) -> str:
 
 
 
-def _non_empty_setting(settings: dict[str, Any], key: str) -> str:
-    return str(settings.get(key) or '').strip()
 
-def build_stream_url(settings: dict[str, Any]) -> str:
-    stream_url = _non_empty_setting(settings, 'stream_url')
-    if stream_url:
-        username = _non_empty_setting(settings, 'username')
-        password = _non_empty_setting(settings, 'password')
-        parsed = urlsplit(stream_url)
-        if username and parsed.scheme in {'rtsp', 'rtsps'} and parsed.netloc and ('@' not in parsed.netloc):
-            credentials = quote(username, safe='')
-            if password:
-                credentials += f":{quote(password, safe='')}"
-            return urlunsplit((parsed.scheme, f'{credentials}@{parsed.netloc}', parsed.path, parsed.query, parsed.fragment))
-        return stream_url
-    host = _non_empty_setting(settings, 'host')
-    if not host:
-        return ''
-    username = _non_empty_setting(settings, 'username')
-    password = _non_empty_setting(settings, 'password')
-    try:
-        port = int(settings.get('port') or 554)
-    except (TypeError, ValueError):
-        port = 554
-    path = _non_empty_setting(settings, 'path') or 'stream1'
-    path = path.lstrip('/')
-    credentials = ''
-    if username:
-        credentials = quote(username, safe='')
-        if password:
-            credentials += f":{quote(password, safe='')}"
-        credentials += '@'
-    return f'rtsp://{credentials}{host}:{port}/{path}'
 
-def camera_default_name(settings: dict[str, Any], fallback: str='Primary Camera') -> str:
-    return str(settings.get('name') or settings.get('device') or fallback).strip() or fallback
 
 
-def default_camera_detection_settings() -> dict[str, Any]:
-    return {'object_detection_enabled': True, 'zones': []}
 
-def normalize_bool_setting(value: Any, default: bool=False) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in {'1', 'true', 'yes', 'on', 'enabled'}
 
 
-def normalize_email_recipients(value: Any) -> list[str]:
-    raw_recipients = value.split(',') if isinstance(value, str) else value
-    if not isinstance(raw_recipients, list):
-        return []
-    recipients: list[str] = []
-    seen: set[str] = set()
-    for raw_recipient in raw_recipients:
-        recipient = str(raw_recipient).strip()
-        if recipient and '@' in recipient and (recipient.lower() not in seen):
-            recipients.append(recipient)
-            seen.add(recipient.lower())
-    return recipients
 
 
 
@@ -792,323 +697,8 @@ def normalize_email_recipients(value: Any) -> list[str]:
 
 
 
-def read_ingest_frame(camera_id: str) -> tuple[Any, dict[str, Any]] | None:
-    """Decode the latest frame the shared per-camera ingest wrote, as
-    ``(bgr_image, frame_dict)``. This is how object detection and snapshots get
-    frames without opening a second RTSP connection. Returns None when no fresh
-    frame is available yet (ingest warming up or camera offline)."""
-    sample = recording_service.latest_frame_jpeg(camera_id)
-    if sample is None:
-        return None
-    jpeg_bytes, captured_ts = sample
-    import cv2
-    import numpy as np
-    image = cv2.imdecode(np.frombuffer(jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
-    if image is None:
-        return None
-    height, width = image.shape[:2]
-    frame = {'frame_number': 0, 'timestamp': captured_ts, 'width': int(width), 'height': int(height)}
-    return (image, frame)
 
 
-
-
-
-
-def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence: float, meta: dict[str, Any]) -> None:
-    """Callback invoked by a per-camera SoundDetector when a sound class is detected."""
-    class_label = SOUND_CLASSES.get(class_id, {}).get('label', class_id)
-    now_iso = datetime.now(timezone.utc).isoformat()
-    with _sound_statuses_lock:
-        status = _sound_statuses.setdefault(camera_id, {})
-        status['state'] = 'detected'
-        status['last_detected_at'] = now_iso
-        status['last_class'] = class_id
-        status['last_class_label'] = class_label
-        status['last_confidence'] = round(confidence, 3)
-        status['backend'] = meta.get('backend', 'unknown')
-    logger.info('Sound detected on %s: %s (confidence=%.2f, backend=%s)', camera_id, class_label, confidence, meta.get('backend'))
-    cam_settings = next((c for c in cameras_config if str(c.get('id') or '') == camera_id), None)
-    sound_rules = cam_settings.get('detection', {}).get('sound', {}).get('rules', []) if cam_settings else []
-    fired_rule = next((r for r in sound_rules if r.get('class') == class_id), {})
-    email_enabled = normalize_bool_setting(fired_rule.get('email_enabled'), False)
-    email_recipients = normalize_email_recipients(fired_rule.get('email_recipients', []))
-    push_enabled = normalize_bool_setting(fired_rule.get('push_enabled'), False)
-    notify_enabled = email_enabled or push_enabled
-    event_id = database.add_event(created_at=now_iso, source='sound', snapshot_path=None, detections=[], alert_triggered=notify_enabled, metadata={'source': 'sound-detection', 'sound_source': 'rtsp', 'camera_id': camera_id, 'camera_name': str((cam_settings or {}).get('name') or '').strip() or None, 'label': class_id, 'class_label': class_label, 'confidence': round(confidence, 3)})
-    sound_detection = {'label': class_id, 'confidence': confidence, 'alert_triggered': True}
-    should_record = normalize_bool_setting(fired_rule.get('record_on_detect'), True)
-    recording_ids: list[int] = []
-    if should_record and cam_settings:
-        stream_url = build_stream_url(cam_settings)
-        if stream_url:
-            cam_rec_config = camera_event_recording_config(cam_settings)
-            recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config)
-            rid = attach_event_recording(event_id, now_iso, 'rtsp', [sound_detection], camera_id=camera_id, recording_config=cam_rec_config)
-            if rid is not None:
-                recording_ids.append(rid)
-                logger.debug('Sound event %s linked to recording %s (camera %s)', event_id, rid, camera_id)
-    message = f'{class_label} detected ({confidence:.0%} confidence)'
-    if notify_enabled and _rule_notify_active_now(fired_rule):
-        database.add_alert(created_at=now_iso, rule_name=rule_name, event_id=event_id, label=class_id, confidence=confidence, message=message, recording_id=recording_ids[0] if recording_ids else None)
-    alert_payload = {'rule_name': rule_name, 'label': class_id, 'confidence': confidence, 'message': message}
-    notify_rule = {'name': rule_name, 'email_enabled': email_enabled, 'push_enabled': push_enabled, 'email_recipients': email_recipients, 'notify_start': str(fired_rule.get('notify_start') or '').strip() or None, 'notify_end': str(fired_rule.get('notify_end') or '').strip() or None}
-    notify_thread = threading.Thread(target=_deliver_sound_alert_notifications, args=([alert_payload], event_id, notify_rule), name=f'sound-alert-notify-{event_id}', daemon=True)
-    with _notification_threads_lock:
-        _notification_threads[:] = [t for t in _notification_threads if t.is_alive()]
-        _notification_threads.append(notify_thread)
-    notify_thread.start()
-
-def _make_sound_detect_callback(camera_id: str):
-
-    def _callback(class_id: str, rule_name: str, confidence: float, meta: dict[str, Any]) -> None:
-        _on_sound_detected(camera_id, class_id, rule_name, confidence, meta)
-    return _callback
-
-def apply_sound_settings() -> None:
-    """Start one SoundDetector per RTSP camera that has sound detection enabled."""
-    global _sound_detectors
-    with _sound_detectors_lock:
-        for det in list(_sound_detectors.values()):
-            det.stop()
-        _sound_detectors.clear()
-    for cam in list(cameras_config):
-        cam_id = str(cam.get('id') or '')
-        stream_url = build_stream_url(cam)
-        if not cam_id or not stream_url:
-            continue
-        sound_cfg = cam.get('detection', {}).get('sound', {})
-        if not normalize_bool_setting(sound_cfg.get('enabled'), False):
-            with _sound_statuses_lock:
-                _sound_statuses[cam_id] = {'state': 'disabled', 'last_detected_at': None, 'last_confidence': 0.0, 'backend': None}
-            continue
-        enabled_rules = [r for r in sound_cfg.get('rules') or [] if r.get('enabled')]
-        if not enabled_rules:
-            with _sound_statuses_lock:
-                _sound_statuses[cam_id] = {'state': 'disabled', 'last_detected_at': None, 'last_confidence': 0.0, 'backend': None}
-            continue
-        recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=cam_id, recording_config=camera_event_recording_config(cam))
-        det = SoundDetector(on_detect=_make_sound_detect_callback(cam_id), rules=enabled_rules, source='ingest', sample_duration_seconds=1.0, audio_segment_provider=lambda after, _cid=cam_id: recording_service.audio_segments_after(_cid, after))
-        det.start()
-        with _sound_detectors_lock:
-            _sound_detectors[cam_id] = det
-        with _sound_statuses_lock:
-            _sound_statuses[cam_id] = {'state': 'listening', 'last_detected_at': None, 'last_confidence': 0.0, 'backend': det.backend}
-        logger.info('Sound monitor started for camera %s (rules=%s)', cam_id, [r.get('class') for r in enabled_rules])
-
-def stop_sound_monitor() -> None:
-    global _sound_detectors
-    with _sound_detectors_lock:
-        for det in list(_sound_detectors.values()):
-            det.stop()
-        _sound_detectors.clear()
-    with _sound_statuses_lock:
-        for cam_id in list(_sound_statuses.keys()):
-            _sound_statuses[cam_id]['state'] = 'stopped'
-
-def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any]) -> None:
-    camera_id = str(settings.get('id') or 'camera')
-    stream_url = build_stream_url(settings)
-    if stream_url:
-        recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=camera_event_recording_config(settings))
-    live_cfg = effective_live_config()
-    if normalize_bool_setting(live_cfg.get('background_detection_enabled'), True):
-        return
-    detection_interval_seconds = float(live_cfg.get('detection_interval_seconds', 0.25))
-    now = time.time()
-    with live_detection_worker_lock:
-        if camera_id in active_live_detection_cameras:
-            return
-        if now - live_detection_last_checked.get(camera_id, 0) < detection_interval_seconds:
-            return
-        live_detection_last_checked[camera_id] = now
-        active_live_detection_cameras.add(camera_id)
-
-    def detect() -> None:
-        try:
-            process_live_stream_alerts(image_bytes, frame, settings, enforce_interval=False)
-        except Exception as exc:
-            logger.warning('Live detection failed for camera %s: %s', camera_id, exc)
-            update_live_detection_status(camera_id, state='error', reason=str(exc), detections=[])
-        finally:
-            with live_detection_worker_lock:
-                active_live_detection_cameras.discard(camera_id)
-    threading.Thread(target=detect, name=f'live-detection-{camera_id}', daemon=True).start()
-
-def _encode_frame_jpeg(image: Any) -> bytes:
-    """Encode a numpy BGR frame to JPEG bytes for snapshot storage."""
-    import cv2
-    _, buffer = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 85])
-    return buffer.tobytes()
-
-def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict[str, Any], *, enforce_interval: bool=True) -> int | None:
-    camera_id = str(settings.get('id') or 'camera')
-    live_settings = effective_live_config()
-    detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 0.25))
-    if not hasattr(detector, 'detect_image'):
-        update_live_detection_status(camera_id, state='skipped', reason='Live stream alerts require ONNX AI mode.', detections=[])
-        return None
-    if enforce_interval:
-        now = time.time()
-        with live_detection_worker_lock:
-            if now - live_detection_last_checked.get(camera_id, 0) < detection_interval_seconds:
-                return None
-            live_detection_last_checked[camera_id] = now
-    ai_state = ai_status_payload()
-    if not ai_state['detector_loaded']:
-        update_live_detection_status(camera_id, state='skipped', reason=ai_state['last_detector_error'] or 'ONNX detector is not loaded.', ai=ai_state, detections=[])
-        return None
-    frame_is_numpy = hasattr(image, 'shape') and hasattr(image, 'dtype')
-    now = time.time()
-    try:
-        frame_capture_ts = float(frame.get('timestamp') or 0.0)
-    except (TypeError, ValueError):
-        frame_capture_ts = 0.0
-    if not now - 300 <= frame_capture_ts <= now + 1:
-        frame_capture_ts = now
-    _pixel_threshold = float(live_settings.get('motion_pixel_threshold', _MOTION_PIXEL_THRESHOLD))
-    _gate_fraction = float(live_settings.get('motion_gate_fraction', _MOTION_GATE_FRACTION))
-    _scale_fraction = float(live_settings.get('motion_scale_fraction', _MOTION_SCALE_FRACTION))
-    _background_alpha = float(live_settings.get('motion_background_alpha', _MOTION_BACKGROUND_ALPHA))
-    _cam_motion = settings.get('motion') or {}
-    if _cam_motion.get('pixel_threshold') is not None:
-        try:
-            _pixel_threshold = float(_cam_motion['pixel_threshold'])
-        except (TypeError, ValueError):
-            pass
-    if _cam_motion.get('gate_fraction') is not None:
-        try:
-            _gate_fraction = float(_cam_motion['gate_fraction'])
-        except (TypeError, ValueError):
-            pass
-    if _cam_motion.get('scale_fraction') is not None:
-        try:
-            _scale_fraction = float(_cam_motion['scale_fraction'])
-        except (TypeError, ValueError):
-            pass
-    if _cam_motion.get('background_alpha') is not None:
-        try:
-            _background_alpha = float(_cam_motion['background_alpha'])
-        except (TypeError, ValueError):
-            pass
-    periodic_scan_interval = float(live_settings.get('periodic_scan_interval_seconds', 0))
-    force_scan = False
-    if periodic_scan_interval > 0 and now - _periodic_scan_last_ts.get(camera_id, 0) >= periodic_scan_interval:
-        force_scan = True
-        _periodic_scan_last_ts[camera_id] = now
-    frame_has_motion, frame_motion_confidence, diff_mask = detect_frame_motion(camera_id, image, pixel_threshold=_pixel_threshold, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, background_alpha=_background_alpha)
-    if not frame_has_motion and (not force_scan):
-        update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[])
-        return None
-    if not frame_has_motion:
-        frame_motion_confidence = 0.0
-        diff_mask = None
-    min_conf = compute_minimum_rule_confidence()
-    try:
-        if frame_is_numpy and hasattr(detector, 'detect_frame'):
-            detections = detector.detect_frame(image, confidence=min_conf)
-        else:
-            detections = detector.detect_image(image, confidence=min_conf)
-    except (DetectorUnavailableError, ValueError) as exc:
-        logger.warning('Live detection skipped for camera %s: %s', camera_id, exc)
-        update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state, detections=[])
-        return None
-    detections = normalize_detection_boxes_for_frame(detections, frame)
-    raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
-    motion_detections = zone_motion_detections(settings, frame_motion_confidence, diff_mask=diff_mask, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction)
-    object_detections = filter_detections_for_camera(detections, settings)
-    zone_rules = zone_object_alert_rules(settings)
-    has_object_zone_rules = any((zone.get('enabled', True) and zone.get('monitor_objects', True) and any((rule.get('enabled', True) and str(rule.get('label') or '').strip() for rule in zone.get('object_rules') or [])) for zone in (settings.get('detection') or {}).get('zones', [])))
-    object_alert_detections = zone_alert_detections(settings, object_detections) if has_object_zone_rules else list(object_detections)
-    record_only_detections = [d for d in object_detections if zone_record_on_detect(d, settings) and (not zone_object_rule_matches(settings, d, action='alert'))] if has_object_zone_rules else []
-    strongest_motion = max(motion_detections, key=lambda d: float(d.get('confidence', 0))) if motion_detections else None
-    record_live_detection_history(camera_id, list(object_alert_detections) + record_only_detections + ([{**strongest_motion, 'label': 'motion', 'motion_event': True}] if strongest_motion is not None else []), sample_ts=frame_capture_ts, live_config=live_settings)
-    alert_detections = list(object_alert_detections) + record_only_detections
-    for _mot in motion_detections:
-        alert_detections.append({**_mot, 'label': 'motion', 'motion_event': True})
-    if not alert_detections:
-        update_live_detection_status(camera_id, state='checked', reason='No detections matched this camera and its monitoring areas.', detected_labels=raw_labels, matched_labels=[], detections=list(detections))
-        return None
-    triggered = alerts.process(alert_detections, rules=zone_rules)
-    triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
-    triggered_labels = {str(alert.get('label') or '').lower() for alert in triggered}
-    _confident_object_detections: list[dict[str, Any]] = []
-    if has_object_zone_rules:
-        for _det in object_detections:
-            _zone_name = zone_name_for_detection(settings, _det)
-            if _zone_name or zone_record_on_detect(_det, settings):
-                _confident_object_detections.append({**_det, 'zone_name': _zone_name or None})
-    else:
-        _confident_object_detections = list(object_detections)
-    recording_detections = [{**detection, 'alert_matched': bool(zone_detection_alert_rule_names(settings, detection) & triggered_rule_names) if has_object_zone_rules else str(detection.get('label') or '').lower() in triggered_labels, 'alert_triggered': zone_record_on_detect(detection, settings)} for detection in _confident_object_detections]
-    if motion_detections:
-        _motion_record = zone_motion_record_on_detect(settings)
-        recording_detections.append({**strongest_motion, 'label': 'motion', 'motion_event': True, 'alert_matched': 'motion' in triggered_labels, 'alert_triggered': 'motion' in triggered_labels or _motion_record or detection_has_matching_record_rule({**strongest_motion, 'label': 'motion'}, zone_rules)})
-    matched_labels = [str(detection.get('label')) for detection in alert_detections if detection.get('label')]
-    camera_recording_config = camera_event_recording_config(settings)
-    should_record_event, _trigger_type, _trigger_label = recording_service.should_record(recording_detections, camera_recording_config)
-    debounced_labels = detection_label_set([detection for detection in recording_detections if detection.get('alert_triggered')])
-    if not debounced_labels:
-        debounced_labels = detection_label_set(recording_detections)
-    global_debounce = max(0.0, float(live_settings.get('event_debounce_seconds', 10.0)))
-    label_cooldowns: dict[str, float] = {}
-    for _zone in (settings.get('detection') or {}).get('zones', []):
-        for _rule in _zone.get('object_rules') or []:
-            if not _rule.get('enabled', True):
-                continue
-            _lbl = str(_rule.get('label') or '').strip().lower()
-            if not _lbl:
-                continue
-            try:
-                _cd = max(0.0, float(_rule.get('cooldown_seconds', 60)))
-            except (TypeError, ValueError):
-                _cd = 60.0
-            if _lbl not in label_cooldowns or _cd > label_cooldowns[_lbl]:
-                label_cooldowns[_lbl] = _cd
-    _matching = [label_cooldowns[_lbl] for _lbl in debounced_labels if _lbl in label_cooldowns]
-    debounce_seconds = max(_matching) if _matching else global_debounce
-    frame_capture_time = datetime.fromtimestamp(frame_capture_ts, tz=timezone.utc).isoformat()
-    if should_record_event and live_event_is_debounced(camera_id, debounced_labels, debounce_seconds):
-        extended_recording_id = extend_active_rtsp_recording(camera_id=camera_id, event_time=frame_capture_time, recording_config=camera_recording_config, detections=recording_detections)
-        remember_live_event(camera_id, debounced_labels, merge=True)
-        update_live_detection_status(camera_id, state='checked', reason=f'Ongoing detection extended active recording and suppressed duplicate event for {debounce_seconds:.1f}s debounce window.' if extended_recording_id is not None else f'Ongoing detection suppressed for {debounce_seconds:.1f}s debounce window.', detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, recording_id=extended_recording_id)
-        return None
-    event_time = frame_capture_time
-    if frame_is_numpy:
-        image_bytes = _encode_frame_jpeg(image)
-    else:
-        image_bytes = image
-    snapshot_path = storage.save_image_snapshot(image_bytes, f'{camera_id}.jpg')
-    event_id = database.add_event(created_at=event_time, source='rtsp', snapshot_path=snapshot_path, detections=recording_detections, alert_triggered=bool(triggered), metadata={'camera_id': settings.get('id'), 'camera_name': settings.get('name'), 'ai_backend': ai_state['configured_backend'], 'detector_backend': ai_state['active_backend'], 'source': 'live-stream'})
-    recording_id = attach_event_recording(event_id, event_time, 'rtsp', recording_detections, camera_id=camera_id, recording_config=camera_recording_config)
-    if recording_id is not None:
-        remember_live_event(camera_id, debounced_labels)
-    _rule_by_name = {str(r.get('name') or ''): r for r in zone_rules or []}
-    for alert in triggered:
-        _rule = _rule_by_name.get(str(alert.get('rule_name') or ''), {})
-        if not _rule_notify_active_now(_rule):
-            continue
-        database.add_alert(created_at=datetime.now(timezone.utc).isoformat(), rule_name=alert['rule_name'], event_id=event_id, label=alert['label'], confidence=alert['confidence'], message=alert['message'], recording_id=recording_id)
-    if triggered:
-        notify_thread = threading.Thread(target=_deliver_alert_notifications, args=(triggered, event_id, zone_rules), name=f'alert-notify-{event_id}', daemon=True)
-        with _notification_threads_lock:
-            _notification_threads[:] = [thread for thread in _notification_threads if thread.is_alive()]
-            _notification_threads.append(notify_thread)
-        notify_thread.start()
-    email_rules = [rule for rule in zone_rules if rule.get('enabled', True) and rule.get('email_enabled') and _rule_notify_active_now(rule) and (str(rule.get('name') or '') in {str(alert.get('rule_name') or '') for alert in triggered})]
-    email_recipients = sorted({recipient for rule in email_rules for recipient in rule.get('email_recipients', [])})
-    update_live_detection_status(camera_id, state='alerted' if triggered else 'checked', reason='Alert matched.' if triggered else 'Detections found. No new alert event was created because no alert rule matched, or a matching rule is still in cooldown.', detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, triggered_alerts=triggered, event_id=event_id, recording_id=recording_id, recording_state='linked' if recording_id is not None else 'skipped', recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(recording_detections, camera_event_recording_config(settings)), email_enabled_rules=len(email_rules), email_recipients=email_recipients, email_attempted=bool(triggered and email_recipients and effective_email_alert_settings().get('enabled')))
-    return event_id
-
-def create_camera(settings: dict[str, Any]):
-    width = int(settings.get('width', 1280))
-    height = int(settings.get('height', 720))
-    fps = int(settings.get('fps', 15))
-    stale = settings.get('stale_frame_grabs')
-    return OpenCvStreamCamera(build_stream_url(settings), width=width, height=height, fps=fps, stale_frame_grabs=stale)
-
-def create_camera_instances(settings_list: list[dict[str, Any]]) -> dict[str, Any]:
-    return {str(settings['id']): create_camera(settings) for settings in settings_list}
 cameras_config = effective_cameras_config()
 _state.cameras_config = cameras_config
 camera_config = cameras_config[0] if cameras_config else {}
@@ -1119,33 +709,6 @@ camera = camera_instances[camera_config['id']] if camera_config else None
 def config_file_path() -> Path:
     return Path(os.environ.get(CONFIG_ENV_VAR) or DEFAULT_CONFIG_PATH)
 
-def active_ai_config_source() -> str:
-    if database.has_setting('ai'):
-        return 'database'
-    if config_file_path().exists():
-        return 'config.yaml'
-    return 'default'
-
-def onnx_runtime_installed() -> bool:
-    return importlib.util.find_spec('onnxruntime') is not None
-
-def model_exists(ai_settings: dict[str, Any]) -> bool:
-    model_path = str(ai_settings.get('model_path') or '')
-    return bool(model_path) and Path(model_path).exists()
-
-def detector_loaded_for(settings: dict[str, Any]) -> bool:
-    configured_backend = str(settings.get('backend', 'onnx')).lower()
-    active_backend = getattr(detector, 'backend', 'unknown')
-    if configured_backend == 'onnx':
-        return active_backend == 'onnx' and bool(getattr(detector, 'available', False))
-    return False
-
-
-def log_detector_initialization(context: str='startup') -> None:
-    ai_status = ai_status_payload()
-    active_providers = getattr(detector, 'active_providers', None)
-    providers_str = ','.join(active_providers) if active_providers else '<none>'
-    logger.info('AI detector %s: active_backend=%s configured_backend=%s model_loaded=%s inference_available=%s providers=%s model_path=%s labels_path=%s error=%s', context, ai_status['active_backend'], ai_status['configured_backend'], ai_status['model_loaded'], ai_status['inference_available'], providers_str, ai_status['model_path'] or '<none>', ai_status['labels_path'] or '<none>', ai_status['error'] or '<none>')
 
 def set_session_cookie(response: Response, request: Request, token: str, expires_at: str) -> None:
     session_hours = float(effective_auth_config().get('session_timeout_hours', 12))
@@ -1181,510 +744,11 @@ def write_audit_log(request: Request, action: str, resource: str, resource_id: A
     except Exception as exc:
         logger.warning('Failed to write audit log: %s', exc)
 
-def log_camera_diagnostic(camera_id: str | None, event_type: str, message: str='', *, severity: str='info', details: dict[str, Any] | None=None, camera_name: str | None=None) -> None:
-    """Record a system-generated camera/recording diagnostic event.
-
-    Best-effort and never raises into the calling path - diagnostics must not
-    be able to break recording or detection. Kept separate from the audit log
-    so operational noise doesn't dilute the security trail.
-    """
-    try:
-        if camera_name is None and camera_id:
-            cfg = next((c for c in cameras_config if str(c.get('id') or '') == str(camera_id)), None)
-            if cfg:
-                camera_name = str(cfg.get('name') or '').strip() or None
-        database.add_camera_diagnostic(created_at=utc_now(), camera_id=str(camera_id) if camera_id else None, camera_name=camera_name, event_type=event_type, severity=severity, message=message, details=details)
-    except Exception as exc:
-        logger.debug('Failed to write camera diagnostic (%s/%s): %s', camera_id, event_type, exc)
 recording_service.diagnostic_callback = log_camera_diagnostic
 
-def _parse_chunk_start_time(file_path: Path) -> datetime | None:
-    stem = file_path.stem
-    parts = stem.rsplit('_', 1)
-    if len(parts) != 2:
-        return None
-    try:
-        return datetime.strptime(parts[1], '%Y%m%dT%H%M%S').astimezone(timezone.utc)
-    except ValueError:
-        return None
-
-def _make_continuous_chunk_callback(camera_id: str) -> Any:
-
-    def on_chunk_complete(camera_key: str, file_path: Path) -> None:
-        try:
-            started_at_dt = _parse_chunk_start_time(file_path)
-            stat = file_path.stat()
-            ended_at_dt = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
-            if started_at_dt is None:
-                started_at_dt = ended_at_dt - timedelta(seconds=effective_recording_config().get('chunk_duration_seconds', 3600))
-            duration_seconds = max(1.0, (ended_at_dt - started_at_dt).total_seconds())
-            chunk_track = build_track_from_live_history(camera_id, started_at_dt.timestamp(), ended_at_dt.timestamp())
-            chunk_labels: list[str] = []
-            chunk_confidences: dict[str, float] = {}
-            if chunk_track:
-                _seen: set[str] = set()
-                for _sample in chunk_track:
-                    for _det in _sample.get('detections') or []:
-                        _lbl = str(_det.get('label') or '').strip().lower()
-                        if not _lbl:
-                            continue
-                        if _lbl not in _seen:
-                            _seen.add(_lbl)
-                            chunk_labels.append(_lbl)
-                        try:
-                            _conf = float(_det.get('confidence'))
-                        except (TypeError, ValueError):
-                            _conf = None
-                        if _conf is not None and (_lbl not in chunk_confidences or _conf > chunk_confidences[_lbl]):
-                            chunk_confidences[_lbl] = _conf
-            recording_id = database.add_recording(event_id=None, camera_id=camera_id, started_at=started_at_dt.isoformat(), ended_at=ended_at_dt.isoformat(), duration_seconds=duration_seconds, file_path=str(file_path), thumbnail_path=None, source='rtsp', created_at=utc_now(), trigger_type='continuous', trigger_label=None, labels=chunk_labels or None, label_confidences=chunk_confidences or None)
-            write_live_history_detection_track(recording_id, file_path, camera_id, started_at_dt.timestamp(), ended_at_dt.timestamp())
-            purge_recordings_by_policy()
-        except Exception as exc:
-            logger.warning('Failed to register continuous chunk %s for camera %s: %s', file_path.name, camera_id, exc)
-    return on_chunk_complete
-
-def attach_event_recording(event_id: int, event_time: str, source: str, detections: list[dict[str, Any]], camera_id: str | None=None, recording_config: dict[str, Any] | None=None) -> int | None:
-    stream_url = ''
-    if source == 'rtsp' and camera_id:
-        stream_url = build_stream_url(get_camera_config(camera_id))
-        extended_recording_id = extend_active_rtsp_recording(camera_id=camera_id, event_time=event_time, recording_config=recording_config, detections=detections)
-        if extended_recording_id is not None:
-            return extended_recording_id
-    metadata = recording_service.event_recording_metadata(event_id, event_time, source, detections, write_clip=not stream_url, recording_config=recording_config)
-    if metadata is None:
-        return None
-    if camera_id:
-        metadata['camera_id'] = camera_id
-    detection_labels = detection_label_strings(detections)
-    recording_id = database.add_recording(created_at=utc_now(), labels=detection_labels or None, label_confidences=detection_label_confidences(detections) or None, **metadata)
-    if stream_url:
-        start_rtsp_recording_capture(stream_url, metadata, event_id, detections, recording_id=recording_id, camera_id=camera_id, event_time=event_time, recording_config=recording_config)
-    else:
-        window = _recording_capture_window(metadata)
-        if window:
-            write_live_history_detection_track(recording_id, Path(str(metadata.get('file_path') or '')), camera_id, window[0], window[1])
-    purge_recordings_by_policy()
-    return recording_id
-
-def start_rtsp_recording_capture(stream_url: str, metadata: dict[str, Any], event_id: int, detections: list[dict[str, Any]], *, recording_id: int, camera_id: str | None=None, event_time: str | None=None, recording_config: dict[str, Any] | None=None) -> None:
-    file_path = Path(str(metadata.get('file_path') or ''))
-    duration_seconds = float(metadata.get('duration_seconds') or 1)
-    trigger_type = str(metadata.get('trigger_type') or 'motion')
-    trigger_label = metadata.get('trigger_label')
-    pre_seconds = max(0, int((recording_config or {}).get('pre_event_seconds', 0)))
-    post_seconds = max(0, int((recording_config or {}).get('post_event_seconds', 0)))
-    try:
-        triggered_at = datetime.fromisoformat(str(event_time or utc_now()))
-    except ValueError:
-        triggered_at = datetime.now(timezone.utc)
-    if triggered_at.tzinfo is None:
-        triggered_at = triggered_at.replace(tzinfo=timezone.utc)
-    start_capture_ts = triggered_at.timestamp() - pre_seconds
-    initial_deadline_ts = triggered_at.timestamp() + post_seconds
-    max_clip_seconds = max(1, int((recording_config or effective_recording_config()).get('max_clip_seconds', 60)))
-    max_deadline_ts = start_capture_ts + max(duration_seconds, float(max_clip_seconds))
-    if camera_id:
-        with active_rtsp_recordings_lock:
-            active_rtsp_recordings[camera_id] = {'recording_id': recording_id, 'start_capture_ts': start_capture_ts, 'capture_deadline_ts': min(max_deadline_ts, initial_deadline_ts), 'max_capture_deadline_ts': max_deadline_ts}
-
-    def write_generated_fallback() -> None:
-        recording_service.write_event_clip(file_path, event_id, detections, duration_seconds, trigger_type, str(trigger_label) if trigger_label else None)
-
-    def capture() -> None:
-        try:
-            final_deadline_ts = min(max_deadline_ts, initial_deadline_ts)
-            if camera_id:
-                while True:
-                    with active_rtsp_recordings_lock:
-                        session = active_rtsp_recordings.get(camera_id)
-                        if not session or int(session.get('recording_id', -1)) != int(recording_id):
-                            break
-                        final_deadline_ts = float(session.get('capture_deadline_ts') or final_deadline_ts)
-                    remaining = final_deadline_ts - time.time()
-                    if remaining <= 0:
-                        break
-                    time.sleep(min(0.5, max(0.05, remaining)))
-            final_deadline_ts = min(final_deadline_ts, max_deadline_ts)
-            actual_end_ts = min(max(time.time(), final_deadline_ts), max_deadline_ts)
-            final_duration_seconds = max(1.0, actual_end_ts - start_capture_ts)
-            dynamic_post_seconds = max(0, int(round(actual_end_ts - triggered_at.timestamp())))
-            if camera_id and pre_seconds > 0:
-                content_start_ts, content_seconds = recording_service.write_rtsp_clip_with_prebuffer(stream_url=stream_url, camera_id=camera_id, file_path=file_path, triggered_at=triggered_at, pre_seconds=pre_seconds, post_seconds=dynamic_post_seconds, max_duration_seconds=final_duration_seconds, buffer_seconds=recording_service.prebuffer_window_seconds(recording_config))
-            else:
-                content_start_ts = time.time()
-                recording_service.write_rtsp_clip(stream_url, file_path, final_duration_seconds)
-                content_seconds = final_duration_seconds
-            database.update_recording_timing(recording_id, started_at=datetime.fromtimestamp(content_start_ts, tz=timezone.utc).isoformat(), ended_at=datetime.fromtimestamp(content_start_ts + content_seconds, tz=timezone.utc).isoformat(), duration_seconds=content_seconds)
-            write_live_history_detection_track(recording_id, file_path, camera_id, content_start_ts, content_start_ts + content_seconds)
-        except Exception as exc:
-            logger.warning('RTSP recording capture failed for event %s, writing generated fallback: %s', event_id, exc)
-            log_camera_diagnostic(camera_id, 'capture_failed', f'RTSP recording capture failed; wrote a generated placeholder clip instead: {exc}', severity='error', details={'event_id': event_id, 'recording_id': recording_id})
-            write_generated_fallback()
-            write_live_history_detection_track(recording_id, file_path, camera_id, start_capture_ts, start_capture_ts + duration_seconds)
-        finally:
-            if camera_id:
-                with active_rtsp_recordings_lock:
-                    session = active_rtsp_recordings.get(camera_id)
-                    if session and int(session.get('recording_id', -1)) == int(recording_id):
-                        active_rtsp_recordings.pop(camera_id, None)
-    threading.Thread(target=capture, name=f'rtsp-recording-{event_id}', daemon=True).start()
-
-def recording_skip_reason(detections: list[dict[str, Any]], recording_config: dict[str, Any] | None=None) -> str:
-    should_record, trigger_type, trigger_label = recording_service.should_record(detections, recording_config)
-    if should_record:
-        return f"Recording policy matched {trigger_type}{(f' {trigger_label}' if trigger_label else '')}, but no recording was linked."
-    labels = ', '.join((str(detection.get('label')) for detection in detections if detection.get('label'))) or 'none'
-    return f'Recording is waiting for an enabled alert rule to trigger for this camera. Detected labels: {labels}.'
-
 GITHUB_REPO = 'daygle/daygle-ai-camera'
-PYPI_ULTRALYTICS_URL = 'https://pypi.org/pypi/ultralytics/json'
 _update_in_progress = False
 _update_lock = threading.Lock()
-_installed_models_lock = threading.Lock()
-
-def _installed_models_path() -> Path:
-    return BASE_DIR / 'models' / 'installed.json'
-
-def _read_installed_models() -> dict[str, Any]:
-    p = _installed_models_path()
-    if p.exists():
-        try:
-            return json.loads(p.read_text(encoding='utf-8'))
-        except Exception as exc:
-            logger.warning('Failed to read settings file: %s', exc)
-            return {}
-    return {}
-
-def _write_installed_models(data: dict[str, Any]) -> None:
-    p = _installed_models_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, indent=2), encoding='utf-8')
-
-def _sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, 'rb') as f:
-        for chunk in iter(lambda: f.read(65536), b''):
-            h.update(chunk)
-    return h.hexdigest()
-
-def _installed_package_version(package: str) -> str:
-    try:
-        return importlib.metadata.version(package)
-    except importlib.metadata.PackageNotFoundError:
-        return 'unknown'
-
-def _fetch_ultralytics_version() -> str:
-    req = urllib.request.Request(PYPI_ULTRALYTICS_URL, headers={'User-Agent': 'daygle-ai-camera-updater/1.0'})
-    with urllib.request.urlopen(req, timeout=10) as response:
-        payload = json.loads(response.read())
-    version = str(payload.get('info', {}).get('version') or '').strip()
-    if not version:
-        raise RuntimeError('PyPI ultralytics response did not include a version.')
-    return version
-
-def _parse_semver(v: str) -> tuple[int, ...]:
-    try:
-        return tuple((int(x) for x in v.split('.')))
-    except ValueError:
-        return (0,)
-
-def _fetch_models_manifest() -> dict[str, Any]:
-    """Return remote YOLO export versions from the upstream Ultralytics package.
-
-    The app exports ONNX files from Ultralytics YOLO weights, so the remote
-    version that matters for update checks is the latest Ultralytics release,
-    not a Daygle-maintained model manifest version.
-
-    The effective version is capped at the locally installed package version:
-    if PyPI has a newer release but the local package hasn't been upgraded yet,
-    re-exporting the model would produce the same file, so no update is shown.
-    """
-    remote_version = _fetch_ultralytics_version()
-    local_version = _installed_package_version('ultralytics')
-    if local_version != 'unknown' and _parse_semver(local_version) < _parse_semver(remote_version):
-        effective_version = local_version
-    else:
-        effective_version = remote_version
-    return {'updated_at': None, 'source': 'pypi:ultralytics', 'models': {model_id: {'version': effective_version} for model_id in YOLO_MODELS}}
-
-def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
-    for recording in recordings:
-        raw_file_path = str(recording.get('file_path') or '')
-        file_path = Path(raw_file_path)
-        if file_path.exists() and file_path.is_file():
-            file_path.unlink(missing_ok=True)
-        if raw_file_path:
-            playback_paths = [recording_playback_sidecar_path(file_path), recording_track_sidecar_path(file_path), file_path.with_name(f'{file_path.stem}.playback.failed'), file_path.with_name(f'{file_path.stem}.h264.mp4'), file_path.with_name(f'{file_path.stem}.browser.mp4'), file_path.with_name(f'{file_path.stem}.playback.mp4'), file_path.with_name(f'{file_path.name}.meta.json')]
-            for playback_path in playback_paths:
-                if playback_path.exists() and playback_path.is_file():
-                    playback_path.unlink(missing_ok=True)
-        thumbnail_path = recording.get('thumbnail_path')
-        if thumbnail_path:
-            thumbnail = Path(str(thumbnail_path))
-            if thumbnail.exists() and thumbnail.is_file():
-                thumbnail.unlink(missing_ok=True)
-
-def clear_runtime_media_directory(path_value: str | None) -> int:
-    if not path_value:
-        return 0
-    path = Path(str(path_value))
-    if not path.exists() or not path.is_dir():
-        return 0
-    deleted = 0
-    for child in path.iterdir():
-        try:
-            if child.is_file() or child.is_symlink():
-                child.unlink(missing_ok=True)
-                deleted += 1
-            elif child.is_dir():
-                shutil.rmtree(child, ignore_errors=True)
-                deleted += 1
-        except OSError:
-            continue
-    return deleted
-
-def recording_playback_sidecar_path(file_path: Path) -> Path:
-    return file_path.with_name(f'{file_path.stem}.h264-audio.mp4')
-
-def recording_stream_path(file_path: Path) -> Path:
-    playback_path = recording_playback_sidecar_path(file_path)
-    if playback_path.exists() and file_path.exists() and (playback_path.stat().st_mtime >= file_path.stat().st_mtime):
-        return playback_path
-    if file_path.suffix.lower() == '.mp4' and mp4_is_browser_playable(file_path):
-        return file_path
-    failed_marker = file_path.with_name(f'{file_path.stem}.playback.failed')
-    if failed_marker.exists() and file_path.exists() and (failed_marker.stat().st_mtime >= file_path.stat().st_mtime):
-        return file_path
-    try:
-        transcode_recording_to_mp4(file_path, playback_path)
-    except Exception as exc:
-        logger.warning('Recording playback conversion failed for %s: %s', file_path, exc)
-        try:
-            failed_marker.write_bytes(b'')
-        except OSError:
-            pass
-        return file_path
-    failed_marker.unlink(missing_ok=True)
-    return playback_path if playback_path.exists() else file_path
-
-def write_live_history_detection_track(recording_id: int | None, file_path: Path, camera_id: str | None, start_ts: float, end_ts: float) -> bool:
-    """Persist the monitor's detections over the capture window as the clip's track.
-
-    This replaces the old post-recording "bake" that re-decoded the clip and ran
-    detection on every sampled frame: the background monitor already analyzed
-    these frames live, so slicing its history costs nothing. An all-empty slice
-    is still written - it marks the clip as analyzed while the loader keeps
-    reporting it as missing so playback falls back to the static event boxes.
-    """
-    if not str(file_path):
-        return False
-    track = build_track_from_live_history(camera_id, start_ts, end_ts)
-    if track is None:
-        logger.debug('No live detection history covers recording %s (%s); no track written.', recording_id, file_path.name)
-        return False
-    try:
-        write_recording_detection_track(file_path, track)
-    except OSError as exc:
-        logger.warning('Could not write detection track for recording %s: %s', recording_id, exc)
-        return False
-    localized = sum((1 for sample in track if sample.get('detections')))
-    logger.info('Saved detection track for recording %s from live history (%d samples, %d with detections).', recording_id, len(track), localized)
-    return True
-
-def _recording_capture_window(recording: dict[str, Any]) -> tuple[float, float] | None:
-    """Return the recording's (start_ts, end_ts) from its stored timing."""
-    try:
-        started_at = datetime.fromisoformat(str(recording.get('started_at') or ''))
-    except ValueError:
-        return None
-    if started_at.tzinfo is None:
-        started_at = started_at.replace(tzinfo=timezone.utc)
-    start_ts = started_at.timestamp()
-    try:
-        ended_at = datetime.fromisoformat(str(recording.get('ended_at') or ''))
-        if ended_at.tzinfo is None:
-            ended_at = ended_at.replace(tzinfo=timezone.utc)
-        end_ts = ended_at.timestamp()
-    except ValueError:
-        end_ts = start_ts + max(1.0, float(recording.get('duration_seconds') or 0))
-    if end_ts <= start_ts:
-        return None
-    return (start_ts, end_ts)
-
-def probe_video_codec(file_path: Path) -> str | None:
-    """Return the first video stream's codec name (e.g. 'h264', 'hevc'), or None."""
-    return probe_stream_codec(file_path, 'v:0')
-
-def probe_audio_codec(file_path: Path) -> str | None:
-    """Return the first audio stream's codec name (e.g. 'aac', 'pcm_mulaw'), or None."""
-    return probe_stream_codec(file_path, 'a:0')
-
-def probe_stream_codec(file_path: Path, stream_selector: str) -> str | None:
-    if not file_path.exists() or file_path.stat().st_size <= 0:
-        return None
-    if not _FFPROBE:
-        return None
-    ffprobe = _FFPROBE
-    command = [ffprobe, '-v', 'error', '-select_streams', stream_selector, '-show_entries', 'stream=codec_name', '-of', 'default=noprint_wrappers=1:nokey=1', str(file_path)]
-    try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    codec = (result.stdout or '').strip().lower()
-    return codec or None if result.returncode == 0 else None
-
-def mp4_is_browser_playable(file_path: Path) -> bool:
-    if probe_video_codec(file_path) != 'h264':
-        return False
-    audio_codec = probe_audio_codec(file_path)
-    return audio_codec in {None, '', 'aac', 'mp3'}
-
-def probe_video_duration(file_path: Path) -> float | None:
-    if not _FFPROBE or not file_path.exists():
-        return None
-    ffprobe = _FFPROBE
-    command = [ffprobe, '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', str(file_path)]
-    try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
-        return float((result.stdout or '').strip()) if result.returncode == 0 else None
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return None
-
-def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
-    ffmpeg = _FFMPEG or shutil.which('ffmpeg')
-    if not ffmpeg:
-        raise RuntimeError('ffmpeg is required to convert recordings for browser playback.')
-    tmp_path = output_path.with_name(f'{output_path.stem}.tmp{output_path.suffix}')
-    if tmp_path.exists():
-        tmp_path.unlink(missing_ok=True)
-    command = [ffmpeg, '-y', '-fflags', '+discardcorrupt', '-err_detect', 'ignore_err', '-i', str(source_path), '-map', '0:v:0', '-map', '0:a:0?', '-c:v', 'libx264', '-c:a', 'aac', '-b:a', '128k', '-preset', 'veryfast', '-profile:v', 'main', '-level', '4.0', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', str(tmp_path)]
-    duration = probe_video_duration(source_path) or 0.0
-    timeout_seconds = max(120, int(duration * 3) + 60)
-    result = subprocess.run(command, capture_output=True, text=True, timeout=timeout_seconds, check=False)
-    if not tmp_path.exists():
-        raise RuntimeError('MP4 conversion did not create an output file.')
-    if result.returncode != 0 and (not mp4_has_video_stream(tmp_path)):
-        tmp_path.unlink(missing_ok=True)
-        error_detail = f'{result.stderr[:500]}\n...\n{result.stderr[-1000:]}'
-        raise RuntimeError(f'ffmpeg failed to convert recording for browser playback: {error_detail}')
-    if not mp4_has_video_stream(tmp_path):
-        tmp_path.unlink(missing_ok=True)
-        raise RuntimeError('Converted MP4 does not contain a video stream.')
-    tmp_path.replace(output_path)
-
-def mp4_has_video_stream(file_path: Path) -> bool:
-    if not _FFPROBE:
-        return file_path.exists() and file_path.stat().st_size > 0
-    command = [_FFPROBE, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name', '-of', 'default=noprint_wrappers=1:nokey=1', str(file_path)]
-    try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0 and bool((result.stdout or '').strip())
-DATABASE_RESTORE_REQUIRED_TABLES = {'events', 'detections', 'app_settings', 'users'}
-
-def backup_directory() -> Path:
-    backups_dir = Path(str(effective_storage_config().get('data_dir') or 'data')) / 'backups'
-    backups_dir.mkdir(parents=True, exist_ok=True)
-    return backups_dir
-
-def safe_backup_timestamp() -> str:
-    return datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-
-def create_database_backup(prefix: str='daygle-database') -> Path:
-    backup_path = backup_directory() / f'{prefix}-{safe_backup_timestamp()}-{secrets.token_hex(4)}.sqlite3'
-    try:
-        source = sqlite3.connect(database.database_path)
-        try:
-            destination = sqlite3.connect(backup_path)
-            try:
-                source.backup(destination)
-            finally:
-                destination.close()
-        finally:
-            source.close()
-    except BaseException:
-        backup_path.unlink(missing_ok=True)
-        raise
-    return backup_path
-
-def validate_restore_database(path: Path) -> None:
-    try:
-        db = sqlite3.connect(path)
-        try:
-            integrity = db.execute('PRAGMA integrity_check').fetchone()
-            if not integrity or str(integrity[0]).lower() != 'ok':
-                raise HTTPException(status_code=400, detail='Uploaded database failed SQLite integrity check.')
-            tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
-            missing = sorted(DATABASE_RESTORE_REQUIRED_TABLES - tables)
-            if missing:
-                raise HTTPException(status_code=400, detail=f"Uploaded database is missing required table(s): {', '.join(missing)}.")
-            admin_count = db.execute("SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1").fetchone()[0]
-            if int(admin_count) < 1:
-                raise HTTPException(status_code=400, detail='Uploaded database must include at least one active administrator account.')
-        finally:
-            db.close()
-    except sqlite3.DatabaseError as exc:
-        raise HTTPException(status_code=400, detail='Uploaded file is not a valid SQLite database.') from exc
-DATABASE_RESTORE_LOCK = threading.Lock()
-
-def overwrite_database_from_file(restore_source: Path) -> None:
-    source = sqlite3.connect(str(restore_source))
-    try:
-        destination = sqlite3.connect(str(database.database_path))
-        try:
-            source.backup(destination)
-            checkpoint = destination.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
-            if checkpoint and checkpoint[0] != 0:
-                logger.warning('Database restore WAL checkpoint returned error code %s', checkpoint[0])
-        finally:
-            destination.close()
-    finally:
-        source.close()
-
-def refresh_runtime_after_database_restore() -> None:
-    database.init()
-    auth.init()
-    apply_cameras_settings(effective_cameras_config())
-    apply_storage_and_recording_settings()
-    auth.apply_config(effective_auth_config())
-
-def purge_recordings_by_policy(*, force: bool=False) -> dict[str, Any]:
-    recording_settings = effective_recording_config()
-    if not force and (not normalize_bool_setting(recording_settings.get('auto_purge_enabled', True), True)):
-        return {'purged': 0, 'files_deleted': 0, 'bytes_deleted': 0, 'recordings': []}
-    retention_days = int(recording_settings.get('retention_days', 14))
-    max_storage_gb = int(recording_settings.get('max_storage_gb', 20))
-    older_than = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
-    max_storage_bytes = max_storage_gb * 1024 * 1024 * 1024
-    purged = database.purge_recordings(older_than=older_than, max_storage_bytes=max_storage_bytes)
-    bytes_deleted = 0
-    files_deleted = 0
-    for recording in purged:
-        file_path = Path(str(recording.get('file_path') or ''))
-        if file_path.exists() and file_path.is_file():
-            bytes_deleted += file_path.stat().st_size
-            files_deleted += 1
-    delete_recording_files(purged)
-    return {'purged': len(purged), 'files_deleted': files_deleted, 'bytes_deleted': bytes_deleted, 'recordings': purged}
-
-def purge_camera_diagnostics_by_policy() -> int:
-    """Age out old camera diagnostic events.
-
-    Two bounds keep the log from growing without limit: a hard row cap enforced
-    on every insert (see EventDatabase.add_camera_diagnostic) and this
-    time-based purge. Retention follows the same recording retention window
-    (``retention_days``) so diagnostics age out alongside the recordings they
-    explain.
-    """
-    try:
-        retention_days = max(1, int(effective_recording_config().get('retention_days', 14)))
-        older_than = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
-        return database.purge_camera_diagnostics_older_than(older_than)
-    except Exception as exc:
-        logger.debug('Camera diagnostics purge failed: %s', exc)
-        return 0
 
 def _parse_header_value(header: str, key: str) -> str | None:
     for part in header.split(';'):
@@ -1719,15 +783,6 @@ async def _read_uploaded_image(request: Request) -> tuple[bytes, str | None, str
             payload = payload[:-2]
         return (payload, filename, uploaded_type)
     raise HTTPException(status_code=400, detail='Multipart upload must include a file field named file')
-
-def _parse_iso_datetime(value: Any) -> datetime | None:
-    try:
-        parsed = datetime.fromisoformat(str(value or ''))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
 
 def _recording_timeline_segment(recording: dict[str, Any], day_start: datetime, day_end: datetime) -> dict[str, Any] | None:
     started_at = _parse_iso_datetime(recording.get('started_at'))
@@ -1789,8 +844,9 @@ def apply_storage_and_recording_settings() -> None:
             logger.warning('Unexpected error deleting camera: %s', unexpected_exc)
 
 def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
-    global detector, last_detector_error, _min_rule_confidence_cache
-    _min_rule_confidence_cache = None
+    import app.alert_dispatch as _alert_dispatch
+    global detector, last_detector_error
+    _alert_dispatch._min_rule_confidence_cache = None
     previous_detector = detector
     old_session = getattr(previous_detector, 'session', None)
     if old_session is not None:
@@ -1809,54 +865,6 @@ def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
     log_detector_initialization('reload')
     return (True, last_detector_error)
 
-def export_yolo_onnx(model_name: str, destination: Path) -> int:
-    if model_name not in YOLO_MODELS:
-        raise ValueError(f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
-    info = YOLO_MODELS[model_name]
-    pt_name = info['pt']
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    command = [sys.executable, '-c', f"from ultralytics import YOLO\nmodel = YOLO('{pt_name}')\nmodel.export(format='onnx')\n"]
-    result = subprocess.run(command, cwd=destination.parent, capture_output=True, text=True, timeout=600, check=False)
-    if result.returncode != 0:
-        details = (result.stderr or result.stdout or '').strip()
-        raise RuntimeError(details or f'Ultralytics export exited with status {result.returncode}.')
-    exported = destination.parent / info['onnx']
-    if exported != destination and exported.exists():
-        exported.replace(destination)
-    if not destination.exists():
-        details = (result.stderr or result.stdout or '').strip()
-        raise RuntimeError(details or f'Ultralytics export did not create {destination.name}.')
-    if destination.stat().st_size <= 0:
-        destination.unlink(missing_ok=True)
-        raise RuntimeError('Exported model file is empty.')
-    return destination.stat().st_size
-
-def _do_download_model(model_name: str, switch_active: bool=True) -> dict[str, Any]:
-    if model_name not in YOLO_MODELS:
-        raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
-    info = YOLO_MODELS[model_name]
-    destination = BASE_DIR / 'models' / info['onnx']
-    try:
-        exported_bytes = export_yolo_onnx(model_name, destination)
-    except (RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to export {info['label']} ONNX model. Install export dependencies with `pip install ultralytics onnx`, then retry. Details: {exc}") from exc
-    installed_version = _installed_package_version('ultralytics')
-    with _installed_models_lock:
-        installed_meta = _read_installed_models()
-        installed_meta[model_name] = {'version': installed_version, 'installed_at': utc_now(), 'sha256': _sha256_file(destination)}
-        _write_installed_models(installed_meta)
-    ai_settings = effective_ai_config()
-    rel_path = str(destination.relative_to(BASE_DIR))
-    is_active = ai_settings.get('model_path') == rel_path
-    if switch_active or is_active:
-        updated = validate_ai_settings({**ai_settings, 'model_path': rel_path})
-        database.set_setting('ai', updated, utc_now())
-        reloaded, error = reload_detector(updated)
-    else:
-        updated = ai_settings
-        reloaded = False
-        error = None
-    return {'ok': True, 'message': f"Exported {info['label']} ONNX to {destination.relative_to(BASE_DIR)}.", 'model_path': rel_path, 'bytes': exported_bytes, 'reload_succeeded': reloaded, 'reload_error': error, 'status': ai_status_payload(updated)}
 
 
 def _current_version() -> str:
