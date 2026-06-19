@@ -2851,71 +2851,6 @@ async def detect_frame(request: Request):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {'detections': detections, 'count': len(detections), 'ai_backend': ai_state['active_backend'], 'ai_error': ai_error}
 
-@app.get('/api/events')
-def events(label: str | None=None, limit: int=Query(50, ge=1, le=200), alerted_only: bool=False, with_recording: bool=False):
-    return database.search_events(label=label, limit=limit, alerted_only=alerted_only, with_recording=with_recording)
-
-@app.get('/api/events/{event_id}')
-def event_detail(event_id: int):
-    event = database.get_event(event_id)
-    if event is None:
-        raise HTTPException(status_code=404, detail='Event not found')
-    return event
-
-@app.delete('/api/events/{event_id}')
-def delete_event(event_id: int, request: Request):
-    require_admin(request)
-    event = database.delete_event(event_id)
-    if event is None:
-        raise HTTPException(status_code=404, detail='Event not found')
-    snapshot_path = event.get('snapshot_path')
-    if snapshot_path:
-        snapshot = Path(snapshot_path)
-        if snapshot.exists() and snapshot.is_file():
-            snapshot.unlink(missing_ok=True)
-    write_audit_log(request, 'delete', 'event', event_id)
-    return {'ok': True}
-
-@app.delete('/api/events')
-def delete_all_events(request: Request):
-    require_admin(request)
-    deleted = database.delete_all_events()
-    write_audit_log(request, 'delete_all', 'events', details={'count': deleted})
-    return {'ok': True, 'deleted': deleted}
-
-@app.post('/api/events/dismiss-all')
-def dismiss_all_events_route():
-    dismissed = database.dismiss_all_events()
-    return {'ok': True, 'dismissed': dismissed}
-
-@app.post('/api/events/{event_id}/dismiss')
-def dismiss_event_route(event_id: int):
-    ok = database.dismiss_event(event_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail='Event not found')
-    return {'ok': True}
-
-@app.get('/api/alerts')
-def alert_history(limit: int=Query(25, ge=1, le=200)):
-    return database.alerts(limit=limit)
-
-@app.delete('/api/alerts')
-def delete_all_alert_history(request: Request):
-    require_admin(request)
-    deleted = database.delete_all_alerts()
-    write_audit_log(request, 'delete_all', 'alert_history', details={'count': deleted})
-    return {'ok': True, 'deleted': deleted}
-
-@app.post('/api/alerts/dismiss-all')
-def dismiss_all_alerts_route():
-    dismissed = database.dismiss_all_alerts()
-    return {'ok': True, 'dismissed': dismissed}
-
-@app.post('/api/alerts/{group_key}/dismiss')
-def dismiss_alert_group_route(group_key: str):
-    dismissed = database.dismiss_alert_group(group_key)
-    return {'ok': True, 'dismissed': dismissed}
-
 @app.get('/api/stats')
 def stats():
     result = database.stats()
@@ -3698,7 +3633,11 @@ if __name__ == '__main__':
     import uvicorn
     server_config = config.get('server', {})
     uvicorn.run('app.main:app', host=server_config.get('host', '0.0.0.0'), port=int(server_config.get('port', 8080)), reload=False)
-
-# Routers extracted from main.py: cameras (Phase 4)
 from app.api.cameras_router import router as cameras_router
 app.include_router(cameras_router)
+
+# Routers extracted from main.py: events + alerts (Phase 5)
+from app.api.events_router import router as events_router
+app.include_router(events_router)
+from app.api.alerts_router import router as alerts_router
+app.include_router(alerts_router)
