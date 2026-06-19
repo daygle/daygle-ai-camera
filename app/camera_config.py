@@ -124,24 +124,24 @@ def _migrate_camera_id(old_id: str, new_id: str) -> None:
     if the destination dir already exists (the latter guards against
     silently clobbering an unrelated camera's frames).
     """
-    from app.main import RecordingService
-    old_key = RecordingService._camera_key(old_id)
-    new_key = RecordingService._camera_key(new_id)
-    with _state.live_detection_history_lock:
-        if old_id in _state.live_detection_history:
-            _state.live_detection_history[new_id] = (
-                _state.live_detection_history.pop(old_id)
+    import app.main as main
+    old_key = main.RecordingService._camera_key(old_id)
+    new_key = main.RecordingService._camera_key(new_id)
+    with main.live_detection_history_lock:
+        if old_id in main.live_detection_history:
+            main.live_detection_history[new_id] = (
+                main.live_detection_history.pop(old_id)
             )
-    with _state._frame_motion_lock:
-        if old_id in _state._frame_motion_prev:
-            _state._frame_motion_prev[new_id] = (
-                _state._frame_motion_prev.pop(old_id)
+    with main._frame_motion_lock:
+        if old_id in main._frame_motion_prev:
+            main._frame_motion_prev[new_id] = (
+                main._frame_motion_prev.pop(old_id)
             )
-    if _state.recording_service is not None:
+    if main.recording_service is not None:
         for base in (
-            _state.recording_service.prebuffer_dir,
-            _state.recording_service.frames_dir,
-            _state.recording_service.audio_dir,
+            main.recording_service.prebuffer_dir,
+            main.recording_service.frames_dir,
+            main.recording_service.audio_dir,
         ):
             old_dir = base / old_key
             new_dir = base / new_key

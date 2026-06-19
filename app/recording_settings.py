@@ -57,7 +57,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.sound_detector import DEFAULT_RULES, SOUND_CLASSES
 
 
 def normalize_camera_recording_settings(settings: Any) -> dict[str, Any]:
@@ -92,7 +91,7 @@ def normalize_camera_ptz_settings(settings: Any) -> dict[str, Any]:
 
 
 def _normalize_camera_sound_settings(raw: Any) -> dict[str, Any]:
-    from app.main import normalize_bool_setting, normalize_email_recipients
+    from app.main import DEFAULT_RULES, SOUND_CLASSES, normalize_bool_setting, normalize_email_recipients
     if not isinstance(raw, dict):
         raw = {}
     enabled = normalize_bool_setting(raw.get('enabled'), False)

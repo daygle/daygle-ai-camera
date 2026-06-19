@@ -69,28 +69,25 @@ from typing import Any
 
 from fastapi import HTTPException
 
-import app.state as _state
-from app.config_facades import effective_ai_config
-from app.detector import load_labels
 
 
 def ai_status_payload(
     ai_settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    from app.main import active_ai_config_source, detector_loaded_for, model_exists, onnx_runtime_installed, YOLO_MODELS
-    settings = ai_settings or effective_ai_config()
-    active_backend = getattr(_state.detector, 'backend', 'unknown')
+    import app.main as main
+    settings = ai_settings or main.effective_ai_config()
+    active_backend = getattr(main.detector, 'backend', 'unknown')
     configured_backend = str(settings.get('backend', 'onnx')).lower()
-    detector_loaded = detector_loaded_for(settings)
+    detector_loaded = main.detector_loaded_for(settings)
     model_loaded = bool(
         configured_backend == 'onnx'
         and active_backend == 'onnx'
-        and getattr(_state.detector, 'available', False)
+        and getattr(main.detector, 'available', False)
     )
-    runtime_installed = onnx_runtime_installed()
-    exists = model_exists(settings)
-    detector_reason = getattr(_state.detector, 'unavailable_reason', None)
-    error = _state.last_detector_error or detector_reason
+    runtime_installed = main.onnx_runtime_installed()
+    exists = main.model_exists(settings)
+    detector_reason = getattr(main.detector, 'unavailable_reason', None)
+    error = main.last_detector_error or detector_reason
     if configured_backend == 'onnx' and (not exists):
         mode = 'MODEL MISSING'
         error = error or f"ONNX model not found: {settings.get('model_path')}"
@@ -107,7 +104,7 @@ def ai_status_payload(
     model_label = next(
         (
             info['label']
-            for info in YOLO_MODELS.values()
+            for info in main.YOLO_MODELS.values()
             if info['onnx'] == model_filename
         ),
         None,
@@ -126,17 +123,18 @@ def ai_status_payload(
         'inference_available': inference_available,
         'error': error,
         'last_detector_error': error,
-        'active_config_source': active_ai_config_source(),
+        'active_config_source': main.active_ai_config_source(),
     }
 
 
 def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
+    import app.main as main
     ai_status = ai_status_payload(ai_settings)
     categories = ai_settings.get(
         'categories',
-        _state.config.get('ai', {}).get('categories', []),
+        main.config.get('ai', {}).get('categories', []),
     )
-    labels = load_labels(
+    labels = main.load_labels(
         ai_settings.get('labels_path'), categories,
     ) or list(categories)
     return {
@@ -158,7 +156,8 @@ def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    current = effective_ai_config()
+    import app.main as main
+    current = main.effective_ai_config()
     allowed = {
         'enabled',
         'backend',
