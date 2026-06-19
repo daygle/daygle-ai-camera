@@ -48,10 +48,10 @@ from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, load_settings
 from app.sound_detector import SoundDetector, SOUND_CLASSES, DEFAULT_RULES
 from app.storage import Storage
 
-# Phase 18: top-of-file Pool A from-import rebinds for the
+# Phase-18: top-of-file Pool A from-import rebinds for the
 # camera-config cluster extracted into app/camera_config.py. The
 # rebind lives in the regular app.X import section (NOT at the very
-# bottom like Phase 15/16) because module-load code in main.py does
+# bottom like Phase-15/16) because module-load code in main.py does
 # NOT call these helpers eagerly, but ``normalize_camera_settings`` /
 # ``normalize_camera_id`` are referenced as bare names from sibling
 # helpers still on main.py (e.g. ``normalize_monitoring_zones``,
@@ -73,12 +73,14 @@ from app.config_facades import (
     effective_storage_config as effective_storage_config,
     get_camera_config as get_camera_config,
 )
-# Phase 19: top-of-file Pool A from-import rebinds for the
+# Phase-19: top-of-file Pool A from-import rebinds for the
 # recording-settings cluster extracted into app/recording_settings.py.
 # The rebind lives in the regular app.X import section (NOT at the very
-# bottom like Phase 15/16) because sibling helpers still on main.py
-# (`camera_event_recording_config`, `validate_camera_settings`) reference
-# these as bare names inside function bodies. Top-of-file placement
+# bottom like Phase-15/16) because sibling helpers still on main.py
+# `camera_event_recording_config` (the sibling helper on main.py
+# that reaches these as bare names inside its function bodies; historically
+# `validate_camera_settings` did too but moved to `app/payload_validators.py`
+# in Phase-22). Top-of-file placement
 # ensures the rebind wires ``main.<name>`` BEFORE any sibling body
 # evaluates. Pool C reach sites (``main.normalize_bool_setting``,
 # ``main.normalize_email_recipients``, ``main.SOUND_CLASSES``,
@@ -89,10 +91,10 @@ from app.recording_settings import (
     normalize_camera_ptz_settings as normalize_camera_ptz_settings,
     normalize_camera_recording_settings as normalize_camera_recording_settings,
 )
-# Phase 20: top-of-file Pool A from-import rebinds for the AI
+# Phase-20: top-of-file Pool A from-import rebinds for the AI
 # subsystem cluster extracted into app/ai_settings.py. The rebind lives
 # in the regular app.X import section (NOT at the very bottom like
-# Phase 15/16) because internal main.py callers (`live_detection_status_payload`,
+# Phase-15/16) because internal main.py callers (`live_detection_status_payload`,
 # `process_live_stream_alerts`, `log_detector_initialization`, `detector_status`
 # itself, `_do_download_model`) reference these as bare names inside function
 # bodies. Top-of-file placement ensures the rebind wires ``main.<name>``
@@ -108,7 +110,7 @@ from app.ai_settings import (
     validate_ai_settings as validate_ai_settings,
 )
 
-# Phase 22: top-of-file Pool A from-import rebinds for the
+# Phase-22: top-of-file Pool A from-import rebinds for the
 # settings-payload-validators cluster extracted into
 # app/payload_validators.py. Top-of-file placement ensures the rebind
 # wires ``main.<name>`` BEFORE any sibling body evaluates. Every
@@ -136,37 +138,42 @@ from app.payload_validators import (
     validate_recording_settings as validate_recording_settings,
     validate_storage_settings as validate_storage_settings,
 )
-# Phase 21: top-of-file Pool A from-import rebinds for the zone /
+# Phase-21: top-of-file Pool A from-import rebinds for the zone /
 # schema normalization cluster extracted into app/zone_schema.py. The
 # rebind lives in the regular app.X import section (NOT at the very
-# bottom like Phase 15/16) because internal main.py callers
-# (`validate_camera_settings` L2537-2538, `render_live_snapshot_svg`
-# L2025, `detection_label_allowed_for_zone` L799,
-# `filter_detections_for_camera_zones` L815 + L911 + L919) reference
-# these as bare names inside function bodies. Top-of-file placement
-# ensures the rebind wires ``main.<name>`` BEFORE any sibling body
-# evaluates. The ``_LABEL_ALIASES`` rebind keeps the 4 main.py-internal
-# bare-name references working after the dict move. The 3 Pool C reach
-# sites (``main.normalize_bool_setting``,
-# ``main.normalize_email_recipients``, ``main.normalize_camera_id``)
-# are also resolved inside the moved helpers.
+# bottom like Phase-15/16) because internal main.py callers
+# reference earlier zone-schema helpers as bare names inside their function
+# bodies. Top-of-file placement ensures the rebind wires ``main.<name>``
+# BEFORE any sibling body evaluates.
+#
+# Historical drift: when Phase-21 landed, the explicit caller list
+# named: (validate_camera_settings, detection_label_allowed_for_zone,
+# filter_detections_for_camera_zones). Phases 22 (payload_validators) and
+# 23 (zone_detection) subsequently moved all three of those callers out of
+# main.py, so the bare-name caller list for this rebind is empty today.
+# The rebind remains because the Pool C reach sites below still
+# flow through ``main.<attr>``. The 4 current sites are:
+# (``main._LABEL_ALIASES``, ``main.normalize_bool_setting``,
+# ``main.normalize_email_recipients``, ``main.normalize_camera_id``) -
+# resolved inside the moved helpers (app/zone_schema.py and
+# app/zone_detection.py both reach them at call time via
+# ``import app.main as main``).
 from app.zone_schema import (
     _LABEL_ALIASES as _LABEL_ALIASES,
     normalize_label_list as normalize_label_list,
     normalize_monitoring_zones as normalize_monitoring_zones,
     normalize_zone_object_rules as normalize_zone_object_rules,
     normalize_zone_point as normalize_zone_point,
-    rectangle_zone_points as rectangle_zone_points,
     zone_bounds as zone_bounds,
     zone_motion_min_confidence as zone_motion_min_confidence,
 )
 
-# Phase 23: top-of-file Pool A from-import rebinds for the
+# Phase-23: top-of-file Pool A from-import rebinds for the
 # zone-detection orchestration cluster extracted into
 # app/zone_detection.py. The rebind lives in the regular app.X import
-# section (NOT at the very bottom like Phase 15/16) because internal
-# main.py callers (``process_live_stream_alerts`` L1442-L1467) reference
-# these as bare names inside function bodies, and Pool C reach sites
+# section (NOT at the very bottom like Phase-15/16) because internal
+# main.py caller (``process_live_stream_alerts`` L1067) references
+# these as bare names inside its function body, and Pool C reach sites
 # (``main.get_camera_config``, ``main.camera_instances``, ``main.HTTPException``,
 # ``main._MOTION_FRAME_W``, ``main._MOTION_FRAME_H``,
 # ``main.zone_motion_min_confidence``, ``main.normalize_label_list``,
@@ -202,10 +209,10 @@ from app.zone_detection import (
     zone_rule_name as zone_rule_name,
 )
 
-# Phase 24: top-of-file Pool A from-import rebinds for the
+# Phase-24: top-of-file Pool A from-import rebinds for the
 # camera-offline/health cluster extracted into app/camera_health.py.
 # The rebind lives in the regular app.X import section (NOT at the very
-# bottom like Phase 15/16) because internal main.py callers
+# bottom like Phase-15/16) because internal main.py callers
 # (``live_alert_monitor_loop`` invokes ``_check_cameras_health`` every
 # cycle) reference these as bare names inside function bodies, and Pool C
 # reach sites (``main._camera_health_state``, ``main._camera_health_lock``,
@@ -226,6 +233,195 @@ from app.camera_health import (
     _mark_camera_recovery_notified as _mark_camera_recovery_notified,
     _update_camera_health as _update_camera_health,
     effective_camera_offline_alert_settings as effective_camera_offline_alert_settings,
+)
+# Phase-25: top-of-file Pool A from-import rebinds for the
+# pure live-snapshot rendering cluster extracted into
+# app/live_snapshot.py. The rebind wires ``main.<name>`` BEFORE any
+# sibling body evaluates because the internal main.py caller
+# (``deliver_email_alerts`` invokes ``render_live_snapshot_jpeg_overlay``
+# as a bare name at L1522) references this as a bare name inside
+# its function body, and ``tests/test_api.py`` reaches them as
+# ``main.render_live_snapshot_*``. No Pool C reach sites - both helpers
+# are pure, depending only on stdlib + ``rectangle_zone_points`` from
+# app.zone_schema (which is now their sole importer).
+from app.live_snapshot import (
+    render_live_snapshot_svg as render_live_snapshot_svg,
+    render_live_snapshot_jpeg_overlay as render_live_snapshot_jpeg_overlay,
+)
+# Phase-26: top-of-file Pool A from-import rebinds for the
+# live-detection state cluster extracted into app/detection_state.py.
+# The rebind wires ``main.<name>`` BEFORE any sibling body evaluates
+# because the internal main.py caller (``process_live_stream_alerts``
+# invokes ``detect_frame_motion`` as a bare name at
+# L1084) refers to these as bare names inside function bodies, and
+# ``tests/test_api.py`` reaches them as
+# ``main.build_track_from_live_history`` / ``main.live_detection_history``.
+# The four helpers are NOT pure: they reach ``main.live_detection_*``
+# locks + dicts, ``main._frame_motion_*``, ``main._MOTION_FRAME_W/H``,
+# the four ``_MOTION_*`` tuning constants, ``main.effective_live_config``,
+# and ``main.logger`` via lazy ``import app.main as main`` access at
+# call time - mirroring the Pool-C pattern in :mod:`app.zone_schema`.
+# State primitives and the ``_MOTION_*`` constants STAY on ``app.main``
+# so :mod:`app.zone_detection` keeps its ``main._MOTION_FRAME_*`` /
+# ``main._MOTION_GATE_FRACTION`` / ``main._MOTION_SCALE_FRACTION``
+# reach sites unchanged. The four ``detect_frame_motion`` tuning
+# defaults were rewired to ``None`` + call-time resolution against the
+# main.py constants for the same import-order reason (see
+# app.detection_state's module docstring).
+from app.detection_state import (
+    build_track_from_live_history as build_track_from_live_history,
+    detection_label_set as detection_label_set,
+    detect_frame_motion as detect_frame_motion,
+    record_live_detection_history as record_live_detection_history,
+)
+# Phase-27: top-of-file Pool A from-import rebinds for the
+# live-event debounce cluster extracted into app/event_debounce.py.
+# The rebind wires ``main.<name>`` BEFORE any sibling body evaluates
+# because the internal main.py callers (``process_live_stream_alerts``
+# invokes ``live_event_is_debounced`` and ``remember_live_event`` as
+# bare names inside its function body, ``run_live_alert_monitor_once``
+# invokes ``clear_live_camera_backoff`` as a bare name) reference
+# these as bare names inside function bodies, and ``tests/test_api.py``
+# reaches them as ``main.live_event_is_debounced`` /
+# ``main.remember_live_event`` / ``main.clear_live_camera_backoff`` AND
+# mutates ``main.live_event_last_emitted`` directly. The three helpers
+# are NOT pure: they reach ``main.live_event_last_emitted_lock`` +
+# ``main.live_event_last_emitted``, ``main._live_backoff_lock`` +
+# ``main.live_detection_failure_count`` + ``main.live_detection_retry_after``,
+# ``main._frame_motion_lock`` / ``main._frame_motion_prev`` /
+# ``main._frame_motion_error_cameras`` / ``main._periodic_scan_last_ts``,
+# and ``main.log_camera_diagnostic`` via lazy ``import app.main as main``
+# access at call time - mirroring the Pool-C pattern in
+# :mod:`app.zone_schema` and :mod:`app.detection_state`. State
+# primitives STAY on ``app.main`` so :mod:`tests.test_api` continues
+# to read/write ``main.live_event_last_emitted`` directly, and
+# :mod:`app.detection_state` keeps its ``main._frame_motion_*`` +
+# ``main._periodic_scan_last_ts`` write sites unchanged.
+from app.event_debounce import (
+    clear_live_camera_backoff as clear_live_camera_backoff,
+    live_event_is_debounced as live_event_is_debounced,
+    remember_live_event as remember_live_event,
+    schedule_live_camera_backoff as schedule_live_camera_backoff,
+)
+
+# Phase 28: top-of-file Pool A from-import rebinds for the
+# live-alert delivery cluster extracted into app/alert_dispatch.py.
+# The rebind wires ``main.<name>`` BEFORE any sibling body evaluates
+# because the internal main.py callers (``process_live_stream_alerts``
+# invokes the dispatch family as bare names inside its function body
+# and ``tests/test_api.py`` reaches them as
+# ``main.deliver_push_notifications`` /
+# ``main.wait_for_pending_alert_notifications``) reference these as
+# bare names inside function bodies. The five helpers reach the
+# following state + helpers on ``app.main`` at call time via lazy
+# ``import app.main as main`` access:
+#   - ``main._notification_threads_lock`` + ``main._notification_threads``
+#     (state primitives owned on main.py)
+#   - ``main.database`` (singleton DB handle; NOT the app/database.py module)
+#   - ``main.effective_email_alert_settings()`` +
+#     ``main.effective_push_notification_settings()`` (Phase-9/10 rebinds)
+#   - ``main._format_alert_datetime(...)`` +
+#     ``main._rule_notify_active_now(...)`` +
+#     ``main.compute_minimum_rule_confidence()`` (top-level helpers)
+#   - ``main.render_live_snapshot_jpeg_overlay(...)`` (Phase-25 rebind).
+# This mirrors the Pool-C pattern in :mod:`app.zone_schema`,
+# :mod:`app.detection_state`, and :mod:`app.event_debounce`. State
+# primitives stay on main.py (mirrors the Phase-26 ``live_detection_history``
+# precedent for the in-flight delivery threads).
+from app.alert_dispatch import (
+    deliver_sound_alert_notifications as _deliver_sound_alert_notifications,
+    wait_for_pending_alert_notifications as wait_for_pending_alert_notifications,
+    deliver_alert_notifications as _deliver_alert_notifications,
+    deliver_email_alerts as deliver_email_alerts,
+    deliver_push_notifications as deliver_push_notifications,
+)
+
+# Phase 29: top-of-file Pool A from-import rebinds for the
+# live-detection status cluster extracted into app/detection_status.py.
+# The rebind wires ``main.<name>`` BEFORE any sibling body evaluates
+# because the internal main.py callers (``update_live_detection_status``
+# is called from many sites including ``process_live_stream_alerts``
+# and ``extend_active_rtsp_recording``; ``detection_label_strings`` +
+# ``detection_label_confidences`` are invoked from
+# ``process_live_stream_alerts``; ``live_detection_status_payload``
+# is reached from ``app/api/live_router.py`` and
+# ``app/api/status_router.py`` as ``main.live_detection_status_payload``
+# AND from ``tests/test_api.py`` as ``main.live_detection_status_payload``)
+# reference these as bare names inside function bodies, and tests reach
+# them as ``main.<name>``. The five helpers reach the following on
+# ``app.main`` at call time via lazy ``import app.main as main`` access:
+#   - ``main.live_detection_status_lock`` + ``main.live_detection_status``
+#     (state primitives owned on main.py, exclusive to this cluster)
+#   - ``main.get_camera_config`` (Phase-18 rebind from app.camera_config)
+#   - ``main.ai_status_payload`` (Phase-20 rebind from app.ai_settings)
+#   - ``main.build_stream_url`` (top-level helper on main.py at L588).
+# This mirrors the Pool-C pattern in :mod:`app.zone_schema`,
+# :mod:`app.detection_state`, :mod:`app.event_debounce`, and
+# :mod:`app.alert_dispatch`. State primitives stay on main.py (mirrors
+# the Phase-26 ``live_detection_history_lock`` precedent).
+#
+# Skipped from this extraction (left in main.py): ``extend_active_rtsp_recording``
+# (recording extension cluster, future Phase-30+) and
+# ``schedule_live_camera_backoff`` (backoff scheduling, related to
+# Phase-27 event_debounce but tightly coupled to recording expiry
+# logic; defer).
+from app.detection_status import (
+    update_live_detection_status as update_live_detection_status,
+    detection_label_strings as detection_label_strings,
+    detection_label_confidences as detection_label_confidences,
+    live_detection_status_payload as live_detection_status_payload,
+    _camera_has_live_alert_stream as _camera_has_live_alert_stream,
+)
+
+# Phase 30: top-of-file Pool A from-import rebinds for the
+# recording-extension cluster extracted into app/recording_extension.py.
+# The rebind wires ``main.<name>`` BEFORE any sibling body evaluates
+# because the internal main.py callers (``extend_active_rtsp_recording``
+# is invoked from ``process_live_stream_alerts`` (around L1149) and
+# another recording-orchestration helper (around L1331); the track trio
+# is invoked from playback + main stream-loop sites) AND the external
+# callers (``app/api/recordings_router.py`` reaches
+# ``main.load_recording_detection_track`` + ``main.recording_track_sidecar_path``,
+# ``tests/test_api.py`` extensively tests all 4 helpers via
+# ``main.<name>`` reach) reference these as bare names inside function
+# bodies. The four helpers reach the following on ``app.main`` at call
+# time via lazy ``import app.main as main`` access:
+#   - ``main.active_rtsp_recordings`` + ``main.active_rtsp_recordings_lock``
+#     (state primitives owned on main.py, exclusive to this cluster)
+#   - ``main.database`` (singleton DB handle on main.py)
+#   - ``main.recording_service`` (RecordingService singleton on main.py)
+#   - ``main.effective_recording_config`` (Phase-17 rebind from
+#     app.config_facades)
+#   - ``main.detection_label_strings`` + ``main.detection_label_confidences``
+#     (Phase-29 rebinds from app.detection_status).
+# The track trio has zero Pool-C reach - it resolves
+# ``recording_track_sidecar_path`` as a bare local name inside the new
+# module. This mirrors the Pool-C pattern in :mod:`app.zone_schema`,
+# :mod:`app.detection_state`, :mod:`app.event_debounce`,
+# :mod:`app.alert_dispatch`, and :mod:`app.detection_status`. State
+# primitives stay on main.py (mirrors the Phase-26
+# ``live_detection_history_lock`` + Phase-27
+# ``_notification_threads_lock`` + Phase-29
+# ``live_detection_status_lock`` precedent for in-flight
+# recording + helper state).
+#
+# Skipped from this extraction (left in main.py): ``schedule_live_camera_backoff``
+# (backoff scheduling + recording-extension overlap, future Phase-31+).
+from app.recording_extension import (
+    extend_active_rtsp_recording as extend_active_rtsp_recording,
+    recording_track_sidecar_path as recording_track_sidecar_path,
+    write_recording_detection_track as write_recording_detection_track,
+    load_recording_detection_track as load_recording_detection_track,
+)
+
+# Phase 32: top-of-file Pool A from-import rebinds for the
+# live-alert-monitor lifecycle cluster extracted into app/live_monitor.py.
+from app.live_monitor import (
+    run_live_alert_monitor_once as run_live_alert_monitor_once,
+    _prune_frame_motion_state as _prune_frame_motion_state,
+    live_alert_monitor_loop as live_alert_monitor_loop,
+    start_live_alert_monitor as start_live_alert_monitor,
+    stop_live_alert_monitor as stop_live_alert_monitor,
 )
 logger = logging.getLogger('daygle.ai')
 
@@ -569,239 +765,7 @@ def normalize_email_recipients(value: Any) -> list[str]:
 
 
 
-def update_live_detection_status(camera_id: str, **updates: Any) -> None:
-    with live_detection_status_lock:
-        live_detection_status[camera_id] = {**live_detection_status.get(camera_id, {}), **updates, 'camera_id': camera_id, 'updated_at': datetime.now(timezone.utc).isoformat()}
 
-def record_live_detection_history(camera_id: str, detections: list[dict[str, Any]], sample_ts: float | None=None, *, live_config: dict[str, Any] | None=None) -> None:
-    """Append one monitor cycle's detections to the camera's rolling history.
-
-    ``sample_ts`` must be when the analyzed frame was CAPTURED, not when
-    inference finished: tracks sliced from this history are replayed against
-    the recorded video, and stamping at completion shifts every box late by
-    the inference duration - the playback overlay then trails moving objects.
-
-    Empty cycles are recorded too: a recording track sliced from the history
-    needs "nothing in frame" samples so playback overlays clear when an object
-    leaves instead of holding the last box."""
-    sample = [{'label': detection.get('label'), 'confidence': detection.get('confidence'), 'box': detection.get('box')} for detection in detections if isinstance(detection.get('box'), dict)]
-    if sample_ts is None:
-        sample_ts = time.time()
-    history_minutes = max(1, int((live_config or effective_live_config()).get('detection_history_minutes', 10)))
-    history_maxlen = max(120, history_minutes * 120)
-    with live_detection_history_lock:
-        history = live_detection_history.get(camera_id)
-        if history is None:
-            history = deque(maxlen=history_maxlen)
-            live_detection_history[camera_id] = history
-        history.append((sample_ts, sample))
-
-def build_track_from_live_history(camera_id: str | None, start_ts: float, end_ts: float) -> list[dict[str, Any]] | None:
-    """Slice the monitor's detection history into a clip-relative track.
-
-    Returns ``[{"t": seconds_from_start, "detections": [...]}]`` or ``None``
-    when the history has no samples inside the window (camera idle, monitor
-    disabled, or the clip predates the in-memory history)."""
-    if not camera_id or end_ts <= start_ts:
-        return None
-    with live_detection_history_lock:
-        samples = list(live_detection_history.get(str(camera_id), ()))
-    track = [{'t': round(sample_ts - start_ts, 3), 'detections': sample_detections} for sample_ts, sample_detections in samples if start_ts <= sample_ts <= end_ts]
-    return track or None
-
-def detection_label_set(detections: list[dict[str, Any]]) -> set[str]:
-    return {str(detection.get('label') or '').strip().lower() for detection in detections if str(detection.get('label') or '').strip()}
-
-def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float=_MOTION_PIXEL_THRESHOLD, gate_fraction: float=_MOTION_GATE_FRACTION, scale_fraction: float=_MOTION_SCALE_FRACTION, background_alpha: float=_MOTION_BACKGROUND_ALPHA) -> tuple[bool, float, Any]:
-    """Adaptive-background motion gate. Returns (has_motion, confidence 0-1, diff_mask).
-
-    ``image`` may be a BGR numpy array (from ``read_frame``) or JPEG bytes
-    (legacy callers).  When a numpy array is provided the PIL decode is
-    skipped, saving ~5-15 ms per cycle.
-
-    Threshold parameters default to module-level constants but can be
-    overridden via live settings so operators can tune sensitivity without
-    touching code.
-
-    Returns ``(has_motion, frame_confidence, diff_mask)`` where ``diff_mask``
-    is a boolean (H×W) numpy array indicating which thumbnail pixels changed by
-    more than ``pixel_threshold``.  Callers can slice ``diff_mask`` to compute
-    per-zone confidence scores instead of using the frame-wide value.
-    ``diff_mask`` is ``None`` on the first frame or when an error occurs.
-    """
-    try:
-        import numpy as np
-        if hasattr(image, 'shape') and hasattr(image, 'dtype'):
-            import cv2
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            resized = cv2.resize(gray, (_MOTION_FRAME_W, _MOTION_FRAME_H), interpolation=cv2.INTER_NEAREST)
-            current = resized.astype(np.float32)
-        else:
-            from PIL import Image as _Image
-            img = _Image.open(io.BytesIO(image)).convert('L').resize((_MOTION_FRAME_W, _MOTION_FRAME_H), _Image.NEAREST)
-            current = np.array(img, dtype=np.float32)
-        with _frame_motion_lock:
-            background = _frame_motion_prev.get(camera_id)
-            if background is None:
-                _frame_motion_prev[camera_id] = current
-                _frame_motion_error_cameras.discard(camera_id)
-                return (False, 0.0, None)
-            diff_mask = np.abs(current - background) > pixel_threshold
-            changed_fraction = float(np.mean(diff_mask))
-            if changed_fraction < gate_fraction:
-                updated_bg = (1.0 - background_alpha) * background + background_alpha * current
-                _frame_motion_prev[camera_id] = updated_bg
-        _frame_motion_error_cameras.discard(camera_id)
-        if changed_fraction < gate_fraction:
-            return (False, 0.0, diff_mask)
-        return (True, round(min(1.0, changed_fraction / scale_fraction), 3), diff_mask)
-    except Exception as exc:
-        if camera_id not in _frame_motion_error_cameras:
-            logger.warning('Motion gate unavailable for camera %s: %s; failing open', camera_id, exc)
-            _frame_motion_error_cameras.add(camera_id)
-        return (True, 0.4, None)
-
-def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: float) -> bool:
-    if debounce_seconds <= 0 or not labels:
-        return False
-    with live_event_last_emitted_lock:
-        previous = live_event_last_emitted.get(camera_id)
-    if not previous:
-        return False
-    elapsed = time.time() - float(previous.get('timestamp', 0))
-    if elapsed > debounce_seconds:
-        return False
-    if labels <= {'motion'}:
-        return True
-    previous_labels = {str(label).strip().lower() for label in previous.get('labels', []) if str(label).strip()}
-    return bool(previous_labels & labels)
-
-def remember_live_event(camera_id: str, labels: set[str], *, merge: bool=False) -> None:
-    if not labels:
-        return
-    with live_event_last_emitted_lock:
-        if merge:
-            previous = live_event_last_emitted.get(camera_id) or {}
-            labels = labels | {str(label).strip().lower() for label in previous.get('labels', []) if str(label).strip()}
-        live_event_last_emitted[camera_id] = {'timestamp': time.time(), 'labels': sorted(labels)}
-
-def clear_live_camera_backoff(camera_id: str) -> None:
-    with _live_backoff_lock:
-        was_backed_off = bool(live_detection_failure_count.get(camera_id))
-        live_detection_retry_after.pop(camera_id, None)
-        live_detection_failure_count.pop(camera_id, None)
-    if was_backed_off:
-        log_camera_diagnostic(camera_id, 'detection_recovered', 'Live detection resumed after a successful frame read.', severity='info')
-    with _frame_motion_lock:
-        _frame_motion_prev.pop(camera_id, None)
-    _frame_motion_error_cameras.discard(camera_id)
-    _periodic_scan_last_ts.pop(camera_id, None)
-
-def extend_active_rtsp_recording(*, camera_id: str, event_time: str, recording_config: dict[str, Any] | None, detections: list[dict[str, Any]] | None=None) -> int | None:
-    try:
-        event_dt = datetime.fromisoformat(str(event_time))
-    except ValueError:
-        event_dt = datetime.now(timezone.utc)
-    if event_dt.tzinfo is None:
-        event_dt = event_dt.replace(tzinfo=timezone.utc)
-    config = recording_config or effective_recording_config()
-    extension_step_seconds = max(0, int(config.get('extension_step_seconds', config.get('post_event_seconds', 10))))
-    extend_until = event_dt.timestamp() + extension_step_seconds
-    with active_rtsp_recordings_lock:
-        session = active_rtsp_recordings.get(camera_id)
-        if not session:
-            return None
-        current_deadline = float(session.get('capture_deadline_ts') or 0)
-        max_deadline = float(session.get('max_capture_deadline_ts') or current_deadline)
-        new_deadline = min(max_deadline, max(current_deadline, extend_until))
-        if new_deadline <= current_deadline:
-            return int(session.get('recording_id'))
-        session['capture_deadline_ts'] = new_deadline
-        start_ts = float(session.get('start_capture_ts') or new_deadline)
-        ended_at = datetime.fromtimestamp(new_deadline, tz=timezone.utc).isoformat()
-        duration_seconds = max(1.0, new_deadline - start_ts)
-        recording_id = int(session.get('recording_id'))
-    database.update_recording_timing(recording_id, ended_at=ended_at, duration_seconds=duration_seconds)
-    if detections:
-        should_record, trigger_type, trigger_label = recording_service.should_record(detections, config)
-        new_labels = detection_label_strings(detections)
-        if new_labels:
-            database.add_recording_labels(recording_id, new_labels, source='extension', confidences=detection_label_confidences(detections))
-        if should_record and trigger_label:
-            current_recording = database.get_recording(recording_id) or {}
-            current_label = str(current_recording.get('trigger_label') or '').strip().lower()
-            current_type = str(current_recording.get('trigger_type') or '').strip().lower()
-            generic_labels = {'', 'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous'}
-            candidate_label = str(trigger_label).strip().lower()
-            if candidate_label not in generic_labels and (current_label in generic_labels or current_type in {'motion', 'human'}):
-                database.update_recording_trigger(recording_id, trigger_type=trigger_type, trigger_label=candidate_label)
-    return recording_id
-
-def detection_label_strings(detections: list[dict[str, Any]]) -> list[str]:
-    """Return the sorted, de-duplicated, non-generic labels from a detections list.
-
-    Used to seed the recording_labels join table so a recording's "labels" field
-    reflects every object that appeared inside it, not just the trigger_label.
-    """
-    if not detections:
-        return []
-    generic = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous', ''}
-    seen: set[str] = set()
-    out: list[str] = []
-    for detection in detections:
-        label = str(detection.get('label') or '').strip().lower()
-        if not label or label in generic or label in seen:
-            continue
-        seen.add(label)
-        out.append(label)
-    out.sort()
-    return out
-
-def detection_label_confidences(detections: list[dict[str, Any]]) -> dict[str, float]:
-    """Return the best confidence per non-generic label from a detections list.
-
-    Used to persist a confidence alongside each recording label so the recordings
-    list and timeline can show a percentage for secondary objects, not just the
-    trigger object.
-    """
-    if not detections:
-        return {}
-    generic = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous', ''}
-    best: dict[str, float] = {}
-    for detection in detections:
-        label = str(detection.get('label') or '').strip().lower()
-        if not label or label in generic:
-            continue
-        try:
-            confidence = float(detection.get('confidence'))
-        except (TypeError, ValueError):
-            continue
-        if label not in best or confidence > best[label]:
-            best[label] = confidence
-    return best
-
-def schedule_live_camera_backoff(camera_id: str, message: str) -> float:
-    with _live_backoff_lock:
-        failure_count = live_detection_failure_count.get(camera_id, 0) + 1
-        live_detection_failure_count[camera_id] = failure_count
-        backoff_seconds = min(300.0, max(10.0, 5.0 * 2 ** min(failure_count - 1, 5)))
-        retry_after = time.time() + backoff_seconds
-        live_detection_retry_after[camera_id] = retry_after
-    update_live_detection_status(camera_id, state='error', reason=f'{message} Retrying in {int(backoff_seconds)}s.', detections=[])
-    if failure_count == 1:
-        log_camera_diagnostic(camera_id, 'detection_backoff', f'Live detection paused after error: {message}', severity='warning', details={'backoff_seconds': int(backoff_seconds)})
-    return backoff_seconds
-
-def live_detection_status_payload(camera_id: str | None=None) -> dict[str, Any]:
-    selected_config = get_camera_config(camera_id)
-    camera_key = str(selected_config.get('id') or camera_id or 'camera')
-    ai_state = ai_status_payload()
-    with live_detection_status_lock:
-        status = live_detection_status.get(camera_key, {'state': 'waiting', 'reason': 'No live detection has run yet.'})
-    return {'camera_id': camera_key, 'camera_name': selected_config.get('name'), 'ai_backend': ai_state['active_backend'], 'ai_configured_backend': ai_state['configured_backend'], 'ai_available': ai_state['inference_available'], 'ai_mode': ai_state['mode'], 'ai_error': ai_state['error'], **status}
-
-def _camera_has_live_alert_stream(settings: dict[str, Any]) -> bool:
-    return bool(build_stream_url(settings))
 
 def read_ingest_frame(camera_id: str) -> tuple[Any, dict[str, Any]] | None:
     """Decode the latest frame the shared per-camera ingest wrote, as
@@ -821,112 +785,10 @@ def read_ingest_frame(camera_id: str) -> tuple[Any, dict[str, Any]] | None:
     frame = {'frame_number': 0, 'timestamp': captured_ts, 'width': int(width), 'height': int(height)}
     return (image, frame)
 
-def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> int:
-    if live_settings is None:
-        live_settings = effective_live_config()
-    background_detection_enabled = normalize_bool_setting(live_settings.get('background_detection_enabled'), True)
-    processed = 0
-    for selected_config in list(cameras_config):
-        camera_id = str(selected_config.get('id') or 'camera')
-        if not _camera_has_live_alert_stream(selected_config):
-            continue
-        now = time.time()
-        stream_url = build_stream_url(selected_config)
-        cam_rec_config = camera_event_recording_config(selected_config)
-        if stream_url:
-            recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config)
-            if cam_rec_config.get('continuous'):
-                recording_service.start_continuous_chunk_recording(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config, on_chunk_complete=_make_continuous_chunk_callback(camera_id))
-        if not background_detection_enabled:
-            continue
-        with _live_backoff_lock:
-            retry_after = live_detection_retry_after.get(camera_id, 0)
-        if retry_after and now < retry_after:
-            continue
-        detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 0.25))
-        with live_detection_worker_lock:
-            if camera_id in active_live_detection_cameras:
-                continue
-            if now - live_detection_last_checked.get(camera_id, 0) < detection_interval_seconds:
-                continue
-            live_detection_last_checked[camera_id] = now
-            active_live_detection_cameras.add(camera_id)
 
-        def _detect_bg(cid: str=camera_id, cfg: dict[str, Any]=dict(selected_config)) -> None:
-            try:
-                sample = read_ingest_frame(cid)
-                if sample is None:
-                    if not recording_service.ingest_has_produced_frame(cid):
-                        return
-                    cam_instance = camera_instances.get(cid)
-                    if cam_instance is not None and hasattr(cam_instance, 'read_jpeg'):
-                        try:
-                            import cv2
-                            import numpy as np
-                            jpeg_bytes, _frame_meta = cam_instance.read_jpeg()
-                            img = cv2.imdecode(np.frombuffer(jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
-                            if img is not None:
-                                h, w = img.shape[:2]
-                                sample = (img, {'frame_number': 0, 'timestamp': time.time(), 'width': w, 'height': h})
-                        except Exception:
-                            pass
-                    if sample is None:
-                        schedule_live_camera_backoff(cid, 'No fresh frame available from the camera ingest.')
-                        return
-                image, frame = sample
-                clear_live_camera_backoff(cid)
-                process_live_stream_alerts(image, frame, cfg, enforce_interval=False)
-            except Exception as exc:
-                logger.warning('Background live alert check failed for camera %s: %s', cid, exc)
-                schedule_live_camera_backoff(cid, str(exc))
-            finally:
-                with live_detection_worker_lock:
-                    active_live_detection_cameras.discard(cid)
-        threading.Thread(target=_detect_bg, name=f'live-detection-{camera_id}', daemon=True).start()
-        processed += 1
-    return processed
 
-def _prune_frame_motion_state() -> None:
-    """Remove background model and scan timestamp entries for cameras no longer in the active config."""
-    active_ids = {str(cfg.get('id') or '') for cfg in cameras_config if cfg.get('id')}
-    with _frame_motion_lock:
-        stale = [cid for cid in _frame_motion_prev if cid not in active_ids]
-        for cid in stale:
-            del _frame_motion_prev[cid]
-    for cid in stale:
-        _periodic_scan_last_ts.pop(cid, None)
-        _frame_motion_error_cameras.discard(cid)
-    if stale:
-        logger.debug('Pruned stale motion state for cameras: %s', stale)
 
-def live_alert_monitor_loop() -> None:
-    _last_prune = 0.0
-    while not live_alert_monitor_stop.is_set():
-        live_settings = effective_live_config()
-        run_live_alert_monitor_once(live_settings)
-        _check_cameras_health()
-        now = time.time()
-        if now - _last_prune > 300:
-            _prune_frame_motion_state()
-            purge_camera_diagnostics_by_policy()
-            _last_prune = now
-        interval = max(0.1, float(live_settings.get('detection_interval_seconds', 0.25)))
-        live_alert_monitor_stop.wait(interval)
 
-def start_live_alert_monitor() -> None:
-    global live_alert_monitor_thread
-    if live_alert_monitor_thread and live_alert_monitor_thread.is_alive():
-        return
-    live_alert_monitor_stop.clear()
-    live_alert_monitor_thread = threading.Thread(target=live_alert_monitor_loop, name='live-alert-monitor', daemon=True)
-    live_alert_monitor_thread.start()
-
-def stop_live_alert_monitor() -> None:
-    global live_alert_monitor_thread
-    live_alert_monitor_stop.set()
-    if live_alert_monitor_thread and live_alert_monitor_thread.is_alive():
-        live_alert_monitor_thread.join(timeout=5)
-    live_alert_monitor_thread = None
 
 def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence: float, meta: dict[str, Any]) -> None:
     """Callback invoked by a per-camera SoundDetector when a sound class is detected."""
@@ -977,18 +839,6 @@ def _make_sound_detect_callback(camera_id: str):
     def _callback(class_id: str, rule_name: str, confidence: float, meta: dict[str, Any]) -> None:
         _on_sound_detected(camera_id, class_id, rule_name, confidence, meta)
     return _callback
-
-def _deliver_sound_alert_notifications(triggered: list[dict[str, Any]], event_id: int, rule: dict[str, Any]) -> None:
-    if rule.get('email_enabled'):
-        try:
-            deliver_email_alerts(triggered, event_id, rules=[rule])
-        except Exception as exc:
-            logger.warning('Sound alert email delivery failed for event %s: %s', event_id, exc)
-    if rule.get('push_enabled'):
-        try:
-            deliver_push_notifications(triggered, event_id, rules=[rule])
-        except Exception as exc:
-            logger.warning('Sound alert push delivery failed for event %s: %s', event_id, exc)
 
 def apply_sound_settings() -> None:
     """Start one SoundDetector per RTSP camera that has sound detection enabled."""
@@ -1467,95 +1317,6 @@ def recording_skip_reason(detections: list[dict[str, Any]], recording_config: di
 _notification_threads_lock = threading.Lock()
 _notification_threads: list[threading.Thread] = []
 
-def wait_for_pending_alert_notifications(timeout: float=10.0) -> None:
-    """Block until in-flight alert email/push deliveries finish (used by tests)."""
-    deadline = time.time() + max(0.0, timeout)
-    with _notification_threads_lock:
-        pending = [thread for thread in _notification_threads if thread.is_alive()]
-    for thread in pending:
-        thread.join(timeout=max(0.0, deadline - time.time()))
-
-def _deliver_alert_notifications(triggered: list[dict[str, Any]], event_id: int, rules: list[dict[str, Any]] | None) -> None:
-    try:
-        deliver_email_alerts(triggered, event_id, rules=rules)
-    except Exception as exc:
-        logger.warning('Email alert delivery failed for event %s: %s', event_id, exc)
-    try:
-        deliver_push_notifications(triggered, event_id, rules=rules)
-    except Exception as exc:
-        logger.warning('Push notification delivery failed for event %s: %s', event_id, exc)
-
-def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: list[dict[str, Any]] | None=None) -> None:
-    if not triggered:
-        return
-    event = database.get_event(event_id) or {}
-    metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
-    camera_name = str(metadata.get('camera_name') or '').strip() or None
-    camera_id = str(metadata.get('camera_id') or '').strip() or None
-    created_at_raw = str(event.get('created_at') or '').strip()
-    detected_at = _format_alert_datetime(created_at_raw) if created_at_raw else None
-    rules_by_name = {str(rule.get('name')): rule for rule in rules or []}
-    any_email_enabled = any(((rule := rules_by_name.get(str(alert.get('rule_name')), {})).get('email_enabled') and _rule_notify_active_now(rule) for alert in triggered))
-    snapshot_bytes: bytes | None = None
-    snapshot_path = str(event.get('snapshot_path') or '')
-    if any_email_enabled and snapshot_path:
-        try:
-            snap_path = Path(snapshot_path)
-            if snap_path.exists():
-                raw_bytes = snap_path.read_bytes()
-                db_detections = event.get('detections') or []
-                _email_min_conf = compute_minimum_rule_confidence()
-                overlay_detections = [{'label': d.get('label'), 'confidence': d.get('confidence'), 'box': {'x': d.get('x', 0), 'y': d.get('y', 0), 'width': d.get('width', 0), 'height': d.get('height', 0)}} for d in db_detections if float(d.get('confidence') or 0) >= _email_min_conf]
-                snapshot_bytes = render_live_snapshot_jpeg_overlay(raw_bytes, overlay_detections)
-        except Exception as exc:
-            logger.debug('Failed to annotate snapshot for email alert event %s: %s', event_id, exc)
-    mailer = EmailAlertService(effective_email_alert_settings())
-    all_triggered_labels = sorted({str(alert.get('label') or '').strip() for alert in triggered if str(alert.get('label') or '').strip()})
-    for alert in triggered:
-        rule = rules_by_name.get(str(alert.get('rule_name')))
-        if not rule or not rule.get('email_enabled'):
-            continue
-        if not _rule_notify_active_now(rule):
-            logger.debug('Email skipped for event %s rule %r: outside email/push window %s-%s', event_id, alert.get('rule_name'), rule.get('notify_start'), rule.get('notify_end'))
-            continue
-        try:
-            mailer.send_alert(alert, event_id=event_id, recipients=rule.get('email_recipients', []), camera_name=camera_name, camera_id=camera_id, snapshot_bytes=snapshot_bytes, triggered_labels=all_triggered_labels, detected_at=detected_at)
-        except EmailAlertError as exc:
-            logger.warning('Failed to send email alert for event %s rule %s: %s', event_id, alert.get('rule_name'), exc)
-
-def deliver_push_notifications(triggered: list[dict[str, Any]], event_id: int, rules: list[dict[str, Any]] | None=None) -> None:
-    if not triggered:
-        return
-    push_settings = effective_push_notification_settings()
-    if not push_settings.get('enabled'):
-        logger.debug('Push notifications disabled globally; skipping event %s', event_id)
-        return
-    event = database.get_event(event_id) or {}
-    metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
-    camera_name = str(metadata.get('camera_name') or '').strip() or None
-    camera_id = str(metadata.get('camera_id') or '').strip() or None
-    created_at_raw = str(event.get('created_at') or '').strip()
-    detected_at = _format_alert_datetime(created_at_raw) if created_at_raw else None
-    rules_by_name = {str(rule.get('name')): rule for rule in rules or []}
-    notifier = PushNotificationService(push_settings)
-    all_triggered_labels = sorted({str(alert.get('label') or '').strip() for alert in triggered if str(alert.get('label') or '').strip()})
-    for alert in triggered:
-        rule_name = str(alert.get('rule_name') or '')
-        rule = rules_by_name.get(rule_name)
-        if not rule:
-            logger.debug('Push skipped for event %s: no rule found for %r', event_id, rule_name)
-            continue
-        if not rule.get('push_enabled'):
-            logger.debug('Push skipped for event %s rule %r: push_enabled is False', event_id, rule_name)
-            continue
-        if not _rule_notify_active_now(rule):
-            logger.debug('Push skipped for event %s rule %r: outside email/push window %s-%s', event_id, rule_name, rule.get('notify_start'), rule.get('notify_end'))
-            continue
-        try:
-            notifier.send_alert(alert, event_id=event_id, camera_name=camera_name, camera_id=camera_id, triggered_labels=all_triggered_labels, detected_at=detected_at)
-            logger.info('Push notification sent for event %s rule %r', event_id, rule_name)
-        except PushNotificationError as exc:
-            logger.error('Failed to send push notification for event %s rule %r: %s', event_id, rule_name, exc)
 GITHUB_REPO = 'daygle/daygle-ai-camera'
 PYPI_ULTRALYTICS_URL = 'https://pypi.org/pypi/ultralytics/json'
 _update_in_progress = False
@@ -1627,83 +1388,6 @@ def _fetch_models_manifest() -> dict[str, Any]:
         effective_version = remote_version
     return {'updated_at': None, 'source': 'pypi:ultralytics', 'models': {model_id: {'version': effective_version} for model_id in YOLO_MODELS}}
 
-def render_live_snapshot_svg(frame: dict[str, Any], detections: list[dict[str, Any]], *, overlay: bool, camera_name: str='Camera', zones: list[dict[str, Any]] | None=None) -> str:
-    width = int(frame.get('width') or 1280)
-    height = int(frame.get('height') or 720)
-    frame_number = int(frame.get('frame_number') or 0)
-    timestamp = datetime.fromtimestamp(float(frame.get('timestamp') or 0), timezone.utc).strftime('%H:%M:%S UTC')
-    grid_spacing = 80
-    grid_lines = []
-    for x in range(0, width + grid_spacing, grid_spacing):
-        grid_lines.append(f'<line x1="{x}" y1="0" x2="{x}" y2="{height}" />')
-    for y in range(0, height + grid_spacing, grid_spacing):
-        grid_lines.append(f'<line x1="0" y1="{y}" x2="{width}" y2="{y}" />')
-    zone_markup: list[str] = []
-    if overlay:
-        for zone in zones or []:
-            if not zone.get('enabled', True):
-                continue
-            points = zone.get('points') or rectangle_zone_points(max(0.0, min(1.0, float(zone.get('x') or 0))), max(0.0, min(1.0, float(zone.get('y') or 0))), max(0.01, min(1.0, float(zone.get('width') or 0))), max(0.01, min(1.0, float(zone.get('height') or 0))))
-            svg_points = []
-            for point in points:
-                if not isinstance(point, dict):
-                    continue
-                svg_points.append(f"{max(0, float(point.get('x') or 0) * width):.1f},{max(0, float(point.get('y') or 0) * height):.1f}")
-            if len(svg_points) < 3:
-                continue
-            label_x = max(0, float(points[0].get('x') or 0) * width) + 12
-            label_y = max(30, float(points[0].get('y') or 0) * height + 30)
-            zone_name = escape(str(zone.get('name') or 'Monitoring area'))
-            zone_markup.append(f'''<g class="monitor-zone"><polygon points="{' '.join(svg_points)}" /><text x="{label_x:.1f}" y="{label_y:.1f}">{zone_name}</text></g>''')
-    detection_markup: list[str] = []
-    if overlay:
-        for detection in detections:
-            box = detection.get('box') or {}
-            x = max(0, float(box.get('x') or 0) * width)
-            y = max(0, float(box.get('y') or 0) * height)
-            box_width = max(1, float(box.get('width') or 0) * width)
-            box_height = max(1, float(box.get('height') or 0) * height)
-            label = escape(str(detection.get('label') or 'object'))
-            confidence = round(float(detection.get('confidence') or 0) * 100)
-            label_y = max(28, y - 10)
-            detection_markup.append(f'<g class="detection-box"><rect x="{x:.1f}" y="{y:.1f}" width="{box_width:.1f}" height="{box_height:.1f}" /><text x="{x:.1f}" y="{label_y:.1f}">{label} · {confidence}%</text></g>')
-    overlay_state = 'ON' if overlay else 'OFF'
-    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">\n  <defs>\n    <linearGradient id="camera-bg" x1="0" x2="1" y1="0" y2="1">\n      <stop offset="0" stop-color="#101827" />\n      <stop offset="0.52" stop-color="#0b1220" />\n      <stop offset="1" stop-color="#17223a" />\n    </linearGradient>\n    <radialGradient id="lens" cx="50%" cy="45%" r="68%">\n      <stop offset="0" stop-color="#47d6ff" stop-opacity="0.22" />\n      <stop offset="0.5" stop-color="#8b5cf6" stop-opacity="0.1" />\n      <stop offset="1" stop-color="#070b13" stop-opacity="0" />\n    </radialGradient>\n    <style>\n      .grid line {{ stroke: rgba(255,255,255,.08); stroke-width: 1; }}\n      .hud {{ fill: #edf3ff; font: 700 26px Inter, Arial, sans-serif; letter-spacing: .04em; }}\n      .muted {{ fill: #91a1ba; font: 700 20px Inter, Arial, sans-serif; }}\n      .monitor-zone polygon {{ fill: rgba(71,214,255,.08); stroke: #47d6ff; stroke-width: 3; stroke-dasharray: 12 10; }}\n      .monitor-zone text {{ fill: #47d6ff; font: 800 20px Inter, Arial, sans-serif; paint-order: stroke; stroke: rgba(7,11,19,.86); stroke-width: 4; stroke-linejoin: round; }}\n      .detection-box rect {{ fill: rgba(73,230,163,.08); stroke: #49e6a3; stroke-width: 4; rx: 18; }}\n      .detection-box text {{ fill: #49e6a3; font: 800 24px Inter, Arial, sans-serif; paint-order: stroke; stroke: rgba(7,11,19,.86); stroke-width: 5; stroke-linejoin: round; }}\n    </style>\n  </defs>\n  <rect width="100%" height="100%" fill="url(#camera-bg)" />\n  <rect width="100%" height="100%" fill="url(#lens)" />\n  <g class="grid">{''.join(grid_lines)}</g>\n  <circle cx="{width * 0.74:.1f}" cy="{height * 0.34:.1f}" r="{min(width, height) * 0.16:.1f}" fill="none" stroke="rgba(71,214,255,.16)" stroke-width="3" />\n  <circle cx="{width * 0.28:.1f}" cy="{height * 0.62:.1f}" r="{min(width, height) * 0.12:.1f}" fill="none" stroke="rgba(139,92,246,.16)" stroke-width="3" />\n  {''.join(zone_markup)}\n  {''.join(detection_markup)}\n  <rect x="24" y="24" width="520" height="116" rx="20" fill="rgba(7,11,19,.58)" stroke="rgba(255,255,255,.12)" />\n  <text x="48" y="70" class="hud">{escape(camera_name).upper()}</text>\n  <text x="48" y="112" class="muted">Frame #{frame_number} · {timestamp} · Overlay {overlay_state}</text>\n</svg>'''
-
-def render_live_snapshot_jpeg_overlay(image_bytes: bytes, detections: list[dict[str, Any]]) -> bytes:
-    if not detections:
-        return image_bytes
-    try:
-        import cv2
-        import numpy as np
-    except ImportError:
-        return image_bytes
-    data = np.frombuffer(image_bytes, dtype=np.uint8)
-    image = cv2.imdecode(data, cv2.IMREAD_COLOR)
-    if image is None:
-        return image_bytes
-    height, width = image.shape[:2]
-    for detection in detections:
-        if detection.get('alert_matched') is False and detection.get('alert_triggered') is False:
-            continue
-        box = detection.get('box') or {}
-        x = int(max(0, min(1, float(box.get('x') or 0))) * width)
-        y = int(max(0, min(1, float(box.get('y') or 0))) * height)
-        box_width = int(max(0.001, min(1, float(box.get('width') or 0))) * width)
-        box_height = int(max(0.001, min(1, float(box.get('height') or 0))) * height)
-        x2 = min(width - 1, x + box_width)
-        y2 = min(height - 1, y + box_height)
-        label = str(detection.get('label') or 'object')
-        confidence = round(float(detection.get('confidence') or 0) * 100)
-        text = f'{label} {confidence}%'
-        cv2.rectangle(image, (x, y), (x2, y2), (73, 230, 163), 2)
-        text_y = max(22, y - 8)
-        (text_width, text_height), _baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.62, 2)
-        cv2.rectangle(image, (x, text_y - text_height - 8), (min(width - 1, x + text_width + 10), text_y + 4), (7, 11, 19), -1)
-        cv2.putText(image, text, (x + 5, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (73, 230, 163), 2, cv2.LINE_AA)
-    ok, encoded = cv2.imencode('.jpg', image, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
-    return encoded.tobytes() if ok else image_bytes
-
 def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
     for recording in recordings:
         raw_file_path = str(recording.get('file_path') or '')
@@ -1763,26 +1447,6 @@ def recording_stream_path(file_path: Path) -> Path:
         return file_path
     failed_marker.unlink(missing_ok=True)
     return playback_path if playback_path.exists() else file_path
-
-def recording_track_sidecar_path(file_path: Path) -> Path:
-    return file_path.with_name(f'{file_path.stem}.track.json')
-
-def write_recording_detection_track(file_path: Path, track: list[dict[str, Any]]) -> None:
-    recording_track_sidecar_path(file_path).write_text(json.dumps(track), encoding='utf-8')
-
-def load_recording_detection_track(file_path: Path) -> list[dict[str, Any]] | None:
-    sidecar = recording_track_sidecar_path(file_path)
-    if not sidecar.exists():
-        return None
-    try:
-        data = json.loads(sidecar.read_text(encoding='utf-8'))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(data, list):
-        return None
-    if not any((isinstance(sample, dict) and sample.get('detections') for sample in data)):
-        return None
-    return data
 
 def write_live_history_detection_track(recording_id: int | None, file_path: Path, camera_id: str | None, start_ts: float, end_ts: float) -> bool:
     """Persist the monitor's detections over the capture window as the clip's track.

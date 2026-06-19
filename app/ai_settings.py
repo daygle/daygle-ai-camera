@@ -1,4 +1,4 @@
-"""AI subsystem helpers extracted from ``app/main.py`` (Phase 20).
+"""AI subsystem helpers extracted from ``app/main.py`` (Phase-20).
 
 The 3 helpers shipped here cluster around the **AI model subsystem**:
 validating incoming AI settings payloads, computing the AI subsystem's
@@ -6,9 +6,9 @@ status payload (model loaded / available / onnx-runtime / mode / errors),
 and shaping the per-request detector status response that the
 ``/api/status/ai`` endpoint and the admin dashboard surface.
 
-Like the prior-cluster extractions (``app/auth_gates.py`` Phase 16,
-``app/config_facades.py`` Phase 17, ``app/camera_config.py`` Phase 18,
-``app/recording_settings.py`` Phase 19), these are extracted using the
+Like the prior-cluster extractions (``app/auth_gates.py`` Phase-16,
+``app/config_facades.py`` Phase-17, ``app/camera_config.py`` Phase-18,
+``app/recording_settings.py`` Phase-19), these are extracted using the
 **hybrid-pattern template**:
 
 - Cluster functions reach ``main.<attr>`` at *call time* (NOT import
@@ -47,7 +47,7 @@ Cluster membership:
 
 Pool C reach sites (resolved via ``main.<attr>`` at call time):
 
-- ``main.effective_ai_config`` (Phase 17) -- ``ai_status_payload`` and
+- ``main.effective_ai_config`` (Phase-17) -- ``ai_status_payload`` and
   ``validate_ai_settings`` both default to the active AI config when
   the caller passes ``None`` / a payload-dict respectively.
 - ``main.detector``, ``main.YOLO_MODELS``, ``main.last_detector_error``

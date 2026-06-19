@@ -1,8 +1,8 @@
 """Admin APIRouter.
 
-Extracted from ``app/main.py`` (Phase 11 of the hybrid-pattern router split).
-Same template as ``app/api/status_router.py`` (Phase 8) and
-``app/api/live_router.py`` (Phase 10): ``import app.main as main`` at module
+Extracted from ``app/main.py`` (Phase-11 of the hybrid-pattern router split).
+Same template as ``app/api/status_router.py`` (Phase-8) and
+``app/api/live_router.py`` (Phase-10): ``import app.main as main`` at module
 level, every global / helper / test-referenced symbol read through
 ``main.<name>`` *inside* handler bodies.
 
@@ -90,7 +90,7 @@ FastAPI builtins stay at top-level imports: ``APIRouter``, ``Query``,
 
 Tests go through ``LocalClient.request`` rather than calling
 ``main.<attr>`` directly for these endpoints, so no back-compat alias on
-``app.main`` is needed. The Phase 7.1 invariant
+``app.main`` is needed. The Phase-7.1 invariant
 ``tests/test_api_router_split_invariants.py::test_app_api_imports_in_main_are_consumed``
 will catch any orphan-import regression if a future refactor drops the
 ``from app.api.admin_router import router as admin_router`` rebind line

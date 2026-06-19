@@ -1,8 +1,8 @@
 """Utility APIRouter.
 
-Extracted from ``app/main.py`` lines 2772-2796 (Phase 12 of the
+Extracted from ``app/main.py`` lines 2772-2796 (Phase-12 of the
 hybrid-pattern router split). Same template as ``app/api/live_router.py``
-(Phase 10) and ``app/api/admin_router.py`` (Phase 11): ``import app.main
+(Phase-10) and ``app/api/admin_router.py`` (Phase-11): ``import app.main
 as main`` at module level, every global / helper read through
 ``main.<name>`` *inside* handler bodies.
 
@@ -59,7 +59,7 @@ not been exported yet). The router preserves that behavior verbatim.
 Tests go through ``LocalClient.request`` rather than calling
 ``main.stats`` / ``main.available_labels`` /
 ``main.delete_all_objects`` directly, so no back-compat alias on
-``app.main`` is needed. The Phase 7.1 invariant
+``app.main`` is needed. The Phase-7.1 invariant
 ``tests/test_api_router_split_invariants.py::test_app_api_imports_in_main_are_consumed``
 will catch any orphan-import regression if a future refactor drops the
 ``from app.api.utility_router import router as utility_router`` rebind

@@ -1,9 +1,9 @@
 """Phase-18 integration tests for ``app/camera_config.py``.
 
-Phase 18 extracted the 4 camera-config helpers (``normalize_camera_id``,
+Phase-18 extracted the 4 camera-config helpers (``normalize_camera_id``,
 ``normalize_camera_settings``, ``_migrate_camera_id``, ``_redact_camera``)
 from ``app/main.py`` into ``app/camera_config.py`` using the hybrid-pattern
-template (same as Phase 16 ``app/auth_gates.py`` and Phase 17
+template (same as Phase-16 ``app/auth_gates.py`` and Phase-17
 ``app/config_facades.py``). Routers reach them via ``main.<name>``,
 preserved by a top-of-file Pool A from-import rebind in ``app/main.py``
 (NOT the bottom -- module-load code in main.py does not call these
@@ -53,8 +53,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 # Top-level lazy-ordered preloads to break the Phase-18 circular-import gate
-# (same pattern as tests/test_auth_gates.py Phase 16 + test_config_facades.py
-# Phase 17). If we imported ``app.camera_config`` FIRST, Python's fresh-load
+# (same pattern as tests/test_auth_gates.py Phase-16 + test_config_facades.py
+# Phase-17). If we imported ``app.camera_config`` FIRST, Python's fresh-load
 # chain would run the top-of-file rebind ``from app.camera_config import (...)``
 # inside ``app/main.py`` while ``app.camera_config`` is still mid-load (only
 # top imports done, function defs pending) -> ``cannot import name
@@ -69,7 +69,7 @@ import app.camera_config as camera_config  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 1. Pool A back-compat identity -- ``main.<name> is camera_config.<name>``.
-#    Re-resolve via sys.modules per Phase 17 lesson (defeats the
+#    Re-resolve via sys.modules per Phase-17 lesson (defeats the
 #    tests/test_api.py::_load_app() sys-modules-wipe state leak).
 # ---------------------------------------------------------------------------
 
@@ -296,7 +296,7 @@ def test_migrate_camera_id_renames_in_memory_state_across_both_locks(monkeypatch
     instance so the call goes through the SAME instance the test's
     monkeypatched ``main`` is also bound to (defeats the
     ``tests/test_api.py::_load_app`` sys-modules-wipe state leak -- same
-    lesson as Phase 17).
+    lesson as Phase-17).
     """
     main, lock_log = _stub_main_with_camera_recording_renamer(monkeypatch)
 

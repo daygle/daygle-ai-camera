@@ -1,6 +1,6 @@
-"""Phase 23 identity + behavior tests for app/zone_detection.py.
+"""Phase-23 identity + behavior tests for app/zone_detection.py.
 
-Mirrors the Phase 22 test_payload_validators.py pattern: fixture-driven,
+Mirrors the Phase-22 test_payload_validators.py pattern: fixture-driven,
 monkeypatch-maintained Pool C dependencies, with one identity test per
 extracted helper (Pool A rebind wiring) and behavior tests covering every
 public path:
@@ -415,7 +415,7 @@ def test_filter_for_camera_zones_no_zones_camera_labels_fallback(monkeypatch):
         {'label': 'cat', 'box': {'x': 0, 'y': 0, 'width': 0.1, 'height': 0.1}},
         {'label': 'dog', 'box': {'x': 0, 'y': 0, 'width': 0.1, 'height': 0.1}},
     ]
-    # Phase 21 normalize_label_list is the Pool C dependency; defaults exist so
+    # Phase-21 normalize_label_list is the Pool C dependency; defaults exist so
     # we don't need to monkeypatch.
     filtered = zd.filter_detections_for_camera_zones(
         detections, settings, zone_monitor_key='monitor_objects'

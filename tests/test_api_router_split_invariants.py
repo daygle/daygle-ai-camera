@@ -13,17 +13,17 @@ Four assertions:
    rule. The invariants in this file enforce the rule, and a stray doc
    removal would silently remove its documentation; this fails fast.
 
-3. ``test_every_request_path_has_a_registered_route`` (NEW for Phase 2) —
+3. ``test_every_request_path_has_a_registered_route`` (NEW for Phase-2) —
    AST-walks every ``LocalClient.request("<path>", ...)`` literal in
    ``tests/test_api.py`` and asserts each path matches a registered FastAPI
    route on the loaded ``main.app`` (matched via Starlette's
    ``route.path_regex``). This is the assertion that would have caught the
-   e365ec5 regression: the Phase 2 attempt used a path-agnostic splice that
+   e365ec5 regression: the Phase-2 attempt used a path-agnostic splice that
    deleted every ``@app.X(...)`` decorator, so EVERY test callsite became
    unrouted at once.
 
 4. ``test_settings_ai_router_includes_exactly_ten_endpoints`` — simple
-   structural count check on the Phase 2 router file. Locks the inventory
+   structural count check on the Phase-2 router file. Locks the inventory
    so future edits can't silently drop or duplicate an endpoint.
 
 All assertions load ``app.main`` fresh against a tmpdir ``DAYGLE_CONFIG`` —
@@ -82,7 +82,7 @@ def _collect_api_imports_in_main(source_text: str, source_path: Path) -> dict[st
 
     Returns a dict mapping the effective binding name (the ``as Z`` if
     present, else ``Y``) to ``(lineno, module, original_name)``. The
-    Phase 7.1 invariant consumes this to assert each binding is
+    Phase-7.1 invariant consumes this to assert each binding is
     referenced somewhere — either as a bare-name in ``app/main.py`` (the
     ``include_router`` pattern), as ``main.<attr>`` *inside*
     ``app/main.py``, or as ``main.<attr>`` in ``tests/test_api.py``
@@ -122,7 +122,7 @@ def _collect_bare_name_references(source_text: str, source_path: Path) -> set[st
     have NO ``main.<attr>`` reachability from main.py itself) from
     test-only back-compat aliases (which also have NO bare-name
     reachability in main.py — they're consumed only by tests). Both pass
-    the Phase 7.1 invariant as long as they fall into one of the three
+    the Phase-7.1 invariant as long as they fall into one of the three
     consumption pools below.
     """
     tree = ast.parse(source_text, filename=str(source_path))
@@ -228,7 +228,7 @@ def test_all_main_attr_references_resolve_on_app_main(tmp_path, monkeypatch):
     assert not missing, (
         f"Hybrid-pattern invariant violation: tests reference main.<attr> "
         f"for {len(missing)} attrs that are NOT defined on app.main after the "
-        f"Phase 2 router split: {missing}\n"
+        f"Phase-2 router split: {missing}\n"
         f"Per app/api/__init__.py, anything referenced as main.X must stay "
         f"defined on app.main or be re-imported explicitly."
     )
@@ -386,7 +386,7 @@ def test_every_request_path_has_a_registered_route(tmp_path, monkeypatch, caplog
 
 
 def test_settings_ai_router_includes_exactly_ten_endpoints():
-    """Lightweight structural check on the Phase 2 router.
+    """Lightweight structural check on the Phase-2 router.
 
     Independent of pytest's app loading (no DAYGLE_CONFIG, no sys.modules
     dance). Reads the new router file directly and counts @router.X(...)
@@ -400,12 +400,12 @@ def test_settings_ai_router_includes_exactly_ten_endpoints():
     settings_ai_paths = [p for p in paths if p.startswith('/api/settings/ai')]
     assert len(settings_ai_paths) == EXPECTED_SETTINGS_AI_REMOVE_COUNT, (
         f"Expected exactly {EXPECTED_SETTINGS_AI_REMOVE_COUNT} endpoints in "
-        f"the Phase 2 router; found {len(settings_ai_paths)}: {settings_ai_paths}"
+        f"the Phase-2 router; found {len(settings_ai_paths)}: {settings_ai_paths}"
     )
 
 
 def test_app_api_imports_in_main_are_consumed():
-    """Phase 7.1 invariant. Every top-level ``from app.api.X import Y[ as Z]``
+    """Phase-7.1 invariant. Every top-level ``from app.api.X import Y[ as Z]``
     in ``app/main.py`` must be consumed somewhere — either as a bare-name
     read in ``app/main.py`` (the ``include_router`` pattern), as
     ``main.<attr>`` *inside* ``app/main.py``, or as ``main.<attr>`` in
@@ -417,7 +417,7 @@ def test_app_api_imports_in_main_are_consumed():
     ``main.<attr>`` must STAY as back-compat aliases per rule 5 of
     ``app/api/__init__.py``.
 
-    Failure mode this guard exists to defeat: Phase 7 once removed
+    Failure mode this guard exists to defeat: Phase-7 once removed
     ``from app.api.recordings_router import recording_detail`` after a
     one-off orphan-audit walked only ``app/main.py`` and saw exactly one
     occurrence of ``recording_detail`` (the import itself). It missed
@@ -437,7 +437,7 @@ def test_app_api_imports_in_main_are_consumed():
         source_text=main_text, source_path=APP_MAIN_PY,
     )
 
-    # Sanity floor: as of Phase 7.1 there are 11 from-imports in
+    # Sanity floor: as of Phase-7.1 there are 11 from-imports in
     # app/main.py (10 router-assembly + 1 back-compat). Floor `>= 5`
     # absorbs future router consolidations (e.g. merging sound_router +
     # settings_ai_router into a single router drops the count to ~9,
@@ -463,7 +463,7 @@ def test_app_api_imports_in_main_are_consumed():
 
     # Pool C: `main.<attr>` reachability across all consumer-facing files
     # in `tests/` AND in `app/` (except `app/main.py`, which Pool B
-    # already covers). The Phase 7 audit misuse only walked `app/main.py`
+    # already covers). The Phase-7 audit misuse only walked `app/main.py`
     # itself; this broadened symmetric scan tightens the consumer-net so
     # a back-compat from-import consumed by ANY sibling test file OR
     # ANY sibling app module (today or future) is correctly classified
@@ -501,7 +501,7 @@ def test_app_api_imports_in_main_are_consumed():
         orphans.append((lineno, module, original_name, alias_tag))
 
     assert not orphans, (
-        f"Phase 7.1 orphan-import invariant violation: found {len(orphans)} "
+        f"Phase-7.1 orphan-import invariant violation: found {len(orphans)} "
         f"unused app.api from-imports in app/main.py:\n  "
         + "\n  ".join(
             f"app/main.py:{ln}: from {m} import {n}{a}"
@@ -511,6 +511,6 @@ def test_app_api_imports_in_main_are_consumed():
         "cost on every test-collection cycle). Imports consumed ONLY by tests "
         "as `main.<attr>` must stay as back-compat aliases and should be "
         "placed adjacent to the originating router's `app.include_router(...)` "
-        "line for discoverability (see Phase 7.1 regroup convention).\n"
+        "line for discoverability (see Phase-7.1 regroup convention).\n"
         "Reference: rule 5 of app/api/__init__.py."
     )

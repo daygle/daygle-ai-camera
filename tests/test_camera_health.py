@@ -1,6 +1,6 @@
-"""Phase 24 identity + behavior tests for app/camera_health.py.
+"""Phase-24 identity + behavior tests for app/camera_health.py.
 
-Mirrors the Phase 22 / 23 test pattern: fixture-driven,
+Mirrors the Phase-22 / 23 test pattern: fixture-driven,
 monkeypatch-maintained Pool C dependencies, with one identity test per
 extracted helper (Pool A rebind wiring) plus behavior tests covering
 each public path:

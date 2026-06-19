@@ -1,8 +1,8 @@
 """Camera-log APIRouter.
 
-Extracted from ``app/main.py`` lines 3327-3338 (Phase 12 of the
+Extracted from ``app/main.py`` lines 3327-3338 (Phase-12 of the
 hybrid-pattern router split). Same template as ``app/api/live_router.py``
-(Phase 10) and ``app/api/admin_router.py`` (Phase 11): ``import app.main
+(Phase-10) and ``app/api/admin_router.py`` (Phase-11): ``import app.main
 as main`` at module level, every global / helper read through
 ``main.<name>`` *inside* handler bodies.
 
@@ -40,7 +40,7 @@ filter validation).
 
 Tests go through ``LocalClient.request`` rather than calling
 ``main.list_camera_log`` / ``main.clear_camera_log`` directly, so no
-back-compat alias on ``app.main`` is needed. The Phase 7.1 invariant
+back-compat alias on ``app.main`` is needed. The Phase-7.1 invariant
 ``tests/test_api_router_split_invariants.py::test_app_api_imports_in_main_are_consumed``
 will catch any orphan-import regression if a future refactor drops the
 ``from app.api.camera_log_router import router as camera_log_router``

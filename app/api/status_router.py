@@ -1,7 +1,7 @@
 """System Status APIRouter.
 
-Extracted from ``app/main.py`` (Phase 8 of the hybrid-pattern router split).
-Same template as ``app/api/alert_email_router.py`` (Phase 7), etc.:
+Extracted from ``app/main.py`` (Phase-8 of the hybrid-pattern router split).
+Same template as ``app/api/alert_email_router.py`` (Phase-7), etc.:
 ``import app.main as main`` at module level, every global / helper read
 through ``main.<name>`` *inside* handler bodies.
 
@@ -31,7 +31,7 @@ Helpers KEPT on ``app.main`` (the router calls them via ``main.<name>``):
 
 Tests go through ``LocalClient.request`` rather than calling
 ``main.<attr>`` directly, so no back-compat alias on ``app.main`` is
-needed. The Phase 7.1 invariant
+needed. The Phase-7.1 invariant
 ``tests/test_api_router_split_invariants.py::test_app_api_imports_in_main_are_consumed``
 will catch orphan-import regressions if a future refactor drops the
 ``from app.api.status_router import router as status_router`` rebind line

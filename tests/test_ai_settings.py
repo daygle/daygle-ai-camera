@@ -1,10 +1,10 @@
 """Phase-20 integration tests for ``app/ai_settings.py``.
 
-Phase 20 extracted the 3 AI-subsystem helpers (``ai_status_payload``,
+Phase-20 extracted the 3 AI-subsystem helpers (``ai_status_payload``,
 ``detector_status``, ``validate_ai_settings``) from ``app/main.py``
 into ``app/ai_settings.py`` using the hybrid-pattern template (same
-as Phase 16 ``app/auth_gates.py``, Phase 17
-``app/config_facades.py``, Phase 18 ``app/camera_config.py``, Phase 19
+as Phase-16 ``app/auth_gates.py``, Phase-17
+``app/config_facades.py``, Phase-18 ``app/camera_config.py``, Phase-19
 ``app/recording_settings.py``).
 
 Internal ``main.py`` callers (``live_detection_status_payload``
@@ -20,7 +20,7 @@ Tests pin three contracts:
    ``main.<name>`` to the SAME function object as
    ``app.ai_settings.<name>``. Re-resolved via ``sys.modules`` to
    defeat the ``tests/test_api.py::_load_app`` sys-modules-wipe state
-   leak (Phase 17 lesson).
+   leak (Phase-17 lesson).
 2. **Behavior of each facade.** Each helper has subtle ordering /
    fallback semantics:
    - ``ai_status_payload``: 4-way mode selection (``MODEL MISSING`` /
@@ -42,7 +42,7 @@ Tests pin three contracts:
      ``HTTPException(400, ...)`` for ANY invalid.
 3. **Top-level preload pattern.** ``import app.main`` BEFORE
    ``import app.ai_settings`` at module top -- same pattern as
-   Phase 16 / 17 / 18 / 19 tests. Without this, pytest collection
+   Phase-16 / 17 / 18 / 19 tests. Without this, pytest collection
    triggers the circular-import gate at ``app.ai_settings`` load time
    (its top has ``import app.main as main`` for the 11 Pool C reach
    sites).
@@ -73,7 +73,7 @@ import app.ai_settings as ai_settings  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 1. Pool A back-compat identity -- ``main.<name> is ai_settings.<name>``.
-#    Re-resolve via sys.modules per Phase 17 lesson (defeats the
+#    Re-resolve via sys.modules per Phase-17 lesson (defeats the
 #    tests/test_api.py::_load_app() sys-modules-wipe state leak).
 # ---------------------------------------------------------------------------
 

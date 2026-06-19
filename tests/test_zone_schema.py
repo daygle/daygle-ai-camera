@@ -1,14 +1,14 @@
 """Phase-21 integration tests for ``app/zone_schema.py``.
 
-Phase 21 extracted the 7 zone/schema normalizers (``normalize_label_list``,
+Phase-21 extracted the 7 zone/schema normalizers (``normalize_label_list``,
 ``normalize_zone_object_rules``, ``zone_motion_min_confidence``,
 ``normalize_zone_point``, ``rectangle_zone_points``, ``zone_bounds``,
 ``normalize_monitoring_zones``) PLUS the module-private
 ``_LABEL_ALIASES`` annotation assignment from ``app/main.py`` into
 ``app/zone_schema.py`` using the hybrid-pattern template (same as
-Phase 16 ``app/auth_gates.py``, Phase 17 ``app/config_facades.py``,
-Phase 18 ``app/camera_config.py``, Phase 19 ``app/recording_settings.py``,
-Phase 20 ``app/ai_settings.py``).
+Phase-16 ``app/auth_gates.py``, Phase-17 ``app/config_facades.py``,
+Phase-18 ``app/camera_config.py``, Phase-19 ``app/recording_settings.py``,
+Phase-20 ``app/ai_settings.py``).
 
 Internal ``main.py`` callers (``validate_camera_settings`` L2537-2538,
 ``render_live_snapshot_svg`` L2025, ``detection_label_allowed_for_zone``
@@ -23,7 +23,7 @@ Tests pin three contracts:
    + 7 cluster helpers) MUST wire ``main.<name>`` to the SAME
    function/object as ``app.zone_schema.<name>``. Re-resolved via
    ``sys.modules`` to defeat the ``tests/test_api.py::_load_app``
-   sys-modules-wipe state leak (Phase 17 lesson).
+   sys-modules-wipe state leak (Phase-17 lesson).
 2. **Behavior of each facade.** Each helper has subtle ordering /
    fallback semantics:
    - ``_LABEL_ALIASES``: dict of ``{'human': 'person', 'people':
@@ -49,7 +49,7 @@ Tests pin three contracts:
      ``monitor_motion`` into motion rule.
 3. **Top-level preload pattern.** ``import app.main`` BEFORE
    ``import app.zone_schema`` at module top -- same pattern as
-   Phase 16 / 17 / 18 / 19 / 20 tests. Without this, pytest collection
+   Phase-16 / 17 / 18 / 19 / 20 tests. Without this, pytest collection
    triggers the circular-import gate at ``app.zone_schema`` load time
    (its top has ``import app.main as main`` for the 3 Pool C reach
    sites).
@@ -80,7 +80,7 @@ import app.zone_schema as zone_schema  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 1. Pool A back-compat identity -- ``main.<name> is zone_schema.<name>``.
-#    Re-resolve via sys.modules per Phase 17 lesson (defeats the
+#    Re-resolve via sys.modules per Phase-17 lesson (defeats the
 #    tests/test_api.py::_load_app() sys-modules-wipe state leak).
 # ---------------------------------------------------------------------------
 

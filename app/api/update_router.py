@@ -1,8 +1,8 @@
 """Update APIRouter.
 
-Extracted from ``app/main.py`` lines 3254-3317 (Phase 12 of the
+Extracted from ``app/main.py`` lines 3254-3317 (Phase-12 of the
 hybrid-pattern router split). Same template as ``app/api/live_router.py``
-(Phase 10) and ``app/api/admin_router.py`` (Phase 11): ``import app.main
+(Phase-10) and ``app/api/admin_router.py`` (Phase-11): ``import app.main
 as main`` at module level, every global / helper read through
 ``main.<name>`` *inside* handler bodies.
 
@@ -37,7 +37,7 @@ In the router we keep the SAME pair of assignments but substitute direct
 itself is unnecessary because assigning to ``main._update_in_progress``
 already mutates the module attribute on ``app.main`` -- this is the
 hybrid-pattern idiom for module-level state mutation across extraction
-boundaries; cf. Phase 9 settings_system_router's
+boundaries; cf. Phase-9 settings_system_router's
 ``main.database.set_setting(...)`` writes reading through ``main.<bare>``
 reads). The same substitution is applied inside the nested
 ``_delayed_restart`` closure.
@@ -78,7 +78,7 @@ Helpers KEPT on ``app.main`` (the router calls them via ``main.<name>``):
 
 Tests go through ``LocalClient.request`` rather than calling
 ``main.check_update`` / ``main.apply_update`` directly, so no
-back-compat alias on ``app.main`` is needed. The Phase 7.1 invariant
+back-compat alias on ``app.main`` is needed. The Phase-7.1 invariant
 ``tests/test_api_router_split_invariants.py::test_app_api_imports_in_main_are_consumed``
 will catch any orphan-import regression if a future refactor drops the
 ``from app.api.update_router import router as update_router`` rebind

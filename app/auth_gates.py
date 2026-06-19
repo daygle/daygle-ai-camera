@@ -1,6 +1,6 @@
-"""Auth-gate helpers extracted from ``app/main.py`` (Phase 16).
+"""Auth-gate helpers extracted from ``app/main.py`` (Phase-16).
 
-Phase 16 audit of ``app/main.py`` identified the auth-gate cluster as the
+Phase-16 audit of ``app/main.py`` identified the auth-gate cluster as the
 highest-ROI group for extraction:
 
 - Highest cross-router reach frequency amongst all helper groups (~19 sites
@@ -8,7 +8,7 @@ highest-ROI group for extraction:
   admin-protected router in the codebase).
 - Tightest cohesion (all four helpers are about session/role gating; they
   share the same input (``Request``) and the same State attributes set by
-  ``authentication_middleware`` from Phase 15).
+  ``authentication_middleware`` from Phase-15).
 - Smallest extraction risk (~22 lines combined; no module-level state of
   their own to migrate; no decorator bindings to move; type-hint-only
   imports for the helpers themselves).
@@ -57,7 +57,7 @@ Helpers KEPT on ``app.main`` (this module calls them via ``main.<attr>``):
   would split the constant's existence across two modules.
 
 Re-typed imports: ``from fastapi import HTTPException, Request`` works at
-top-level (Phase 15 verified ``HTTPException`` is reachable from
+top-level (Phase-15 verified ``HTTPException`` is reachable from
 ``fastapi.*``).
 """
 

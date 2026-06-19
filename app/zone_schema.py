@@ -1,4 +1,4 @@
-"""Zone / schema normalization helpers extracted from ``app/main.py`` (Phase 21).
+"""Zone / schema normalization helpers extracted from ``app/main.py`` (Phase-21).
 
 The 7 helpers shipped here (plus the ``_LABEL_ALIASES`` label-canonicalization
 dict used by the public ``normalize_label_list`` helper) cluster around the
@@ -7,9 +7,9 @@ per-zone object-detection rules (label + per-rule min_confidence +
 cooldown + e-mail / push notification enablement), and the multi-zone
 orchestrator that bundles ``detection.zones`` back into the canonical shape.
 
-Like the prior-cluster extractions (``app/auth_gates.py`` Phase 16,
-``app/config_facades.py`` Phase 17, ``app/camera_config.py`` Phase 18,
-``app/recording_settings.py`` Phase 19, ``app/ai_settings.py`` Phase 20),
+Like the prior-cluster extractions (``app/auth_gates.py`` Phase-16,
+``app/config_facades.py`` Phase-17, ``app/camera_config.py`` Phase-18,
+``app/recording_settings.py`` Phase-19, ``app/ai_settings.py`` Phase-20),
 these are extracted using the **hybrid-pattern template**:
 
 - Cluster functions reach ``main.<attr>`` at *call time* (NOT import
@@ -75,7 +75,7 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
 - ``main.normalize_email_recipients`` (called once in
   ``normalize_zone_object_rules``)
 - ``main.normalize_camera_id`` (called once in
-  ``normalize_monitoring_zones`` -- reached via Phase 18's
+  ``normalize_monitoring_zones`` -- reached via Phase-18's
   camera_config rebind)
 """
 
@@ -91,7 +91,7 @@ import app.main as main
 # ``normalize_label_list`` below. main.py keeps a Pool A rebind so its 4
 # bare-name references (``detection_label_allowed_for_zone`` L799,
 # ``filter_detections_for_camera_zones`` L815 + L911 + L919) still resolve
-# to this dict after the Phase 21 splice.
+# to this dict after the Phase-21 splice.
 _LABEL_ALIASES: dict[str, str] = {
     'human': 'person',
     'people': 'person',

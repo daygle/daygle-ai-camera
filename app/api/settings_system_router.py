@@ -1,8 +1,8 @@
 """System Settings APIRouter.
 
-Extracted from ``app/main.py`` (Phase 9 of the hybrid-pattern router split).
-Same template as ``app/api/settings_ai_router.py`` (Phase 2) and
-``app/api/status_router.py`` (Phase 8): ``import app.main as main`` at
+Extracted from ``app/main.py`` (Phase-9 of the hybrid-pattern router split).
+Same template as ``app/api/settings_ai_router.py`` (Phase-2) and
+``app/api/status_router.py`` (Phase-8): ``import app.main as main`` at
 module level, every global / helper read through ``main.<name>`` *inside*
 handler bodies.
 
@@ -17,7 +17,7 @@ Handlers moved (7):
 - PUT   /api/settings/system/auth
 
 BODY-REWRITE NOTE
-The status_router.py Phase 8 BODY-REWRITE NOTE applies here too:
+The status_router.py Phase-8 BODY-REWRITE NOTE applies here too:
 handlers in this file originally referenced module-level state in
 main.py via bare names (``config``, ``auth_enabled``,
 ``SESSION_COOKIE_NAME``, ``BASE_DIR``, ``database``,
@@ -59,7 +59,7 @@ Helpers KEPT on ``app.main`` (the router calls them via ``main.<name>``):
 
 Tests go through ``LocalClient.request`` rather than calling
 ``main.<attr>`` directly for these endpoints, so no back-compat alias
-on ``app.main`` is needed. The Phase 7.1 invariant
+on ``app.main`` is needed. The Phase-7.1 invariant
 ``tests/test_api_router_split_invariants.py::test_app_api_imports_in_main_are_consumed``
 will catch any orphan-import regression if a future refactor drops the
 ``from app.api.settings_system_router import router as settings_system_router``

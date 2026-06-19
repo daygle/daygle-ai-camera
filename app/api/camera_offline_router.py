@@ -1,9 +1,9 @@
 """Camera Offline Alert Settings APIRouter.
 
-Extracted from ``app/main.py`` (Phase 7 of the hybrid-pattern router split).
-Same template as ``app/api/settings_ai_router.py`` (Phase 2),
-``app/api/events_router.py`` (Phase 5), ``app/api/alert_email_router.py``
-(Phase 7 email sibling), and ``app/api/alert_push_router.py`` (Phase 7
+Extracted from ``app/main.py`` (Phase-7 of the hybrid-pattern router split).
+Same template as ``app/api/settings_ai_router.py`` (Phase-2),
+``app/api/events_router.py`` (Phase-5), ``app/api/alert_email_router.py``
+(Phase-7 email sibling), and ``app/api/alert_push_router.py`` (Phase-7
 push sibling): ``import app.main as main`` at module level, every
 global / helper read through ``main.<name>`` *inside* handler bodies.
 
@@ -22,8 +22,8 @@ minimal-changes rule. Future cleanup: lift the inline coerce into a
 shared ``main.validate_camera_offline_alert_settings(payload)`` helper
 in a non-Phase-N commit; until then the router keeps the inline shape.
 
-The splice was AST tree-filter + unparse (Phase 2 / Phase 3 / Phase 4 /
-Phase 5 / Phase 6 safe pattern). See ``app/api/__init__.py`` for the
+The splice was AST tree-filter + unparse (Phase-2 / Phase-3 / Phase-4 /
+Phase-5 / Phase-6 safe pattern). See ``app/api/__init__.py`` for the
 full hybrid-pattern rules.
 
 Helpers KEPT on ``app.main`` (the router calls them via ``main.<name>``):

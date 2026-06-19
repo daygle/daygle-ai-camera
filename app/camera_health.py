@@ -1,4 +1,4 @@
-"""Camera offline/health lifecycle helpers extracted from ``app/main.py`` (Phase 24).
+"""Camera offline/health lifecycle helpers extracted from ``app/main.py`` (Phase-24).
 
 The 8 helpers shipped here cluster around the per-camera **health-state
 machine**: tracking each camera's online/offline presence, deciding when
@@ -11,11 +11,11 @@ mutable state**. The state primitives are:
 
 - ``_camera_health_state`` -- ``dict[str, dict[str, Any]]`` mapping
   ``camera_id`` -> ``{'online', 'offline_since', 'offline_notified',
-  'recovery_notified'}``. Lived on ``app.main`` since 2024-05 (Phase 9).
+  'recovery_notified'}``. Lived on ``app.main`` since 2024-05 (Phase-9).
 - ``_camera_health_lock`` -- ``threading.Lock`` guarding every read /
   write of ``_camera_health_state``.
 
-Both primitives **stay on ``app.main``** for this extraction (Phase 24
+Both primitives **stay on ``app.main``** for this extraction (Phase-24
 does NOT migrate them). This is the **state-migration template**:
 
 - State stays on the host module so the live-detection history rebuild
@@ -39,11 +39,11 @@ background thread (``live_alert_monitor_loop`` invokes
 ``main.<attr>`` references. **Zero cross-router reach** from
 ``app/api/*.py``.
 
-Like the prior-cluster extractions (``app/auth_gates.py`` Phase 16,
-``app/config_facades.py`` Phase 17, ``app/camera_config.py`` Phase 18,
-``app/recording_settings.py`` Phase 19, ``app/ai_settings.py`` Phase 20,
-``app/zone_schema.py`` Phase 21, ``app/payload_validators.py`` Phase 22,
-``app/zone_detection.py`` Phase 23), these are extracted using the
+Like the prior-cluster extractions (``app/auth_gates.py`` Phase-16,
+``app/config_facades.py`` Phase-17, ``app/camera_config.py`` Phase-18,
+``app/recording_settings.py`` Phase-19, ``app/ai_settings.py`` Phase-20,
+``app/zone_schema.py`` Phase-21, ``app/payload_validators.py`` Phase-22,
+``app/zone_detection.py`` Phase-23), these are extracted using the
 **hybrid-pattern template**:
 
 - Cluster functions reach ``main.<attr>`` at *call time* for their

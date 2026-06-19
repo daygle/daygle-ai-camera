@@ -1,9 +1,9 @@
 """Alerts APIRouter.
 
-Extracted from ``app/main.py`` (Phase 5 of the hybrid-pattern router split).
-Same template as ``app/api/recordings_router.py`` (Phase 3),
-``app/api/cameras_router.py`` (Phase 4), and ``app/api/events_router.py``
-(Phase 5): ``import app.main as main`` at module level, every global /
+Extracted from ``app/main.py`` (Phase-5 of the hybrid-pattern router split).
+Same template as ``app/api/recordings_router.py`` (Phase-3),
+``app/api/cameras_router.py`` (Phase-4), and ``app/api/events_router.py``
+(Phase-5): ``import app.main as main`` at module level, every global /
 helper read through ``main.<name>`` *inside* handler bodies.
 
 Handlers moved (4):
@@ -13,8 +13,8 @@ Handlers moved (4):
 - POST   /api/alerts/dismiss-all
 - POST   /api/alerts/{group_key}/dismiss
 
-The splice was AST tree-filter + unparse (the safe pattern Phase 2 / Phase
-3 / Phase 4 used). See ``app/api/__init__.py`` for the full hybrid-pattern
+The splice was AST tree-filter + unparse (the safe pattern Phase-2 / Phase
+3 / Phase-4 used). See ``app/api/__init__.py`` for the full hybrid-pattern
 rules.
 
 Helpers KEPT on ``app.main`` (the router calls them via ``main.<name>``):

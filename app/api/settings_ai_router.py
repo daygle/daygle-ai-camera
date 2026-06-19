@@ -1,6 +1,6 @@
 """Settings / AI APIRouter.
 
-Extracted from ``app/main.py`` lines 5148-5400 (Phase 2 of the hybrid-pattern
+Extracted from ``app/main.py`` lines 5148-5400 (Phase-2 of the hybrid-pattern
 router split). Same template as ``app/api/sound_router.py``: ``import app.main
 as main`` at module level, every global / helper / test-referenced symbol read
 through ``main.<name>`` *inside* handler bodies.

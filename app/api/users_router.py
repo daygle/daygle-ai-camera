@@ -1,9 +1,9 @@
 """Users and Profile APIRouter.
 
-Extracted from ``app/main.py`` (Phase 6 of the hybrid-pattern router split).
-Same template as ``app/api/recordings_router.py`` (Phase 3),
-``app/api/cameras_router.py`` (Phase 4), and
-``app/api/events_router.py`` (Phase 5): ``import app.main as main`` at
+Extracted from ``app/main.py`` (Phase-6 of the hybrid-pattern router split).
+Same template as ``app/api/recordings_router.py`` (Phase-3),
+``app/api/cameras_router.py`` (Phase-4), and
+``app/api/events_router.py`` (Phase-5): ``import app.main as main`` at
 module level, every global / helper read through ``main.<name>`` *inside*
 handler bodies.
 
@@ -15,15 +15,15 @@ Handlers moved (5):
 - POST   /api/users
 - PATCH  /api/users/{user_id}
 
-Note: the user prompt for Phase 6 also listed ``/api/profile/notifications``.
+Note: the user prompt for Phase-6 also listed ``/api/profile/notifications``.
 That endpoint does not exist in ``app/main.py`` (the front-end profile page
 exposes notification preferences inline via the main ``/api/profile``
 PUT body, not as a separate sub-route), so it is deliberately not part
 of this extraction. The notifications fields ``date_format`` /
 ``time_format`` / ``timezone`` ride on ``/api/profile``'s body.
 
-The splice was AST tree-filter + unparse (Phase 2 / Phase 3 / Phase 4 /
-Phase 5 safe pattern). See ``app/api/__init__.py`` for the full
+The splice was AST tree-filter + unparse (Phase-2 / Phase-3 / Phase-4 /
+Phase-5 safe pattern). See ``app/api/__init__.py`` for the full
 hybrid-pattern rules.
 
 Helpers KEPT on ``app.main`` (the router calls them via ``main.<name>``):
@@ -52,7 +52,7 @@ below on every test run.
 
 Security notes
 - ``change_profile_password`` is explicitly the password-change route
-  (Phase 7 audit). The body intentionally requires the current password
+  (Phase-7 audit). The body intentionally requires the current password
   via ``auth.change_password(int(user['id']), current_password, new_password)``
   — the ``AuthService`` rejects mismatches with ``AuthError``. The router
   does NOT add any extra credential check; the helper is the source of

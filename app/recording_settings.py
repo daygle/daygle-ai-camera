@@ -1,4 +1,4 @@
-"""Recording / PTZ / sound setting helpers extracted from ``app/main.py`` (Phase 19).
+"""Recording / PTZ / sound setting helpers extracted from ``app/main.py`` (Phase-19).
 
 The 4 helpers shipped here cluster around normalizing the *detection
 sub-block* of a camera's settings payload -- specifically the
@@ -6,11 +6,11 @@ sub-block* of a camera's settings payload -- specifically the
 threads together with the ``detection`` defaults. They were originally
 siblings on ``app/main.py`` and reach the same cross-cuts
 (``main.normalize_bool_setting``, ``main.normalize_email_recipients``,
-``main.SOUND_CLASSES``, ``main.DEFAULT_RULES``) as bare names; Phase 19
+``main.SOUND_CLASSES``, ``main.DEFAULT_RULES``) as bare names; Phase-19
 extracts them into this module while preserving identical behaviour,
-using the **hybrid-pattern template** introduced in Phase 16
-(``app/auth_gates.py``) and re-applied in Phase 17
-(``app/config_facades.py``) and Phase 18 (``app/camera_config.py``):
+using the **hybrid-pattern template** introduced in Phase-16
+(``app/auth_gates.py``) and re-applied in Phase-17
+(``app/config_facades.py``) and Phase-18 (``app/camera_config.py``):
 
 - Cluster functions reach ``main.<attr>`` at *call time* (NOT import
   time) for their cross-module dependencies, so they continue to work
@@ -43,7 +43,7 @@ Cluster membership:
   off across the upgrade.
 
 These helpers are reached almost exclusively via
-``app/camera_config.py::normalize_camera_settings`` (Phase 18), which
+``app/camera_config.py::normalize_camera_settings`` (Phase-18), which
 already wires the calls through ``main.<attr>`` to defeat the
 circular-import gate. The only other internal callers in ``app/main.py``
 are ``camera_event_recording_config`` (the ``continuous`` flag

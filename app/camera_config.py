@@ -1,12 +1,12 @@
-"""Camera-config helpers extracted from ``app/main.py`` (Phase 18).
+"""Camera-config helpers extracted from ``app/main.py`` (Phase-18).
 
 The 4 helpers shipped here cluster around camera-id normalization,
 camera-settings orchestration with defaulting/migration, mid-stream
 camera-id renaming (with on-disk ingest-dir migration), and credential
 redaction in API responses.
 
-Like ``app/auth_gates.py`` (Phase 16) and ``app/config_facades.py``
-(Phase 17), these are extracted with the **hybrid-pattern template**:
+Like ``app/auth_gates.py`` (Phase-16) and ``app/config_facades.py``
+(Phase-17), these are extracted with the **hybrid-pattern template**:
 helpers reach ``main.<attr>`` for their cross-module dependencies at
 *call time* (not import time), so they continue to work seamlessly
 when ``app/main.py`` is partially loaded during the Pool A rebind loop.

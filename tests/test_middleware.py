@@ -1,6 +1,6 @@
 """Phase-15 integration tests for ``app/middleware.py``.
 
-Phase 15 extracted the last 2 ``@app.middleware('http')`` decorators out of
+Phase-15 extracted the last 2 ``@app.middleware('http')`` decorators out of
 ``app/main.py`` and into ``app/middleware.py`` as plain async callables. The
 extraction can't move the decorator itself -- ``@app.middleware('http')``
 signs the callable onto the FastAPI app's middleware stack at app-instance

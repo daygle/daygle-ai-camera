@@ -1,6 +1,6 @@
 """Integration tests for the Phase-13 hybrid-pattern split's public-surface contracts.
 
-When Phase 13 extracted 24 ``@app.X`` handlers from ``app/main.py`` into
+When Phase-13 extracted 24 ``@app.X`` handlers from ``app/main.py`` into
 ``app/api/web_router.py`` + ``app/api/auth_router.py``, two back-compat
 aliases were appended at the bottom of ``app/main.py``::
 
@@ -39,9 +39,9 @@ These tests defend that public-surface contract:
 
 Why this matters
 ----------------
-The Phase 1-12 AST splices each moved 1-7 handlers out of ``app/main.py``
+The Phase-1-12 AST splices each moved 1-7 handlers out of ``app/main.py``
 and the existing ``test_api_router_split_invariants.py`` walks the AST
-for orphan-import regressions. Phase 13 created two back-compat aliases
+for orphan-import regressions. Phase-13 created two back-compat aliases
 that are NOT rebind-walkable by Pool A (they look bare from main.py's
 perspective but resolve to web_router functions via the module's import
 system). A future refactor could trivially drop these aliases and the
@@ -53,7 +53,7 @@ Likewise, the response-class monkeypatch contract is documented in
 ``web_router.py``'s STD-LIB NOTE docstring but never enforced by a test.
 A future maintainer who re-transitions from hybrid pattern back to
 top-level imports would silently break the monkeypatch contract;
-Round-2 / Round-3 / Round-4 of Phase 13 already showed how easy that
+Round-2 / Round-3 / Round-4 of Phase-13 already showed how easy that
 regression is to introduce.
 """
 

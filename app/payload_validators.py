@@ -1,14 +1,14 @@
-"""Settings payload validators extracted from ``app/main.py`` (Phase 22).
+"""Settings payload validators extracted from ``app/main.py`` (Phase-22).
 
 The 9 helpers shipped here cluster around settings-router payload
 validation -- the small, mostly-pure functions called by every mutating
 settings endpoint to coerce and bounds-check an inbound ``dict`` payload
 before the route writes it back to the database / record-store.
 
-Like the prior-cluster extractions (``app/auth_gates.py`` Phase 16,
-``app/config_facades.py`` Phase 17, ``app/camera_config.py`` Phase 18,
-``app/recording_settings.py`` Phase 19, ``app/ai_settings.py`` Phase 20,
-``app/zone_schema.py`` Phase 21), these are extracted using the
+Like the prior-cluster extractions (``app/auth_gates.py`` Phase-16,
+``app/config_facades.py`` Phase-17, ``app/camera_config.py`` Phase-18,
+``app/recording_settings.py`` Phase-19, ``app/ai_settings.py`` Phase-20,
+``app/zone_schema.py`` Phase-21), these are extracted using the
 **hybrid-pattern template**:
 
 - Cluster functions reach ``main.<attr>`` at *call time* (NOT import
@@ -73,16 +73,16 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
   validate_camera_settings + validate_recording_settings +
   validate_live_settings)
 - ``main.normalize_camera_id`` (validate_camera_settings) -- reaches
-  via Phase 18 camera_config rebind
+  via Phase-18 camera_config rebind
 - ``main.camera_default_name`` (validate_camera_settings)
 - ``main.default_camera_detection_settings`` (validate_camera_settings)
 - ``main.build_stream_url`` (validate_camera_settings)
 - ``main.normalize_label_list`` (validate_camera_settings) -- reaches
-  via Phase 21 zone_schema rebind
+  via Phase-21 zone_schema rebind
 - ``main.normalize_monitoring_zones`` (validate_camera_settings) --
-  reaches via Phase 21 zone_schema rebind
+  reaches via Phase-21 zone_schema rebind
 - ``main._migrate_legacy_camera_motion`` (validate_camera_settings) --
-  reaches via Phase 19 recording_settings rebind
+  reaches via Phase-19 recording_settings rebind
 - ``main.normalize_camera_recording_settings`` (validate_camera_settings)
 - ``main.normalize_camera_ptz_settings`` (validate_camera_settings)
 - ``main.effective_recording_config`` (validate_recording_settings)
@@ -92,7 +92,7 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
 - ``main.effective_auth_config`` (validate_auth_settings)
 - ``main.effective_live_config`` (validate_live_settings)
 - ``main.cameras_config`` (validate_cameras_settings) -- runtime
-  set at module-load via Phase 17 config_facades rebind
+  set at module-load via Phase-17 config_facades rebind
 """
 
 from __future__ import annotations

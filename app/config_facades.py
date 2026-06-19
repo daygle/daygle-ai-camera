@@ -1,6 +1,6 @@
-"""Config-facade functions extracted from ``app/main.py`` (Phase 17).
+"""Config-facade functions extracted from ``app/main.py`` (Phase-17).
 
-Phase 17 carries the Phase-16 audit forward: after the auth-gate cluster
+Phase-17 carries the Phase-16 audit forward: after the auth-gate cluster
 (4 helpers, ~19 cross-router reach sites) was extracted to
 ``app/middleware.py`` and ``app/auth_gates.py``, the next-highest-ROI
 group of helpers in ``app/main.py`` is the config-facade cluster.
@@ -11,8 +11,8 @@ dictionary and (for some) a hardcoded default set, returning a single
 flattened dict the routers can consume directly without rewriting
 their access pattern.
 
-Same hybrid-pattern template as ``app/middleware.py`` (Phase 15) and
-``app/auth_gates.py`` (Phase 16)::
+Same hybrid-pattern template as ``app/middleware.py`` (Phase-15) and
+``app/auth_gates.py`` (Phase-16)::
 
     import app.main as main
     # helpers reach main.<attr> at CALL time, not at module top
@@ -102,7 +102,7 @@ import app.main as main
 # constant (not module-level on main.py) because it is purely a
 # default-set under the extract's responsibility; promoting it out of
 # the function body makes it greppable + trivially overridable in a
-# future Phase 17+ test.
+# future Phase-17+ test.
 DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     'snapshot_refresh_ms': 500,
     'detection_status_refresh_ms': 2000,

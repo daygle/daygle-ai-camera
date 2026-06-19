@@ -1,6 +1,6 @@
 """Phase-17 integration tests for ``app/config_facades.py``.
 
-Phase 17 extracted the 7 config-facade helpers from ``app/main.py`` into
+Phase-17 extracted the 7 config-facade helpers from ``app/main.py`` into
 ``app/config_facades.py`` using the hybrid-pattern template. Routers
 reach them via ``main.<name>`` (Pool C bare-name reach), preserved by
 Pool A from-import rebinds at the top of ``app/main.py`` (NOT the
@@ -30,7 +30,7 @@ Tests pin three contracts:
 Top-level preload pattern (import app.main BEFORE app.config_facades)
 breaks the circular import gate at collection time. Without this,
 pytest collection triggers auth_gates.py-style reverse-direction
-circular import (Phase 16 lesson re-applied here for Phase 17).
+circular import (Phase-16 lesson re-applied here for Phase-17).
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 # Top-level lazy-ordered preloads to break the Phase-17 circular-import gate
-# (same pattern as tests/test_auth_gates.py Phase 16). If we imported
+# (same pattern as tests/test_auth_gates.py Phase-16). If we imported
 # ``app.config_facades`` FIRST, Python's fresh-load chain would run the
 # bottom-of-file rebind ``from app.config_facades import (...)`` inside
 # ``app/main.py`` while ``app.config_facades`` is still mid-load (only top

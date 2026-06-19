@@ -1,8 +1,8 @@
-"""HTTP middleware callables extracted from ``app/main.py`` (Phase 15).
+"""HTTP middleware callables extracted from ``app/main.py`` (Phase-15).
 
 Extracted from ``app/main.py`` lines 1765-1813 (final phase of the
 hybrid-pattern router/middleware split). Same template as the
-Phase 1-14 router extractions: ``import app.main as main`` at module
+Phase-1-14 router extractions: ``import app.main as main`` at module
 top, every global / helper read through ``main.<name>`` *inside*
 callable bodies.
 
@@ -59,7 +59,7 @@ Helpers KEPT on ``app.main`` (this module calls them via ``main.<name>``):
 - ``main.auth.users_exist`` - boolean check for any user row.
 - ``main.auth.get_session`` - cookie -> session lookup.
 - ``main.JSONResponse`` - re-exported at ``app.main`` from
-  ``fastapi.responses`` per hybrid-pattern rule 5 (Phase 13 fix).
+  ``fastapi.responses`` per hybrid-pattern rule 5 (Phase-13 fix).
 - ``main.RedirectResponse`` - same re-export contract.
 - ``main.Response`` - same re-export contract (``starlette.responses.Response``
   actually; FastAPI re-exports it under starlette's name).

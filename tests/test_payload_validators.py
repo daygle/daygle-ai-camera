@@ -1,6 +1,6 @@
 """Phase-22 integration tests for ``app/payload_validators.py``.
 
-Phase 22 extracted the 9 settings payload-validator helpers (8 validators
+Phase-22 extracted the 9 settings payload-validator helpers (8 validators
 + 1 ``_int_field`` helper) from ``app/main.py`` into
 ``app/payload_validators.py`` using the hybrid-pattern template (same
 as Phases 16-21).
@@ -26,7 +26,7 @@ Tests pin three contracts:
 1. **Pool A back-compat identity.** The 9 Pool A rebinds MUST wire
    ``main.<name>`` to the SAME function object as
    ``app.payload_validators.<name>``. Re-resolved via ``sys.modules``
-   per the Phase 17 lesson (defeats the
+   per the Phase-17 lesson (defeats the
    ``tests/test_api.py::_load_app`` sys-modules-wipe state leak).
 
 2. **Behavior of each validator.** Each validator has subtle coercion
@@ -44,7 +44,7 @@ Tests pin three contracts:
      ``stream_url`` (or host+...) required for ONVIF/RTSP, flip in
      {none, horizontal, vertical, both}, dims/fps clamped,
      motion-migration delegation, recording/ptz delegated to
-     Phase 19.
+     Phase-19.
    - ``validate_cameras_settings``: non-list rejected, dup-id
      rejected, normal list passes, makes only list of normalized
      per-camera dicts.
@@ -94,7 +94,7 @@ import app.payload_validators as payload_validators  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 1. Pool A back-compat identity -- ``main.<name> is pv.<name>``.
-#    Re-resolve via sys.modules per Phase 17 lesson (defeats the
+#    Re-resolve via sys.modules per Phase-17 lesson (defeats the
 #    tests/test_api.py::_load_app() sys-modules-wipe state leak).
 # ---------------------------------------------------------------------------
 

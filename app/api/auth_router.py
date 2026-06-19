@@ -1,8 +1,8 @@
 """Authentication-flow APIRouter.
 
-Extracted from ``app/main.py`` (Phase 13 of the hybrid-pattern router split).
-Same template as ``app/api/admin_router.py`` (Phase 11) and
-``app/api/live_router.py`` (Phase 10): ``import app.main as main`` at module
+Extracted from ``app/main.py`` (Phase-13 of the hybrid-pattern router split).
+Same template as ``app/api/admin_router.py`` (Phase-11) and
+``app/api/live_router.py`` (Phase-10): ``import app.main as main`` at module
 level, every global / helper read through ``main.<name>`` *inside* handler
 bodies.
 
@@ -92,7 +92,7 @@ FastAPI builtins stay at top-level imports: ``APIRouter``,
 
 Tests go through ``LocalClient.request`` rather than calling
 ``main.login`` / ``main.setup`` / ``main.logout_post`` directly, so no
-back-compat alias on ``app.main`` is needed. The Phase 7.1 invariant
+back-compat alias on ``app.main`` is needed. The Phase-7.1 invariant
 ``tests/test_api_router_split_invariants.py::test_app_api_imports_in_main_are_consumed``
 will catch any orphan-import regression if a future refactor drops the
 ``from app.api.auth_router import router as auth_router`` rebind line in

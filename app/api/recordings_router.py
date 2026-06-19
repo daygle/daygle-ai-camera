@@ -1,6 +1,6 @@
 """Recordings APIRouter.
 
-Extracted from ``app/main.py`` (Phase 3 of the hybrid-pattern router split).
+Extracted from ``app/main.py`` (Phase-3 of the hybrid-pattern router split).
 Same template as ``app/api/settings_ai_router.py``: ``import app.main as main``
 at module level, every global / helper read through ``main.<name>`` *inside*
 handler bodies.

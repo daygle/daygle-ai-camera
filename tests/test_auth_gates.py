@@ -1,6 +1,6 @@
 """Phase-16 integration tests for ``app/auth_gates.py``.
 
-Phase 16 extracted the 4 auth-gate helpers (``require_admin``,
+Phase-16 extracted the 4 auth-gate helpers (``require_admin``,
 ``require_user``, ``require_session``, ``_request_ip``) from
 ``app/main.py`` into ``app/auth_gates.py`` as plain functions. Routers
 reach them via ``main.<name>`` (Pool C bare-name reach), preserved by
@@ -68,7 +68,7 @@ if str(REPO_ROOT) not in sys.path:
 #
 # This mirrors the ``app_modules`` fixture in
 # tests/test_web_auth_router_integration.py -- whose docstring (which is
-# 50 lines) explains the same circular-import contract for Phase 13's
+# 50 lines) explains the same circular-import contract for Phase-13's
 # web_router / auth_router.
 import app.main  # noqa: E402  -- must precede the import below
 import app.auth_gates  # noqa: E402

@@ -1,11 +1,11 @@
 """Phase-19 integration tests for ``app/recording_settings.py``.
 
-Phase 19 extracted the 4 recording-settings helpers
+Phase-19 extracted the 4 recording-settings helpers
 (``normalize_camera_recording_settings``, ``normalize_camera_ptz_settings``,
 ``_normalize_camera_sound_settings``, ``_migrate_legacy_camera_motion``)
 from ``app/main.py`` into ``app/recording_settings.py`` using the
-hybrid-pattern template (same as Phase 16 ``app/auth_gates.py``,
-Phase 17 ``app/config_facades.py``, Phase 18 ``app/camera_config.py``).
+hybrid-pattern template (same as Phase-16 ``app/auth_gates.py``,
+Phase-17 ``app/config_facades.py``, Phase-18 ``app/camera_config.py``).
 
 Siblings still on ``app/main.py`` (``camera_event_recording_config``,
 ``validate_camera_settings``) reach these helpers as bare names inside
@@ -18,7 +18,7 @@ Tests pin three contracts:
    ``main.<name>`` to the SAME function object as
    ``app.recording_settings.<name>``. Re-resolved via ``sys.modules``
    to defeat the ``tests/test_api.py::_load_app`` sys-modules-wipe
-   state leak (Phase 17 lesson).
+   state leak (Phase-17 lesson).
 2. **Behavior of each facade.** Each helper has subtle ordering /
    fallback semantics:
    - ``normalize_camera_recording_settings``: defensively type-coerces
@@ -37,7 +37,7 @@ Tests pin three contracts:
      object_rule.
 3. **Top-level preload pattern.** ``import app.main`` BEFORE
    ``import app.recording_settings`` at module top -- same pattern as
-   Phase 16 / 17 / 18 tests. Without this, pytest collection
+   Phase-16 / 17 / 18 tests. Without this, pytest collection
    triggers the circular-import gate at ``app.recording_settings``
    load time (its top has ``import app.main as main`` for the Pool C
    reach sites).
@@ -55,8 +55,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 # Top-level lazy-ordered preloads to break the Phase-19 circular-import gate
-# (same pattern as tests/test_auth_gates.py Phase 16, test_config_facades.py
-# Phase 17, test_camera_config.py Phase 18). If we imported
+# (same pattern as tests/test_auth_gates.py Phase-16, test_config_facades.py
+# Phase-17, test_camera_config.py Phase-18). If we imported
 # ``app.recording_settings`` FIRST, Python's fresh-load chain would run
 # the top-of-file rebind ``from app.recording_settings import (...)`` inside
 # ``app/main.py`` while ``app.recording_settings`` is still mid-load (only
@@ -72,7 +72,7 @@ import app.recording_settings as recording_settings  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 1. Pool A back-compat identity -- ``main.<name> is recording_settings.<name>``.
-#    Re-resolve via sys.modules per Phase 17 lesson (defeats the
+#    Re-resolve via sys.modules per Phase-17 lesson (defeats the
 #    tests/test_api.py::_load_app() sys-modules-wipe state leak).
 # ---------------------------------------------------------------------------
 

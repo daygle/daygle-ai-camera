@@ -1,4 +1,4 @@
-"""Zone detection orchestration extracted from ``app/main.py`` (Phase 23).
+"""Zone detection orchestration extracted from ``app/main.py`` (Phase-23).
 
 The 21 helpers shipped here cluster around the **zone detection pipeline
 that runs inside the live-stream alert monitor**: per-detection geometry
@@ -12,10 +12,10 @@ prior 7 hybrid phases. Two of its 21 helpers (``get_camera_instance``,
 ``_zone_pixel_motion_fraction``) cross the cluster boundary with state
 or numpy on main.py; the other 19 reach siblings only.
 
-Like the prior extractions (``app/auth_gates.py`` Phase 16,
-``app/config_facades.py`` Phase 17, ``app/camera_config.py`` Phase 18,
-``app/recording_settings.py`` Phase 19, ``app/ai_settings.py`` Phase 20,
-``app/zone_schema.py`` Phase 21, ``app/payload_validators.py`` Phase 22),
+Like the prior extractions (``app/auth_gates.py`` Phase-16,
+``app/config_facades.py`` Phase-17, ``app/camera_config.py`` Phase-18,
+``app/recording_settings.py`` Phase-19, ``app/ai_settings.py`` Phase-20,
+``app/zone_schema.py`` Phase-21, ``app/payload_validators.py`` Phase-22),
 these are extracted using the **hybrid-pattern template**:
 
 - Cluster functions reach ``main.<attr>`` at *call time* (NOT import
@@ -35,7 +35,7 @@ these are extracted using the **hybrid-pattern template**:
 Cluster membership (21 helpers, 290 lines original):
 
 - ``get_camera_instance`` -- resolves ``camera_id`` -> live OpenCvStreamCamera
-  instance via ``main.get_camera_config`` (Phase 17 route) and
+  instance via ``main.get_camera_config`` (Phase-17 route) and
   ``main.camera_instances`` (main module state, mutated by ``apply_cameras_settings``).
   Raises ``fastapi.HTTPException(404)`` when the instance is missing so
   router handlers can return a clean 404 instead of a stack trace.
@@ -70,7 +70,7 @@ Cluster membership (21 helpers, 290 lines original):
 
 - ``zone_motion_detections`` -- per-camera motion-to-detection
   converter. Reads each zone's motion rule (``zone_motion_min_confidence``
-  from Phase 21) and emits a pseudo-detection with the zone footprint
+  from Phase-21) and emits a pseudo-detection with the zone footprint
   when motion clears the gate. Default values ``gate_fraction`` /
   ``scale_fraction`` bind to ``main._MOTION_GATE_FRACTION`` /
   ``main._MOTION_SCALE_FRACTION`` at module-load time.
@@ -85,7 +85,7 @@ Cluster membership (21 helpers, 290 lines original):
   ``filter_detections_for_camera_zones`` with ``zone_monitor_key='monitor_objects'``.
 
 - ``detection_label_allowed_for_zone`` -- checks ``zone['object_labels']``
-  (call ``normalize_label_list`` from Phase 21 + ``_LABEL_ALIASES``)
+  (call ``normalize_label_list`` from Phase-21 + ``_LABEL_ALIASES``)
   against the detection label, falling back to the full camera label
   set when the zone has no allow-list.
 
@@ -116,7 +116,7 @@ Cluster membership (21 helpers, 290 lines original):
 
 - ``zone_record_on_detect`` -- ``bool(zone_object_rule_matches(... 'record'))``
   so a single record rule fires the recorder; back-compat with the
-  flat ``record_objects`` flag removed in Phase 9.
+  flat ``record_objects`` flag removed in Phase-9.
 
 - ``zone_motion_record_on_detect`` -- the motion-axis counterpart:
   iterates the ``monitor_motion=True`` zones and returns True when
@@ -142,7 +142,7 @@ Cluster membership (21 helpers, 290 lines original):
 
 Pool C reach sites (resolved via ``main.<attr>`` at call time):
 
-- ``main.get_camera_config`` (``get_camera_instance`` -- Phase 17 rebind)
+- ``main.get_camera_config`` (``get_camera_instance`` -- Phase-17 rebind)
 - ``main.camera_instances`` (``get_camera_instance`` -- module-level
   dict state, mutated in place by ``apply_cameras_settings``; main.py
   retains ownership as the source of truth so the recorder + admin
@@ -157,9 +157,9 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
   (``zone_motion_detections`` -- bound to default-arg expressions at
   module-load time of this module; both constants are populated on
   ``app.main`` before this rebind block fires)
-- ``main.normalize_label_list`` (Phase 21 rebind, called 2x)
-- ``main._LABEL_ALIASES`` (Phase 21 dict rebind, used 3x)
-- ``main.zone_motion_min_confidence`` (Phase 21 rebind, called 1x)
+- ``main.normalize_label_list`` (Phase-21 rebind, called 2x)
+- ``main._LABEL_ALIASES`` (Phase-21 dict rebind, used 3x)
+- ``main.zone_motion_min_confidence`` (Phase-21 rebind, called 1x)
 - ``main.normalize_email_recipients`` (still on main.py, called 1x)
 - ``main.normalize_bool_setting`` (still on main.py, called 2x)
 """

@@ -1,9 +1,9 @@
 """Push Notification Settings APIRouter.
 
-Extracted from ``app/main.py`` (Phase 7 of the hybrid-pattern router split).
-Same template as ``app/api/settings_ai_router.py`` (Phase 2),
-``app/api/events_router.py`` (Phase 5), and
-``app/api/alert_email_router.py`` (Phase 7 email sibling): ``import app.main
+Extracted from ``app/main.py`` (Phase-7 of the hybrid-pattern router split).
+Same template as ``app/api/settings_ai_router.py`` (Phase-2),
+``app/api/events_router.py`` (Phase-5), and
+``app/api/alert_email_router.py`` (Phase-7 email sibling): ``import app.main
 as main`` at module level, every global / helper read through ``main.<name>``
 *inside* handler bodies.
 
@@ -13,8 +13,8 @@ Handlers moved (3):
 - PUT   /api/settings/alert-push
 - POST  /api/settings/alert-push/test
 
-The splice was AST tree-filter + unparse (Phase 2 / Phase 3 / Phase 4 /
-Phase 5 / Phase 6 safe pattern). See ``app/api/__init__.py`` for the
+The splice was AST tree-filter + unparse (Phase-2 / Phase-3 / Phase-4 /
+Phase-5 / Phase-6 safe pattern). See ``app/api/__init__.py`` for the
 full hybrid-pattern rules.
 
 Helpers KEPT on ``app.main`` (the router calls them via ``main.<name>``):
