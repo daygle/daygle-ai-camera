@@ -3312,92 +3312,10 @@ async def test_push_notification_settings(request: Request):
         raise HTTPException(status_code=400, detail=f'Test notification failed: {exc}') from exc
     return {'ok': True}
 
-@app.get('/api/settings/system')
-def get_system_settings():
-    version_file = BASE_DIR / 'VERSION'
-    current_version = version_file.read_text(encoding='utf-8').strip() if version_file.exists() else 'unknown'
-    return {'version': current_version, 'camera': get_camera_config(None), 'cameras': effective_cameras_config(), 'live': effective_live_config(), 'recording': effective_recording_config(), 'storage': effective_storage_config(), 'auth': {'session_timeout_hours': effective_auth_config().get('session_timeout_hours'), 'max_login_attempts': effective_auth_config().get('max_login_attempts'), 'lockout_minutes': effective_auth_config().get('lockout_minutes')}, 'bootstrap': {'database': config.get('storage', {}).get('database'), 'auth_enabled': auth_enabled, 'cookie_name': SESSION_COOKIE_NAME, 'server': config.get('server', {})}}
-
-@app.get('/api/settings/system/database/backup')
-def backup_database(request: Request):
-    require_admin(request)
-    backup_path = create_database_backup()
-    write_audit_log(request, 'backup', 'database', details={'filename': backup_path.name})
-    return FileResponse(backup_path, media_type='application/vnd.sqlite3', filename=backup_path.name, headers={'Cache-Control': 'no-store'}, background=BackgroundTask(backup_path.unlink, missing_ok=True))
-
-@app.post('/api/settings/system/database/restore')
-async def restore_database(request: Request, file: UploadFile=File(...)):
-    require_admin(request)
-    filename = Path(file.filename or '').name
-    if not filename:
-        raise HTTPException(status_code=400, detail='Choose a SQLite database backup file to restore.')
-    if not DATABASE_RESTORE_LOCK.acquire(blocking=False):
-        raise HTTPException(status_code=409, detail='Another database restore is already in progress.')
-    restore_temp = database.database_path.parent / f'.restore-{secrets.token_hex(8)}.sqlite3'
-    try:
-        with restore_temp.open('wb') as handle:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                handle.write(chunk)
-        if restore_temp.stat().st_size == 0:
-            raise HTTPException(status_code=400, detail='Uploaded database backup is empty.')
-        await run_in_threadpool(validate_restore_database, restore_temp)
-        safety_backup = await run_in_threadpool(create_database_backup, 'pre-restore-daygle-database')
-        try:
-            await run_in_threadpool(overwrite_database_from_file, restore_temp)
-        except sqlite3.Error as exc:
-            raise HTTPException(status_code=500, detail=f'Database restore failed: {exc}') from exc
-        await run_in_threadpool(refresh_runtime_after_database_restore)
-        write_audit_log(request, 'restore', 'database', details={'source_filename': filename, 'safety_backup': str(safety_backup)})
-        return {'ok': True, 'message': 'Database restored successfully.', 'source_filename': filename, 'safety_backup': str(safety_backup)}
-    finally:
-        DATABASE_RESTORE_LOCK.release()
-        restore_temp.unlink(missing_ok=True)
-        for sidecar_suffix in ('-wal', '-shm'):
-            Path(f'{restore_temp}{sidecar_suffix}').unlink(missing_ok=True)
-        await file.close()
-
 def _redact_camera(cam: dict[str, Any]) -> dict[str, Any]:
     out = {k: v for k, v in cam.items() if k != 'password'}
     out['has_password'] = bool(cam.get('password'))
     return out
-
-@app.put('/api/settings/system/live')
-async def update_live_settings(request: Request):
-    require_admin(request)
-    settings = validate_live_settings(await request.json())
-    database.set_setting('live', settings, utc_now())
-    write_audit_log(request, 'update', 'settings.live')
-    return settings
-
-@app.put('/api/settings/system/recording')
-async def update_recording_settings(request: Request):
-    require_admin(request)
-    settings = validate_recording_settings(await request.json())
-    database.set_setting('recording', settings, utc_now())
-    apply_storage_and_recording_settings()
-    write_audit_log(request, 'update', 'settings.recording')
-    return settings
-
-@app.put('/api/settings/system/storage')
-async def update_storage_settings(request: Request):
-    require_admin(request)
-    settings = validate_storage_settings(await request.json())
-    database.set_setting('storage', settings, utc_now())
-    apply_storage_and_recording_settings()
-    write_audit_log(request, 'update', 'settings.storage')
-    return settings
-
-@app.put('/api/settings/system/auth')
-async def update_auth_settings(request: Request):
-    require_admin(request)
-    settings = validate_auth_settings(await request.json())
-    database.set_setting('auth', settings, utc_now())
-    auth.apply_config(settings)
-    write_audit_log(request, 'update', 'settings.auth')
-    return settings
 
 def _current_version() -> str:
     version_file = BASE_DIR / 'VERSION'
@@ -3528,6 +3446,8 @@ from app.api.alert_push_router import router as alert_push_router
 app.include_router(alert_push_router)
 from app.api.camera_offline_router import router as camera_offline_router
 app.include_router(camera_offline_router)
-
 from app.api.status_router import router as status_router
 app.include_router(status_router)
+
+from app.api.settings_system_router import router as settings_system_router
+app.include_router(settings_system_router)
