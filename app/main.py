@@ -3304,19 +3304,6 @@ def _do_download_model(model_name: str, switch_active: bool=True) -> dict[str, A
         error = None
     return {'ok': True, 'message': f"Exported {info['label']} ONNX to {destination.relative_to(BASE_DIR)}.", 'model_path': rel_path, 'bytes': exported_bytes, 'reload_succeeded': reloaded, 'reload_error': error, 'status': ai_status_payload(updated)}
 
-@app.get('/api/settings/alert-email')
-def get_alert_email_settings():
-    return effective_email_alert_settings()
-
-@app.put('/api/settings/alert-email')
-async def update_alert_email_settings(request: Request):
-    require_admin(request)
-    payload = await request.json()
-    settings = validate_alert_email_settings(payload)
-    result = database.set_setting('alert_email', settings, utc_now())
-    write_audit_log(request, 'update', 'settings.alert_email')
-    return result
-
 @app.post('/api/settings/alert-email/test')
 async def test_alert_email_settings(request: Request):
     payload = await request.json()
@@ -3330,19 +3317,6 @@ async def test_alert_email_settings(request: Request):
         raise HTTPException(status_code=400, detail=f'Test email failed: {exc}') from exc
     return {'ok': True, 'recipient': recipient}
 
-@app.get('/api/settings/alert-push')
-def get_push_notification_settings():
-    return effective_push_notification_settings()
-
-@app.put('/api/settings/alert-push')
-async def update_push_notification_settings(request: Request):
-    require_admin(request)
-    payload = await request.json()
-    settings = validate_push_notification_settings(payload)
-    result = database.set_setting('alert_push', settings, utc_now())
-    write_audit_log(request, 'update', 'settings.alert_push')
-    return result
-
 @app.post('/api/settings/alert-push/test')
 async def test_push_notification_settings(request: Request):
     payload = await request.json()
@@ -3352,24 +3326,6 @@ async def test_push_notification_settings(request: Request):
     except PushNotificationError as exc:
         raise HTTPException(status_code=400, detail=f'Test notification failed: {exc}') from exc
     return {'ok': True}
-
-@app.get('/api/settings/camera-offline')
-def get_camera_offline_alert_settings():
-    return effective_camera_offline_alert_settings()
-
-@app.put('/api/settings/camera-offline')
-async def update_camera_offline_alert_settings(request: Request):
-    require_admin(request)
-    payload = await request.json()
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail='Invalid settings payload')
-    validated = {'enabled': bool(payload.get('enabled', False))}
-    try:
-        validated['offline_delay_minutes'] = max(1, int(payload.get('offline_delay_minutes', 1)))
-    except (TypeError, ValueError):
-        validated['offline_delay_minutes'] = 1
-    result = database.set_setting('camera_offline_alert', validated, utc_now())
-    return result
 
 @app.get('/api/settings/system')
 def get_system_settings():
@@ -3568,12 +3524,7 @@ from app.api.settings_ai_router import router as settings_ai_router
 app.include_router(settings_ai_router)
 from app.api.recordings_router import router as recordings_router
 app.include_router(recordings_router)
-# Back-compat aliases for tests that called now-extracted handlers via main.X
-# (Phase 3 recordings-router extraction). The handlers still live at module
-# level on the router file; we re-export them so existing tests/test_api.py
-# unit-style calls (e.g. ``main.recording_detail(recording_id)``) keep working.
-# HTTP callers go through ``app.include_router`` and don't need this alias.
-from app.api.recordings_router import recording_detail
+
 if __name__ == '__main__':
     import uvicorn
     server_config = config.get('server', {})
@@ -3584,7 +3535,14 @@ from app.api.events_router import router as events_router
 app.include_router(events_router)
 from app.api.alerts_router import router as alerts_router
 app.include_router(alerts_router)
-
-# Routers extracted from main.py: users + profile (Phase 6)
 from app.api.users_router import router as users_router
 app.include_router(users_router)
+
+# Routers extracted from main.py: alert rules (Phase 7)
+from app.api.alert_email_router import router as alert_email_router
+app.include_router(alert_email_router)
+from app.api.alert_push_router import router as alert_push_router
+app.include_router(alert_push_router)
+from app.api.camera_offline_router import router as camera_offline_router
+app.include_router(camera_offline_router)
+from app.api.recordings_router import recording_detail  # back-compat alias for tests (Phase 3)
