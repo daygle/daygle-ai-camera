@@ -2773,21 +2773,6 @@ def me(request: Request):
     session = require_session(request)
     return {'user': session['user'], 'csrf_token': session['csrf_token'], 'expires_at': session['expires_at']}
 
-@app.get('/api/status')
-def status(camera_id: str | None=None):
-    if not cameras_config:
-        ai_state = ai_status_payload()
-        return {'status': 'online', 'mode': None, 'camera_id': None, 'camera_name': None, 'camera_detection': {}, 'ai_backend': ai_state['active_backend'], 'ai_available': ai_state['inference_available'], 'ai_error': ai_state['error'], 'ai_mode': ai_state['mode'], 'live_detection': live_detection_status_payload(camera_id), 'frame_number': 0, 'uptime_seconds': 0, 'resolution': {'width': 0, 'height': 0}}
-    selected_camera = get_camera_instance(camera_id)
-    selected_config = get_camera_config(camera_id)
-    frame = selected_camera.get_frame()
-    ai_state = ai_status_payload()
-    return {'status': 'online', 'mode': selected_config.get('backend', 'onvif'), 'camera_id': selected_config.get('id'), 'camera_name': selected_config.get('name'), 'camera_detection': selected_config.get('detection', {}), 'ai_backend': ai_state['active_backend'], 'ai_available': ai_state['inference_available'], 'ai_error': ai_state['error'], 'ai_mode': ai_state['mode'], 'live_detection': live_detection_status_payload(camera_id), 'frame_number': frame['frame_number'], 'uptime_seconds': frame['uptime_seconds'], 'resolution': {'width': frame['width'], 'height': frame['height']}}
-
-@app.get('/api/status/ai')
-def ai_status():
-    return ai_status_payload()
-
 @app.get('/api/live/detection-status')
 def live_detection_status_api(camera_id: str | None=None):
     return live_detection_status_payload(camera_id)
@@ -3524,8 +3509,7 @@ from app.api.settings_ai_router import router as settings_ai_router
 app.include_router(settings_ai_router)
 from app.api.recordings_router import router as recordings_router
 app.include_router(recordings_router)
-from app.api.recordings_router import recording_detail  # back-compat alias for tests (Phase 3)
-
+from app.api.recordings_router import recording_detail
 if __name__ == '__main__':
     import uvicorn
     server_config = config.get('server', {})
@@ -3538,11 +3522,12 @@ from app.api.alerts_router import router as alerts_router
 app.include_router(alerts_router)
 from app.api.users_router import router as users_router
 app.include_router(users_router)
-
-# Routers extracted from main.py: alert rules (Phase 7)
 from app.api.alert_email_router import router as alert_email_router
 app.include_router(alert_email_router)
 from app.api.alert_push_router import router as alert_push_router
 app.include_router(alert_push_router)
 from app.api.camera_offline_router import router as camera_offline_router
 app.include_router(camera_offline_router)
+
+from app.api.status_router import router as status_router
+app.include_router(status_router)
