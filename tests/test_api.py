@@ -178,7 +178,15 @@ alerts:
         encoding="utf-8",
     )
     monkeypatch.setenv("DAYGLE_CONFIG", str(config_path))
-    sys.modules.pop("app.main", None)
+    # Pop the ENTIRE app namespace from sys.modules so the next import
+    # constructs a completely fresh application tree. Without this, parent
+    # packages (``app``, ``app.api``) and sibling modules (``app.database``,
+    # ``app.detector``) retain pointers to the PREVIOUS test's module-level
+    # objects, producing cross-test state contamination (the e365ec5->Phase-2
+    # lesson). Forward-compatible with future Phase-N routers / sub-modules.
+    for mod in list(sys.modules.keys()):
+        if mod == "app" or mod.startswith("app."):
+            sys.modules.pop(mod, None)
     return importlib.import_module("app.main").app, database_path
 
 
