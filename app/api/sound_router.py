@@ -1,12 +1,6 @@
 """Sound detection APIRouter.
 
-Uses the Option-3 hybrid pattern: ``import app.main as main`` at the top of this
-file, then every global, lock, and test-referenced helper is read through
-``main.<name>`` *inside* handler bodies. This preserves test back-compat
-(``tests/test_api.py`` references ``main._sound_status_reason`` directly).
-
-See ``app/api/__init__.py`` for the full hybrid-pattern rules; the short version
-is: globals stay defined on ``app.main`` even if the router is their only caller.
+Direct imports replace the ``import app.main as main`` hybrid pattern.
 """
 from __future__ import annotations
 
@@ -14,13 +8,20 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
-import app.main as main
+from app.main import (
+    _sound_detectors,
+    _sound_detectors_lock,
+    _sound_statuses,
+    _sound_statuses_lock,
+    _sound_status_reason,
+)
 
 router = APIRouter()
 
 
 @router.get('/api/sound/classes')
 def list_sound_classes() -> dict[str, Any]:
+    from app.sound_detector import SOUND_CLASSES
     return {
         'classes': [
             {
@@ -30,37 +31,27 @@ def list_sound_classes() -> dict[str, Any]:
                 'default_threshold': meta['default_threshold'],
                 'default_cooldown': meta['default_cooldown'],
             }
-            for class_id, meta in main.SOUND_CLASSES.items()
+            for class_id, meta in SOUND_CLASSES.items()
         ]
     }
 
 
 @router.get('/api/sound/status')
 def get_sound_status(camera_id: str | None = Query(None)) -> dict[str, Any]:
-    # LOCK-ORDER INVARIANT (set/detail and aggregate both share this):
-    # _sound_statuses_lock is taken FIRST and released BEFORE _sound_detectors_lock
-    # is taken, so the two acquisitions are *sequential*, never nested. Lock A
-    # only protects a brief copy of the statuses dict into a local; Lock B is the
-    # read-side lock for detectors. Consequence: a future edit must NEVER move
-    # the second ``with`` block inside the first ``with`` block (no atomic
-    # snapshot across both is required) and must NEVER introduce a third lock
-    # that takes detectors while status still holds.
-    # Lock A: _sound_statuses_lock (acquired first, released before Lock B).
-    with main._sound_statuses_lock:
+    # LOCK-ORDER INVARIANT: _sound_statuses_lock taken FIRST and released
+    # BEFORE _sound_detectors_lock is taken (sequential, never nested).
+    with _sound_statuses_lock:
         if camera_id:
-            status = dict(main._sound_statuses.get(
+            status = dict(_sound_statuses.get(
                 camera_id,
                 {'state': 'disabled', 'last_detected_at': None, 'last_confidence': 0.0, 'backend': None},
             ))
         else:
-            statuses = dict(main._sound_statuses)
+            statuses = dict(_sound_statuses)
 
     if camera_id:
-        # Don't hold Lock A while doing per-detector IO; release it before reading det.
-        # The earlier `with main._sound_statuses_lock` block already exited.
-        # Lock B: _sound_detectors_lock (sequential after Lock A, briefly held).
-        with main._sound_detectors_lock:
-            det = main._sound_detectors.get(camera_id)
+        with _sound_detectors_lock:
+            det = _sound_detectors.get(camera_id)
         if det is not None:
             status['running'] = det.running
             status['detector_status'] = det.status
@@ -69,7 +60,7 @@ def get_sound_status(camera_id: str | None = Query(None)) -> dict[str, Any]:
             status['last_confidences'] = {k: round(v, 3) for k, v in det.last_confidences().items()}
             diagnostics = det.diagnostics()
             status['diagnostics'] = diagnostics
-            reason = main._sound_status_reason(diagnostics)
+            reason = _sound_status_reason(diagnostics)
             if reason:
                 status['reason'] = reason
         else:
@@ -78,10 +69,8 @@ def get_sound_status(camera_id: str | None = Query(None)) -> dict[str, Any]:
             status['last_confidences'] = {}
         return status
 
-    # Aggregate path: Lock A was released above; take Lock B now.
-    # Lock B: _sound_detectors_lock (sequential after Lock A, briefly held).
-    with main._sound_detectors_lock:
-        detectors = list(main._sound_detectors.values())
+    with _sound_detectors_lock:
+        detectors = list(_sound_detectors.values())
 
     if not statuses:
         return {'state': 'disabled', 'running': False, 'detector_status': 'disabled', 'last_confidences': {}}
