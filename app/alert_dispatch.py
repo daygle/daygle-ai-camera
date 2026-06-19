@@ -85,14 +85,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-import app.main as main
-# Service classes + their exception types are intentionally NOT imported
-# here; ``deliver_email_alerts`` and ``deliver_push_notifications`` reach
-# them through ``main.<ServiceName>`` / ``main.<ErrorType>`` (Pool A at
-# call time) so test monkeypatches against ``main.<attr>`` land
-# consistently. The service classes are still top-level attributes of
-# ``app.main`` via the standard top-of-file Pool-A import block in
-# ``app/main.py``.
+import app.state as _state
+from app.config_facades import effective_email_alert_settings, effective_push_notification_settings
 
 logger = logging.getLogger('daygle.ai')
 
@@ -100,8 +94,8 @@ logger = logging.getLogger('daygle.ai')
 def wait_for_pending_alert_notifications(timeout: float = 10.0) -> None:
     """Block until in-flight alert email/push deliveries finish (used by tests)."""
     deadline = time.time() + max(0.0, timeout)
-    with main._notification_threads_lock:
-        pending = [thread for thread in main._notification_threads if thread.is_alive()]
+    with _state._notification_threads_lock:
+        pending = [thread for thread in _state._notification_threads if thread.is_alive()]
     for thread in pending:
         thread.join(timeout=max(0.0, deadline - time.time()))
 
@@ -126,19 +120,20 @@ def deliver_email_alerts(
     event_id: int,
     rules: list[dict[str, Any]] | None = None,
 ) -> None:
+    from app.main import _format_alert_datetime, _rule_notify_active_now, compute_minimum_rule_confidence, render_live_snapshot_jpeg_overlay, EmailAlertService, EmailAlertError
     if not triggered:
         return
-    event = main.database.get_event(event_id) or {}
+    event = _state.database.get_event(event_id) or {}
     metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
     camera_name = str(metadata.get('camera_name') or '').strip() or None
     camera_id = str(metadata.get('camera_id') or '').strip() or None
     created_at_raw = str(event.get('created_at') or '').strip()
-    detected_at = main._format_alert_datetime(created_at_raw) if created_at_raw else None
+    detected_at = _format_alert_datetime(created_at_raw) if created_at_raw else None
     rules_by_name = {str(rule.get('name')): rule for rule in rules or []}
     any_email_enabled = any(
         (
             (rule := rules_by_name.get(str(alert.get('rule_name')), {})).get('email_enabled')
-            and main._rule_notify_active_now(rule)
+            and _rule_notify_active_now(rule)
         )
         for alert in triggered
     )
@@ -150,7 +145,7 @@ def deliver_email_alerts(
             if snap_path.exists():
                 raw_bytes = snap_path.read_bytes()
                 db_detections = event.get('detections') or []
-                _email_min_conf = main.compute_minimum_rule_confidence()
+                _email_min_conf = compute_minimum_rule_confidence()
                 overlay_detections = [
                     {
                         'label': d.get('label'),
@@ -165,10 +160,10 @@ def deliver_email_alerts(
                     for d in db_detections
                     if float(d.get('confidence') or 0) >= _email_min_conf
                 ]
-                snapshot_bytes = main.render_live_snapshot_jpeg_overlay(raw_bytes, overlay_detections)
+                snapshot_bytes = render_live_snapshot_jpeg_overlay(raw_bytes, overlay_detections)
         except Exception as exc:
             logger.debug('Failed to annotate snapshot for email alert event %s: %s', event_id, exc)
-    mailer = main.EmailAlertService(main.effective_email_alert_settings())
+    mailer = EmailAlertService(effective_email_alert_settings())
     all_triggered_labels = sorted(
         {
             str(alert.get('label') or '').strip()
@@ -180,7 +175,7 @@ def deliver_email_alerts(
         rule = rules_by_name.get(str(alert.get('rule_name')))
         if not rule or not rule.get('email_enabled'):
             continue
-        if not main._rule_notify_active_now(rule):
+        if not _rule_notify_active_now(rule):
             logger.debug(
                 'Email skipped for event %s rule %r: outside email/push window %s-%s',
                 event_id,
@@ -200,7 +195,7 @@ def deliver_email_alerts(
                 triggered_labels=all_triggered_labels,
                 detected_at=detected_at,
             )
-        except main.EmailAlertError as exc:
+        except EmailAlertError as exc:
             logger.warning(
                 'Failed to send email alert for event %s rule %s: %s',
                 event_id,
@@ -214,20 +209,21 @@ def deliver_push_notifications(
     event_id: int,
     rules: list[dict[str, Any]] | None = None,
 ) -> None:
+    from app.main import _format_alert_datetime, _rule_notify_active_now, PushNotificationService, PushNotificationError
     if not triggered:
         return
-    push_settings = main.effective_push_notification_settings()
+    push_settings = effective_push_notification_settings()
     if not push_settings.get('enabled'):
         logger.debug('Push notifications disabled globally; skipping event %s', event_id)
         return
-    event = main.database.get_event(event_id) or {}
+    event = _state.database.get_event(event_id) or {}
     metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
     camera_name = str(metadata.get('camera_name') or '').strip() or None
     camera_id = str(metadata.get('camera_id') or '').strip() or None
     created_at_raw = str(event.get('created_at') or '').strip()
-    detected_at = main._format_alert_datetime(created_at_raw) if created_at_raw else None
+    detected_at = _format_alert_datetime(created_at_raw) if created_at_raw else None
     rules_by_name = {str(rule.get('name')): rule for rule in rules or []}
-    notifier = main.PushNotificationService(push_settings)
+    notifier = PushNotificationService(push_settings)
     all_triggered_labels = sorted(
         {
             str(alert.get('label') or '').strip()
@@ -248,7 +244,7 @@ def deliver_push_notifications(
                 rule_name,
             )
             continue
-        if not main._rule_notify_active_now(rule):
+        if not _rule_notify_active_now(rule):
             logger.debug(
                 'Push skipped for event %s rule %r: outside email/push window %s-%s',
                 event_id,
@@ -267,7 +263,7 @@ def deliver_push_notifications(
                 detected_at=detected_at,
             )
             logger.info('Push notification sent for event %s rule %r', event_id, rule_name)
-        except main.PushNotificationError as exc:
+        except PushNotificationError as exc:
             logger.error(
                 'Failed to send push notification for event %s rule %r: %s',
                 event_id,

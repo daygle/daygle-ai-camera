@@ -74,7 +74,8 @@ import time
 from collections import deque
 from typing import Any
 
-import app.main as main
+import app.state as _state
+from app.config_facades import effective_live_config
 
 
 logger = logging.getLogger('daygle.ai')
@@ -94,13 +95,13 @@ def record_live_detection_history(camera_id: str, detections: list[dict[str, Any
     sample = [{'label': detection.get('label'), 'confidence': detection.get('confidence'), 'box': detection.get('box')} for detection in detections if isinstance(detection.get('box'), dict)]
     if sample_ts is None:
         sample_ts = time.time()
-    history_minutes = max(1, int((live_config or main.effective_live_config()).get('detection_history_minutes', 10)))
+    history_minutes = max(1, int((live_config or effective_live_config()).get('detection_history_minutes', 10)))
     history_maxlen = max(120, history_minutes * 120)
-    with main.live_detection_history_lock:
-        history = main.live_detection_history.get(camera_id)
+    with _state.live_detection_history_lock:
+        history = _state.live_detection_history.get(camera_id)
         if history is None:
             history = deque(maxlen=history_maxlen)
-            main.live_detection_history[camera_id] = history
+            _state.live_detection_history[camera_id] = history
         history.append((sample_ts, sample))
 
 
@@ -112,8 +113,8 @@ def build_track_from_live_history(camera_id: str | None, start_ts: float, end_ts
     disabled, or the clip predates the in-memory history)."""
     if not camera_id or end_ts <= start_ts:
         return None
-    with main.live_detection_history_lock:
-        samples = list(main.live_detection_history.get(str(camera_id), ()))
+    with _state.live_detection_history_lock:
+        samples = list(_state.live_detection_history.get(str(camera_id), ()))
     track = [{'t': round(sample_ts - start_ts, 3), 'detections': sample_detections} for sample_ts, sample_detections in samples if start_ts <= sample_ts <= end_ts]
     return track or None
 
@@ -154,41 +155,41 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
     ``diff_mask`` is ``None`` on the first frame or when an error occurs.
     """
     if pixel_threshold is None:
-        pixel_threshold = main._MOTION_PIXEL_THRESHOLD
+        pixel_threshold = _state._MOTION_PIXEL_THRESHOLD
     if gate_fraction is None:
-        gate_fraction = main._MOTION_GATE_FRACTION
+        gate_fraction = _state._MOTION_GATE_FRACTION
     if scale_fraction is None:
-        scale_fraction = main._MOTION_SCALE_FRACTION
+        scale_fraction = _state._MOTION_SCALE_FRACTION
     if background_alpha is None:
-        background_alpha = main._MOTION_BACKGROUND_ALPHA
+        background_alpha = _state._MOTION_BACKGROUND_ALPHA
     try:
         import numpy as np
         if hasattr(image, 'shape') and hasattr(image, 'dtype'):
             import cv2
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            resized = cv2.resize(gray, (main._MOTION_FRAME_W, main._MOTION_FRAME_H), interpolation=cv2.INTER_NEAREST)
+            resized = cv2.resize(gray, (_state._MOTION_FRAME_W, _state._MOTION_FRAME_H), interpolation=cv2.INTER_NEAREST)
             current = resized.astype(np.float32)
         else:
             from PIL import Image as _Image
-            img = _Image.open(io.BytesIO(image)).convert('L').resize((main._MOTION_FRAME_W, main._MOTION_FRAME_H), _Image.NEAREST)
+            img = _Image.open(io.BytesIO(image)).convert('L').resize((_state._MOTION_FRAME_W, _state._MOTION_FRAME_H), _Image.NEAREST)
             current = np.array(img, dtype=np.float32)
-        with main._frame_motion_lock:
-            background = main._frame_motion_prev.get(camera_id)
+        with _state._frame_motion_lock:
+            background = _state._frame_motion_prev.get(camera_id)
             if background is None:
-                main._frame_motion_prev[camera_id] = current
-                main._frame_motion_error_cameras.discard(camera_id)
+                _state._frame_motion_prev[camera_id] = current
+                _state._frame_motion_error_cameras.discard(camera_id)
                 return (False, 0.0, None)
             diff_mask = np.abs(current - background) > pixel_threshold
             changed_fraction = float(np.mean(diff_mask))
             if changed_fraction < gate_fraction:
                 updated_bg = (1.0 - background_alpha) * background + background_alpha * current
-                main._frame_motion_prev[camera_id] = updated_bg
-        main._frame_motion_error_cameras.discard(camera_id)
+                _state._frame_motion_prev[camera_id] = updated_bg
+        _state._frame_motion_error_cameras.discard(camera_id)
         if changed_fraction < gate_fraction:
             return (False, 0.0, diff_mask)
         return (True, round(min(1.0, changed_fraction / scale_fraction), 3), diff_mask)
     except Exception as exc:
-        if camera_id not in main._frame_motion_error_cameras:
+        if camera_id not in _state._frame_motion_error_cameras:
             logger.warning('Motion gate unavailable for camera %s: %s; failing open', camera_id, exc)
-            main._frame_motion_error_cameras.add(camera_id)
+            _state._frame_motion_error_cameras.add(camera_id)
         return (True, 0.4, None)

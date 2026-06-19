@@ -16,7 +16,8 @@ from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.camera_config import _migrate_camera_id, _redact_camera, normalize_camera_id
 from app.config_facades import effective_cameras_config
-from app.main import _camera_health_lock, _camera_health_state, apply_cameras_settings, build_stream_url, get_camera_config
+from app.main import apply_cameras_settings, build_stream_url, get_camera_config
+from app.state import _camera_health_lock, _camera_health_state
 from app.deps import get_database, get_recording_service
 from app.payload_validators import validate_camera_settings, validate_cameras_settings
 from app.ptz import send_ptz_command, VALID_COMMANDS as PTZ_VALID_COMMANDS

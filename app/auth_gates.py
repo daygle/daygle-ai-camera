@@ -67,7 +67,7 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 
-import app.main as main
+import app.state as _state
 
 
 def require_user(request: Request) -> dict[str, Any]:
@@ -87,7 +87,7 @@ def require_admin(request: Request) -> dict[str, Any]:
 
 def _request_ip(request: Request) -> str:
     direct = request.client.host if request.client else ''
-    if direct in main._LOOPBACK:
+    if direct in _state._LOOPBACK:
         forwarded = request.headers.get('x-forwarded-for')
         if forwarded:
             return forwarded.split(',')[0].strip()

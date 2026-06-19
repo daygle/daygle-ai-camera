@@ -57,14 +57,14 @@ from __future__ import annotations
 import time
 from typing import Any
 
-import app.main as main
+import app.state as _state
 
 
 def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: float) -> bool:
     if debounce_seconds <= 0 or not labels:
         return False
-    with main.live_event_last_emitted_lock:
-        previous = main.live_event_last_emitted.get(camera_id)
+    with _state.live_event_last_emitted_lock:
+        previous = _state.live_event_last_emitted.get(camera_id)
     if not previous:
         return False
     elapsed = time.time() - float(previous.get('timestamp', 0))
@@ -79,24 +79,27 @@ def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: 
 def remember_live_event(camera_id: str, labels: set[str], *, merge: bool=False) -> None:
     if not labels:
         return
-    with main.live_event_last_emitted_lock:
+    with _state.live_event_last_emitted_lock:
         if merge:
-            previous = main.live_event_last_emitted.get(camera_id) or {}
+            previous = _state.live_event_last_emitted.get(camera_id) or {}
             labels = labels | {str(label).strip().lower() for label in previous.get('labels', []) if str(label).strip()}
-        main.live_event_last_emitted[camera_id] = {'timestamp': time.time(), 'labels': sorted(labels)}
+        _state.live_event_last_emitted[camera_id] = {'timestamp': time.time(), 'labels': sorted(labels)}
 
 
 def clear_live_camera_backoff(camera_id: str) -> None:
-    with main._live_backoff_lock:
-        was_backed_off = bool(main.live_detection_failure_count.get(camera_id))
-        main.live_detection_retry_after.pop(camera_id, None)
-        main.live_detection_failure_count.pop(camera_id, None)
+    from app.main import log_camera_diagnostic
+    with _state._live_backoff_lock:
+        was_backed_off = bool(_state.live_detection_failure_count.get(camera_id))
+        _state.live_detection_retry_after.pop(camera_id, None)
+        _state.live_detection_failure_count.pop(camera_id, None)
     if was_backed_off:
-        main.log_camera_diagnostic(camera_id, 'detection_recovered', 'Live detection resumed after a successful frame read.', severity='info')
-    with main._frame_motion_lock:
-        main._frame_motion_prev.pop(camera_id, None)
-    main._frame_motion_error_cameras.discard(camera_id)
-    main._periodic_scan_last_ts.pop(camera_id, None)
+        log_camera_diagnostic(camera_id, 'detection_recovered', 'Live detection resumed after a successful frame read.', severity='info')
+    with _state._frame_motion_lock:
+        _state._frame_motion_prev.pop(camera_id, None)
+    _state._frame_motion_error_cameras.discard(camera_id)
+    _state._periodic_scan_last_ts.pop(camera_id, None)
+
+
 def schedule_live_camera_backoff(camera_id: str, message: str) -> float:
     """Record a per-camera detection failure + apply exponential backoff (max 300s).
 
@@ -105,27 +108,28 @@ def schedule_live_camera_backoff(camera_id: str, message: str) -> float:
     module) because the two helpers share the SAME three state primitives and
     are called from the same ``_detect_bg`` background closure.
 
-    Pool-C reach (resolved lazily via ``import app.main as main``):
-    - ``main._live_backoff_lock``, ``main.live_detection_failure_count``,
-      ``main.live_detection_retry_after`` (state primitives owned on main.py)
-    - ``main.update_live_detection_status`` (Phase-29 rebind from
+    Pool-C reach (resolved lazily via lazy imports inside function body):
+    - ``_state._live_backoff_lock``, ``_state.live_detection_failure_count``,
+      ``_state.live_detection_retry_after`` (state primitives owned on state.py)
+    - ``update_live_detection_status`` (Phase-29 rebind from
       app.detection_status)
-    - ``main.log_camera_diagnostic`` (top-level helper on main.py at L1265).
+    - ``log_camera_diagnostic`` (top-level helper on main.py at L1265).
     """
-    with main._live_backoff_lock:
-        failure_count = main.live_detection_failure_count.get(camera_id, 0) + 1
-        main.live_detection_failure_count[camera_id] = failure_count
+    from app.main import update_live_detection_status, log_camera_diagnostic
+    with _state._live_backoff_lock:
+        failure_count = _state.live_detection_failure_count.get(camera_id, 0) + 1
+        _state.live_detection_failure_count[camera_id] = failure_count
         backoff_seconds = min(300.0, max(10.0, 5.0 * 2 ** min(failure_count - 1, 5)))
         retry_after = time.time() + backoff_seconds
-        main.live_detection_retry_after[camera_id] = retry_after
-    main.update_live_detection_status(
+        _state.live_detection_retry_after[camera_id] = retry_after
+    update_live_detection_status(
         camera_id,
         state='error',
         reason=f'{message} Retrying in {int(backoff_seconds)}s.',
         detections=[],
     )
     if failure_count == 1:
-        main.log_camera_diagnostic(
+        log_camera_diagnostic(
             camera_id,
             'detection_backoff',
             f'Live detection paused after error: {message}',

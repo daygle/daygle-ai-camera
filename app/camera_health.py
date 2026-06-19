@@ -122,24 +122,29 @@ Stdlib imports at module top (NOT Pool C):
 
 from __future__ import annotations
 
+import logging
 import time
 from email.mime.text import MIMEText
 from typing import Any
 
-import app.main as main
+import app.state as _state
+from app.config_facades import effective_email_alert_settings, effective_push_notification_settings
+
+logger = logging.getLogger('daygle.ai')
 
 
 def effective_camera_offline_alert_settings() -> dict[str, Any]:
     settings = {'enabled': False, 'offline_delay_minutes': 1, 'recipients': []}
-    override = main.database.get_setting('camera_offline_alert')
+    override = _state.database.get_setting('camera_offline_alert')
     if isinstance(override, dict):
         settings.update(override)
     return settings
 
 
 def _update_camera_health(camera_id: str, online: bool) -> None:
-    with main._camera_health_lock:
-        state = main._camera_health_state.get(camera_id, {'online': True, 'offline_since': None, 'offline_notified': False, 'recovery_notified': False})
+    from app.main import log_camera_diagnostic
+    with _state._camera_health_lock:
+        state = _state._camera_health_state.get(camera_id, {'online': True, 'offline_since': None, 'offline_notified': False, 'recovery_notified': False})
         was_online = state.get('online', True)
         state['online'] = online
         transition: str | None = None
@@ -151,18 +156,18 @@ def _update_camera_health(camera_id: str, online: bool) -> None:
             state['offline_since'] = None
             state['offline_notified'] = False
             transition = 'online'
-        main._camera_health_state[camera_id] = state
+        _state._camera_health_state[camera_id] = state
     if transition == 'offline':
-        main.log_camera_diagnostic(camera_id, 'camera_offline', 'Camera went offline (detection unavailable).', severity='warning')
+        log_camera_diagnostic(camera_id, 'camera_offline', 'Camera went offline (detection unavailable).', severity='warning')
     elif transition == 'online':
-        main.log_camera_diagnostic(camera_id, 'camera_online', 'Camera recovered and is back online.', severity='info')
+        log_camera_diagnostic(camera_id, 'camera_online', 'Camera recovered and is back online.', severity='info')
 
 
 def _camera_offline_notification_eligible(camera_id: str) -> bool:
     delay_minutes = int(effective_camera_offline_alert_settings().get('offline_delay_minutes', 1))
     delay_seconds = max(0, delay_minutes * 60)
-    with main._camera_health_lock:
-        state = main._camera_health_state.get(camera_id)
+    with _state._camera_health_lock:
+        state = _state._camera_health_state.get(camera_id)
         if not state or state.get('online', True):
             return False
         if state.get('offline_notified'):
@@ -174,8 +179,8 @@ def _camera_offline_notification_eligible(camera_id: str) -> bool:
 
 
 def _camera_recovery_notification_eligible(camera_id: str) -> bool:
-    with main._camera_health_lock:
-        state = main._camera_health_state.get(camera_id)
+    with _state._camera_health_lock:
+        state = _state._camera_health_state.get(camera_id)
         if not state or not state.get('online', True):
             return False
         if state.get('recovery_notified'):
@@ -184,20 +189,21 @@ def _camera_recovery_notification_eligible(camera_id: str) -> bool:
 
 
 def _mark_camera_offline_notified(camera_id: str) -> None:
-    with main._camera_health_lock:
-        state = main._camera_health_state.get(camera_id)
+    with _state._camera_health_lock:
+        state = _state._camera_health_state.get(camera_id)
         if state:
             state['offline_notified'] = True
 
 
 def _mark_camera_recovery_notified(camera_id: str) -> None:
-    with main._camera_health_lock:
-        state = main._camera_health_state.get(camera_id)
+    with _state._camera_health_lock:
+        state = _state._camera_health_state.get(camera_id)
         if state:
             state['recovery_notified'] = True
 
 
 def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event_type: str) -> None:
+    from app.main import PushNotificationService, EmailAlertService
     settings = effective_camera_offline_alert_settings()
     if not settings.get('enabled'):
         return
@@ -207,17 +213,17 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
     else:
         title = f'Camera Online: {camera_name}'
         body = f'Camera {camera_name} ({camera_id}) is back online.'
-    push_settings_obj = main.effective_push_notification_settings()
+    push_settings_obj = effective_push_notification_settings()
     if push_settings_obj.get('enabled'):
         try:
-            notifier = main.PushNotificationService(push_settings_obj)
+            notifier = PushNotificationService(push_settings_obj)
             notifier._deliver(title, body)
         except Exception as exc:
-            main.logger.warning('Push notify failed for camera %s %s: %s', camera_id, event_type, exc)
-    email_settings_obj = main.effective_email_alert_settings()
+            logger.warning('Push notify failed for camera %s %s: %s', camera_id, event_type, exc)
+    email_settings_obj = effective_email_alert_settings()
     if email_settings_obj.get('enabled'):
         try:
-            mailer = main.EmailAlertService(email_settings_obj)
+            mailer = EmailAlertService(email_settings_obj)
             recipients = [r for r in settings.get('recipients') or [] if isinstance(r, str) and '@' in r]
             if not recipients:
                 fallback = str(email_settings_obj.get('from_address') or '').strip()
@@ -230,7 +236,7 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
                 msg['To'] = ', '.join(recipients)
                 mailer._deliver(msg)
         except Exception as exc:
-            main.logger.warning('Email notify failed for camera %s %s: %s', camera_id, event_type, exc)
+            logger.warning('Email notify failed for camera %s %s: %s', camera_id, event_type, exc)
     if event_type == 'offline':
         _mark_camera_offline_notified(camera_id)
     else:
@@ -238,12 +244,12 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
 
 
 def _check_cameras_health() -> None:
-    for cfg in list(main.cameras_config):
+    for cfg in list(_state.cameras_config):
         cam_id = str(cfg.get('id') or '')
         cam_name = str(cfg.get('name') or cam_id or 'Unknown')
         if not cam_id:
             continue
-        retry_after = main.live_detection_retry_after.get(cam_id, 0)
+        retry_after = _state.live_detection_retry_after.get(cam_id, 0)
         now = time.time()
         camera_online = not (retry_after and now < retry_after)
         _update_camera_health(cam_id, camera_online)

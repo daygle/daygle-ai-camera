@@ -37,10 +37,13 @@ implementations with no source edits.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
-import app.main as main
+import app.state as _state
+
+logger = logging.getLogger('daygle.ai')
 
 
 def normalize_camera_id(value: Any, fallback: str = 'camera-1') -> str:
@@ -56,12 +59,22 @@ def normalize_camera_settings(
     settings: dict[str, Any],
     index: int = 1,
 ) -> dict[str, Any]:
+    from app.main import (
+        _migrate_legacy_camera_motion,
+        _normalize_camera_sound_settings,
+        camera_default_name,
+        default_camera_detection_settings,
+        normalize_camera_ptz_settings,
+        normalize_camera_recording_settings,
+        normalize_label_list,
+        normalize_monitoring_zones,
+    )
     camera_settings = dict(settings or {})
     camera_settings['id'] = normalize_camera_id(
         camera_settings.get('id'),
         f'camera-{index}',
     )
-    camera_settings['name'] = main.camera_default_name(
+    camera_settings['name'] = camera_default_name(
         camera_settings,
         f'Camera {index}',
     )
@@ -75,27 +88,27 @@ def normalize_camera_settings(
     camera_settings['stale_frame_grabs'] = (
         int(raw_stale) if raw_stale is not None else None
     )
-    detection = main.default_camera_detection_settings()
+    detection = default_camera_detection_settings()
     if isinstance(camera_settings.get('detection'), dict):
         detection.update(camera_settings['detection'])
     detection['object_detection_enabled'] = bool(
         detection.get('object_detection_enabled', True)
     )
-    detection['object_labels'] = main.normalize_label_list(
+    detection['object_labels'] = normalize_label_list(
         detection.get('object_labels', []),
     )
-    detection['zones'] = main.normalize_monitoring_zones(
+    detection['zones'] = normalize_monitoring_zones(
         detection.get('zones', []),
     )
-    detection['sound'] = main._normalize_camera_sound_settings(
+    detection['sound'] = _normalize_camera_sound_settings(
         detection.get('sound'),
     )
-    main._migrate_legacy_camera_motion(detection)
+    _migrate_legacy_camera_motion(detection)
     camera_settings['detection'] = detection
-    camera_settings['recording'] = main.normalize_camera_recording_settings(
+    camera_settings['recording'] = normalize_camera_recording_settings(
         camera_settings.get('recording'),
     )
-    camera_settings['ptz'] = main.normalize_camera_ptz_settings(
+    camera_settings['ptz'] = normalize_camera_ptz_settings(
         camera_settings.get('ptz'),
     )
     return camera_settings
@@ -111,23 +124,24 @@ def _migrate_camera_id(old_id: str, new_id: str) -> None:
     if the destination dir already exists (the latter guards against
     silently clobbering an unrelated camera's frames).
     """
-    old_key = main.RecordingService._camera_key(old_id)
-    new_key = main.RecordingService._camera_key(new_id)
-    with main.live_detection_history_lock:
-        if old_id in main.live_detection_history:
-            main.live_detection_history[new_id] = (
-                main.live_detection_history.pop(old_id)
+    from app.main import RecordingService
+    old_key = RecordingService._camera_key(old_id)
+    new_key = RecordingService._camera_key(new_id)
+    with _state.live_detection_history_lock:
+        if old_id in _state.live_detection_history:
+            _state.live_detection_history[new_id] = (
+                _state.live_detection_history.pop(old_id)
             )
-    with main._frame_motion_lock:
-        if old_id in main._frame_motion_prev:
-            main._frame_motion_prev[new_id] = (
-                main._frame_motion_prev.pop(old_id)
+    with _state._frame_motion_lock:
+        if old_id in _state._frame_motion_prev:
+            _state._frame_motion_prev[new_id] = (
+                _state._frame_motion_prev.pop(old_id)
             )
-    if main.recording_service is not None:
+    if _state.recording_service is not None:
         for base in (
-            main.recording_service.prebuffer_dir,
-            main.recording_service.frames_dir,
-            main.recording_service.audio_dir,
+            _state.recording_service.prebuffer_dir,
+            _state.recording_service.frames_dir,
+            _state.recording_service.audio_dir,
         ):
             old_dir = base / old_key
             new_dir = base / new_key
@@ -135,7 +149,7 @@ def _migrate_camera_id(old_id: str, new_id: str) -> None:
                 try:
                     old_dir.rename(new_dir)
                 except OSError as exc:
-                    main.logger.warning(
+                    logger.warning(
                         'Could not rename ingest dir %s \u2192 %s: %s',
                         old_dir,
                         new_dir,
