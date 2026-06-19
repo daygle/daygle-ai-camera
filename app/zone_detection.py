@@ -62,7 +62,7 @@ Cluster membership (21 helpers, 290 lines original):
 
 - ``_zone_pixel_motion_fraction`` -- numpy-based per-zone motion
   pixel fraction using the boolean ``diff_mask`` from
-  ``detect_frame_motion`` at ``_MOTION_FRAME_H × _MOTION_FRAME_W``
+  ``detect_frame_motion`` at ``main._MOTION_FRAME_H × main._MOTION_FRAME_W``
   resolution. Reads ``main._MOTION_FRAME_W`` and
   ``main._MOTION_FRAME_H``. Falls back to bounds derived from
   ``zone['points']`` when the rectangle fields are missing so
@@ -171,20 +171,14 @@ from typing import Any
 from fastapi import HTTPException
 import numpy as np
 
-import app.state as _state
-from app.state import (
-    _MOTION_FRAME_W,
-    _MOTION_FRAME_H,
-    _MOTION_GATE_FRACTION,
-    _MOTION_SCALE_FRACTION,
-)
 from app.zone_schema import _LABEL_ALIASES, normalize_label_list, zone_motion_min_confidence
 
 
 def get_camera_instance(camera_id: str | None = None):
     from app.main import get_camera_config
     configured = get_camera_config(camera_id)
-    instance = _state.camera_instances.get(str(configured['id']))
+    import app.main as main
+    instance = main.camera_instances.get(str(configured['id']))
     if instance is None:
         raise HTTPException(status_code=404, detail='Camera not found')
     return instance
@@ -274,9 +268,10 @@ def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
     """Return the fraction of pixels inside a zone's bounding box that changed.
 
     ``diff_mask`` is the boolean (H×W) array from ``detect_frame_motion`` at
-    ``_MOTION_FRAME_H × _MOTION_FRAME_W`` resolution.  Zone coordinates are
+    ``main._MOTION_FRAME_H × main._MOTION_FRAME_W`` resolution.  Zone coordinates are
     normalised (0–1) and are converted to pixel indices before slicing.
     """
+    import app.main as main
     try:
         x = zone.get('x')
         y = zone.get('y')
@@ -295,10 +290,10 @@ def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
         y = float(y if y is not None else 0)
         w = float(w if w is not None else 1)
         h = float(h if h is not None else 1)
-        px1 = max(0, int(x * _MOTION_FRAME_W))
-        py1 = max(0, int(y * _MOTION_FRAME_H))
-        px2 = min(_MOTION_FRAME_W, max(px1 + 1, int(round((x + w) * _MOTION_FRAME_W))))
-        py2 = min(_MOTION_FRAME_H, max(py1 + 1, int(round((y + h) * _MOTION_FRAME_H))))
+        px1 = max(0, int(x * main._MOTION_FRAME_W))
+        py1 = max(0, int(y * main._MOTION_FRAME_H))
+        px2 = min(main._MOTION_FRAME_W, max(px1 + 1, int(round((x + w) * main._MOTION_FRAME_W))))
+        py2 = min(main._MOTION_FRAME_H, max(py1 + 1, int(round((y + h) * main._MOTION_FRAME_H))))
         return float(np.mean(diff_mask[py1:py2, px1:px2]))
     except Exception:
         return 0.0
@@ -321,10 +316,11 @@ def zone_motion_detections(
     # fully loaded. Callers that pass explicit kwargs (process_live_stream_alerts)
     # are unaffected. Tests that omit the kwargs fall back to main's value
     # transparently.
+    import app.main as main
     if gate_fraction is None:
-        gate_fraction = _MOTION_GATE_FRACTION
+        gate_fraction = main._MOTION_GATE_FRACTION
     if scale_fraction is None:
-        scale_fraction = _MOTION_SCALE_FRACTION
+        scale_fraction = main._MOTION_SCALE_FRACTION
     detection_settings = settings.get('detection') or {}
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_motion', True)]
     if not zones:
