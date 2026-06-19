@@ -3524,6 +3524,7 @@ from app.api.settings_ai_router import router as settings_ai_router
 app.include_router(settings_ai_router)
 from app.api.recordings_router import router as recordings_router
 app.include_router(recordings_router)
+from app.api.recordings_router import recording_detail  # back-compat alias for tests (Phase 3)
 
 if __name__ == '__main__':
     import uvicorn
@@ -3545,4 +3546,3 @@ from app.api.alert_push_router import router as alert_push_router
 app.include_router(alert_push_router)
 from app.api.camera_offline_router import router as camera_offline_router
 app.include_router(camera_offline_router)
-from app.api.recordings_router import recording_detail  # back-compat alias for tests (Phase 3)

@@ -77,6 +77,62 @@ def _discover_main_attr_references(*, source_text: str, source_path: Path) -> li
     return sorted(names)
 
 
+def _collect_api_imports_in_main(source_text: str, source_path: Path) -> dict[str, tuple[int, str, str]]:
+    """Every top-level ``from app.api.X import Y[ as Z]`` in ``source_text``.
+
+    Returns a dict mapping the effective binding name (the ``as Z`` if
+    present, else ``Y``) to ``(lineno, module, original_name)``. The
+    Phase 7.1 invariant consumes this to assert each binding is
+    referenced somewhere — either as a bare-name in ``app/main.py`` (the
+    ``include_router`` pattern), as ``main.<attr>`` *inside*
+    ``app/main.py``, or as ``main.<attr>`` in ``tests/test_api.py``
+    (test-only back-compat aliases).
+
+    Walks module-level ``ImportFrom`` nodes only — nested from-imports
+    inside function bodies are not relevant here (the hybrid pattern
+    keeps all cross-module imports at module top). Filters to absolute
+    imports whose module starts with ``app.api``; ignores ``from .api``
+    relative imports.
+    """
+    tree = ast.parse(source_text, filename=str(source_path))
+    out: dict[str, tuple[int, str, str]] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if node.module is None or not node.module.startswith('app.api'):
+            continue
+        if node.level != 0:
+            continue
+        for alias in node.names:
+            binding = alias.asname or alias.name
+            out[binding] = (node.lineno, node.module, alias.name)
+    return out
+
+
+def _collect_bare_name_references(source_text: str, source_path: Path) -> set[str]:
+    """Every bare ``Name`` loaded (read) in ``source_text``.
+
+    Filters on ``ast.Load`` so import / function / assignment binding
+    sites are excluded — only the actual reference sites count. The
+    ``include_router`` pattern ``app.include_router(recordings_router)``
+    registers as a bare ``Name`` read of ``recordings_router`` here.
+
+    A bare ``Name`` with ``ast.Load`` context in the include_router call
+    is the signal that distinguishes router-assembly from-imports (which
+    have NO ``main.<attr>`` reachability from main.py itself) from
+    test-only back-compat aliases (which also have NO bare-name
+    reachability in main.py — they're consumed only by tests). Both pass
+    the Phase 7.1 invariant as long as they fall into one of the three
+    consumption pools below.
+    """
+    tree = ast.parse(source_text, filename=str(source_path))
+    out: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            out.add(node.id)
+    return out
+
+
 def _collect_test_request_paths() -> tuple[list[tuple[int, str]], int]:
     """Every literal path-string passed as the first positional arg of a
     ``*.request(...)`` call in ``tests/test_api.py``.
@@ -345,4 +401,116 @@ def test_settings_ai_router_includes_exactly_ten_endpoints():
     assert len(settings_ai_paths) == EXPECTED_SETTINGS_AI_REMOVE_COUNT, (
         f"Expected exactly {EXPECTED_SETTINGS_AI_REMOVE_COUNT} endpoints in "
         f"the Phase 2 router; found {len(settings_ai_paths)}: {settings_ai_paths}"
+    )
+
+
+def test_app_api_imports_in_main_are_consumed():
+    """Phase 7.1 invariant. Every top-level ``from app.api.X import Y[ as Z]``
+    in ``app/main.py`` must be consumed somewhere — either as a bare-name
+    read in ``app/main.py`` (the ``include_router`` pattern), as
+    ``main.<attr>`` *inside* ``app/main.py``, or as ``main.<attr>`` in
+    ``tests/test_api.py`` (the Phase-3 back-compat-alias pattern, e.g.
+    ``main.recording_detail``).
+
+    Truly unused imports should be DROPPED to reduce module-load cost on
+    every test-collection cycle. Imports consumed ONLY by tests as
+    ``main.<attr>`` must STAY as back-compat aliases per rule 5 of
+    ``app/api/__init__.py``.
+
+    Failure mode this guard exists to defeat: Phase 7 once removed
+    ``from app.api.recordings_router import recording_detail`` after a
+    one-off orphan-audit walked only ``app/main.py`` and saw exactly one
+    occurrence of ``recording_detail`` (the import itself). It missed
+    that ``tests/test_api.py`` accesses the binding as
+    ``main.recording_detail(recording_id)``. The resulting 3-test failure
+    was caught by ``test_all_main_attr_references_resolve_on_app_main``
+    AFTER the bad edit; this invariant catches the same regression class
+    at audit / commit time so the bad edit never ships.
+
+    Diagnostic shape on failure: ``file:lineno: from <module> import
+    <original>[ as <alias>]`` per orphan import — so the next refactor
+    sees exactly which line to either drop or convert to a named
+    back-compat alias.
+    """
+    main_text = APP_MAIN_PY.read_text(encoding='utf-8')
+    api_imports = _collect_api_imports_in_main(
+        source_text=main_text, source_path=APP_MAIN_PY,
+    )
+
+    # Sanity floor: as of Phase 7.1 there are 11 from-imports in
+    # app/main.py (10 router-assembly + 1 back-compat). Floor `>= 5`
+    # absorbs future router consolidations (e.g. merging sound_router +
+    # settings_ai_router into a single router drops the count to ~9,
+    # still above the floor; deeper merges down to ~5 still pass). The
+    # floor's job is to fail loudly if a future refactor accidentally
+    # makes the walker go vacuous (e.g. a wrong module filter, AST
+    # walking changes, or a typo in the walker). Lower it further only
+    # if a legitimate consolidation has documented phase-X tally < 5.
+    assert len(api_imports) >= 5, (
+        f"_collect_api_imports_in_main walker found only {len(api_imports)} "
+        f"app.api bindings at the top of app/main.py. Has the walker gone "
+        f"vacuous, or did a Phase-N import-shape refactor require a tally "
+        f"bump in the comment above?"
+    )
+
+    #    Three consumption pools. A binding passes if it lands in ANY one.
+    bare_names_main = _collect_bare_name_references(
+        source_text=main_text, source_path=APP_MAIN_PY,
+    )
+    main_attrs_main = set(_discover_main_attr_references(
+        source_text=main_text, source_path=APP_MAIN_PY,
+    ))
+
+    # Pool C: `main.<attr>` reachability across all consumer-facing files
+    # in `tests/` AND in `app/` (except `app/main.py`, which Pool B
+    # already covers). The Phase 7 audit misuse only walked `app/main.py`
+    # itself; this broadened symmetric scan tightens the consumer-net so
+    # a back-compat from-import consumed by ANY sibling test file OR
+    # ANY sibling app module (today or future) is correctly classified
+    # as not-orphan. Both globs use recursive `rglob` so a future
+    # `tests/integration/test_X.py` and a future `app/feature/ext.py`
+    # join the scan for free on the same footing.
+    consumer_paths: list[Path] = []
+    consumer_paths.extend(sorted((PROJECT_ROOT / 'tests').rglob('*.py')))
+    for app_py in sorted((PROJECT_ROOT / 'app').rglob('*.py')):
+        if app_py == APP_MAIN_PY:
+            continue  # Pool B already walks main.py
+        consumer_paths.append(app_py)
+    main_attrs_consumers: set[str] = set()
+    for cp in consumer_paths:
+        if not cp.is_file():
+            continue
+        # Let ast.parse raise loudly on malformed vendored .py -- a
+        # silently-skipped file would mask a real SyntaxError regression
+        # in a sibling test. Property of `_discover_main_attr_references`
+        # is that it always either parses or raises; we don't catch.
+        main_attrs_consumers.update(_discover_main_attr_references(
+            source_text=cp.read_text(encoding='utf-8'),
+            source_path=cp,
+        ))
+
+    orphans: list[tuple[int, str, str, str]] = []
+    for binding, (lineno, module, original_name) in api_imports.items():
+        if (
+            binding in bare_names_main
+            or binding in main_attrs_main
+            or binding in main_attrs_consumers
+        ):
+            continue
+        alias_tag = f" as {binding}" if binding != original_name else ""
+        orphans.append((lineno, module, original_name, alias_tag))
+
+    assert not orphans, (
+        f"Phase 7.1 orphan-import invariant violation: found {len(orphans)} "
+        f"unused app.api from-imports in app/main.py:\n  "
+        + "\n  ".join(
+            f"app/main.py:{ln}: from {m} import {n}{a}"
+            for ln, m, n, a in orphans
+        )
+        + "\n\nTruly unused imports should be dropped (they bloat module-load "
+        "cost on every test-collection cycle). Imports consumed ONLY by tests "
+        "as `main.<attr>` must stay as back-compat aliases and should be "
+        "placed adjacent to the originating router's `app.include_router(...)` "
+        "line for discoverability (see Phase 7.1 regroup convention).\n"
+        "Reference: rule 5 of app/api/__init__.py."
     )
