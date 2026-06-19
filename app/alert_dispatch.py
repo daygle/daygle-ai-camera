@@ -49,13 +49,16 @@ modification (the new module exposes them as clean public APIs:
   ``main.py``.
 * ``main.render_live_snapshot_jpeg_overlay(...)`` — Phase-25 rebind
   from ``app.live_snapshot``.
-
-**Downstream modules imported directly (no Pool C needed):**
-
-* ``app.email_alerts.{EmailAlertError, EmailAlertService}`` — already
-  standalone, only takes a settings dict at init.
-* ``app.push_notifications.{PushNotificationError, PushNotificationService}``
-  — already standalone.
+* ``main.EmailAlertService``, ``main.EmailAlertError``,
+  ``main.PushNotificationService``, ``main.PushNotificationError``
+  — service classes + exception types reached via Pool A so tests can
+  monkeypatch ``main.<ServiceName>`` consistently (mirrors the Pool-A
+  contract documented in :mod:`app.api.__init__` and the proven
+  pattern in :mod:`app.detection_state`, :mod:`app.event_debounce`,
+  :mod:`app.detection_status`). Replaces the previous direct
+  top-of-module imports (see commit history — the bypass produced a
+  single failing pytest case post-Phase-28, fixed by restoring the
+  Pool-A reach).
 
 **Logger acquisition:** the module uses its OWN child logger via
 ``logging.getLogger('daygle.ai')`` (matching the Phase-26
@@ -83,8 +86,13 @@ from pathlib import Path
 from typing import Any
 
 import app.main as main
-from app.email_alerts import EmailAlertError, EmailAlertService
-from app.push_notifications import PushNotificationError, PushNotificationService
+# Service classes + their exception types are intentionally NOT imported
+# here; ``deliver_email_alerts`` and ``deliver_push_notifications`` reach
+# them through ``main.<ServiceName>`` / ``main.<ErrorType>`` (Pool A at
+# call time) so test monkeypatches against ``main.<attr>`` land
+# consistently. The service classes are still top-level attributes of
+# ``app.main`` via the standard top-of-file Pool-A import block in
+# ``app/main.py``.
 
 logger = logging.getLogger('daygle.ai')
 
@@ -160,7 +168,7 @@ def deliver_email_alerts(
                 snapshot_bytes = main.render_live_snapshot_jpeg_overlay(raw_bytes, overlay_detections)
         except Exception as exc:
             logger.debug('Failed to annotate snapshot for email alert event %s: %s', event_id, exc)
-    mailer = EmailAlertService(main.effective_email_alert_settings())
+    mailer = main.EmailAlertService(main.effective_email_alert_settings())
     all_triggered_labels = sorted(
         {
             str(alert.get('label') or '').strip()
@@ -192,7 +200,7 @@ def deliver_email_alerts(
                 triggered_labels=all_triggered_labels,
                 detected_at=detected_at,
             )
-        except EmailAlertError as exc:
+        except main.EmailAlertError as exc:
             logger.warning(
                 'Failed to send email alert for event %s rule %s: %s',
                 event_id,
@@ -219,7 +227,7 @@ def deliver_push_notifications(
     created_at_raw = str(event.get('created_at') or '').strip()
     detected_at = main._format_alert_datetime(created_at_raw) if created_at_raw else None
     rules_by_name = {str(rule.get('name')): rule for rule in rules or []}
-    notifier = PushNotificationService(push_settings)
+    notifier = main.PushNotificationService(push_settings)
     all_triggered_labels = sorted(
         {
             str(alert.get('label') or '').strip()
@@ -259,7 +267,7 @@ def deliver_push_notifications(
                 detected_at=detected_at,
             )
             logger.info('Push notification sent for event %s rule %r', event_id, rule_name)
-        except PushNotificationError as exc:
+        except main.PushNotificationError as exc:
             logger.error(
                 'Failed to send push notification for event %s rule %r: %s',
                 event_id,
