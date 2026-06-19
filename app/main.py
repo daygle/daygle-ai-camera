@@ -212,6 +212,7 @@ from app.zone_schema import (
     normalize_monitoring_zones as normalize_monitoring_zones,
     normalize_zone_object_rules as normalize_zone_object_rules,
     normalize_zone_point as normalize_zone_point,
+    rectangle_zone_points as rectangle_zone_points,
     zone_bounds as zone_bounds,
     zone_motion_min_confidence as zone_motion_min_confidence,
 )
@@ -914,6 +915,7 @@ from app.api.auth_router import router as auth_router
 app.include_router(auth_router)
 from app.api.web_router import login_page as login_page
 from app.api.web_router import setup_page as setup_page
+_WEB_ROUTER_PAGE_ALIASES = (login_page, setup_page)
 from app.middleware import authentication_middleware, app_navigation_middleware
 app.middleware('http')(authentication_middleware)
 app.middleware('http')(app_navigation_middleware)

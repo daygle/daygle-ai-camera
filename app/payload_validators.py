@@ -101,8 +101,6 @@ from typing import Any
 
 from fastapi import HTTPException
 
-import app.state as _state
-
 
 def _int_field(payload: dict[str, Any], field: str, default: int, minimum: int, maximum: int) -> int:
     try:
@@ -237,16 +235,17 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
 
 
 def validate_cameras_settings(payload: Any) -> list[dict[str, Any]]:
+    import app.main as main
     raw_cameras = payload.get('cameras') if isinstance(payload, dict) else payload
     if not isinstance(raw_cameras, list):
         raise HTTPException(status_code=400, detail='cameras must be a list.')
     validated: list[dict[str, Any]] = []
     seen: set[str] = set()
-    current_by_id = {str(camera_settings.get('id')): camera_settings for camera_settings in _state.cameras_config}
+    current_by_id = {str(camera_settings.get('id')): camera_settings for camera_settings in main.cameras_config}
     for index, raw_camera in enumerate(raw_cameras, start=1):
         if not isinstance(raw_camera, dict):
             raise HTTPException(status_code=400, detail='Each camera must be an object.')
-        current = current_by_id.get(str(raw_camera.get('id'))) or (_state.cameras_config[index - 1] if index <= len(_state.cameras_config) else {})
+        current = current_by_id.get(str(raw_camera.get('id'))) or (main.cameras_config[index - 1] if index <= len(main.cameras_config) else {})
         camera_settings = validate_camera_settings(raw_camera, current=current, index=index)
         if camera_settings['id'] in seen:
             raise HTTPException(status_code=400, detail=f"Duplicate camera id: {camera_settings['id']}.")
@@ -269,7 +268,7 @@ def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_storage_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    from app.main import effective_storage_config
+    from app.main import config, effective_storage_config
     current = effective_storage_config()
     updated = {key: str(current.get(key) or '') for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir', 'database')}
     for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir'):
@@ -278,11 +277,12 @@ def validate_storage_settings(payload: dict[str, Any]) -> dict[str, Any]:
             if not value:
                 raise HTTPException(status_code=400, detail=f'{key} cannot be blank.')
             updated[key] = value
-    updated['database'] = str(_state.config.get('storage', {}).get('database') or updated.get('database') or 'data/daygle_ai_camera.sqlite3')
+    updated['database'] = str(config.get('storage', {}).get('database') or updated.get('database') or 'data/daygle_ai_camera.sqlite3')
     return updated
 
 
 def validate_auth_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    import app.main as main
     current = main.effective_auth_config()
     merged = {**current, **payload}
     try:
@@ -295,6 +295,7 @@ def validate_auth_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    import app.main as main
     current = main.effective_live_config()
     merged = {**current, **payload}
     snapshot_refresh_ms = _int_field(merged, 'snapshot_refresh_ms', 500, 150, 5000)
