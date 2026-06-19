@@ -130,7 +130,6 @@ async def app_lifespan(_app: FastAPI):
         stop_live_alert_monitor()
         stop_sound_monitor()
 
-
 app = FastAPI(title='Daygle AI Camera', lifespan=app_lifespan)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -146,11 +145,9 @@ def effective_ai_config() -> dict[str, Any]:
         settings.update(override)
     return settings
 
-
 _min_rule_confidence_cache: tuple[float, float] | None = None  # (value, timestamp)
 _MIN_RULE_CONFIDENCE_TTL = 5.0  # seconds; short enough to pick up user edits promptly
 _min_rule_confidence_lock = threading.Lock()
-
 
 def compute_minimum_rule_confidence(fallback: float | None = None) -> float:
     """Return the lowest min_confidence across all enabled object rules so YOLO's floor never silently suppresses per-rule thresholds.
@@ -198,14 +195,12 @@ def compute_minimum_rule_confidence(fallback: float | None = None) -> float:
         _min_rule_confidence_cache = (result, time.time())
         return result
 
-
 def effective_recording_config() -> dict[str, Any]:
     settings = copy.deepcopy(config.get('recording', {}))
     override = database.get_setting('recording')
     if isinstance(override, dict):
         settings.update(override)
     return settings
-
 
 def effective_live_config() -> dict[str, Any]:
     settings = {
@@ -236,7 +231,6 @@ def effective_live_config() -> dict[str, Any]:
         settings.update(override)
     return settings
 
-
 def camera_event_recording_config(settings: dict[str, Any]) -> dict[str, Any]:
     base = effective_recording_config()
     camera_recording = normalize_camera_recording_settings(settings.get('recording'))
@@ -244,7 +238,6 @@ def camera_event_recording_config(settings: dict[str, Any]) -> dict[str, Any]:
         'continuous': camera_recording['continuous'],
     })
     return base
-
 
 def effective_storage_config() -> dict[str, Any]:
     settings = copy.deepcopy(config.get('storage', {}))
@@ -255,14 +248,12 @@ def effective_storage_config() -> dict[str, Any]:
         settings['database'] = database_path
     return settings
 
-
 def effective_auth_config() -> dict[str, Any]:
     settings = copy.deepcopy(auth_config)
     override = database.get_setting('auth')
     if isinstance(override, dict):
         settings.update(override)
     return settings
-
 
 def effective_email_alert_settings() -> dict[str, Any]:
     settings = copy.deepcopy(config.get('alerts', {}).get('email', {}))
@@ -271,14 +262,12 @@ def effective_email_alert_settings() -> dict[str, Any]:
         settings.update(override)
     return settings
 
-
 def effective_push_notification_settings() -> dict[str, Any]:
     settings = copy.deepcopy(config.get('alerts', {}).get('push_notification', {}))
     override = database.get_setting('alert_push')
     if isinstance(override, dict):
         settings.update(override)
     return settings
-
 
 database = EventDatabase(config['storage']['database'])
 camera_config: dict[str, Any] = {}
@@ -290,7 +279,6 @@ storage = Storage({**config, 'storage': effective_storage_config()})
 recording_service = RecordingService({**config, 'storage': effective_storage_config(), 'recording': effective_recording_config()})
 auth = AuthService(config['storage']['database'], effective_auth_config())
 SESSION_COOKIE_NAME = str(effective_auth_config().get('cookie_name', SESSION_COOKIE))
-
 
 detector = create_detector(effective_ai_config())
 last_detector_error: str | None = getattr(detector, 'unavailable_reason', None)
@@ -367,12 +355,9 @@ def _sound_status_reason(diagnostics: list[dict[str, Any]]) -> dict[str, Any] | 
         'cooldown_remaining': top['cooldown_remaining'],
     }
 
-
-
 # ── Camera offline alert health tracking ─────────────────────────────────
 _camera_health_state: dict[str, dict[str, Any]] = {}
 _camera_health_lock = threading.Lock()
-
 
 def effective_camera_offline_alert_settings() -> dict[str, Any]:
     settings = {
@@ -384,8 +369,6 @@ def effective_camera_offline_alert_settings() -> dict[str, Any]:
     if isinstance(override, dict):
         settings.update(override)
     return settings
-
-
 
 def _alert_datetime_prefs() -> tuple[str, str, str]:
     """Return (timezone_name, date_format, time_format) from the primary admin user."""
@@ -403,7 +386,6 @@ def _alert_datetime_prefs() -> tuple[str, str, str]:
     except Exception:
         pass
     return ('UTC', 'iso', '24h')
-
 
 def _rule_notify_active_now(rule: dict[str, Any]) -> bool:
     """Return True if a rule's email/push window (notify_start/notify_end) covers now.
@@ -429,7 +411,6 @@ def _rule_notify_active_now(rule: dict[str, Any]) -> bool:
         return start <= now_hm <= end
     return now_hm >= start or now_hm <= end
 
-
 def _format_alert_datetime(iso_str: str) -> str:
     """Format a UTC ISO timestamp for display in alerts using the admin user's preferences."""
     tz_name, date_fmt, time_fmt = _alert_datetime_prefs()
@@ -452,7 +433,6 @@ def _format_alert_datetime(iso_str: str) -> str:
     else:
         time_str = dt.strftime('%H:%M:%S')
     return f"{date_str} {time_str} {tz_label}"
-
 
 def _update_camera_health(camera_id: str, online: bool) -> None:
     with _camera_health_lock:
@@ -481,7 +461,6 @@ def _update_camera_health(camera_id: str, online: bool) -> None:
     elif transition == 'online':
         log_camera_diagnostic(camera_id, 'camera_online', 'Camera recovered and is back online.', severity='info')
 
-
 def _camera_offline_notification_eligible(camera_id: str) -> bool:
     delay_minutes = int(effective_camera_offline_alert_settings().get('offline_delay_minutes', 1))
     delay_seconds = max(0, delay_minutes * 60)
@@ -496,7 +475,6 @@ def _camera_offline_notification_eligible(camera_id: str) -> bool:
             return False
         return time.time() - offline_since >= delay_seconds
 
-
 def _camera_recovery_notification_eligible(camera_id: str) -> bool:
     with _camera_health_lock:
         state = _camera_health_state.get(camera_id)
@@ -506,20 +484,17 @@ def _camera_recovery_notification_eligible(camera_id: str) -> bool:
             return False
         return state.get('offline_notified', False)
 
-
 def _mark_camera_offline_notified(camera_id: str) -> None:
     with _camera_health_lock:
         state = _camera_health_state.get(camera_id)
         if state:
             state['offline_notified'] = True
 
-
 def _mark_camera_recovery_notified(camera_id: str) -> None:
     with _camera_health_lock:
         state = _camera_health_state.get(camera_id)
         if state:
             state['recovery_notified'] = True
-
 
 def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event_type: str) -> None:
     settings = effective_camera_offline_alert_settings()
@@ -563,7 +538,6 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
     else:
         _mark_camera_recovery_notified(camera_id)
 
-
 def _check_cameras_health() -> None:
     for cfg in list(cameras_config):
         cam_id = str(cfg.get('id') or '')
@@ -579,10 +553,8 @@ def _check_cameras_health() -> None:
         elif _camera_recovery_notification_eligible(cam_id):
             _deliver_camera_offline_notification(cam_id, cam_name, 'recovery')
 
-
 def _non_empty_setting(settings: dict[str, Any], key: str) -> str:
     return str(settings.get(key) or '').strip()
-
 
 def build_stream_url(settings: dict[str, Any]) -> str:
     stream_url = _non_empty_setting(settings, 'stream_url')
@@ -616,22 +588,18 @@ def build_stream_url(settings: dict[str, Any]) -> str:
         credentials += '@'
     return f'rtsp://{credentials}{host}:{port}/{path}'
 
-
 def camera_default_name(settings: dict[str, Any], fallback: str = 'Primary Camera') -> str:
     return str(settings.get('name') or settings.get('device') or fallback).strip() or fallback
-
 
 def normalize_camera_id(value: Any, fallback: str = 'camera-1') -> str:
     camera_id = re.sub(r'[^a-zA-Z0-9_-]+', '-', str(value or '').strip().lower()).strip('-')
     return camera_id or fallback
-
 
 def default_camera_detection_settings() -> dict[str, Any]:
     return {
         'object_detection_enabled': True,
         'zones': [],
     }
-
 
 def normalize_bool_setting(value: Any, default: bool = False) -> bool:
     if value is None:
@@ -640,13 +608,11 @@ def normalize_bool_setting(value: Any, default: bool = False) -> bool:
         return value
     return str(value).strip().lower() in {'1', 'true', 'yes', 'on', 'enabled'}
 
-
 _LABEL_ALIASES: dict[str, str] = {
     'human': 'person',
     'people': 'person',
     'pedestrian': 'person',
 }
-
 
 def normalize_label_list(value: Any) -> list[str]:
     if isinstance(value, str):
@@ -664,7 +630,6 @@ def normalize_label_list(value: Any) -> list[str]:
             seen.add(label)
     return labels
 
-
 def normalize_email_recipients(value: Any) -> list[str]:
     raw_recipients = value.split(',') if isinstance(value, str) else value
     if not isinstance(raw_recipients, list):
@@ -677,7 +642,6 @@ def normalize_email_recipients(value: Any) -> list[str]:
             recipients.append(recipient)
             seen.add(recipient.lower())
     return recipients
-
 
 def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
     raw_rules = zone.get('object_rules')
@@ -722,7 +686,6 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
         })
     return rules
 
-
 def zone_motion_min_confidence(zone: dict[str, Any]) -> float:
     for rule in zone.get('object_rules', []):
         if str(rule.get('label') or '').strip().lower() == 'motion' and rule.get('enabled', True):
@@ -732,13 +695,11 @@ def zone_motion_min_confidence(zone: dict[str, Any]) -> float:
                 return 0.45
     return 0.45
 
-
 def normalize_camera_recording_settings(settings: Any) -> dict[str, Any]:
     raw = settings if isinstance(settings, dict) else {}
     # Only 'continuous' remains; stale keys from older configs (enabled,
     # record_on_alert) are intentionally dropped.
     return {'continuous': normalize_bool_setting(raw.get('continuous'), False)}
-
 
 def normalize_camera_ptz_settings(settings: Any) -> dict[str, Any]:
     raw = settings if isinstance(settings, dict) else {}
@@ -761,7 +722,6 @@ def normalize_camera_ptz_settings(settings: Any) -> dict[str, Any]:
         'speed': _int(raw.get('speed'), 5, 1, 8),
     }
 
-
 def normalize_zone_point(point: Any) -> dict[str, float] | None:
     if not isinstance(point, dict):
         return None
@@ -772,7 +732,6 @@ def normalize_zone_point(point: Any) -> dict[str, float] | None:
         return None
     return {'x': round(x, 4), 'y': round(y, 4)}
 
-
 def rectangle_zone_points(x: float, y: float, width: float, height: float) -> list[dict[str, float]]:
     return [
         {'x': round(x, 4), 'y': round(y, 4)},
@@ -780,7 +739,6 @@ def rectangle_zone_points(x: float, y: float, width: float, height: float) -> li
         {'x': round(x + width, 4), 'y': round(y + height, 4)},
         {'x': round(x, 4), 'y': round(y + height, 4)},
     ]
-
 
 def zone_bounds(points: list[dict[str, float]]) -> tuple[float, float, float, float]:
     xs = [point['x'] for point in points]
@@ -790,7 +748,6 @@ def zone_bounds(points: list[dict[str, float]]) -> tuple[float, float, float, fl
     right = max(xs)
     bottom = max(ys)
     return left, top, max(0.01, right - left), max(0.01, bottom - top)
-
 
 def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
@@ -864,7 +821,6 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
         })
     return normalized
 
-
 def _normalize_camera_sound_settings(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raw = {}
@@ -909,7 +865,6 @@ def _normalize_camera_sound_settings(raw: Any) -> dict[str, Any]:
         })
     return {'enabled': enabled, 'rules': rules}
 
-
 def _migrate_legacy_camera_motion(detection: dict[str, Any]) -> None:
     """Fold the removed camera-level motion master switch into each zone's
     motion rule, then drop the legacy fields.
@@ -938,7 +893,6 @@ def _migrate_legacy_camera_motion(detection: dict[str, Any]) -> None:
             if str(rule.get('label') or '').strip().lower() == 'motion':
                 rule['enabled'] = False
 
-
 def normalize_camera_settings(settings: dict[str, Any], index: int = 1) -> dict[str, Any]:
     camera_settings = dict(settings or {})
     camera_settings['id'] = normalize_camera_id(camera_settings.get('id'), f'camera-{index}')
@@ -962,13 +916,11 @@ def normalize_camera_settings(settings: dict[str, Any], index: int = 1) -> dict[
     camera_settings['ptz'] = normalize_camera_ptz_settings(camera_settings.get('ptz'))
     return camera_settings
 
-
 def effective_cameras_config() -> list[dict[str, Any]]:
     override = database.get_setting('cameras')
     if isinstance(override, list) and override:
         return [normalize_camera_settings(camera_settings, index) for index, camera_settings in enumerate(override, start=1)]
     return []
-
 
 def get_camera_config(camera_id: str | None = None) -> dict[str, Any]:
     if not cameras_config:
@@ -981,14 +933,12 @@ def get_camera_config(camera_id: str | None = None) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail='Camera not found')
     return cameras_config[0]
 
-
 def get_camera_instance(camera_id: str | None = None):
     configured = get_camera_config(camera_id)
     instance = camera_instances.get(str(configured['id']))
     if instance is None:
         raise HTTPException(status_code=404, detail='Camera not found')
     return instance
-
 
 def detection_center_in_zone(detection: dict[str, Any], zone: dict[str, Any]) -> bool:
     box = detection.get('box') or {}
@@ -1001,7 +951,6 @@ def detection_center_in_zone(detection: dict[str, Any], zone: dict[str, Any]) ->
         float(zone['x']) <= center_x <= float(zone['x']) + float(zone['width'])
         and float(zone['y']) <= center_y <= float(zone['y']) + float(zone['height'])
     )
-
 
 def detection_overlap_ratio_with_zone_rect(detection: dict[str, Any], zone: dict[str, Any]) -> float:
     box = detection.get('box') or {}
@@ -1035,7 +984,6 @@ def detection_overlap_ratio_with_zone_rect(detection: dict[str, Any], zone: dict
     detection_area = width * height
     return intersection / detection_area if detection_area > 0 else 0.0
 
-
 def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any], *, min_overlap_ratio: float = 0.2) -> bool:
     if detection_center_in_zone(detection, zone):
         return True
@@ -1047,7 +995,6 @@ def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any], *, m
     # For rectangular zones fall back to bounding-rect overlap so large objects
     # straddling the edge are not silently dropped.
     return detection_overlap_ratio_with_zone_rect(detection, zone) >= min_overlap_ratio
-
 
 def point_in_polygon(x: float, y: float, points: list[dict[str, Any]]) -> bool:
     if len(points) < 3:
@@ -1073,20 +1020,17 @@ def point_in_polygon(x: float, y: float, points: list[dict[str, Any]]) -> bool:
         previous = current
     return inside
 
-
 def point_on_segment(x: float, y: float, x1: float, y1: float, x2: float, y2: float) -> bool:
     cross = (y - y1) * (x2 - x1) - (x - x1) * (y2 - y1)
     if abs(cross) > 1e-9:
         return False
     return min(x1, x2) - 1e-9 <= x <= max(x1, x2) + 1e-9 and min(y1, y2) - 1e-9 <= y <= max(y1, y2) + 1e-9
 
-
 def filter_detections_for_camera(detections: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
     if not detection_settings.get('object_detection_enabled', True):
         return []
     return filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects')
-
 
 def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
     """Return the fraction of pixels inside a zone's bounding box that changed.
@@ -1124,7 +1068,6 @@ def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
         return float(np.mean(diff_mask[py1:py2, px1:px2]))
     except Exception:
         return 0.0
-
 
 def zone_motion_detections(
     settings: dict[str, Any],
@@ -1180,7 +1123,6 @@ def zone_motion_detections(
         })
     return result
 
-
 def detection_label_allowed_for_zone(detection: dict[str, Any], zone: dict[str, Any], camera_labels: set[str]) -> bool:
     zone_labels = set(normalize_label_list(zone.get('object_labels', [])))
     allowed_labels = zone_labels or camera_labels
@@ -1188,7 +1130,6 @@ def detection_label_allowed_for_zone(detection: dict[str, Any], zone: dict[str, 
         return True
     label = str(detection.get('label') or '').strip().lower()
     return _LABEL_ALIASES.get(label, label) in allowed_labels
-
 
 def filter_detections_for_camera_zones(detections: list[dict[str, Any]], settings: dict[str, Any], *, zone_monitor_key: str, require_zones: bool = False) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
@@ -1207,7 +1148,6 @@ def filter_detections_for_camera_zones(detections: list[dict[str, Any]], setting
             for zone in zones
         )
     ]
-
 
 def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any], *, action: str) -> list[tuple[dict[str, Any], dict[str, Any]]]:
     detection_settings = settings.get('detection') or {}
@@ -1233,7 +1173,6 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
                 continue
             matches.append((zone, rule))
     return matches
-
 
 def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
@@ -1266,13 +1205,11 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
             })
     return rules
 
-
 def zone_rule_name(settings: dict[str, Any], zone: dict[str, Any], rule: dict[str, Any]) -> str:
     camera_name = str(settings.get('name') or settings.get('id') or 'Camera')
     zone_name = str(zone.get('name') or zone.get('id') or 'Zone')
     label = str(rule.get('label') or '').strip().lower()
     return f'{camera_name} / {zone_name} / {label}'
-
 
 def zone_alert_detections(settings: dict[str, Any], detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
     matched: list[dict[str, Any]] = []
@@ -1291,7 +1228,6 @@ def zone_alert_detections(settings: dict[str, Any], detections: list[dict[str, A
             })
     return matched
 
-
 def zone_name_for_detection(settings: dict[str, Any], detection: dict[str, Any]) -> str | None:
     for action in ('alert', 'record'):
         matches = zone_object_rule_matches(settings, detection, action=action)
@@ -1301,10 +1237,8 @@ def zone_name_for_detection(settings: dict[str, Any], detection: dict[str, Any])
             return zone_name or None
     return None
 
-
 def zone_record_on_detect(detection: dict[str, Any], settings: dict[str, Any]) -> bool:
     return bool(zone_object_rule_matches(settings, detection, action='record'))
-
 
 def zone_motion_record_on_detect(settings: dict[str, Any]) -> bool:
     """Return True if any enabled motion-monitoring zone has a motion rule with record_on_detect=True.
@@ -1324,10 +1258,8 @@ def zone_motion_record_on_detect(settings: dict[str, Any]) -> bool:
                 return True
     return False
 
-
 def zone_detection_alert_rule_names(settings: dict[str, Any], detection: dict[str, Any]) -> set[str]:
     return {zone_rule_name(settings, zone, rule) for zone, rule in zone_object_rule_matches(settings, detection, action='alert')}
-
 
 def detection_has_matching_record_rule(detection: dict[str, Any], rules: list[dict[str, Any]]) -> bool:
     """Return True if any enabled alert rule covers this detection by label and confidence.
@@ -1354,7 +1286,6 @@ def detection_has_matching_record_rule(detection: dict[str, Any], rules: list[di
         if confidence >= min_conf:
             return True
     return False
-
 
 def normalize_detection_boxes_for_frame(detections: list[dict[str, Any]], frame: dict[str, Any]) -> list[dict[str, Any]]:
     width = float(frame.get('width') or 0)
@@ -1385,7 +1316,6 @@ def normalize_detection_boxes_for_frame(detections: list[dict[str, Any]], frame:
         })
     return normalized
 
-
 def update_live_detection_status(camera_id: str, **updates: Any) -> None:
     with live_detection_status_lock:
         live_detection_status[camera_id] = {
@@ -1394,7 +1324,6 @@ def update_live_detection_status(camera_id: str, **updates: Any) -> None:
             'camera_id': camera_id,
             'updated_at': datetime.now(timezone.utc).isoformat(),
         }
-
 
 def record_live_detection_history(camera_id: str, detections: list[dict[str, Any]], sample_ts: float | None = None, *, live_config: dict[str, Any] | None = None) -> None:
     """Append one monitor cycle's detections to the camera's rolling history.
@@ -1423,7 +1352,6 @@ def record_live_detection_history(camera_id: str, detections: list[dict[str, Any
             live_detection_history[camera_id] = history
         history.append((sample_ts, sample))
 
-
 def build_track_from_live_history(camera_id: str | None, start_ts: float, end_ts: float) -> list[dict[str, Any]] | None:
     """Slice the monitor's detection history into a clip-relative track.
 
@@ -1441,14 +1369,12 @@ def build_track_from_live_history(camera_id: str | None, start_ts: float, end_ts
     ]
     return track or None
 
-
 def detection_label_set(detections: list[dict[str, Any]]) -> set[str]:
     return {
         str(detection.get('label') or '').strip().lower()
         for detection in detections
         if str(detection.get('label') or '').strip()
     }
-
 
 def detect_frame_motion(
     camera_id: str,
@@ -1525,7 +1451,6 @@ def detect_frame_motion(
             _frame_motion_error_cameras.add(camera_id)
         return True, 0.4, None
 
-
 def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: float) -> bool:
     if debounce_seconds <= 0 or not labels:
         return False
@@ -1544,7 +1469,6 @@ def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: 
     previous_labels = {str(label).strip().lower() for label in previous.get('labels', []) if str(label).strip()}
     return bool(previous_labels & labels)
 
-
 def remember_live_event(camera_id: str, labels: set[str], *, merge: bool = False) -> None:
     if not labels:
         return
@@ -1558,7 +1482,6 @@ def remember_live_event(camera_id: str, labels: set[str], *, merge: bool = False
             'timestamp': time.time(),
             'labels': sorted(labels),
         }
-
 
 def clear_live_camera_backoff(camera_id: str) -> None:
     with _live_backoff_lock:
@@ -1581,7 +1504,6 @@ def clear_live_camera_backoff(camera_id: str) -> None:
         _frame_motion_prev.pop(camera_id, None)
     _frame_motion_error_cameras.discard(camera_id)
     _periodic_scan_last_ts.pop(camera_id, None)
-
 
 def extend_active_rtsp_recording(
     *,
@@ -1643,7 +1565,6 @@ def extend_active_rtsp_recording(
                 )
     return recording_id
 
-
 def detection_label_strings(detections: list[dict[str, Any]]) -> list[str]:
     """Return the sorted, de-duplicated, non-generic labels from a detections list.
 
@@ -1663,7 +1584,6 @@ def detection_label_strings(detections: list[dict[str, Any]]) -> list[str]:
         out.append(label)
     out.sort()
     return out
-
 
 def detection_label_confidences(detections: list[dict[str, Any]]) -> dict[str, float]:
     """Return the best confidence per non-generic label from a detections list.
@@ -1687,7 +1607,6 @@ def detection_label_confidences(detections: list[dict[str, Any]]) -> dict[str, f
         if label not in best or confidence > best[label]:
             best[label] = confidence
     return best
-
 
 def schedule_live_camera_backoff(camera_id: str, message: str) -> float:
     with _live_backoff_lock:
@@ -1714,7 +1633,6 @@ def schedule_live_camera_backoff(camera_id: str, message: str) -> float:
         )
     return backoff_seconds
 
-
 def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any]:
     selected_config = get_camera_config(camera_id)
     # Fall back to the requested id so status written under that key (e.g. by
@@ -1734,10 +1652,8 @@ def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any
         **status,
     }
 
-
 def _camera_has_live_alert_stream(settings: dict[str, Any]) -> bool:
     return bool(build_stream_url(settings))
-
 
 def read_ingest_frame(camera_id: str) -> tuple[Any, dict[str, Any]] | None:
     """Decode the latest frame the shared per-camera ingest wrote, as
@@ -1761,7 +1677,6 @@ def read_ingest_frame(camera_id: str) -> tuple[Any, dict[str, Any]] | None:
         'height': int(height),
     }
     return image, frame
-
 
 def run_live_alert_monitor_once(live_settings: dict[str, Any] | None = None) -> int:
     if live_settings is None:
@@ -1854,7 +1769,6 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None = None) -> 
         processed += 1
     return processed
 
-
 def _prune_frame_motion_state() -> None:
     """Remove background model and scan timestamp entries for cameras no longer in the active config."""
     active_ids = {str(cfg.get('id') or '') for cfg in cameras_config if cfg.get('id')}
@@ -1867,7 +1781,6 @@ def _prune_frame_motion_state() -> None:
         _frame_motion_error_cameras.discard(cid)
     if stale:
         logger.debug('Pruned stale motion state for cameras: %s', stale)
-
 
 def live_alert_monitor_loop() -> None:
     _last_prune = 0.0
@@ -1883,7 +1796,6 @@ def live_alert_monitor_loop() -> None:
         interval = max(0.1, float(live_settings.get('detection_interval_seconds', 0.25)))
         live_alert_monitor_stop.wait(interval)
 
-
 def start_live_alert_monitor() -> None:
     global live_alert_monitor_thread
     if live_alert_monitor_thread and live_alert_monitor_thread.is_alive():
@@ -1892,14 +1804,12 @@ def start_live_alert_monitor() -> None:
     live_alert_monitor_thread = threading.Thread(target=live_alert_monitor_loop, name='live-alert-monitor', daemon=True)
     live_alert_monitor_thread.start()
 
-
 def stop_live_alert_monitor() -> None:
     global live_alert_monitor_thread
     live_alert_monitor_stop.set()
     if live_alert_monitor_thread and live_alert_monitor_thread.is_alive():
         live_alert_monitor_thread.join(timeout=5)
     live_alert_monitor_thread = None
-
 
 # ── Sound detection ───────────────────────────────────────────────────────
 
@@ -2016,12 +1926,10 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
         _notification_threads.append(notify_thread)
     notify_thread.start()
 
-
 def _make_sound_detect_callback(camera_id: str):
     def _callback(class_id: str, rule_name: str, confidence: float, meta: dict[str, Any]) -> None:
         _on_sound_detected(camera_id, class_id, rule_name, confidence, meta)
     return _callback
-
 
 def _deliver_sound_alert_notifications(
     triggered: list[dict[str, Any]],
@@ -2038,7 +1946,6 @@ def _deliver_sound_alert_notifications(
             deliver_push_notifications(triggered, event_id, rules=[rule])
         except Exception as exc:
             logger.warning('Sound alert push delivery failed for event %s: %s', event_id, exc)
-
 
 def apply_sound_settings() -> None:
     """Start one SoundDetector per RTSP camera that has sound detection enabled."""
@@ -2087,7 +1994,6 @@ def apply_sound_settings() -> None:
             _sound_statuses[cam_id] = {'state': 'listening', 'last_detected_at': None, 'last_confidence': 0.0, 'backend': det.backend}
         logger.info('Sound monitor started for camera %s (rules=%s)', cam_id, [r.get('class') for r in enabled_rules])
 
-
 def stop_sound_monitor() -> None:
     global _sound_detectors
     with _sound_detectors_lock:
@@ -2097,7 +2003,6 @@ def stop_sound_monitor() -> None:
     with _sound_statuses_lock:
         for cam_id in list(_sound_statuses.keys()):
             _sound_statuses[cam_id]['state'] = 'stopped'
-
 
 def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any]) -> None:
     camera_id = str(settings.get('id') or 'camera')
@@ -2135,14 +2040,11 @@ def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings
 
     threading.Thread(target=detect, name=f'live-detection-{camera_id}', daemon=True).start()
 
-
-
 def _encode_frame_jpeg(image: Any) -> bytes:
     """Encode a numpy BGR frame to JPEG bytes for snapshot storage."""
     import cv2
     _, buffer = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 85])
     return buffer.tobytes()
-
 
 def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict[str, Any], *, enforce_interval: bool = True) -> int | None:
     camera_id = str(settings.get('id') or 'camera')
@@ -2495,7 +2397,6 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     )
     return event_id
 
-
 def create_camera(settings: dict[str, Any]):
     width = int(settings.get('width', 1280))
     height = int(settings.get('height', 720))
@@ -2503,10 +2404,8 @@ def create_camera(settings: dict[str, Any]):
     stale = settings.get("stale_frame_grabs")
     return OpenCvStreamCamera(build_stream_url(settings), width=width, height=height, fps=fps, stale_frame_grabs=stale)
 
-
 def create_camera_instances(settings_list: list[dict[str, Any]]) -> dict[str, Any]:
     return {str(settings['id']): create_camera(settings) for settings in settings_list}
-
 
 cameras_config = effective_cameras_config()
 camera_config = cameras_config[0] if cameras_config else {}
@@ -2516,7 +2415,6 @@ camera = camera_instances[camera_config['id']] if camera_config else None
 def config_file_path() -> Path:
     return Path(os.environ.get(CONFIG_ENV_VAR) or DEFAULT_CONFIG_PATH)
 
-
 def active_ai_config_source() -> str:
     if database.has_setting('ai'):
         return 'database'
@@ -2524,15 +2422,12 @@ def active_ai_config_source() -> str:
         return 'config.yaml'
     return 'default'
 
-
 def onnx_runtime_installed() -> bool:
     return importlib.util.find_spec('onnxruntime') is not None
-
 
 def model_exists(ai_settings: dict[str, Any]) -> bool:
     model_path = str(ai_settings.get('model_path') or '')
     return bool(model_path) and Path(model_path).exists()
-
 
 def detector_loaded_for(settings: dict[str, Any]) -> bool:
     configured_backend = str(settings.get('backend', 'onnx')).lower()
@@ -2540,7 +2435,6 @@ def detector_loaded_for(settings: dict[str, Any]) -> bool:
     if configured_backend == 'onnx':
         return active_backend == 'onnx' and bool(getattr(detector, 'available', False))
     return False
-
 
 def ai_status_payload(ai_settings: dict[str, Any] | None = None) -> dict[str, Any]:
     settings = ai_settings or effective_ai_config()
@@ -2586,7 +2480,6 @@ def ai_status_payload(ai_settings: dict[str, Any] | None = None) -> dict[str, An
         'active_config_source': active_ai_config_source(),
     }
 
-
 def log_detector_initialization(context: str = 'startup') -> None:
     ai_status = ai_status_payload()
     active_providers = getattr(detector, 'active_providers', None)
@@ -2609,7 +2502,6 @@ PUBLIC_PREFIXES = ('/static/',)
 PUBLIC_PATHS = {'/favicon.ico', '/login', '/setup'}
 ADMIN_PATHS = {'/onnx', '/yamnet-tflite', '/ai', '/cameras', '/settings', '/users', '/zones', '/sounds', '/audit', '/camera-log'}
 MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
-
 
 @app.middleware('http')
 async def authentication_middleware(request: Request, call_next):
@@ -2654,7 +2546,6 @@ async def authentication_middleware(request: Request, call_next):
 
     return await call_next(request)
 
-
 @app.middleware('http')
 async def app_navigation_middleware(request: Request, call_next):
     response = await call_next(request)
@@ -2672,7 +2563,6 @@ async def app_navigation_middleware(request: Request, call_next):
     headers.pop('content-length', None)
     return Response(content=body, status_code=response.status_code, headers=headers, media_type='text/html')
 
-
 def set_session_cookie(response: Response, request: Request, token: str, expires_at: str) -> None:
     session_hours = float(effective_auth_config().get('session_timeout_hours', 12))
     response.set_cookie(
@@ -2685,27 +2575,22 @@ def set_session_cookie(response: Response, request: Request, token: str, expires
         max_age=int(session_hours * 3600),
     )
 
-
 def set_csrf_cookie(response: Response, token: str, request: Request) -> None:
     response.set_cookie(CSRF_COOKIE, token, httponly=True, secure=request.url.scheme == 'https', samesite='lax', max_age=3600)
-
 
 def clear_auth_cookies(response: Response) -> None:
     response.delete_cookie(SESSION_COOKIE_NAME)
     response.delete_cookie(CSRF_COOKIE)
 
-
 async def form_data(request: Request) -> dict[str, str]:
     body = (await request.body()).decode('utf-8')
     return {key: values[-1] for key, values in parse_qs(body, keep_blank_values=True).items()}
-
 
 def auth_page(title: str, body: str) -> HTMLResponse:
     return HTMLResponse(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>{escape(title)} · Daygle AI Camera</title><link rel="stylesheet" href="/static/styles.css" /></head>
 <body><main class="auth-shell"><section class="card auth-card"><p class="eyebrow">Daygle AI Camera</p>{body}</section></main></body></html>""")
-
 
 def csrf_token_response(request: Request, title: str, body_template: str, *, status_code: int = 200) -> HTMLResponse:
     token = secrets.token_urlsafe(32)
@@ -2714,21 +2599,17 @@ def csrf_token_response(request: Request, title: str, body_template: str, *, sta
     set_csrf_cookie(response, token, request)
     return response
 
-
 def require_user(request: Request) -> dict[str, Any]:
     return request.state.user
 
-
 def require_session(request: Request) -> dict[str, Any]:
     return request.state.session
-
 
 def require_admin(request: Request) -> dict[str, Any]:
     user = require_user(request)
     if user.get('role') != 'admin':
         raise HTTPException(status_code=403, detail='Admin access required')
     return user
-
 
 _LOOPBACK = {'127.0.0.1', '::1', 'localhost'}
 
@@ -2742,7 +2623,6 @@ def _request_ip(request: Request) -> str:
         if forwarded:
             return forwarded.split(',')[0].strip()
     return direct or 'unknown'
-
 
 def write_audit_log(
     request: Request,
@@ -2769,7 +2649,6 @@ def write_audit_log(
         )
     except Exception as exc:
         logger.warning('Failed to write audit log: %s', exc)
-
 
 def log_camera_diagnostic(
     camera_id: str | None,
@@ -2803,11 +2682,9 @@ def log_camera_diagnostic(
     except Exception as exc:
         logger.debug('Failed to write camera diagnostic (%s/%s): %s', camera_id, event_type, exc)
 
-
 # Surface RecordingService operational events (e.g. prebuffer fallbacks) into
 # the camera diagnostics log now that the writer above is defined.
 recording_service.diagnostic_callback = log_camera_diagnostic
-
 
 def _parse_chunk_start_time(file_path: Path) -> datetime | None:
     stem = file_path.stem  # e.g. 'continuous_camera-1_20260609T140000'
@@ -2822,7 +2699,6 @@ def _parse_chunk_start_time(file_path: Path) -> datetime | None:
         return datetime.strptime(parts[1], '%Y%m%dT%H%M%S').astimezone(timezone.utc)
     except ValueError:
         return None
-
 
 def _make_continuous_chunk_callback(camera_id: str) -> Any:
     def on_chunk_complete(camera_key: str, file_path: Path) -> None:
@@ -2879,7 +2755,6 @@ def _make_continuous_chunk_callback(camera_id: str) -> Any:
             logger.warning('Failed to register continuous chunk %s for camera %s: %s', file_path.name, camera_id, exc)
     return on_chunk_complete
 
-
 def attach_event_recording(
     event_id: int,
     event_time: str,
@@ -2932,7 +2807,6 @@ def attach_event_recording(
             )
     purge_recordings_by_policy()
     return recording_id
-
 
 def start_rtsp_recording_capture(
     stream_url: str,
@@ -3059,7 +2933,6 @@ def start_rtsp_recording_capture(
 
     threading.Thread(target=capture, name=f'rtsp-recording-{event_id}', daemon=True).start()
 
-
 def recording_skip_reason(detections: list[dict[str, Any]], recording_config: dict[str, Any] | None = None) -> str:
     should_record, trigger_type, trigger_label = recording_service.should_record(detections, recording_config)
     if should_record:
@@ -3067,10 +2940,8 @@ def recording_skip_reason(detections: list[dict[str, Any]], recording_config: di
     labels = ', '.join(str(detection.get('label')) for detection in detections if detection.get('label')) or 'none'
     return f'Recording is waiting for an enabled alert rule to trigger for this camera. Detected labels: {labels}.'
 
-
 _notification_threads_lock = threading.Lock()
 _notification_threads: list[threading.Thread] = []
-
 
 def wait_for_pending_alert_notifications(timeout: float = 10.0) -> None:
     """Block until in-flight alert email/push deliveries finish (used by tests)."""
@@ -3079,7 +2950,6 @@ def wait_for_pending_alert_notifications(timeout: float = 10.0) -> None:
         pending = [thread for thread in _notification_threads if thread.is_alive()]
     for thread in pending:
         thread.join(timeout=max(0.0, deadline - time.time()))
-
 
 def _deliver_alert_notifications(
     triggered: list[dict[str, Any]],
@@ -3094,7 +2964,6 @@ def _deliver_alert_notifications(
         deliver_push_notifications(triggered, event_id, rules=rules)
     except Exception as exc:
         logger.warning('Push notification delivery failed for event %s: %s', event_id, exc)
-
 
 def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: list[dict[str, Any]] | None = None) -> None:
     if not triggered:
@@ -3167,7 +3036,6 @@ def deliver_email_alerts(triggered: list[dict[str, Any]], event_id: int, rules: 
         except EmailAlertError as exc:
             logger.warning('Failed to send email alert for event %s rule %s: %s', event_id, alert.get('rule_name'), exc)
 
-
 def deliver_push_notifications(triggered: list[dict[str, Any]], event_id: int, rules: list[dict[str, Any]] | None = None) -> None:
     if not triggered:
         return
@@ -3219,17 +3087,14 @@ def deliver_push_notifications(triggered: list[dict[str, Any]], event_id: int, r
         except PushNotificationError as exc:
             logger.error('Failed to send push notification for event %s rule %r: %s', event_id, rule_name, exc)
 
-
 GITHUB_REPO = 'daygle/daygle-ai-camera'
 PYPI_ULTRALYTICS_URL = 'https://pypi.org/pypi/ultralytics/json'
 _update_in_progress = False
 _update_lock = threading.Lock()
 _installed_models_lock = threading.Lock()
 
-
 def _installed_models_path() -> Path:
     return BASE_DIR / 'models' / 'installed.json'
-
 
 def _read_installed_models() -> dict[str, Any]:
     p = _installed_models_path()
@@ -3241,12 +3106,10 @@ def _read_installed_models() -> dict[str, Any]:
             return {}
     return {}
 
-
 def _write_installed_models(data: dict[str, Any]) -> None:
     p = _installed_models_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(data, indent=2), encoding='utf-8')
-
 
 def _sha256_file(path: Path) -> str:
     h = hashlib.sha256()
@@ -3255,13 +3118,11 @@ def _sha256_file(path: Path) -> str:
             h.update(chunk)
     return h.hexdigest()
 
-
 def _installed_package_version(package: str) -> str:
     try:
         return importlib.metadata.version(package)
     except importlib.metadata.PackageNotFoundError:
         return 'unknown'
-
 
 def _fetch_ultralytics_version() -> str:
     req = urllib.request.Request(
@@ -3275,13 +3136,11 @@ def _fetch_ultralytics_version() -> str:
         raise RuntimeError('PyPI ultralytics response did not include a version.')
     return version
 
-
 def _parse_semver(v: str) -> tuple[int, ...]:
     try:
         return tuple(int(x) for x in v.split('.'))
     except ValueError:
         return (0,)
-
 
 def _fetch_models_manifest() -> dict[str, Any]:
     """Return remote YOLO export versions from the upstream Ultralytics package.
@@ -3305,7 +3164,6 @@ def _fetch_models_manifest() -> dict[str, Any]:
         'source': 'pypi:ultralytics',
         'models': {model_id: {'version': effective_version} for model_id in YOLO_MODELS},
     }
-
 
 def render_live_snapshot_svg(
     frame: dict[str, Any],
@@ -3403,7 +3261,6 @@ def render_live_snapshot_svg(
   <text x="48" y="112" class="muted">Frame #{frame_number} · {timestamp} · Overlay {overlay_state}</text>
 </svg>'''
 
-
 def render_live_snapshot_jpeg_overlay(image_bytes: bytes, detections: list[dict[str, Any]]) -> bytes:
     if not detections:
         return image_bytes
@@ -3464,7 +3321,6 @@ def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
             if thumbnail.exists() and thumbnail.is_file():
                 thumbnail.unlink(missing_ok=True)
 
-
 def clear_runtime_media_directory(path_value: str | None) -> int:
     if not path_value:
         return 0
@@ -3484,10 +3340,8 @@ def clear_runtime_media_directory(path_value: str | None) -> int:
             continue
     return deleted
 
-
 def recording_playback_sidecar_path(file_path: Path) -> Path:
     return file_path.with_name(f'{file_path.stem}.h264-audio.mp4')
-
 
 def recording_stream_path(file_path: Path) -> Path:
     playback_path = recording_playback_sidecar_path(file_path)
@@ -3520,14 +3374,11 @@ def recording_stream_path(file_path: Path) -> Path:
     failed_marker.unlink(missing_ok=True)
     return playback_path if playback_path.exists() else file_path
 
-
 def recording_track_sidecar_path(file_path: Path) -> Path:
     return file_path.with_name(f'{file_path.stem}.track.json')
 
-
 def write_recording_detection_track(file_path: Path, track: list[dict[str, Any]]) -> None:
     recording_track_sidecar_path(file_path).write_text(json.dumps(track), encoding='utf-8')
-
 
 def load_recording_detection_track(file_path: Path) -> list[dict[str, Any]] | None:
     sidecar = recording_track_sidecar_path(file_path)
@@ -3544,7 +3395,6 @@ def load_recording_detection_track(file_path: Path) -> list[dict[str, Any]] | No
     if not any(isinstance(sample, dict) and sample.get('detections') for sample in data):
         return None
     return data
-
 
 def write_live_history_detection_track(
     recording_id: int | None,
@@ -3579,7 +3429,6 @@ def write_live_history_detection_track(
     )
     return True
 
-
 def _recording_capture_window(recording: dict[str, Any]) -> tuple[float, float] | None:
     """Return the recording's (start_ts, end_ts) from its stored timing."""
     try:
@@ -3600,16 +3449,13 @@ def _recording_capture_window(recording: dict[str, Any]) -> tuple[float, float] 
         return None
     return start_ts, end_ts
 
-
 def probe_video_codec(file_path: Path) -> str | None:
     """Return the first video stream's codec name (e.g. 'h264', 'hevc'), or None."""
     return probe_stream_codec(file_path, 'v:0')
 
-
 def probe_audio_codec(file_path: Path) -> str | None:
     """Return the first audio stream's codec name (e.g. 'aac', 'pcm_mulaw'), or None."""
     return probe_stream_codec(file_path, 'a:0')
-
 
 def probe_stream_codec(file_path: Path, stream_selector: str) -> str | None:
     if not file_path.exists() or file_path.stat().st_size <= 0:
@@ -3632,13 +3478,11 @@ def probe_stream_codec(file_path: Path, stream_selector: str) -> str | None:
     codec = (result.stdout or '').strip().lower()
     return codec or None if result.returncode == 0 else None
 
-
 def mp4_is_browser_playable(file_path: Path) -> bool:
     if probe_video_codec(file_path) != 'h264':
         return False
     audio_codec = probe_audio_codec(file_path)
     return audio_codec in {None, '', 'aac', 'mp3'}
-
 
 def probe_video_duration(file_path: Path) -> float | None:
     if not _FFPROBE or not file_path.exists():
@@ -3656,7 +3500,6 @@ def probe_video_duration(file_path: Path) -> float | None:
         return float((result.stdout or '').strip()) if result.returncode == 0 else None
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
-
 
 def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
     ffmpeg = _FFMPEG or shutil.which('ffmpeg')
@@ -3713,7 +3556,6 @@ def transcode_recording_to_mp4(source_path: Path, output_path: Path) -> None:
         raise RuntimeError('Converted MP4 does not contain a video stream.')
     tmp_path.replace(output_path)
 
-
 def mp4_has_video_stream(file_path: Path) -> bool:
     if not _FFPROBE:
         return file_path.exists() and file_path.stat().st_size > 0
@@ -3731,19 +3573,15 @@ def mp4_has_video_stream(file_path: Path) -> bool:
         return False
     return result.returncode == 0 and bool((result.stdout or '').strip())
 
-
 DATABASE_RESTORE_REQUIRED_TABLES = {'events', 'detections', 'app_settings', 'users'}
-
 
 def backup_directory() -> Path:
     backups_dir = Path(str(effective_storage_config().get('data_dir') or 'data')) / 'backups'
     backups_dir.mkdir(parents=True, exist_ok=True)
     return backups_dir
 
-
 def safe_backup_timestamp() -> str:
     return datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-
 
 def create_database_backup(prefix: str = 'daygle-database') -> Path:
     backup_path = backup_directory() / f'{prefix}-{safe_backup_timestamp()}-{secrets.token_hex(4)}.sqlite3'
@@ -3764,7 +3602,6 @@ def create_database_backup(prefix: str = 'daygle-database') -> Path:
         raise
     return backup_path
 
-
 def validate_restore_database(path: Path) -> None:
     try:
         db = sqlite3.connect(path)
@@ -3784,11 +3621,9 @@ def validate_restore_database(path: Path) -> None:
     except sqlite3.DatabaseError as exc:
         raise HTTPException(status_code=400, detail='Uploaded file is not a valid SQLite database.') from exc
 
-
 # Serialises restores: running two at once would interleave page copies into
 # the live database file and corrupt it.
 DATABASE_RESTORE_LOCK = threading.Lock()
-
 
 def overwrite_database_from_file(restore_source: Path) -> None:
     # Use the sqlite3 backup API to restore in-place rather than
@@ -3808,14 +3643,12 @@ def overwrite_database_from_file(restore_source: Path) -> None:
     finally:
         source.close()
 
-
 def refresh_runtime_after_database_restore() -> None:
     database.init()
     auth.init()
     apply_cameras_settings(effective_cameras_config())
     apply_storage_and_recording_settings()
     auth.apply_config(effective_auth_config())
-
 
 def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
     recording_settings = effective_recording_config()
@@ -3836,7 +3669,6 @@ def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
     delete_recording_files(purged)
     return {'purged': len(purged), 'files_deleted': files_deleted, 'bytes_deleted': bytes_deleted, 'recordings': purged}
 
-
 def purge_camera_diagnostics_by_policy() -> int:
     """Age out old camera diagnostic events.
 
@@ -3854,7 +3686,6 @@ def purge_camera_diagnostics_by_policy() -> int:
         logger.debug('Camera diagnostics purge failed: %s', exc)
         return 0
 
-
 @app.get('/login')
 def login_page(request: Request, error: str | None = None):
     if auth_enabled and auth.users_exist() and auth.get_session(request.cookies.get(SESSION_COOKIE_NAME)):
@@ -3868,7 +3699,6 @@ def login_page(request: Request, error: str | None = None):
   <label>Password<input name="password" type="password" autocomplete="current-password" required /></label>
   <button class="primary" type="submit">Sign In</button>
 </form>""")
-
 
 @app.post('/login')
 async def login(request: Request):
@@ -3894,7 +3724,6 @@ async def login(request: Request):
     response.delete_cookie(CSRF_COOKIE)
     return response
 
-
 @app.get('/setup')
 def setup_page(request: Request, error: str | None = None):
     if auth_enabled and auth.users_exist():
@@ -3912,7 +3741,6 @@ def setup_page(request: Request, error: str | None = None):
   <label>Confirm password<input name="confirm_password" type="password" autocomplete="new-password" required /></label>
   <button class="primary" type="submit">Create Admin Account</button>
 </form>""")
-
 
 @app.post('/setup')
 async def setup(request: Request):
@@ -3936,13 +3764,11 @@ async def setup(request: Request):
         return setup_page(request, str(exc))
     return RedirectResponse('/login', status_code=303)
 
-
 @app.get('/logout')
 def logout_get(request: Request):
     # GET logout does not delete the session to avoid CSRF via link tricks.
     # The nav uses a JS-driven POST with a CSRF token instead.
     return RedirectResponse('/login', status_code=303)
-
 
 @app.post('/logout')
 def logout_post(request: Request):
@@ -3955,14 +3781,12 @@ def logout_post(request: Request):
     clear_auth_cookies(response)
     return response
 
-
 def _parse_header_value(header: str, key: str) -> str | None:
     for part in header.split(';'):
         part = part.strip()
         if part.startswith(f'{key}='):
             return part.split('=', 1)[1].strip('"')
     return None
-
 
 async def _read_uploaded_image(request: Request) -> tuple[bytes, str | None, str | None]:
     content_type = request.headers.get('content-type', '')
@@ -3995,14 +3819,12 @@ async def _read_uploaded_image(request: Request) -> tuple[bytes, str | None, str
 
     raise HTTPException(status_code=400, detail='Multipart upload must include a file field named file')
 
-
 @app.get('/')
 def root():
     index_path = web_dir / 'index.html'
     if index_path.exists():
         return FileResponse(index_path)
     return {'application': 'Daygle AI Camera', 'status': 'running'}
-
 
 @app.get('/favicon.ico')
 def favicon():
@@ -4011,14 +3833,12 @@ def favicon():
         return FileResponse(favicon_path, media_type='image/svg+xml')
     raise HTTPException(status_code=404, detail='Favicon not found')
 
-
 @app.get('/live')
 def live_page():
     live_path = web_dir / 'live.html'
     if live_path.exists():
         return FileResponse(live_path)
     return root()
-
 
 @app.get('/zones')
 def zones_page():
@@ -4027,14 +3847,12 @@ def zones_page():
         return FileResponse(zones_path)
     return root()
 
-
 @app.get('/sounds')
 def sounds_page():
     sounds_path = web_dir / 'sounds.html'
     if sounds_path.exists():
         return FileResponse(sounds_path)
     return root()
-
 
 @app.get('/cameras')
 def cameras_page():
@@ -4043,13 +3861,11 @@ def cameras_page():
         return FileResponse(cameras_path)
     return root()
 
-
 @app.get('/events')
 @app.get('/alerts')
 @app.get('/search')
 def dashboard_aliases():
     return root()
-
 
 @app.get('/recordings')
 def recordings_page():
@@ -4058,14 +3874,12 @@ def recordings_page():
         return FileResponse(recordings_path)
     return root()
 
-
 @app.get('/recordings/timeline')
 def recordings_timeline_page():
     timeline_path = web_dir / 'timeline.html'
     if timeline_path.exists():
         return FileResponse(timeline_path)
     return root()
-
 
 @app.get('/onnx')
 def onnx_page():
@@ -4074,11 +3888,9 @@ def onnx_page():
         return FileResponse(ai_path)
     return root()
 
-
 @app.get('/ai')
 def ai_settings_page():
     return RedirectResponse('/onnx', status_code=308)
-
 
 @app.get('/yamnet-tflite')
 def yamnet_tflite_page():
@@ -4087,11 +3899,9 @@ def yamnet_tflite_page():
         return FileResponse(yamnet_path)
     return root()
 
-
 @app.get('/yamnet')
 def yamnet_page():
     return RedirectResponse('/yamnet-tflite', status_code=308)
-
 
 @app.get('/profile')
 def profile_page():
@@ -4099,9 +3909,6 @@ def profile_page():
     if profile_path.exists():
         return FileResponse(profile_path)
     return root()
-
-
-
 
 @app.get('/settings')
 def system_settings_page():
@@ -4117,12 +3924,10 @@ def users_page():
         return FileResponse(users_path)
     return root()
 
-
 @app.get('/api/auth/me')
 def me(request: Request):
     session = require_session(request)
     return {'user': session['user'], 'csrf_token': session['csrf_token'], 'expires_at': session['expires_at']}
-
 
 @app.put('/api/profile')
 async def update_profile(request: Request):
@@ -4144,7 +3949,6 @@ async def update_profile(request: Request):
     request.state.user = updated
     return updated
 
-
 @app.post('/api/profile/password')
 async def change_profile_password(request: Request):
     user = require_user(request)
@@ -4154,7 +3958,6 @@ async def change_profile_password(request: Request):
     except AuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {'ok': True}
-
 
 @app.get('/api/status')
 def status(camera_id: str | None = None):
@@ -4196,16 +3999,13 @@ def status(camera_id: str | None = None):
         'resolution': {'width': frame['width'], 'height': frame['height']},
     }
 
-
 @app.get('/api/status/ai')
 def ai_status():
     return ai_status_payload()
 
-
 @app.get('/api/live/detection-status')
 def live_detection_status_api(camera_id: str | None = None):
     return live_detection_status_payload(camera_id)
-
 
 @app.get('/api/live/snapshot')
 def live_snapshot(camera_id: str | None = None):
@@ -4227,7 +4027,6 @@ def live_snapshot(camera_id: str | None = None):
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return Response(content=image_bytes, media_type='image/jpeg')
     raise HTTPException(status_code=503, detail='Live snapshots require an ONVIF/RTSP camera backend.')
-
 
 @app.post('/api/detect/frame')
 async def detect_frame(request: Request):
@@ -4258,11 +4057,9 @@ async def detect_frame(request: Request):
         'ai_error': ai_error,
     }
 
-
 @app.get('/api/events')
 def events(label: str | None = None, limit: int = Query(50, ge=1, le=200), alerted_only: bool = False, with_recording: bool = False):
     return database.search_events(label=label, limit=limit, alerted_only=alerted_only, with_recording=with_recording)
-
 
 @app.get('/api/events/{event_id}')
 def event_detail(event_id: int):
@@ -4270,7 +4067,6 @@ def event_detail(event_id: int):
     if event is None:
         raise HTTPException(status_code=404, detail='Event not found')
     return event
-
 
 @app.delete('/api/events/{event_id}')
 def delete_event(event_id: int, request: Request):
@@ -4286,7 +4082,6 @@ def delete_event(event_id: int, request: Request):
     write_audit_log(request, 'delete', 'event', event_id)
     return {'ok': True}
 
-
 @app.delete('/api/events')
 def delete_all_events(request: Request):
     require_admin(request)
@@ -4294,12 +4089,10 @@ def delete_all_events(request: Request):
     write_audit_log(request, 'delete_all', 'events', details={'count': deleted})
     return {'ok': True, 'deleted': deleted}
 
-
 @app.post('/api/events/dismiss-all')
 def dismiss_all_events_route():
     dismissed = database.dismiss_all_events()
     return {'ok': True, 'dismissed': dismissed}
-
 
 @app.post('/api/events/{event_id}/dismiss')
 def dismiss_event_route(event_id: int):
@@ -4308,11 +4101,9 @@ def dismiss_event_route(event_id: int):
         raise HTTPException(status_code=404, detail='Event not found')
     return {'ok': True}
 
-
 @app.get('/api/alerts')
 def alert_history(limit: int = Query(25, ge=1, le=200)):
     return database.alerts(limit=limit)
-
 
 @app.delete('/api/alerts')
 def delete_all_alert_history(request: Request):
@@ -4321,18 +4112,15 @@ def delete_all_alert_history(request: Request):
     write_audit_log(request, 'delete_all', 'alert_history', details={'count': deleted})
     return {'ok': True, 'deleted': deleted}
 
-
 @app.post('/api/alerts/dismiss-all')
 def dismiss_all_alerts_route():
     dismissed = database.dismiss_all_alerts()
     return {'ok': True, 'dismissed': dismissed}
 
-
 @app.post('/api/alerts/{group_key}/dismiss')
 def dismiss_alert_group_route(group_key: str):
     dismissed = database.dismiss_alert_group(group_key)
     return {'ok': True, 'dismissed': dismissed}
-
 
 @app.get('/api/stats')
 def stats():
@@ -4340,13 +4128,11 @@ def stats():
     result['total_cameras'] = len(cameras_config)
     return result
 
-
 @app.delete('/api/objects')
 def delete_all_objects(request: Request):
     require_admin(request)
     deleted = database.delete_all_objects()
     return {'ok': True, 'deleted': deleted}
-
 
 @app.get('/api/config')
 def runtime_config():
@@ -4387,9 +4173,6 @@ def runtime_config():
         'recording': effective_recording_config(),
     }
 
-
-
-
 @app.get('/api/labels')
 def available_labels():
     """Return available labels for the recordings filter dropdown."""
@@ -4415,33 +4198,6 @@ def available_labels():
         'sounds': sound_labels,
     }
 
-@app.get('/api/recordings')
-def recordings(
-    label: str | None = None,
-    camera_id: str | None = None,
-    limit: int = Query(50, ge=1, le=500),
-    alerted_only: bool = False,
-    started_after: str | None = Query(None, description='ISO timestamp; include recordings started at or after this time.'),
-    started_before: str | None = Query(None, description='ISO timestamp; include recordings started at or before this time.'),
-    sort: str = Query('newest', pattern='^(newest|oldest)$', description='Sort order by started_at. Default: newest.'),
-    source_type: str | None = Query(None, pattern='^(sound|object)$', description='Filter by recording type: sound or object.'),
-):
-    # Support comma-separated labels (e.g. ?label=person,car,cat_meow)
-    labels: list[str] | None = None
-    if label:
-        labels = [l.strip().lower() for l in str(label).split(',') if l.strip()]
-    return database.list_recordings(
-        labels=labels,
-        camera_id=camera_id,
-        limit=limit,
-        alerted_only=alerted_only,
-        started_after=started_after,
-        started_before=started_before,
-        sort=sort,
-        source_type=source_type,
-    )
-
-
 def _parse_iso_datetime(value: Any) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(str(value or ''))
@@ -4450,7 +4206,6 @@ def _parse_iso_datetime(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
-
 
 def _recording_timeline_segment(recording: dict[str, Any], day_start: datetime, day_end: datetime) -> dict[str, Any] | None:
     started_at = _parse_iso_datetime(recording.get('started_at'))
@@ -4479,200 +4234,6 @@ def _recording_timeline_segment(recording: dict[str, Any], day_start: datetime, 
         'color_key': color_key,
         'color_label': color_key,
     }
-
-
-@app.get('/api/recordings/timeline')
-def recordings_timeline(
-    camera_id: str | None = None,
-    day: str | None = None,
-    tz_offset_minutes: int | None = Query(None, ge=-840, le=840),
-):
-    cameras = [
-        {
-            'id': str(camera_settings.get('id') or ''),
-            'name': camera_default_name(camera_settings, f'Camera {index}'),
-        }
-        for index, camera_settings in enumerate(effective_cameras_config(), start=1)
-    ]
-    if not cameras and not camera_id:
-        raise HTTPException(status_code=404, detail='No cameras configured')
-
-    selected_camera_id = normalize_camera_id(camera_id or cameras[0]['id'])
-    selected_camera = next((camera for camera in cameras if camera['id'] == selected_camera_id), None)
-    if selected_camera is None:
-        # Recordings outlive camera configuration: keep an explicitly requested
-        # camera's timeline viewable even after the camera entry is removed.
-        selected_camera = {'id': selected_camera_id, 'name': selected_camera_id}
-        cameras = [*cameras, selected_camera]
-
-    if day:
-        try:
-            target_day = datetime.strptime(day, '%Y-%m-%d').date()
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail='Invalid day. Use YYYY-MM-DD.') from exc
-    else:
-        target_day = datetime.now(timezone.utc).date()
-
-    if tz_offset_minutes is None:
-        timeline_timezone = timezone.utc
-    else:
-        # Browser getTimezoneOffset() is UTC-local minutes, so invert to get local UTC offset.
-        timeline_timezone = timezone(timedelta(minutes=-tz_offset_minutes))
-
-    day_start_local = datetime.combine(target_day, datetime.min.time(), tzinfo=timeline_timezone)
-    day_end_local = day_start_local + timedelta(days=1)
-    day_start = day_start_local.astimezone(timezone.utc)
-    day_end = day_end_local.astimezone(timezone.utc)
-
-    recordings = database.list_recordings_for_camera_day(selected_camera_id, day_start.isoformat(), day_end.isoformat())
-    segments = [
-        segment
-        for segment in (
-            _recording_timeline_segment(recording, day_start, day_end)
-            for recording in recordings
-        )
-        if segment is not None
-    ]
-    rec_config = effective_recording_config()
-    return {
-        'camera': selected_camera,
-        'cameras': cameras,
-        'day': target_day.isoformat(),
-        'day_start': day_start.isoformat(),
-        'day_end': day_end.isoformat(),
-        'timeline_timezone_offset_minutes': tz_offset_minutes if tz_offset_minutes is not None else 0,
-        'pre_event_seconds': max(0, int(rec_config.get('pre_event_seconds', 5))),
-        'recordings': segments,
-    }
-
-
-@app.post('/api/recordings/purge')
-def purge_recordings(request: Request):
-    require_admin(request)
-    return purge_recordings_by_policy(force=True)
-
-
-@app.get('/api/recordings/{recording_id}')
-def recording_detail(recording_id: int):
-    recording = database.get_recording(recording_id)
-    if recording is None:
-        raise HTTPException(status_code=404, detail='Recording not found')
-    file_path = Path(str(recording.get('file_path') or ''))
-    recording['track'] = load_recording_detection_track(file_path)
-    # Backfill from the live monitor's in-memory history while it still covers
-    # the clip's window (e.g. a recording finalized before this feature, viewed
-    # shortly after capture). Older clips simply have no track and playback
-    # falls back to the static event boxes - clips are never decoded or
-    # re-analyzed for overlays.
-    if (
-        recording['track'] is None
-        and str(file_path)
-        and file_path.exists()
-        and not recording_track_sidecar_path(file_path).exists()
-    ):
-        window = _recording_capture_window(recording)
-        if window and write_live_history_detection_track(
-            recording_id, file_path, str(recording.get('camera_id') or '') or None, window[0], window[1],
-        ):
-            recording['track'] = load_recording_detection_track(file_path)
-    return recording
-
-
-@app.get('/api/recordings/{recording_id}/stream')
-def stream_recording(recording_id: int, request: Request):
-    recording = database.get_recording(recording_id)
-    if recording is None:
-        raise HTTPException(status_code=404, detail='Recording not found')
-    file_path = Path(recording['file_path'])
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail='Recording media file not found')
-
-    stream_path = recording_stream_path(file_path)
-    if not stream_path.exists() or not mp4_has_video_stream(stream_path):
-        raise HTTPException(
-            status_code=415,
-            detail='Recording file is not a playable video stream. Generate a new recording to rebuild media.',
-        )
-    file_size = stream_path.stat().st_size
-    media_type = mimetypes.guess_type(stream_path.name)[0] or 'video/mp4'
-    range_header = request.headers.get('range')
-    if not range_header:
-        return FileResponse(stream_path, media_type=media_type)
-
-    match = re.fullmatch(r'bytes=(\d*)-(\d*)', range_header.strip())
-    if not match:
-        return Response(status_code=416, headers={'Content-Range': f'bytes */{file_size}'})
-    start_text, end_text = match.groups()
-    start = int(start_text) if start_text else 0
-    end = int(end_text) if end_text else file_size - 1
-    if start >= file_size or end < start:
-        return Response(status_code=416, headers={'Content-Range': f'bytes */{file_size}'})
-    end = min(end, file_size - 1)
-    chunk_size = end - start + 1
-
-    def iter_file():
-        with stream_path.open('rb') as handle:
-            handle.seek(start)
-            remaining = chunk_size
-            while remaining > 0:
-                chunk = handle.read(min(1024 * 1024, remaining))
-                if not chunk:
-                    break
-                remaining -= len(chunk)
-                yield chunk
-
-    return StreamingResponse(
-        iter_file(),
-        status_code=206,
-        media_type=media_type,
-        headers={
-            'Content-Range': f'bytes {start}-{end}/{file_size}',
-            'Accept-Ranges': 'bytes',
-            'Content-Length': str(chunk_size),
-        },
-    )
-
-
-@app.get('/api/recordings/{recording_id}/download')
-def download_recording(recording_id: int):
-    recording = database.get_recording(recording_id)
-    if recording is None:
-        raise HTTPException(status_code=404, detail='Recording not found')
-    file_path = Path(recording['file_path'])
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail='Recording media file not found')
-    stream_path = recording_stream_path(file_path)
-    if not stream_path.exists() or not mp4_has_video_stream(stream_path):
-        raise HTTPException(status_code=415, detail='Recording file is not a playable video stream.')
-    started_at = str(recording.get('started_at') or '')
-    safe_ts = re.sub(r'[^\w\-]', '_', started_at)[:19]
-    filename = f'recording_{recording_id}_{safe_ts}.mp4'
-    return FileResponse(
-        stream_path,
-        media_type='video/mp4',
-        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
-    )
-
-
-@app.delete('/api/recordings/{recording_id}')
-def delete_recording(recording_id: int, request: Request):
-    require_admin(request)
-    recording = database.delete_recording(recording_id)
-    if recording is None:
-        raise HTTPException(status_code=404, detail='Recording not found')
-    delete_recording_files([recording])
-    write_audit_log(request, 'delete', 'recording', recording_id)
-    return {'ok': True}
-
-
-@app.delete('/api/recordings')
-def delete_all_recordings(request: Request):
-    require_admin(request)
-    recordings = database.delete_all_recordings()
-    delete_recording_files(recordings)
-    write_audit_log(request, 'delete_all', 'recordings', details={'count': len(recordings)})
-    return {'ok': True, 'deleted': len(recordings)}
-
 
 @app.delete('/api/system/runtime-data')
 def delete_runtime_data(request: Request):
@@ -4704,12 +4265,10 @@ def delete_runtime_data(request: Request):
     write_audit_log(request, 'delete_all', 'runtime_data', details=result['deleted'])
     return result
 
-
 @app.get('/api/users')
 def list_users(request: Request):
     require_user(request)
     return auth.list_users()
-
 
 @app.post('/api/users')
 async def create_user(request: Request):
@@ -4729,7 +4288,6 @@ async def create_user(request: Request):
     except AuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-
 @app.patch('/api/users/{user_id}')
 async def update_user(user_id: int, request: Request):
     require_admin(request)
@@ -4747,7 +4305,6 @@ async def update_user(user_id: int, request: Request):
         return user
     except AuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
 
 def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_ai_config()
@@ -4810,7 +4367,6 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     updated['labels_path'] = str(updated.get('labels_path') or current.get('labels_path') or 'models/coco.names')
     return updated
 
-
 def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
     ai_status = ai_status_payload(ai_settings)
     categories = ai_settings.get('categories', config.get('ai', {}).get('categories', []))
@@ -4831,7 +4387,6 @@ def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
         'categories': categories,
         'available_labels': labels,
     }
-
 
 def validate_alert_email_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_email_alert_settings()
@@ -4861,7 +4416,6 @@ def validate_alert_email_settings(payload: dict[str, Any]) -> dict[str, Any]:
         updated['use_tls'] = False
     return updated
 
-
 def validate_push_notification_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_push_notification_settings()
     allowed = {'enabled', 'server_url', 'topic', 'priority', 'username', 'password'}
@@ -4883,7 +4437,6 @@ def validate_push_notification_settings(payload: dict[str, Any]) -> dict[str, An
         raise HTTPException(status_code=400, detail='Topic is required when push notifications are enabled.')
     return updated
 
-
 def _int_field(payload: dict[str, Any], field: str, default: int, minimum: int, maximum: int) -> int:
     try:
         value = int(payload.get(field, default))
@@ -4892,7 +4445,6 @@ def _int_field(payload: dict[str, Any], field: str, default: int, minimum: int, 
     if value < minimum or value > maximum:
         raise HTTPException(status_code=400, detail=f'{field} must be between {minimum} and {maximum}.')
     return value
-
 
 def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | None = None, index: int = 1) -> dict[str, Any]:
     current = current or {}
@@ -4969,7 +4521,6 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
         updated['motion'] = current['motion']
     return updated
 
-
 def validate_cameras_settings(payload: Any) -> list[dict[str, Any]]:
     raw_cameras = payload.get('cameras') if isinstance(payload, dict) else payload
     if not isinstance(raw_cameras, list):
@@ -5010,7 +4561,6 @@ def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'auto_purge_enabled': normalize_bool_setting(merged.get('auto_purge_enabled', True), True),
     }
 
-
 def validate_storage_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_storage_config()
     updated = {key: str(current.get(key) or '') for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir', 'database')}
@@ -5022,7 +4572,6 @@ def validate_storage_settings(payload: dict[str, Any]) -> dict[str, Any]:
             updated[key] = value
     updated['database'] = str(config.get('storage', {}).get('database') or updated.get('database') or 'data/daygle_ai_camera.sqlite3')
     return updated
-
 
 def validate_auth_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_auth_config()
@@ -5038,7 +4587,6 @@ def validate_auth_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'max_login_attempts': _int_field(merged, 'max_login_attempts', 5, 1, 100),
         'lockout_minutes': _int_field(merged, 'lockout_minutes', 15, 1, 1440),
     }
-
 
 def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_live_config()
@@ -5098,7 +4646,6 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'periodic_scan_interval_seconds': periodic_scan_interval_seconds,
     }
 
-
 def _migrate_camera_id(old_id: str, new_id: str) -> None:
     old_key = RecordingService._camera_key(old_id)
     new_key = RecordingService._camera_key(new_id)
@@ -5118,7 +4665,6 @@ def _migrate_camera_id(old_id: str, new_id: str) -> None:
                 except OSError as exc:
                     logger.warning('Could not rename ingest dir %s → %s: %s', old_dir, new_dir, exc)
 
-
 def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
     global camera, camera_config, cameras_config, camera_instances
     old_instances = camera_instances
@@ -5133,7 +4679,6 @@ def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
             logger.warning("Unexpected error updating camera: %s", unexpected_exc)
     apply_sound_settings()
 
-
 def apply_storage_and_recording_settings() -> None:
     global storage, recording_service
     storage = Storage({**config, 'storage': effective_storage_config()})
@@ -5145,9 +4690,6 @@ def apply_storage_and_recording_settings() -> None:
             old_service.stop_all_continuous_recordings()
         except Exception as unexpected_exc:
             logger.warning("Unexpected error deleting camera: %s", unexpected_exc)
-
-
-
 
 def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
     global detector, last_detector_error, _min_rule_confidence_cache
@@ -5172,13 +4714,6 @@ def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
     last_detector_error = candidate_error
     log_detector_initialization('reload')
     return True, last_detector_error
-
-
-
-
-
-
-
 
 def export_yolo_onnx(model_name: str, destination: Path) -> int:
     if model_name not in YOLO_MODELS:
@@ -5216,7 +4751,6 @@ def export_yolo_onnx(model_name: str, destination: Path) -> int:
         destination.unlink(missing_ok=True)
         raise RuntimeError('Exported model file is empty.')
     return destination.stat().st_size
-
 
 def _do_download_model(model_name: str, switch_active: bool = True) -> dict[str, Any]:
     if model_name not in YOLO_MODELS:
@@ -5264,23 +4798,9 @@ def _do_download_model(model_name: str, switch_active: bool = True) -> dict[str,
         'status': ai_status_payload(updated),
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 @app.get('/api/settings/alert-email')
 def get_alert_email_settings():
     return effective_email_alert_settings()
-
 
 @app.put('/api/settings/alert-email')
 async def update_alert_email_settings(request: Request):
@@ -5290,7 +4810,6 @@ async def update_alert_email_settings(request: Request):
     result = database.set_setting('alert_email', settings, utc_now())
     write_audit_log(request, 'update', 'settings.alert_email')
     return result
-
 
 @app.post('/api/settings/alert-email/test')
 async def test_alert_email_settings(request: Request):
@@ -5305,11 +4824,9 @@ async def test_alert_email_settings(request: Request):
         raise HTTPException(status_code=400, detail=f'Test email failed: {exc}') from exc
     return {'ok': True, 'recipient': recipient}
 
-
 @app.get('/api/settings/alert-push')
 def get_push_notification_settings():
     return effective_push_notification_settings()
-
 
 @app.put('/api/settings/alert-push')
 async def update_push_notification_settings(request: Request):
@@ -5319,7 +4836,6 @@ async def update_push_notification_settings(request: Request):
     result = database.set_setting('alert_push', settings, utc_now())
     write_audit_log(request, 'update', 'settings.alert_push')
     return result
-
 
 @app.post('/api/settings/alert-push/test')
 async def test_push_notification_settings(request: Request):
@@ -5331,11 +4847,9 @@ async def test_push_notification_settings(request: Request):
         raise HTTPException(status_code=400, detail=f'Test notification failed: {exc}') from exc
     return {'ok': True}
 
-
 @app.get('/api/settings/camera-offline')
 def get_camera_offline_alert_settings():
     return effective_camera_offline_alert_settings()
-
 
 @app.put('/api/settings/camera-offline')
 async def update_camera_offline_alert_settings(request: Request):
@@ -5352,7 +4866,6 @@ async def update_camera_offline_alert_settings(request: Request):
         validated['offline_delay_minutes'] = 1
     result = database.set_setting('camera_offline_alert', validated, utc_now())
     return result
-
 
 @app.get('/api/settings/system')
 def get_system_settings():
@@ -5378,7 +4891,6 @@ def get_system_settings():
         },
     }
 
-
 @app.get('/api/settings/system/database/backup')
 def backup_database(request: Request):
     require_admin(request)
@@ -5394,7 +4906,6 @@ def backup_database(request: Request):
         headers={'Cache-Control': 'no-store'},
         background=BackgroundTask(backup_path.unlink, missing_ok=True),
     )
-
 
 @app.post('/api/settings/system/database/restore')
 async def restore_database(request: Request, file: UploadFile = File(...)):
@@ -5439,17 +4950,14 @@ async def restore_database(request: Request, file: UploadFile = File(...)):
             Path(f'{restore_temp}{sidecar_suffix}').unlink(missing_ok=True)
         await file.close()
 
-
 def _redact_camera(cam: dict[str, Any]) -> dict[str, Any]:
     out = {k: v for k, v in cam.items() if k != 'password'}
     out['has_password'] = bool(cam.get('password'))
     return out
 
-
 @app.get('/api/cameras')
 def list_cameras():
     return {'cameras': [_redact_camera(c) for c in effective_cameras_config()]}
-
 
 @app.get('/api/cameras/health')
 def cameras_health():
@@ -5474,7 +4982,6 @@ def cameras_health():
         },
     }
 
-
 @app.put('/api/cameras')
 async def update_cameras(request: Request):
     require_admin(request)
@@ -5487,7 +4994,6 @@ async def update_cameras(request: Request):
     apply_cameras_settings(settings)
     write_audit_log(request, 'update', 'settings.cameras', details={'count': len(settings)})
     return {'cameras': [_redact_camera(c) for c in settings]}
-
 
 @app.put('/api/cameras/{camera_id}')
 async def update_camera(camera_id: str, request: Request):
@@ -5511,7 +5017,6 @@ async def update_camera(camera_id: str, request: Request):
     write_audit_log(request, 'create', 'settings.camera', normalized, {'camera_name': created.get('name')})
     return _redact_camera(created)
 
-
 @app.post('/api/cameras/test-connection')
 async def test_camera_connection(request: Request):
     require_admin(request)
@@ -5532,7 +5037,6 @@ async def test_camera_connection(request: Request):
         return {'online': False, 'message': f'Stream unreachable: {stderr[:300]}' if stderr else 'Stream unreachable.'}
     except subprocess.TimeoutExpired:
         return {'online': False, 'message': 'Connection timed out (8 s). Check host, port, and credentials.'}
-
 
 @app.post('/api/cameras/{camera_id}/ptz')
 async def camera_ptz(camera_id: str, request: Request):
@@ -5574,7 +5078,6 @@ async def camera_ptz(camera_id: str, request: Request):
 
     return {'ok': True, 'command': command}
 
-
 @app.put('/api/settings/system/live')
 async def update_live_settings(request: Request):
     require_admin(request)
@@ -5582,7 +5085,6 @@ async def update_live_settings(request: Request):
     database.set_setting('live', settings, utc_now())
     write_audit_log(request, 'update', 'settings.live')
     return settings
-
 
 @app.put('/api/settings/system/recording')
 async def update_recording_settings(request: Request):
@@ -5593,7 +5095,6 @@ async def update_recording_settings(request: Request):
     write_audit_log(request, 'update', 'settings.recording')
     return settings
 
-
 @app.put('/api/settings/system/storage')
 async def update_storage_settings(request: Request):
     require_admin(request)
@@ -5602,7 +5103,6 @@ async def update_storage_settings(request: Request):
     apply_storage_and_recording_settings()
     write_audit_log(request, 'update', 'settings.storage')
     return settings
-
 
 @app.put('/api/settings/system/auth')
 async def update_auth_settings(request: Request):
@@ -5613,11 +5113,9 @@ async def update_auth_settings(request: Request):
     write_audit_log(request, 'update', 'settings.auth')
     return settings
 
-
 def _current_version() -> str:
     version_file = BASE_DIR / 'VERSION'
     return version_file.read_text(encoding='utf-8').strip() if version_file.exists() else 'unknown'
-
 
 @app.get('/api/update/check')
 def check_update(request: Request):
@@ -5653,7 +5151,6 @@ def check_update(request: Request):
         return {'current_version': current_version, 'latest_version': None, 'update_available': False, 'error': f'GitHub API error {exc.code}: {exc.reason}'}
     except Exception as exc:
         return {'current_version': current_version, 'latest_version': None, 'update_available': False, 'error': str(exc)}
-
 
 @app.post('/api/update/apply')
 def apply_update(request: Request):
@@ -5724,7 +5221,6 @@ def apply_update(request: Request):
         'service_restart_scheduled': service_restart_scheduled,
     }
 
-
 @app.get('/api/audit')
 def list_audit_log(
     request: Request,
@@ -5739,14 +5235,12 @@ def list_audit_log(
     total = database.count_audit_logs(action=action or None, username=username or None, resource=resource or None)
     return {'entries': entries, 'total': total, 'limit': limit, 'offset': offset}
 
-
 @app.get('/audit')
 def audit_page():
     audit_path = web_dir / 'audit.html'
     if audit_path.exists():
         return FileResponse(audit_path)
     return root()
-
 
 @app.get('/api/camera-log')
 def list_camera_log(
@@ -5767,7 +5261,6 @@ def list_camera_log(
     )
     return {'entries': entries, 'total': total, 'limit': limit, 'offset': offset}
 
-
 @app.delete('/api/camera-log')
 def clear_camera_log(request: Request):
     require_admin(request)
@@ -5775,14 +5268,12 @@ def clear_camera_log(request: Request):
     write_audit_log(request, 'delete_all', 'camera_log', details={'count': deleted})
     return {'ok': True, 'deleted': deleted}
 
-
 @app.get('/camera-log')
 def camera_log_page():
     page_path = web_dir / 'camera-log.html'
     if page_path.exists():
         return FileResponse(page_path)
     return root()
-
 
 # --- Routers extracted from main.py ---
 # Imported at the bottom so globals in app.main are populated before
@@ -5792,6 +5283,15 @@ app.include_router(sound_router)
 
 from app.api.settings_ai_router import router as settings_ai_router
 app.include_router(settings_ai_router)
+
+from app.api.recordings_router import router as recordings_router
+app.include_router(recordings_router)
+# Back-compat aliases for tests that called now-extracted handlers via main.X
+# (Phase 3 recordings-router extraction). The handlers still live at module
+# level on the router file; we re-export them so existing tests/test_api.py
+# unit-style calls (e.g. ``main.recording_detail(recording_id)``) keep working.
+# HTTP callers go through ``app.include_router`` and don't need this alias.
+from app.api.recordings_router import recording_detail
 if __name__ == '__main__':
     import uvicorn
 
