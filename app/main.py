@@ -47,6 +47,23 @@ from app.recordings import RecordingService
 from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, load_settings
 from app.sound_detector import SoundDetector, SOUND_CLASSES, DEFAULT_RULES
 from app.storage import Storage
+
+# Phase 18: top-of-file Pool A from-import rebinds for the
+# camera-config cluster extracted into app/camera_config.py. The
+# rebind lives in the regular app.X import section (NOT at the very
+# bottom like Phase 15/16) because module-load code in main.py does
+# NOT call these helpers eagerly, but ``normalize_camera_settings`` /
+# ``normalize_camera_id`` are referenced as bare names from sibling
+# helpers still on main.py (e.g. ``normalize_monitoring_zones``,
+# ``update_cameras`` handlers) and from the camera_router + recording
+# _router at runtime. Top-of-file placement ensures the rebind wires
+# ``main.<name>`` BEFORE any function body is evaluated.
+from app.camera_config import (
+    _migrate_camera_id as _migrate_camera_id,
+    _redact_camera as _redact_camera,
+    normalize_camera_id as normalize_camera_id,
+    normalize_camera_settings as normalize_camera_settings,
+)
 from app.config_facades import (
     effective_ai_config as effective_ai_config,
     effective_auth_config as effective_auth_config,
@@ -449,9 +466,6 @@ def build_stream_url(settings: dict[str, Any]) -> str:
 def camera_default_name(settings: dict[str, Any], fallback: str='Primary Camera') -> str:
     return str(settings.get('name') or settings.get('device') or fallback).strip() or fallback
 
-def normalize_camera_id(value: Any, fallback: str='camera-1') -> str:
-    camera_id = re.sub('[^a-zA-Z0-9_-]+', '-', str(value or '').strip().lower()).strip('-')
-    return camera_id or fallback
 
 def default_camera_detection_settings() -> dict[str, Any]:
     return {'object_detection_enabled': True, 'zones': []}
@@ -662,28 +676,6 @@ def _migrate_legacy_camera_motion(detection: dict[str, Any]) -> None:
             if str(rule.get('label') or '').strip().lower() == 'motion':
                 rule['enabled'] = False
 
-def normalize_camera_settings(settings: dict[str, Any], index: int=1) -> dict[str, Any]:
-    camera_settings = dict(settings or {})
-    camera_settings['id'] = normalize_camera_id(camera_settings.get('id'), f'camera-{index}')
-    camera_settings['name'] = camera_default_name(camera_settings, f'Camera {index}')
-    camera_settings['backend'] = str(camera_settings.get('backend') or 'onvif').lower()
-    camera_settings['width'] = int(camera_settings.get('width') or 1280)
-    camera_settings['height'] = int(camera_settings.get('height') or 720)
-    camera_settings['fps'] = int(camera_settings.get('fps') or 15)
-    raw_stale = camera_settings.get('stale_frame_grabs')
-    camera_settings['stale_frame_grabs'] = int(raw_stale) if raw_stale is not None else None
-    detection = default_camera_detection_settings()
-    if isinstance(camera_settings.get('detection'), dict):
-        detection.update(camera_settings['detection'])
-    detection['object_detection_enabled'] = bool(detection.get('object_detection_enabled', True))
-    detection['object_labels'] = normalize_label_list(detection.get('object_labels', []))
-    detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
-    detection['sound'] = _normalize_camera_sound_settings(detection.get('sound'))
-    _migrate_legacy_camera_motion(detection)
-    camera_settings['detection'] = detection
-    camera_settings['recording'] = normalize_camera_recording_settings(camera_settings.get('recording'))
-    camera_settings['ptz'] = normalize_camera_ptz_settings(camera_settings.get('ptz'))
-    return camera_settings
 
 def get_camera_instance(camera_id: str | None=None):
     configured = get_camera_config(camera_id)
@@ -2790,24 +2782,6 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
     periodic_scan_interval_seconds = _int_field(merged, 'periodic_scan_interval_seconds', 0, 0, 3600)
     return {'snapshot_refresh_ms': snapshot_refresh_ms, 'detection_status_refresh_ms': detection_status_refresh_ms, 'detection_interval_seconds': detection_interval_seconds, 'event_debounce_seconds': event_debounce_seconds, 'background_detection_enabled': background_detection_enabled, 'detection_history_minutes': detection_history_minutes, 'motion_pixel_threshold': motion_pixel_threshold, 'motion_gate_fraction': round(motion_gate_fraction, 6), 'motion_scale_fraction': round(motion_scale_fraction, 4), 'motion_background_alpha': round(motion_background_alpha, 4), 'periodic_scan_interval_seconds': periodic_scan_interval_seconds}
 
-def _migrate_camera_id(old_id: str, new_id: str) -> None:
-    old_key = RecordingService._camera_key(old_id)
-    new_key = RecordingService._camera_key(new_id)
-    with live_detection_history_lock:
-        if old_id in live_detection_history:
-            live_detection_history[new_id] = live_detection_history.pop(old_id)
-    with _frame_motion_lock:
-        if old_id in _frame_motion_prev:
-            _frame_motion_prev[new_id] = _frame_motion_prev.pop(old_id)
-    if recording_service is not None:
-        for base in (recording_service.prebuffer_dir, recording_service.frames_dir, recording_service.audio_dir):
-            old_dir = base / old_key
-            new_dir = base / new_key
-            if old_dir.exists() and (not new_dir.exists()):
-                try:
-                    old_dir.rename(new_dir)
-                except OSError as exc:
-                    logger.warning('Could not rename ingest dir %s → %s: %s', old_dir, new_dir, exc)
 
 def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
     global camera, camera_config, cameras_config, camera_instances
@@ -2905,10 +2879,6 @@ def _do_download_model(model_name: str, switch_active: bool=True) -> dict[str, A
         error = None
     return {'ok': True, 'message': f"Exported {info['label']} ONNX to {destination.relative_to(BASE_DIR)}.", 'model_path': rel_path, 'bytes': exported_bytes, 'reload_succeeded': reloaded, 'reload_error': error, 'status': ai_status_payload(updated)}
 
-def _redact_camera(cam: dict[str, Any]) -> dict[str, Any]:
-    out = {k: v for k, v in cam.items() if k != 'password'}
-    out['has_password'] = bool(cam.get('password'))
-    return out
 
 def _current_version() -> str:
     version_file = BASE_DIR / 'VERSION'
