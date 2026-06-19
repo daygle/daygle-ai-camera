@@ -101,7 +101,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-import app.main as main
+import app.state as _state
 
 
 def _int_field(payload: dict[str, Any], field: str, default: int, minimum: int, maximum: int) -> int:
@@ -115,7 +115,8 @@ def _int_field(payload: dict[str, Any], field: str, default: int, minimum: int, 
 
 
 def validate_alert_email_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    current = main.effective_email_alert_settings()
+    from app.main import effective_email_alert_settings
+    current = effective_email_alert_settings()
     allowed = {'enabled', 'host', 'port', 'username', 'password', 'from_address', 'use_tls', 'use_ssl'}
     updated = {key: current.get(key) for key in allowed if key in current}
     for key, value in payload.items():
@@ -144,13 +145,14 @@ def validate_alert_email_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_push_notification_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    current = main.effective_push_notification_settings()
+    from app.main import effective_push_notification_settings, normalize_bool_setting
+    current = effective_push_notification_settings()
     allowed = {'enabled', 'server_url', 'topic', 'priority', 'username', 'password'}
     updated = {key: current.get(key) for key in allowed if key in current}
     for key, value in payload.items():
         if key in allowed:
             updated[key] = value
-    updated['enabled'] = main.normalize_bool_setting(updated.get('enabled', False))
+    updated['enabled'] = normalize_bool_setting(updated.get('enabled', False))
     for key in ('server_url', 'topic', 'priority', 'username', 'password'):
         updated[key] = str(updated.get(key) or '').strip()
     if not updated['server_url']:
@@ -169,6 +171,10 @@ def validate_push_notification_settings(payload: dict[str, Any]) -> dict[str, An
 
 
 def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | None=None, index: int=1) -> dict[str, Any]:
+    from app.main import (normalize_bool_setting, normalize_camera_id, camera_default_name,
+        default_camera_detection_settings, build_stream_url, normalize_label_list,
+        normalize_monitoring_zones, _migrate_legacy_camera_motion,
+        normalize_camera_recording_settings, normalize_camera_ptz_settings)
     current = current or {}
     updated = {key: current.get(key) for key in ('id', 'name', 'backend', 'device', 'width', 'height', 'fps', 'flip', 'stream_url', 'host', 'port', 'path', 'username', 'password') if key in current}
     updated.update({key: payload[key] for key in ('id', 'name', 'backend', 'device', 'flip', 'stream_url', 'host', 'port', 'path', 'username', 'password') if key in payload})
@@ -176,8 +182,8 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     if backend not in {'onvif', 'rtsp'}:
         raise HTTPException(status_code=400, detail='Camera backend must be onvif or rtsp.')
     updated['backend'] = backend
-    updated['id'] = main.normalize_camera_id(updated.get('id'), f'camera-{index}')
-    updated['name'] = main.camera_default_name(updated, f'Camera {index}')
+    updated['id'] = normalize_camera_id(updated.get('id'), f'camera-{index}')
+    updated['name'] = camera_default_name(updated, f'Camera {index}')
     updated['device'] = payload.get('device', current.get('device', 0))
     updated['width'] = _int_field({**current, **payload}, 'width', 1280, 160, 7680)
     updated['height'] = _int_field({**current, **payload}, 'height', 720, 120, 4320)
@@ -189,28 +195,28 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
             updated[key] = str(updated.get(key) or '').strip()
     if not updated.get('password') and current.get('password'):
         updated['password'] = current['password']
-    if backend in {'onvif', 'rtsp'} and (not main.build_stream_url(updated)):
+    if backend in {'onvif', 'rtsp'} and (not build_stream_url(updated)):
         raise HTTPException(status_code=400, detail='stream_url is required for ONVIF/RTSP cameras, or provide host plus optional username, password, port, and path.')
     flip = str(updated.get('flip', 'none')).lower()
     if flip not in {'none', 'horizontal', 'vertical', 'both'}:
         raise HTTPException(status_code=400, detail='flip must be none, horizontal, vertical, or both.')
     updated['flip'] = flip
-    detection = main.default_camera_detection_settings()
+    detection = default_camera_detection_settings()
     existing_detection = current.get('detection') if isinstance(current.get('detection'), dict) else {}
     payload_detection = payload.get('detection') if isinstance(payload.get('detection'), dict) else {}
     detection.update(existing_detection)
     detection.update(payload_detection)
-    detection['object_detection_enabled'] = main.normalize_bool_setting(detection.get('object_detection_enabled', True), True)
-    detection['object_labels'] = main.normalize_label_list(detection.get('object_labels', []))
-    detection['zones'] = main.normalize_monitoring_zones(detection.get('zones', []))
-    main._migrate_legacy_camera_motion(detection)
+    detection['object_detection_enabled'] = normalize_bool_setting(detection.get('object_detection_enabled', True), True)
+    detection['object_labels'] = normalize_label_list(detection.get('object_labels', []))
+    detection['zones'] = normalize_monitoring_zones(detection.get('zones', []))
+    _migrate_legacy_camera_motion(detection)
     updated['detection'] = detection
     existing_recording = current.get('recording') if isinstance(current.get('recording'), dict) else {}
     payload_recording = payload.get('recording') if isinstance(payload.get('recording'), dict) else {}
-    updated['recording'] = main.normalize_camera_recording_settings({**existing_recording, **payload_recording})
+    updated['recording'] = normalize_camera_recording_settings({**existing_recording, **payload_recording})
     existing_ptz = current.get('ptz') if isinstance(current.get('ptz'), dict) else {}
     payload_ptz = payload.get('ptz') if isinstance(payload.get('ptz'), dict) else {}
-    updated['ptz'] = main.normalize_camera_ptz_settings({**existing_ptz, **payload_ptz})
+    updated['ptz'] = normalize_camera_ptz_settings({**existing_ptz, **payload_ptz})
     if 'motion' in payload:
         raw_motion = payload.get('motion') if isinstance(payload.get('motion'), dict) else {}
         cam_motion: dict[str, Any] = {}
@@ -235,11 +241,11 @@ def validate_cameras_settings(payload: Any) -> list[dict[str, Any]]:
         raise HTTPException(status_code=400, detail='cameras must be a list.')
     validated: list[dict[str, Any]] = []
     seen: set[str] = set()
-    current_by_id = {str(camera_settings.get('id')): camera_settings for camera_settings in main.cameras_config}
+    current_by_id = {str(camera_settings.get('id')): camera_settings for camera_settings in _state.cameras_config}
     for index, raw_camera in enumerate(raw_cameras, start=1):
         if not isinstance(raw_camera, dict):
             raise HTTPException(status_code=400, detail='Each camera must be an object.')
-        current = current_by_id.get(str(raw_camera.get('id'))) or (main.cameras_config[index - 1] if index <= len(main.cameras_config) else {})
+        current = current_by_id.get(str(raw_camera.get('id'))) or (_state.cameras_config[index - 1] if index <= len(_state.cameras_config) else {})
         camera_settings = validate_camera_settings(raw_camera, current=current, index=index)
         if camera_settings['id'] in seen:
             raise HTTPException(status_code=400, detail=f"Duplicate camera id: {camera_settings['id']}.")
@@ -249,18 +255,20 @@ def validate_cameras_settings(payload: Any) -> list[dict[str, Any]]:
 
 
 def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    current = main.effective_recording_config()
+    from app.main import effective_recording_config, normalize_bool_setting
+    current = effective_recording_config()
     merged = {**current, **payload}
     fmt = str(merged.get('format', 'mp4')).strip().lstrip('.').lower() or 'mp4'
     if fmt == 'avi':
         fmt = 'mp4'
     if fmt != 'mp4':
         raise HTTPException(status_code=400, detail='Recording format must be mp4 for browser playback.')
-    return {'pre_event_seconds': _int_field(merged, 'pre_event_seconds', 10, 0, 300), 'post_event_seconds': _int_field(merged, 'post_event_seconds', 15, 0, 300), 'extension_step_seconds': _int_field(merged, 'extension_step_seconds', 45, 0, 300), 'max_clip_seconds': _int_field(merged, 'max_clip_seconds', 300, 1, 3600), 'format': fmt, 'chunk_duration_seconds': _int_field(merged, 'chunk_duration_seconds', 3600, 60, 86400), 'retention_days': _int_field(merged, 'retention_days', 14, 1, 3650), 'max_storage_gb': _int_field(merged, 'max_storage_gb', 20, 1, 100000), 'auto_purge_enabled': main.normalize_bool_setting(merged.get('auto_purge_enabled', True), True)}
+    return {'pre_event_seconds': _int_field(merged, 'pre_event_seconds', 10, 0, 300), 'post_event_seconds': _int_field(merged, 'post_event_seconds', 15, 0, 300), 'extension_step_seconds': _int_field(merged, 'extension_step_seconds', 45, 0, 300), 'max_clip_seconds': _int_field(merged, 'max_clip_seconds', 300, 1, 3600), 'format': fmt, 'chunk_duration_seconds': _int_field(merged, 'chunk_duration_seconds', 3600, 60, 86400), 'retention_days': _int_field(merged, 'retention_days', 14, 1, 3650), 'max_storage_gb': _int_field(merged, 'max_storage_gb', 20, 1, 100000), 'auto_purge_enabled': normalize_bool_setting(merged.get('auto_purge_enabled', True), True)}
 
 
 def validate_storage_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    current = main.effective_storage_config()
+    from app.main import effective_storage_config
+    current = effective_storage_config()
     updated = {key: str(current.get(key) or '') for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir', 'database')}
     for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir'):
         if key in payload:
@@ -268,7 +276,7 @@ def validate_storage_settings(payload: dict[str, Any]) -> dict[str, Any]:
             if not value:
                 raise HTTPException(status_code=400, detail=f'{key} cannot be blank.')
             updated[key] = value
-    updated['database'] = str(main.config.get('storage', {}).get('database') or updated.get('database') or 'data/daygle_ai_camera.sqlite3')
+    updated['database'] = str(_state.config.get('storage', {}).get('database') or updated.get('database') or 'data/daygle_ai_camera.sqlite3')
     return updated
 
 

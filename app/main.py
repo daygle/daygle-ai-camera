@@ -17,6 +17,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import app.state as _state
 import gc
 import time
 import urllib.error
@@ -48,6 +49,47 @@ from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, load_settings
 from app.sound_detector import SoundDetector, SOUND_CLASSES, DEFAULT_RULES
 from app.storage import Storage
 
+# State-registry Pool A rebinds: background modules and tests reach these via
+# ``main.<attr>``; they now live in app.state but are re-exported here so the
+# contract is preserved.  Locks/dicts are mutable objects; the rebind shares
+# the same object, so mutations are visible through both names.
+from app.state import (
+    _MOTION_FRAME_W as _MOTION_FRAME_W,
+    _MOTION_FRAME_H as _MOTION_FRAME_H,
+    _MOTION_PIXEL_THRESHOLD as _MOTION_PIXEL_THRESHOLD,
+    _MOTION_GATE_FRACTION as _MOTION_GATE_FRACTION,
+    _MOTION_SCALE_FRACTION as _MOTION_SCALE_FRACTION,
+    _MOTION_BACKGROUND_ALPHA as _MOTION_BACKGROUND_ALPHA,
+    PUBLIC_PREFIXES as PUBLIC_PREFIXES,
+    PUBLIC_PATHS as PUBLIC_PATHS,
+    ADMIN_PATHS as ADMIN_PATHS,
+    MUTATING_METHODS as MUTATING_METHODS,
+    _LOOPBACK as _LOOPBACK,
+    live_detection_history_lock as live_detection_history_lock,
+    live_detection_history as live_detection_history,
+    live_detection_status_lock as live_detection_status_lock,
+    live_detection_status as live_detection_status,
+    live_event_last_emitted_lock as live_event_last_emitted_lock,
+    live_event_last_emitted as live_event_last_emitted,
+    live_detection_retry_after as live_detection_retry_after,
+    live_detection_failure_count as live_detection_failure_count,
+    _live_backoff_lock as _live_backoff_lock,
+    live_detection_worker_lock as live_detection_worker_lock,
+    active_live_detection_cameras as active_live_detection_cameras,
+    live_detection_last_checked as live_detection_last_checked,
+    live_alert_monitor_stop as live_alert_monitor_stop,
+    live_alert_monitor_thread as live_alert_monitor_thread,
+    _periodic_scan_last_ts as _periodic_scan_last_ts,
+    _frame_motion_lock as _frame_motion_lock,
+    _frame_motion_prev as _frame_motion_prev,
+    _frame_motion_error_cameras as _frame_motion_error_cameras,
+    active_rtsp_recordings_lock as active_rtsp_recordings_lock,
+    active_rtsp_recordings as active_rtsp_recordings,
+    _camera_health_lock as _camera_health_lock,
+    _camera_health_state as _camera_health_state,
+    _notification_threads_lock as _notification_threads_lock,
+    _notification_threads as _notification_threads,
+)
 # Phase-18: top-of-file Pool A from-import rebinds for the
 # camera-config cluster extracted into app/camera_config.py. The
 # rebind lives in the regular app.X import section (NOT at the very
@@ -445,22 +487,13 @@ _FFMPEG: str | None = shutil.which('ffmpeg')
 YOLO_MODELS: dict[str, dict[str, Any]] = {'yolov8n': {'pt': 'yolov8n.pt', 'onnx': 'yolov8n.onnx', 'label': 'YOLOv8n · Nano', 'approx_mb': 6, 'description': 'Fastest inference, lowest accuracy. Best for low-power or embedded hardware.'}, 'yolov8s': {'pt': 'yolov8s.pt', 'onnx': 'yolov8s.onnx', 'label': 'YOLOv8s · Small', 'approx_mb': 22, 'description': 'Good balance of speed and accuracy for most systems.'}, 'yolov8m': {'pt': 'yolov8m.pt', 'onnx': 'yolov8m.onnx', 'label': 'YOLOv8m · Medium', 'approx_mb': 52, 'description': 'Significantly better accuracy. Recommended for IR or night-vision cameras.'}, 'yolov8l': {'pt': 'yolov8l.pt', 'onnx': 'yolov8l.onnx', 'label': 'YOLOv8l · Large', 'approx_mb': 87, 'description': 'High accuracy. Requires a capable CPU or GPU.'}, 'yolov8x': {'pt': 'yolov8x.pt', 'onnx': 'yolov8x.onnx', 'label': 'YOLOv8x · Extra Large', 'approx_mb': 131, 'description': 'Best possible accuracy. GPU strongly recommended.'}}
 ONE_PIXEL_PNG = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82'
 config = load_settings()
+_state.config = config
 auth_config = config.get('auth', {})
+_state.auth_config = auth_config
 auth_enabled = bool(auth_config.get('enabled', True))
-
-_app_instance: FastAPI | None = None
-
 
 @asynccontextmanager
 async def app_lifespan(_app: FastAPI):
-    global _app_instance
-    _app_instance = _app
-    # Store singletons on app.state so Depends() providers can reach them
-    _app.state.database = database
-    _app.state.auth = auth
-    _app.state.config = config
-    _app.state.cameras_config = cameras_config
-    _app.state.recording_service = recording_service
     removed = database.cleanup_incomplete_recordings()
     if removed:
         logger.info(f'Cleaned up {len(removed)} incomplete recording(s) from previous session')
@@ -545,43 +578,25 @@ def effective_push_notification_settings() -> dict[str, Any]:
         settings.update(override)
     return settings
 database = EventDatabase(config['storage']['database'])
+_state.database = database
 camera_config: dict[str, Any] = {}
+_state.camera_config = camera_config
 cameras_config: list[dict[str, Any]] = []
+_state.cameras_config = cameras_config
 camera_instances: dict[str, Any] = {}
+_state.camera_instances = camera_instances
 camera = None
 storage = Storage({**config, 'storage': effective_storage_config()})
 recording_service = RecordingService({**config, 'storage': effective_storage_config(), 'recording': effective_recording_config()})
+_state.recording_service = recording_service
 auth = AuthService(config['storage']['database'], effective_auth_config())
+_state.auth = auth
 SESSION_COOKIE_NAME = str(effective_auth_config().get('cookie_name', SESSION_COOKIE))
 detector = create_detector(effective_ai_config())
+_state.detector = detector
 last_detector_error: str | None = getattr(detector, 'unavailable_reason', None)
+_state.last_detector_error = last_detector_error
 alerts = AlertEngine([])
-live_detection_last_checked: dict[str, float] = {}
-live_detection_status: dict[str, dict[str, Any]] = {}
-live_detection_status_lock = threading.Lock()
-live_detection_history: dict[str, deque] = {}
-live_detection_history_lock = threading.Lock()
-live_event_last_emitted: dict[str, dict[str, Any]] = {}
-live_event_last_emitted_lock = threading.Lock()
-live_detection_retry_after: dict[str, float] = {}
-live_detection_failure_count: dict[str, int] = {}
-_live_backoff_lock = threading.Lock()
-active_rtsp_recordings: dict[str, dict[str, Any]] = {}
-active_rtsp_recordings_lock = threading.Lock()
-live_detection_worker_lock = threading.Lock()
-active_live_detection_cameras: set[str] = set()
-_frame_motion_prev: dict[str, Any] = {}
-_frame_motion_lock = threading.Lock()
-_frame_motion_error_cameras: set[str] = set()
-_periodic_scan_last_ts: dict[str, float] = {}
-_MOTION_FRAME_W = 160
-_MOTION_FRAME_H = 120
-_MOTION_PIXEL_THRESHOLD = 30
-_MOTION_GATE_FRACTION = 0.003
-_MOTION_SCALE_FRACTION = 0.1
-_MOTION_BACKGROUND_ALPHA = 0.05
-live_alert_monitor_stop = threading.Event()
-live_alert_monitor_thread: threading.Thread | None = None
 _sound_detectors: dict[str, SoundDetector] = {}
 _sound_detectors_lock = threading.Lock()
 _sound_statuses: dict[str, dict[str, Any]] = {}
@@ -611,8 +626,6 @@ def _sound_status_reason(diagnostics: list[dict[str, Any]]) -> dict[str, Any] | 
         top = below[0]
         code = 'below_threshold'
     return {'code': code, 'class': top['class'], 'class_label': top['label'], 'confidence': top['confidence'], 'threshold': top['threshold'], 'cooldown_remaining': top['cooldown_remaining']}
-_camera_health_state: dict[str, dict[str, Any]] = {}
-_camera_health_lock = threading.Lock()
 
 
 def _alert_datetime_prefs() -> tuple[str, str, str]:
@@ -1096,8 +1109,10 @@ def create_camera(settings: dict[str, Any]):
 def create_camera_instances(settings_list: list[dict[str, Any]]) -> dict[str, Any]:
     return {str(settings['id']): create_camera(settings) for settings in settings_list}
 cameras_config = effective_cameras_config()
+_state.cameras_config = cameras_config
 camera_config = cameras_config[0] if cameras_config else {}
 camera_instances = create_camera_instances(cameras_config)
+_state.camera_instances = camera_instances
 camera = camera_instances[camera_config['id']] if camera_config else None
 
 def config_file_path() -> Path:
@@ -1130,10 +1145,6 @@ def log_detector_initialization(context: str='startup') -> None:
     active_providers = getattr(detector, 'active_providers', None)
     providers_str = ','.join(active_providers) if active_providers else '<none>'
     logger.info('AI detector %s: active_backend=%s configured_backend=%s model_loaded=%s inference_available=%s providers=%s model_path=%s labels_path=%s error=%s', context, ai_status['active_backend'], ai_status['configured_backend'], ai_status['model_loaded'], ai_status['inference_available'], providers_str, ai_status['model_path'] or '<none>', ai_status['labels_path'] or '<none>', ai_status['error'] or '<none>')
-PUBLIC_PREFIXES = ('/static/',)
-PUBLIC_PATHS = {'/favicon.ico', '/login', '/setup'}
-ADMIN_PATHS = {'/onnx', '/yamnet-tflite', '/ai', '/cameras', '/settings', '/users', '/zones', '/sounds', '/audit', '/camera-log'}
-MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
 def set_session_cookie(response: Response, request: Request, token: str, expires_at: str) -> None:
     session_hours = float(effective_auth_config().get('session_timeout_hours', 12))
@@ -1159,7 +1170,6 @@ def csrf_token_response(request: Request, title: str, body_template: str, *, sta
     response.status_code = status_code
     set_csrf_cookie(response, token, request)
     return response
-_LOOPBACK = {'127.0.0.1', '::1', 'localhost'}
 
 def write_audit_log(request: Request, action: str, resource: str, resource_id: Any=None, details: dict[str, Any] | None=None, status: str='success') -> None:
     user: dict[str, Any] | None = getattr(request.state, 'user', None)
@@ -1325,8 +1335,6 @@ def recording_skip_reason(detections: list[dict[str, Any]], recording_config: di
         return f"Recording policy matched {trigger_type}{(f' {trigger_label}' if trigger_label else '')}, but no recording was linked."
     labels = ', '.join((str(detection.get('label')) for detection in detections if detection.get('label'))) or 'none'
     return f'Recording is waiting for an enabled alert rule to trigger for this camera. Detected labels: {labels}.'
-_notification_threads_lock = threading.Lock()
-_notification_threads: list[threading.Thread] = []
 
 GITHUB_REPO = 'daygle/daygle-ai-camera'
 PYPI_ULTRALYTICS_URL = 'https://pypi.org/pypi/ultralytics/json'
@@ -1753,12 +1761,12 @@ def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
     global camera, camera_config, cameras_config, camera_instances
     old_instances = camera_instances
     cameras_config = settings_list
+    _state.cameras_config = cameras_config
     camera_config = settings_list[0] if settings_list else {}
+    _state.camera_config = camera_config
     camera_instances = create_camera_instances(settings_list)
+    _state.camera_instances = camera_instances
     camera = camera_instances[camera_config['id']] if camera_config else None
-    # Keep app.state in sync so Depends(get_cameras_config) sees the new list
-    if _app_instance is not None:
-        _app_instance.state.cameras_config = cameras_config
     for old_cam in (old_instances or {}).values():
         try:
             old_cam.close()
@@ -1771,6 +1779,7 @@ def apply_storage_and_recording_settings() -> None:
     storage = Storage({**config, 'storage': effective_storage_config()})
     old_service = recording_service
     recording_service = RecordingService({**config, 'storage': effective_storage_config(), 'recording': effective_recording_config()})
+    _state.recording_service = recording_service
     if old_service is not None:
         try:
             old_service.stop_prebuffer_workers()
