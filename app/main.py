@@ -448,8 +448,19 @@ config = load_settings()
 auth_config = config.get('auth', {})
 auth_enabled = bool(auth_config.get('enabled', True))
 
+_app_instance: FastAPI | None = None
+
+
 @asynccontextmanager
 async def app_lifespan(_app: FastAPI):
+    global _app_instance
+    _app_instance = _app
+    # Store singletons on app.state so Depends() providers can reach them
+    _app.state.database = database
+    _app.state.auth = auth
+    _app.state.config = config
+    _app.state.cameras_config = cameras_config
+    _app.state.recording_service = recording_service
     removed = database.cleanup_incomplete_recordings()
     if removed:
         logger.info(f'Cleaned up {len(removed)} incomplete recording(s) from previous session')
@@ -1745,6 +1756,9 @@ def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
     camera_config = settings_list[0] if settings_list else {}
     camera_instances = create_camera_instances(settings_list)
     camera = camera_instances[camera_config['id']] if camera_config else None
+    # Keep app.state in sync so Depends(get_cameras_config) sees the new list
+    if _app_instance is not None:
+        _app_instance.state.cameras_config = cameras_config
     for old_cam in (old_instances or {}).values():
         try:
             old_cam.close()
@@ -1887,5 +1901,13 @@ from app.middleware import authentication_middleware, app_navigation_middleware
 app.middleware('http')(authentication_middleware)
 app.middleware('http')(app_navigation_middleware)
 from app.auth_gates import _request_ip as _request_ip, require_admin as require_admin, require_session as require_session, require_user as require_user
-
-
+# Pool A back-compat rebinds for helpers moved to app/auth_helpers.py and
+# app/request_helpers.py.  Sibling modules (middleware, tests) still reach
+# them as ``main.<name>``; these rebinds keep that working without requiring
+# every caller to be updated simultaneously.
+from app.auth_helpers import auth_page as auth_page
+from app.auth_helpers import csrf_token_response as csrf_token_response
+from app.auth_helpers import set_csrf_cookie as set_csrf_cookie
+from app.auth_helpers import set_session_cookie as set_session_cookie
+from app.auth_helpers import clear_auth_cookies as clear_auth_cookies
+from app.request_helpers import form_data as form_data
