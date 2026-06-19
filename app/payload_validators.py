@@ -145,7 +145,8 @@ def validate_alert_email_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_push_notification_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    from app.main import effective_push_notification_settings, normalize_bool_setting
+    from app.utils import normalize_bool_setting
+    from app.config_facades import effective_push_notification_settings
     current = effective_push_notification_settings()
     allowed = {'enabled', 'server_url', 'topic', 'priority', 'username', 'password'}
     updated = {key: current.get(key) for key in allowed if key in current}
@@ -171,10 +172,10 @@ def validate_push_notification_settings(payload: dict[str, Any]) -> dict[str, An
 
 
 def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | None=None, index: int=1) -> dict[str, Any]:
-    from app.main import (normalize_bool_setting, normalize_camera_id, camera_default_name,
-        default_camera_detection_settings, build_stream_url, normalize_label_list,
-        normalize_monitoring_zones, _migrate_legacy_camera_motion,
-        normalize_camera_recording_settings, normalize_camera_ptz_settings)
+    from app.utils import normalize_bool_setting, build_stream_url, camera_default_name, default_camera_detection_settings
+    from app.camera_config import normalize_camera_id
+    from app.zone_schema import normalize_label_list, normalize_monitoring_zones
+    from app.recording_settings import _migrate_legacy_camera_motion, normalize_camera_recording_settings, normalize_camera_ptz_settings
     current = current or {}
     updated = {key: current.get(key) for key in ('id', 'name', 'backend', 'device', 'width', 'height', 'fps', 'flip', 'stream_url', 'host', 'port', 'path', 'username', 'password') if key in current}
     updated.update({key: payload[key] for key in ('id', 'name', 'backend', 'device', 'flip', 'stream_url', 'host', 'port', 'path', 'username', 'password') if key in payload})
@@ -255,7 +256,8 @@ def validate_cameras_settings(payload: Any) -> list[dict[str, Any]]:
 
 
 def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    from app.main import effective_recording_config, normalize_bool_setting
+    from app.utils import normalize_bool_setting
+    from app.config_facades import effective_recording_config
     current = effective_recording_config()
     merged = {**current, **payload}
     fmt = str(merged.get('format', 'mp4')).strip().lstrip('.').lower() or 'mp4'

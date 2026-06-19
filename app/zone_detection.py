@@ -427,7 +427,7 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
 
 
 def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
-    from app.main import normalize_email_recipients
+    from app.utils import normalize_email_recipients
     detection_settings = settings.get('detection') or {}
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
     rules: list[dict[str, Any]] = []

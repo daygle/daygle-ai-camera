@@ -177,5 +177,5 @@ def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any
 
 
 def _camera_has_live_alert_stream(settings: dict[str, Any]) -> bool:
-    from app.main import build_stream_url
+    from app.utils import build_stream_url
     return bool(build_stream_url(settings))

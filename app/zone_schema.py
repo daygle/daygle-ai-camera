@@ -118,7 +118,7 @@ def normalize_label_list(value: Any) -> list[str]:
 
 
 def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
-    from app.main import normalize_bool_setting, normalize_email_recipients
+    from app.utils import normalize_bool_setting, normalize_email_recipients
     raw_rules = zone.get('object_rules')
     if isinstance(raw_rules, list):
         source_rules = raw_rules

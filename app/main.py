@@ -465,6 +465,16 @@ from app.live_monitor import (
     start_live_alert_monitor as start_live_alert_monitor,
     stop_live_alert_monitor as stop_live_alert_monitor,
 )
+# Phase A: pure stateless utility helpers → app/utils.py
+from app.utils import (
+    _non_empty_setting as _non_empty_setting,
+    build_stream_url as build_stream_url,
+    camera_default_name as camera_default_name,
+    default_camera_detection_settings as default_camera_detection_settings,
+    normalize_bool_setting as normalize_bool_setting,
+    normalize_email_recipients as normalize_email_recipients,
+    _parse_iso_datetime as _parse_iso_datetime,
+)
 logger = logging.getLogger('daygle.ai')
 
 def _configure_file_logging() -> None:
@@ -695,67 +705,6 @@ def _format_alert_datetime(iso_str: str) -> str:
 
 
 
-def _non_empty_setting(settings: dict[str, Any], key: str) -> str:
-    return str(settings.get(key) or '').strip()
-
-def build_stream_url(settings: dict[str, Any]) -> str:
-    stream_url = _non_empty_setting(settings, 'stream_url')
-    if stream_url:
-        username = _non_empty_setting(settings, 'username')
-        password = _non_empty_setting(settings, 'password')
-        parsed = urlsplit(stream_url)
-        if username and parsed.scheme in {'rtsp', 'rtsps'} and parsed.netloc and ('@' not in parsed.netloc):
-            credentials = quote(username, safe='')
-            if password:
-                credentials += f":{quote(password, safe='')}"
-            return urlunsplit((parsed.scheme, f'{credentials}@{parsed.netloc}', parsed.path, parsed.query, parsed.fragment))
-        return stream_url
-    host = _non_empty_setting(settings, 'host')
-    if not host:
-        return ''
-    username = _non_empty_setting(settings, 'username')
-    password = _non_empty_setting(settings, 'password')
-    try:
-        port = int(settings.get('port') or 554)
-    except (TypeError, ValueError):
-        port = 554
-    path = _non_empty_setting(settings, 'path') or 'stream1'
-    path = path.lstrip('/')
-    credentials = ''
-    if username:
-        credentials = quote(username, safe='')
-        if password:
-            credentials += f":{quote(password, safe='')}"
-        credentials += '@'
-    return f'rtsp://{credentials}{host}:{port}/{path}'
-
-def camera_default_name(settings: dict[str, Any], fallback: str='Primary Camera') -> str:
-    return str(settings.get('name') or settings.get('device') or fallback).strip() or fallback
-
-
-def default_camera_detection_settings() -> dict[str, Any]:
-    return {'object_detection_enabled': True, 'zones': []}
-
-def normalize_bool_setting(value: Any, default: bool=False) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in {'1', 'true', 'yes', 'on', 'enabled'}
-
-
-def normalize_email_recipients(value: Any) -> list[str]:
-    raw_recipients = value.split(',') if isinstance(value, str) else value
-    if not isinstance(raw_recipients, list):
-        return []
-    recipients: list[str] = []
-    seen: set[str] = set()
-    for raw_recipient in raw_recipients:
-        recipient = str(raw_recipient).strip()
-        if recipient and '@' in recipient and (recipient.lower() not in seen):
-            recipients.append(recipient)
-            seen.add(recipient.lower())
-    return recipients
 
 
 
@@ -1718,15 +1667,6 @@ async def _read_uploaded_image(request: Request) -> tuple[bytes, str | None, str
             payload = payload[:-2]
         return (payload, filename, uploaded_type)
     raise HTTPException(status_code=400, detail='Multipart upload must include a file field named file')
-
-def _parse_iso_datetime(value: Any) -> datetime | None:
-    try:
-        parsed = datetime.fromisoformat(str(value or ''))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
 
 def _recording_timeline_segment(recording: dict[str, Any], day_start: datetime, day_end: datetime) -> dict[str, Any] | None:
     started_at = _parse_iso_datetime(recording.get('started_at'))
