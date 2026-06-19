@@ -1768,51 +1768,6 @@ PUBLIC_PATHS = {'/favicon.ico', '/login', '/setup'}
 ADMIN_PATHS = {'/onnx', '/yamnet-tflite', '/ai', '/cameras', '/settings', '/users', '/zones', '/sounds', '/audit', '/camera-log'}
 MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
-@app.middleware('http')
-async def authentication_middleware(request: Request, call_next):
-    if not effective_auth_config().get('enabled', True):
-        return await call_next(request)
-    path = request.url.path
-    if path in PUBLIC_PATHS or any((path.startswith(prefix) for prefix in PUBLIC_PREFIXES)):
-        return await call_next(request)
-    has_users = auth.users_exist()
-    if not has_users:
-        if path.startswith('/api/'):
-            return JSONResponse({'detail': 'Initial administrator setup is required.'}, status_code=403)
-        return RedirectResponse('/setup', status_code=303)
-    session = auth.get_session(request.cookies.get(SESSION_COOKIE_NAME))
-    if session is None:
-        if path.startswith('/api/'):
-            return JSONResponse({'detail': 'Authentication required'}, status_code=401)
-        return RedirectResponse('/login', status_code=303)
-    request.state.session = session
-    request.state.user = session['user']
-    admin_required = path in ADMIN_PATHS or path.startswith('/api/users') or path.startswith('/api/settings/ai') or path.startswith('/api/settings/system') or path.startswith('/api/update/') or (path.startswith('/api/cameras') and request.method in MUTATING_METHODS) or (path.startswith('/api/settings/alert-email') and request.method in MUTATING_METHODS) or (path.startswith('/api/settings/alert-push') and request.method in MUTATING_METHODS) or (path.startswith('/api/settings/camera-offline') and request.method in MUTATING_METHODS) or ((path.startswith('/api/events') or path.startswith('/api/alerts')) and 'dismiss' in path and (request.method in MUTATING_METHODS))
-    if admin_required and session['user']['role'] != 'admin':
-        return JSONResponse({'detail': 'Admin access required'}, status_code=403)
-    if (path.startswith('/api/') or path == '/logout') and request.method in MUTATING_METHODS:
-        csrf_header = request.headers.get(CSRF_HEADER)
-        if not csrf_header or csrf_header != session['csrf_token']:
-            return JSONResponse({'detail': 'CSRF token missing or invalid'}, status_code=403)
-    return await call_next(request)
-
-@app.middleware('http')
-async def app_navigation_middleware(request: Request, call_next):
-    response = await call_next(request)
-    content_type = response.headers.get('content-type', '')
-    if request.url.path in PUBLIC_PATHS or not content_type.startswith('text/html'):
-        return response
-    body = b''
-    async for chunk in response.body_iterator:
-        body += chunk
-    marker = b'</body>'
-    script = b'<script src="/static/nav.js"></script>'
-    if marker in body and script not in body:
-        body = body.replace(marker, script + marker)
-    headers = dict(response.headers)
-    headers.pop('content-length', None)
-    return Response(content=body, status_code=response.status_code, headers=headers, media_type='text/html')
-
 def set_session_cookie(response: Response, request: Request, token: str, expires_at: str) -> None:
     session_hours = float(effective_auth_config().get('session_timeout_hours', 12))
     response.set_cookie(SESSION_COOKIE_NAME, token, httponly=True, secure=request.url.scheme == 'https', samesite='lax', expires=expires_at, max_age=int(session_hours * 3600))
@@ -3071,3 +3026,10 @@ from app.api.auth_router import router as auth_router
 app.include_router(auth_router)
 from app.api.web_router import login_page as login_page
 from app.api.web_router import setup_page as setup_page
+
+from app.middleware import (
+    authentication_middleware,
+    app_navigation_middleware,
+)
+app.middleware("http")(authentication_middleware)
+app.middleware("http")(app_navigation_middleware)
