@@ -88,59 +88,64 @@ applies verbatim.
 from __future__ import annotations
 
 from fastapi import Request
+from fastapi.responses import JSONResponse, RedirectResponse
+from starlette.responses import Response
 
-import app.main as main
+import app.state as _state
+from app.auth import CSRF_HEADER
+from app.config_facades import effective_auth_config
 
 
 async def authentication_middleware(request: Request, call_next):
-    if not main.effective_auth_config().get('enabled', True):
+    if not effective_auth_config().get('enabled', True):
         return await call_next(request)
     path = request.url.path
-    if path in main.PUBLIC_PATHS or any(
-        (path.startswith(prefix) for prefix in main.PUBLIC_PREFIXES)
+    if path in _state.PUBLIC_PATHS or any(
+        (path.startswith(prefix) for prefix in _state.PUBLIC_PREFIXES)
     ):
         return await call_next(request)
-    has_users = main.auth.users_exist()
+    has_users = _state.auth.users_exist()
     if not has_users:
         if path.startswith('/api/'):
-            return main.JSONResponse(
+            return JSONResponse(
                 {'detail': 'Initial administrator setup is required.'},
                 status_code=403,
             )
-        return main.RedirectResponse('/setup', status_code=303)
-    session = main.auth.get_session(request.cookies.get(main.SESSION_COOKIE_NAME))
+        return RedirectResponse('/setup', status_code=303)
+    _cookie_name = str(effective_auth_config().get('cookie_name', 'session'))
+    session = _state.auth.get_session(request.cookies.get(_cookie_name))
     if session is None:
         if path.startswith('/api/'):
-            return main.JSONResponse(
+            return JSONResponse(
                 {'detail': 'Authentication required'}, status_code=401,
             )
-        return main.RedirectResponse('/login', status_code=303)
+        return RedirectResponse('/login', status_code=303)
     request.state.session = session
     request.state.user = session['user']
     admin_required = (
-        path in main.ADMIN_PATHS
+        path in _state.ADMIN_PATHS
         or path.startswith('/api/users')
         or path.startswith('/api/settings/ai')
         or path.startswith('/api/settings/system')
         or path.startswith('/api/update/')
-        or (path.startswith('/api/cameras') and request.method in main.MUTATING_METHODS)
-        or (path.startswith('/api/settings/alert-email') and request.method in main.MUTATING_METHODS)
-        or (path.startswith('/api/settings/alert-push') and request.method in main.MUTATING_METHODS)
-        or (path.startswith('/api/settings/camera-offline') and request.method in main.MUTATING_METHODS)
+        or (path.startswith('/api/cameras') and request.method in _state.MUTATING_METHODS)
+        or (path.startswith('/api/settings/alert-email') and request.method in _state.MUTATING_METHODS)
+        or (path.startswith('/api/settings/alert-push') and request.method in _state.MUTATING_METHODS)
+        or (path.startswith('/api/settings/camera-offline') and request.method in _state.MUTATING_METHODS)
         or (
             (path.startswith('/api/events') or path.startswith('/api/alerts'))
             and 'dismiss' in path
-            and (request.method in main.MUTATING_METHODS)
+            and (request.method in _state.MUTATING_METHODS)
         )
     )
     if admin_required and session['user']['role'] != 'admin':
-        return main.JSONResponse(
+        return JSONResponse(
             {'detail': 'Admin access required'}, status_code=403,
         )
-    if (path.startswith('/api/') or path == '/logout') and request.method in main.MUTATING_METHODS:
-        csrf_header = request.headers.get(main.CSRF_HEADER)
+    if (path.startswith('/api/') or path == '/logout') and request.method in _state.MUTATING_METHODS:
+        csrf_header = request.headers.get(CSRF_HEADER)
         if not csrf_header or csrf_header != session['csrf_token']:
-            return main.JSONResponse(
+            return JSONResponse(
                 {'detail': 'CSRF token missing or invalid'}, status_code=403,
             )
     return await call_next(request)
@@ -149,7 +154,7 @@ async def authentication_middleware(request: Request, call_next):
 async def app_navigation_middleware(request: Request, call_next):
     response = await call_next(request)
     content_type = response.headers.get('content-type', '')
-    if request.url.path in main.PUBLIC_PATHS or not content_type.startswith('text/html'):
+    if request.url.path in _state.PUBLIC_PATHS or not content_type.startswith('text/html'):
         return response
     body = b''
     async for chunk in response.body_iterator:
@@ -160,7 +165,7 @@ async def app_navigation_middleware(request: Request, call_next):
         body = body.replace(marker, script + marker)
     headers = dict(response.headers)
     headers.pop('content-length', None)
-    return main.Response(
+    return Response(
         content=body,
         status_code=response.status_code,
         headers=headers,

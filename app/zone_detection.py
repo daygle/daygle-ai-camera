@@ -171,12 +171,20 @@ from typing import Any
 from fastapi import HTTPException
 import numpy as np
 
-import app.main as main
+import app.state as _state
+from app.state import (
+    _MOTION_FRAME_W,
+    _MOTION_FRAME_H,
+    _MOTION_GATE_FRACTION,
+    _MOTION_SCALE_FRACTION,
+)
+from app.zone_schema import _LABEL_ALIASES, normalize_label_list, zone_motion_min_confidence
 
 
 def get_camera_instance(camera_id: str | None = None):
-    configured = main.get_camera_config(camera_id)
-    instance = main.camera_instances.get(str(configured['id']))
+    from app.main import get_camera_config
+    configured = get_camera_config(camera_id)
+    instance = _state.camera_instances.get(str(configured['id']))
     if instance is None:
         raise HTTPException(status_code=404, detail='Camera not found')
     return instance
@@ -287,10 +295,10 @@ def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
         y = float(y if y is not None else 0)
         w = float(w if w is not None else 1)
         h = float(h if h is not None else 1)
-        px1 = max(0, int(x * main._MOTION_FRAME_W))
-        py1 = max(0, int(y * main._MOTION_FRAME_H))
-        px2 = min(main._MOTION_FRAME_W, max(px1 + 1, int(round((x + w) * main._MOTION_FRAME_W))))
-        py2 = min(main._MOTION_FRAME_H, max(py1 + 1, int(round((y + h) * main._MOTION_FRAME_H))))
+        px1 = max(0, int(x * _MOTION_FRAME_W))
+        py1 = max(0, int(y * _MOTION_FRAME_H))
+        px2 = min(_MOTION_FRAME_W, max(px1 + 1, int(round((x + w) * _MOTION_FRAME_W))))
+        py2 = min(_MOTION_FRAME_H, max(py1 + 1, int(round((y + h) * _MOTION_FRAME_H))))
         return float(np.mean(diff_mask[py1:py2, px1:px2]))
     except Exception:
         return 0.0
@@ -314,9 +322,9 @@ def zone_motion_detections(
     # are unaffected. Tests that omit the kwargs fall back to main's value
     # transparently.
     if gate_fraction is None:
-        gate_fraction = main._MOTION_GATE_FRACTION
+        gate_fraction = _MOTION_GATE_FRACTION
     if scale_fraction is None:
-        scale_fraction = main._MOTION_SCALE_FRACTION
+        scale_fraction = _MOTION_SCALE_FRACTION
     detection_settings = settings.get('detection') or {}
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_motion', True)]
     if not zones:
@@ -334,7 +342,7 @@ def zone_motion_detections(
             zone_confidence = round(min(1.0, zone_fraction / max(scale_fraction, 1e-09)), 3)
         else:
             zone_confidence = frame_motion_confidence
-        conf_threshold = main.zone_motion_min_confidence(zone)
+        conf_threshold = zone_motion_min_confidence(zone)
         if zone_confidence < conf_threshold:
             continue
         seen_zones.add(zone_id)
@@ -352,12 +360,12 @@ def zone_motion_detections(
 
 
 def detection_label_allowed_for_zone(detection: dict[str, Any], zone: dict[str, Any], camera_labels: set[str]) -> bool:
-    zone_labels = set(main.normalize_label_list(zone.get('object_labels', [])))
+    zone_labels = set(normalize_label_list(zone.get('object_labels', [])))
     allowed_labels = zone_labels or camera_labels
     if not allowed_labels:
         return True
     label = str(detection.get('label') or '').strip().lower()
-    return main._LABEL_ALIASES.get(label, label) in allowed_labels
+    return _LABEL_ALIASES.get(label, label) in allowed_labels
 
 
 def filter_detections_for_camera_zones(
@@ -369,7 +377,7 @@ def filter_detections_for_camera_zones(
 ) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get(zone_monitor_key, True)]
-    camera_labels = set(main.normalize_label_list(detection_settings.get('object_labels', [])))
+    camera_labels = set(normalize_label_list(detection_settings.get('object_labels', [])))
     if not zones:
         if zone_monitor_key == 'monitor_objects' and camera_labels and (not require_zones):
             return [detection for detection in detections if str(detection.get('label') or '').strip().lower() in camera_labels]
@@ -396,7 +404,7 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
     detection_settings = settings.get('detection') or {}
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
     label = str(detection.get('label') or '').strip().lower()
-    label = main._LABEL_ALIASES.get(label, label)
+    label = _LABEL_ALIASES.get(label, label)
     if not label:
         return []
     matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
@@ -419,6 +427,7 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
 
 
 def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
+    from app.main import normalize_email_recipients
     detection_settings = settings.get('detection') or {}
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
     rules: list[dict[str, Any]] = []
@@ -440,7 +449,7 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
                 'cooldown_seconds': rule.get('cooldown_seconds', 60),
                 'enabled': True,
                 'email_enabled': bool(rule.get('email_enabled', False)),
-                'email_recipients': main.normalize_email_recipients(rule.get('email_recipients', [])),
+                'email_recipients': normalize_email_recipients(rule.get('email_recipients', [])),
                 'push_enabled': bool(rule.get('push_enabled', False)),
                 'active_start': rule.get('active_start'),
                 'active_end': rule.get('active_end'),
@@ -515,7 +524,7 @@ def detection_has_matching_record_rule(detection: dict[str, Any], rules: list[di
     matching detection, not only when a new alert notification is emitted.
     """
     label = str(detection.get('label') or '').strip().lower()
-    label = main._LABEL_ALIASES.get(label, label)
+    label = _LABEL_ALIASES.get(label, label)
     if not label:
         return False
     confidence = float(detection.get('confidence') or 0)
@@ -523,7 +532,7 @@ def detection_has_matching_record_rule(detection: dict[str, Any], rules: list[di
         if not rule.get('enabled', True):
             continue
         rule_object = str(rule.get('object') or '').strip().lower()
-        rule_object = main._LABEL_ALIASES.get(rule_object, rule_object)
+        rule_object = _LABEL_ALIASES.get(rule_object, rule_object)
         if rule_object != label:
             continue
         try:

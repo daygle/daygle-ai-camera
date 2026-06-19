@@ -93,15 +93,16 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-import app.main as main
+import app.state as _state
+from app.config_facades import get_camera_config
 
 logger = logging.getLogger('daygle.ai')
 
 
 def update_live_detection_status(camera_id: str, **updates: Any) -> None:
-    with main.live_detection_status_lock:
-        main.live_detection_status[camera_id] = {
-            **main.live_detection_status.get(camera_id, {}),
+    with _state.live_detection_status_lock:
+        _state.live_detection_status[camera_id] = {
+            **_state.live_detection_status.get(camera_id, {}),
             **updates,
             'camera_id': camera_id,
             'updated_at': datetime.now(timezone.utc).isoformat(),
@@ -154,11 +155,12 @@ def detection_label_confidences(detections: list[dict[str, Any]]) -> dict[str, f
 
 
 def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any]:
-    selected_config = main.get_camera_config(camera_id)
+    from app.ai_settings import ai_status_payload
+    selected_config = get_camera_config(camera_id)
     camera_key = str(selected_config.get('id') or camera_id or 'camera')
-    ai_state = main.ai_status_payload()
-    with main.live_detection_status_lock:
-        status = main.live_detection_status.get(
+    ai_state = ai_status_payload()
+    with _state.live_detection_status_lock:
+        status = _state.live_detection_status.get(
             camera_key,
             {'state': 'waiting', 'reason': 'No live detection has run yet.'},
         )
@@ -175,4 +177,5 @@ def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any
 
 
 def _camera_has_live_alert_stream(settings: dict[str, Any]) -> bool:
-    return bool(main.build_stream_url(settings))
+    from app.main import build_stream_url
+    return bool(build_stream_url(settings))

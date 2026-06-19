@@ -95,7 +95,8 @@ from typing import Any
 
 from fastapi import HTTPException
 
-import app.main as main
+import app.state as _state
+from app.camera_config import normalize_camera_id, normalize_camera_settings
 
 
 # Source of truth for the live-config defaults. Kept as a module
@@ -119,16 +120,16 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
 
 
 def effective_ai_config() -> dict[str, Any]:
-    settings = copy.deepcopy(main.config.get('ai', {}))
-    override = main.database.get_setting('ai')
+    settings = copy.deepcopy(_state.config.get('ai', {}))
+    override = _state.database.get_setting('ai')
     if isinstance(override, dict):
         settings.update(override)
     return settings
 
 
 def effective_recording_config() -> dict[str, Any]:
-    settings = copy.deepcopy(main.config.get('recording', {}))
-    override = main.database.get_setting('recording')
+    settings = copy.deepcopy(_state.config.get('recording', {}))
+    override = _state.database.get_setting('recording')
     if isinstance(override, dict):
         settings.update(override)
     return settings
@@ -136,18 +137,18 @@ def effective_recording_config() -> dict[str, Any]:
 
 def effective_live_config() -> dict[str, Any]:
     settings = copy.deepcopy(DEFAULT_LIVE_CONFIG)
-    config_live = main.config.get('live', {})
+    config_live = _state.config.get('live', {})
     if isinstance(config_live, dict):
         settings.update(config_live)
-    override = main.database.get_setting('live')
+    override = _state.database.get_setting('live')
     if isinstance(override, dict):
         settings.update(override)
     return settings
 
 
 def effective_storage_config() -> dict[str, Any]:
-    settings = copy.deepcopy(main.config.get('storage', {}))
-    override = main.database.get_setting('storage')
+    settings = copy.deepcopy(_state.config.get('storage', {}))
+    override = _state.database.get_setting('storage')
     if isinstance(override, dict):
         database_path = settings.get('database')
         settings.update(override)
@@ -159,30 +160,30 @@ def effective_storage_config() -> dict[str, Any]:
 
 
 def effective_auth_config() -> dict[str, Any]:
-    settings = copy.deepcopy(main.auth_config)
-    override = main.database.get_setting('auth')
+    settings = copy.deepcopy(_state.auth_config)
+    override = _state.database.get_setting('auth')
     if isinstance(override, dict):
         settings.update(override)
     return settings
 
 
 def effective_cameras_config() -> list[dict[str, Any]]:
-    override = main.database.get_setting('cameras')
+    override = _state.database.get_setting('cameras')
     if isinstance(override, list) and override:
         return [
-            main.normalize_camera_settings(camera_settings, index)
+            normalize_camera_settings(camera_settings, index)
             for index, camera_settings in enumerate(override, start=1)
         ]
     return []
 
 
 def get_camera_config(camera_id: str | None = None) -> dict[str, Any]:
-    if not main.cameras_config:
-        return main.camera_config
+    if not _state.cameras_config:
+        return _state.camera_config
     if camera_id:
-        normalized = main.normalize_camera_id(camera_id)
-        for configured in main.cameras_config:
+        normalized = normalize_camera_id(camera_id)
+        for configured in _state.cameras_config:
             if configured.get('id') == normalized:
                 return configured
         raise HTTPException(status_code=404, detail='Camera not found')
-    return main.cameras_config[0]
+    return _state.cameras_config[0]

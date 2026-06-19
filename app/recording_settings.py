@@ -57,17 +57,19 @@ from __future__ import annotations
 
 from typing import Any
 
-import app.main as main
+from app.sound_detector import DEFAULT_RULES, SOUND_CLASSES
 
 
 def normalize_camera_recording_settings(settings: Any) -> dict[str, Any]:
+    from app.main import normalize_bool_setting
     raw = settings if isinstance(settings, dict) else {}
     return {
-        'continuous': main.normalize_bool_setting(raw.get('continuous'), False),
+        'continuous': normalize_bool_setting(raw.get('continuous'), False),
     }
 
 
 def normalize_camera_ptz_settings(settings: Any) -> dict[str, Any]:
+    from app.main import normalize_bool_setting
     raw = settings if isinstance(settings, dict) else {}
     protocol = str(raw.get('protocol') or 'onvif').strip().lower()
     if protocol not in {'onvif', 'tcp_pelcod'}:
@@ -80,7 +82,7 @@ def normalize_camera_ptz_settings(settings: Any) -> dict[str, Any]:
             return default
 
     return {
-        'enabled': main.normalize_bool_setting(raw.get('enabled'), False),
+        'enabled': normalize_bool_setting(raw.get('enabled'), False),
         'protocol': protocol,
         'http_port': _int(raw.get('http_port'), 80, 1, 65535),
         'port': _int(raw.get('port'), 6060, 1, 65535),
@@ -90,19 +92,20 @@ def normalize_camera_ptz_settings(settings: Any) -> dict[str, Any]:
 
 
 def _normalize_camera_sound_settings(raw: Any) -> dict[str, Any]:
+    from app.main import normalize_bool_setting, normalize_email_recipients
     if not isinstance(raw, dict):
         raw = {}
-    enabled = main.normalize_bool_setting(raw.get('enabled'), False)
+    enabled = normalize_bool_setting(raw.get('enabled'), False)
     raw_rules = raw.get('rules') if isinstance(raw.get('rules'), list) else []
     saved: dict[str, dict[str, Any]] = {}
     for r in raw_rules:
         if not isinstance(r, dict):
             continue
         cls = str(r.get('class') or '').strip()
-        if cls in main.SOUND_CLASSES:
+        if cls in SOUND_CLASSES:
             saved[cls] = r
     defaults_by_class: dict[str, dict[str, Any]] = {
-        d['class']: d for d in main.DEFAULT_RULES
+        d['class']: d for d in DEFAULT_RULES
     }
     rules = []
     for cls, r in saved.items():
@@ -122,14 +125,14 @@ def _normalize_camera_sound_settings(raw: Any) -> dict[str, Any]:
             cooldown = float(default['cooldown_seconds'])
         rules.append({
             'class': cls,
-            'name': str(r.get('name') or main.SOUND_CLASSES[cls]['label']),
-            'enabled': main.normalize_bool_setting(r.get('enabled'), False),
-            'record_on_detect': main.normalize_bool_setting(r.get('record_on_detect'), True),
+            'name': str(r.get('name') or SOUND_CLASSES[cls]['label']),
+            'enabled': normalize_bool_setting(r.get('enabled'), False),
+            'record_on_detect': normalize_bool_setting(r.get('record_on_detect'), True),
             'confidence_threshold': threshold,
             'cooldown_seconds': cooldown,
-            'email_enabled': main.normalize_bool_setting(r.get('email_enabled'), False),
-            'email_recipients': main.normalize_email_recipients(r.get('email_recipients', [])),
-            'push_enabled': main.normalize_bool_setting(r.get('push_enabled'), False),
+            'email_enabled': normalize_bool_setting(r.get('email_enabled'), False),
+            'email_recipients': normalize_email_recipients(r.get('email_recipients', [])),
+            'push_enabled': normalize_bool_setting(r.get('push_enabled'), False),
             'active_start': str(r.get('active_start') or '').strip() or None,
             'active_end': str(r.get('active_end') or '').strip() or None,
             'notify_start': str(r.get('notify_start') or '').strip() or None,
@@ -151,14 +154,15 @@ def _migrate_legacy_camera_motion(detection: dict[str, Any]) -> None:
     record/email/push flags are dropped: the zone rule's own
     checkboxes are the single source of truth.
     """
+    from app.main import normalize_bool_setting
     legacy = detection.pop('motion', None)
     flat_enabled = detection.pop('motion_enabled', None)
     detection.pop('motion_email_enabled', None)
     enabled = True
     if isinstance(legacy, dict):
-        enabled = main.normalize_bool_setting(legacy.get('enabled'), True)
+        enabled = normalize_bool_setting(legacy.get('enabled'), True)
     elif flat_enabled is not None:
-        enabled = main.normalize_bool_setting(flat_enabled, True)
+        enabled = normalize_bool_setting(flat_enabled, True)
     if enabled:
         return
     for zone in detection.get('zones', []):

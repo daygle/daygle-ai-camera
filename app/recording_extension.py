@@ -111,7 +111,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import app.main as main
+import app.state as _state
+from app.config_facades import effective_recording_config
 
 logger = logging.getLogger('daygle.ai')
 
@@ -123,20 +124,21 @@ def extend_active_rtsp_recording(
     recording_config: dict[str, Any] | None = None,
     detections: list[dict[str, Any]] | None = None,
 ) -> int | None:
+    from app.main import detection_label_strings, detection_label_confidences
     try:
         event_dt = datetime.fromisoformat(str(event_time))
     except ValueError:
         event_dt = datetime.now(timezone.utc)
     if event_dt.tzinfo is None:
         event_dt = event_dt.replace(tzinfo=timezone.utc)
-    config = recording_config or main.effective_recording_config()
+    config = recording_config or effective_recording_config()
     extension_step_seconds = max(
         0,
         int(config.get('extension_step_seconds', config.get('post_event_seconds', 10))),
     )
     extend_until = event_dt.timestamp() + extension_step_seconds
-    with main.active_rtsp_recordings_lock:
-        session = main.active_rtsp_recordings.get(camera_id)
+    with _state.active_rtsp_recordings_lock:
+        session = _state.active_rtsp_recordings.get(camera_id)
         if not session:
             return None
         current_deadline = float(session.get('capture_deadline_ts') or 0)
@@ -149,23 +151,23 @@ def extend_active_rtsp_recording(
         ended_at = datetime.fromtimestamp(new_deadline, tz=timezone.utc).isoformat()
         duration_seconds = max(1.0, new_deadline - start_ts)
         recording_id = int(session.get('recording_id'))
-    main.database.update_recording_timing(
+    _state.database.update_recording_timing(
         recording_id, ended_at=ended_at, duration_seconds=duration_seconds,
     )
     if detections:
-        should_record, trigger_type, trigger_label = main.recording_service.should_record(
+        should_record, trigger_type, trigger_label = _state.recording_service.should_record(
             detections, config,
         )
-        new_labels = main.detection_label_strings(detections)
+        new_labels = detection_label_strings(detections)
         if new_labels:
-            main.database.add_recording_labels(
+            _state.database.add_recording_labels(
                 recording_id,
                 new_labels,
                 source='extension',
-                confidences=main.detection_label_confidences(detections),
+                confidences=detection_label_confidences(detections),
             )
         if should_record and trigger_label:
-            current_recording = main.database.get_recording(recording_id) or {}
+            current_recording = _state.database.get_recording(recording_id) or {}
             current_label = str(current_recording.get('trigger_label') or '').strip().lower()
             current_type = str(current_recording.get('trigger_type') or '').strip().lower()
             generic_labels = {
@@ -176,7 +178,7 @@ def extend_active_rtsp_recording(
                 candidate_label not in generic_labels
                 and (current_label in generic_labels or current_type in {'motion', 'human'})
             ):
-                main.database.update_recording_trigger(
+                _state.database.update_recording_trigger(
                     recording_id, trigger_type=trigger_type, trigger_label=candidate_label,
                 )
     return recording_id

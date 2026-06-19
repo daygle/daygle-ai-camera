@@ -83,8 +83,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import app.main as main
-
 
 # Module-private label canonicalization: maps alternative spellings of the
 # same detection label to a single canonical form. Used exclusively by
@@ -120,6 +118,7 @@ def normalize_label_list(value: Any) -> list[str]:
 
 
 def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
+    from app.main import normalize_bool_setting, normalize_email_recipients
     raw_rules = zone.get('object_rules')
     if isinstance(raw_rules, list):
         source_rules = raw_rules
@@ -150,17 +149,17 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
             cooldown_seconds = 60
         rules.append({
             'label': label,
-            'enabled': main.normalize_bool_setting(rule.get('enabled'), True),
-            'record_on_detect': main.normalize_bool_setting(rule.get('record_on_detect'), True),
+            'enabled': normalize_bool_setting(rule.get('enabled'), True),
+            'record_on_detect': normalize_bool_setting(rule.get('record_on_detect'), True),
             'min_confidence': max(0.0, min(1.0, min_confidence)),
             'cooldown_seconds': max(0, cooldown_seconds),
-            'email_enabled': main.normalize_bool_setting(rule.get('email_enabled'), False),
-            'email_recipients': main.normalize_email_recipients(rule.get('email_recipients', [])),
+            'email_enabled': normalize_bool_setting(rule.get('email_enabled'), False),
+            'email_recipients': normalize_email_recipients(rule.get('email_recipients', [])),
             'active_start': str(rule.get('active_start') or '').strip() or None,
             'active_end': str(rule.get('active_end') or '').strip() or None,
             'notify_start': str(rule.get('notify_start') or '').strip() or None,
             'notify_end': str(rule.get('notify_end') or '').strip() or None,
-            'push_enabled': main.normalize_bool_setting(rule.get('push_enabled'), False),
+            'push_enabled': normalize_bool_setting(rule.get('push_enabled'), False),
         })
     return rules
 
@@ -214,6 +213,7 @@ def zone_motion_min_confidence(zone: dict[str, Any]) -> float:
 
 
 def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
+    from app.main import normalize_camera_id
     normalized: list[dict[str, Any]] = []
     if not isinstance(zones, list):
         return normalized
@@ -272,7 +272,7 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
             for r in object_rules
         )
         normalized.append({
-            'id': main.normalize_camera_id(zone.get('id'), f'zone-{index}'),
+            'id': normalize_camera_id(zone.get('id'), f'zone-{index}'),
             'name': str(zone.get('name') or f'Zone {index}').strip() or f'Zone {index}',
             'x': round(x, 4),
             'y': round(y, 4),
