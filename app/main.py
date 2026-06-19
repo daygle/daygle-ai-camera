@@ -147,8 +147,14 @@ from app.recording_settings import (
 # main.load_labels, main.HTTPException via fastapi) are also resolved
 # inside the moved helpers.
 from app.ai_settings import (
+    YOLO_MODELS as YOLO_MODELS,
+    active_ai_config_source as active_ai_config_source,
     ai_status_payload as ai_status_payload,
     detector_status as detector_status,
+    detector_loaded_for as detector_loaded_for,
+    log_detector_initialization as log_detector_initialization,
+    model_exists as model_exists,
+    onnx_runtime_installed as onnx_runtime_installed,
     validate_ai_settings as validate_ai_settings,
 )
 
@@ -494,7 +500,6 @@ def _configure_file_logging() -> None:
 _configure_file_logging()
 _FFPROBE: str | None = shutil.which('ffprobe')
 _FFMPEG: str | None = shutil.which('ffmpeg')
-YOLO_MODELS: dict[str, dict[str, Any]] = {'yolov8n': {'pt': 'yolov8n.pt', 'onnx': 'yolov8n.onnx', 'label': 'YOLOv8n · Nano', 'approx_mb': 6, 'description': 'Fastest inference, lowest accuracy. Best for low-power or embedded hardware.'}, 'yolov8s': {'pt': 'yolov8s.pt', 'onnx': 'yolov8s.onnx', 'label': 'YOLOv8s · Small', 'approx_mb': 22, 'description': 'Good balance of speed and accuracy for most systems.'}, 'yolov8m': {'pt': 'yolov8m.pt', 'onnx': 'yolov8m.onnx', 'label': 'YOLOv8m · Medium', 'approx_mb': 52, 'description': 'Significantly better accuracy. Recommended for IR or night-vision cameras.'}, 'yolov8l': {'pt': 'yolov8l.pt', 'onnx': 'yolov8l.onnx', 'label': 'YOLOv8l · Large', 'approx_mb': 87, 'description': 'High accuracy. Requires a capable CPU or GPU.'}, 'yolov8x': {'pt': 'yolov8x.pt', 'onnx': 'yolov8x.onnx', 'label': 'YOLOv8x · Extra Large', 'approx_mb': 131, 'description': 'Best possible accuracy. GPU strongly recommended.'}}
 ONE_PIXEL_PNG = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82'
 config = load_settings()
 _state.config = config
@@ -1067,33 +1072,6 @@ camera = camera_instances[camera_config['id']] if camera_config else None
 def config_file_path() -> Path:
     return Path(os.environ.get(CONFIG_ENV_VAR) or DEFAULT_CONFIG_PATH)
 
-def active_ai_config_source() -> str:
-    if database.has_setting('ai'):
-        return 'database'
-    if config_file_path().exists():
-        return 'config.yaml'
-    return 'default'
-
-def onnx_runtime_installed() -> bool:
-    return importlib.util.find_spec('onnxruntime') is not None
-
-def model_exists(ai_settings: dict[str, Any]) -> bool:
-    model_path = str(ai_settings.get('model_path') or '')
-    return bool(model_path) and Path(model_path).exists()
-
-def detector_loaded_for(settings: dict[str, Any]) -> bool:
-    configured_backend = str(settings.get('backend', 'onnx')).lower()
-    active_backend = getattr(detector, 'backend', 'unknown')
-    if configured_backend == 'onnx':
-        return active_backend == 'onnx' and bool(getattr(detector, 'available', False))
-    return False
-
-
-def log_detector_initialization(context: str='startup') -> None:
-    ai_status = ai_status_payload()
-    active_providers = getattr(detector, 'active_providers', None)
-    providers_str = ','.join(active_providers) if active_providers else '<none>'
-    logger.info('AI detector %s: active_backend=%s configured_backend=%s model_loaded=%s inference_available=%s providers=%s model_path=%s labels_path=%s error=%s', context, ai_status['active_backend'], ai_status['configured_backend'], ai_status['model_loaded'], ai_status['inference_available'], providers_str, ai_status['model_path'] or '<none>', ai_status['labels_path'] or '<none>', ai_status['error'] or '<none>')
 
 def set_session_cookie(response: Response, request: Request, token: str, expires_at: str) -> None:
     session_hours = float(effective_auth_config().get('session_timeout_hours', 12))

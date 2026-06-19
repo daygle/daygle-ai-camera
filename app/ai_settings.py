@@ -64,6 +64,8 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
 
 from __future__ import annotations
 
+import importlib.util
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -73,11 +75,58 @@ import app.state as _state
 from app.config_facades import effective_ai_config
 from app.detector import load_labels
 
+YOLO_MODELS: dict[str, dict[str, Any]] = {
+    'yolov8n': {'pt': 'yolov8n.pt', 'onnx': 'yolov8n.onnx', 'label': 'YOLOv8n · Nano', 'approx_mb': 6, 'description': 'Fastest inference, lowest accuracy. Best for low-power or embedded hardware.'},
+    'yolov8s': {'pt': 'yolov8s.pt', 'onnx': 'yolov8s.onnx', 'label': 'YOLOv8s · Small', 'approx_mb': 22, 'description': 'Good balance of speed and accuracy for most systems.'},
+    'yolov8m': {'pt': 'yolov8m.pt', 'onnx': 'yolov8m.onnx', 'label': 'YOLOv8m · Medium', 'approx_mb': 52, 'description': 'Significantly better accuracy. Recommended for IR or night-vision cameras.'},
+    'yolov8l': {'pt': 'yolov8l.pt', 'onnx': 'yolov8l.onnx', 'label': 'YOLOv8l · Large', 'approx_mb': 87, 'description': 'High accuracy. Requires a capable CPU or GPU.'},
+    'yolov8x': {'pt': 'yolov8x.pt', 'onnx': 'yolov8x.onnx', 'label': 'YOLOv8x · Extra Large', 'approx_mb': 131, 'description': 'Best possible accuracy. GPU strongly recommended.'},
+}
+
+logger = logging.getLogger('daygle.ai')
+
+
+def active_ai_config_source() -> str:
+    from app.main import config_file_path
+    if _state.database.has_setting('ai'):
+        return 'database'
+    if config_file_path().exists():
+        return 'config.yaml'
+    return 'default'
+
+
+def onnx_runtime_installed() -> bool:
+    return importlib.util.find_spec('onnxruntime') is not None
+
+
+def model_exists(ai_settings: dict[str, Any]) -> bool:
+    model_path = str(ai_settings.get('model_path') or '')
+    return bool(model_path) and Path(model_path).exists()
+
+
+def detector_loaded_for(settings: dict[str, Any]) -> bool:
+    configured_backend = str(settings.get('backend', 'onnx')).lower()
+    active_backend = getattr(_state.detector, 'backend', 'unknown')
+    if configured_backend == 'onnx':
+        return active_backend == 'onnx' and bool(getattr(_state.detector, 'available', False))
+    return False
+
+
+def log_detector_initialization(context: str = 'startup') -> None:
+    ai_status = ai_status_payload()
+    active_providers = getattr(_state.detector, 'active_providers', None)
+    providers_str = ','.join(active_providers) if active_providers else '<none>'
+    logger.info(
+        'AI detector %s: active_backend=%s configured_backend=%s model_loaded=%s inference_available=%s providers=%s model_path=%s labels_path=%s error=%s',
+        context, ai_status['active_backend'], ai_status['configured_backend'], ai_status['model_loaded'],
+        ai_status['inference_available'], providers_str, ai_status['model_path'] or '<none>',
+        ai_status['labels_path'] or '<none>', ai_status['error'] or '<none>',
+    )
+
 
 def ai_status_payload(
     ai_settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    from app.main import active_ai_config_source, detector_loaded_for, model_exists, onnx_runtime_installed, YOLO_MODELS
     settings = ai_settings or effective_ai_config()
     active_backend = getattr(_state.detector, 'backend', 'unknown')
     configured_backend = str(settings.get('backend', 'onnx')).lower()
