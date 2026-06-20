@@ -149,7 +149,7 @@ def _migrate_camera_id(old_id: str, new_id: str) -> None:
                 try:
                     old_dir.rename(new_dir)
                 except OSError as exc:
-                    logger.warning(
+                    main.logger.warning(
                         'Could not rename ingest dir %s \u2192 %s: %s',
                         old_dir,
                         new_dir,
