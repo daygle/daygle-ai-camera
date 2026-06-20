@@ -346,34 +346,34 @@ def test_dashboard_aliases_dispatch_to_dashboard_shell_over_http(
     _server_obj, _thread, base_url = _server(app)
     client = LocalClient(base_url)
     try:
-      _setup_admin(client)
-      _login(client)
+        _setup_admin(client)
+        _login(client)
 
-    # GET / -- the dashboard shell that dashboard_aliases delegates to.
-    root_status, root_headers, root_body = client.request("/")
-    assert root_status == 200, (
-        f"GET / should return 200 after login (dashboard shell) "
-        f"but got {root_status}"
-    )
-    root_content_type = LocalClient.header(root_headers, "Content-Type")
+        # GET / -- the dashboard shell that dashboard_aliases delegates to.
+        root_status, root_headers, root_body = client.request("/")
+        assert root_status == 200, (
+            f"GET / should return 200 after login (dashboard shell) "
+            f"but got {root_status}"
+        )
+        root_content_type = LocalClient.header(root_headers, "Content-Type")
 
-    # Each dashboard_aliases path -- should be BYTE-IDENTICAL to /.
-    for path in ("/alerts", "/events", "/search"):
-        status, headers, body = client.request(path)
-        assert status == 200, (
-            f"GET {path} should return 200 after login but got {status}"
-        )
-        content_type = LocalClient.header(headers, "Content-Type")
-        assert content_type == root_content_type, (
-            f"GET {path} Content-Type ({content_type!r}) differs "
-            f"from GET / ({root_content_type!r}); "
-            f"dashboard_aliases delegation drift"
-        )
-        assert body == root_body, (
-            f"GET {path} body differs from GET /; "
-            f"dashboard_aliases delegation drift -- the three "
-            f"decorator paths must serve identical content"
-        )
+        # Each dashboard_aliases path -- should be BYTE-IDENTICAL to /.
+        for path in ("/alerts", "/events", "/search"):
+            status, headers, body = client.request(path)
+            assert status == 200, (
+                f"GET {path} should return 200 after login but got {status}"
+            )
+            content_type = LocalClient.header(headers, "Content-Type")
+            assert content_type == root_content_type, (
+                f"GET {path} Content-Type ({content_type!r}) differs "
+                f"from GET / ({root_content_type!r}); "
+                f"dashboard_aliases delegation drift"
+            )
+            assert body == root_body, (
+                f"GET {path} body differs from GET /; "
+                f"dashboard_aliases delegation drift -- the three "
+                f"decorator paths must serve identical content"
+            )
     finally:
-      _server_obj.should_exit = True
-      _thread.join(timeout=5)
+        _server_obj.should_exit = True
+        _thread.join(timeout=5)
