@@ -202,7 +202,7 @@ def _mark_camera_recovery_notified(camera_id: str) -> None:
 
 
 def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event_type: str) -> None:
-    from app.main import PushNotificationService, EmailAlertService, effective_push_notification_settings, effective_email_alert_settings
+    from app.main import PushNotificationService, EmailAlertService, effective_push_notification_settings, effective_email_alert_settings, logger as _main_logger
     settings = effective_camera_offline_alert_settings()
     if not settings.get('enabled'):
         return
@@ -218,7 +218,7 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
             notifier = PushNotificationService(push_settings_obj)
             notifier._deliver(title, body)
         except Exception as exc:
-            logger.warning('Push notify failed for camera %s %s: %s', camera_id, event_type, exc)
+            _main_logger.warning('Push notify failed for camera %s %s: %s', camera_id, event_type, exc)
     email_settings_obj = effective_email_alert_settings()
     if email_settings_obj.get('enabled'):
         try:
@@ -235,7 +235,7 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
                 msg['To'] = ', '.join(recipients)
                 mailer._deliver(msg)
         except Exception as exc:
-            logger.warning('Email notify failed for camera %s %s: %s', camera_id, event_type, exc)
+            _main_logger.warning('Email notify failed for camera %s %s: %s', camera_id, event_type, exc)
     if event_type == 'offline':
         _mark_camera_offline_notified(camera_id)
     else:
