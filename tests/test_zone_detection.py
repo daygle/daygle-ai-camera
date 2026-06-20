@@ -581,10 +581,17 @@ def test_zone_object_alert_rules_email_recipients_cleaned(monkeypatch):
             ],
         },
     }
-    # Stage main.normalize_email_recipients + main.normalize_bool_setting
-    import app.main as main
-    monkeypatch.setattr(main, 'normalize_email_recipients', lambda v: ['admin@example.com'])
-    monkeypatch.setattr(main, 'normalize_bool_setting', lambda v, default=False: bool(v) if isinstance(v, bool) else str(v).lower() in {'1', 'true', 'yes', 'on', 'enabled'})
+    # Patch app.utils.normalize_email_recipients -- zone_object_alert_rules
+    # does a runtime ``from app.utils import normalize_email_recipients``,
+    # so the patch must live on app.utils (NOT on main, which is never
+    # consulted for this helper). This isolates the helper from the real
+    # recipient-filtering path so a behaviour change in app.utils cannot
+    # mask a regression here.
+    #
+    # NOTE: we do NOT patch normalize_bool_setting here -- zone_object_alert_rules
+    # never calls it (it uses ``bool(rule.get(...))`` directly on each flag).
+    import app.utils as _utils
+    monkeypatch.setattr(_utils, 'normalize_email_recipients', lambda v: ['admin@example.com'])
     rules = zd.zone_object_alert_rules(settings)
     assert len(rules) == 1
     assert rules[0]['email_recipients'] == ['admin@example.com']
