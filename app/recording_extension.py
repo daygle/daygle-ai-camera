@@ -160,7 +160,13 @@ def extend_active_rtsp_recording(
     _state.database.update_recording_timing(
         recording_id, ended_at=ended_at, duration_seconds=duration_seconds,
     )
-    if detections:
+    # Re-check that this recording is still the active one for this camera before
+    # writing labels/trigger — a new capture may have started between lock release
+    # and here, in which case these updates belong to a now-closed recording.
+    with _state.active_rtsp_recordings_lock:
+        current_session = _state.active_rtsp_recordings.get(camera_id)
+        still_active = current_session is not None and int(current_session.get('recording_id', -1)) == recording_id
+    if detections and still_active:
         should_record, trigger_type, trigger_label = _state.recording_service.should_record(
             detections, config,
         )

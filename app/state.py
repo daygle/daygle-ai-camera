@@ -71,6 +71,7 @@ auth_config: dict = {}      # pre-stripped snapshot of config['auth']
 cameras_config: list = []
 camera_config: dict = {}
 camera_instances: dict = {}
+_camera_instances_lock: threading.Lock = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # Live-detection shared state (locks + associated dicts)

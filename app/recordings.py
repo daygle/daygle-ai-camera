@@ -360,17 +360,20 @@ class RecordingService:
                             lines = list_file.read_text(encoding='utf-8').splitlines()
                         except OSError:
                             lines = []
-                        for line in lines[seen_count:]:
+                        for i, line in enumerate(lines[seen_count:], start=seen_count):
                             segment_name = line.strip()
                             if not segment_name:
+                                seen_count = i + 1
                                 continue
                             segment_path = chunks_dir / segment_name
                             try:
-                                if segment_path.exists() and segment_path.stat().st_size > 0 and on_chunk_complete:
-                                    on_chunk_complete(camera_key, segment_path)
+                                if segment_path.exists() and segment_path.stat().st_size > 0:
+                                    if on_chunk_complete:
+                                        on_chunk_complete(camera_key, segment_path)
+                                    seen_count = i + 1
                             except Exception as exc:
                                 logger.warning('Continuous chunk callback failed for %s/%s: %s', camera_key, segment_name, exc)
-                        seen_count = len(lines)
+                                seen_count = i + 1
                     time.sleep(1)
             finally:
                 if process.poll() is None:
@@ -444,15 +447,26 @@ class RecordingService:
         camera_key = self._camera_key(camera_id)
         self._ensure_prebuffer_worker(camera_key, stream_url, buffer_seconds, camera_id=camera_id)
 
-        end_capture_at = triggered_at.timestamp() + post_seconds
-        delay = end_capture_at - time.time()
-        if delay > 0:
-            time.sleep(delay)
+        # Check for ffmpeg and pre-event segments BEFORE sleeping so that if we
+        # must fall back to a live capture it starts now (at trigger time) rather
+        # than post_seconds later — giving the clip a meaningful timestamp.
+        ffmpeg = shutil.which('ffmpeg')
+        if not ffmpeg:
+            self._emit_diagnostic(
+                camera_id,
+                'prebuffer_fallback',
+                'ffmpeg is not installed, so the pre-event buffer could not be rendered and the clip was captured live.',
+                severity='warning',
+                details={'reason': 'ffmpeg_missing'},
+            )
+            return self._live_capture(stream_url, file_path, max_duration_seconds)
 
-        start_ts = triggered_at.timestamp() - pre_seconds
-        end_ts = end_capture_at
-        segments, content_start_ts = self._collect_prebuffer_segments(camera_key, start_ts, end_ts)
-        if not segments:
+        pre_only_segments, _ = self._collect_prebuffer_segments(
+            camera_key,
+            triggered_at.timestamp() - pre_seconds,
+            triggered_at.timestamp(),
+        )
+        if not pre_only_segments:
             logger.info('No prebuffer segments available for %s; falling back to direct RTSP clip capture.', camera_key)
             self._emit_diagnostic(
                 camera_id,
@@ -464,14 +478,22 @@ class RecordingService:
             )
             return self._live_capture(stream_url, file_path, max_duration_seconds)
 
-        ffmpeg = shutil.which('ffmpeg')
-        if not ffmpeg:
+        end_capture_at = triggered_at.timestamp() + post_seconds
+        delay = end_capture_at - time.time()
+        if delay > 0:
+            time.sleep(delay)
+
+        start_ts = triggered_at.timestamp() - pre_seconds
+        end_ts = end_capture_at
+        segments, content_start_ts = self._collect_prebuffer_segments(camera_key, start_ts, end_ts)
+        if not segments:
+            logger.info('No prebuffer segments available for %s after waiting; falling back to direct RTSP clip capture.', camera_key)
             self._emit_diagnostic(
                 camera_id,
                 'prebuffer_fallback',
-                'ffmpeg is not installed, so the pre-event buffer could not be rendered and the clip was captured live.',
+                'Pre-event buffer segments disappeared before rendering; falling back to live capture.',
                 severity='warning',
-                details={'reason': 'ffmpeg_missing', 'segment_count': len(segments)},
+                details={'reason': 'segments_expired'},
             )
             return self._live_capture(stream_url, file_path, max_duration_seconds)
 

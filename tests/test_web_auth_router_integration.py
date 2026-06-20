@@ -345,17 +345,9 @@ def test_dashboard_aliases_dispatch_to_dashboard_shell_over_http(
     app, _database_path = _load_app(tmp_path, monkeypatch)
     _server_obj, _thread, base_url = _server(app)
     client = LocalClient(base_url)
-    # NOTE: tests/test_api.py's _server helper starts the uvicorn
-    # ``Server`` in a ``daemon=True`` thread. The codebase convention
-    # is to NOT explicitly shut it down between tests -- the thread
-    # dies at pytest process exit. An explicit ``server.shutdown()``
-    # would fire a RuntimeWarning because ``uvicorn.Server.shutdown``
-    # is an async coroutine and the test is sync. We follow the
-    # convention: ``_server_obj`` and ``_thread`` are intentionally
-    # retained only as locals so a future maintainer can plumb an
-    # async shutdown in if they wish.
-    _setup_admin(client)
-    _login(client)
+    try:
+      _setup_admin(client)
+      _login(client)
 
     # GET / -- the dashboard shell that dashboard_aliases delegates to.
     root_status, root_headers, root_body = client.request("/")
@@ -382,3 +374,6 @@ def test_dashboard_aliases_dispatch_to_dashboard_shell_over_http(
             f"dashboard_aliases delegation drift -- the three "
             f"decorator paths must serve identical content"
         )
+    finally:
+      _server_obj.should_exit = True
+      _thread.join(timeout=5)

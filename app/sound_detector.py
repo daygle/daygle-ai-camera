@@ -246,12 +246,20 @@ class _YamnetBackend:
         """
         if not self._load():
             return {}
+        # Preprocess audio before acquiring the lock — these are pure numpy
+        # operations that do not touch model state, so they don't need
+        # serialization and keeping them outside the lock reduces contention
+        # between cameras sharing the singleton.
+        try:
+            waveform: np.ndarray = audio.astype(np.float32)
+            if waveform.ndim > 1:
+                waveform = waveform.mean(axis=1)
+        except Exception as exc:
+            logger.debug('YAMNet audio preprocessing error: %s', exc)
+            return {}
+
         with self._lock:
             try:
-                waveform = audio.astype(np.float32)
-                if waveform.ndim > 1:
-                    waveform = waveform.mean(axis=1)
-
                 input_detail = self._input_details[0]
                 input_index = int(input_detail['index'])
                 raw_shape = input_detail.get('shape')
@@ -294,16 +302,19 @@ class _YamnetBackend:
                     raise RuntimeError('YAMNet TFLite scores output was not found.')
 
                 if scores_array.ndim == 1:
-                    mean_scores = scores_array
+                    mean_scores: np.ndarray = scores_array.copy()
                 else:
                     mean_scores = scores_array.reshape(-1, scores_array.shape[-1]).mean(axis=0)
-                result: dict[str, float] = {}
-                for class_id, idxs in self._class_indices.items():
-                    result[class_id] = float(mean_scores[idxs].max()) if idxs else 0.0
-                return result
             except Exception as exc:
                 logger.debug('YAMNet TFLite inference error: %s', exc)
                 return {}
+
+        # Build the result dict outside the lock — mean_scores is a local copy
+        # and self._class_indices is immutable after _load().
+        result: dict[str, float] = {}
+        for class_id, idxs in self._class_indices.items():
+            result[class_id] = float(mean_scores[idxs].max()) if idxs else 0.0
+        return result
 
     # ------------------------------------------------------------------
     def preload(self) -> None:

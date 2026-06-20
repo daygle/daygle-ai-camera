@@ -33,6 +33,9 @@ class EventDatabase(
         try:
             yield connection
             connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
         finally:
             connection.close()
 
@@ -50,6 +53,7 @@ class EventDatabase(
         """
         with self.connect() as db:
             db.execute('PRAGMA journal_mode=WAL;')
+            db.commit()  # flush PRAGMA before executescript issues its own implicit COMMIT
             # Migration: add recording_id to alert_history if upgrading from a
             # pre-video-link schema. New installs get it via the CREATE TABLE
             # block below, so use ALTER TABLE for the upgrade path and swallow

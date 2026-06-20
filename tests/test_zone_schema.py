@@ -110,11 +110,8 @@ def zs():
 
 
 def test_main_LABEL_ALIASES_is_zone_schema_LABEL_ALIASES(main, current_zone_schema):
-    # NOTE: name uses the special `_LABEL_ALIASES` underscore. The Pool A
-    # rebind blocks use ``as _LABEL_ALIASES`` so the bare-name retains the
-    # underscore. Identity here is dict-equality (same key/value pairs).
-    assert main._LABEL_ALIASES == current_zone_schema._LABEL_ALIASES, (
-        "main._LABEL_ALIASES is NOT the same dict as "
+    assert main._LABEL_ALIASES is current_zone_schema._LABEL_ALIASES, (
+        "main._LABEL_ALIASES is NOT the same dict object as "
         "app.zone_schema._LABEL_ALIASES -- Pool A rebind wire broke"
     )
 

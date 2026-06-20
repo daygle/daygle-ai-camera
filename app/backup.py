@@ -93,6 +93,15 @@ def validate_restore_database(path: Path) -> None:
 
 
 def overwrite_database_from_file(restore_source: Path) -> None:
+    # Flush pending WAL frames into the main database file before overwriting so
+    # that frames written by the live connection cannot be replayed on top of the
+    # restored data after the backup completes.
+    live_flush = sqlite3.connect(str(_state.database.database_path))
+    try:
+        live_flush.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+    finally:
+        live_flush.close()
+
     source = sqlite3.connect(str(restore_source))
     try:
         destination = sqlite3.connect(str(_state.database.database_path))

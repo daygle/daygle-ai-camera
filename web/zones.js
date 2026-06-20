@@ -200,11 +200,11 @@ function renderObjectRules(zone, zoneIndex) {
         <div class="sound-rule-row-fields">
           <label class="sound-rule-field">
             <span>Confidence</span>
-            <input type="number" data-zone-rule-confidence="${key}" value="${rule.min_confidence}" min="0" max="1" step="0.05" />
+            <input type="number" data-zone-rule-confidence="${key}" value="${escapeHtml(rule.min_confidence)}" min="0" max="1" step="0.05" />
           </label>
           <label class="sound-rule-field">
             <span>Cooldown (s)</span>
-            <input type="number" data-zone-rule-cooldown="${key}" value="${rule.cooldown_seconds}" min="0" max="3600" step="5" />
+            <input type="number" data-zone-rule-cooldown="${key}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" />
           </label>
           <label class="sound-rule-field sound-rule-email-field">
             <span>Email recipients</span>

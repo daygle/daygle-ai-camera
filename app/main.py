@@ -803,14 +803,16 @@ def _recording_timeline_segment(recording: dict[str, Any], day_start: datetime, 
 
 def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
     global camera, camera_config, cameras_config, camera_instances
-    old_instances = camera_instances
-    cameras_config = settings_list
-    _state.cameras_config = cameras_config
-    camera_config = settings_list[0] if settings_list else {}
-    _state.camera_config = camera_config
-    camera_instances = create_camera_instances(settings_list)
-    _state.camera_instances = camera_instances
-    camera = camera_instances[camera_config['id']] if camera_config else None
+    new_instances = create_camera_instances(settings_list)
+    with _state._camera_instances_lock:
+        old_instances = camera_instances
+        cameras_config = settings_list
+        _state.cameras_config = cameras_config
+        camera_config = settings_list[0] if settings_list else {}
+        _state.camera_config = camera_config
+        camera_instances = new_instances
+        _state.camera_instances = camera_instances
+        camera = camera_instances[camera_config['id']] if camera_config else None
     for old_cam in (old_instances or {}).values():
         try:
             old_cam.close()
@@ -823,6 +825,7 @@ def apply_storage_and_recording_settings() -> None:
     storage = Storage({**config, 'storage': effective_storage_config()})
     old_service = recording_service
     recording_service = RecordingService({**config, 'storage': effective_storage_config(), 'recording': effective_recording_config()})
+    recording_service.diagnostic_callback = log_camera_diagnostic
     _state.recording_service = recording_service
     if old_service is not None:
         try:

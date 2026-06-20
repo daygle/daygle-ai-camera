@@ -129,10 +129,7 @@ def purge_recordings(request: Request):
 
 
 @router.get('/api/recordings/{recording_id}')
-def recording_detail(recording_id: int, db=None):
-    if db is None:
-        import app.main as main
-        db = main.database
+def recording_detail(recording_id: int, db=Depends(get_database)):
     recording = db.get_recording(recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail='Recording not found')

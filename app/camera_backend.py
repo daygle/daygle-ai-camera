@@ -208,10 +208,10 @@ class OpenCvStreamCamera:
         import cv2
         with self._lock:
             image, frame = self._acquire_raw_frame()
-            ok, encoded = cv2.imencode(".jpg", image)
-            if not ok:
-                self.last_error = "Unable to encode ONVIF/RTSP frame as JPEG."
-                raise RuntimeError(self.last_error)
+        ok, encoded = cv2.imencode(".jpg", image)
+        if not ok:
+            self.last_error = "Unable to encode ONVIF/RTSP frame as JPEG."
+            raise RuntimeError(self.last_error)
         self.last_error = None
         return encoded.tobytes(), frame
 

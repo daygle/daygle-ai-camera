@@ -385,10 +385,10 @@ function initSoftwareUpdateSection() {
   const outputEl = document.getElementById('updateOutput');
   if (!checkBtn) return;
 
-  function showUpdateStatus(html, type = '') {
+  function showUpdateStatus(message, type = '') {
     if (!statusEl) return;
     statusEl.style.display = '';
-    statusEl.innerHTML = html;
+    statusEl.textContent = message;
     statusEl.className = 'status-panel' + (type ? ` status-${type}` : '');
   }
 

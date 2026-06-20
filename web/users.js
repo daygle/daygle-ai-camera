@@ -45,34 +45,46 @@ async function loadUsers() {
 
 usersEl.addEventListener('change', async (event) => {
   if (event.target.dataset.action !== 'role') return;
-  await api(`/api/users/${event.target.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ role: event.target.value }) });
-  setMessage('Role updated.');
-  await loadUsers();
+  try {
+    await api(`/api/users/${event.target.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ role: event.target.value }) });
+    setMessage('Role updated.');
+    await loadUsers();
+  } catch (error) {
+    setMessage(error.message, true);
+  }
 });
 
 usersEl.addEventListener('click', async (event) => {
   const button = event.target.closest('button');
   if (!button) return;
-  if (button.dataset.action === 'toggle') {
-    await api(`/api/users/${button.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ is_active: button.dataset.active !== 'true' }) });
-    setMessage('User status updated.');
+  try {
+    if (button.dataset.action === 'toggle') {
+      await api(`/api/users/${button.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ is_active: button.dataset.active !== 'true' }) });
+      setMessage('User status updated.');
+    }
+    if (button.dataset.action === 'reset') {
+      const password = window.prompt('Enter the new password:');
+      if (!password) return;
+      await api(`/api/users/${button.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ password }) });
+      setMessage('Password reset.');
+    }
+    await loadUsers();
+  } catch (error) {
+    setMessage(error.message, true);
   }
-  if (button.dataset.action === 'reset') {
-    const password = window.prompt('Enter the new password:');
-    if (!password) return;
-    await api(`/api/users/${button.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ password }) });
-    setMessage('Password reset.');
-  }
-  await loadUsers();
 });
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const data = new FormData(form);
-  await api('/api/users', { method: 'POST', body: JSON.stringify(Object.fromEntries(data.entries())) });
-  form.reset();
-  setMessage('User created.');
-  await loadUsers();
+  try {
+    const data = new FormData(form);
+    await api('/api/users', { method: 'POST', body: JSON.stringify(Object.fromEntries(data.entries())) });
+    form.reset();
+    setMessage('User created.');
+    await loadUsers();
+  } catch (error) {
+    setMessage(error.message, true);
+  }
 });
 
 document.querySelectorAll('.field-help').forEach((el) => {

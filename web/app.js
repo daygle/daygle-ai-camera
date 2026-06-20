@@ -235,7 +235,7 @@ function buildActivityItems() {
 
   return [...dedupedEventItems, ...alertItems]
     .filter((item) => item.createdAt)
-    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 }
 
 function applyFilter(items) {

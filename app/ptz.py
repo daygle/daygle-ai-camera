@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import socket
+import time
 import urllib.error
 import urllib.request
 from html import escape as _xml_escape
@@ -36,7 +37,10 @@ _ONVIF_VELOCITY: dict[str, tuple[float, float, float]] = {
 }
 
 # Profile token cache - avoids a GetProfiles round-trip on every button press.
-_profile_token_cache: dict[tuple[str, int], str] = {}
+# Entries expire after 5 minutes so stale tokens (camera reboot, firmware update,
+# credential rotation) are never used indefinitely.
+_PROFILE_TOKEN_TTL = 300.0
+_profile_token_cache: dict[tuple[str, int], tuple[str, float]] = {}
 
 
 def _wssec_header(username: str, password: str) -> str:
@@ -85,8 +89,11 @@ def _soap(url: str, body: str, username: str, password: str) -> str:
 
 def _get_profile_token(host: str, http_port: int, username: str, password: str) -> str:
     key = (host, http_port)
-    if key in _profile_token_cache:
-        return _profile_token_cache[key]
+    cached = _profile_token_cache.get(key)
+    if cached is not None:
+        token, cached_at = cached
+        if time.monotonic() - cached_at < _PROFILE_TOKEN_TTL:
+            return token
     url = f'http://{host}:{http_port}/onvif/media_service'
     response = _soap(url, '<trt:GetProfiles/>', username, password)
     match = re.search(r'<[^>]*Profiles[^>]+token=["\']([^"\']+)["\']', response)
@@ -96,7 +103,7 @@ def _get_profile_token(host: str, http_port: int, username: str, password: str) 
         raise OSError('Could not find ONVIF media profile token. Check credentials.')
     token = match.group(1)
     logger.debug('ONVIF profile token for %s:%d → %s', host, http_port, token)
-    _profile_token_cache[key] = token
+    _profile_token_cache[key] = (token, time.monotonic())
     return token
 
 

@@ -223,7 +223,7 @@ def detection_center_in_zone(detection: dict[str, Any], zone: dict[str, Any]) ->
     points = zone.get('points') or []
     if isinstance(points, list) and len(points) >= 3:
         return point_in_polygon(center_x, center_y, points)
-    return float(zone['x']) <= center_x <= float(zone['x']) + float(zone['width']) and float(zone['y']) <= center_y <= float(zone['y']) + float(zone['height'])
+    return float(zone.get('x') or 0) <= center_x <= float(zone.get('x') or 0) + float(zone.get('width') or 0) and float(zone.get('y') or 0) <= center_y <= float(zone.get('y') or 0) + float(zone.get('height') or 0)
 
 
 def detection_overlap_ratio_with_zone_rect(detection: dict[str, Any], zone: dict[str, Any]) -> float:

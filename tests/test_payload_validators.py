@@ -260,6 +260,8 @@ def _install_validator_dependencies(
     monkeypatch.setattr(main, 'normalize_camera_ptz_settings', normalize_camera_ptz_settings)
     monkeypatch.setattr(main, 'effective_recording_config', effective_recording_config)
     monkeypatch.setattr(main, 'effective_storage_config', effective_storage_config)
+    import app.config_facades as _config_facades
+    monkeypatch.setattr(_config_facades, 'effective_recording_config', effective_recording_config)
     monkeypatch.setattr(main, 'config', config)
     monkeypatch.setattr(main, 'effective_auth_config', effective_auth_config)
     monkeypatch.setattr(main, 'effective_live_config', effective_live_config)

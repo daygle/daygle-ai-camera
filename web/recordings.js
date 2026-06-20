@@ -816,7 +816,7 @@ loadAuth().then(async () => {
   await populateLabelFilterOptionsFromApi();
   await loadRecordings();
   const selected = new URLSearchParams(window.location.search).get('recording_id');
-  if (selected) playRecording(selected).catch((error) => { els.listStatus.textContent = error.message; });
+  if (selected) playRecording(encodeURIComponent(selected)).catch((error) => { els.listStatus.textContent = error.message; });
 }).catch((error) => {
   if (els.listStatus) els.listStatus.textContent = error.message;
   window.showToast?.(error.message, true);

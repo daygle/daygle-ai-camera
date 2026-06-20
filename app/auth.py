@@ -56,6 +56,7 @@ class AuthService:
     def init(self) -> None:
         with self.connect() as db:
             db.execute('PRAGMA journal_mode=WAL;')
+            db.commit()  # flush PRAGMA before executescript issues its own implicit COMMIT
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS users (
@@ -133,7 +134,10 @@ class AuthService:
 
     def verify_password(self, password: str, password_hash: str) -> bool:
         if password_hash.startswith("pbkdf2_sha256$"):
-            _algorithm, salt, digest = password_hash.split("$", 2)
+            try:
+                _algorithm, salt, digest = password_hash.split("$", 2)
+            except ValueError:
+                return False
             candidate = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 390000).hex()
             return hmac.compare_digest(candidate, digest)
         if bcrypt is None:
@@ -279,9 +283,14 @@ class AuthService:
         errors = self.validate_password_complexity(new_password)
         if errors:
             raise AuthError(" ".join(errors))
+        now_dt = datetime.now(timezone.utc)
         with self.connect() as db:
             row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-            if row is None or not self.verify_password(current_password, row["password_hash"]):
+            if row is None or not row["is_active"]:
+                raise AuthError("Current password is incorrect.")
+            if row["locked_until"] and datetime.fromisoformat(row["locked_until"]) > now_dt:
+                raise AuthError("Account is temporarily locked. Try again later.")
+            if not self.verify_password(current_password, row["password_hash"]):
                 raise AuthError("Current password is incorrect.")
             db.execute(
                 "UPDATE users SET password_hash = ?, failed_attempts = 0, locked_until = NULL, updated_at = ? WHERE id = ?",
@@ -339,11 +348,14 @@ class AuthService:
                 success = True
                 return self.public_user(row), token, csrf_token, expires_at
             finally:
-                db.execute(
-                    "INSERT INTO login_attempts (username, ip_address, success, created_at) VALUES (?, ?, ?, ?)",
-                    (username, ip_address, int(success), now),
-                )
-                db.commit()
+                try:
+                    db.execute(
+                        "INSERT INTO login_attempts (username, ip_address, success, created_at) VALUES (?, ?, ?, ?)",
+                        (username, ip_address, int(success), now),
+                    )
+                    db.commit()
+                except Exception:
+                    pass
 
     def get_session(self, session_token: str | None) -> dict[str, Any] | None:
         if not session_token:

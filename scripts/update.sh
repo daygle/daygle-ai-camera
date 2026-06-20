@@ -21,6 +21,11 @@ CURRENT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 echo "Current branch: ${CURRENT_BRANCH} (${CURRENT_COMMIT})"
 echo ""
 
+if [[ "${CURRENT_BRANCH}" == "HEAD" ]]; then
+  echo "Error: Repository is in a detached HEAD state. Check out a branch before updating." >&2
+  exit 1
+fi
+
 echo "Fetching latest changes from origin..."
 git fetch origin
 
@@ -44,7 +49,8 @@ if [[ -f "${APP_DIR}/.venv/bin/pip" ]]; then
 elif [[ -f "${APP_DIR}/.venv/Scripts/pip.exe" ]]; then
   "${APP_DIR}/.venv/Scripts/pip.exe" install --no-cache-dir -r "${APP_DIR}/requirements.txt"
 else
-  pip install --no-cache-dir -r "${APP_DIR}/requirements.txt"
+  echo "Error: Virtual environment not found at ${APP_DIR}/.venv. Run the installer first." >&2
+  exit 1
 fi
 
 echo ""

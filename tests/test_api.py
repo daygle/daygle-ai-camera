@@ -246,7 +246,7 @@ def test_onnx_missing_model_returns_clear_api_error(tmp_path, monkeypatch):
             headers={"Content-Type": "image/jpeg", "X-CSRF-Token": csrf},
         )
         assert status == 200
-        assert body.get('ai_error') or body.get('detail')
+        assert body.get('ai_error'), f"Expected 'ai_error' in response body, got: {body}"
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -313,7 +313,7 @@ def test_ai_settings_save_onnx_missing_keeps_previous_detector_and_errors_on_upl
             headers={'Content-Type': 'image/jpeg', 'X-CSRF-Token': csrf},
         )
         assert status == 200
-        assert body.get('ai_error') or body.get('detail')
+        assert body.get('ai_error'), f"Expected 'ai_error' in response body, got: {body}"
     finally:
         server.should_exit = True
         thread.join(timeout=5)

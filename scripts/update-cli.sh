@@ -124,8 +124,9 @@ echo -e "${YELLOW}An update is available!${RESET}"
 echo ""
 echo -e "${BOLD}Release notes:${RESET}"
 echo -e "${DIM}────────────────────────────────────────────────${RESET}"
-# Truncate very long notes
-echo "${RELEASE_NOTES}" | cut -c1-800
+# Strip non-printable characters (including ANSI escape sequences) before
+# printing to prevent terminal escape injection from untrusted release notes.
+printf '%s' "${RELEASE_NOTES}" | LC_ALL=C tr -cd '[:print:]\n' | cut -c1-800
 if [[ ${#RELEASE_NOTES} -gt 800 ]]; then
   echo ""
   echo -e "${DIM}... (truncated, see full notes at: ${RELEASE_URL})${RESET}"
@@ -178,7 +179,8 @@ if [[ -f "${APP_DIR}/.venv/bin/pip" ]]; then
 elif [[ -f "${APP_DIR}/.venv/Scripts/pip.exe" ]]; then
   "${APP_DIR}/.venv/Scripts/pip.exe" install --no-cache-dir -r "${APP_DIR}/requirements.txt"
 else
-  pip install --no-cache-dir -r "${APP_DIR}/requirements.txt"
+  err "Virtual environment not found at ${APP_DIR}/.venv. Run the installer first."
+  exit 1
 fi
 
 info "Dependencies updated."

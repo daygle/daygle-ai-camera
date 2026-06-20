@@ -122,7 +122,7 @@ async def detect_frame(request: Request, detector=Depends(get_detector)):
         return detector.detect_image(image_bytes, confidence=min_confidence)
 
     try:
-        detections = await asyncio.get_event_loop().run_in_executor(None, _run_detection)
+        detections = await asyncio.get_running_loop().run_in_executor(None, _run_detection)
     except DetectorUnavailableError as exc:
         detections = []
         ai_error = str(exc) or ai_state.get('last_detector_error') or ai_state.get('error') or 'Detector unavailable.'
