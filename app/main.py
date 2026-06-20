@@ -505,9 +505,17 @@ from app.diagnostics import log_camera_diagnostic as log_camera_diagnostic
 # Phase E: sound-monitor helpers → app/sound_monitor.py
 from app.sound_monitor import (
     _sound_status_reason as _sound_status_reason,
+    _on_sound_detected as _on_sound_detected,
     apply_sound_settings as apply_sound_settings,
     stop_sound_monitor as stop_sound_monitor,
 )
+
+# ``_on_sound_detected`` rebind is test-only back-compat: no production
+# caller reaches ``main._on_sound_detected`` (only
+# ``_make_sound_detect_callback`` inside app/sound_monitor.py references
+# it directly). It exists solely to satisfy the
+# ``test_all_main_attr_references_resolve_on_app_main`` invariant in
+# tests/test_api_router_split_invariants.py.
 # Phase F: camera-instance helpers → app/camera_instance.py
 from app.camera_instance import (
     create_camera as create_camera,
@@ -563,6 +571,15 @@ from app.state import (
     _sound_statuses_lock as _sound_statuses_lock,
 )
 _logger = logging.getLogger('daygle.ai')
+# Pool A re-export: tests and extracted modules reach this logger via
+# ``main.logger.warning(...)`` per the hybrid-pattern. ``_logger`` stays
+# intact so the 4 main.py internal use sites (lifespan, write_audit_log,
+# apply_cameras_settings, apply_storage_and_recording_settings) keep
+# working unchanged. ``logging.getLogger('daygle.ai')`` returns the same
+# cached Logger instance for both names, so this alias carries zero
+# runtime cost while satisfying ``monkeypatch.setattr(main, 'logger', ...)``
+# from ``tests/test_camera_health.py`` and ``tests/test_camera_config.py``.
+logger = logging.getLogger('daygle.ai')
 
 def _configure_file_logging() -> None:
     log_dir = Path(__file__).resolve().parent.parent / 'data' / 'logs'
