@@ -83,10 +83,12 @@ def test_main_require_admin_is_auth_gates_require_admin():
     """``app/main.py`` must expose ``require_admin`` as the SAME function
     object as ``app.auth_gates.require_admin``.
 
-    Pool A from-import rebind at the bottom of ``main.py``. If this rebind
-    is ever dropped or aliased to a wrapper, every mutating admin-only
-    route silently breaks (routers call ``main.require_admin(request)``
-    and Python ``NameError``s or routes through a different callable).
+    Pool A from-import rebind at the bottom of ``main.py``. After the DI
+    refactor, routers import ``require_admin`` directly from
+    ``app.auth_gates`` (not via ``main.require_admin``). The rebind is
+    retained so that any future code that reaches ``main.require_admin``
+    (e.g., test monkeypatches) resolves to the same callable and does not
+    silently diverge.
     """
     main = sys.modules["app.main"]
     assert hasattr(main, "require_admin"), (
@@ -97,17 +99,18 @@ def test_main_require_admin_is_auth_gates_require_admin():
     assert main.require_admin is auth_gates.require_admin, (
         "main.require_admin is NOT the same function object as "
         "app.auth_gates.require_admin -- the Pool A rebind was wired wrong "
-        "(e.g., to a wrapper, lambda, or shim). Routers will break at "
-        "request time."
+        "(e.g., to a wrapper, lambda, or shim)"
     )
 
 
 def test_main_require_user_is_auth_gates_require_user():
     """Same identity check for ``require_user``.
 
-    Used by ``app/api/users_router.py`` to gate ``GET /api/users/me`` and
-    ``PATCH /api/users/{id}`` when the caller is allowed to operate on
-    themselves.
+    After the DI refactor, ``app/api/users_router.py`` imports
+    ``require_user`` directly from ``app.auth_gates``. The Pool A rebind
+    on ``app.main`` is retained so that ``main.require_user`` resolves to
+    the same callable and does not silently diverge from the canonical
+    implementation.
     """
     main = sys.modules["app.main"]
     assert hasattr(main, "require_user"), (
@@ -123,8 +126,10 @@ def test_main_require_user_is_auth_gates_require_user():
 def test_main_require_session_is_auth_gates_require_session():
     """Same identity check for ``require_session``.
 
-    Used by ``app/api/admin_router.py`` and ``app/api/auth_router.py``
-    for session-shaped reads (csrf_token + expires_at + user).
+    After the DI refactor, ``app/api/admin_router.py`` and
+    ``app/api/auth_router.py`` import ``require_session`` directly from
+    ``app.auth_gates``. The Pool A rebind on ``app.main`` is retained so
+    that ``main.require_session`` resolves to the same callable.
     """
     main = sys.modules["app.main"]
     assert hasattr(main, "require_session"), (

@@ -2155,7 +2155,7 @@ def test_rtsp_recording_capture_falls_back_on_stream_error(tmp_path, monkeypatch
             Path(file_path).write_text('fallback', encoding='utf-8')
 
     service = FakeRecordingService()
-    monkeypatch.setattr(main, 'recording_service', service)
+    monkeypatch.setattr(main._state, 'recording_service', service)
     stream_url = 'rtsp://admin:secret-password@192.168.40.101:554/live/0/MAIN'
     main.active_rtsp_recordings.clear()
 
@@ -2489,7 +2489,7 @@ def test_rtsp_capture_anchors_timing_and_track_to_actual_media_window(tmp_path, 
             path.write_bytes(b'clip')
             return actual_start, 15.0
 
-    monkeypatch.setattr(main, 'recording_service', FakeRecordingService())
+    monkeypatch.setattr(main._state, 'recording_service', FakeRecordingService())
     main.active_rtsp_recordings.clear()
     box = {'x': 0.2, 'y': 0.2, 'width': 0.3, 'height': 0.3}
     main.live_detection_history['camera-1'] = main.deque(

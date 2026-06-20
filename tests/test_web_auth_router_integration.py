@@ -21,19 +21,14 @@ These tests defend that public-surface contract:
    ``app.api.web_router.login_page`` -- the back-compat alias is wired.
 2. ``main.setup_page`` is the SAME function object as
    ``app.api.web_router.setup_page`` -- the back-compat alias is wired.
-3. ``main`` re-exports the FastAPI *response classes* (``FileResponse``,
-   ``JSONResponse``, ``RedirectResponse``) so router monkeypatching
-   (``monkeypatch.setattr(main, 'FileResponse', X)``) still swaps the
-   right class object in the router-handler code paths per hybrid-
-   pattern rule 5 in ``app/api/__init__.py``.
-4. ``web_router`` registers the expected 22 unique page-handler paths
+3. ``web_router`` registers the expected 22 unique page-handler paths
    (19 functions × 1 decorator + 1 function ``dashboard_aliases`` ×
    3 decorators).
-5. ``dashboard_aliases`` is the route handler for ``/alerts``,
+4. ``dashboard_aliases`` is the route handler for ``/alerts``,
    ``/events``, ``/search`` (one function, three decorator paths).
-6. ``auth_router`` registers exactly the four auth-cycle endpoints
+5. ``auth_router`` registers exactly the four auth-cycle endpoints
    (POST ``/login``, POST ``/setup``, GET ``/logout``, POST ``/logout``).
-7. **HTTP-level**: ``GET /alerts``, ``GET /events``, ``GET /search``
+6. **HTTP-level**: ``GET /alerts``, ``GET /events``, ``GET /search``
    all serve the SAME response (status, Content-Type, body bytes) as
    ``GET /`` after a successful login -- the marquee delegation proof.
 
@@ -114,18 +109,14 @@ def app_modules():
 
     Returns a ``SimpleNamespace`` with ``main`` (the ``app.main``
     module), ``web_router`` (the ``app.api.web_router`` module),
-    ``auth_router`` (the ``app.api.auth_router`` module), and
-    ``fastapi_responses`` (for the response-class re-export
-    contract test).
+    ``auth_router`` (the ``app.api.auth_router`` module).
     """
     import sys
     import app.main as main
-    import fastapi.responses as fastapi_responses
     return SimpleNamespace(
         main=main,
         web_router=sys.modules["app.api.web_router"],
         auth_router=sys.modules["app.api.auth_router"],
-        fastapi_responses=fastapi_responses,
     )
 
 
@@ -138,13 +129,13 @@ def test_main_login_page_alias_points_to_web_router_login_page(app_modules):
     """``main.login_page`` must be the SAME function object as
     ``web_router.login_page``.
 
-    The Pool A from-import rebind in ``app/main.py`` (final 2 lines of
-    ``main.py``: ``from app.api.web_router import login_page as
-    login_page``) creates a name ``login_page`` in main's namespace
-    that points to the web_router implementation. ``auth_router``
-    reads it via ``main.login_page(request, error)`` (Pool C bare-name
-    reach). If this rebind drops, every POST ``/login`` flow
-    NameErrors at request time.
+    The Pool A from-import rebind in ``app/main.py``
+    (``from app.api.web_router import login_page as login_page``) creates a
+    name ``login_page`` in main's namespace pointing to the web_router
+    implementation. After the DI refactor, ``auth_router`` imports
+    ``login_page`` directly from ``app.api.web_router`` rather than via
+    ``main.login_page``; the rebind is retained so that any code reaching
+    ``main.login_page`` resolves to the same object.
     """
     assert (
         app_modules.main.login_page is app_modules.web_router.login_page
@@ -155,8 +146,10 @@ def test_main_setup_page_alias_points_to_web_router_setup_page(app_modules):
     """``main.setup_page`` must be the SAME function object as
     ``web_router.setup_page``.
 
-    Same back-compat pattern as ``login_page`` -- ``auth_router``'s
-    POST ``/setup`` handler reads ``main.setup_page(request, error)``.
+    Same back-compat pattern as ``login_page``. After the DI refactor,
+    ``auth_router``'s POST ``/setup`` handler imports ``setup_page``
+    directly from ``app.api.web_router``; the Pool A rebind on ``app.main``
+    is retained so that ``main.setup_page`` resolves to the same object.
     """
     assert (
         app_modules.main.setup_page is app_modules.web_router.setup_page
@@ -164,34 +157,7 @@ def test_main_setup_page_alias_points_to_web_router_setup_page(app_modules):
 
 
 # ---------------------------------------------------------------------------
-# 2. Hybrid-pattern rule 5 -- response-class re-export contract.
-# ---------------------------------------------------------------------------
-
-
-def test_main_reexports_fastapi_response_classes(app_modules):
-    """``main`` must re-export ``FileResponse`` / ``JSONResponse`` /
-    ``RedirectResponse`` as attrs on its own namespace so the hybrid
-    pattern's ``main.FileResponse(...)`` reaches the same class the
-    routers would get via a top-level
-    ``from fastapi.responses import FileResponse`` (which the routers
-    explicitly avoid because those classes live at
-    ``fastapi.responses`` -- NOT at ``fastapi``).
-
-    The test harness
-    (``monkeypatch.setattr(main, 'FileResponse', X)``) and the
-    Phase-13 Round-2/3/4 fixes all rely on this contract. A future
-    refactor that re-imports FileResponse at top of a router file
-    would silently regress this contract.
-    """
-    main = app_modules.main
-    fastapi_responses = app_modules.fastapi_responses
-    assert main.FileResponse is fastapi_responses.FileResponse
-    assert main.JSONResponse is fastapi_responses.JSONResponse
-    assert main.RedirectResponse is fastapi_responses.RedirectResponse
-
-
-# ---------------------------------------------------------------------------
-# 3. web_router registration: 22 unique paths.
+# 2. web_router registration: 22 unique paths.
 # ---------------------------------------------------------------------------
 
 
@@ -271,7 +237,7 @@ def test_web_router_dashboard_aliases_function_serves_three_paths(app_modules):
 
 
 # ---------------------------------------------------------------------------
-# 4. auth_router registration: 4 endpoints with correct methods.
+# 3. auth_router registration: 4 endpoints with correct methods.
 # ---------------------------------------------------------------------------
 
 
@@ -313,7 +279,7 @@ def test_auth_router_registers_expected_auth_endpoints(app_modules):
 
 
 # ---------------------------------------------------------------------------
-# 5. HTTP-level: dashboard_aliases delegation end-to-end.
+# 4. HTTP-level: dashboard_aliases delegation end-to-end.
 # ---------------------------------------------------------------------------
 
 
