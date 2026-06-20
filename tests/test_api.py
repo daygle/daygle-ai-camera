@@ -406,7 +406,7 @@ def test_detection_backoff_keeps_prebuffer_warm(tmp_path, monkeypatch):
         'backend': 'rtsp',
         'stream_url': 'rtsp://example/front',
     }
-    monkeypatch.setattr(main, 'cameras_config', [camera])
+    monkeypatch.setattr(main._state, 'cameras_config', [camera])
 
     primed: list[str] = []
     monkeypatch.setattr(
@@ -3625,7 +3625,9 @@ def test_rule_notify_active_now_window(tmp_path, monkeypatch):
     evaluated in the admin's local timezone."""
     _app, _database_path = _load_app(tmp_path, monkeypatch)
     main = sys.modules["app.main"]
-    monkeypatch.setattr(main, '_alert_datetime_prefs', lambda: ('UTC', 'iso', '24h'))
+    # `_rule_notify_active_now` reads `_alert_datetime_prefs` from
+    # ``app.alert_dispatch``'s module-global namespace, NOT via main.
+    monkeypatch.setattr('app.alert_dispatch._alert_datetime_prefs', lambda: ('UTC', 'iso', '24h'))
 
     import datetime as _dt
     fixed = _dt.datetime(2026, 1, 1, 23, 30, tzinfo=_dt.timezone.utc)  # 23:30 local
@@ -3635,7 +3637,9 @@ def test_rule_notify_active_now_window(tmp_path, monkeypatch):
         def now(cls, tz=None):
             return fixed.astimezone(tz) if tz else fixed
 
-    monkeypatch.setattr(main, 'datetime', _FakeDateTime)
+    # `_rule_notify_active_now` lives at app.alert_dispatch; its `datetime`
+    # class is bound there via ``from datetime import datetime``.
+    monkeypatch.setattr('app.alert_dispatch.datetime', _FakeDateTime)
 
     # No window (or partial) means notify any time.
     assert main._rule_notify_active_now({}) is True
@@ -3886,19 +3890,32 @@ def test_fetch_models_manifest_uses_remote_ultralytics_version(tmp_path, monkeyp
 
 def test_check_model_updates_endpoints(tmp_path, monkeypatch):
     app, _ = _load_app(tmp_path, monkeypatch)
-    main_module = sys.modules["app.main"]
     server, thread, base_url = _server(app)
     client = LocalClient(base_url)
     try:
         _setup_admin(client)
         _login(client)
 
+        # #5 fixture: write a fake yolov8n.onnx into the test's
+        # models dir so the endpoint's on-disk installed-model filter
+        # has a registered entry. The BASE_DIR patch here also
+        # isolates the filter from stray .onnx files in real
+        # <project>/models/ (dev-install / prior-test contamination
+        # defense). Scenario monkeypatches below use string-path
+        # form because the endpoint body reads those names from
+        # THIS module's globals, NOT via app.main -- same
+        # antipattern as the #4 lesson.
+        fake_models_dir = tmp_path / 'models'
+        fake_models_dir.mkdir(parents=True, exist_ok=True)
+        (fake_models_dir / 'yolov8n.onnx').write_bytes(b'fake onnx')
+        monkeypatch.setattr('app.api.settings_ai_router.BASE_DIR', tmp_path)
+
         # All versions match - no updates
-        monkeypatch.setattr(main_module, "_fetch_models_manifest", lambda: {
+        monkeypatch.setattr('app.api.settings_ai_router._fetch_models_manifest', lambda: {
             "updated_at": "2026-06-08",
             "models": {mid: {"version": "1.0.0"} for mid in ["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"]},
         })
-        monkeypatch.setattr(main_module, "_read_installed_models", lambda: {
+        monkeypatch.setattr('app.api.settings_ai_router._read_installed_models', lambda: {
             mid: {"version": "1.0.0", "installed_at": "2026-06-08T00:00:00Z", "sha256": "abc"}
             for mid in ["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"]
         })
@@ -3912,7 +3929,7 @@ def test_check_model_updates_endpoints(tmp_path, monkeypatch):
         assert n_row["latest_version"] == "1.0.0"
 
         # Manifest bumped to 2.0.0 - update available
-        monkeypatch.setattr(main_module, "_fetch_models_manifest", lambda: {
+        monkeypatch.setattr('app.api.settings_ai_router._fetch_models_manifest', lambda: {
             "updated_at": "2026-06-09",
             "source": "pypi:ultralytics",
             "models": {mid: {"version": "2.0.0"} for mid in ["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"]},
@@ -3929,7 +3946,7 @@ def test_check_model_updates_endpoints(tmp_path, monkeypatch):
         assert n_row["latest_version"] == "2.0.0"
 
         # Unknown installed version (legacy install) - treated as needing update
-        monkeypatch.setattr(main_module, "_read_installed_models", lambda: {
+        monkeypatch.setattr('app.api.settings_ai_router._read_installed_models', lambda: {
             "yolov8n": {"version": "unknown", "installed_at": "2026-06-08T00:00:00Z", "sha256": "abc"},
         })
         status, _, payload = client.request("/api/settings/ai/check-model-updates")
@@ -3940,7 +3957,7 @@ def test_check_model_updates_endpoints(tmp_path, monkeypatch):
         # Manifest fetch failure - returns 200 with readable error field, not 502
         def _raise():
             raise RuntimeError("Connection refused")
-        monkeypatch.setattr(main_module, "_fetch_models_manifest", _raise)
+        monkeypatch.setattr('app.api.settings_ai_router._fetch_models_manifest', _raise)
         status, _, payload = client.request("/api/settings/ai/check-model-updates")
         assert status == 200
         assert "error" in payload
@@ -4469,9 +4486,12 @@ def test_sound_rule_normalization_keeps_email_recipients_and_active_window(tmp_p
 def test_sound_detection_with_email_rule_delivers_to_rule_recipients(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    # ``_on_sound_detected`` reads cameras from the canonical
+    # ``_state.cameras_config`` (see app/sound_monitor.py:_on_sound_detected);
+    # ``main._on_sound_detected`` is exposed via Pool A rebind on app/main.py:506.
 
     sent = _email_alert_capture(main, monkeypatch)
-    main.cameras_config = [{
+    camera = {
         'id': 'sound-cam',
         'name': 'Sound Camera',
         'detection': {
@@ -4488,7 +4508,10 @@ def test_sound_detection_with_email_rule_delivers_to_rule_recipients(tmp_path, m
                 }],
             },
         },
-    }]
+    }
+    # Patch the canonical store directly (Option C retarget, matches
+    # ``test_detection_backoff_keeps_prebuffer_warm`` at line ~409).
+    monkeypatch.setattr(main._state, 'cameras_config', [camera])
 
     main._on_sound_detected('sound-cam', 'cat_meow', 'Cat meow alert', 0.92, {'backend': 'test'})
     main.wait_for_pending_alert_notifications()
@@ -4552,9 +4575,15 @@ def test_compute_minimum_rule_confidence(tmp_path, monkeypatch, zone_rules, glob
     is lower. Motion rules are excluded from the floor calculation."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    # Phase-N migrated _min_rule_confidence_cache to app.alert_dispatch; write
+    # through the canonical module path so the test actually invalidates the
+    # production cache (production does the same in app/main.py via
+    # `_alert_dispatch._min_rule_confidence_cache = None`). Also keeps
+    # test_api_router_split_invariants green (no main.<attr> reference).
+    import app.alert_dispatch as _alert_dispatch
 
     main.database.set_setting('ai', {'backend': 'onnx', 'confidence': global_conf, 'model_path': 'fake.onnx'}, main.utc_now())
-    main._min_rule_confidence_cache = None
+    _alert_dispatch._min_rule_confidence_cache = None
 
     if zone_rules is not None:
         main.database.set_setting('cameras', [
@@ -4568,7 +4597,7 @@ def test_compute_minimum_rule_confidence(tmp_path, monkeypatch, zone_rules, glob
     else:
         main.database.set_setting('cameras', [], main.utc_now())
 
-    main._min_rule_confidence_cache = None
+    _alert_dispatch._min_rule_confidence_cache = None
     assert main.compute_minimum_rule_confidence() == pytest.approx(expected)
 
 def test_trailing_motion_after_object_event_is_debounced(tmp_path, monkeypatch):
@@ -4725,52 +4754,63 @@ def test_live_monitor_populates_detection_history(tmp_path, monkeypatch):
 def test_recording_detail_track_backfill(tmp_path, monkeypatch, has_history_coverage, expect_track):
     """When live history covers a recording's window, the detail view backfills
     a track sidecar synchronously. Without coverage, no track is generated."""
-    _load_app(tmp_path, monkeypatch)
+    # Migrated from direct ``main.recording_detail(...)`` to LocalClient: a
+    # FastAPI ``Depends`` default only resolves inside the request lifecycle,
+    # so calling the handler directly leaves ``db`` as a raw Depends sentinel.
+    app, _db_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        _csrf = _login(client)
+        clip = tmp_path / 'data' / 'recordings' / ('event_backfill.mp4' if has_history_coverage else 'event_no_history.mp4')
+        clip.parent.mkdir(parents=True, exist_ok=True)
+        clip.write_bytes(b'not-decoded')
 
-    clip = tmp_path / 'data' / 'recordings' / ('event_backfill.mp4' if has_history_coverage else 'event_no_history.mp4')
-    clip.parent.mkdir(parents=True, exist_ok=True)
-    clip.write_bytes(b'not-decoded')
+        started = datetime.now(timezone.utc) - timedelta(seconds=12)
+        ended = started + timedelta(seconds=8)
+        box = {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}
 
-    started = datetime.now(timezone.utc) - timedelta(seconds=12)
-    ended = started + timedelta(seconds=8)
-    box = {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}
+        if has_history_coverage:
+            main.live_detection_history['camera-1'] = main.deque(
+                [(started.timestamp() + 2.0, [{'label': 'person', 'confidence': 0.9, 'box': box}])],
+                maxlen=1200,
+            )
 
-    if has_history_coverage:
-        main.live_detection_history['camera-1'] = main.deque(
-            [(started.timestamp() + 2.0, [{'label': 'person', 'confidence': 0.9, 'box': box}])],
-            maxlen=1200,
+        event_id = main.database.add_event(
+            created_at=main.utc_now(), source='rtsp', snapshot_path=None,
+            detections=[{'label': 'person', 'confidence': 0.9, 'box': box}],
+            alert_triggered=True, metadata={},
+        )
+        recording_id = main.database.add_recording(
+            event_id=event_id, camera_id='camera-1',
+            started_at=started.isoformat(), ended_at=ended.isoformat(), duration_seconds=8.0,
+            file_path=str(clip), thumbnail_path=None, source='rtsp',
+            created_at=main.utc_now(), trigger_type='object', trigger_label='person',
         )
 
-    event_id = main.database.add_event(
-        created_at=main.utc_now(), source='rtsp', snapshot_path=None,
-        detections=[{'label': 'person', 'confidence': 0.9, 'box': box}],
-        alert_triggered=True, metadata={},
-    )
-    recording_id = main.database.add_recording(
-        event_id=event_id, camera_id='camera-1',
-        started_at=started.isoformat(), ended_at=ended.isoformat(), duration_seconds=8.0,
-        file_path=str(clip), thumbnail_path=None, source='rtsp',
-        created_at=main.utc_now(), trigger_type='object', trigger_label='person',
-    )
+        status, _headers, detail = client.request(f'/api/recordings/{recording_id}')
+        assert status == 200, f'recording_detail must succeed, got status {status}'
+        if expect_track:
+            assert main.recording_track_sidecar_path(clip).exists(), 'backfill must write the track sidecar'
+            assert detail['track'], 'detail view must return the backfilled track'
+            assert detail['track'][0]['t'] == pytest.approx(2.0, abs=0.01)
+            assert detail['track'][0]['detections'][0]['label'] == 'person'
+        else:
+            assert detail['track'] is None
+            assert not main.recording_track_sidecar_path(clip).exists()
 
-    detail = main.recording_detail(recording_id)
-    if expect_track:
-        assert main.recording_track_sidecar_path(clip).exists(), 'backfill must write the track sidecar'
-        assert detail['track'], 'detail view must return the backfilled track'
-        assert detail['track'][0]['t'] == pytest.approx(2.0, abs=0.01)
-        assert detail['track'][0]['detections'][0]['label'] == 'person'
-    else:
-        assert detail['track'] is None
-        assert not main.recording_track_sidecar_path(clip).exists()
-
-    # Repeat views stay cheap and consistent.
-    detail = main.recording_detail(recording_id)
-    if expect_track:
-        assert detail['track']
-    else:
-        assert detail['track'] is None
-
+        # Repeat views stay cheap and consistent.
+        status, _headers, detail = client.request(f'/api/recordings/{recording_id}')
+        assert status == 200
+        if expect_track:
+            assert detail['track']
+        else:
+            assert detail['track'] is None
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
 def test_get_ai_settings(tmp_path, monkeypatch):
     """GET /api/settings/ai returns the current AI configuration with status fields."""
     app, _database_path = _load_app(tmp_path, monkeypatch)
