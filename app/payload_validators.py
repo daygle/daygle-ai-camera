@@ -144,7 +144,7 @@ def validate_alert_email_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 def validate_push_notification_settings(payload: dict[str, Any]) -> dict[str, Any]:
     from app.utils import normalize_bool_setting
-    from app.config_facades import effective_push_notification_settings
+    from app.main import effective_push_notification_settings
     current = effective_push_notification_settings()
     allowed = {'enabled', 'server_url', 'topic', 'priority', 'username', 'password'}
     updated = {key: current.get(key) for key in allowed if key in current}

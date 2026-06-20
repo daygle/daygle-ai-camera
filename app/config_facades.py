@@ -5,7 +5,7 @@ Phase-17 carries the Phase-16 audit forward: after the auth-gate cluster
 ``app/middleware.py`` and ``app/auth_gates.py``, the next-highest-ROI
 group of helpers in ``app/main.py`` is the config-facade cluster.
 
-The 7 functions in this module each merge a runtime config snapshot
+The 9 functions in this module each merge a runtime config snapshot
 from ``database.get_setting(<name>)`` with the on-disk ``config``
 dictionary and (for some) a hardcoded default set, returning a single
 flattened dict the routers can consume directly without rewriting
@@ -17,14 +17,14 @@ Same hybrid-pattern template as ``app/middleware.py`` (Phase-15) and
     import app.main as main
     # helpers reach main.<attr> at CALL time, not at module top
 
-The 18 reach sites across the 7 helpers resolve to ``main.<attr>``
+The 20 reach sites across the 9 helpers resolve to ``main.<attr>``
 attributes on ``app.main``: (``config``, ``auth_config``, ``database``,
 ``cameras_config``, ``camera_config``, ``normalize_camera_settings``,
 ``normalize_camera_id``). They stay on ``app.main`` (transport-level +
 storage state + normalization helpers) so this module can read them
 via Pool C.
 
-Helpers moved (7):
+Helpers moved (9):
 
 - ``effective_ai_config`` - merges on-disk ``config['ai']`` with
   ``database.get_setting('ai')``; ``copy.deepcopy`` ensures callers
@@ -42,6 +42,14 @@ Helpers moved (7):
   pre-computed copy of ``config['auth']`` produced at module load for
   use during ``auth = AuthService(...)`` startup) with
   ``database.get_setting('auth')``.
+- ``effective_email_alert_settings`` - merges
+  ``config['alerts']['email']`` with ``database.get_setting('alert_email')``.
+  ``copy.deepcopy`` ensures callers cannot mutate the source
+  ``config`` dict.
+- ``effective_push_notification_settings`` - merges
+  ``config['alerts']['push_notification']`` with
+  ``database.get_setting('alert_push')``. ``copy.deepcopy`` ensures
+  callers cannot mutate the source ``config`` dict.
 - ``effective_cameras_config`` - reads only the database override; if
   present, normalizes each entry via ``main.normalize_camera_settings``.
   Empty list when no override is present (cameras are managed via the
@@ -72,13 +80,15 @@ State KEPT on ``app.main`` (this module reads via ``main.<attr>``):
   ``get_camera_config`` to fuzzy-match incoming ``camera_id`` strings
   to camera records.
 
-Pool A from-import rebinds (at the bottom of ``app/main.py``)::
+Pool A from-import rebinds (at the TOP of ``app/main.py``)::
 
     from app.config_facades import (
         effective_ai_config as effective_ai_config,
         effective_auth_config as effective_auth_config,
         effective_cameras_config as effective_cameras_config,
+        effective_email_alert_settings as effective_email_alert_settings,
         effective_live_config as effective_live_config,
+        effective_push_notification_settings as effective_push_notification_settings,
         effective_recording_config as effective_recording_config,
         effective_storage_config as effective_storage_config,
         get_camera_config as get_camera_config,
@@ -165,6 +175,24 @@ def effective_auth_config() -> dict[str, Any]:
     import app.main as main
     settings = copy.deepcopy(main.auth_config)
     override = main.database.get_setting('auth')
+    if isinstance(override, dict):
+        settings.update(override)
+    return settings
+
+
+def effective_email_alert_settings() -> dict[str, Any]:
+    import app.main as main
+    settings = copy.deepcopy(main.config.get('alerts', {}).get('email', {}))
+    override = main.database.get_setting('alert_email')
+    if isinstance(override, dict):
+        settings.update(override)
+    return settings
+
+
+def effective_push_notification_settings() -> dict[str, Any]:
+    import app.main as main
+    settings = copy.deepcopy(main.config.get('alerts', {}).get('push_notification', {}))
+    override = main.database.get_setting('alert_push')
     if isinstance(override, dict):
         settings.update(override)
     return settings

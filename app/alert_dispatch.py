@@ -91,8 +91,6 @@ import app.state as _state
 from app.config_facades import (
     effective_ai_config,
     effective_cameras_config,
-    effective_email_alert_settings,
-    effective_push_notification_settings,
 )
 
 logger = logging.getLogger('daygle.ai')
@@ -233,7 +231,7 @@ def deliver_email_alerts(
     event_id: int,
     rules: list[dict[str, Any]] | None = None,
 ) -> None:
-    from app.main import render_live_snapshot_jpeg_overlay, EmailAlertService, EmailAlertError
+    from app.main import render_live_snapshot_jpeg_overlay, EmailAlertService, EmailAlertError, effective_email_alert_settings
     if not triggered:
         return
     event = _state.database.get_event(event_id) or {}
@@ -322,7 +320,7 @@ def deliver_push_notifications(
     event_id: int,
     rules: list[dict[str, Any]] | None = None,
 ) -> None:
-    from app.main import PushNotificationService, PushNotificationError
+    from app.main import PushNotificationService, PushNotificationError, effective_push_notification_settings
     if not triggered:
         return
     push_settings = effective_push_notification_settings()

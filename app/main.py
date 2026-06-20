@@ -110,7 +110,9 @@ from app.config_facades import (
     effective_ai_config as effective_ai_config,
     effective_auth_config as effective_auth_config,
     effective_cameras_config as effective_cameras_config,
+    effective_email_alert_settings as effective_email_alert_settings,
     effective_live_config as effective_live_config,
+    effective_push_notification_settings as effective_push_notification_settings,
     effective_recording_config as effective_recording_config,
     effective_storage_config as effective_storage_config,
     get_camera_config as get_camera_config,
@@ -614,19 +616,6 @@ def camera_event_recording_config(settings: dict[str, Any]) -> dict[str, Any]:
     base.update({'continuous': camera_recording['continuous']})
     return base
 
-def effective_email_alert_settings() -> dict[str, Any]:
-    settings = copy.deepcopy(config.get('alerts', {}).get('email', {}))
-    override = database.get_setting('alert_email')
-    if isinstance(override, dict):
-        settings.update(override)
-    return settings
-
-def effective_push_notification_settings() -> dict[str, Any]:
-    settings = copy.deepcopy(config.get('alerts', {}).get('push_notification', {}))
-    override = database.get_setting('alert_push')
-    if isinstance(override, dict):
-        settings.update(override)
-    return settings
 database = EventDatabase(config['storage']['database'])
 _state.database = database
 camera_config: dict[str, Any] = {}

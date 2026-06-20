@@ -128,7 +128,6 @@ from email.mime.text import MIMEText
 from typing import Any
 
 import app.state as _state
-from app.config_facades import effective_email_alert_settings, effective_push_notification_settings
 
 logger = logging.getLogger('daygle.ai')
 
@@ -203,7 +202,7 @@ def _mark_camera_recovery_notified(camera_id: str) -> None:
 
 
 def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event_type: str) -> None:
-    from app.main import PushNotificationService, EmailAlertService
+    from app.main import PushNotificationService, EmailAlertService, effective_push_notification_settings, effective_email_alert_settings
     settings = effective_camera_offline_alert_settings()
     if not settings.get('enabled'):
         return
