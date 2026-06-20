@@ -130,7 +130,6 @@ def extend_active_rtsp_recording(
     recording_config: dict[str, Any] | None = None,
     detections: list[dict[str, Any]] | None = None,
 ) -> int | None:
-    from app.main import detection_label_strings, detection_label_confidences
     try:
         event_dt = datetime.fromisoformat(str(event_time))
     except ValueError:

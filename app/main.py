@@ -77,8 +77,6 @@ from app.state import (
     live_detection_worker_lock as live_detection_worker_lock,
     active_live_detection_cameras as active_live_detection_cameras,
     live_detection_last_checked as live_detection_last_checked,
-    live_alert_monitor_stop as live_alert_monitor_stop,
-    live_alert_monitor_thread as live_alert_monitor_thread,
     _periodic_scan_last_ts as _periodic_scan_last_ts,
     _frame_motion_lock as _frame_motion_lock,
     _frame_motion_prev as _frame_motion_prev,
@@ -87,8 +85,6 @@ from app.state import (
     active_rtsp_recordings as active_rtsp_recordings,
     _camera_health_lock as _camera_health_lock,
     _camera_health_state as _camera_health_state,
-    _notification_threads_lock as _notification_threads_lock,
-    _notification_threads as _notification_threads,
 )
 # Phase-18: top-of-file Pool A from-import rebinds for the
 # camera-config cluster extracted into app/camera_config.py. The
@@ -355,40 +351,19 @@ from app.event_debounce import (
     schedule_live_camera_backoff as schedule_live_camera_backoff,
 )
 
-# Phase 28: top-of-file Pool A from-import rebinds for the
-# live-alert delivery cluster extracted into app/alert_dispatch.py.
-# The rebind wires ``main.<name>`` BEFORE any sibling body evaluates
-# because the internal main.py callers (``process_live_stream_alerts``
-# invokes the dispatch family as bare names inside its function body
-# and ``tests/test_api.py`` reaches them as
-# ``main.deliver_push_notifications`` /
-# ``main.wait_for_pending_alert_notifications``) reference these as
-# bare names inside function bodies. The five helpers reach the
-# following state + helpers on ``app.main`` at call time via lazy
-# ``import app.main as main`` access:
-#   - ``main._notification_threads_lock`` + ``main._notification_threads``
-#     (state primitives owned on main.py)
-#   - ``main.database`` (singleton DB handle; NOT the app/database.py module)
-#   - ``main.effective_email_alert_settings()`` +
-#     ``main.effective_push_notification_settings()`` (Phase-9/10 rebinds)
-#   - ``main._format_alert_datetime(...)`` +
-#     ``main._rule_notify_active_now(...)`` +
-#     ``main.compute_minimum_rule_confidence()`` (top-level helpers)
-#   - ``main.render_live_snapshot_jpeg_overlay(...)`` (Phase-25 rebind).
-# This mirrors the Pool-C pattern in :mod:`app.zone_schema`,
-# :mod:`app.detection_state`, and :mod:`app.event_debounce`. State
-# primitives stay on main.py (mirrors the Phase-26 ``live_detection_history``
-# precedent for the in-flight delivery threads).
+# Phase 28: Pool A rebinds for the live-alert delivery cluster
+# (app/alert_dispatch.py). Only the three names with active consumers
+# are retained: ``tests/test_api.py`` reaches ``main._rule_notify_active_now``
+# and ``main.compute_minimum_rule_confidence`` as bare attrs; tests also
+# reach ``main.wait_for_pending_alert_notifications``. The remaining
+# names (_alert_datetime_prefs, _format_alert_datetime, deliver_email_alerts,
+# deliver_push_notifications, the two underscore-aliased deliver_* functions)
+# were removed because alert_dispatch.py uses them as module-internal bare
+# names and no Pool C consumer reaches them via main.<name>.
 from app.alert_dispatch import (
-    _alert_datetime_prefs as _alert_datetime_prefs,
-    _format_alert_datetime as _format_alert_datetime,
     _rule_notify_active_now as _rule_notify_active_now,
     compute_minimum_rule_confidence as compute_minimum_rule_confidence,
-    deliver_sound_alert_notifications as _deliver_sound_alert_notifications,
     wait_for_pending_alert_notifications as wait_for_pending_alert_notifications,
-    deliver_alert_notifications as _deliver_alert_notifications,
-    deliver_email_alerts as deliver_email_alerts,
-    deliver_push_notifications as deliver_push_notifications,
 )
 
 # Phase 29: top-of-file Pool A from-import rebinds for the
@@ -492,7 +467,6 @@ from app.live_monitor import (
 )
 # Phase A: pure stateless utility helpers → app/utils.py
 from app.utils import (
-    _non_empty_setting as _non_empty_setting,
     build_stream_url as build_stream_url,
     camera_default_name as camera_default_name,
     default_camera_detection_settings as default_camera_detection_settings,
@@ -561,14 +535,6 @@ from app.backup import (
     refresh_runtime_after_database_restore as refresh_runtime_after_database_restore,
     purge_recordings_by_policy as purge_recordings_by_policy,
     purge_camera_diagnostics_by_policy as purge_camera_diagnostics_by_policy,
-)
-# Sound-monitor state: Pool A rebind from app.state so that
-# app.api.sound_router (and tests) can still reach these via main.<attr>.
-from app.state import (
-    _sound_detectors as _sound_detectors,
-    _sound_detectors_lock as _sound_detectors_lock,
-    _sound_statuses as _sound_statuses,
-    _sound_statuses_lock as _sound_statuses_lock,
 )
 _logger = logging.getLogger('daygle.ai')
 # Pool A re-export: tests and extracted modules reach this logger via

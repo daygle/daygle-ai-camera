@@ -170,7 +170,10 @@ def test_state_primitives_live_on_main(main_module):
     )
     import threading as _threading
     assert isinstance(main_module._camera_health_state, dict)
-    assert isinstance(main_module._camera_health_lock, _threading.Lock)
+    # threading.Lock() returns a _thread.lock object; threading.Lock itself is a
+    # factory function, not a class, so isinstance(..., threading.Lock) raises
+    # TypeError. Use type(threading.Lock()) to get the actual lock type.
+    assert isinstance(main_module._camera_health_lock, type(_threading.Lock()))
 
 
 def test_state_primitives_not_promoted_into_camera_health(ch):
