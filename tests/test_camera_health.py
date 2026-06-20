@@ -24,8 +24,8 @@ each public path:
 - ``_check_cameras_health`` -- iterates cameras_config snapshot,
   updates state, fires _deliver for first eligible camera.
 - ``_camera_health_state`` / ``_camera_health_lock`` -- state primitives
-  STAY on main.py per the state-migration template (verified by AST +
-  smoke-load).
+  live in ``app.state`` and are re-exported from ``app.main`` via Pool A
+  rebinds (verified by attribute existence + type checks).
 - Lock discipline -- 8-thread concurrent _update_camera_health writers
   on the same camera_id complete without exceptions; final state is
   internally consistent.
@@ -151,12 +151,22 @@ def test_pool_a_rebind_wires_helper_to_main(name, main_module, ch):
 # ---------------------------------------------------------------------------
 
 def test_state_primitives_live_on_main(main_module):
-    """Module-level state primitives stay on main per the state-migration template."""
+    """``app.main`` re-exports ``_camera_health_state`` and ``_camera_health_lock``
+    via Pool A from-import rebinds from ``app.state``.
+
+    The canonical home of these primitives is ``app.state`` (introduced in the
+    state-pool migration). ``app/main.py`` re-exports them so that call sites
+    that do ``from app.main import _camera_health_state`` (Pool C) and
+    monkeypatch targets that do ``setattr(main_module, '_camera_health_state', ...)``
+    continue to reach the same objects.
+    """
     assert hasattr(main_module, '_camera_health_state'), (
-        '_camera_health_state must STAY on app.main (state-migration template)'
+        '_camera_health_state re-export missing from app.main -- '
+        'Pool A from-import rebind from app.state was dropped'
     )
     assert hasattr(main_module, '_camera_health_lock'), (
-        '_camera_health_lock must STAY on app.main (state-migration template)'
+        '_camera_health_lock re-export missing from app.main -- '
+        'Pool A from-import rebind from app.state was dropped'
     )
     import threading as _threading
     assert isinstance(main_module._camera_health_state, dict)
@@ -166,13 +176,15 @@ def test_state_primitives_live_on_main(main_module):
 def test_state_primitives_not_promoted_into_camera_health(ch):
     """camera_health.py must NOT have its own copy of the state primitives.
 
-    A local copy would diverge from main.py's mutation paths (e.g.
-    camera_config._migrate_camera_id) and silently corrupt the state
-    machine. The only source of truth is main._camera_health_state.
+    The canonical source of truth is ``app.state`` (``_state._camera_health_state``
+    and ``_state._camera_health_lock``). ``camera_health.py`` reaches them via
+    ``import app.state as _state`` at module top. A local attribute copy on the
+    ``camera_health`` module would diverge from the registry and silently corrupt
+    the state machine.
     """
     assert not hasattr(ch, '_camera_health_state'), (
         'camera_health must NOT define its own _camera_health_state; it must '
-        "reach into main._camera_health_state at call time only"
+        "reach app.state._camera_health_state via 'import app.state as _state'"
     )
     assert not hasattr(ch, '_camera_health_lock'), (
         'camera_health must NOT define its own _camera_health_lock'
