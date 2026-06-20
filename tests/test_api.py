@@ -2821,6 +2821,44 @@ def test_push_notification_title_lists_all_triggered_labels(monkeypatch):
         assert 'Camera: Front Door' in entry['body']
 
 
+
+# ---------------------------------------------------------------------------
+# Monkey-patching reach-path conventions for the 2 sites below
+# ---------------------------------------------------------------------------
+# `effective_push_notification_settings` (line 2852) and
+# `PushNotificationService` (line 2858) are stateless module-level rebinds
+# on `app/main.py`. Production code reaches them through Pool A from-
+# import + local-name lookup:
+#
+#   app/alert_dispatch.py:323      `from app.main import ..., effective_push_notification_settings, ...`
+#                                  + `effective_push_notification_settings()` (local call on :326)
+#   app/camera_health.py:205       `from app.main import PushNotificationService, ..., effective_push_notification_settings, ...`
+#                                  + local-name lookup on :215 / :218
+#   app/payload_validators.py:147  `from app.main import effective_push_notification_settings`
+#                                  + local call on :148
+#
+# Crucially, app/main.py's 12 `_state.<X>` post-construction writes do NOT
+# include these names. They cover only: config, auth_config, database,
+# camera_config, cameras_config, camera_instances, recording_service, auth,
+# detector, last_detector_error (+ 2 late duplicates for cameras_config /
+# camera_instances). Neither `effective_push_notification_settings` nor
+# `PushNotificationService` is routed via the registry.
+#
+# Therefore the 2 patches below MUST stay on `main_module.<X>`. The
+# registry-side `_app_state.<X>` pattern from commit e73da3c works only
+# for INSTANCE methods on singletons (e.g. `_state.database.get_setting`);
+# it does NOT apply here because production reads these names through
+# Pool A's from-import surface, not via the registry. A `_state.<X>`
+# patch would land the fakes on a dead attribute, and
+# `deliver_push_notifications` would invoke the real
+# `PushNotificationService`, leaving `captured` empty and failing every
+# assertion in this test.
+#
+# For the full enumeration of the three reach-path rules and the 11
+# sibling sites in this codebase, see tests/test_camera_health.py:182-237.
+# ---------------------------------------------------------------------------
+
+
 def test_deliver_push_notifications_passes_all_triggered_labels(tmp_path, monkeypatch):
     _app, _ = _load_app(tmp_path, monkeypatch)
     main_module = sys.modules["app.main"]
