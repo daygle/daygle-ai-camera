@@ -21,8 +21,6 @@ from app.main import (
     GITHUB_REPO,
     _current_version,
     _parse_semver,
-    _update_in_progress,
-    _update_lock,
 )
 
 router = APIRouter()
