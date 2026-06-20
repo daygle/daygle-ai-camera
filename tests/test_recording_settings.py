@@ -161,24 +161,33 @@ class _EmailRecipients:
 
 
 def _install_recording_dependencies(monkeypatch, *, sound_classes=None, default_rules=_DEFAULT_DEFAULTS_SENTINEL):
-    """Install hermetic stand-ins for the ``main`` attributes that the 4
-    helpers reach at call time:
+    """Install hermetic stand-ins for the 4 cross-module deps reached by
+    the recording-settings cluster:
 
     - ``normalize_bool_setting`` -- always succeeds (via ``_BoolBool``).
     - ``normalize_email_recipients`` -- list pass-through.
     - ``SOUND_CLASSES`` + ``DEFAULT_RULES`` -- injected dictionaries.
 
-    Returns ``(main, bs, er)``. ``default_rules`` distinguishes ``None``
-    (caller wants the helper's default list) from ``[]`` (caller wants an
-    EMPTY list -- important for testing the ``if not default: continue``
-    branch in ``_normalize_camera_sound_settings``).
+    Targets are intentionally ``app.recording_settings`` (NOT ``main``):
+    app/recording_settings.py binds its dependencies at the top of the
+    file via direct imports:
+        from app.sound_detector import DEFAULT_RULES, SOUND_CLASSES
+        from app.utils import normalize_bool_setting, normalize_email_recipients
+    Function bodies consult the module's globals dict, so we must patch
+    the bound names on ``app.recording_settings`` -- patching ``main.<name>``
+    would NOT intercept the real call path.
+
+    Returns ``(recording_settings_module, bs, er)``. ``default_rules``
+    distinguishes ``None`` (caller wants the helper's default list) from
+    ``[]`` (caller wants an EMPTY list -- important for testing the
+    ``if not default: continue`` branch in ``_normalize_camera_sound_settings``).
     """
-    import app.main as main
+    import app.recording_settings as recording_settings_module
 
     bs = _BoolBool()
     er = _EmailRecipients()
-    monkeypatch.setattr(main, 'normalize_bool_setting', bs)
-    monkeypatch.setattr(main, 'normalize_email_recipients', er)
+    monkeypatch.setattr(recording_settings_module, 'normalize_bool_setting', bs)
+    monkeypatch.setattr(recording_settings_module, 'normalize_email_recipients', er)
 
     if sound_classes is None:
         sound_classes = {
@@ -190,10 +199,10 @@ def _install_recording_dependencies(monkeypatch, *, sound_classes=None, default_
             {'class': 'siren', 'confidence_threshold': 0.7, 'cooldown_seconds': 30.0, 'record_on_detect': True},
             {'class': 'glass_break', 'confidence_threshold': 0.6, 'cooldown_seconds': 60.0, 'record_on_detect': True},
         ]
-    monkeypatch.setattr(main, 'SOUND_CLASSES', sound_classes)
-    monkeypatch.setattr(main, 'DEFAULT_RULES', default_rules)
+    monkeypatch.setattr(recording_settings_module, 'SOUND_CLASSES', sound_classes)
+    monkeypatch.setattr(recording_settings_module, 'DEFAULT_RULES', default_rules)
 
-    return main, bs, er
+    return recording_settings_module, bs, er
 
 
 # -- normalize_camera_recording_settings ---------------------------------
@@ -207,10 +216,11 @@ def test_normalize_camera_recording_settings_defaults_continuous_false_when_inpu
 
 
 def test_normalize_camera_recording_settings_passes_continuous_through_normalize_bool(monkeypatch, rs):
-    """The ``continuous`` field is routed through ``main.normalize_bool_setting``
-    with ``False`` as the default -- verified by stubbing normalize_bool_setting
-    and reading back its captured calls."""
-    main, bs, _er = _install_recording_dependencies(monkeypatch)
+    """The ``continuous`` field is routed through ``app.recording_settings.normalize_bool_setting``
+    (top-of-file bound from ``app.utils``) -- verified by stubbing
+    ``normalize_bool_setting`` on the recording_settings module and reading
+    back its captured calls."""
+    _rs, bs, _er = _install_recording_dependencies(monkeypatch)
 
     out = rs.normalize_camera_recording_settings({'continuous': 'yes'})
     assert out == {'continuous': True}
@@ -287,7 +297,7 @@ def test_normalize_camera_sound_settings_collapses_non_dict_input(rs):
 def test_normalize_camera_sound_settings_filters_unknown_rule_classes(monkeypatch, rs):
     """Rules whose ``class`` isn't in ``main.SOUND_CLASSES`` are dropped --
     only known sound classes survive the rebuild."""
-    main, _bs, _er = _install_recording_dependencies(
+    _rs, _bs, _er = _install_recording_dependencies(
         monkeypatch,
         sound_classes={'siren': {'label': 'Siren'}},
         default_rules=[{'class': 'siren', 'confidence_threshold': 0.7, 'cooldown_seconds': 30.0}],
