@@ -884,7 +884,6 @@ from app.api.settings_ai_router import router as settings_ai_router
 app.include_router(settings_ai_router)
 from app.api.recordings_router import router as recordings_router
 app.include_router(recordings_router)
-from app.api.recordings_router import recording_detail
 if __name__ == '__main__':
     import uvicorn
     server_config = config.get('server', {})
