@@ -99,11 +99,12 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
         _state.database.add_alert(created_at=now_iso, rule_name=rule_name, event_id=event_id, label=class_id, confidence=confidence, message=message, recording_id=recording_ids[0] if recording_ids else None)
     alert_payload = {'rule_name': rule_name, 'label': class_id, 'confidence': confidence, 'message': message}
     notify_rule = {'name': rule_name, 'email_enabled': email_enabled, 'push_enabled': push_enabled, 'email_recipients': email_recipients, 'notify_start': str(fired_rule.get('notify_start') or '').strip() or None, 'notify_end': str(fired_rule.get('notify_end') or '').strip() or None}
-    notify_thread = threading.Thread(target=_deliver_sound_alert_notifications, args=([alert_payload], event_id, notify_rule), name=f'sound-alert-notify-{event_id}', daemon=True)
-    with _state._notification_threads_lock:
-        _state._notification_threads[:] = [t for t in _state._notification_threads if t.is_alive()]
-        _state._notification_threads.append(notify_thread)
-    notify_thread.start()
+    if notify_enabled:
+        notify_thread = threading.Thread(target=_deliver_sound_alert_notifications, args=([alert_payload], event_id, notify_rule), name=f'sound-alert-notify-{event_id}', daemon=True)
+        with _state._notification_threads_lock:
+            _state._notification_threads[:] = [t for t in _state._notification_threads if t.is_alive()]
+            _state._notification_threads.append(notify_thread)
+        notify_thread.start()
 
 
 def _make_sound_detect_callback(camera_id: str):

@@ -85,7 +85,8 @@ def stub_logger(main_module, monkeypatch):
     def fake_log_camera_diagnostic(camera_id, event_type, message='', *, severity='info', details=None, camera_name=None):
         diagnostics.append((camera_id, event_type))
 
-    monkeypatch.setattr(main_module, 'log_camera_diagnostic', fake_log_camera_diagnostic)
+    import app.diagnostics as _diag
+    monkeypatch.setattr(_diag, 'log_camera_diagnostic', fake_log_camera_diagnostic)
     monkeypatch.setattr(
         main_module, 'logger', type('FakeLogger', (), {
             'warning': staticmethod(lambda *args, **kwargs: warnings.append((args, kwargs))),
@@ -568,11 +569,12 @@ def test_check_cameras_health_iterates_config_snapshot(ch, main_module, monkeypa
     monkeypatch.setattr(ch, '_update_camera_health', fake_update)
     monkeypatch.setattr(ch, '_deliver_camera_offline_notification', lambda *a, **kw: None)
 
-    monkeypatch.setattr(main_module, 'cameras_config', [
+    import app.state as _app_state
+    monkeypatch.setattr(_app_state, 'cameras_config', [
         {'id': 'cam-1', 'name': 'Cam One'},
         {'id': 'cam-2', 'name': 'Cam Two'},
     ])
-    monkeypatch.setattr(main_module, 'live_detection_retry_after', {})
+    monkeypatch.setattr(_app_state, 'live_detection_retry_after', {})
     ch._check_cameras_health()
     assert captured_iterations == ['cam-1', 'cam-2']
 
@@ -580,9 +582,10 @@ def test_check_cameras_health_iterates_config_snapshot(ch, main_module, monkeypa
 def test_check_cameras_health_skips_cameras_in_backoff_set_offline(ch, main_module, monkeypatch, stub_delivery_services, stub_logger):
     """Cameras with retry_after (in detection backoff) are marked offline
     while backoff is in effect."""
+    import app.state as _app_state
     monkeypatch.setattr(ch, '_deliver_camera_offline_notification', lambda *a, **kw: None)
-    monkeypatch.setattr(main_module, 'cameras_config', [{'id': 'cam-1', 'name': 'Cam One'}])
-    monkeypatch.setattr(main_module, 'live_detection_retry_after', {'cam-1': time.time() + 600})
+    monkeypatch.setattr(_app_state, 'cameras_config', [{'id': 'cam-1', 'name': 'Cam One'}])
+    monkeypatch.setattr(_app_state, 'live_detection_retry_after', {'cam-1': time.time() + 600})
     ch._check_cameras_health()
     state = main_module._camera_health_state['cam-1']
     assert state['online'] is False
@@ -591,7 +594,8 @@ def test_check_cameras_health_skips_cameras_in_backoff_set_offline(ch, main_modu
 
 def test_check_cameras_health_empty_config_no_op(ch, main_module, monkeypatch):
     """No cameras to iterate -- early exit; state dict stays untouched."""
-    monkeypatch.setattr(main_module, 'cameras_config', [])
+    import app.state as _app_state
+    monkeypatch.setattr(_app_state, 'cameras_config', [])
     initial_state_keys = list(main_module._camera_health_state.keys())
     ch._check_cameras_health()
     assert list(main_module._camera_health_state.keys()) == initial_state_keys

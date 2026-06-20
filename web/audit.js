@@ -134,4 +134,7 @@ document.getElementById('filterResource').addEventListener('keydown', (e) => {
 
 // Bootstrap: prime CSRF/user via setApiAuth first so subsequent api() calls
 // (none today, but consistent with every other page) are authenticated.
-loadAuth().then(() => loadEntries(0));
+loadAuth().then(() => loadEntries(0)).catch((err) => {
+  if (window.daygleAuth?.redirecting) return;
+  window.showToast?.(err.message, true);
+});

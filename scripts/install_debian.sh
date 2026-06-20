@@ -87,13 +87,14 @@ install -m 0644 "${APP_DIR}/systemd/${APP_NAME}.service" "${SERVICE_FILE}"
 # Patch service file for the configured install paths. Debian installs run the
 # application service as root for hardware/device access, while explicitly
 # allowing ONNX/PT model exports under the models directory.
+_esc() { printf '%s\n' "$1" | sed 's|[&/\\]|\\&|g'; }
 sed -i \
-  -e "s#WorkingDirectory=/opt/daygle-ai-camera#WorkingDirectory=${APP_DIR}#" \
-  -e "s#Environment=DAYGLE_CONFIG=/etc/daygle-ai-camera/config.yaml#Environment=DAYGLE_CONFIG=${CONFIG_DIR}/config.yaml#" \
-  -e "s#ExecStart=/opt/daygle-ai-camera/.venv/bin/python#ExecStart=${APP_DIR}/.venv/bin/python#" \
-  -e "s#User=.*#User=root#" \
-  -e "s#Group=.*#Group=root#" \
-  -e "s#ReadWritePaths=/etc/daygle-ai-camera /opt/daygle-ai-camera/data#ReadWritePaths=${CONFIG_DIR} ${DATA_DIR} ${MODEL_DIR}#" \
+  -e "s|WorkingDirectory=/opt/daygle-ai-camera|WorkingDirectory=$(_esc "${APP_DIR}")|" \
+  -e "s|Environment=DAYGLE_CONFIG=/etc/daygle-ai-camera/config.yaml|Environment=DAYGLE_CONFIG=$(_esc "${CONFIG_DIR}/config.yaml")|" \
+  -e "s|ExecStart=/opt/daygle-ai-camera/.venv/bin/python|ExecStart=$(_esc "${APP_DIR}/.venv/bin/python")|" \
+  -e "s|User=.*|User=root|" \
+  -e "s|Group=.*|Group=root|" \
+  -e "s|ReadWritePaths=/etc/daygle-ai-camera /opt/daygle-ai-camera/data|ReadWritePaths=$(_esc "${CONFIG_DIR} ${DATA_DIR} ${MODEL_DIR}")|" \
   "${SERVICE_FILE}"
 
 # Permissions: the Debian service runs as root, but keep runtime data and

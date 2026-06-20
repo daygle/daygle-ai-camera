@@ -701,7 +701,7 @@ function renderTimeline(payload) {
       <button
         class="timeline-segment${activeClass}${compactClass}${tinyClass}"
         type="button"
-        data-recording-id="${recording.id}"
+        data-recording-id="${escapeHtml(String(recording.id))}"
         title="${escapeHtml(`${recordingTriggerSummary(recording)} · ${formatClock(origStart)} · ${formatDuration(recording.duration_seconds)}${recordingConfidenceText(recording)}`)}"
         style="left:${left}%;width:${width}%;top:${recording.rowIndex * TIMELINE_ROW_HEIGHT + 8}px;--segment-color:${color};"
       >
@@ -742,12 +742,12 @@ function renderRecordingList(recordings) {
     const zones = recordingZoneNames(recording);
     const zoneSuffix = zones.length ? ` · ${zones.map(escapeHtml).join(', ')}` : '';
     return `
-      <button class="timeline-recording-item${activeClass}" type="button" data-recording-id="${recording.id}" data-tooltip="${escapeHtml(tooltip)}">
+      <button class="timeline-recording-item${activeClass}" type="button" data-recording-id="${escapeHtml(String(recording.id))}" data-tooltip="${escapeHtml(tooltip)}">
         <span class="timeline-recording-color" style="background:${color}"></span>
         <span class="timeline-recording-main">
           <span class="timeline-recording-title-row">
             <span class="activity-item-type">${typeLabel}</span>
-            <strong>Recording #${recording.id}</strong>
+            <strong>Recording #${escapeHtml(String(recording.id))}</strong>
           </span>
           <span>${escapeHtml(start)} – ${escapeHtml(end)} · ${camera}${zoneSuffix}</span>
           ${confidenceBadges ? `<span class="timeline-recording-confidence-row">${confidenceBadges}</span>` : ''}
@@ -775,7 +775,7 @@ function renderRecordingDetails(recording) {
   const zoneRow = zones.length ? `<div><span>Zone</span><strong>${zones.map(escapeHtml).join(', ')}</strong></div>` : '';
   const triggerRow = detections.length ? '' : `<div><span>Trigger</span><strong>${escapeHtml(recordingTriggerSummary(recording))}</strong></div>`;
   els.recordingDetails.innerHTML = `
-    <div><span>Recording</span><strong><a href="/recordings?recording_id=${recording.id}" class="timeline-recording-link">#${recording.id} ↗</a></strong></div>
+    <div><span>Recording</span><strong><a href="/recordings?recording_id=${encodeURIComponent(recording.id)}" class="timeline-recording-link">#${escapeHtml(String(recording.id))} ↗</a></strong></div>
     <div><span>Camera</span><strong>${escapeHtml(cameraLabel(recording))}</strong></div>
     ${zoneRow}
     ${triggerRow}
@@ -872,7 +872,7 @@ async function renderFilteredTimeline({ preserveSelection = true } = {}) {
       ? `No recordings match the selected filter for ${state.payload.camera.name} on ${formattedDay}.`
       : `No recordings found for ${state.payload.camera.name} on ${formattedDay}.`;
     setTimelineStatusChip({
-      kind: allRecordings.length ? 'empty' : 'empty',
+      kind: allRecordings.length ? 'filtered' : 'empty',
       label: allRecordings.length ? 'No matches' : 'No recordings',
     });
     clearPlayback(false);

@@ -280,7 +280,7 @@ async function runAction(buttonId, path, label) {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
     setMessage(error.message, true);
-    renderAi(await api('/api/settings/ai'));
+    try { renderAi(await api('/api/settings/ai')); } catch { /* ignore refresh errors */ }
   } finally {
     button.disabled = false;
   }

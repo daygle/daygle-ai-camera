@@ -147,4 +147,7 @@ document.getElementById('filterCamera').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') loadEntries(0);
 });
 
-loadAuth().then(() => loadEntries(0));
+loadAuth().then(() => loadEntries(0)).catch((err) => {
+  if (window.daygleAuth?.redirecting) return;
+  window.showToast?.(err.message, true);
+});
