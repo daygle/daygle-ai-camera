@@ -180,26 +180,78 @@ def test_state_primitives_not_promoted_into_camera_health(ch):
 
 
 # ---------------------------------------------------------------------------
+# Monkey-patching reach-path conventions in this file
+# ---------------------------------------------------------------------------
+#
+# Two attribute surfaces exist in this codebase:
+#
+# - `main_module.<X>` patches the rebind on `app.main` (Pool A from-import
+#   surface; e.g. `from app.push_notifications import PushNotificationService
+#   as PushNotificationService` at the top of `app/main.py`).
+# - `_app_state.<X>`  patches the underlying registry module `app.state`
+#   ("Application-scoped singleton and shared-state registry" per
+#   `app/state.py`'s docstring).
+#
+# The choice between them is dictated by HOW the production code under test
+# imports the symbol. Three rules follow.
+#
+# 1. Registry imports MUST happen inside the test function body, not at the
+#    top of this file. `tests/test_api.py::_load_app()` reloads `app.main`
+#    and, depending on its reload strategy, may also replace
+#    `sys.modules['app.state']` with a fresh instance. A file-top
+#    `import app.state as _app_state` captured at pytest collection time
+#    would then land monkeypatches on a phantom module that production no
+#    longer reads from. The function-body `import app.state as _app_state`
+#    re-binds to whatever `sys.modules['app.state']` holds at call time,
+#    AFTER `_load_app()`, so it always lands on the live singleton. The three
+#    pre-existing `test_check_cameras_health_*` sites in this file already
+#    use this pattern; the three sites migrated below match them.
+#
+# 2. Stateful singletons (`database`, `cameras_config`,
+#    `live_detection_retry_after`, ...) live canonically on `app.state`.
+#    After startup, `app.main.<X>` and `app.state.<X>` name the same object
+#    because `app/main.py` does `import app.state as _state` (line 20) and
+#    writes the registry via `_state.<X> = <X>` post-construction (e.g.
+#    `_state.database = database` at line 637). `app.state` is the file's
+#    stated home, so we patch there.
+#
+# 3. Stateless helpers consumed via `from app.main import X` inside a
+#    function body (e.g. `PushNotificationService`, `EmailAlertService`,
+#    `effective_push_notification_settings`, `effective_email_alert_settings`
+#    reached at `app/camera_health.py:205`, `app/alert_dispatch.py:234`,
+#    `app/alert_dispatch.py:323`) MUST be patched on `main_module.<X>`. The
+#    Pool A from-import rebind creates a SEPARATE binding in the app.main
+#    namespace that source-module patches cannot reach. The 11 other
+#    `monkeypatch.setattr(main_module, ...)` sites in this file (service-
+#    class fakes for `PushNotificationService` / `EmailAlertService` at :119,
+#    :120, :535; settings fakes for `effective_*_alert_settings` in delivery
+#    tests at :451-:541) rely on this contract.
+#
+
+# ---------------------------------------------------------------------------
 # effective_camera_offline_alert_settings -- defaults + database override
 # ---------------------------------------------------------------------------
 
-def test_effective_offline_alert_settings_defaults(ch, main_module, monkeypatch):
-    monkeypatch.setattr(main_module.database, 'get_setting', lambda key: None)
+def test_effective_offline_alert_settings_defaults(ch, monkeypatch):
+    import app.state as _app_state
+    monkeypatch.setattr(_app_state.database, 'get_setting', lambda key: None)
     out = ch.effective_camera_offline_alert_settings()
     assert out == {'enabled': False, 'offline_delay_minutes': 1, 'recipients': []}
 
 
-def test_effective_offline_alert_settings_overrides_with_dict(ch, main_module, monkeypatch):
+def test_effective_offline_alert_settings_overrides_with_dict(ch, monkeypatch):
+    import app.state as _app_state
     monkeypatch.setattr(
-        main_module.database, 'get_setting',
+        _app_state.database, 'get_setting',
         lambda key: {'enabled': True, 'offline_delay_minutes': 5, 'recipients': ['admin@example.com']},
     )
     out = ch.effective_camera_offline_alert_settings()
     assert out == {'enabled': True, 'offline_delay_minutes': 5, 'recipients': ['admin@example.com']}
 
 
-def test_effective_offline_alert_settings_ignores_non_dict_override(ch, main_module, monkeypatch):
-    monkeypatch.setattr(main_module.database, 'get_setting', lambda key: 'just-a-string')
+def test_effective_offline_alert_settings_ignores_non_dict_override(ch, monkeypatch):
+    import app.state as _app_state
+    monkeypatch.setattr(_app_state.database, 'get_setting', lambda key: 'just-a-string')
     # Non-dict override must not crash and must leave defaults intact.
     out = ch.effective_camera_offline_alert_settings()
     assert out == {'enabled': False, 'offline_delay_minutes': 1, 'recipients': []}
