@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -2131,6 +2132,10 @@ def test_rtsp_recording_errors_redact_stream_password():
     assert 'rtsp://admin:***@192.168.40.101:554/live/0/MAIN' in message
 
 
+@pytest.mark.skipif(
+    not shutil.which("ffmpeg"),
+    reason="ffmpeg not installed; install or set PATH to run this ffmpeg-dependent test",
+)
 def test_rtsp_recording_capture_falls_back_on_stream_error(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
@@ -2458,6 +2463,10 @@ def test_continuous_chunk_recording_maps_optional_audio_to_aac(tmp_path, monkeyp
     assert command[command.index('-b:a') + 1] == '128k'
 
 
+@pytest.mark.skipif(
+    not shutil.which("ffmpeg"),
+    reason="ffmpeg not installed; install or set PATH to run this ffmpeg-dependent test",
+)
 def test_rtsp_capture_anchors_timing_and_track_to_actual_media_window(tmp_path, monkeypatch):
     """After capture, the recording's stored started_at/ended_at and the baked
     detection track must describe the window the written media actually covers,
@@ -2697,6 +2706,10 @@ def test_h264_mp4_without_audio_streams_directly(tmp_path, monkeypatch):
     assert main.recording_stream_path(source_path) == source_path
 
 
+@pytest.mark.skipif(
+    not shutil.which("ffmpeg"),
+    reason="ffmpeg not installed; install or set PATH to run this ffmpeg-dependent test",
+)
 def test_h264_mp4_with_unsupported_audio_is_transcoded_for_playback(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
