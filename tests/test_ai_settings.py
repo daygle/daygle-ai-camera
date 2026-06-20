@@ -150,13 +150,31 @@ def _install_ai_dependencies(
     yolo_models=None,
     active_ai_config_source='config',
 ):
-    """Install hermetic stand-ins for the 8 ``main`` attributes that
-    ``ai_status_payload`` / ``detector_status`` reach at call time.
+    """Install hermetic stand-ins for the cross-module deps reached by
+    ``ai_status_payload`` / ``detector_status`` / ``validate_ai_settings``.
 
-    Returns ``(main, capture)`` where ``capture`` is a dict collecting the
-    per-helper call log so tests can introspect what was called.
+    Targets are intentionally ``app.state`` (where ``_state.detector``,
+    ``_state.last_detector_error``, ``_state.config`` resolve via the
+    module-level ``import app.state as _state`` in ai_settings.py) and
+    ``app.ai_settings`` (where the locally-defined helpers
+    ``detector_loaded_for`` / ``onnx_runtime_installed`` / ``model_exists`` /
+    ``active_ai_config_source`` and the top-of-file imports
+    ``effective_ai_config`` / ``load_labels`` / the ``YOLO_MODELS``
+    constant resolve as bare names inside function bodies).
+
+    Patching ``main.<attr>`` would NOT intercept these calls: ai_settings
+    is a Phase-20 extraction that does NOT do ``import app.main as main``
+    inside its function bodies - it binds its deps directly from
+    app.state / app.config_facades / app.detector at module load.
+
+    Returns ``(ai_settings_module, ai_state, capture)`` where ``capture``
+    is a dict collecting the per-helper call log so tests can introspect
+    what was called. Tests that need to also patch ``load_labels`` and
+    ``state.config`` (used by ``detector_status``) use the returned
+    ``ai_settings_module`` / ``ai_state`` handles directly.
     """
-    import app.main as main
+    import app.ai_settings as ai_settings_module
+    import app.state as ai_state
 
     capture: dict = {
         'detector_loaded_for_calls': [],
@@ -170,18 +188,27 @@ def _install_ai_dependencies(
 
     if effective_ai_config_value is None:
         effective_ai_config_value = {'backend': 'onnx', 'model_path': 'models/yolov8n.onnx'}
-    monkeypatch.setattr(main, 'effective_ai_config', lambda: effective_ai_config_value)
-    monkeypatch.setattr(main, 'detector', detector)
+
+    # State attributes -- patch on app.state (the ``_state`` alias used by
+    # ai_settings.py for ``_state.detector``, ``_state.last_detector_error``,
+    # ``_state.config``).
+    monkeypatch.setattr(ai_state, 'detector', detector)
+    monkeypatch.setattr(ai_state, 'last_detector_error', last_detector_error)
+
+    # Bare-name helpers + module-level constants -- patch on
+    # app.ai_settings where the names actually resolve for function-body
+    # lookups.
+    monkeypatch.setattr(ai_settings_module, 'effective_ai_config', lambda: effective_ai_config_value)
 
     def _detector_loaded_for(settings):
         capture['detector_loaded_for_calls'].append(settings)
         return detector_loaded_for
-    monkeypatch.setattr(main, 'detector_loaded_for', _detector_loaded_for)
+    monkeypatch.setattr(ai_settings_module, 'detector_loaded_for', _detector_loaded_for)
 
     def _onnx_runtime_installed():
         capture['onnx_runtime_installed_calls'] += 1
         return onnx_runtime_installed
-    monkeypatch.setattr(main, 'onnx_runtime_installed', _onnx_runtime_installed)
+    monkeypatch.setattr(ai_settings_module, 'onnx_runtime_installed', _onnx_runtime_installed)
 
     # ``model_exists`` always installed as a callable (single semantic):
     # callers pass a bool that the stub returns regardless of input args.
@@ -190,23 +217,21 @@ def _install_ai_dependencies(
     def _model_exists(settings):
         capture['model_exists_calls'].append(settings)
         return bool(model_exists) if model_exists is not None else False
-    monkeypatch.setattr(main, 'model_exists', _model_exists)
-
-    monkeypatch.setattr(main, 'last_detector_error', last_detector_error)
+    monkeypatch.setattr(ai_settings_module, 'model_exists', _model_exists)
 
     if yolo_models is None:
         yolo_models = {
             'yolov8n': {'label': 'YOLOv8 nano', 'onnx': 'yolov8n.onnx'},
             'yolov8s': {'label': 'YOLOv8 small', 'onnx': 'yolov8s.onnx'},
         }
-    monkeypatch.setattr(main, 'YOLO_MODELS', yolo_models)
+    monkeypatch.setattr(ai_settings_module, 'YOLO_MODELS', yolo_models)
 
     def _active_ai_config_source():
         capture['active_ai_config_source_calls'] += 1
         return active_ai_config_source
-    monkeypatch.setattr(main, 'active_ai_config_source', _active_ai_config_source)
+    monkeypatch.setattr(ai_settings_module, 'active_ai_config_source', _active_ai_config_source)
 
-    return main, capture
+    return ai_settings_module, ai_state, capture
 
 
 # -- ai_status_payload -----------------------------------------------------
@@ -352,25 +377,29 @@ def test_ai_status_payload_resolves_model_name_from_yolo_models(monkeypatch, ais
 
 # -- detector_status ------------------------------------------------------
 
+
 def test_detector_status_uses_ai_settings_categories_over_config_default(monkeypatch, ais):
     """When ``ai_settings['categories']`` is present, ``detector_status``
     uses it directly -- the ``config['ai']['categories']`` fallback is
-    skipped."""
-    import app.main as main
-
-    # Stub load_labels to return None so the helper falls back to the
-    # categories list verbatim (avoiding any on-disk labels_path read).
-    monkeypatch.setattr(main, 'load_labels', lambda labels_path, categories: None)
-    _install_ai_dependencies(
+    skipped.
+    """
+    ai_settings_module, ai_state, _capture = _install_ai_dependencies(
         monkeypatch,
         detector=_DetectorStub(backend='onnx', available=True),
         detector_loaded_for=True,
         onnx_runtime_installed=True,
         model_exists=True,
     )
-    # The fallback is config['ai']['categories'] -- make it different from
-    # the inline ai_settings['categories'] to verify the fallback is NOT used.
-    monkeypatch.setattr(main, 'config', {'ai': {'categories': ['fallback-cat']}})
+    # Stub load_labels to return None so the helper falls back to the
+    # categories list verbatim (avoiding any on-disk labels_path read).
+    # Patch on app.ai_settings because detector_status binds the bare name
+    # ``load_labels`` at module top via ``from app.detector import load_labels``.
+    monkeypatch.setattr(ai_settings_module, 'load_labels', lambda labels_path, categories: None)
+    # The fallback is state.config['ai']['categories'] -- make it different
+    # from the inline ai_settings['categories'] to verify the fallback is NOT
+    # used. Patch on app.state because detector_status reads it via
+    # ``_state.config`` (the ``import app.state as _state`` alias).
+    monkeypatch.setattr(ai_state, 'config', {'ai': {'categories': ['fallback-cat']}})
 
     out = ais.detector_status({'categories': ['inline-cat']})
     assert out['categories'] == ['inline-cat']
@@ -379,18 +408,17 @@ def test_detector_status_uses_ai_settings_categories_over_config_default(monkeyp
 
 def test_detector_status_falls_back_to_config_categories_when_ai_settings_omit_them(monkeypatch, ais):
     """When ``ai_settings`` does NOT carry ``categories``, fall back to
-    ``config['ai']['categories']``."""
-    import app.main as main
-
-    monkeypatch.setattr(main, 'load_labels', lambda labels_path, categories: None)
-    _install_ai_dependencies(
+    ``config['ai']['categories']``.
+    """
+    ai_settings_module, ai_state, _capture = _install_ai_dependencies(
         monkeypatch,
         detector=_DetectorStub(backend='onnx', available=True),
         detector_loaded_for=True,
         onnx_runtime_installed=True,
         model_exists=True,
     )
-    monkeypatch.setattr(main, 'config', {'ai': {'categories': ['config-cat']}})
+    monkeypatch.setattr(ai_settings_module, 'load_labels', lambda labels_path, categories: None)
+    monkeypatch.setattr(ai_state, 'config', {'ai': {'categories': ['config-cat']}})
 
     out = ais.detector_status({})  # no categories passed in
     assert out['categories'] == ['config-cat']
@@ -399,18 +427,17 @@ def test_detector_status_falls_back_to_config_categories_when_ai_settings_omit_t
 
 def test_detector_status_uses_load_labels_when_returns_labels(monkeypatch, ais):
     """When ``load_labels`` returns a list, ``available_labels`` is that
-    list; the categories fallback is OVERRIDDEN by load_labels."""
-    import app.main as main
-
-    monkeypatch.setattr(main, 'load_labels', lambda labels_path, categories: ['load-cat-1', 'load-cat-2'])
-    _install_ai_dependencies(
+    list; the categories fallback is OVERRIDDEN by load_labels.
+    """
+    ai_settings_module, ai_state, _capture = _install_ai_dependencies(
         monkeypatch,
         detector=_DetectorStub(backend='onnx', available=True),
         detector_loaded_for=True,
         onnx_runtime_installed=True,
         model_exists=True,
     )
-    monkeypatch.setattr(main, 'config', {'ai': {'categories': ['config-cat']}})
+    monkeypatch.setattr(ai_settings_module, 'load_labels', lambda labels_path, categories: ['load-cat-1', 'load-cat-2'])
+    monkeypatch.setattr(ai_state, 'config', {'ai': {'categories': ['config-cat']}})
 
     out = ais.detector_status({'categories': ['inline-cat']})
     assert out['available_labels'] == ['load-cat-1', 'load-cat-2']
@@ -423,8 +450,8 @@ def test_detector_status_uses_load_labels_when_returns_labels(monkeypatch, ais):
 
 def test_validate_ai_settings_keeps_only_allowed_keys(monkeypatch, ais):
     """The allowed set is enforced: extra keys in ``payload`` are dropped,
-    missing-but-allowed keys inherit from ``current``."""
-    import app.main as main
+    missing-but-allowed keys inherit from ``current``.
+    """
     _install_ai_dependencies(
         monkeypatch,
         effective_ai_config_value={
@@ -444,8 +471,8 @@ def test_validate_ai_settings_keeps_only_allowed_keys(monkeypatch, ais):
 def test_validate_ai_settings_coerces_enabled_string_truthy(monkeypatch, ais):
     """The ``enabled`` field accepts string forms '1', 'true', 'yes', 'on'
     (case-insensitive) and any non-empty truthy string -- exercised across
-    the str -> bool coercion branch."""
-    import app.main as main
+    the str -> bool coercion branch.
+    """
     _install_ai_dependencies(
         monkeypatch,
         effective_ai_config_value={'enabled': True},
