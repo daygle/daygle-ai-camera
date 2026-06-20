@@ -3878,7 +3878,10 @@ def test_fetch_models_manifest_uses_remote_ultralytics_version(tmp_path, monkeyp
         assert timeout == 10
         return FakeResponse()
 
-    monkeypatch.setattr(main_module.urllib.request, "urlopen", fake_urlopen)
+    # Patch the ``urllib.request`` singleton directly -- matches the
+    # shape ``PushNotificationService._deliver`` uses (``urllib.request.urlopen``
+    # read from its own module globals after a top-of-file ``import urllib.request``).
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
 
     manifest = main_module._fetch_models_manifest()
 
