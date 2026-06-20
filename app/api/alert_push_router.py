@@ -9,11 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.auth import utc_now
 from app.auth_gates import require_admin
+from app.config_facades import effective_push_notification_settings
 from app.deps import get_database
 from app.payload_validators import validate_push_notification_settings
 from app.push_notifications import PushNotificationError, PushNotificationService
 from app.request_helpers import write_audit_log
-from app.main import effective_push_notification_settings
 
 router = APIRouter()
 

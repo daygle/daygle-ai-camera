@@ -16,10 +16,14 @@ from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.camera_config import _migrate_camera_id, _redact_camera, normalize_camera_id
 from app.config_facades import effective_cameras_config
-from app.main import apply_cameras_settings, get_camera_config
+from app.main import get_camera_config
 from app.utils import build_stream_url
 from app.state import _camera_health_lock, _camera_health_state
-from app.deps import get_database, get_recording_service
+from app.deps import (
+    get_apply_cameras_settings,
+    get_database,
+    get_recording_service,
+)
 from app.payload_validators import validate_camera_settings, validate_cameras_settings
 from app.ptz import send_ptz_command, VALID_COMMANDS as PTZ_VALID_COMMANDS
 from app.request_helpers import write_audit_log
@@ -57,7 +61,11 @@ def cameras_health():
 
 
 @router.put('/api/cameras')
-async def update_cameras(request: Request, db=Depends(get_database)):
+async def update_cameras(
+    request: Request,
+    db=Depends(get_database),
+    apply_cameras_settings=Depends(get_apply_cameras_settings),
+):
     require_admin(request)
     settings = validate_cameras_settings(await request.json())
     old_configs = list(effective_cameras_config())
@@ -71,7 +79,12 @@ async def update_cameras(request: Request, db=Depends(get_database)):
 
 
 @router.put('/api/cameras/{camera_id}')
-async def update_camera(camera_id: str, request: Request, db=Depends(get_database)):
+async def update_camera(
+    camera_id: str,
+    request: Request,
+    db=Depends(get_database),
+    apply_cameras_settings=Depends(get_apply_cameras_settings),
+):
     require_admin(request)
     normalized = normalize_camera_id(camera_id)
     payload = await request.json()

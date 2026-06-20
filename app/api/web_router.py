@@ -1,7 +1,8 @@
 """Web-page APIRouter.
 
 Page-render routes for the Daygle AI Camera UI. All state is accessed via
-direct imports rather than the hybrid ``import app.main as main`` pattern.
+Depends() providers in ``app.deps`` rather than the hybrid
+``import app.main as main`` pattern.
 
 Routes:
 - GET  /              -- root
@@ -31,13 +32,13 @@ from __future__ import annotations
 from html import escape
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 
 from app.auth import CSRF_COOKIE, SESSION_COOKIE
 from app.auth_helpers import csrf_token_response
 from app.config_facades import effective_auth_config
-from app.main import auth, auth_enabled, web_dir
+from app.deps import get_auth, get_auth_enabled, get_web_dir
 
 router = APIRouter()
 
@@ -46,7 +47,7 @@ def _session_cookie_name() -> str:
 
 
 @router.get('/')
-def root():
+def root(web_dir: Path = Depends(get_web_dir)):
     index_path = web_dir / 'index.html'
     if index_path.exists():
         return FileResponse(index_path)
@@ -54,7 +55,7 @@ def root():
 
 
 @router.get('/favicon.ico')
-def favicon():
+def favicon(web_dir: Path = Depends(get_web_dir)):
     favicon_path = web_dir / 'favicon.svg'
     if favicon_path.exists():
         return FileResponse(favicon_path, media_type='image/svg+xml')
@@ -62,7 +63,12 @@ def favicon():
 
 
 @router.get('/login')
-def login_page(request: Request, error: str | None = None):
+def login_page(
+    request: Request,
+    error: str | None = None,
+    auth=Depends(get_auth),
+    auth_enabled: bool = Depends(get_auth_enabled),
+):
     if auth_enabled and auth.users_exist() and auth.get_session(request.cookies.get(_session_cookie_name())):
         return RedirectResponse('/', status_code=303)
     error_html = f'<p class="error">{escape(error)}</p>' if error else ''
@@ -80,7 +86,12 @@ def login_page(request: Request, error: str | None = None):
 
 
 @router.get('/setup')
-def setup_page(request: Request, error: str | None = None):
+def setup_page(
+    request: Request,
+    error: str | None = None,
+    auth=Depends(get_auth),
+    auth_enabled: bool = Depends(get_auth_enabled),
+):
     if auth_enabled and auth.users_exist():
         return RedirectResponse('/login', status_code=303)
     error_html = f'<p class="error">{escape(error)}</p>' if error else ''
@@ -102,66 +113,66 @@ def setup_page(request: Request, error: str | None = None):
 
 
 @router.get('/live')
-def live_page():
+def live_page(web_dir: Path = Depends(get_web_dir)):
     live_path = web_dir / 'live.html'
     if live_path.exists():
         return FileResponse(live_path)
-    return root()
+    return root(web_dir=web_dir)
 
 
 @router.get('/zones')
-def zones_page():
+def zones_page(web_dir: Path = Depends(get_web_dir)):
     zones_path = web_dir / 'zones.html'
     if zones_path.exists():
         return FileResponse(zones_path)
-    return root()
+    return root(web_dir=web_dir)
 
 
 @router.get('/sounds')
-def sounds_page():
+def sounds_page(web_dir: Path = Depends(get_web_dir)):
     sounds_path = web_dir / 'sounds.html'
     if sounds_path.exists():
         return FileResponse(sounds_path)
-    return root()
+    return root(web_dir=web_dir)
 
 
 @router.get('/cameras')
-def cameras_page():
+def cameras_page(web_dir: Path = Depends(get_web_dir)):
     cameras_path = web_dir / 'cameras.html'
     if cameras_path.exists():
         return FileResponse(cameras_path)
-    return root()
+    return root(web_dir=web_dir)
 
 
 @router.get('/alerts')
 @router.get('/events')
 @router.get('/search')
-def dashboard_aliases():
-    return root()
+def dashboard_aliases(web_dir: Path = Depends(get_web_dir)):
+    return root(web_dir=web_dir)
 
 
 @router.get('/recordings')
-def recordings_page():
+def recordings_page(web_dir: Path = Depends(get_web_dir)):
     recordings_path = web_dir / 'recordings.html'
     if recordings_path.exists():
         return FileResponse(recordings_path)
-    return root()
+    return root(web_dir=web_dir)
 
 
 @router.get('/recordings/timeline')
-def recordings_timeline_page():
+def recordings_timeline_page(web_dir: Path = Depends(get_web_dir)):
     timeline_path = web_dir / 'timeline.html'
     if timeline_path.exists():
         return FileResponse(timeline_path)
-    return root()
+    return root(web_dir=web_dir)
 
 
 @router.get('/onnx')
-def onnx_page():
+def onnx_page(web_dir: Path = Depends(get_web_dir)):
     ai_path = web_dir / 'onnx.html'
     if ai_path.exists():
         return FileResponse(ai_path)
-    return root()
+    return root(web_dir=web_dir)
 
 
 @router.get('/ai')
@@ -170,11 +181,11 @@ def ai_settings_page():
 
 
 @router.get('/yamnet-tflite')
-def yamnet_tflite_page():
+def yamnet_tflite_page(web_dir: Path = Depends(get_web_dir)):
     yamnet_path = web_dir / 'yamnet-tflite.html'
     if yamnet_path.exists():
         return FileResponse(yamnet_path)
-    return root()
+    return root(web_dir=web_dir)
 
 
 @router.get('/yamnet')
@@ -183,40 +194,40 @@ def yamnet_page():
 
 
 @router.get('/profile')
-def profile_page():
+def profile_page(web_dir: Path = Depends(get_web_dir)):
     profile_path = web_dir / 'profile.html'
     if profile_path.exists():
         return FileResponse(profile_path)
-    return root()
+    return root(web_dir=web_dir)
 
 
 @router.get('/settings')
-def system_settings_page():
+def system_settings_page(web_dir: Path = Depends(get_web_dir)):
     settings_path = web_dir / 'settings.html'
     if settings_path.exists():
         return FileResponse(settings_path)
-    return root()
+    return root(web_dir=web_dir)
 
 
 @router.get('/users')
-def users_page():
+def users_page(web_dir: Path = Depends(get_web_dir)):
     users_path = web_dir / 'users.html'
     if users_path.exists():
         return FileResponse(users_path)
-    return root()
+    return root(web_dir=web_dir)
 
 
 @router.get('/audit')
-def audit_page():
+def audit_page(web_dir: Path = Depends(get_web_dir)):
     audit_path = web_dir / 'audit.html'
     if audit_path.exists():
         return FileResponse(audit_path)
-    return root()
+    return root(web_dir=web_dir)
 
 
 @router.get('/camera-log')
-def camera_log_page():
+def camera_log_page(web_dir: Path = Depends(get_web_dir)):
     page_path = web_dir / 'camera-log.html'
     if page_path.exists():
         return FileResponse(page_path)
-    return root()
+    return root(web_dir=web_dir)

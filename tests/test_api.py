@@ -1267,8 +1267,14 @@ def test_admin_can_send_test_alert_email(tmp_path, monkeypatch):
     try:
         _setup_admin(client)
         csrf = _login(client)
-        main_module = sys.modules["app.main"]
-        monkeypatch.setattr(main_module, "EmailAlertService", FakeEmailAlertService)
+        # Patch on the handler module's actual import namespace
+        # (app.api.alert_email_router). `from app.email_alerts import
+        # EmailAlertService` creates a module-level binding there at import
+        # time, and the handler's bare-name lookup reads from THAT
+        # module's globals. Patching on app.email_alerts alone would
+        # rebind a different binding the handler never reads.
+        import app.api.alert_email_router as alert_email_router_module
+        monkeypatch.setattr(alert_email_router_module, "EmailAlertService", FakeEmailAlertService)
 
         status, _headers, payload = client.request(
             "/api/settings/alert-email/test",
@@ -1670,7 +1676,7 @@ def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypat
                 }
             ]
 
-    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.live_detection_last_checked.clear()
 
     strict_settings = {
@@ -1800,7 +1806,7 @@ def test_live_stream_detection_queue_runs_in_background_and_deduplicates(tmp_pat
             return []
 
     detector = SlowDetector()
-    monkeypatch.setattr(main, 'detector', detector)
+    monkeypatch.setattr(main._state, 'detector', detector)
     main.live_detection_last_checked.clear()
     main.active_live_detection_cameras.clear()
     # queue_live_stream_alerts is the frontend-triggered path and only runs detection
@@ -1840,7 +1846,7 @@ def test_live_stream_detection_without_alert_rule_does_not_record_by_default(tmp
                 }
             ]
 
-    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.live_detection_last_checked.clear()
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
 
@@ -1891,7 +1897,7 @@ def test_live_stream_detection_saves_only_allowed_zone_object_labels(tmp_path, m
                 },
             ]
 
-    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.live_detection_last_checked.clear()
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
 
@@ -1944,7 +1950,7 @@ def test_live_stream_camera_continuous_recording_records_without_alert_rule(tmp_
                 }
             ]
 
-    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.live_detection_last_checked.clear()
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
 
@@ -3096,7 +3102,7 @@ def test_recording_labels_api_filter_matches_any_recorded_label(tmp_path, monkey
         def detect_image(self, _image_bytes, confidence=None):
             return []
 
-    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
     server, thread, base_url = _server(app)
     admin = LocalClient(base_url)
     try:
@@ -3200,7 +3206,7 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
         def detect_image(self, _image_bytes, confidence=None):
             return [{'label': 'cat', 'confidence': 0.91, 'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}}]
 
-    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
     server, thread, base_url = _server(app)
     admin = LocalClient(base_url)
     try:
@@ -3296,7 +3302,7 @@ def test_recording_retention_purge_deletes_metadata_and_files(tmp_path, monkeypa
         def detect_image(self, _image_bytes, confidence=None):
             return [{'label': 'cat', 'confidence': 0.91, 'box': {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}}]
 
-    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
     server, thread, base_url = _server(app)
     admin = LocalClient(base_url)
     try:
@@ -3781,7 +3787,7 @@ def test_zone_spatial_filtering_blocks_detections_outside_zone(tmp_path, monkeyp
                 {'label': 'person', 'confidence': 0.9, 'box': {'x': 0.7, 'y': 0.3, 'width': 0.1, 'height': 0.2}},
             ]
 
-    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.live_detection_last_checked.clear()
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
 
@@ -4068,7 +4074,7 @@ def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, m
         def detect_image(self, image_bytes, confidence=None):
             return [{'label': 'cat', 'confidence': 0.88, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.2}}]
 
-    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
     main.live_detection_last_checked.clear()
 
@@ -4126,7 +4132,7 @@ def test_record_only_zone_with_no_alert_rules_keeps_zone_name(tmp_path, monkeypa
         def detect_image(self, image_bytes, confidence=None):
             return [{'label': 'person', 'confidence': 0.82, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.2}}]
 
-    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
     main.live_detection_last_checked.clear()
 
@@ -4199,7 +4205,7 @@ def test_zone_detection_creates_alert_and_recording(tmp_path, monkeypatch, label
         def detect_image(self, _bytes, **kwargs):
             return [{'label': label, 'confidence': confidence, 'box': box}]
 
-    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
     main.live_detection_last_checked.clear()
     main.alerts.last_triggered.clear()
@@ -4241,7 +4247,7 @@ def test_person_and_cat_in_zone_each_create_independent_events(tmp_path, monkeyp
         def detect_image(self, image_bytes, confidence=None):
             return labels_by_frame.get(image_bytes, [])
 
-    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
     main.live_detection_last_checked.clear()
     main.alerts.last_triggered.clear()
@@ -4318,7 +4324,7 @@ def test_object_outside_zone_does_not_create_recording(tmp_path, monkeypatch):
             # Object is in the right half of the frame (x=0.6..0.9)
             return [{'label': 'person', 'confidence': 0.88, 'box': {'x': 0.6, 'y': 0.1, 'width': 0.3, 'height': 0.5}}]
 
-    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
     main.live_detection_last_checked.clear()
 
@@ -4412,7 +4418,7 @@ def test_object_detection_with_email_rule_delivers_email(tmp_path, monkeypatch, 
         def detect_image(self, _bytes, confidence=None):
             return [{'label': label, 'confidence': 0.9, 'box': {'x': 0.2, 'y': 0.2, 'width': 0.2, 'height': 0.2}}]
 
-    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
     main.live_detection_last_checked.clear()
     main.alerts.last_triggered.clear()
@@ -4509,7 +4515,7 @@ def test_object_detection_without_global_email_enabled_sends_nothing(tmp_path, m
         def detect_image(self, _bytes, confidence=None):
             return [{'label': 'cat', 'confidence': 0.9, 'box': {'x': 0.2, 'y': 0.2, 'width': 0.2, 'height': 0.2}}]
 
-    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
     main.live_detection_last_checked.clear()
     main.alerts.last_triggered.clear()
@@ -4594,7 +4600,7 @@ def test_debounce_window_refreshes_while_activity_continues(tmp_path, monkeypatc
         def detect_image(self, _bytes, confidence=None):
             return [{'label': 'person', 'confidence': 0.91, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.3, 'height': 0.5}}]
 
-    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
     main.live_detection_last_checked.clear()
     main.live_event_last_emitted.clear()
@@ -4693,7 +4699,7 @@ def test_live_monitor_populates_detection_history(tmp_path, monkeypatch):
         def detect_image(self, _bytes, confidence=None):
             return [{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}}]
 
-    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
     main.live_detection_last_checked.clear()
     main.alerts.last_triggered.clear()
@@ -5050,7 +5056,7 @@ def test_multi_object_recording_labels_and_trigger_type(tmp_path, monkeypatch):
         def detect_image(self, _image_bytes, confidence=None):
             return []
 
-    monkeypatch.setattr(main, 'detector', FakeDetector())
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
     server, thread, base_url = _server(app)
     admin = LocalClient(base_url)
     try:

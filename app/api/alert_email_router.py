@@ -9,11 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.auth import utc_now
 from app.auth_gates import require_admin
+from app.config_facades import effective_email_alert_settings
 from app.deps import get_database
-from app.email_alerts import EmailAlertError
+from app.email_alerts import EmailAlertError, EmailAlertService
 from app.payload_validators import validate_alert_email_settings
 from app.request_helpers import write_audit_log
-from app.main import effective_email_alert_settings
 
 router = APIRouter()
 
@@ -47,8 +47,7 @@ async def test_alert_email_settings(request: Request):
             status_code=400, detail='Test recipient must be a valid email address.'
         )
     try:
-        import app.main as main
-        main.EmailAlertService(settings).send_test(recipient)
+        EmailAlertService(settings).send_test(recipient)
     except EmailAlertError as exc:
         raise HTTPException(
             status_code=400, detail=f'Test email failed: {exc}'

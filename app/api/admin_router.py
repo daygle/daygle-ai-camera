@@ -20,7 +20,7 @@ from app.config_facades import (
     effective_storage_config,
     get_camera_config,
 )
-from app.deps import get_database
+from app.deps import get_auth_enabled, get_database, get_detector
 from app.detector import DetectorUnavailableError
 from app.request_helpers import write_audit_log
 from app.main import (
@@ -30,9 +30,7 @@ from app.main import (
     compute_minimum_rule_confidence,
     delete_recording_files,
     clear_runtime_media_directory,
-    auth_enabled,
     config,
-    detector,
 )
 
 router = APIRouter()
@@ -71,7 +69,7 @@ def me(request: Request):
 
 
 @router.get('/api/config')
-def runtime_config():
+def runtime_config(auth_enabled: bool = Depends(get_auth_enabled)):
     ai_state = ai_status_payload()
     ai_cfg = effective_ai_config()
     return {
@@ -111,7 +109,7 @@ def runtime_config():
 
 
 @router.post('/api/detect/frame')
-async def detect_frame(request: Request):
+async def detect_frame(request: Request, detector=Depends(get_detector)):
     image_bytes, _filename, _content_type = await _read_uploaded_image(request)
     if not image_bytes:
         raise HTTPException(status_code=400, detail='Uploaded image is empty')

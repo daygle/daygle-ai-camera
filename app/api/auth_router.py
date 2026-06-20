@@ -19,9 +19,8 @@ from app.auth import CSRF_COOKIE, CSRF_HEADER, AuthError, SESSION_COOKIE, utc_no
 from app.auth_gates import _request_ip, require_session
 from app.auth_helpers import clear_auth_cookies, set_session_cookie
 from app.config_facades import effective_auth_config
-from app.deps import get_auth, get_database
+from app.deps import get_auth, get_auth_enabled, get_database, get_logger
 from app.request_helpers import form_data
-from app.main import auth_enabled, logger
 from app.api.web_router import login_page, setup_page
 
 router = APIRouter()
@@ -32,7 +31,7 @@ def _session_cookie_name() -> str:
 
 
 @router.post('/login')
-async def login(request: Request, db=Depends(get_database), auth=Depends(get_auth)):
+async def login(request: Request, db=Depends(get_database), auth=Depends(get_auth), auth_enabled=Depends(get_auth_enabled), logger=Depends(get_logger)):
     data = await form_data(request)
     if data.get('csrf_token') != request.cookies.get(CSRF_COOKIE):
         return login_page(request, 'Security token expired. Try again.')
@@ -54,7 +53,7 @@ async def login(request: Request, db=Depends(get_database), auth=Depends(get_aut
             )
         except Exception as unexpected_exc:
             logger.warning('Unexpected error during login callback: %s', unexpected_exc)
-        return login_page(request, str(exc))
+        return login_page(request, str(exc), auth=auth, auth_enabled=auth_enabled)
     try:
         db.add_audit_log(
             created_at=utc_now(),
@@ -74,7 +73,7 @@ async def login(request: Request, db=Depends(get_database), auth=Depends(get_aut
 
 
 @router.post('/setup')
-async def setup(request: Request, auth=Depends(get_auth)):
+async def setup(request: Request, auth=Depends(get_auth), auth_enabled=Depends(get_auth_enabled)):
     if auth.users_exist():
         return RedirectResponse('/login', status_code=303)
     data = await form_data(request)
@@ -92,7 +91,7 @@ async def setup(request: Request, auth=Depends(get_auth)):
             email=data.get('email', ''),
         )
     except AuthError as exc:
-        return setup_page(request, str(exc))
+        return setup_page(request, str(exc), auth=auth, auth_enabled=auth_enabled)
     return RedirectResponse('/login', status_code=303)
 
 

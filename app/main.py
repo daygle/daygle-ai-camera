@@ -562,7 +562,7 @@ from app.state import (
     _sound_statuses as _sound_statuses,
     _sound_statuses_lock as _sound_statuses_lock,
 )
-logger = logging.getLogger('daygle.ai')
+_logger = logging.getLogger('daygle.ai')
 
 def _configure_file_logging() -> None:
     log_dir = Path(__file__).resolve().parent.parent / 'data' / 'logs'
@@ -586,13 +586,14 @@ config = load_settings()
 _state.config = config
 auth_config = config.get('auth', {})
 _state.auth_config = auth_config
-auth_enabled = bool(auth_config.get('enabled', True))
+# NOTE: removed module-level auth_enabled. Routers reach it via Depends(get_auth_enabled)
+# (declared by name as _state.auth_config['enabled']) or _state.auth_config direct read; see app/deps.py.
 
 @asynccontextmanager
 async def app_lifespan(_app: FastAPI):
     removed = database.cleanup_incomplete_recordings()
     if removed:
-        logger.info(f'Cleaned up {len(removed)} incomplete recording(s) from previous session')
+        _logger.info(f'Cleaned up {len(removed)} incomplete recording(s) from previous session')
     log_detector_initialization()
     start_live_alert_monitor()
     apply_sound_settings()
@@ -605,8 +606,7 @@ async def app_lifespan(_app: FastAPI):
         stop_sound_monitor()
 app = FastAPI(title='Daygle AI Camera', lifespan=app_lifespan)
 BASE_DIR = Path(__file__).resolve().parent.parent
-web_dir = BASE_DIR / 'web'
-static_dir = web_dir
+static_dir = BASE_DIR / 'web'
 if static_dir.exists():
     app.mount('/static', StaticFiles(directory=static_dir), name='static')
 
@@ -631,9 +631,8 @@ _state.recording_service = recording_service
 auth = AuthService(config['storage']['database'], effective_auth_config())
 _state.auth = auth
 SESSION_COOKIE_NAME = str(effective_auth_config().get('cookie_name', SESSION_COOKIE))
-detector = create_detector(effective_ai_config())
-_state.detector = detector
-last_detector_error: str | None = getattr(detector, 'unavailable_reason', None)
+_state.detector = create_detector(effective_ai_config())
+last_detector_error: str | None = getattr(_state.detector, 'unavailable_reason', None)
 _state.last_detector_error = last_detector_error
 alerts = AlertEngine([])
 
@@ -731,7 +730,7 @@ def write_audit_log(request: Request, action: str, resource: str, resource_id: A
     try:
         database.add_audit_log(created_at=utc_now(), user_id=user_id, username=username, action=action, resource=resource, resource_id=str(resource_id) if resource_id is not None else None, details=details, ip_address=_request_ip(request), status=status)
     except Exception as exc:
-        logger.warning('Failed to write audit log: %s', exc)
+        _logger.warning('Failed to write audit log: %s', exc)
 
 recording_service.diagnostic_callback = log_camera_diagnostic
 
@@ -816,7 +815,7 @@ def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
         try:
             old_cam.close()
         except Exception as unexpected_exc:
-            logger.warning('Unexpected error updating camera: %s', unexpected_exc)
+            _logger.warning('Unexpected error updating camera: %s', unexpected_exc)
     apply_sound_settings()
 
 def apply_storage_and_recording_settings() -> None:
@@ -830,13 +829,13 @@ def apply_storage_and_recording_settings() -> None:
             old_service.stop_prebuffer_workers()
             old_service.stop_all_continuous_recordings()
         except Exception as unexpected_exc:
-            logger.warning('Unexpected error deleting camera: %s', unexpected_exc)
+            _logger.warning('Unexpected error deleting camera: %s', unexpected_exc)
 
 def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
     import app.alert_dispatch as _alert_dispatch
-    global detector, last_detector_error
+    global last_detector_error
     _alert_dispatch._min_rule_confidence_cache = None
-    previous_detector = detector
+    previous_detector = _state.detector
     old_session = getattr(previous_detector, 'session', None)
     if old_session is not None:
         previous_detector.session = None
@@ -845,11 +844,11 @@ def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
     candidate = create_detector(ai_settings)
     candidate_error = getattr(candidate, 'unavailable_reason', None)
     if ai_settings['backend'] == 'onnx' and (not getattr(candidate, 'available', False)):
-        detector = previous_detector
+        _state.detector = previous_detector
         last_detector_error = candidate_error or 'Failed to load ONNX detector.'
         log_detector_initialization('reload_failed')
         return (False, last_detector_error)
-    detector = candidate
+    _state.detector = candidate
     last_detector_error = candidate_error
     log_detector_initialization('reload')
     return (True, last_detector_error)

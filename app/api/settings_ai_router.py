@@ -14,7 +14,7 @@ from app.ai_settings import YOLO_MODELS, ai_status_payload, detector_status, val
 from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.config_facades import effective_ai_config
-from app.deps import get_database
+from app.deps import get_database, get_detector, get_reload_detector
 from app.detector import DetectorUnavailableError
 from app.model_management import (
     BASE_DIR,
@@ -24,11 +24,7 @@ from app.model_management import (
     _read_installed_models,
 )
 from app.request_helpers import write_audit_log
-from app.main import (
-    ONE_PIXEL_PNG,
-    detector,
-    reload_detector,
-)
+from app.main import ONE_PIXEL_PNG
 
 router = APIRouter()
 
@@ -39,7 +35,11 @@ def get_ai_settings():
 
 
 @router.put('/api/settings/ai')
-async def update_ai_settings(request: Request, db=Depends(get_database)):
+async def update_ai_settings(
+    request: Request,
+    db=Depends(get_database),
+    reload_detector=Depends(get_reload_detector),
+):
     require_admin(request)
     payload = await request.json()
     new_settings = validate_ai_settings(payload)
@@ -56,7 +56,7 @@ async def update_ai_settings(request: Request, db=Depends(get_database)):
 
 
 @router.post('/api/settings/ai/reload')
-def reload_ai_detector():
+def reload_ai_detector(reload_detector=Depends(get_reload_detector)):
     ai_settings = effective_ai_config()
     reloaded, error = reload_detector(ai_settings)
     response = detector_status(ai_settings)
@@ -161,7 +161,7 @@ async def update_ai_model(request: Request):
 
 
 @router.post('/api/settings/ai/test-detector')
-def test_ai_detector():
+def test_ai_detector(detector=Depends(get_detector)):
     ai_settings = effective_ai_config()
     ai_state = ai_status_payload(ai_settings)
     ai_error: str | None = None

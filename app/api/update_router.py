@@ -12,9 +12,10 @@ import time
 import urllib.error
 import urllib.request
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.auth_gates import require_admin
+from app.deps import get_logger
 from app.main import (
     BASE_DIR,
     GITHUB_REPO,
@@ -22,7 +23,6 @@ from app.main import (
     _parse_semver,
     _update_in_progress,
     _update_lock,
-    logger,
 )
 
 router = APIRouter()
@@ -72,7 +72,7 @@ def check_update(request: Request):
 
 
 @router.post('/api/update/apply')
-def apply_update(request: Request):
+def apply_update(request: Request, logger=Depends(get_logger)):
     import app.main as _main_mod
     require_admin(request)
     with _main_mod._update_lock:

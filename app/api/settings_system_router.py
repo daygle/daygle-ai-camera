@@ -22,7 +22,12 @@ from app.config_facades import (
     effective_storage_config,
     get_camera_config,
 )
-from app.deps import get_auth, get_database
+from app.deps import (
+    get_apply_storage_and_recording_settings,
+    get_auth,
+    get_auth_enabled,
+    get_database,
+)
 from app.payload_validators import (
     validate_auth_settings,
     validate_live_settings,
@@ -39,8 +44,6 @@ from app.backup import (
 )
 from app.main import (
     BASE_DIR,
-    apply_storage_and_recording_settings,
-    auth_enabled,
     config,
     SESSION_COOKIE_NAME,
 )
@@ -49,7 +52,7 @@ router = APIRouter()
 
 
 @router.get('/api/settings/system')
-def get_system_settings(db=Depends(get_database)):
+def get_system_settings(db=Depends(get_database), auth_enabled: bool = Depends(get_auth_enabled)):
     version_file = BASE_DIR / 'VERSION'
     current_version = version_file.read_text(encoding='utf-8').strip() if version_file.exists() else 'unknown'
     return {'version': current_version, 'camera': get_camera_config(None), 'cameras': effective_cameras_config(), 'live': effective_live_config(), 'recording': effective_recording_config(), 'storage': effective_storage_config(), 'auth': {'session_timeout_hours': effective_auth_config().get('session_timeout_hours'), 'max_login_attempts': effective_auth_config().get('max_login_attempts'), 'lockout_minutes': effective_auth_config().get('lockout_minutes')}, 'bootstrap': {'database': config.get('storage', {}).get('database'), 'auth_enabled': auth_enabled, 'cookie_name': SESSION_COOKIE_NAME, 'server': config.get('server', {})}}
@@ -108,7 +111,11 @@ async def update_live_settings(request: Request, db=Depends(get_database)):
 
 
 @router.put('/api/settings/system/recording')
-async def update_recording_settings(request: Request, db=Depends(get_database)):
+async def update_recording_settings(
+    request: Request,
+    db=Depends(get_database),
+    apply_storage_and_recording_settings=Depends(get_apply_storage_and_recording_settings),
+):
     require_admin(request)
     settings = validate_recording_settings(await request.json())
     db.set_setting('recording', settings, utc_now())
@@ -118,7 +125,11 @@ async def update_recording_settings(request: Request, db=Depends(get_database)):
 
 
 @router.put('/api/settings/system/storage')
-async def update_storage_settings(request: Request, db=Depends(get_database)):
+async def update_storage_settings(
+    request: Request,
+    db=Depends(get_database),
+    apply_storage_and_recording_settings=Depends(get_apply_storage_and_recording_settings),
+):
     require_admin(request)
     settings = validate_storage_settings(await request.json())
     db.set_setting('storage', settings, utc_now())
