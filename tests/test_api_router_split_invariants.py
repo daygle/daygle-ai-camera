@@ -514,3 +514,262 @@ def test_app_api_imports_in_main_are_consumed():
         "line for discoverability (see Phase-7.1 regroup convention).\n"
         "Reference: rule 5 of app/api/__init__.py."
     )
+
+
+
+# =============================================================================
+# Catchall-import regression net + Pool A / PatchReach drift nets.
+# Regression-proof for the three commits in this session:
+#   - 3a28b82 (eliminate 19-file `import app.main as main` cascade),
+#   - e73da3c (migrate test_camera_health.py monkeypatch sites from
+#     `main_module.<X>` to `_app_state.<X>`),
+#   - 967f241 (orphan-import deletion at app/main.py:887).
+# =============================================================================
+
+
+def _discover_orphan_catchall_imports():
+    """Top-level ``import app.main`` (in any alias form) in any app/ module.
+
+    Walks ``app/*.py`` + ``app/api/*.py`` excluding ``app/main.py`` (the
+    latter legitimately imports its own sub-packages as part of the Pool A
+    rebind inventory).
+
+    Returns:
+        files_walked: every file checked. The test asserts a sanity floor.
+        violations: per-violation (path, lineno, verbatim import expression).
+    """
+    paths = []
+    for sub in (PROJECT_ROOT / 'app', PROJECT_ROOT / 'app' / 'api'):
+        if sub.exists():
+            paths.extend(sorted(p for p in sub.glob('*.py') if p.name != '__init__.py'))
+    paths = [p for p in paths if p.resolve() != APP_MAIN_PY.resolve()]
+    violations = []
+    for p in paths:
+        tree = ast.parse(p.read_text(encoding='utf-8'), filename=str(p))
+        for node in tree.body:
+            if not isinstance(node, ast.Import):
+                continue
+            for alias in node.names:
+                if alias.name != 'app.main':
+                    continue
+                as_text = f' as {alias.asname}' if alias.asname else ''
+                violations.append((p, node.lineno, f'import {alias.name}{as_text}'))
+    return paths, violations
+
+
+def test_no_app_module_has_catchall_import_app_main():
+    """Catchall-import regression net (proof vs. 3a28b82).
+
+    Zero tolerance for top-level ``import app.main`` (any alias form) in
+    non-``app/main.py`` modules under ``app/`` or ``app/api/``. Catches
+    the 19-file circular-import cascade that arose when sibling modules
+    eagerly imported ``app.main as main`` to short-circuit the
+    dual-binding dance with ``app.state``.
+    """
+    files_walked, violations = _discover_orphan_catchall_imports()
+    # Current count: ~25 app/*.py + ~22 app/api/*.py minus app/main.py = ~46.
+    # Floor of 30 catches a vacuous walker without over-fitting.
+    assert len(files_walked) >= 30, (
+        f"walker went suspiciously vacuous (saw {len(files_walked)} files); "
+        f"refusing to silently pass on a possibly-broken glob"
+    )
+    assert not violations, (
+        f"Catchall-import regression: found {len(violations)} top-level "
+        f"`import app.main` lines in app/ modules:\n  "
+        + "\n  ".join(
+            f"{p.relative_to(PROJECT_ROOT)}:{ln}: {expr}"
+            for p, ln, expr in violations
+        )
+        + "\n\nSiblings must NOT catchall `import app.main as main`. Use "
+        "function-body `import app.X as _X` instead, OR reach the singleton "
+        "via the registry at `app.state.<singleton>`. Circular imports cascade."
+    )
+
+
+def _collect_app_main_definitions():
+    """All module-level names defined in ``app/main.py`` (Pool A TARGET surface).
+
+    Every name reachable as ``app.main.<X>``. Includes:
+
+      - ``ast.Assign``: ``X = Y`` and ``X, Y = a, b`` (tuple-unpack)
+      - ``ast.AnnAssign``: ``X: <type> = Y`` (e.g. ``cameras_config: list = []``)
+      - ``ast.AugAssign``: ``X += Y`` (rare but reachable)
+      - ``ast.Import``: ``import M[ as N]`` -> ``N`` (or top-level ``M[0]``)
+      - ``ast.ImportFrom``: ``from M import Y[ as Z]`` -> ``Y`` or ``Z``
+      - ``ast.FunctionDef``/``AsyncFunctionDef``: ``def X(...):`` -> ``X``
+      - ``ast.ClassDef``: ``class X(...):`` -> ``X``
+
+    Returns a ``set[str]`` of binding names. Captures attribute access via
+    ``_add`` (e.g. ``_state.database = database`` only registers its
+    ``ast.Name``/``ast.Tuple`` targets, not the ``Attribute`` LHS).
+    """
+    tree = ast.parse(APP_MAIN_PY.read_text(encoding='utf-8'),
+                     filename=str(APP_MAIN_PY))
+    names: set[str] = set()
+
+    def _add(target):
+        if isinstance(target, ast.Name):
+            names.add(target.id)
+        elif isinstance(target, ast.Tuple):
+            for elt in target.elts:
+                _add(elt)
+        # Star-targets (e.g. `a, *b = ...`) intentionally skipped: dynamic
+        # binds aren't reachable as `main.<X>`.
+
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                _add(t)
+        elif isinstance(node, ast.AnnAssign):
+            _add(node.target)
+        elif isinstance(node, ast.AugAssign):
+            _add(node.target)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.asname or alias.name.split('.')[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                names.add(alias.asname or alias.name)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+    return names
+
+
+def _collect_pool_a_consumers():
+    """Every Pool A ``from app.main import X[ as Y]`` consumer site across
+    ``app/*.py`` + ``app/api/*.py``.
+
+    Returns a list of ``(binding_name, consumer_path, lineno)``. Function-body
+    imports are Pool C and out-of-scope here.
+    """
+    out = []
+    for sub in (PROJECT_ROOT / 'app', PROJECT_ROOT / 'app' / 'api'):
+        if sub.exists():
+            for p in sorted(sub.glob('*.py')):
+                if p.name == '__init__.py':
+                    continue
+                if p.resolve() == APP_MAIN_PY.resolve():
+                    continue
+                tree = ast.parse(p.read_text(encoding='utf-8'), filename=str(p))
+                for node in tree.body:
+                    if not isinstance(node, ast.ImportFrom):
+                        continue
+                    if node.module != 'app.main':
+                        continue
+                    for alias in node.names:
+                        out.append((alias.asname or alias.name, p, node.lineno))
+    return out
+
+
+def test_every_pool_a_consumer_resolves_on_app_main():
+    """Pool A consumer drift net.
+
+    Every Pool A ``from app.main import X[ as Y]`` consumer across
+    ``app/*.py`` + ``app/api/*.py`` must resolve to a name module-level
+    defined in ``app/main.py``. A missing definition raises ImportError
+    at collection time.
+    """
+    main_defs = _collect_app_main_definitions()
+    consumers = _collect_pool_a_consumers()
+    # Currently 29 consumers; floor of 10 catches vacuous walker without
+    # over-fitting against future legitimate shrinkage.
+    assert len(consumers) >= 10, (
+        f"walker went suspiciously vacuous (saw {len(consumers)} Pool A "
+        f"consumers); refusing to silently pass on a possibly-broken glob"
+    )
+    missing = [
+        (binding, p, ln)
+        for binding, p, ln in consumers
+        if binding not in main_defs
+    ]
+    assert not missing, (
+        f"Pool A consumer drift: found {len(missing)} `from app.main import` "
+        f"consumers whose target is no longer module-level defined in "
+        f"app/main.py:\n  "
+        + "\n  ".join(
+            f"{p.relative_to(PROJECT_ROOT)}:{ln}: from app.main import {b}"
+            for b, p, ln in missing
+        )
+        + "\n\nResolution paths:\n"
+        "  1. Re-export the symbol on `app.main` via a top-level rebind\n"
+        "     (`from app.X import Y as Y`) so it's module-level defined.\n"
+        "  2. Update the consumer to import directly from its sub-package\n"
+        "     (`from app.X import Y`) if the Pool A indirection is no "
+        "     longer needed.\n"
+    )
+
+
+def _collect_test_main_module_patches():
+    """Every ``monkeypatch.setattr(main_module, '<X>', ...)`` site across
+    ``tests/``.
+
+    AST walker: matches ``Call`` nodes where
+        ``func.attr == 'setattr'``,
+        ``len(args) >= 2``,
+        ``arg0 is Name('main_module')``,
+        ``arg1 is Constant(str)``.
+
+    Returns a list of ``(lineno, target_name, test_path)``. Dynamic
+    indirection (``functools.partial``, string-name variables, ternary
+    targets) correctly stays outside the walker.
+    """
+    out = []
+    for p in sorted((PROJECT_ROOT / 'tests').glob('test_*.py')):
+        try:
+            tree = ast.parse(p.read_text(encoding='utf-8'), filename=str(p))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if (not isinstance(node, ast.Call)
+                    or not isinstance(node.func, ast.Attribute)
+                    or node.func.attr != 'setattr'
+                    or len(node.args) < 2):
+                continue
+            target, attr_node = node.args[0], node.args[1]
+            if (isinstance(target, ast.Name)
+                    and target.id == 'main_module'
+                    and isinstance(attr_node, ast.Constant)
+                    and isinstance(attr_node.value, str)):
+                out.append((node.lineno, attr_node.value, p))
+    return out
+
+
+def test_every_main_module_patch_reaches_a_pool_a_consumer():
+    """PatchReach contract net.
+
+    Every ``monkeypatch.setattr(main_module, '<X>', ...)`` site in
+    ``tests/`` must target a name module-level defined in ``app/main.py``.
+    Names defined only deep in production (Pool C function-body imports
+    onto module-local aliases) cannot be intercepted via a module-attribute
+    patch — the mutation lands on the wrong surface and the test silently
+    loses its fakes.
+
+    The reference set is the Pool A TARGET surface (every module-level
+    binding in ``app/main.py``), NOT the consumer side — a module
+    attribute is reached via the target, not the consumer.
+    """
+    reachable = _collect_app_main_definitions()
+    sites = _collect_test_main_module_patches()
+    # Currently 13 sites across tests/test_api.py + tests/test_camera_health.py.
+    # Floor of 5 catches vacuous walker without over-fitting.
+    assert len(sites) >= 5, (
+        f"walker went suspiciously vacuous (saw {len(sites)} main_module "
+        f"monkeypatch sites); refusing to silently pass on a possibly-"
+        f"broken AST scanner"
+    )
+    unreachable = [
+        (ln, name, p) for ln, name, p in sites if name not in reachable
+    ]
+    assert not unreachable, (
+        f"PatchReach violation: {len(unreachable)} main_module-X monkeypatch "
+        f"sites target a name NOT module-level defined in app/main.py:\n  "
+        + "\n  ".join(
+            f"{p.relative_to(PROJECT_ROOT)}:{ln}: patch on '{name}'"
+            for ln, name, p in unreachable
+        )
+        + "\n\nTo reach a Pool C-only name, monkeypatch on the producing "
+        "module instead (e.g. `monkeypatch.setattr(app.alert_dispatch, "
+        "'EmailAlertService', FakeEmail)`), OR move the binding up to "
+        "module level in app/main.py via a Pool A rebind so it surfaces "
+        "as `main.<X>`."
+    )
