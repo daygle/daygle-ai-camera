@@ -119,8 +119,30 @@ def overwrite_database_from_file(restore_source: Path) -> None:
 def refresh_runtime_after_database_restore() -> None:
     _state.database.init()
     _state.auth.init()
-    _state.apply_cameras_settings(effective_cameras_config())
+    # Bug 7 fix: apply the storage / recording swap BEFORE applying the
+    # camera settings. ``apply_cameras_settings`` finishes with a call to
+    # ``apply_sound_settings`` which (when not suppressed) invokes
+    # ``_state.recording_service.prime_rtsp_prebuffer`` on every enabled
+    # camera. If the OLD recording service is still published at that
+    # point, every prime spawns a fresh ``prebuffer-<key>`` worker on the
+    # OLD service -- ``apply_storage_and_recording_settings`` then
+    # immediately drains and replaces the OLD service, tearing those
+    # fresh workers down without ever serving a recorded frame. The OLD
+    # service's per-camera locks synthesize enough disk / CPU / network
+    # churn during the redundant ingest that the user can observe
+    # several seconds of ffmpeg restart-rate spikes on every restore.
+    #
+    # Running ``apply_storage_and_recording_settings`` first publishes
+    # the NEW (``RecordingService(...)``) onto ``_state.recording_service``
+    # before any prime call lands, so the primes land on the NEW one's
+    # empty worker dicts -- workers that survive the swap rather than
+    # being immediately torn down. The locking discipline from Bug 6
+    # (``_apply_settings_lock`` already serialises the two apply_*
+    # functions; the swap-order simply removes the wasted work; the lock
+    # only needs to be held once because the apply_* functions no longer
+    # have a meaningful interleave).
     _state.apply_storage_and_recording_settings()
+    _state.apply_cameras_settings(effective_cameras_config())
     _state.auth.apply_config(effective_auth_config())
 
 

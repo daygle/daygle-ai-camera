@@ -155,6 +155,21 @@ apply_storage_and_recording_settings: Any = None
 reload_detector: Any = None
 
 # ---------------------------------------------------------------------------
+# Settings-replacement lock (Bug 6)
+# ---------------------------------------------------------------------------
+
+# Serializes ``apply_storage_and_recording_settings`` and
+# ``apply_cameras_settings`` (and any future settings-replacement path)
+# so a concurrent settings change cannot prime an outgoing
+# RecordingService while the swap is still teardown-then-publishing the
+# new one. Both functions acquire this lock for the ENTIRE duration of
+# their swap; only one of them can be inside the critical section at a
+# time, so ``apply_sound_settings()`` -> ``prime_rtsp_prebuffer`` cannot
+# interleave with ``_state.recording_service = NEW`` and start a fresh
+# ffmpeg while the OLD service's workers are still alive.
+_apply_settings_lock: threading.RLock = threading.RLock()
+
+# ---------------------------------------------------------------------------
 # In-flight update guard (used by update_router)
 # ---------------------------------------------------------------------------
 

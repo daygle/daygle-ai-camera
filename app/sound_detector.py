@@ -18,6 +18,14 @@ logger = logging.getLogger('daygle.sound')
 
 SAMPLE_RATE = 16000
 
+# Raised by app.recordings.audio_segments_after() when the per-camera ingest
+# has learned the RTSP stream carries no audio track. Mirrored here instead
+# of imported to avoid a circular dependency; the sound detector matches the
+# substring rather than the exception class so consumers in any process can
+# still identify this 'unavailable' state from the message alone.
+NO_AUDIO_EXC_PREFIX = 'no audio track in stream'
+NO_AUDIO_STATUS = f'unavailable: {NO_AUDIO_EXC_PREFIX}'
+
 # Store the CPU-only YAMNet TFLite assets alongside other app models.
 _MODELS_DIR = Path(__file__).resolve().parents[1] / 'models'
 _MODELS_DIR.mkdir(exist_ok=True)
@@ -718,9 +726,39 @@ class SoundDetector:
 
         # Only process segments newer than startup so we don't replay stale audio.
         last_ts = time.time()
+        # When the per-camera ingest discovers the stream has no audio,
+        # ``audio_segments_after`` raises ``no audio track in stream``. Gate
+        # further polling behind a 30s probe interval (re-armed on every
+        # re-detection) so the sound idle-state has a single 'unavailable'
+        # status and doesn't hammer the file system for a queue that can
+        # never produce a chunk.
+        no_audio_until = 0.0
         while not self._stop_event.is_set():
+            if no_audio_until > 0:
+                if time.time() < no_audio_until:
+                    self._stop_event.wait(
+                        min(2.0, max(0.0, no_audio_until - time.time()))
+                    )
+                    continue
+                # Probe window elapsed: clear the gate so the next iteration
+                # re-queries the provider. If the stream has gained audio
+                # since the last probe, we fall through into the listening
+                # path; otherwise the provider raises again and we re-arm.
+                self._set_status('listening')
+                no_audio_until = 0.0
             try:
                 segments = self.audio_segment_provider(last_ts)
+            except RuntimeError as exc:
+                if NO_AUDIO_EXC_PREFIX in str(exc):
+                    logger.info(
+                        'Sound monitor: %s has no audio track; will retry in 30s.',
+                        self.rtsp_url or self.device_index,
+                    )
+                    self._set_status(NO_AUDIO_STATUS)
+                    no_audio_until = time.time() + 30.0
+                    continue
+                logger.error('Sound monitor ingest provider error: %s', exc)
+                segments = []
             except Exception as exc:
                 logger.error('Sound monitor ingest provider error: %s', exc)
                 segments = []

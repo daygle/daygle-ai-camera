@@ -112,8 +112,37 @@ def _make_sound_detect_callback(camera_id: str):
     return _callback
 
 
-def apply_sound_settings() -> None:
-    """Start one SoundDetector per RTSP camera that has sound detection enabled."""
+def apply_sound_settings(*, prime: bool = False) -> None:
+    """Start one SoundDetector per RTSP camera that has sound detection enabled.
+
+    Bug 7 follow-up: ``prime=False`` (default) is a no-op for the per-camera
+    ``prime_rtsp_prebuffer`` side effect -- it still stops existing detectors
+    and updates the status surface for cameras that have sound disabled, but
+    it does NOT spawn fresh prebuffer workers. Reasons:
+
+    - During a fresh database restore (Bug 7), the storage / recording
+      swap has just replaced ``_state.recording_service`` with a NEW
+      ``RecordingService`` and is in its prime window. Re-priming here
+      would either land on the OLD service (if apply_cameras_settings
+      ran first) or race a concurrent monitor poll on the NEW service,
+      neither of which is the intended outcome.
+    - On any settings-update path (settings_router / admin_router /
+      on-startup refresh), live_alert_monitor_loop's per-poll loop
+      already primes each camera within seconds of the function call.
+      Re-priming here is redundant and pays an ffmpeg-connect + SIGTERM
+      + reconnect cost on every enabled camera.
+    - _on_sound_detected's per-detection callback also primes the camera
+      when a sound is actually detected -- so the prime is still
+      guaranteed before SoundDetector's first audio_segments_after call
+      can be answered.
+
+    Pass ``prime=True`` only when the caller KNOWS no other prime path
+    will fire for these cameras before the SoundDetector is ready to
+    consume audio (e.g. a one-shot startup hook before live_alert_monitor
+    has its first poll complete). Outside that narrow exception, the
+    default is correct: a no-op-for-prime apply that still keeps the
+    SoundDetector set + status surface aligned with the current config.
+    """
     with _state._sound_detectors_lock:
         for det in list(_state._sound_detectors.values()):
             det.stop()
@@ -133,7 +162,8 @@ def apply_sound_settings() -> None:
             with _state._sound_statuses_lock:
                 _state._sound_statuses[cam_id] = {'state': 'disabled', 'last_detected_at': None, 'last_confidence': 0.0, 'backend': None}
             continue
-        _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=cam_id, recording_config=_state.camera_event_recording_config(cam))
+        if prime:
+            _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=cam_id, recording_config=_state.camera_event_recording_config(cam))
         det = SoundDetector(on_detect=_make_sound_detect_callback(cam_id), rules=enabled_rules, source='ingest', sample_duration_seconds=1.0, audio_segment_provider=lambda after, _cid=cam_id: _state.recording_service.audio_segments_after(_cid, after))
         det.start()
         with _state._sound_detectors_lock:

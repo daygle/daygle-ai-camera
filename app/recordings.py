@@ -13,6 +13,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+import app.state as _state
+
 
 logger = logging.getLogger('daygle.ai')
 
@@ -44,6 +46,20 @@ class RecordingService:
     # the full prebuffer window (pre + max_clip) so long event clips get audio
     # for their whole length; this is just the minimum when that window is tiny.
     AUDIO_SEGMENT_RETENTION_SECONDS = 20
+    # Worst-case ceiling for ``_stop_worker``'s ``thread.join`` when the worker
+    # that's being joined is the per-camera ingest / prebuffer ffmpeg (1s loop
+    # sleep + up to 2s ``process.wait(timeout=2)`` for SIGTERM grace + SIGKILL
+    # fallback in ``_run_prebuffer_worker``). Same value is used wherever this
+    # worker is replaced or explicitly stopped so ``stop_*`` are synchronously
+    # bound to the same ceiling as the ``_ensure_*`` paths.
+    PREBUFFER_WORKER_JOIN_TIMEOUT_SECONDS = 4.0
+    # Worst-case ceiling for ``_stop_worker``'s ``thread.join`` when the worker
+    # that's being joined is the continuous-chunk ffmpeg (1s loop sleep + up to
+    # 5s ``process.wait(timeout=5)`` for SIGTERM grace + SIGKILL fallback in
+    # ``_run_continuous_chunk_worker``). Same value is used wherever this
+    # worker is replaced or explicitly stopped so ``stop_*`` are synchronously
+    # bound to the same ceiling as the ``_ensure_*`` paths.
+    CONTINUOUS_WORKER_JOIN_TIMEOUT_SECONDS = 7.0
 
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
@@ -230,20 +246,105 @@ class RecordingService:
         tmp_path.replace(file_path)
 
     @staticmethod
-    def _stop_worker(worker: dict[str, Any], join_timeout: float = 2.0) -> None:
+    def _stop_worker(worker: dict[str, Any], join_timeout: float | None = None) -> None:
+        # Default to the larger of the two worker ceilings so a caller that
+        # forgets to pass an explicit value can't silently regress to a tight
+        # 2s join that masks a still-running ffmpeg. Callers should always
+        # pass the worker-appropriate constant explicitly; this fallback is
+        # only here for safety on legacy / monkeypatched call paths.
+        if join_timeout is None:
+            join_timeout = RecordingService.CONTINUOUS_WORKER_JOIN_TIMEOUT_SECONDS
         stop_event = worker.get('stop_event')
         thread = worker.get('thread')
         if isinstance(stop_event, threading.Event):
             stop_event.set()
         if isinstance(thread, threading.Thread):
+            join_start = time.monotonic()
             thread.join(timeout=join_timeout)
+            if thread.is_alive():
+                # Bug 5: a worker thread that ignored ``stop_event`` and
+                # survived the full ``join_timeout`` window is a hung ffmpeg
+                # teardown (network stall, SIGTERM-handler crash, kill
+                # blocked on a flush), NOT a graceful shutdown. The
+                # replacement worker is still started from the caller's
+                # perspective because denying camera ingest would be worse
+                # than a brief overlap, but operators deserve visibility —
+                # surface this through the same ``diagnostic_callback``
+                # already used by ``prebuffer_restart`` / ``ingest_restart``
+                # / ``prebuffer_fallback`` so a hung camera shows up in the
+                # camera-diagnostics log alongside the other ingest
+                # failures. Capture ``join_start`` before the join so
+                # ``alive_after_seconds`` measures the actual wall time we
+                # spent waiting before giving up (≤ ``join_timeout``).
+                alive_seconds = time.monotonic() - join_start
+                # Worker kind is derived from the dict shape rather than a
+                # call-site flag so diagnostic emission stays an internal
+                # concern of ``_stop_worker``: prebuffer workers carry
+                # ``buffer_seconds`` (the rolling-window size), continuous
+                # chunk workers carry ``chunk_seconds`` (the segment size).
+                worker_kind = 'prebuffer' if 'buffer_seconds' in worker else 'continuous'
+                # ``camera_id`` is always populated by the ensure path
+                # (prebuffer stores the friendly name, continuous stores
+                # the sanitized key when no friendly name exists).
+                camera_id = worker.get('camera_id')
+                event_type = f'worker_stop_join_timeout_{worker_kind}'
+                message = (
+                    f'{worker_kind.capitalize()} worker thread for {camera_id or "(unknown camera)"} '
+                    f'did not exit within {join_timeout}s of stop_event.set; thread {thread.name!r} '
+                    f'was still alive after waiting {alive_seconds:.3f}s. The replacement worker has '
+                    f'been started anyway and may briefly overlap with the previous ffmpeg, which was '
+                    f'probably hung in its SIGTERM teardown.'
+                )
+                details = {
+                    'camera_id': camera_id,
+                    'requested_timeout_seconds': join_timeout,
+                    'alive_after_seconds': round(alive_seconds, 3),
+                    'worker_kind': worker_kind,
+                    'thread_name': thread.name,
+                }
+                diagnostic_callback = worker.get('diagnostic_callback')
+                if diagnostic_callback is not None:
+                    try:
+                        diagnostic_callback(
+                            camera_id,
+                            event_type,
+                            message,
+                            severity='warning',
+                            details=details,
+                        )
+                    except Exception as exc:
+                        # A misbehaving diagnostic surface must not crash
+                        # the shutdown path — the worker thread is hung, we
+                        # are racing to start the replacement, every error
+                        # here is operator-noise at best.
+                        logger.debug(
+                            'Camera diagnostic callback failed for %s: %s',
+                            event_type, exc,
+                        )
+                else:
+                    # No application-level diagnostic surface is configured
+                    # (e.g. in unit-test contexts); still log a warning so
+                    # the assumption "the operator saw a structured event"
+                    # doesn't silently degrade to "no signal at all".
+                    logger.warning('%s details=%s', message, details)
 
     def stop_prebuffer_workers(self) -> None:
+        # Bug 4 fix: hold ``_prebuffer_lock`` through the per-worker join so
+        # a concurrent ``_ensure_prebuffer_worker`` cannot start a new ffmpeg
+        # while the old ffmpeg is still in its SIGTERM teardown. Joining
+        # under the same lock mirrors the pattern ``_ensure_prebuffer_worker``
+        # already uses internally to close the Bug 2 race, applied here to
+        # the explicit-shutdown entry points. The join_timeout matches
+        # ``_ensure_prebuffer_worker``'s worst-case ceiling
+        # (``PREBUFFER_WORKER_JOIN_TIMEOUT_SECONDS``) so an explicit shutdown
+        # is synchronously bound to the same bound the ensure path enforces;
+        # a multi-camera shutdown holds the lock for up to N * that value,
+        # which is acceptable because this is a one-shot admin/shutdown path.
         with self._prebuffer_lock:
             workers = list(self._prebuffer_workers.values())
             self._prebuffer_workers = {}
-        for worker in workers:
-            self._stop_worker(worker)
+            for worker in workers:
+                self._stop_worker(worker, join_timeout=self.PREBUFFER_WORKER_JOIN_TIMEOUT_SECONDS)
 
     def start_continuous_chunk_recording(
         self,
@@ -253,29 +354,56 @@ class RecordingService:
         recording_config: dict[str, Any] | None = None,
         on_chunk_complete: Callable[[str, Path], None] | None = None,
     ) -> bool:
-        config = recording_config or self.recording_config
-        chunk_seconds = max(60, int(config.get('chunk_duration_seconds', 3600)))
-        if not self._worker_ffmpeg_available('continuous_chunk_recording'):
-            return False
-        camera_key = self._camera_key(camera_id)
-        chunks_dir = self.recordings_dir / f'continuous-{camera_key}'
-        chunks_dir.mkdir(parents=True, exist_ok=True)
-        self._ensure_continuous_chunk_worker(camera_key, stream_url, chunks_dir, chunk_seconds, on_chunk_complete)
-        return True
+        # Bug 6 follow-up: acquire ``_state._apply_settings_lock`` so a
+        # concurrent monitor poll that calls this method blocks while
+        # ``apply_storage_and_recording_settings`` is mid-swap (publishing
+        # the sentinel, stopping OLD workers, then publishing the NEW
+        # service). Without this, a concurrent
+        # ``start_continuous_chunk_recording`` could see the OLD service
+        # mid-teardown and land a fresh ffmpeg in the just-vacated
+        # ``continuous-<key>/`` directory while the OLD ffmpeg is still
+        # alive in its SIGTERM teardown -- two workers writing into the
+        # same per-camera directory at the same time. The lock is
+        # reentrant (``RLock``) so the apply_* functions can already be
+        # holding it when they call ``RecordingService`` methods that
+        # would otherwise need to re-acquire it.
+        with _state._apply_settings_lock:
+            config = recording_config or self.recording_config
+            chunk_seconds = max(60, int(config.get('chunk_duration_seconds', 3600)))
+            if not self._worker_ffmpeg_available('continuous_chunk_recording'):
+                return False
+            camera_key = self._camera_key(camera_id)
+            chunks_dir = self.recordings_dir / f'continuous-{camera_key}'
+            chunks_dir.mkdir(parents=True, exist_ok=True)
+            self._ensure_continuous_chunk_worker(camera_key, stream_url, chunks_dir, chunk_seconds, on_chunk_complete)
+            return True
 
     def stop_continuous_chunk_recording(self, camera_id: str) -> None:
         camera_key = self._camera_key(camera_id)
+        # Bug 4 fix: hold ``_continuous_lock`` through the join so a
+        # concurrent ``_ensure_continuous_chunk_worker`` cannot start a new
+        # ffmpeg writing into the just-vacated ``continuous-{key}/`` directory
+        # while the old ffmpeg is still alive in its SIGTERM teardown. The
+        # join_timeout matches ``_ensure_continuous_chunk_worker``'s
+        # worst-case ceiling (``CONTINUOUS_WORKER_JOIN_TIMEOUT_SECONDS``)
+        # so this explicit shutdown is synchronously bound to the same bound
+        # the ensure path enforces.
         with self._continuous_lock:
             worker = self._continuous_workers.pop(camera_key, None)
-        if worker:
-            self._stop_worker(worker, join_timeout=5)
+            if worker:
+                self._stop_worker(worker, join_timeout=self.CONTINUOUS_WORKER_JOIN_TIMEOUT_SECONDS)
 
     def stop_all_continuous_recordings(self) -> None:
+        # Bug 4 fix: same pattern as ``stop_continuous_chunk_recording`` —
+        # hold ``_continuous_lock`` through the per-worker join so a
+        # concurrent ensure for any key can't race in. The join_timeout
+        # (``CONTINUOUS_WORKER_JOIN_TIMEOUT_SECONDS``) matches
+        # ``_ensure_continuous_chunk_worker``'s worst-case ceiling.
         with self._continuous_lock:
             workers = list(self._continuous_workers.values())
             self._continuous_workers = {}
-        for worker in workers:
-            self._stop_worker(worker, join_timeout=3)
+            for worker in workers:
+                self._stop_worker(worker, join_timeout=self.CONTINUOUS_WORKER_JOIN_TIMEOUT_SECONDS)
 
     def _ensure_continuous_chunk_worker(
         self,
@@ -291,8 +419,20 @@ class RecordingService:
                 thread = existing.get('thread')
                 if isinstance(thread, threading.Thread) and thread.is_alive():
                     return
-            if existing and isinstance(existing.get('stop_event'), threading.Event):
-                existing['stop_event'].set()
+            # Bug 2 fix: same pattern as ``_ensure_prebuffer_worker`` —
+            # join the old worker's thread before starting a replacement so
+            # two ffmpegs can't write into the same ``continuous-{key}/``
+            # directory concurrently and a chunk callback can't observe a
+            # segment the new ffmpeg is still writing. Continuous workers
+            # have a longer per-iteration teardown (ffmpeg SIGTERM waits up
+            # to 5s before SIGKILL in ``_run_continuous_chunk_worker``), so
+            # the join timeout uses
+            # ``CONTINUOUS_WORKER_JOIN_TIMEOUT_SECONDS`` and covers the
+            # worst-case shutdown plus ~1s of headroom over OS scheduling
+            # jitter, without padding the lock long enough to noticeably
+            # delay concurrent settings changes for other cameras.
+            if existing:
+                self._stop_worker(existing, join_timeout=self.CONTINUOUS_WORKER_JOIN_TIMEOUT_SECONDS)
 
             stop_event = threading.Event()
             thread = threading.Thread(
@@ -306,8 +446,69 @@ class RecordingService:
                 'stop_event': stop_event,
                 'stream_url': stream_url,
                 'chunk_seconds': chunk_seconds,
+                # Continuous workers previously had no ``camera_id`` on the
+                # dict; the sanitized camera_key was only available via the
+                # outer dict key. Add it so ``_stop_worker``'s hang-on-stop
+                # diagnostic (Bug 5) can identify which camera hung.
+                'camera_id': camera_key,
+                # Captured at construction for the same reason as the
+                # prebuffer worker_state. See the matching comment there.
+                'diagnostic_callback': self.diagnostic_callback,
             }
             thread.start()
+
+    def _drain_chunk_list(
+        self,
+        camera_key: str,
+        chunks_dir: Path,
+        list_file: Path,
+        seen_count: int,
+        on_chunk_complete: Callable[[str, Path], None] | None,
+    ) -> int:
+        """Drain any unaccounted-for entries from ffmpeg's ``-segment_list``
+        file, calling ``on_chunk_complete`` for each new chunk. Returns the
+        updated ``seen_count``.
+
+        Used both by the live polling loop inside
+        ``_run_continuous_chunk_worker`` AND once after ffmpeg's graceful
+        shutdown (SIGTERM) returns, so any chunk finalised during teardown
+        is surfaced to the callback before the worker thread exits. Without
+        the post-``process.wait`` drain the final chunk of a stopped
+        continuous recording is orphaned on disk the moment the user stops
+        recording: ``on_chunk_complete`` never fires for it, the database
+        never learns about it, and the file sits in the chunks directory
+        with no recordings row to point at it.
+        """
+        if not list_file.exists():
+            return seen_count
+        try:
+            lines = list_file.read_text(encoding='utf-8').splitlines()
+        except OSError:
+            return seen_count
+        for index in range(seen_count, len(lines)):
+            segment_name = lines[index].strip()
+            if not segment_name:
+                seen_count = index + 1
+                continue
+            segment_path = chunks_dir / segment_name
+            try:
+                if segment_path.exists() and segment_path.stat().st_size > 0:
+                    if on_chunk_complete:
+                        try:
+                            on_chunk_complete(camera_key, segment_path)
+                        except Exception as exc:
+                            logger.warning(
+                                'Continuous chunk callback failed for %s/%s: %s',
+                                camera_key, segment_name, exc,
+                            )
+                    seen_count = index + 1
+            except Exception as exc:
+                logger.warning(
+                    'Continuous chunk callback failed for %s/%s: %s',
+                    camera_key, segment_name, exc,
+                )
+                seen_count = index + 1
+        return seen_count
 
     def _run_continuous_chunk_worker(
         self,
@@ -355,25 +556,7 @@ class RecordingService:
             seen_count = 0
             try:
                 while process.poll() is None and not stop_event.is_set():
-                    if list_file.exists():
-                        try:
-                            lines = list_file.read_text(encoding='utf-8').splitlines()
-                        except OSError:
-                            lines = []
-                        for i, line in enumerate(lines[seen_count:], start=seen_count):
-                            segment_name = line.strip()
-                            if not segment_name:
-                                seen_count = i + 1
-                                continue
-                            segment_path = chunks_dir / segment_name
-                            try:
-                                if segment_path.exists() and segment_path.stat().st_size > 0:
-                                    if on_chunk_complete:
-                                        on_chunk_complete(camera_key, segment_path)
-                                    seen_count = i + 1
-                            except Exception as exc:
-                                logger.warning('Continuous chunk callback failed for %s/%s: %s', camera_key, segment_name, exc)
-                                seen_count = i + 1
+                    seen_count = self._drain_chunk_list(camera_key, chunks_dir, list_file, seen_count, on_chunk_complete)
                     time.sleep(1)
             finally:
                 if process.poll() is None:
@@ -382,6 +565,13 @@ class RecordingService:
                         process.wait(timeout=5)
                     except subprocess.TimeoutExpired:
                         process.kill()
+                # Bug 3 fix: drain any chunk ffmpeg finalised during graceful
+                # shutdown (SIGTERM). The inner polling loop bailed out the
+                # instant ``stop_event`` fired, so the chunk that was open at
+                # that moment - and the entry ffmpeg appended to
+                # ``.segment_list`` while tearing down - would otherwise never
+                # reach ``on_chunk_complete`` and would sit orphaned on disk.
+                seen_count = self._drain_chunk_list(camera_key, chunks_dir, list_file, seen_count, on_chunk_complete)
             if not stop_event.is_set():
                 logger.info('Continuous recorder for %s restarting after ffmpeg exit.', camera_key)
                 time.sleep(2)
@@ -403,16 +593,30 @@ class RecordingService:
         camera_id: str,
         recording_config: dict[str, Any] | None = None,
     ) -> bool:
-        # The per-camera ingest is the SINGLE RTSP connection that feeds event
-        # pre-roll, object detection (latest.jpg) and sound detection (audio
-        # segments), so it runs whenever the camera has a stream - not only when
-        # pre_event_seconds > 0.
-        config = recording_config or self.recording_config
-        if not self._worker_ffmpeg_available('camera_ingest'):
-            return False
-        camera_key = self._camera_key(camera_id)
-        self._ensure_prebuffer_worker(camera_key, stream_url, self.prebuffer_window_seconds(config), camera_id=camera_id)
-        return True
+        # Bug 6 follow-up: acquire ``_state._apply_settings_lock`` so a
+        # concurrent monitor poll (live_alert_monitor_loop,
+        # sound_monitor, event-driven callbacks) blocks while
+        # ``apply_storage_and_recording_settings`` is mid-swap. Without
+        # this, a concurrent prime could see the OLD service mid-teardown
+        # and land an ``_ensure_prebuffer_worker`` call that spawns a
+        # fresh ffmpeg writing into the just-vacated
+        # ``.prebuffer/<key>/`` / ``.audio/<key>/`` /
+        # ``.frames/<key>/`` directories while the OLD ffmpeg is still
+        # alive in its SIGTERM teardown -- two workers writing into the
+        # same per-camera directory at the same time. Lock is reentrant
+        # (``RLock``); see the matching ``start_continuous_chunk_recording``
+        # note.
+        with _state._apply_settings_lock:
+            # The per-camera ingest is the SINGLE RTSP connection that feeds event
+            # pre-roll, object detection (latest.jpg) and sound detection (audio
+            # segments), so it runs whenever the camera has a stream - not only when
+            # pre_event_seconds > 0.
+            config = recording_config or self.recording_config
+            if not self._worker_ffmpeg_available('camera_ingest'):
+                return False
+            camera_key = self._camera_key(camera_id)
+            self._ensure_prebuffer_worker(camera_key, stream_url, self.prebuffer_window_seconds(config), camera_id=camera_id)
+            return True
 
     def write_rtsp_clip_with_prebuffer(
         self,
@@ -629,6 +833,26 @@ class RecordingService:
     def _camera_key(camera_id: str) -> str:
         return re.sub(r'[^a-zA-Z0-9_-]+', '-', str(camera_id or '').strip().lower()).strip('-') or 'camera'
 
+    # Marker file written when the per-camera ingest learns the RTSP stream
+    # has no audio track. The worker checks it on startup to skip the audio
+    # output, ``audio_segments_after`` raises a clean RuntimeError when
+    # consumers ask for audio on a marked camera, and
+    # ``_ensure_prebuffer_worker`` clears it before probing a new stream URL.
+    NO_AUDIO_MARKER_FILENAME = '.no_audio'
+    # Substring to detect in ffmpeg stderr when an output target has no
+    # mapped streams. ffmpeg's canonical message is
+    # "Output file #N does not contain any stream\n" (see
+    # libavformat/output.c av_log(FATAL, "Output file #%d …")).
+    NO_AUDIO_FFMPEG_SUBSTRING = 'does not contain any stream'
+    # Human-friendly prefix used in RuntimeError messages surfaced to
+    # consumers (sound detector, external tests). Kept distinct from the
+    # ffmpeg substring above so a test that simulates ffmpeg's exact text
+    # can match the worker branch independently of the consumer branch.
+    NO_AUDIO_EXC_PREFIX = 'no audio track in stream'
+
+    def _audio_disabled_marker(self, camera_key: str) -> Path:
+        return self.audio_dir / camera_key / self.NO_AUDIO_MARKER_FILENAME
+
     @staticmethod
     def _concat_file_line(file_path: Path, duration_seconds: float | None = None) -> str:
         """Return an ffmpeg concat-demuxer file line for this path.
@@ -672,8 +896,31 @@ class RecordingService:
                     # still clips - so surface why, to catch config churn / collisions.
                     if existing.get('stream_url') != stream_url:
                         restart_reason = 'stream_url_changed'
-                if isinstance(existing.get('stop_event'), threading.Event):
-                    existing['stop_event'].set()
+            # Bug 2 fix: join the OLD worker's thread (via ``_stop_worker``)
+            # BEFORE clearing the marker or starting a replacement worker.
+            # Without joining, two ffmpegs race over the same rolling-buffer
+            # directories (``frames``/``latest.jpg``, ``.audio``/``*.wav``,
+            # ``.prebuffer``/``segment-*.mp4``), and the old worker's
+            # ``finally``-block pruner can silently delete freshly-written
+            # segments from the new worker — destroying event pre-roll footage
+            # immediately after every restart. Joining also closes the
+            # URL-change marker-write-back race (P1 from earlier review): the
+            # old worker has fully exited by the time we clear the .no_audio
+            # marker, so it can't re-touch the file after the unlink and lock
+            # the new URL into permanent video-only mode. We hold the lock
+            # across the join so concurrent ``_ensure_prebuffer_worker`` calls
+            # cannot race in between ``stop_event.set`` and the new
+            # ``thread.start``. The join timeout uses
+            # ``PREBUFFER_WORKER_JOIN_TIMEOUT_SECONDS`` to cover the worker's
+            # worst-case ffmpeg shutdown (1s loop sleep + up to 2s
+            # SIGTERM/terminate wait + SIGKILL); if a hung worker exceeds it,
+            # the replacement is still started (denying camera ingest would
+            # be worse than a brief two-ffmpeg overlap) — see TODO note
+            # for issuing an operator diagnostic in that case.
+            if existing:
+                self._stop_worker(existing, join_timeout=self.PREBUFFER_WORKER_JOIN_TIMEOUT_SECONDS)
+            if restart_reason == 'stream_url_changed':
+                self._audio_disabled_marker(camera_key).unlink(missing_ok=True)
 
             stop_event = threading.Event()
             worker_state = {
@@ -681,6 +928,14 @@ class RecordingService:
                 'stream_url': stream_url,
                 'buffer_seconds': int(buffer_seconds),
                 'camera_id': camera_id or camera_key,
+                # Captured at construction so `_stop_worker` can emit a
+                # useful ``worker_stop_join_timeout_prebuffer`` diagnostic
+                # later (Bug 5). The callback is set once at startup in
+                # main.py and is not hot-reloaded, so capturing it here is
+                # safe; if a future hot-reload path changes it on a live
+                # service, the next ``_ensure_prebuffer_worker`` call will
+                # record the new reference in the dict.
+                'diagnostic_callback': self.diagnostic_callback,
             }
             thread = threading.Thread(
                 target=self._run_prebuffer_worker,
@@ -724,6 +979,16 @@ class RecordingService:
         # normal exit path unlinks them in `finally`, but a non-graceful death
         # leaves them behind and the segment pruner never touches them.
         self._prune_stale_ingest_logs()
+
+        # If a previous worker for this stream learned it has no audio track,
+        # skip the audio output from the first iteration rather than rebuilding
+        # and tearing it down just to immediately write the no-audio marker.
+        # ``just_disabled_audio`` flags the next iteration as a recovery hop so
+        # the worker can respawn video-only ffmpeg WITHOUT the normal 1-5s
+        # backoff - otherwise a 4-fps camera would still get one audio-disabled
+        # attempt every few seconds forever even after the stream has stabilized.
+        audio_enabled = not self._audio_disabled_marker(camera_key).exists()
+        just_disabled_audio = False
 
         while not stop_event.is_set():
             command = [
@@ -782,28 +1047,37 @@ class RecordingService:
                 'image2',
                 '-y',
                 str(latest_frame_path),
-                # Output 3: 1s mono 16 kHz PCM-WAV segments for sound detection.
-                '-map',
-                '0:a:0?',
-                '-vn',
-                '-acodec',
-                'pcm_s16le',
-                '-ar',
-                '16000',
-                '-ac',
-                '1',
-                '-f',
-                'segment',
-                '-segment_time',
-                '1',
-                '-segment_format',
-                'wav',
-                '-reset_timestamps',
-                '1',
-                '-strftime',
-                '1',
-                str(audio_pattern),
             ]
+            if audio_enabled:
+                command += [
+                    # Output 3: 1s mono 16 kHz PCM-WAV segments for sound detection.
+                    # Only included when the worker has confirmed the stream
+                    # carries audio; on a video-only camera ffmpeg refuses with
+                    # "Output file does not contain any stream" and the entire
+                    # ingest crashes (the optional ``?`` on ``-map 0:a:0?``
+                    # makes only the *map* optional, never the output itself).
+                    '-map',
+                    '0:a:0?',
+                    '-vn',
+                    '-acodec',
+                    'pcm_s16le',
+                    '-ar',
+                    '16000',
+                    '-ac',
+                    '1',
+                    '-f',
+                    'segment',
+                    '-segment_time',
+                    '1',
+                    '-segment_format',
+                    'wav',
+                    '-reset_timestamps',
+                    '1',
+                    '-strftime',
+                    '1',
+                    str(audio_pattern),
+                ]
+
             stderr_file = tempfile.NamedTemporaryFile(mode='w+', suffix='.log', delete=False, dir=str(self.prebuffer_dir))
             stderr_path = Path(stderr_file.name)
             ffmpeg_started_at = time.time()
@@ -851,6 +1125,31 @@ class RecordingService:
                         logger.debug('Prebuffer ffmpeg %s: %s', camera_key, stderr_content.strip()[:1000])
                 except OSError:
                     stderr_content = ''
+                # ffmpeg aborts with "Output file does not contain any stream"
+                # when an output target has no mapped streams - on a video-only
+                # camera that means the audio-WAV output. Detect it from the
+                # captured stderr, drop the audio output for the rest of this
+                # worker's lifetime, and persist the decision in a marker file
+                # so a restarted worker (same URL) skips the doomed probe.
+                if (
+                    audio_enabled
+                    and not stop_event.is_set()
+                    and return_code not in (None, 0)
+                    and self.NO_AUDIO_FFMPEG_SUBSTRING in (stderr_content or '')
+                ):
+                    audio_enabled = False
+                    just_disabled_audio = True
+                    self._audio_disabled_marker(camera_key).touch()
+                    self._emit_diagnostic(
+                        worker_state.get('camera_id') or camera_key,
+                        'ingest_audio_disabled',
+                        'Camera ingest has switched to video-only mode because '
+                        'the RTSP stream has no audio track. Sound detection '
+                        'will be unavailable for this camera until the stream '
+                        'URL changes.',
+                        severity='info',
+                        details={'reason': 'no_audio_stream'},
+                    )
                 stderr_path.unlink(missing_ok=True)
                 keep_seconds = int(worker_state.get('buffer_seconds') or 15)
                 self._prune_prebuffer_segments(camera_dir, keep_seconds)
@@ -876,8 +1175,14 @@ class RecordingService:
                         },
                     )
             if not stop_event.is_set():
-                run_seconds = time.time() - ffmpeg_started_at
-                time.sleep(5 if run_seconds < 60 else 1)
+                # Skip the backoff on the recovery iteration so a worker that
+                # just lost its audio output reconnects video-only immediately
+                # rather than after 1-5s of doing nothing.
+                if just_disabled_audio:
+                    just_disabled_audio = False
+                else:
+                    run_seconds = time.time() - ffmpeg_started_at
+                    time.sleep(5 if run_seconds < 60 else 1)
 
     def _prune_prebuffer_segments(self, camera_dir: Path, keep_seconds: int) -> None:
         cutoff = time.time() - max(keep_seconds, 5)
@@ -968,10 +1273,21 @@ class RecordingService:
     def audio_segments_after(self, camera_id: str, after_ts: float) -> list[tuple[Path, float]]:
         """Audio WAV segments written strictly after ``after_ts``, oldest first,
         as (path, mtime). Lets the sound detector consume each 1s chunk once
-        without reopening its own RTSP connection."""
+        without reopening its own RTSP connection.
+
+        Raises ``RuntimeError`` (``no audio track in stream``) when the
+        per-camera ingest has already learned this RTSP stream has no audio
+        track - the sound detector treats the prefix as a clean 'unavailable'
+        signal rather than spinning on an empty queue.
+        """
         audio_camera_dir = self.audio_dir / self._camera_key(camera_id)
         if not audio_camera_dir.exists():
             return []
+        if self._audio_disabled_marker(self._camera_key(camera_id)).exists():
+            raise RuntimeError(
+                f'{self.NO_AUDIO_EXC_PREFIX}: {camera_id} (RTSP stream has no '
+                f'audio; per-camera ingest is running video-only)'
+            )
         out: list[tuple[Path, float]] = []
         for segment in audio_camera_dir.glob('aud-*.wav'):
             try:
