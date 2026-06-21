@@ -351,6 +351,7 @@ def camera_event_recording_config(settings: dict[str, Any]) -> dict[str, Any]:
 database = EventDatabase(config['storage']['database'])
 _state.database = database
 camera_config: dict[str, Any] = {}
+_state.camera_config = camera_config
 cameras_config: list[dict[str, Any]] = []
 _state.cameras_config = cameras_config
 camera_instances: dict[str, Any] = {}
@@ -421,6 +422,7 @@ alerts = AlertEngine([])
 cameras_config = effective_cameras_config()
 _state.cameras_config = cameras_config
 camera_config = cameras_config[0] if cameras_config else {}
+_state.camera_config = camera_config
 camera_instances = create_camera_instances(cameras_config)
 _state.camera_instances = camera_instances
 camera = camera_instances[camera_config['id']] if camera_config else None
@@ -506,6 +508,7 @@ def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
         cameras_config = settings_list
         _state.cameras_config = cameras_config
         camera_config = settings_list[0] if settings_list else {}
+        _state.camera_config = camera_config
         camera_instances = new_instances
         _state.camera_instances = camera_instances
         camera = camera_instances[camera_config['id']] if camera_config else None

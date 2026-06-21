@@ -281,7 +281,6 @@ def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_storage_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    from app.main import config  # raw loaded config; not on app.state until Tier 2
     current = effective_storage_config()
     updated = {key: str(current.get(key) or '') for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir', 'database')}
     for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir'):
@@ -290,7 +289,7 @@ def validate_storage_settings(payload: dict[str, Any]) -> dict[str, Any]:
             if not value:
                 raise HTTPException(status_code=400, detail=f'{key} cannot be blank.')
             updated[key] = value
-    updated['database'] = str(config.get('storage', {}).get('database') or updated.get('database') or 'data/daygle_ai_camera.sqlite3')
+    updated['database'] = str(_state.config.get('storage', {}).get('database') or updated.get('database') or 'data/daygle_ai_camera.sqlite3')
     return updated
 
 
