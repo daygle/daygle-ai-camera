@@ -143,7 +143,6 @@ def export_yolo_onnx(model_name: str, destination: Path) -> int:
 
 
 def _do_download_model(model_name: str, switch_active: bool = True) -> dict[str, Any]:
-    from app.main import reload_detector
     if model_name not in YOLO_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
     info = YOLO_MODELS[model_name]
@@ -163,7 +162,7 @@ def _do_download_model(model_name: str, switch_active: bool = True) -> dict[str,
     if switch_active or is_active:
         updated = validate_ai_settings({**ai_settings, 'model_path': rel_path})
         _state.database.set_setting('ai', updated, utc_now())
-        reloaded, error = reload_detector(updated)
+        reloaded, error = _state.reload_detector(updated)
     else:
         updated = ai_settings
         reloaded = False

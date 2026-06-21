@@ -517,10 +517,12 @@ def test_authentication_middleware_bypasses_when_auth_disabled(tmp_path, monkeyp
     server, thread, base_url = _server(app)
     try:
         # Override effective_auth_config(runtime) to report enabled=False.
-        # The middleware resolves it on every request -- no reload needed.
-        main = sys.modules["app.main"]
+        # Patch on app.middleware (its true import site) since middleware.py
+        # now imports effective_auth_config directly from app.config_facades
+        # rather than reaching it via main.effective_auth_config.
+        middleware = sys.modules["app.middleware"]
         monkeypatch.setattr(
-            main,
+            middleware,
             "effective_auth_config",
             lambda: {
                 "enabled": False,

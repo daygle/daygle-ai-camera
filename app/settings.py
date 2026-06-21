@@ -102,3 +102,7 @@ def load_settings(path: str | Path | None = None) -> dict[str, Any]:
         raise ValueError(f"Configuration file must contain a YAML mapping: {config_path}")
 
     return deep_merge(DEFAULT_CONFIG, loaded)
+
+
+def config_file_path() -> Path:
+    return Path(os.environ.get(CONFIG_ENV_VAR) or DEFAULT_CONFIG_PATH)

@@ -74,6 +74,7 @@ from fastapi import HTTPException
 import app.state as _state
 from app.config_facades import effective_ai_config
 from app.detector import load_labels
+from app.settings import config_file_path
 
 YOLO_MODELS: dict[str, dict[str, Any]] = {
     'yolov8n': {'pt': 'yolov8n.pt', 'onnx': 'yolov8n.onnx', 'label': 'YOLOv8n · Nano', 'approx_mb': 6, 'description': 'Fastest inference, lowest accuracy. Best for low-power or embedded hardware.'},
@@ -87,7 +88,6 @@ logger = logging.getLogger('daygle.ai')
 
 
 def active_ai_config_source() -> str:
-    from app.main import config_file_path
     if _state.database.has_setting('ai'):
         return 'database'
     if config_file_path().exists():

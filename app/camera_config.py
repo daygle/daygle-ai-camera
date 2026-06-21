@@ -38,37 +38,27 @@ implementations with no source edits.
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 import app.state as _state
+from app.camera_id import normalize_camera_id as normalize_camera_id  # noqa: PLC0414  re-export
+from app.recording_settings import (
+    _migrate_legacy_camera_motion,
+    _normalize_camera_sound_settings,
+    normalize_camera_ptz_settings,
+    normalize_camera_recording_settings,
+)
+from app.recordings import RecordingService
+from app.utils import camera_default_name, default_camera_detection_settings
+from app.zone_schema import normalize_label_list, normalize_monitoring_zones
 
 logger = logging.getLogger('daygle.ai')
-
-
-def normalize_camera_id(value: Any, fallback: str = 'camera-1') -> str:
-    camera_id = re.sub(
-        '[^a-zA-Z0-9_-]+',
-        '-',
-        str(value or '').strip().lower(),
-    ).strip('-')
-    return camera_id or fallback
 
 
 def normalize_camera_settings(
     settings: dict[str, Any],
     index: int = 1,
 ) -> dict[str, Any]:
-    from app.main import (
-        _migrate_legacy_camera_motion,
-        _normalize_camera_sound_settings,
-        camera_default_name,
-        default_camera_detection_settings,
-        normalize_camera_ptz_settings,
-        normalize_camera_recording_settings,
-        normalize_label_list,
-        normalize_monitoring_zones,
-    )
     camera_settings = dict(settings or {})
     camera_settings['id'] = normalize_camera_id(
         camera_settings.get('id'),
@@ -124,24 +114,23 @@ def _migrate_camera_id(old_id: str, new_id: str) -> None:
     if the destination dir already exists (the latter guards against
     silently clobbering an unrelated camera's frames).
     """
-    import app.main as main
-    old_key = main.RecordingService._camera_key(old_id)
-    new_key = main.RecordingService._camera_key(new_id)
-    with main.live_detection_history_lock:
-        if old_id in main.live_detection_history:
-            main.live_detection_history[new_id] = (
-                main.live_detection_history.pop(old_id)
+    old_key = RecordingService._camera_key(old_id)
+    new_key = RecordingService._camera_key(new_id)
+    with _state.live_detection_history_lock:
+        if old_id in _state.live_detection_history:
+            _state.live_detection_history[new_id] = (
+                _state.live_detection_history.pop(old_id)
             )
-    with main._frame_motion_lock:
-        if old_id in main._frame_motion_prev:
-            main._frame_motion_prev[new_id] = (
-                main._frame_motion_prev.pop(old_id)
+    with _state._frame_motion_lock:
+        if old_id in _state._frame_motion_prev:
+            _state._frame_motion_prev[new_id] = (
+                _state._frame_motion_prev.pop(old_id)
             )
-    if main.recording_service is not None:
+    if _state.recording_service is not None:
         for base in (
-            main.recording_service.prebuffer_dir,
-            main.recording_service.frames_dir,
-            main.recording_service.audio_dir,
+            _state.recording_service.prebuffer_dir,
+            _state.recording_service.frames_dir,
+            _state.recording_service.audio_dir,
         ):
             old_dir = base / old_key
             new_dir = base / new_key
@@ -149,7 +138,7 @@ def _migrate_camera_id(old_id: str, new_id: str) -> None:
                 try:
                     old_dir.rename(new_dir)
                 except OSError as exc:
-                    main.logger.warning(
+                    logger.warning(
                         'Could not rename ingest dir %s \u2192 %s: %s',
                         old_dir,
                         new_dir,
