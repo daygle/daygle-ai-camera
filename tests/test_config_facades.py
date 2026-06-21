@@ -58,6 +58,32 @@ import app.main  # noqa: E402  -- must precede the import below
 import app.config_facades as config_facades  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _stub_database(monkeypatch):
+    """Ensure database is a stub for tests that don't monkeypatch it.
+
+    Two cases need covering:
+    1. Fresh run: app.main was preloaded but _startup() never ran -> _state.database is None.
+    2. After test_api.py's _load_app() reloads all app.* modules, the module-level
+       config_facades binding in this file becomes stale and points to an old _state
+       instance (database=None). Patch that stale _state too.
+    """
+    class _StubDb:
+        def get_setting(self, key):
+            return None
+
+    # Patch the _state that the module-level config_facades actually references
+    # (may be a stale instance after _load_app() reloads app.* mid-session).
+    cf_state = getattr(config_facades, '_state', None)
+    if cf_state is not None and cf_state.database is None:
+        monkeypatch.setattr(cf_state, 'database', _StubDb())
+
+    # Also patch the current sys.modules['app.state'] (may differ after reload).
+    import app.state as _s
+    if _s.database is None:
+        monkeypatch.setattr(_s, 'database', _StubDb())
+
+
 # ---------------------------------------------------------------------------
 # 1. Pool A back-compat identity -- ``main.<name> is config_facades.<name>``.
 # ---------------------------------------------------------------------------

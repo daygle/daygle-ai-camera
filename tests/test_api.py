@@ -189,7 +189,9 @@ alerts:
     for mod in list(sys.modules.keys()):
         if mod == "app" or mod.startswith("app."):
             sys.modules.pop(mod, None)
-    return importlib.import_module("app.main").app, database_path
+    main_mod = importlib.import_module("app.main")
+    main_mod._startup()
+    return main_mod.app, database_path
 
 
 def _server(app):
