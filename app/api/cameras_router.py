@@ -117,7 +117,9 @@ async def test_camera_connection(request: Request, recording_service=Depends(get
     command = [ffprobe, '-v', 'quiet', '-rtsp_transport', 'tcp', '-i', stream_url,
                '-show_entries', 'stream=codec_type', '-of', 'json']
     try:
-        result = subprocess.run(command, capture_output=True, timeout=8, check=False)
+        result = await run_in_threadpool(
+            subprocess.run, command, capture_output=True, timeout=8, check=False
+        )
         if result.returncode == 0:
             return {'online': True, 'message': 'Stream is reachable.'}
         stderr = recording_service.redact_stream_credentials(result.stderr.decode('utf-8', errors='replace').strip())

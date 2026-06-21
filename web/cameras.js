@@ -30,7 +30,7 @@ const ICON_VIEW_LIVE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="no
 function setMessage(text, isError = false) {
   messageEl.textContent = text;
   messageEl.className = isError ? 'error' : 'muted';
-  if (text) window.showToast(text, isError);
+  if (text) window.showToast?.(text, isError);
 }
 
 // api() is provided by web/utils.js (loaded before this script). It throws on
