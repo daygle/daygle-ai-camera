@@ -35,7 +35,7 @@ from typing import Any
 from fastapi import HTTPException
 
 import app.state as _state
-from app.ai_settings import YOLO_MODELS, ai_status_payload, validate_ai_settings
+from app.ai_settings import YOLO_MODELS, ai_status_payload, detector_status, validate_ai_settings
 from app.auth import utc_now
 from app.config_facades import effective_ai_config
 
@@ -167,4 +167,4 @@ def _do_download_model(model_name: str, switch_active: bool = True) -> dict[str,
         updated = ai_settings
         reloaded = False
         error = None
-    return {'ok': True, 'message': f"Exported {info['label']} ONNX to {destination.relative_to(BASE_DIR)}.", 'model_path': rel_path, 'bytes': exported_bytes, 'reload_succeeded': reloaded, 'reload_error': error, 'status': ai_status_payload(updated)}
+    return {'ok': True, 'message': f"Exported {info['label']} ONNX to {destination.relative_to(BASE_DIR)}.", 'model_path': rel_path, 'bytes': exported_bytes, 'reload_succeeded': reloaded, 'reload_error': error, 'status': detector_status(updated)}
