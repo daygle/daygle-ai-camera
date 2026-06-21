@@ -12,7 +12,7 @@ from app.config_facades import (
     effective_email_alert_settings,
     effective_push_notification_settings,
 )
-from app.main import (
+from app.camera_lifecycle import (
     apply_cameras_settings,
     apply_storage_and_recording_settings,
     reload_detector,

@@ -44,22 +44,6 @@ def state():
 # Pool A identity: main.<name> is camera_lifecycle.<name>
 # ---------------------------------------------------------------------------
 
-def test_main_camera_event_recording_config_is_lifecycle(main, cl):
-    assert main.camera_event_recording_config is cl.camera_event_recording_config
-
-
-def test_main_apply_cameras_settings_is_lifecycle(main, cl):
-    assert main.apply_cameras_settings is cl.apply_cameras_settings
-
-
-def test_main_apply_storage_and_recording_settings_is_lifecycle(main, cl):
-    assert main.apply_storage_and_recording_settings is cl.apply_storage_and_recording_settings
-
-
-def test_main_reload_detector_is_lifecycle(main, cl):
-    assert main.reload_detector is cl.reload_detector
-
-
 # ---------------------------------------------------------------------------
 # _state callback slots: _state.<name> is camera_lifecycle.<name>
 # ---------------------------------------------------------------------------

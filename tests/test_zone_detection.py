@@ -72,42 +72,6 @@ def main_module():
 
 
 # ---------------------------------------------------------------------------
-# Pool A rebind identity tests -- 21 names must resolve to zone_detection
-# ---------------------------------------------------------------------------
-
-IDENTITY_NAMES = [
-    'get_camera_instance',
-    'detection_center_in_zone',
-    'detection_overlap_ratio_with_zone_rect',
-    'detection_matches_zone',
-    'point_in_polygon',
-    'point_on_segment',
-    'filter_detections_for_camera',
-    '_zone_pixel_motion_fraction',
-    'zone_motion_detections',
-    'detection_label_allowed_for_zone',
-    'filter_detections_for_camera_zones',
-    'zone_object_rule_matches',
-    'zone_object_alert_rules',
-    'zone_rule_name',
-    'zone_alert_detections',
-    'zone_name_for_detection',
-    'zone_record_on_detect',
-    'zone_motion_record_on_detect',
-    'zone_detection_alert_rule_names',
-    'detection_has_matching_record_rule',
-    'normalize_detection_boxes_for_frame',
-]
-
-
-@pytest.mark.parametrize('name', IDENTITY_NAMES)
-def test_pool_a_rebind_wires_helper_to_main(name, main_module, zd):
-    """Each Pool A rebind must keep ``main.<name> is zone_detection.<name>``."""
-    assert hasattr(main_module, name), f'main missing helper {name}'
-    assert getattr(main_module, name) is getattr(zd, name), (
-        f'main.{name} resolves to {getattr(main_module, name).__module__!r}, '
-        f'expected zone_detection'
-    )
 
 
 # ---------------------------------------------------------------------------

@@ -101,25 +101,6 @@ def rs():
     return sys.modules["app.recording_settings"]
 
 
-def test_main_normalize_camera_recording_settings_is_recording_settings_recording_settings(main, current_recording_settings):
-    assert main.normalize_camera_recording_settings is current_recording_settings.normalize_camera_recording_settings, (
-        "main.normalize_camera_recording_settings is NOT the same function object as "
-        "app.recording_settings.normalize_camera_recording_settings -- Pool A rebind wire broke"
-    )
-
-
-def test_main_normalize_camera_ptz_settings_is_recording_settings_ptz_settings(main, current_recording_settings):
-    assert main.normalize_camera_ptz_settings is current_recording_settings.normalize_camera_ptz_settings
-
-
-def test_main_normalize_camera_sound_settings_is_recording_settings_sound_settings(main, current_recording_settings):
-    assert main._normalize_camera_sound_settings is current_recording_settings._normalize_camera_sound_settings
-
-
-def test_main_migrate_legacy_camera_motion_is_recording_settings_migrate_legacy_camera_motion(main, current_recording_settings):
-    assert main._migrate_legacy_camera_motion is current_recording_settings._migrate_legacy_camera_motion
-
-
 # ---------------------------------------------------------------------------
 # 2. Helpers -- isolate cross-module deps via monkeypatched helpers.
 # ---------------------------------------------------------------------------

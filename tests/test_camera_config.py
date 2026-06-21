@@ -99,25 +99,6 @@ def cc():
     return sys.modules["app.camera_config"]
 
 
-def test_main_normalize_camera_id_is_camera_config_normalize_camera_id(main, current_camera_config):
-    assert main.normalize_camera_id is current_camera_config.normalize_camera_id, (
-        "main.normalize_camera_id is NOT the same function object as "
-        "app.camera_config.normalize_camera_id -- Pool A rebind wire broke"
-    )
-
-
-def test_main_normalize_camera_settings_is_camera_config_normalize_camera_settings(main, current_camera_config):
-    assert main.normalize_camera_settings is current_camera_config.normalize_camera_settings
-
-
-def test_main_migrate_camera_id_is_camera_config_migrate_camera_id(main, current_camera_config):
-    assert main._migrate_camera_id is current_camera_config._migrate_camera_id
-
-
-def test_main_redact_camera_is_camera_config_redact_camera(main, current_camera_config):
-    assert main._redact_camera is current_camera_config._redact_camera
-
-
 # ---------------------------------------------------------------------------
 # 2. Behavior of each facade (hermetic; uses monkeypatch on main.<attr>).
 # ---------------------------------------------------------------------------

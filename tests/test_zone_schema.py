@@ -103,41 +103,6 @@ def zs():
     return sys.modules["app.zone_schema"]
 
 
-def test_main_LABEL_ALIASES_is_zone_schema_LABEL_ALIASES(main, current_zone_schema):
-    assert main._LABEL_ALIASES is current_zone_schema._LABEL_ALIASES, (
-        "main._LABEL_ALIASES is NOT the same dict object as "
-        "app.zone_schema._LABEL_ALIASES -- Pool A rebind wire broke"
-    )
-
-
-def test_main_normalize_label_list_is_zone_schema_normalize_label_list(main, current_zone_schema):
-    assert main.normalize_label_list is current_zone_schema.normalize_label_list
-
-
-def test_main_normalize_monitoring_zones_is_zone_schema_normalize_monitoring_zones(main, current_zone_schema):
-    assert main.normalize_monitoring_zones is current_zone_schema.normalize_monitoring_zones
-
-
-def test_main_normalize_zone_object_rules_is_zone_schema_normalize_zone_object_rules(main, current_zone_schema):
-    assert main.normalize_zone_object_rules is current_zone_schema.normalize_zone_object_rules
-
-
-def test_main_normalize_zone_point_is_zone_schema_normalize_zone_point(main, current_zone_schema):
-    assert main.normalize_zone_point is current_zone_schema.normalize_zone_point
-
-
-def test_main_rectangle_zone_points_is_zone_schema_rectangle_zone_points(main, current_zone_schema):
-    assert main.rectangle_zone_points is current_zone_schema.rectangle_zone_points
-
-
-def test_main_zone_bounds_is_zone_schema_zone_bounds(main, current_zone_schema):
-    assert main.zone_bounds is current_zone_schema.zone_bounds
-
-
-def test_main_zone_motion_min_confidence_is_zone_schema_zone_motion_min_confidence(main, current_zone_schema):
-    assert main.zone_motion_min_confidence is current_zone_schema.zone_motion_min_confidence
-
-
 # ---------------------------------------------------------------------------
 # 2. Helpers -- isolate cross-module deps via monkeypatched helpers.
 # ---------------------------------------------------------------------------

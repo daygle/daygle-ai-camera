@@ -70,11 +70,13 @@ def _isolate_health_state(main_module):
     flags / offline_since values. Snapshot + restore keeps the cluster's
     state dict clean across tests.
     """
-    saved = dict(main_module._camera_health_state)
+    _hs = main_module._state._camera_health_state
+    _hl = main_module._state._camera_health_lock
+    saved = dict(_hs)
     yield
-    with main_module._camera_health_lock:
-        main_module._camera_health_state.clear()
-        main_module._camera_health_state.update(saved)
+    with _hl:
+        _hs.clear()
+        _hs.update(saved)
 
 
 @pytest.fixture
@@ -136,57 +138,8 @@ def stub_delivery_services(ch, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Pool A rebind identity tests -- 8 names must resolve to camera_health
+# State-migration invariants: state primitives live on app.state
 # ---------------------------------------------------------------------------
-
-IDENTITY_NAMES = [
-    '_update_camera_health',
-    '_camera_offline_notification_eligible',
-    '_camera_recovery_notification_eligible',
-    '_mark_camera_offline_notified',
-    '_mark_camera_recovery_notified',
-    '_deliver_camera_offline_notification',
-    '_check_cameras_health',
-    'effective_camera_offline_alert_settings',
-]
-
-
-@pytest.mark.parametrize('name', IDENTITY_NAMES)
-def test_pool_a_rebind_wires_helper_to_main(name, main_module, ch):
-    assert hasattr(main_module, name), f'main missing helper {name}'
-    assert getattr(main_module, name) is getattr(ch, name), (
-        f'main.{name} resolves to {getattr(main_module, name).__module__!r}, '
-        f'expected camera_health'
-    )
-
-
-# ---------------------------------------------------------------------------
-# State-migration invariants: state primitives STAY on app.main
-# ---------------------------------------------------------------------------
-
-def test_state_primitives_live_on_main(main_module):
-    """``app.main`` re-exports ``_camera_health_state`` and ``_camera_health_lock``
-    via Pool A from-import rebinds from ``app.state``.
-
-    The canonical home of these primitives is ``app.state``. ``app/main.py``
-    re-exports them so that tests that access state via ``main_module.<X>``
-    reach the live objects (same dict/lock as ``app.state.<X>``).
-    """
-    assert hasattr(main_module, '_camera_health_state'), (
-        '_camera_health_state re-export missing from app.main -- '
-        'Pool A from-import rebind from app.state was dropped'
-    )
-    assert hasattr(main_module, '_camera_health_lock'), (
-        '_camera_health_lock re-export missing from app.main -- '
-        'Pool A from-import rebind from app.state was dropped'
-    )
-    import threading as _threading
-    assert isinstance(main_module._camera_health_state, dict)
-    # threading.Lock() returns a _thread.lock object; threading.Lock itself is a
-    # factory function, not a class, so isinstance(..., threading.Lock) raises
-    # TypeError. Use type(threading.Lock()) to get the actual lock type.
-    assert isinstance(main_module._camera_health_lock, type(_threading.Lock()))
-
 
 def test_state_primitives_not_promoted_into_camera_health(ch):
     """camera_health.py must NOT have its own copy of the state primitives.
@@ -275,11 +228,11 @@ def test_effective_offline_alert_settings_ignores_non_dict_override(ch, monkeypa
 
 def test_update_camera_health_online_to_offline_fires_diagnostic(ch, main_module, stub_logger):
     diagnostics, _warnings = stub_logger
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': True, 'offline_since': None, 'offline_notified': False, 'recovery_notified': False,
     }
     ch._update_camera_health('cam-1', False)
-    state = main_module._camera_health_state['cam-1']
+    state = main_module._state._camera_health_state['cam-1']
     assert state['online'] is False
     assert state['offline_since'] is not None  # was stamped with time.time()
     assert diagnostics == [('cam-1', 'camera_offline')]
@@ -287,11 +240,11 @@ def test_update_camera_health_online_to_offline_fires_diagnostic(ch, main_module
 
 def test_update_camera_health_offline_to_online_fires_recovery_log(ch, main_module, stub_logger):
     diagnostics, _warnings = stub_logger
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': False, 'offline_since': time.time() - 30, 'offline_notified': True, 'recovery_notified': False,
     }
     ch._update_camera_health('cam-1', True)
-    state = main_module._camera_health_state['cam-1']
+    state = main_module._state._camera_health_state['cam-1']
     assert state['online'] is True
     assert state['offline_since'] is None
     assert state['offline_notified'] is False  # reset on recovery
@@ -301,7 +254,7 @@ def test_update_camera_health_offline_to_online_fires_recovery_log(ch, main_modu
 def test_update_camera_health_no_op_when_state_unchanged(ch, main_module, stub_logger):
     """Idempotent update must NOT fire a diagnostic."""
     diagnostics, _warnings = stub_logger
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': True, 'offline_since': None, 'offline_notified': False, 'recovery_notified': False,
     }
     ch._update_camera_health('cam-1', True)  # online -> online -> no transition
@@ -312,11 +265,11 @@ def test_update_camera_health_no_op_when_state_unchanged(ch, main_module, stub_l
 
 
 def test_update_camera_health_resets_offline_since_on_recovery(ch, main_module):
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': False, 'offline_since': time.time() - 100, 'offline_notified': True, 'recovery_notified': True,
     }
     ch._update_camera_health('cam-1', True)
-    state = main_module._camera_health_state['cam-1']
+    state = main_module._state._camera_health_state['cam-1']
     assert state['offline_since'] is None
     assert state['offline_notified'] is False  # reset for next offline cycle
 
@@ -324,12 +277,12 @@ def test_update_camera_health_resets_offline_since_on_recovery(ch, main_module):
 def test_update_camera_health_preserves_existing_offline_since(ch, main_module, stub_logger):
     """If state already has offline_since set, don't overwrite it on the next
     online->offline edge (preserves the original offline-streak starting time)."""
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': True, 'offline_since': None, 'offline_notified': False, 'recovery_notified': False,
     }
     # Force an online -> offline edge; capture offline_since as T0.
     ch._update_camera_health('cam-1', False)
-    T0 = main_module._camera_health_state['cam-1']['offline_since']
+    T0 = main_module._state._camera_health_state['cam-1']['offline_since']
     # A subsequent recovery + immediate re-offline should keep the same offline_since
     # because the cluster memoizes it across recovery_to_offline cycles when the
     # previous offline_since was already stamped; but since recovery clears
@@ -337,7 +290,7 @@ def test_update_camera_health_preserves_existing_offline_since(ch, main_module, 
     ch._update_camera_health('cam-1', True)
     time.sleep(0.01)
     ch._update_camera_health('cam-1', False)
-    T1 = main_module._camera_health_state['cam-1']['offline_since']
+    T1 = main_module._state._camera_health_state['cam-1']['offline_since']
     assert T1 is not None and T1 >= T0
 
 
@@ -346,7 +299,7 @@ def test_update_camera_health_preserves_existing_offline_since(ch, main_module, 
 # ---------------------------------------------------------------------------
 
 def test_offline_eligible_when_offline_beyond_delay(ch, main_module, monkeypatch):
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': False,
         'offline_since': time.time() - 600,  # 10 mins ago, way past 1-min default
         'offline_notified': False,
@@ -357,7 +310,7 @@ def test_offline_eligible_when_offline_beyond_delay(ch, main_module, monkeypatch
 
 
 def test_offline_eligible_blocked_before_delay_elapsed(ch, main_module, monkeypatch):
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': False,
         'offline_since': time.time() - 10,  # only 10s ago, default=60s -> not eligible
         'offline_notified': False,
@@ -367,7 +320,7 @@ def test_offline_eligible_blocked_before_delay_elapsed(ch, main_module, monkeypa
 
 
 def test_offline_eligible_blocked_when_already_notified(ch, main_module):
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': False,
         'offline_since': time.time() - 600,
         'offline_notified': True,
@@ -377,7 +330,7 @@ def test_offline_eligible_blocked_when_already_notified(ch, main_module):
 
 
 def test_offline_eligible_blocked_when_online(ch, main_module):
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': True,
         'offline_since': None,
         'offline_notified': False,
@@ -397,14 +350,14 @@ def test_offline_eligible_respects_custom_delay(ch, main_module, monkeypatch):
         main_module.database, 'get_setting',
         lambda key: {'enabled': True, 'offline_delay_minutes': 10, 'recipients': []},
     )
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': False,
         'offline_since': time.time() - 60,  # 60s ago, 10-min delay -> NOT eligible
         'offline_notified': False,
         'recovery_notified': False,
     }
     assert ch._camera_offline_notification_eligible('cam-1') is False
-    main_module._camera_health_state['cam-1']['offline_since'] = time.time() - 700
+    main_module._state._camera_health_state['cam-1']['offline_since'] = time.time() - 700
     assert ch._camera_offline_notification_eligible('cam-1') is True
 
 
@@ -413,7 +366,7 @@ def test_offline_eligible_respects_custom_delay(ch, main_module, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_recovery_eligible_when_previously_offline_notified(ch, main_module):
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': True,
         'offline_since': None,
         'offline_notified': True,
@@ -423,7 +376,7 @@ def test_recovery_eligible_when_previously_offline_notified(ch, main_module):
 
 
 def test_recovery_ineligible_when_not_previously_offline_notified(ch, main_module):
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': True,
         'offline_since': None,
         'offline_notified': False,
@@ -433,7 +386,7 @@ def test_recovery_ineligible_when_not_previously_offline_notified(ch, main_modul
 
 
 def test_recovery_ineligible_when_still_offline(ch, main_module):
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': False,
         'offline_since': time.time() - 600,
         'offline_notified': True,
@@ -443,7 +396,7 @@ def test_recovery_ineligible_when_still_offline(ch, main_module):
 
 
 def test_recovery_ineligible_when_already_recovery_notified(ch, main_module):
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': True,
         'offline_since': None,
         'offline_notified': True,
@@ -457,32 +410,32 @@ def test_recovery_ineligible_when_already_recovery_notified(ch, main_module):
 # ---------------------------------------------------------------------------
 
 def test_mark_camera_offline_notified_sets_flag(ch, main_module):
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': False,
         'offline_since': time.time() - 600,
         'offline_notified': False,
         'recovery_notified': False,
     }
     ch._mark_camera_offline_notified('cam-1')
-    assert main_module._camera_health_state['cam-1']['offline_notified'] is True
+    assert main_module._state._camera_health_state['cam-1']['offline_notified'] is True
 
 
 def test_mark_camera_recovery_notified_sets_flag(ch, main_module):
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': True,
         'offline_since': None,
         'offline_notified': True,
         'recovery_notified': False,
     }
     ch._mark_camera_recovery_notified('cam-1')
-    assert main_module._camera_health_state['cam-1']['recovery_notified'] is True
+    assert main_module._state._camera_health_state['cam-1']['recovery_notified'] is True
 
 
 def test_marks_no_op_on_missing_state(ch, main_module):
     """No-raise on missing state -- the mark helper should swallow silently."""
     ch._mark_camera_offline_notified('nonexistent-camera')
     ch._mark_camera_recovery_notified('nonexistent-camera')
-    assert 'nonexistent-camera' not in main_module._camera_health_state
+    assert 'nonexistent-camera' not in main_module._state._camera_health_state
 
 
 # ---------------------------------------------------------------------------
@@ -495,7 +448,7 @@ def test_deliver_short_circuits_when_disabled(ch, main_module, monkeypatch, stub
         main_module.database, 'get_setting',
         lambda key: {'enabled': False, 'offline_delay_minutes': 1, 'recipients': []},
     )
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': False, 'offline_since': time.time() - 600,
         'offline_notified': False, 'recovery_notified': False,
     }
@@ -503,7 +456,7 @@ def test_deliver_short_circuits_when_disabled(ch, main_module, monkeypatch, stub
     assert push_calls == []
     assert email_calls == []
     # No mark when disabled (the cluster only marks AFTER delivery attempt).
-    assert main_module._camera_health_state['cam-1']['offline_notified'] is False
+    assert main_module._state._camera_health_state['cam-1']['offline_notified'] is False
 
 
 def test_deliver_fires_push_only_when_only_push_enabled(ch, main_module, monkeypatch, stub_delivery_services, stub_logger):
@@ -514,7 +467,7 @@ def test_deliver_fires_push_only_when_only_push_enabled(ch, main_module, monkeyp
     )
     monkeypatch.setattr(ch, 'effective_push_notification_settings', lambda: {'enabled': True})
     monkeypatch.setattr(ch, 'effective_email_alert_settings', lambda: {'enabled': False})
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': False, 'offline_since': time.time() - 600,
         'offline_notified': False, 'recovery_notified': False,
     }
@@ -522,7 +475,7 @@ def test_deliver_fires_push_only_when_only_push_enabled(ch, main_module, monkeyp
     assert len(push_calls) == 1
     assert push_calls[0] == ('Camera Offline: Front Yard', 'Camera Front Yard (cam-1) has gone offline.')
     assert email_calls == []
-    assert main_module._camera_health_state['cam-1']['offline_notified'] is True
+    assert main_module._state._camera_health_state['cam-1']['offline_notified'] is True
 
 
 def test_deliver_fires_email_with_recipients(ch, main_module, monkeypatch, stub_delivery_services, stub_logger):
@@ -536,7 +489,7 @@ def test_deliver_fires_email_with_recipients(ch, main_module, monkeypatch, stub_
         ch, 'effective_email_alert_settings',
         lambda: {'enabled': True, 'from_address': 'alerts@example.com'},
     )
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': False, 'offline_since': time.time() - 600,
         'offline_notified': False, 'recovery_notified': False,
     }
@@ -546,7 +499,7 @@ def test_deliver_fires_email_with_recipients(ch, main_module, monkeypatch, stub_
         ('Camera Offline: Front Yard', {'enabled': True, 'from_address': 'alerts@example.com'}, 'admin@example.com'),
         ('Camera Offline: Front Yard', {'enabled': True, 'from_address': 'alerts@example.com'}, 'ops@example.com'),
     ]
-    assert main_module._camera_health_state['cam-1']['offline_notified'] is True
+    assert main_module._state._camera_health_state['cam-1']['offline_notified'] is True
 
 
 def test_deliver_email_falls_back_to_from_address_when_no_recipients(ch, main_module, monkeypatch, stub_delivery_services, stub_logger):
@@ -560,7 +513,7 @@ def test_deliver_email_falls_back_to_from_address_when_no_recipients(ch, main_mo
         ch, 'effective_email_alert_settings',
         lambda: {'enabled': True, 'from_address': 'alerts@example.com'},
     )
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': False, 'offline_since': time.time() - 600,
         'offline_notified': False, 'recovery_notified': False,
     }
@@ -578,14 +531,14 @@ def test_deliver_recovery_event_uses_online_title(ch, main_module, monkeypatch, 
     )
     monkeypatch.setattr(ch, 'effective_push_notification_settings', lambda: {'enabled': True})
     monkeypatch.setattr(ch, 'effective_email_alert_settings', lambda: {'enabled': False})
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': True, 'offline_since': None, 'offline_notified': True, 'recovery_notified': False,
     }
     ch._deliver_camera_offline_notification('cam-1', 'Front Yard', 'recovery')
     assert push_calls == [
         ('Camera Online: Front Yard', 'Camera Front Yard (cam-1) is back online.'),
     ]
-    assert main_module._camera_health_state['cam-1']['recovery_notified'] is True
+    assert main_module._state._camera_health_state['cam-1']['recovery_notified'] is True
 
 
 def test_deliver_push_failure_logs_warning_but_marks_still(ch, main_module, monkeypatch, stub_logger, stub_delivery_services):
@@ -605,7 +558,7 @@ def test_deliver_push_failure_logs_warning_but_marks_still(ch, main_module, monk
     )
     monkeypatch.setattr(ch, 'effective_push_notification_settings', lambda: {'enabled': True})
     monkeypatch.setattr(ch, 'effective_email_alert_settings', lambda: {'enabled': False})
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': False, 'offline_since': time.time() - 600,
         'offline_notified': False, 'recovery_notified': False,
     }
@@ -613,7 +566,7 @@ def test_deliver_push_failure_logs_warning_but_marks_still(ch, main_module, monk
     ch._deliver_camera_offline_notification('cam-1', 'Front Yard', 'offline')
     assert len(warnings) == 1
     assert 'Push notify failed' in warnings[0][0][0]
-    assert main_module._camera_health_state['cam-1']['offline_notified'] is True
+    assert main_module._state._camera_health_state['cam-1']['offline_notified'] is True
 
 
 # ---------------------------------------------------------------------------
@@ -653,7 +606,7 @@ def test_check_cameras_health_skips_cameras_in_backoff_set_offline(ch, main_modu
     monkeypatch.setattr(_app_state, 'cameras_config', [{'id': 'cam-1', 'name': 'Cam One'}])
     monkeypatch.setattr(_app_state, 'live_detection_retry_after', {'cam-1': time.time() + 600})
     ch._check_cameras_health()
-    state = main_module._camera_health_state['cam-1']
+    state = main_module._state._camera_health_state['cam-1']
     assert state['online'] is False
     assert state['offline_since'] is not None
 
@@ -662,9 +615,9 @@ def test_check_cameras_health_empty_config_no_op(ch, main_module, monkeypatch):
     """No cameras to iterate -- early exit; state dict stays untouched."""
     import app.state as _app_state
     monkeypatch.setattr(_app_state, 'cameras_config', [])
-    initial_state_keys = list(main_module._camera_health_state.keys())
+    initial_state_keys = list(main_module._state._camera_health_state.keys())
     ch._check_cameras_health()
-    assert list(main_module._camera_health_state.keys()) == initial_state_keys
+    assert list(main_module._state._camera_health_state.keys()) == initial_state_keys
 
 
 # ---------------------------------------------------------------------------
@@ -673,16 +626,16 @@ def test_check_cameras_health_empty_config_no_op(ch, main_module, monkeypatch):
 
 def test_state_isolation_per_camera_id(ch, main_module):
     """Mutating camera 'A' must not affect camera 'B' state."""
-    main_module._camera_health_state['A'] = {
+    main_module._state._camera_health_state['A'] = {
         'online': True, 'offline_since': None, 'offline_notified': False, 'recovery_notified': False,
     }
-    main_module._camera_health_state['B'] = {
+    main_module._state._camera_health_state['B'] = {
         'online': True, 'offline_since': None, 'offline_notified': False, 'recovery_notified': False,
     }
     ch._update_camera_health('A', False)
-    assert main_module._camera_health_state['A']['online'] is False
-    assert main_module._camera_health_state['B']['online'] is True  # unaffected
-    assert main_module._camera_health_state['B']['offline_since'] is None
+    assert main_module._state._camera_health_state['A']['online'] is False
+    assert main_module._state._camera_health_state['B']['online'] is True  # unaffected
+    assert main_module._state._camera_health_state['B']['offline_since'] is None
 
 
 # ---------------------------------------------------------------------------
@@ -694,7 +647,7 @@ def test_lock_discipline_concurrent_updates_no_corruption(ch, main_module):
     produce a non-corrupted final state. The threading.Lock around the
     state-dict mutation guarantees no dictionary or key is in flight
     while another thread inspects it."""
-    main_module._camera_health_state['race-cam'] = {
+    main_module._state._camera_health_state['race-cam'] = {
         'online': True, 'offline_since': None, 'offline_notified': False, 'recovery_notified': False,
     }
 
@@ -712,7 +665,7 @@ def test_lock_discipline_concurrent_updates_no_corruption(ch, main_module):
         for f in futures:
             f.result()
     assert errors == [], f'lock discipline broke: {errors}'
-    state = main_module._camera_health_state['race-cam']
+    state = main_module._state._camera_health_state['race-cam']
     # Final online flag must be a real bool (never mid-write garbage).
     assert isinstance(state['online'], bool)
     # offline_since is either None (when last transition was online) or a float >= 0.
@@ -722,7 +675,7 @@ def test_lock_discipline_concurrent_updates_no_corruption(ch, main_module):
 def test_lock_discipline_concurrent_mark_no_key_error(ch, main_module):
     """8 threads concurrently calling `_mark_*_notified` for an existing
     state should not raise a KeyError mid-transit."""
-    main_module._camera_health_state['mark-cam'] = {
+    main_module._state._camera_health_state['mark-cam'] = {
         'online': False, 'offline_since': time.time() - 600,
         'offline_notified': False, 'recovery_notified': True,
     }
@@ -742,7 +695,7 @@ def test_lock_discipline_concurrent_mark_no_key_error(ch, main_module):
     for t in threads:
         t.join()
     assert errors == [], f'lock discipline broke: {errors}'
-    state = main_module._camera_health_state['mark-cam']
+    state = main_module._state._camera_health_state['mark-cam']
     assert state['offline_notified'] is True
     assert state['recovery_notified'] is True
 
@@ -753,22 +706,22 @@ def test_lock_discipline_concurrent_mark_no_key_error(ch, main_module):
 
 def test_state_machine_invariant_offline_to_offline_does_not_change_offline_since(ch, main_module):
     """Idempotent offline update must NOT increment / reset offline_since."""
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': False, 'offline_since': 1000.0,
         'offline_notified': True, 'recovery_notified': False,
     }
-    initial_offline_since = main_module._camera_health_state['cam-1']['offline_since']
+    initial_offline_since = main_module._state._camera_health_state['cam-1']['offline_since']
     ch._update_camera_health('cam-1', False)
-    assert main_module._camera_health_state['cam-1']['offline_since'] == initial_offline_since
+    assert main_module._state._camera_health_state['cam-1']['offline_since'] == initial_offline_since
 
 
 def test_state_machine_recovers_only_after_offline(ch, main_module):
     """A camera that's already online must NOT trigger a recovery state change."""
-    main_module._camera_health_state['cam-1'] = {
+    main_module._state._camera_health_state['cam-1'] = {
         'online': True, 'offline_since': None, 'offline_notified': False, 'recovery_notified': True,  # prior false recovery
     }
     ch._update_camera_health('cam-1', True)
-    state = main_module._camera_health_state['cam-1']
+    state = main_module._state._camera_health_state['cam-1']
     assert state['online'] is True
     # No transition -> recovery_notified stays as before (no spurious changes).
     assert state['recovery_notified'] is True
