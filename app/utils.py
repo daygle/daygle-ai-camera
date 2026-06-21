@@ -22,8 +22,16 @@ Cluster membership:
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
+
+BASE_DIR: Path = Path(__file__).resolve().parent.parent
+
+
+def _current_version() -> str:
+    version_file = BASE_DIR / 'VERSION'
+    return version_file.read_text(encoding='utf-8').strip() if version_file.exists() else 'unknown'
 
 
 def _non_empty_setting(settings: dict[str, Any], key: str) -> str:

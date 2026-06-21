@@ -121,43 +121,7 @@ def app_modules():
 
 
 # ---------------------------------------------------------------------------
-# 1. Back-compat aliases -- the single most important Pool A contract.
-# ---------------------------------------------------------------------------
-
-
-def test_main_login_page_alias_points_to_web_router_login_page(app_modules):
-    """``main.login_page`` must be the SAME function object as
-    ``web_router.login_page``.
-
-    The Pool A from-import rebind in ``app/main.py``
-    (``from app.api.web_router import login_page as login_page``) creates a
-    name ``login_page`` in main's namespace pointing to the web_router
-    implementation. After the DI refactor, ``auth_router`` imports
-    ``login_page`` directly from ``app.api.web_router`` rather than via
-    ``main.login_page``; the rebind is retained so that any code reaching
-    ``main.login_page`` resolves to the same object.
-    """
-    assert (
-        app_modules.main.login_page is app_modules.web_router.login_page
-    ), "main.login_page back-compat alias not wired to app.api.web_router.login_page"
-
-
-def test_main_setup_page_alias_points_to_web_router_setup_page(app_modules):
-    """``main.setup_page`` must be the SAME function object as
-    ``web_router.setup_page``.
-
-    Same back-compat pattern as ``login_page``. After the DI refactor,
-    ``auth_router``'s POST ``/setup`` handler imports ``setup_page``
-    directly from ``app.api.web_router``; the Pool A rebind on ``app.main``
-    is retained so that ``main.setup_page`` resolves to the same object.
-    """
-    assert (
-        app_modules.main.setup_page is app_modules.web_router.setup_page
-    ), "main.setup_page back-compat alias not wired to app.api.web_router.setup_page"
-
-
-# ---------------------------------------------------------------------------
-# 2. web_router registration: 22 unique paths.
+# 1. web_router registration: 22 unique paths.
 # ---------------------------------------------------------------------------
 
 

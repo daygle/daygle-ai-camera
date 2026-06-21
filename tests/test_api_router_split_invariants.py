@@ -668,14 +668,22 @@ def test_every_pool_a_consumer_resolves_on_app_main():
     ``app/*.py`` + ``app/api/*.py`` must resolve to a name module-level
     defined in ``app/main.py``. A missing definition raises ImportError
     at collection time.
+
+    Pool A has been fully eliminated: all routers now import directly from
+    their canonical submodules. This test now verifies that zero new
+    ``from app.main import`` module-level consumers are introduced -- any
+    such line would be a regression back toward the Pool A pattern.
     """
     main_defs = _collect_app_main_definitions()
     consumers = _collect_pool_a_consumers()
-    # Currently 29 consumers; floor of 10 catches vacuous walker without
-    # over-fitting against future legitimate shrinkage.
-    assert len(consumers) >= 10, (
-        f"walker went suspiciously vacuous (saw {len(consumers)} Pool A "
-        f"consumers); refusing to silently pass on a possibly-broken glob"
+    assert len(consumers) == 0, (
+        f"Pool A regression: found {len(consumers)} new `from app.main import` "
+        f"module-level consumer(s) in app/ -- Pool A has been fully eliminated; "
+        f"import directly from the canonical submodule instead:\n  "
+        + "\n  ".join(
+            f"{p.relative_to(PROJECT_ROOT)}:{ln}: from app.main import {b}"
+            for b, p, ln in consumers
+        )
     )
     missing = [
         (binding, p, ln)

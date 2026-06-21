@@ -42,20 +42,16 @@ from app.backup import (
     refresh_runtime_after_database_restore,
     validate_restore_database,
 )
-from app.main import (
-    BASE_DIR,
-    config,
-    SESSION_COOKIE_NAME,
-)
+from app.auth import SESSION_COOKIE
+from app.utils import _current_version
+import app.state as _state
 
 router = APIRouter()
 
 
 @router.get('/api/settings/system')
 def get_system_settings(db=Depends(get_database), auth_enabled: bool = Depends(get_auth_enabled)):
-    version_file = BASE_DIR / 'VERSION'
-    current_version = version_file.read_text(encoding='utf-8').strip() if version_file.exists() else 'unknown'
-    return {'version': current_version, 'camera': get_camera_config(None), 'cameras': effective_cameras_config(), 'live': effective_live_config(), 'recording': effective_recording_config(), 'storage': effective_storage_config(), 'auth': {'session_timeout_hours': effective_auth_config().get('session_timeout_hours'), 'max_login_attempts': effective_auth_config().get('max_login_attempts'), 'lockout_minutes': effective_auth_config().get('lockout_minutes')}, 'bootstrap': {'database': config.get('storage', {}).get('database'), 'auth_enabled': auth_enabled, 'cookie_name': SESSION_COOKIE_NAME, 'server': config.get('server', {})}}
+    return {'version': _current_version(), 'camera': get_camera_config(None), 'cameras': effective_cameras_config(), 'live': effective_live_config(), 'recording': effective_recording_config(), 'storage': effective_storage_config(), 'auth': {'session_timeout_hours': effective_auth_config().get('session_timeout_hours'), 'max_login_attempts': effective_auth_config().get('max_login_attempts'), 'lockout_minutes': effective_auth_config().get('lockout_minutes')}, 'bootstrap': {'database': _state.config.get('storage', {}).get('database'), 'auth_enabled': auth_enabled, 'cookie_name': str(effective_auth_config().get('cookie_name', SESSION_COOKIE)), 'server': _state.config.get('server', {})}}
 
 
 @router.get('/api/settings/system/database/backup')

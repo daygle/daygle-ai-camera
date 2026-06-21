@@ -27,7 +27,7 @@ from app.recording_extension import (
     delete_recording_files,
     write_live_history_detection_track,
 )
-from app.main import _recording_timeline_segment
+from app.media_utils import _recording_timeline_segment
 
 router = APIRouter()
 

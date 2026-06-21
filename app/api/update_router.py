@@ -16,12 +16,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.auth_gates import require_admin
 from app.deps import get_logger
-from app.model_management import _parse_semver
-from app.main import (
-    BASE_DIR,
-    GITHUB_REPO,
-    _current_version,
-)
+from app.model_management import BASE_DIR, _parse_semver
+from app.utils import _current_version
+
+GITHUB_REPO = 'daygle/daygle-ai-camera'
 
 router = APIRouter()
 
