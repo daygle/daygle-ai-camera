@@ -83,6 +83,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.camera_config import normalize_camera_id
+from app.utils import normalize_bool_setting, normalize_email_recipients
+
 
 # Module-private label canonicalization: maps alternative spellings of the
 # same detection label to a single canonical form. Used exclusively by
@@ -118,7 +121,6 @@ def normalize_label_list(value: Any) -> list[str]:
 
 
 def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
-    from app.utils import normalize_bool_setting, normalize_email_recipients
     raw_rules = zone.get('object_rules')
     if isinstance(raw_rules, list):
         source_rules = raw_rules
@@ -213,7 +215,6 @@ def zone_motion_min_confidence(zone: dict[str, Any]) -> float:
 
 
 def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
-    from app.main import normalize_camera_id
     normalized: list[dict[str, Any]] = []
     if not isinstance(zones, list):
         return normalized
