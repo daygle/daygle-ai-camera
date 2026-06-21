@@ -93,16 +93,12 @@ def current_config_facades():
 def test_main_effective_ai_config_is_config_facades_effective_ai_config(main, current_config_facades):
     assert main.effective_ai_config is current_config_facades.effective_ai_config, (
         "main.effective_ai_config is NOT the same function object as "
-        "app.config_facades.effective_ai_config -- Pool A rebind wire broke"
+        "app.config_facades.effective_ai_config -- plain import wire broke"
     )
 
 
 def test_main_effective_recording_config_is_config_facades_recording_config(main, current_config_facades):
     assert main.effective_recording_config is current_config_facades.effective_recording_config
-
-
-def test_main_effective_live_config_is_config_facades_live_config(main, current_config_facades):
-    assert main.effective_live_config is current_config_facades.effective_live_config
 
 
 def test_main_effective_storage_config_is_config_facades_storage_config(main, current_config_facades):
@@ -115,10 +111,6 @@ def test_main_effective_auth_config_is_config_facades_auth_config(main, current_
 
 def test_main_effective_cameras_config_is_config_facades_cameras_config(main, current_config_facades):
     assert main.effective_cameras_config is current_config_facades.effective_cameras_config
-
-
-def test_main_get_camera_config_is_config_facades_get_camera_config(main, current_config_facades):
-    assert main.get_camera_config is current_config_facades.get_camera_config
 
 
 # ---------------------------------------------------------------------------

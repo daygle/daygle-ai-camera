@@ -102,21 +102,6 @@ def ais():
     return sys.modules["app.ai_settings"]
 
 
-def test_main_ai_status_payload_is_ai_settings_ai_status_payload(main, current_ai_settings):
-    assert main.ai_status_payload is current_ai_settings.ai_status_payload, (
-        "main.ai_status_payload is NOT the same function object as "
-        "app.ai_settings.ai_status_payload -- Pool A rebind wire broke"
-    )
-
-
-def test_main_detector_status_is_ai_settings_detector_status(main, current_ai_settings):
-    assert main.detector_status is current_ai_settings.detector_status
-
-
-def test_main_validate_ai_settings_is_ai_settings_validate_ai_settings(main, current_ai_settings):
-    assert main.validate_ai_settings is current_ai_settings.validate_ai_settings
-
-
 # ---------------------------------------------------------------------------
 # 2. Helpers -- isolate cross-module deps via monkeypatched helpers.
 # ---------------------------------------------------------------------------

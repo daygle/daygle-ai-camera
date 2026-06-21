@@ -204,6 +204,34 @@ def _server(app):
     return server, thread, f"http://127.0.0.1:{port}"
 
 
+def _m():
+    """Canonical module namespace — call after _load_app() only."""
+    import types
+    ns = types.SimpleNamespace()
+    ns.state = sys.modules["app.state"]
+    ns.live_snapshot = sys.modules["app.live_snapshot"]
+    ns.detection_state = sys.modules["app.detection_state"]
+    ns.event_debounce = sys.modules["app.event_debounce"]
+    ns.alert_dispatch = sys.modules["app.alert_dispatch"]
+    ns.detection_status = sys.modules["app.detection_status"]
+    ns.recording_extension = sys.modules["app.recording_extension"]
+    ns.live_monitor = sys.modules["app.live_monitor"]
+    ns.utils = sys.modules["app.utils"]
+    ns.camera_instance = sys.modules["app.camera_instance"]
+    ns.media_utils = sys.modules["app.media_utils"]
+    ns.model_management = sys.modules["app.model_management"]
+    ns.backup = sys.modules["app.backup"]
+    ns.sound_monitor = sys.modules["app.sound_monitor"]
+    ns.zone_detection = sys.modules["app.zone_detection"]
+    ns.camera_config = sys.modules["app.camera_config"]
+    ns.zone_schema = sys.modules["app.zone_schema"]
+    ns.payload_validators = sys.modules["app.payload_validators"]
+    ns.camera_lifecycle = sys.modules["app.camera_lifecycle"]
+    ns.camera_id = sys.modules["app.camera_id"]
+    ns.recording_settings = sys.modules["app.recording_settings"]
+    return ns
+
+
 def test_detector_backend_selection(tmp_path):
     from app.detector import OnnxYoloDetector, create_detector
 
@@ -324,6 +352,7 @@ def test_ai_settings_save_onnx_missing_keeps_previous_detector_and_errors_on_upl
 def test_live_snapshot_renderer_can_hide_object_overlay(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
 
     frame = {'width': 1280, 'height': 720, 'frame_number': 7, 'timestamp': 1_700_000_000}
     detections = [
@@ -334,11 +363,11 @@ def test_live_snapshot_renderer_can_hide_object_overlay(tmp_path, monkeypatch):
         }
     ]
 
-    without_overlay = main.render_live_snapshot_svg(frame, detections, overlay=False)
+    without_overlay = mods.live_snapshot.render_live_snapshot_svg(frame, detections, overlay=False)
     assert 'Overlay OFF' in without_overlay
     assert '<g class="detection-box"' not in without_overlay
 
-    with_overlay = main.render_live_snapshot_svg(frame, detections, overlay=True)
+    with_overlay = mods.live_snapshot.render_live_snapshot_svg(frame, detections, overlay=True)
     assert 'Overlay ON' in with_overlay
     assert '<g class="detection-box"' in with_overlay
     assert 'person · 92%' in with_overlay
@@ -347,6 +376,7 @@ def test_live_snapshot_renderer_can_hide_object_overlay(tmp_path, monkeypatch):
 def test_live_snapshot_jpeg_overlay_changes_frame_when_detections_exist(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
 
     cv2 = pytest.importorskip('cv2')
     np = pytest.importorskip('numpy')
@@ -362,7 +392,7 @@ def test_live_snapshot_jpeg_overlay_changes_frame_when_detections_exist(tmp_path
         }
     ]
 
-    overlaid = main.render_live_snapshot_jpeg_overlay(image_bytes, detections)
+    overlaid = mods.live_snapshot.render_live_snapshot_jpeg_overlay(image_bytes, detections)
 
     assert overlaid != image_bytes
     decoded = cv2.imdecode(np.frombuffer(overlaid, dtype=np.uint8), cv2.IMREAD_COLOR)
@@ -373,6 +403,7 @@ def test_live_snapshot_jpeg_overlay_changes_frame_when_detections_exist(tmp_path
 def test_export_yolo_onnx_uses_ultralytics_export(tmp_path, monkeypatch):
     app, _database_path = _load_app(tmp_path, monkeypatch)
     main = sys.modules["app.main"]
+    mods = _m()
     destination = tmp_path / "models" / "yolov8n.onnx"
 
     def fake_run(command, cwd, capture_output, text, timeout, check):  # noqa: ANN001
@@ -390,7 +421,7 @@ def test_export_yolo_onnx_uses_ultralytics_export(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main.subprocess, "run", fake_run)
 
-    assert main.export_yolo_onnx("yolov8n", destination) == len(b"fake onnx")
+    assert mods.model_management.export_yolo_onnx("yolov8n", destination) == len(b"fake onnx")
     assert destination.exists()
 
 
@@ -401,6 +432,7 @@ def test_detection_backoff_keeps_prebuffer_warm(tmp_path, monkeypatch):
     # triggering subject.
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
 
     camera = {
         'id': 'front-yard',
@@ -435,10 +467,10 @@ def test_detection_backoff_keeps_prebuffer_warm(tmp_path, monkeypatch):
     monkeypatch.setattr(main.threading, 'Thread', _track_thread)
 
     # Put the camera into detection backoff.
-    with main._live_backoff_lock:
-        main.live_detection_retry_after['front-yard'] = time.time() + 300
+    with main._state._live_backoff_lock:
+        main._state.live_detection_retry_after['front-yard'] = time.time() + 300
 
-    main.run_live_alert_monitor_once({'background_detection_enabled': True, 'detection_interval_seconds': 0.5})
+    mods.live_monitor.run_live_alert_monitor_once({'background_detection_enabled': True, 'detection_interval_seconds': 0.5})
 
     assert primed == ['front-yard'], 'prebuffer should be primed despite detection backoff'
     assert threads_started == [], 'detection should remain throttled during backoff'
@@ -483,6 +515,7 @@ def test_camera_diagnostics_log_crud_and_retention(tmp_path, monkeypatch):
 def test_camera_diagnostics_purge_follows_retention_days(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
 
     main.database.set_setting('recording', {'retention_days': 3}, main.utc_now())
     now = datetime.now(timezone.utc)
@@ -496,7 +529,7 @@ def test_camera_diagnostics_purge_follows_retention_days(tmp_path, monkeypatch):
         event_type='detection_backoff', severity='warning', message='old',
     )
 
-    removed = main.purge_camera_diagnostics_by_policy()
+    removed = mods.backup.purge_camera_diagnostics_by_policy()
     assert removed == 1
     remaining = main.database.list_camera_diagnostics()
     assert len(remaining) == 1
@@ -506,17 +539,18 @@ def test_camera_diagnostics_purge_follows_retention_days(tmp_path, monkeypatch):
 def test_detection_backoff_writes_camera_diagnostic(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
 
-    main.schedule_live_camera_backoff('front-yard', 'frame read failed')
+    mods.event_debounce.schedule_live_camera_backoff('front-yard', 'frame read failed')
     entries = main.database.list_camera_diagnostics(camera_id='front-yard')
     assert any(e['event_type'] == 'detection_backoff' for e in entries)
 
     # A second failure in the same streak must not add another row (no flooding).
-    main.schedule_live_camera_backoff('front-yard', 'frame read failed again')
+    mods.event_debounce.schedule_live_camera_backoff('front-yard', 'frame read failed again')
     assert main.database.count_camera_diagnostics(event_type='detection_backoff') == 1
 
     # Recovery after a backoff streak logs a recovered event.
-    main.clear_live_camera_backoff('front-yard')
+    mods.event_debounce.clear_live_camera_backoff('front-yard')
     assert main.database.count_camera_diagnostics(event_type='detection_recovered') == 1
 
 
@@ -621,6 +655,7 @@ def test_read_ingest_frame_decodes_latest_jpeg(tmp_path, monkeypatch):
     np = pytest.importorskip('numpy')
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
 
     key = main.RecordingService._camera_key('cam1')
     frames_dir = main.recording_service.frames_dir / key
@@ -629,11 +664,11 @@ def test_read_ingest_frame_decodes_latest_jpeg(tmp_path, monkeypatch):
     assert ok
     (frames_dir / 'latest.jpg').write_bytes(encoded.tobytes())
 
-    sample = main.read_ingest_frame('cam1')
+    sample = mods.camera_instance.read_ingest_frame('cam1')
     assert sample is not None
     image, frame = sample
     assert frame['width'] == 64 and frame['height'] == 48 and frame['timestamp'] > 0
-    assert main.read_ingest_frame('no-such-camera') is None
+    assert mods.camera_instance.read_ingest_frame('no-such-camera') is None
 
 
 def test_shared_ingest_worker_command_fans_out_three_outputs(tmp_path, monkeypatch):
@@ -726,6 +761,7 @@ def test_prebuffer_window_change_updates_worker_without_restart(tmp_path, monkey
 def test_sound_detector_diagnostics_and_reason():
     import app.main as main
     from app.sound_detector import SoundDetector
+    mods = _m()
 
     rules = [
         {'class': 'car_alarm', 'name': 'Car Alarm', 'enabled': True, 'confidence_threshold': 0.35, 'cooldown_seconds': 60},
@@ -734,14 +770,14 @@ def test_sound_detector_diagnostics_and_reason():
     det = SoundDetector(on_detect=lambda *a, **k: None, rules=rules, source='ingest')
 
     # Nothing heard yet -> no diagnostics confidence, no reason.
-    assert main._sound_status_reason(det.diagnostics()) is None
+    assert mods.sound_monitor._sound_status_reason(det.diagnostics()) is None
 
     # A class heard below its threshold -> 'below_threshold'.
     with det._status_lock:
         det._last_confidences = {'car_alarm': 0.28, 'dog_bark': 0.05}
     diag = det.diagnostics()
     assert diag[0]['class'] == 'car_alarm'  # sorted by confidence, highest first
-    reason = main._sound_status_reason(diag)
+    reason = mods.sound_monitor._sound_status_reason(diag)
     assert reason['code'] == 'below_threshold'
     assert reason['class'] == 'car_alarm'
     assert reason['threshold'] == 0.35
@@ -750,14 +786,14 @@ def test_sound_detector_diagnostics_and_reason():
     with det._status_lock:
         det._last_confidences = {'car_alarm': 0.50}
         det._last_triggered = {'car_alarm': time.time()}
-    cooldown_reason = main._sound_status_reason(det.diagnostics())
+    cooldown_reason = mods.sound_monitor._sound_status_reason(det.diagnostics())
     assert cooldown_reason['code'] == 'cooldown'
     assert cooldown_reason['cooldown_remaining'] > 0
 
     # Same class above threshold once its cooldown has elapsed -> 'detected'.
     with det._status_lock:
         det._last_triggered = {'car_alarm': time.time() - 120}
-    assert main._sound_status_reason(det.diagnostics())['code'] == 'detected'
+    assert mods.sound_monitor._sound_status_reason(det.diagnostics())['code'] == 'detected'
 
 
 def test_sound_detector_ingest_consumes_audio_segments(tmp_path):
@@ -1469,8 +1505,9 @@ def test_runtime_data_reset_clears_operational_data_but_keeps_settings(tmp_path,
 def test_onvif_camera_settings_build_rtsp_url(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
 
-    settings = main.validate_camera_settings({
+    settings = mods.payload_validators.validate_camera_settings({
         'backend': 'onvif',
         'host': '192.168.1.50',
         'port': 554,
@@ -1484,16 +1521,17 @@ def test_onvif_camera_settings_build_rtsp_url(tmp_path, monkeypatch):
     })
 
     assert settings['backend'] == 'onvif'
-    assert main.build_stream_url(settings) == 'rtsp://daygle%20user:pa%3Ass@192.168.1.50:554/stream1'
-    camera = main.create_camera(settings)
+    assert mods.utils.build_stream_url(settings) == 'rtsp://daygle%20user:pa%3Ass@192.168.1.50:554/stream1'
+    camera = mods.camera_instance.create_camera(settings)
     assert camera.stream_url == 'rtsp://daygle%20user:pa%3Ass@192.168.1.50:554/stream1'
 
 
 def test_onvif_stream_url_uses_form_credentials_when_url_is_bare(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
 
-    settings = main.validate_camera_settings({
+    settings = mods.payload_validators.validate_camera_settings({
         'backend': 'onvif',
         'stream_url': 'rtsp://192.168.40.103:554/live/0/MAIN',
         'username': 'admin',
@@ -1504,7 +1542,7 @@ def test_onvif_stream_url_uses_form_credentials_when_url_is_bare(tmp_path, monke
         'flip': 'none',
     })
 
-    assert main.build_stream_url(settings) == 'rtsp://admin:pa%3Ass@192.168.40.103:554/live/0/MAIN'
+    assert mods.utils.build_stream_url(settings) == 'rtsp://admin:pa%3Ass@192.168.40.103:554/live/0/MAIN'
 
 
 def test_opencv_stream_camera_reuses_rtsp_capture(monkeypatch):
@@ -1663,6 +1701,7 @@ def test_opencv_stream_camera_applies_ffmpeg_log_level_after_each_videocapture(m
 def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
 
     class FakeDetector:
         backend = 'onnx'
@@ -1679,7 +1718,7 @@ def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypat
             ]
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
-    main.live_detection_last_checked.clear()
+    main._state.live_detection_last_checked.clear()
 
     strict_settings = {
         'id': 'camera-1',
@@ -1700,7 +1739,7 @@ def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypat
         },
     }
 
-    blocked_event_id = main.process_live_stream_alerts(
+    blocked_event_id = mods.live_monitor.process_live_stream_alerts(
         b'jpeg-frame',
         {'width': 1280, 'height': 720},
         strict_settings,
@@ -1727,7 +1766,7 @@ def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypat
         },
     }
 
-    allowed_event_id = main.process_live_stream_alerts(
+    allowed_event_id = mods.live_monitor.process_live_stream_alerts(
         b'jpeg-frame',
         {'width': 1280, 'height': 720},
         relaxed_settings,
@@ -1742,6 +1781,7 @@ def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypat
 def test_extend_active_rtsp_recording_updates_trigger_label_to_specific_object(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
 
     now = datetime.now(timezone.utc)
     started_at = (now - timedelta(seconds=5)).isoformat()
@@ -1764,15 +1804,15 @@ def test_extend_active_rtsp_recording_updates_trigger_label_to_specific_object(t
         trigger_label='motion',
     )
 
-    with main.active_rtsp_recordings_lock:
-        main.active_rtsp_recordings['camera-1'] = {
+    with main._state.active_rtsp_recordings_lock:
+        main._state.active_rtsp_recordings['camera-1'] = {
             'recording_id': recording_id,
             'start_capture_ts': (now - timedelta(seconds=5)).timestamp(),
             'capture_deadline_ts': now.timestamp(),
             'max_capture_deadline_ts': (now + timedelta(seconds=20)).timestamp(),
         }
 
-    extended_id = main.extend_active_rtsp_recording(
+    extended_id = mods.recording_extension.extend_active_rtsp_recording(
         camera_id='camera-1',
         event_time=now.isoformat(),
         recording_config={'extension_step_seconds': 10},
@@ -1785,12 +1825,13 @@ def test_extend_active_rtsp_recording_updates_trigger_label_to_specific_object(t
     assert updated['trigger_label'] == 'dog'
     assert updated['trigger_type'] == 'alert'
 
-    with main.active_rtsp_recordings_lock:
-        main.active_rtsp_recordings.pop('camera-1', None)
+    with main._state.active_rtsp_recordings_lock:
+        main._state.active_rtsp_recordings.pop('camera-1', None)
 
 def test_live_stream_detection_queue_runs_in_background_and_deduplicates(tmp_path, monkeypatch):
     _app, _database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
 
     started = threading.Event()
     release = threading.Event()
@@ -1809,30 +1850,31 @@ def test_live_stream_detection_queue_runs_in_background_and_deduplicates(tmp_pat
 
     detector = SlowDetector()
     monkeypatch.setattr(main._state, 'detector', detector)
-    main.live_detection_last_checked.clear()
-    main.active_live_detection_cameras.clear()
+    main._state.live_detection_last_checked.clear()
+    main._state.active_live_detection_cameras.clear()
     # queue_live_stream_alerts is the frontend-triggered path and only runs detection
     # when background_detection_enabled=False (otherwise the background monitor handles it).
     main.database.set_setting('live', {'background_detection_enabled': False}, main.utc_now())
     settings = {'id': 'camera-1', 'name': 'Front Door', 'detection': {'zones': []}}
 
-    main.queue_live_stream_alerts(b'jpeg-frame-1', {'width': 1280, 'height': 720}, settings)
+    mods.live_monitor.queue_live_stream_alerts(b'jpeg-frame-1', {'width': 1280, 'height': 720}, settings)
     assert started.wait(timeout=2)
-    main.queue_live_stream_alerts(b'jpeg-frame-2', {'width': 1280, 'height': 720}, settings)
+    mods.live_monitor.queue_live_stream_alerts(b'jpeg-frame-2', {'width': 1280, 'height': 720}, settings)
 
     assert detector.calls == 1
-    assert 'camera-1' in main.active_live_detection_cameras
+    assert 'camera-1' in main._state.active_live_detection_cameras
 
     release.set()
     deadline = time.time() + 2
-    while 'camera-1' in main.active_live_detection_cameras and time.time() < deadline:
+    while 'camera-1' in main._state.active_live_detection_cameras and time.time() < deadline:
         time.sleep(0.01)
-    assert 'camera-1' not in main.active_live_detection_cameras
+    assert 'camera-1' not in main._state.active_live_detection_cameras
 
 
 def test_live_stream_detection_without_alert_rule_does_not_record_by_default(tmp_path, monkeypatch):
     _app, _database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
 
     class FakeDetector:
         backend = 'onnx'
@@ -1849,10 +1891,10 @@ def test_live_stream_detection_without_alert_rule_does_not_record_by_default(tmp
             ]
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
-    main.live_detection_last_checked.clear()
+    main._state.live_detection_last_checked.clear()
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
 
-    event_id = main.process_live_stream_alerts(
+    event_id = mods.live_monitor.process_live_stream_alerts(
         b'jpeg-frame',
         {'width': 1280, 'height': 720},
         {
@@ -1870,7 +1912,7 @@ def test_live_stream_detection_without_alert_rule_does_not_record_by_default(tmp
     assert event_id is not None
     event = main.database.get_event(event_id)
     assert event['recording_status'] == 'none'
-    status = main.live_detection_status_payload('camera-1')
+    status = mods.detection_status.live_detection_status_payload('camera-1')
     assert status['state'] == 'checked'
     assert status['recording_state'] == 'skipped'
     assert 'waiting for an enabled alert rule' in status['recording_reason']
@@ -1879,6 +1921,7 @@ def test_live_stream_detection_without_alert_rule_does_not_record_by_default(tmp
 def test_live_stream_detection_saves_only_allowed_zone_object_labels(tmp_path, monkeypatch):
     _app, _database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
 
     class FakeDetector:
         backend = 'onnx'
@@ -1900,10 +1943,10 @@ def test_live_stream_detection_saves_only_allowed_zone_object_labels(tmp_path, m
             ]
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
-    main.live_detection_last_checked.clear()
+    main._state.live_detection_last_checked.clear()
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
 
-    event_id = main.process_live_stream_alerts(
+    event_id = mods.live_monitor.process_live_stream_alerts(
         b'jpeg-frame',
         {'width': 1280, 'height': 720},
         {
@@ -1930,13 +1973,14 @@ def test_live_stream_detection_saves_only_allowed_zone_object_labels(tmp_path, m
     assert event_id is not None
     event = main.database.get_event(event_id)
     assert [detection['label'] for detection in event['detections']] == ['person']
-    status = main.live_detection_status_payload('camera-1')
+    status = mods.detection_status.live_detection_status_payload('camera-1')
     assert [detection['label'] for detection in status['detections']] == ['person']
 
 
 def test_live_stream_camera_continuous_recording_records_without_alert_rule(tmp_path, monkeypatch):
     _app, _database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
 
     class FakeDetector:
         backend = 'onnx'
@@ -1953,10 +1997,10 @@ def test_live_stream_camera_continuous_recording_records_without_alert_rule(tmp_
             ]
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
-    main.live_detection_last_checked.clear()
+    main._state.live_detection_last_checked.clear()
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
 
-    event_id = main.process_live_stream_alerts(
+    event_id = mods.live_monitor.process_live_stream_alerts(
         b'jpeg-frame',
         {'width': 1280, 'height': 720},
         {
@@ -1975,16 +2019,17 @@ def test_live_stream_camera_continuous_recording_records_without_alert_rule(tmp_
     event = main.database.get_event(event_id)
     assert event['recording_status'] == 'linked'
     assert event['recordings'][0]['trigger_type'] == 'continuous'
-    status = main.live_detection_status_payload('camera-1')
+    status = mods.detection_status.live_detection_status_payload('camera-1')
     assert status['recording_state'] == 'linked'
 
 
 def test_onvif_camera_settings_require_stream_source(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
 
     try:
-        main.validate_camera_settings({'backend': 'onvif', 'width': 640, 'height': 480, 'fps': 10, 'flip': 'none'})
+        mods.payload_validators.validate_camera_settings({'backend': 'onvif', 'width': 640, 'height': 480, 'fps': 10, 'flip': 'none'})
     except Exception as exc:  # FastAPI raises HTTPException here.
         assert getattr(exc, 'status_code', None) == 400
         assert 'stream_url is required' in str(getattr(exc, 'detail', ''))
@@ -2140,6 +2185,7 @@ def test_rtsp_recording_errors_redact_stream_password():
 def test_rtsp_recording_capture_falls_back_on_stream_error(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
 
     class FakeRecordingService:
         def __init__(self):
@@ -2158,10 +2204,10 @@ def test_rtsp_recording_capture_falls_back_on_stream_error(tmp_path, monkeypatch
     service = FakeRecordingService()
     monkeypatch.setattr(main._state, 'recording_service', service)
     stream_url = 'rtsp://admin:secret-password@192.168.40.101:554/live/0/MAIN'
-    main.active_rtsp_recordings.clear()
+    main._state.active_rtsp_recordings.clear()
 
     file_path = tmp_path / 'recordings' / 'event_1.mp4'
-    main.start_rtsp_recording_capture(
+    mods.recording_extension.start_rtsp_recording_capture(
         stream_url,
         {'file_path': str(file_path), 'duration_seconds': 10, 'trigger_type': 'motion'},
         1,
@@ -2176,7 +2222,7 @@ def test_rtsp_recording_capture_falls_back_on_stream_error(tmp_path, monkeypatch
     assert service.rtsp_calls == 1
     assert service.fallback_calls == 1
     assert file_path.read_text(encoding='utf-8') == 'fallback'
-    main.active_rtsp_recordings.clear()
+    main._state.active_rtsp_recordings.clear()
 
 
 def test_collect_prebuffer_segments_selects_by_content_overlap(tmp_path):
@@ -2475,6 +2521,8 @@ def test_rtsp_capture_anchors_timing_and_track_to_actual_media_window(tmp_path, 
     overlay boxes drifting against the video during playback."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    from collections import deque
+    mods = _m()
 
     now = time.time()
     actual_start = now - 12.0
@@ -2491,9 +2539,9 @@ def test_rtsp_capture_anchors_timing_and_track_to_actual_media_window(tmp_path, 
             return actual_start, 15.0
 
     monkeypatch.setattr(main._state, 'recording_service', FakeRecordingService())
-    main.active_rtsp_recordings.clear()
+    main._state.active_rtsp_recordings.clear()
     box = {'x': 0.2, 'y': 0.2, 'width': 0.3, 'height': 0.3}
-    main.live_detection_history['camera-1'] = main.deque(
+    main._state.live_detection_history['camera-1'] = deque(
         [(actual_start + 1.0, [{'label': 'person', 'confidence': 0.9, 'box': box}])],
         maxlen=1200,
     )
@@ -2510,7 +2558,7 @@ def test_rtsp_capture_anchors_timing_and_track_to_actual_media_window(tmp_path, 
         source='rtsp',
         created_at=main.utc_now(),
     )
-    main.start_rtsp_recording_capture(
+    mods.recording_extension.start_rtsp_recording_capture(
         'rtsp://example/stream',
         {'file_path': str(clip), 'duration_seconds': 15, 'trigger_type': 'motion'},
         1,
@@ -2521,7 +2569,7 @@ def test_rtsp_capture_anchors_timing_and_track_to_actual_media_window(tmp_path, 
         recording_config={'pre_event_seconds': 5, 'post_event_seconds': 10, 'max_clip_seconds': 60},
     )
 
-    sidecar = main.recording_track_sidecar_path(clip)
+    sidecar = mods.recording_extension.recording_track_sidecar_path(clip)
     deadline = time.time() + 3
     while not sidecar.exists() and time.time() < deadline:
         time.sleep(0.05)
@@ -2533,7 +2581,7 @@ def test_rtsp_capture_anchors_timing_and_track_to_actual_media_window(tmp_path, 
     # The history sample 1s into the actual media window must land at t=1.0.
     assert track[0]['t'] == pytest.approx(1.0, abs=0.01)
     assert track[0]['detections'][0]['label'] == 'person'
-    main.active_rtsp_recordings.clear()
+    main._state.active_rtsp_recordings.clear()
 
 
 def test_write_rtsp_clip_rejects_videoless_output(tmp_path, monkeypatch):
@@ -2645,6 +2693,7 @@ def test_write_rtsp_clip_explicitly_records_optional_audio_as_aac(tmp_path, monk
 def test_playback_transcode_preserves_optional_audio_stream(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
 
     commands = []
 
@@ -2660,10 +2709,10 @@ def test_playback_transcode_preserves_optional_audio_stream(tmp_path, monkeypatc
     monkeypatch.setattr(_media_utils, 'mp4_has_video_stream', lambda _path: True)
 
     source_path = tmp_path / 'source.mkv'
-    output_path = main.recording_playback_sidecar_path(source_path)
+    output_path = mods.media_utils.recording_playback_sidecar_path(source_path)
     source_path.write_bytes(b'input-video')
 
-    main.transcode_recording_to_mp4(source_path, output_path)
+    mods.media_utils.transcode_recording_to_mp4(source_path, output_path)
 
     command = commands[0]
     assert output_path.name == 'source.h264-audio.mp4'
@@ -2677,6 +2726,7 @@ def test_playback_transcode_preserves_optional_audio_stream(tmp_path, monkeypatc
 def test_h264_mp4_with_browser_playable_audio_streams_directly(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
 
     import app.media_utils as _media_utils
     source_path = tmp_path / 'source.mp4'
@@ -2689,12 +2739,13 @@ def test_h264_mp4_with_browser_playable_audio_streams_directly(tmp_path, monkeyp
 
     monkeypatch.setattr(_media_utils, 'transcode_recording_to_mp4', fail_transcode)
 
-    assert main.recording_stream_path(source_path) == source_path
+    assert mods.media_utils.recording_stream_path(source_path) == source_path
 
 
 def test_h264_mp4_without_audio_streams_directly(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    mods = _m()
     import app.media_utils as _media_utils
 
     source_path = tmp_path / 'source.mp4'
@@ -2707,7 +2758,7 @@ def test_h264_mp4_without_audio_streams_directly(tmp_path, monkeypatch):
 
     monkeypatch.setattr(_media_utils, 'transcode_recording_to_mp4', fail_transcode)
 
-    assert main.recording_stream_path(source_path) == source_path
+    assert mods.media_utils.recording_stream_path(source_path) == source_path
 
 
 @pytest.mark.skipif(
@@ -2732,9 +2783,10 @@ def test_h264_mp4_with_unsupported_audio_is_transcoded_for_playback(tmp_path, mo
 
     monkeypatch.setattr(_media_utils, 'transcode_recording_to_mp4', fake_transcode)
 
-    stream_path = main.recording_stream_path(source_path)
+    import app.media_utils as _mu
+    stream_path = _mu.recording_stream_path(source_path)
 
-    assert stream_path == main.recording_playback_sidecar_path(source_path)
+    assert stream_path == _mu.recording_playback_sidecar_path(source_path)
     assert stream_path.exists()
     assert transcoded == [(source_path, stream_path)]
 
@@ -2885,7 +2937,8 @@ def test_deliver_push_notifications_passes_all_triggered_labels(tmp_path, monkey
         {'name': 'Person alert', 'push_enabled': True},
     ]
 
-    main_module.deliver_push_notifications(triggered, 42, rules=rules)
+    import app.alert_dispatch as _ad2
+    _ad2.deliver_push_notifications(triggered, 42, rules=rules)
 
     assert len(captured) == 2
     assert [entry['triggered_labels'] for entry in captured] == [['cat', 'person'], ['cat', 'person']]
@@ -3126,6 +3179,7 @@ def test_recording_labels_api_filter_matches_any_recorded_label(tmp_path, monkey
     not just the single trigger_label column."""
     app, database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.recording_extension as _re
 
     class FakeDetector:
         backend = 'onnx'
@@ -3156,7 +3210,7 @@ def test_recording_labels_api_filter_matches_any_recorded_label(tmp_path, monkey
             alert_triggered=True,
             metadata={'camera_id': 'front', 'camera_name': 'Front'},
         )
-        recording_id = main.attach_event_recording(event_id, event_time, 'upload', detections)
+        recording_id = _re.attach_event_recording(event_id, event_time, 'upload', detections)
         assert recording_id is not None
 
         # The recording was tagged 'cat' as the trigger, but the join table
@@ -3229,6 +3283,7 @@ def test_recording_labels_backfill_seeds_existing_recordings(tmp_path):
 def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(tmp_path, monkeypatch):
     app, database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.recording_extension as _re
 
     class FakeDetector:
         backend = 'onnx'
@@ -3263,7 +3318,7 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
             alert_triggered=False,
             metadata={},
         )
-        recording_id = main.attach_event_recording(event_id, event_time, 'upload', detections)
+        recording_id = _re.attach_event_recording(event_id, event_time, 'upload', detections)
         assert recording_id is not None
 
         status, _headers, recordings = admin.request('/api/recordings')
@@ -3325,6 +3380,7 @@ def test_event_linked_recording_metadata_listing_stream_and_delete_permissions(t
 def test_recording_retention_purge_deletes_metadata_and_files(tmp_path, monkeypatch):
     app, database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.recording_extension as _re
 
     class FakeDetector:
         backend = 'onnx'
@@ -3350,7 +3406,7 @@ def test_recording_retention_purge_deletes_metadata_and_files(tmp_path, monkeypa
             alert_triggered=False,
             metadata={},
         )
-        recording_id = main.attach_event_recording(event_id, event_time, 'upload', detections)
+        recording_id = _re.attach_event_recording(event_id, event_time, 'upload', detections)
         assert recording_id is not None
         recording = admin.request(f"/api/recordings/{recording_id}")[2]
         file_path = Path(recording['file_path'])
@@ -3550,7 +3606,8 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
 
 def test_polygon_monitoring_zones_are_normalized_and_filter_by_shape(tmp_path, monkeypatch):
     _app, _database_path = _load_app(tmp_path, monkeypatch)
-    main = sys.modules["app.main"]
+    import app.zone_schema as _zs
+    import app.zone_detection as _zd
     triangle = {
         'id': 'triangle',
         'name': 'Triangle',
@@ -3563,7 +3620,7 @@ def test_polygon_monitoring_zones_are_normalized_and_filter_by_shape(tmp_path, m
         'monitor_objects': True,
     }
 
-    zones = main.normalize_monitoring_zones([triangle])
+    zones = _zs.normalize_monitoring_zones([triangle])
 
     assert zones[0]['x'] == 0.1
     assert zones[0]['y'] == 0.1
@@ -3577,15 +3634,16 @@ def test_polygon_monitoring_zones_are_normalized_and_filter_by_shape(tmp_path, m
         {'label': 'car', 'box': {'x': 0.7, 'y': 0.7, 'width': 0.1, 'height': 0.1}},
     ]
 
-    filtered = main.filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects', require_zones=True)
+    filtered = _zd.filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects', require_zones=True)
 
     assert [detection['label'] for detection in filtered] == ['person']
 
 
 def test_monitoring_zones_filter_object_detections_by_label(tmp_path, monkeypatch):
     _app, _database_path = _load_app(tmp_path, monkeypatch)
-    main = sys.modules["app.main"]
-    zones = main.normalize_monitoring_zones([
+    import app.zone_schema as _zs
+    import app.zone_detection as _zd
+    zones = _zs.normalize_monitoring_zones([
         {
             'id': 'porch',
             'name': 'Porch',
@@ -3604,15 +3662,15 @@ def test_monitoring_zones_filter_object_detections_by_label(tmp_path, monkeypatc
         {'label': 'cat', 'box': {'x': 0.3, 'y': 0.3, 'width': 0.1, 'height': 0.1}},
     ]
 
-    filtered = main.filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects', require_zones=True)
+    filtered = _zd.filter_detections_for_camera_zones(detections, settings, zone_monitor_key='monitor_objects', require_zones=True)
 
     assert [detection['label'] for detection in filtered] == ['person', 'cat']
 
 
 def test_monitoring_zones_normalize_object_rules(tmp_path, monkeypatch):
     _app, _database_path = _load_app(tmp_path, monkeypatch)
-    main = sys.modules["app.main"]
-    zones = main.normalize_monitoring_zones([
+    import app.zone_schema as _zs
+    zones = _zs.normalize_monitoring_zones([
         {
             'id': 'porch',
             'name': 'Porch',
@@ -3656,7 +3714,7 @@ def test_rule_notify_active_now_window(tmp_path, monkeypatch):
     """The email/push window gates only when set, supports midnight wrap, and is
     evaluated in the admin's local timezone."""
     _app, _database_path = _load_app(tmp_path, monkeypatch)
-    main = sys.modules["app.main"]
+    import app.alert_dispatch as _ad
     # `_rule_notify_active_now` reads `_alert_datetime_prefs` from
     # ``app.alert_dispatch``'s module-global namespace, NOT via main.
     monkeypatch.setattr('app.alert_dispatch._alert_datetime_prefs', lambda: ('UTC', 'iso', '24h'))
@@ -3674,20 +3732,22 @@ def test_rule_notify_active_now_window(tmp_path, monkeypatch):
     monkeypatch.setattr('app.alert_dispatch.datetime', _FakeDateTime)
 
     # No window (or partial) means notify any time.
-    assert main._rule_notify_active_now({}) is True
-    assert main._rule_notify_active_now({'notify_start': '22:00'}) is True
+    assert _ad._rule_notify_active_now({}) is True
+    assert _ad._rule_notify_active_now({'notify_start': '22:00'}) is True
     # Wrap-past-midnight window that covers 23:30.
-    assert main._rule_notify_active_now({'notify_start': '22:00', 'notify_end': '05:00'}) is True
+    assert _ad._rule_notify_active_now({'notify_start': '22:00', 'notify_end': '05:00'}) is True
     # Same-day window that covers 23:30.
-    assert main._rule_notify_active_now({'notify_start': '23:00', 'notify_end': '23:59'}) is True
+    assert _ad._rule_notify_active_now({'notify_start': '23:00', 'notify_end': '23:59'}) is True
     # Window that excludes 23:30.
-    assert main._rule_notify_active_now({'notify_start': '06:00', 'notify_end': '18:00'}) is False
+    assert _ad._rule_notify_active_now({'notify_start': '06:00', 'notify_end': '18:00'}) is False
 
 
 def test_zone_object_alert_rules_are_scoped_to_matching_zone(tmp_path, monkeypatch):
     _app, _database_path = _load_app(tmp_path, monkeypatch)
-    main = sys.modules["app.main"]
-    zones = main.normalize_monitoring_zones([
+    import app.zone_schema as _zs
+    import app.zone_detection as _zd
+    from app.alerts import AlertEngine
+    zones = _zs.normalize_monitoring_zones([
         {
             'id': 'porch',
             'name': 'Porch',
@@ -3716,29 +3776,29 @@ def test_zone_object_alert_rules_are_scoped_to_matching_zone(tmp_path, monkeypat
         {'label': 'cat', 'confidence': 0.9, 'box': {'x': 0.8, 'y': 0.8, 'width': 0.1, 'height': 0.1}},
     ]
 
-    rules = main.zone_object_alert_rules(settings)
-    alert_detections = main.zone_alert_detections(settings, detections)
+    rules = _zd.zone_object_alert_rules(settings)
+    alert_detections = _zd.zone_alert_detections(settings, detections)
 
     assert [rule['name'] for rule in rules] == ['Front Door / Porch / cat']
     assert len(alert_detections) == 1
     assert alert_detections[0]['zone_id'] == 'porch'
     assert alert_detections[0]['box']['x'] == 0.1
-    triggered = main.AlertEngine(rules).process(alert_detections + [{**detections[2], 'zone_id': 'driveway'}])
+    triggered = AlertEngine(rules).process(alert_detections + [{**detections[2], 'zone_id': 'driveway'}])
     assert [alert['rule_name'] for alert in triggered] == ['Front Door / Porch / cat']
-    assert main.zone_record_on_detect(detections[0], settings) is False
-    assert main.zone_record_on_detect(detections[2], settings) is True
+    assert _zd.zone_record_on_detect(detections[0], settings) is False
+    assert _zd.zone_record_on_detect(detections[2], settings) is True
 
 
 def test_camera_object_labels_filter_without_monitoring_zones(tmp_path, monkeypatch):
     _app, _database_path = _load_app(tmp_path, monkeypatch)
-    main = sys.modules["app.main"]
+    import app.zone_detection as _zd
     settings = {'detection': {'object_labels': ['person', 'cat'], 'zones': []}}
     detections = [
         {'label': 'person', 'box': {'x': 0.1, 'y': 0.1, 'width': 0.1, 'height': 0.1}},
         {'label': 'suitcase', 'box': {'x': 0.2, 'y': 0.2, 'width': 0.1, 'height': 0.1}},
     ]
 
-    filtered = main.filter_detections_for_camera(detections, settings)
+    filtered = _zd.filter_detections_for_camera(detections, settings)
 
     assert [detection['label'] for detection in filtered] == ['person']
 
@@ -3746,24 +3806,25 @@ def test_camera_object_labels_filter_without_monitoring_zones(tmp_path, monkeypa
 def test_object_detection_enabled_flag_gates_object_detections(tmp_path, monkeypatch):
     """Setting object_detection_enabled=False must suppress all object detections."""
     _app, _database_path = _load_app(tmp_path, monkeypatch)
-    import app.main as main
+    import app.zone_detection as _zd
 
     detections = [{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.3, 'y': 0.3, 'width': 0.1, 'height': 0.1}}]
 
     enabled_settings = {'detection': {'object_detection_enabled': True, 'zones': []}}
     disabled_settings = {'detection': {'object_detection_enabled': False, 'zones': []}}
 
-    assert main.filter_detections_for_camera(detections, enabled_settings) == detections
-    assert main.filter_detections_for_camera(detections, disabled_settings) == []
+    assert _zd.filter_detections_for_camera(detections, enabled_settings) == detections
+    assert _zd.filter_detections_for_camera(detections, disabled_settings) == []
 
 
 def test_zone_motion_rule_gates_motion_detections(tmp_path, monkeypatch):
     """Motion is gated per zone: a disabled zone motion rule suppresses motion detections."""
     _app, _database_path = _load_app(tmp_path, monkeypatch)
-    import app.main as main
+    import app.zone_schema as _zs
+    import app.zone_detection as _zd
 
     def make_zones(rule_enabled):
-        return main.normalize_monitoring_zones([
+        return _zs.normalize_monitoring_zones([
             {'id': 'z1', 'name': 'Zone 1', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
              'monitor_motion': True, 'monitor_objects': False,
              'object_rules': [{'label': 'motion', 'min_confidence': 0.3, 'enabled': rule_enabled}]},
@@ -3773,15 +3834,16 @@ def test_zone_motion_rule_gates_motion_detections(tmp_path, monkeypatch):
     disabled_settings = {'detection': {'zones': make_zones(False)}}
 
     # High-confidence motion frame
-    assert main.zone_motion_detections(enabled_settings, frame_motion_confidence=0.9) != []
-    assert main.zone_motion_detections(disabled_settings, frame_motion_confidence=0.9) == []
+    assert _zd.zone_motion_detections(enabled_settings, frame_motion_confidence=0.9) != []
+    assert _zd.zone_motion_detections(disabled_settings, frame_motion_confidence=0.9) == []
 
 
 def test_legacy_camera_motion_disabled_migrates_to_zone_rules(tmp_path, monkeypatch):
     """Cameras stored with the removed camera-level motion switch off must keep
     motion off after the upgrade by disabling each zone's motion rule."""
     _app, _database_path = _load_app(tmp_path, monkeypatch)
-    import app.main as main
+    import app.camera_config as _cc
+    import app.zone_detection as _zd
 
     def legacy_zone():
         return {'id': 'z1', 'name': 'Zone 1', 'x': 0, 'y': 0, 'width': 1, 'height': 1,
@@ -3791,17 +3853,17 @@ def test_legacy_camera_motion_disabled_migrates_to_zone_rules(tmp_path, monkeypa
         {'motion_enabled': False, 'zones': [legacy_zone()]},
         {'motion': {'enabled': False}, 'zones': [legacy_zone()]},
     ):
-        camera = main.normalize_camera_settings({'id': 'cam-1', 'detection': legacy_detection})
+        camera = _cc.normalize_camera_settings({'id': 'cam-1', 'detection': legacy_detection})
         detection = camera['detection']
         assert 'motion' not in detection
         assert 'motion_enabled' not in detection
         assert detection['zones'][0]['monitor_motion'] is False
         motion_rule = next(r for r in detection['zones'][0]['object_rules'] if r['label'] == 'motion')
         assert motion_rule['enabled'] is False
-        assert main.zone_motion_detections({'detection': detection}, frame_motion_confidence=0.9) == []
+        assert _zd.zone_motion_detections({'detection': detection}, frame_motion_confidence=0.9) == []
 
     # Cameras without the legacy switch keep motion governed by the zone rule.
-    camera = main.normalize_camera_settings({'id': 'cam-2', 'detection': {'zones': [legacy_zone()]}})
+    camera = _cc.normalize_camera_settings({'id': 'cam-2', 'detection': {'zones': [legacy_zone()]}})
     assert camera['detection']['zones'][0]['monitor_motion'] is True
 
 
@@ -3809,6 +3871,8 @@ def test_zone_spatial_filtering_blocks_detections_outside_zone(tmp_path, monkeyp
     """Objects outside the configured zone area must not trigger alerts."""
     _app, _database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.zone_schema as _zs
+    import app.live_monitor as _lm
 
     class FakeDetector:
         backend = 'onnx'
@@ -3824,10 +3888,10 @@ def test_zone_spatial_filtering_blocks_detections_outside_zone(tmp_path, monkeyp
             ]
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
-    main.live_detection_last_checked.clear()
+    main._state.live_detection_last_checked.clear()
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
 
-    zones = main.normalize_monitoring_zones([
+    zones = _zs.normalize_monitoring_zones([
         {
             'id': 'left-half',
             'name': 'Left Half',
@@ -3846,7 +3910,7 @@ def test_zone_spatial_filtering_blocks_detections_outside_zone(tmp_path, monkeyp
         'detection': {'zones': zones},
     }
 
-    event_id = main.process_live_stream_alerts(b'jpeg-frame', {'width': 1280, 'height': 720}, settings)
+    event_id = _lm.process_live_stream_alerts(b'jpeg-frame', {'width': 1280, 'height': 720}, settings)
 
     assert event_id is not None
     event = main.database.get_event(event_id)
@@ -3861,9 +3925,10 @@ def test_zone_spatial_filtering_blocks_detections_outside_zone(tmp_path, monkeyp
 def test_zone_label_aliases_match_configured_rules(tmp_path, monkeypatch):
     """Detection labels that are aliases of a configured rule label should still match."""
     _app, _database_path = _load_app(tmp_path, monkeypatch)
-    import app.main as main
+    import app.zone_schema as _zs
+    import app.zone_detection as _zd
 
-    zones = main.normalize_monitoring_zones([
+    zones = _zs.normalize_monitoring_zones([
         {
             'id': 'porch',
             'name': 'Porch',
@@ -3880,18 +3945,18 @@ def test_zone_label_aliases_match_configured_rules(tmp_path, monkeypatch):
 
     # A detection with an aliased label ('human' → 'person') should be allowed in the zone
     aliased_detection = {'label': 'human', 'confidence': 0.8, 'box': {'x': 0.3, 'y': 0.3, 'width': 0.1, 'height': 0.1}}
-    filtered = main.filter_detections_for_camera_zones([aliased_detection], settings, zone_monitor_key='monitor_objects', require_zones=True)
+    filtered = _zd.filter_detections_for_camera_zones([aliased_detection], settings, zone_monitor_key='monitor_objects', require_zones=True)
     assert len(filtered) == 1
 
     # zone_object_rule_matches should also resolve the alias
-    matches = main.zone_object_rule_matches(settings, aliased_detection, action='alert')
+    matches = _zd.zone_object_rule_matches(settings, aliased_detection, action='alert')
     assert len(matches) == 1
     assert matches[0][1]['label'] == 'person'
 
 
 def test_fetch_models_manifest_uses_remote_ultralytics_version(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
-    main_module = sys.modules["app.main"]
+    import app.model_management as _mm
 
     class FakeResponse:
         def __enter__(self):
@@ -3915,9 +3980,9 @@ def test_fetch_models_manifest_uses_remote_ultralytics_version(tmp_path, monkeyp
     # read from its own module globals after a top-of-file ``import urllib.request``).
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
 
-    manifest = main_module._fetch_models_manifest()
+    manifest = _mm._fetch_models_manifest()
 
-    assert requested_urls == [main_module.PYPI_ULTRALYTICS_URL]
+    assert requested_urls == [_mm.PYPI_ULTRALYTICS_URL]
     assert manifest["source"] == "pypi:ultralytics"
     assert manifest["models"]
     assert all(model["version"] == "8.4.12" for model in manifest["models"].values())
@@ -4091,7 +4156,7 @@ def test_audit_log_records_admin_actions(tmp_path, monkeypatch):
 
 def test_detection_has_matching_record_rule(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
-    main = sys.modules["app.main"]
+    import app.zone_detection as _zd
 
     rules = [
         {'name': 'Person alert', 'object': 'person', 'min_confidence': 0.5, 'enabled': True},
@@ -4100,15 +4165,15 @@ def test_detection_has_matching_record_rule(tmp_path, monkeypatch):
         {'name': 'Motion alert', 'object': 'motion', 'min_confidence': 0.3, 'enabled': True},
     ]
 
-    assert main.detection_has_matching_record_rule({'label': 'person', 'confidence': 0.8}, rules) is True
-    assert main.detection_has_matching_record_rule({'label': 'dog', 'confidence': 0.7}, rules) is True
-    assert main.detection_has_matching_record_rule({'label': 'dog', 'confidence': 0.69}, rules) is False
-    assert main.detection_has_matching_record_rule({'label': 'car', 'confidence': 0.9}, rules) is False
-    assert main.detection_has_matching_record_rule({'label': 'cat', 'confidence': 0.9}, rules) is False
-    assert main.detection_has_matching_record_rule({'label': 'human', 'confidence': 0.8}, rules) is True
-    assert main.detection_has_matching_record_rule({'label': 'motion', 'confidence': 0.4}, rules) is True
-    assert main.detection_has_matching_record_rule({'label': 'motion', 'confidence': 0.1}, rules) is False
-    assert main.detection_has_matching_record_rule({'label': '', 'confidence': 0.9}, rules) is False
+    assert _zd.detection_has_matching_record_rule({'label': 'person', 'confidence': 0.8}, rules) is True
+    assert _zd.detection_has_matching_record_rule({'label': 'dog', 'confidence': 0.7}, rules) is True
+    assert _zd.detection_has_matching_record_rule({'label': 'dog', 'confidence': 0.69}, rules) is False
+    assert _zd.detection_has_matching_record_rule({'label': 'car', 'confidence': 0.9}, rules) is False
+    assert _zd.detection_has_matching_record_rule({'label': 'cat', 'confidence': 0.9}, rules) is False
+    assert _zd.detection_has_matching_record_rule({'label': 'human', 'confidence': 0.8}, rules) is True
+    assert _zd.detection_has_matching_record_rule({'label': 'motion', 'confidence': 0.4}, rules) is True
+    assert _zd.detection_has_matching_record_rule({'label': 'motion', 'confidence': 0.1}, rules) is False
+    assert _zd.detection_has_matching_record_rule({'label': '', 'confidence': 0.9}, rules) is False
 
 
 def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, monkeypatch):
@@ -4117,6 +4182,7 @@ def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, m
     zone_alert_detections filtering)."""
     _app, _database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.live_monitor as _lm
 
     class FakeDetector:
         backend = 'onnx'
@@ -4128,14 +4194,14 @@ def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, m
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
-    main.live_detection_last_checked.clear()
+    main._state.live_detection_last_checked.clear()
 
     # Camera has a zone covering the whole frame:
     # - cat rule: record_on_detect=True, no email/push (record only, no alert)
     # - person rule: record_on_detect=False, email_enabled=True (alert only)
     # The person alert rule makes zone_rules non-empty, which used to cause zone_alert_detections
     # to filter out the cat entirely (no alert rule for cat).
-    event_id = main.process_live_stream_alerts(
+    event_id = _lm.process_live_stream_alerts(
         b'cat-frame',
         {'width': 1280, 'height': 720},
         {
@@ -4175,6 +4241,7 @@ def test_record_only_zone_with_no_alert_rules_keeps_zone_name(tmp_path, monkeypa
     rule raises an alert."""
     _app, _database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.live_monitor as _lm
 
     class FakeDetector:
         backend = 'onnx'
@@ -4186,9 +4253,9 @@ def test_record_only_zone_with_no_alert_rules_keeps_zone_name(tmp_path, monkeypa
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
-    main.live_detection_last_checked.clear()
+    main._state.live_detection_last_checked.clear()
 
-    event_id = main.process_live_stream_alerts(
+    event_id = _lm.process_live_stream_alerts(
         b'person-frame',
         {'width': 1280, 'height': 720},
         {
@@ -4248,6 +4315,7 @@ def test_zone_detection_creates_alert_and_recording(tmp_path, monkeypatch, label
     saved event with recording_status='linked' and an alert history entry."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.live_monitor as _lm
 
     class FakeDetector:
         backend = 'onnx'
@@ -4259,13 +4327,13 @@ def test_zone_detection_creates_alert_and_recording(tmp_path, monkeypatch, label
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
-    main.live_detection_last_checked.clear()
+    main._state.live_detection_last_checked.clear()
     main.alerts.last_triggered.clear()
 
     settings = _zone_camera_settings([
         {'label': label, 'record_on_detect': True, 'email_enabled': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
     ])
-    event_id = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    event_id = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
 
     assert event_id is not None
     event = main.database.get_event(event_id)
@@ -4282,6 +4350,7 @@ def test_person_and_cat_in_zone_each_create_independent_events(tmp_path, monkeyp
     their own event and recording when both have zero cooldown."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.live_monitor as _lm
 
     # Key detections off the frame bytes rather than call order, so each live
     # call answers deterministically for its own frame regardless of how many
@@ -4301,7 +4370,7 @@ def test_person_and_cat_in_zone_each_create_independent_events(tmp_path, monkeyp
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
-    main.live_detection_last_checked.clear()
+    main._state.live_detection_last_checked.clear()
     main.alerts.last_triggered.clear()
 
     settings = _zone_camera_settings([
@@ -4309,8 +4378,8 @@ def test_person_and_cat_in_zone_each_create_independent_events(tmp_path, monkeyp
         {'label': 'cat',    'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
     ])
 
-    person_event_id = main.process_live_stream_alerts(b'frame1', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
-    cat_event_id    = main.process_live_stream_alerts(b'frame2', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    person_event_id = _lm.process_live_stream_alerts(b'frame1', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    cat_event_id    = _lm.process_live_stream_alerts(b'frame2', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
 
     assert person_event_id is not None
     assert cat_event_id is not None
@@ -4366,6 +4435,7 @@ def test_object_outside_zone_does_not_create_recording(tmp_path, monkeypatch):
     """A person detected entirely outside the configured zone must not create a recording."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.live_monitor as _lm
 
     class FakeDetector:
         backend = 'onnx'
@@ -4378,7 +4448,7 @@ def test_object_outside_zone_does_not_create_recording(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
-    main.live_detection_last_checked.clear()
+    main._state.live_detection_last_checked.clear()
 
     # Zone covers only the left half of the frame
     settings = {
@@ -4400,7 +4470,7 @@ def test_object_outside_zone_does_not_create_recording(tmp_path, monkeypatch):
         },
         'recording': {'continuous': False},
     }
-    event_id = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    event_id = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
 
     assert event_id is None, "Person outside the zone must not produce any event"
 
@@ -4470,6 +4540,8 @@ def test_object_detection_with_email_rule_delivers_email(tmp_path, monkeypatch, 
     """
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.live_monitor as _lm
+    import app.alert_dispatch as _ad
 
     class FakeDetector:
         backend = 'onnx'
@@ -4481,13 +4553,13 @@ def test_object_detection_with_email_rule_delivers_email(tmp_path, monkeypatch, 
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
-    main.live_detection_last_checked.clear()
+    main._state.live_detection_last_checked.clear()
     main.alerts.last_triggered.clear()
 
     sent = _email_alert_capture(main, monkeypatch)
     settings = _zone_camera_settings_with_email(label)
-    event_id = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
-    main.wait_for_pending_alert_notifications()
+    event_id = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    _ad.wait_for_pending_alert_notifications()
 
     assert event_id is not None
     assert len(sent) == 1, f'exactly one email should be sent for a {label} detection'
@@ -4503,6 +4575,8 @@ def test_object_detection_with_email_rule_delivers_one_envelope_per_recipient(tm
     """
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.live_monitor as _lm
+    import app.alert_dispatch as _ad
 
     class FakeDetector:
         backend = 'onnx'
@@ -4514,17 +4588,17 @@ def test_object_detection_with_email_rule_delivers_one_envelope_per_recipient(tm
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
-    main.live_detection_last_checked.clear()
+    main._state.live_detection_last_checked.clear()
     main.alerts.last_triggered.clear()
 
     sent = _email_alert_capture(main, monkeypatch)
     settings = _zone_camera_settings_with_email('cat')
     # Override recipients on the nested rule so the alert fans out to 2 addresses.
     settings['detection']['zones'][0]['object_rules'][0]['email_recipients'] = ['alice@example.com', 'bob@example.com']
-    event_id = main.process_live_stream_alerts(
+    event_id = _lm.process_live_stream_alerts(
         b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False,
     )
-    main.wait_for_pending_alert_notifications()
+    _ad.wait_for_pending_alert_notifications()
 
     assert event_id is not None
     assert len(sent) == 2, 'one envelope per recipient, never a multi-recipient To'
@@ -4534,9 +4608,9 @@ def test_object_detection_with_email_rule_delivers_one_envelope_per_recipient(tm
 
 def test_sound_rule_normalization_keeps_email_recipients_and_active_window(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
-    import app.main as main
+    import app.camera_config as _cc
 
-    camera = main.normalize_camera_settings({
+    camera = _cc.normalize_camera_settings({
         'id': 'sound-cam',
         'detection': {
             'sound': {
@@ -4567,9 +4641,10 @@ def test_sound_rule_normalization_keeps_email_recipients_and_active_window(tmp_p
 def test_sound_detection_with_email_rule_delivers_to_rule_recipients(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.sound_monitor as _sm
+    import app.alert_dispatch as _ad
     # ``_on_sound_detected`` reads cameras from the canonical
-    # ``_state.cameras_config`` (see app/sound_monitor.py:_on_sound_detected);
-    # ``main._on_sound_detected`` is exposed via Pool A rebind on app/main.py:506.
+    # ``_state.cameras_config`` (see app/sound_monitor.py:_on_sound_detected).
 
     sent = _email_alert_capture(main, monkeypatch)
     camera = {
@@ -4594,8 +4669,8 @@ def test_sound_detection_with_email_rule_delivers_to_rule_recipients(tmp_path, m
     # ``test_detection_backoff_keeps_prebuffer_warm`` at line ~409).
     monkeypatch.setattr(main._state, 'cameras_config', [camera])
 
-    main._on_sound_detected('sound-cam', 'cat_meow', 'Cat meow alert', 0.92, {'backend': 'test'})
-    main.wait_for_pending_alert_notifications()
+    _sm._on_sound_detected('sound-cam', 'cat_meow', 'Cat meow alert', 0.92, {'backend': 'test'})
+    _ad.wait_for_pending_alert_notifications()
 
     assert len(sent) == 1
     assert sent[0]['To'] == 'alerts@example.test'
@@ -4610,6 +4685,8 @@ def test_object_detection_without_global_email_enabled_sends_nothing(tmp_path, m
     the operator has not finished SMTP setup."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.live_monitor as _lm
+    import app.alert_dispatch as _ad
 
     class FakeDetector:
         backend = 'onnx'
@@ -4621,7 +4698,7 @@ def test_object_detection_without_global_email_enabled_sends_nothing(tmp_path, m
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
-    main.live_detection_last_checked.clear()
+    main._state.live_detection_last_checked.clear()
     main.alerts.last_triggered.clear()
 
     # Global email left disabled; only the per-rule flag is on.
@@ -4634,8 +4711,8 @@ def test_object_detection_without_global_email_enabled_sends_nothing(tmp_path, m
     monkeypatch.setattr(main.EmailAlertService, '_deliver', lambda self, message: delivered.append(message))
 
     settings = _zone_camera_settings_with_email('cat')
-    event_id = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
-    main.wait_for_pending_alert_notifications()
+    event_id = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    _ad.wait_for_pending_alert_notifications()
 
     assert event_id is not None, 'event/alert should still be recorded even without email configured'
     assert delivered == [], 'no email should be delivered while global SMTP is disabled'
@@ -4679,7 +4756,7 @@ def test_compute_minimum_rule_confidence(tmp_path, monkeypatch, zone_rules, glob
         main.database.set_setting('cameras', [], main.utc_now())
 
     _alert_dispatch._min_rule_confidence_cache = None
-    assert main.compute_minimum_rule_confidence() == pytest.approx(expected)
+    assert _alert_dispatch.compute_minimum_rule_confidence() == pytest.approx(expected)
 
 def test_trailing_motion_after_object_event_is_debounced(tmp_path, monkeypatch):
     """Generic motion right after any event on the camera is the trailing edge of the
@@ -4687,12 +4764,13 @@ def test_trailing_motion_after_object_event_is_debounced(tmp_path, monkeypatch):
     'motion' does not overlap the remembered object labels."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.event_debounce as _ed
 
-    main.live_event_last_emitted.clear()
-    main.remember_live_event('camera-1', {'person'})
-    assert main.live_event_is_debounced('camera-1', {'motion'}, 10.0) is True
+    main._state.live_event_last_emitted.clear()
+    _ed.remember_live_event('camera-1', {'person'})
+    assert _ed.live_event_is_debounced('camera-1', {'motion'}, 10.0) is True
     # A different concrete object is genuinely new activity and must NOT be debounced.
-    assert main.live_event_is_debounced('camera-1', {'cat'}, 10.0) is False
+    assert _ed.live_event_is_debounced('camera-1', {'cat'}, 10.0) is False
 
 
 def test_debounce_window_refreshes_while_activity_continues(tmp_path, monkeypatch):
@@ -4701,6 +4779,7 @@ def test_debounce_window_refreshes_while_activity_continues(tmp_path, monkeypatc
     activity persists (which produced back-to-back duplicate recordings)."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.live_monitor as _lm
 
     class FakeDetector:
         backend = 'onnx'
@@ -4712,34 +4791,34 @@ def test_debounce_window_refreshes_while_activity_continues(tmp_path, monkeypatc
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
-    main.live_detection_last_checked.clear()
-    main.live_event_last_emitted.clear()
+    main._state.live_detection_last_checked.clear()
+    main._state.live_event_last_emitted.clear()
     main.alerts.last_triggered.clear()
 
     settings = _zone_camera_settings([
         {'label': 'person', 'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 30},
     ])
 
-    first_event = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    first_event = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
     assert first_event is not None
 
     # Simulate the original event being 25s old (still inside the 30s window) when
     # another scan sees the same person: it must be suppressed AND refresh the window.
-    main.live_event_last_emitted['camera-1']['timestamp'] = time.time() - 25
-    suppressed = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    main._state.live_event_last_emitted['camera-1']['timestamp'] = time.time() - 25
+    suppressed = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
     assert suppressed is None
-    refreshed_ts = main.live_event_last_emitted['camera-1']['timestamp']
+    refreshed_ts = main._state.live_event_last_emitted['camera-1']['timestamp']
     assert time.time() - refreshed_ts < 5, 'suppressed detection must refresh the debounce window'
 
     # 25s later again (would be 50s after the original event - past the old anchor)
     # the same ongoing activity must STILL be suppressed thanks to the refresh.
-    main.live_event_last_emitted['camera-1']['timestamp'] = time.time() - 25
-    still_suppressed = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    main._state.live_event_last_emitted['camera-1']['timestamp'] = time.time() - 25
+    still_suppressed = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
     assert still_suppressed is None
 
     # Only after a quiet gap longer than the window does a new event get created.
-    main.live_event_last_emitted['camera-1']['timestamp'] = time.time() - 31
-    new_event = main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    main._state.live_event_last_emitted['camera-1']['timestamp'] = time.time() - 31
+    new_event = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
     assert new_event is not None
     assert new_event != first_event
 
@@ -4748,19 +4827,19 @@ def test_empty_detection_track_is_marker_only(tmp_path, monkeypatch):
     """An all-empty baked track marks the clip as analyzed (so it is not re-decoded)
     but must load as None so playback falls back to the static event box."""
     _load_app(tmp_path, monkeypatch)
-    import app.main as main
+    import app.recording_extension as _rex
 
     clip = tmp_path / 'clip.mp4'
     clip.write_bytes(b'')
-    main.write_recording_detection_track(clip, [{'t': 0.0, 'detections': []}, {'t': 0.2, 'detections': []}])
-    assert main.recording_track_sidecar_path(clip).exists()
-    assert main.load_recording_detection_track(clip) is None
+    _rex.write_recording_detection_track(clip, [{'t': 0.0, 'detections': []}, {'t': 0.2, 'detections': []}])
+    assert _rex.recording_track_sidecar_path(clip).exists()
+    assert _rex.load_recording_detection_track(clip) is None
 
-    main.write_recording_detection_track(clip, [
+    _rex.write_recording_detection_track(clip, [
         {'t': 0.0, 'detections': []},
         {'t': 0.2, 'detections': [{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}}]},
     ])
-    loaded = main.load_recording_detection_track(clip)
+    loaded = _rex.load_recording_detection_track(clip)
     assert loaded is not None and len(loaded) == 2
 
 
@@ -4770,10 +4849,12 @@ def test_build_track_from_live_history_slices_capture_window(tmp_path, monkeypat
     the capture window."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.detection_state as _ds
+    from collections import deque
 
     now = time.time()
     box = {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}
-    main.live_detection_history['camera-1'] = main.deque(
+    main._state.live_detection_history['camera-1'] = deque(
         [
             (now - 10.0, [{'label': 'person', 'confidence': 0.9, 'box': box}]),   # before window
             (now - 4.0, [{'label': 'person', 'confidence': 0.91, 'box': box}]),
@@ -4783,16 +4864,16 @@ def test_build_track_from_live_history_slices_capture_window(tmp_path, monkeypat
         maxlen=1200,
     )
 
-    track = main.build_track_from_live_history('camera-1', now - 5.0, now)
+    track = _ds.build_track_from_live_history('camera-1', now - 5.0, now)
     assert track is not None
     assert [sample['t'] for sample in track] == [1.0, 3.0]
     assert track[0]['detections'][0]['label'] == 'person'
     # Empty cycles are kept so playback clears boxes after the object leaves.
     assert track[1]['detections'] == []
 
-    assert main.build_track_from_live_history('camera-1', now + 100, now + 110) is None
-    assert main.build_track_from_live_history('other-camera', now - 5.0, now) is None
-    assert main.build_track_from_live_history(None, now - 5.0, now) is None
+    assert _ds.build_track_from_live_history('camera-1', now + 100, now + 110) is None
+    assert _ds.build_track_from_live_history('other-camera', now - 5.0, now) is None
+    assert _ds.build_track_from_live_history(None, now - 5.0, now) is None
 
 
 def test_live_monitor_populates_detection_history(tmp_path, monkeypatch):
@@ -4800,6 +4881,7 @@ def test_live_monitor_populates_detection_history(tmp_path, monkeypatch):
     history that recording tracks are sliced from."""
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.live_monitor as _lm
 
     class FakeDetector:
         backend = 'onnx'
@@ -4811,16 +4893,16 @@ def test_live_monitor_populates_detection_history(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
-    main.live_detection_last_checked.clear()
+    main._state.live_detection_last_checked.clear()
     main.alerts.last_triggered.clear()
 
     settings = _zone_camera_settings([
         {'label': 'person', 'record_on_detect': True, 'alert_on_detect': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
     ])
     before = time.time()
-    main.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
 
-    history = main.live_detection_history.get('camera-1')
+    history = main._state.live_detection_history.get('camera-1')
     assert history, 'monitor cycle must be recorded in the detection history'
     sample_ts, sample_detections = history[-1]
     assert sample_ts >= before
@@ -4840,6 +4922,8 @@ def test_recording_detail_track_backfill(tmp_path, monkeypatch, has_history_cove
     # so calling the handler directly leaves ``db`` as a raw Depends sentinel.
     app, _db_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.recording_extension as _rex
+    from collections import deque
     server, thread, base_url = _server(app)
     client = LocalClient(base_url)
     try:
@@ -4854,7 +4938,7 @@ def test_recording_detail_track_backfill(tmp_path, monkeypatch, has_history_cove
         box = {'x': 0.1, 'y': 0.1, 'width': 0.2, 'height': 0.4}
 
         if has_history_coverage:
-            main.live_detection_history['camera-1'] = main.deque(
+            main._state.live_detection_history['camera-1'] = deque(
                 [(started.timestamp() + 2.0, [{'label': 'person', 'confidence': 0.9, 'box': box}])],
                 maxlen=1200,
             )
@@ -4874,13 +4958,13 @@ def test_recording_detail_track_backfill(tmp_path, monkeypatch, has_history_cove
         status, _headers, detail = client.request(f'/api/recordings/{recording_id}')
         assert status == 200, f'recording_detail must succeed, got status {status}'
         if expect_track:
-            assert main.recording_track_sidecar_path(clip).exists(), 'backfill must write the track sidecar'
+            assert _rex.recording_track_sidecar_path(clip).exists(), 'backfill must write the track sidecar'
             assert detail['track'], 'detail view must return the backfilled track'
             assert detail['track'][0]['t'] == pytest.approx(2.0, abs=0.01)
             assert detail['track'][0]['detections'][0]['label'] == 'person'
         else:
             assert detail['track'] is None
-            assert not main.recording_track_sidecar_path(clip).exists()
+            assert not _rex.recording_track_sidecar_path(clip).exists()
 
         # Repeat views stay cheap and consistent.
         status, _headers, detail = client.request(f'/api/recordings/{recording_id}')
@@ -5169,6 +5253,7 @@ def test_multi_object_recording_labels_and_trigger_type(tmp_path, monkeypatch):
     and maintains the correct trigger_type after the 'object' type change."""
     app, database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.recording_extension as _re
 
     class FakeDetector:
         backend = 'onnx'
@@ -5202,7 +5287,7 @@ def test_multi_object_recording_labels_and_trigger_type(tmp_path, monkeypatch):
         )
 
         # Attach recording - should store ALL labels in recording_labels
-        recording_id = main.attach_event_recording(event_id, event_time, 'upload', detections)
+        recording_id = _re.attach_event_recording(event_id, event_time, 'upload', detections)
         assert recording_id is not None
 
         # Verify recording list endpoint
@@ -5271,8 +5356,8 @@ def test_multi_object_recording_labels_and_trigger_type(tmp_path, monkeypatch):
             trigger_label='motion',
         )
 
-        with main.active_rtsp_recordings_lock:
-            main.active_rtsp_recordings['camera-1'] = {
+        with main._state.active_rtsp_recordings_lock:
+            main._state.active_rtsp_recordings['camera-1'] = {
                 'recording_id': ext_recording_id,
                 'start_capture_ts': (now - timedelta(seconds=5)).timestamp(),
                 'capture_deadline_ts': now.timestamp(),
@@ -5280,7 +5365,7 @@ def test_multi_object_recording_labels_and_trigger_type(tmp_path, monkeypatch):
             }
 
         # Extend with new detections that include a NEW label (bicycle) + existing dog
-        extended_id = main.extend_active_rtsp_recording(
+        extended_id = _re.extend_active_rtsp_recording(
             camera_id='camera-1',
             event_time=now.isoformat(),
             recording_config={'extension_step_seconds': 10},
@@ -5301,8 +5386,8 @@ def test_multi_object_recording_labels_and_trigger_type(tmp_path, monkeypatch):
         assert round(ext_confidences.get('bicycle'), 2) == 0.85
         assert round(ext_confidences.get('dog'), 2) == 0.75
 
-        with main.active_rtsp_recordings_lock:
-            main.active_rtsp_recordings.pop('camera-1', None)
+        with main._state.active_rtsp_recordings_lock:
+            main._state.active_rtsp_recordings.pop('camera-1', None)
     finally:
         server.should_exit = True
         thread.join(timeout=5)

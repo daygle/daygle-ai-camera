@@ -58,13 +58,6 @@ def zs():
 # 1. Pool A identity checks
 # ---------------------------------------------------------------------------
 
-def test_main_normalize_camera_id_is_camera_id_normalize_camera_id(main, ci):
-    assert main.normalize_camera_id is ci.normalize_camera_id, (
-        "main.normalize_camera_id does not point to camera_id.normalize_camera_id "
-        "-- Pool A rebind broke"
-    )
-
-
 def test_camera_config_normalize_camera_id_is_camera_id_normalize_camera_id(cc, ci):
     assert cc.normalize_camera_id is ci.normalize_camera_id, (
         "camera_config.normalize_camera_id does not re-export camera_id.normalize_camera_id"

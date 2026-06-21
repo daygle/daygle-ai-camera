@@ -21,13 +21,13 @@ from app.media_utils import mp4_has_video_stream, recording_stream_path
 from app.recording_extension import load_recording_detection_track, recording_track_sidecar_path
 from app.request_helpers import write_audit_log
 from app.utils import camera_default_name
-from app.main import (
+from app.backup import purge_recordings_by_policy
+from app.recording_extension import (
     _recording_capture_window,
-    _recording_timeline_segment,
     delete_recording_files,
-    purge_recordings_by_policy,
     write_live_history_detection_track,
 )
+from app.main import _recording_timeline_segment
 
 router = APIRouter()
 

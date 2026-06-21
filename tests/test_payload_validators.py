@@ -119,42 +119,6 @@ def pv():
     return sys.modules["app.payload_validators"]
 
 
-def test_main_int_field_is_payload_validators_int_field(main, current_payload_validators):
-    assert main._int_field is current_payload_validators._int_field
-
-
-def test_main_validate_alert_email_settings_is_payload_validators_validate_alert_email_settings(main, current_payload_validators):
-    assert main.validate_alert_email_settings is current_payload_validators.validate_alert_email_settings
-
-
-def test_main_validate_auth_settings_is_payload_validators_validate_auth_settings(main, current_payload_validators):
-    assert main.validate_auth_settings is current_payload_validators.validate_auth_settings
-
-
-def test_main_validate_camera_settings_is_payload_validators_validate_camera_settings(main, current_payload_validators):
-    assert main.validate_camera_settings is current_payload_validators.validate_camera_settings
-
-
-def test_main_validate_cameras_settings_is_payload_validators_validate_cameras_settings(main, current_payload_validators):
-    assert main.validate_cameras_settings is current_payload_validators.validate_cameras_settings
-
-
-def test_main_validate_live_settings_is_payload_validators_validate_live_settings(main, current_payload_validators):
-    assert main.validate_live_settings is current_payload_validators.validate_live_settings
-
-
-def test_main_validate_push_notification_settings_is_payload_validators_validate_push_notification_settings(main, current_payload_validators):
-    assert main.validate_push_notification_settings is current_payload_validators.validate_push_notification_settings
-
-
-def test_main_validate_recording_settings_is_payload_validators_validate_recording_settings(main, current_payload_validators):
-    assert main.validate_recording_settings is current_payload_validators.validate_recording_settings
-
-
-def test_main_validate_storage_settings_is_payload_validators_validate_storage_settings(main, current_payload_validators):
-    assert main.validate_storage_settings is current_payload_validators.validate_storage_settings
-
-
 # ---------------------------------------------------------------------------
 # 2. Helpers -- isolate cross-module deps via monkeypatched stubs.
 # ---------------------------------------------------------------------------
