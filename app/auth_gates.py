@@ -71,11 +71,22 @@ import app.state as _state
 
 
 def require_user(request: Request) -> dict[str, Any]:
-    return request.state.user
+    user = getattr(request.state, 'user', None)
+    if user is None:
+        if not _state.auth_config.get('enabled', True):
+            return {'id': None, 'role': 'admin', 'username': 'anonymous'}
+        raise HTTPException(status_code=401, detail='Authentication required')
+    return user
 
 
 def require_session(request: Request) -> dict[str, Any]:
-    return request.state.session
+    session = getattr(request.state, 'session', None)
+    if session is None:
+        if not _state.auth_config.get('enabled', True):
+            anon: dict[str, Any] = {'id': None, 'role': 'admin', 'username': 'anonymous'}
+            return {'user': anon, 'csrf_token': '', 'expires_at': ''}
+        raise HTTPException(status_code=401, detail='Authentication required')
+    return session
 
 
 def require_admin(request: Request) -> dict[str, Any]:
@@ -90,5 +101,5 @@ def _request_ip(request: Request) -> str:
     if direct in _state._LOOPBACK:
         forwarded = request.headers.get('x-forwarded-for')
         if forwarded:
-            return forwarded.split(',')[0].strip()
+            return forwarded.split(',')[-1].strip()
     return direct or 'unknown'

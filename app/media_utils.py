@@ -92,9 +92,9 @@ def probe_audio_codec(file_path: Path) -> str | None:
 def probe_stream_codec(file_path: Path, stream_selector: str) -> str | None:
     if not file_path.exists() or file_path.stat().st_size <= 0:
         return None
-    if not _FFPROBE:
+    ffprobe = _FFPROBE or shutil.which('ffprobe')
+    if not ffprobe:
         return None
-    ffprobe = _FFPROBE
     command = [ffprobe, '-v', 'error', '-select_streams', stream_selector,
                '-show_entries', 'stream=codec_name',
                '-of', 'default=noprint_wrappers=1:nokey=1', str(file_path)]
@@ -114,9 +114,9 @@ def mp4_is_browser_playable(file_path: Path) -> bool:
 
 
 def probe_video_duration(file_path: Path) -> float | None:
-    if not _FFPROBE or not file_path.exists():
+    ffprobe = _FFPROBE or shutil.which('ffprobe')
+    if not ffprobe or not file_path.exists():
         return None
-    ffprobe = _FFPROBE
     command = [ffprobe, '-v', 'error', '-show_entries', 'format=duration',
                '-of', 'default=noprint_wrappers=1:nokey=1', str(file_path)]
     try:

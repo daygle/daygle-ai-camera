@@ -28,12 +28,14 @@ def delete_all_alert_history(request: Request, db=Depends(get_database)):
 
 
 @router.post('/api/alerts/dismiss-all')
-def dismiss_all_alerts_route(db=Depends(get_database)):
+def dismiss_all_alerts_route(request: Request, db=Depends(get_database)):
+    require_admin(request)
     dismissed = db.dismiss_all_alerts()
     return {'ok': True, 'dismissed': dismissed}
 
 
 @router.post('/api/alerts/{group_key}/dismiss')
-def dismiss_alert_group_route(group_key: str, db=Depends(get_database)):
+def dismiss_alert_group_route(group_key: str, request: Request, db=Depends(get_database)):
+    require_admin(request)
     dismissed = db.dismiss_alert_group(group_key)
     return {'ok': True, 'dismissed': dismissed}

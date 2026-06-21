@@ -6,6 +6,7 @@ Direct imports replace the ``import app.main as main`` hybrid pattern.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
 from app.auth import utc_now
 from app.auth_gates import require_admin
@@ -39,6 +40,7 @@ async def update_alert_email_settings(request: Request, db=Depends(get_database)
 
 @router.post('/api/settings/alert-email/test')
 async def test_alert_email_settings(request: Request):
+    require_admin(request)
     payload = await request.json()
     settings = validate_alert_email_settings(
         payload.get('settings') if isinstance(payload.get('settings'), dict) else payload
@@ -51,7 +53,7 @@ async def test_alert_email_settings(request: Request):
             status_code=400, detail='Test recipient must be a valid email address.'
         )
     try:
-        EmailAlertService(settings).send_test(recipient)
+        await run_in_threadpool(EmailAlertService(settings).send_test, recipient)
     except EmailAlertError as exc:
         raise HTTPException(
             status_code=400, detail=f'Test email failed: {exc}'

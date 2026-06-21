@@ -287,7 +287,7 @@ function renderActivityItem(item) {
   } else if (!isEvent && item.recordingId) {
     actions.push(recordingLink(item.recordingId, 'Footage'));
   }
-  if (window.daygleAuth.user?.role === 'admin') {
+  if (window.daygleAuth?.user?.role === 'admin') {
     const dismissAttr = isEvent
       ? `data-dismiss-event="${escapeHtml(String(item.id))}"`
       : `data-dismiss-alert="${escapeHtml(String(item.id))}"`;
@@ -397,7 +397,7 @@ function bindActivityActions() {
 }
 
 function updateDismissButtons() {
-  const isAdmin = window.daygleAuth.user?.role === 'admin';
+  const isAdmin = window.daygleAuth?.user?.role === 'admin';
   if (els.dismissAllEventsBtn) els.dismissAllEventsBtn.hidden = !isAdmin || events.length === 0;
   if (els.dismissAllAlertsBtn) els.dismissAllAlertsBtn.hidden = !isAdmin || alertGroups.length === 0;
 }
@@ -421,6 +421,7 @@ async function loadEvents() {
   try {
     events = await api('/api/events?with_recording=true');
   } catch (error) {
+    if (window.daygleAuth?.redirecting) return;
     events = [];
     window.showToast?.(error.message, true);
   }
@@ -431,6 +432,7 @@ async function loadAlerts() {
     const alerts = await api('/api/alerts');
     alertGroups = groupAlertsByEvent(alerts);
   } catch (error) {
+    if (window.daygleAuth?.redirecting) return;
     alertGroups = [];
     window.showToast?.(error.message, true);
   }

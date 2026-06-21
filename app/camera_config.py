@@ -126,24 +126,26 @@ def _migrate_camera_id(old_id: str, new_id: str) -> None:
             _state._frame_motion_prev[new_id] = (
                 _state._frame_motion_prev.pop(old_id)
             )
-    if _state.recording_service is not None:
-        for base in (
-            _state.recording_service.prebuffer_dir,
-            _state.recording_service.frames_dir,
-            _state.recording_service.audio_dir,
-        ):
-            old_dir = base / old_key
-            new_dir = base / new_key
-            if old_dir.exists() and (not new_dir.exists()):
-                try:
-                    old_dir.rename(new_dir)
-                except OSError as exc:
-                    logger.warning(
-                        'Could not rename ingest dir %s \u2192 %s: %s',
-                        old_dir,
-                        new_dir,
-                        exc,
-                    )
+    with _state._apply_settings_lock:
+        service = _state.recording_service
+        if service is not None:
+            for base in (
+                service.prebuffer_dir,
+                service.frames_dir,
+                service.audio_dir,
+            ):
+                old_dir = base / old_key
+                new_dir = base / new_key
+                if old_dir.exists() and (not new_dir.exists()):
+                    try:
+                        old_dir.rename(new_dir)
+                    except OSError as exc:
+                        logger.warning(
+                            'Could not rename ingest dir %s \u2192 %s: %s',
+                            old_dir,
+                            new_dir,
+                            exc,
+                        )
 
 
 def _redact_camera(cam: dict[str, Any]) -> dict[str, Any]:

@@ -9,6 +9,7 @@ import urllib.error
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.ai_settings import YOLO_MODELS, ai_status_payload, detector_status, validate_ai_settings
 from app.auth import utc_now
@@ -30,7 +31,8 @@ router = APIRouter()
 
 
 @router.get('/api/settings/ai')
-def get_ai_settings():
+def get_ai_settings(request: Request):
+    require_admin(request)
     return detector_status(effective_ai_config())
 
 
@@ -69,7 +71,8 @@ def reload_ai_detector(request: Request, reload_detector=Depends(get_reload_dete
 
 
 @router.post('/api/settings/ai/check-model')
-def check_ai_model():
+def check_ai_model(request: Request):
+    require_admin(request)
     return detector_status(effective_ai_config())
 
 
@@ -102,11 +105,13 @@ def list_ai_models():
 async def download_ai_model(request: Request):
     require_admin(request)
     body = await request.json()
-    return _do_download_model(str(body.get('model') or '').strip().lower())
+    model_name = str(body.get('model') or '').strip().lower()
+    return await run_in_threadpool(_do_download_model, model_name)
 
 
 @router.post('/api/settings/ai/download-yolov8n')
-def download_yolov8n_model():
+def download_yolov8n_model(request: Request):
+    require_admin(request)
     return _do_download_model('yolov8n')
 
 
@@ -159,11 +164,12 @@ async def update_ai_model(request: Request):
     model_name = str(body.get('model') or '').strip().lower()
     if model_name not in YOLO_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'.")
-    return _do_download_model(model_name, switch_active=False)
+    return await run_in_threadpool(_do_download_model, model_name, False)
 
 
 @router.post('/api/settings/ai/test-detector')
-def test_ai_detector(detector=Depends(get_detector)):
+def test_ai_detector(request: Request, detector=Depends(get_detector)):
+    require_admin(request)
     ai_settings = effective_ai_config()
     ai_state = detector_status(ai_settings)
     ai_error: str | None = None

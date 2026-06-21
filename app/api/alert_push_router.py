@@ -6,6 +6,7 @@ Direct imports replace the ``import app.main as main`` hybrid pattern.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
 from app.auth import utc_now
 from app.auth_gates import require_admin
@@ -38,12 +39,13 @@ async def update_push_notification_settings(request: Request, db=Depends(get_dat
 
 @router.post('/api/settings/alert-push/test')
 async def test_push_notification_settings(request: Request):
+    require_admin(request)
     payload = await request.json()
     settings = validate_push_notification_settings(
         payload.get('settings') if isinstance(payload.get('settings'), dict) else payload
     )
     try:
-        PushNotificationService(settings).send_test()
+        await run_in_threadpool(PushNotificationService(settings).send_test)
     except PushNotificationError as exc:
         raise HTTPException(
             status_code=400, detail=f'Test notification failed: {exc}'

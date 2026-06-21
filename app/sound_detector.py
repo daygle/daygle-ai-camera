@@ -8,6 +8,8 @@ import subprocess
 import threading
 import time
 from datetime import datetime
+
+from app.alerts import _now_hm_in_admin_tz
 from pathlib import Path
 from typing import Any, Callable
 from urllib.request import urlretrieve
@@ -559,7 +561,7 @@ class SoundDetector:
         end = rule.get('active_end')
         if not start or not end:
             return True
-        now = datetime.now().strftime('%H:%M')
+        now = _now_hm_in_admin_tz()
         start_text = str(start)
         end_text = str(end)
         if start_text <= end_text:
