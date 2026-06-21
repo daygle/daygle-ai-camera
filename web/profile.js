@@ -10,7 +10,7 @@ const summaryEl = document.getElementById('profileSummary');
 
 function setMessage(text, isError = false) {
   messageEl.textContent = text;
-  if (text) window.showToast(text, isError);
+  if (text) window.showToast?.(text, isError);
 }
 
 function renderProfile(user) {
@@ -40,6 +40,8 @@ async function loadProfile() {
 
 profileForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  const btn = profileForm.querySelector('[type="submit"]');
+  if (btn) btn.disabled = true;
   const payload = Object.fromEntries(new FormData(profileForm).entries());
   try {
     const updated = await api('/api/profile', { method: 'PUT', body: JSON.stringify(payload) });
@@ -62,14 +64,19 @@ profileForm.addEventListener('submit', async (event) => {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
     setMessage(error.message, true);
+  } finally {
+    if (btn) btn.disabled = false;
   }
 });
 
 passwordForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  const btn = passwordForm.querySelector('[type="submit"]');
+  if (btn) btn.disabled = true;
   const payload = Object.fromEntries(new FormData(passwordForm).entries());
   if (payload.new_password !== payload.confirm_password) {
     setMessage('Passwords do not match.', true);
+    if (btn) btn.disabled = false;
     return;
   }
   delete payload.confirm_password;
@@ -81,6 +88,8 @@ passwordForm.addEventListener('submit', async (event) => {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
     setMessage(error.message, true);
+  } finally {
+    if (btn) btn.disabled = false;
   }
 });
 

@@ -143,7 +143,7 @@ const forms = {
 
 function setMessage(text, isError = false) {
   messageEl.textContent = text;
-  if (text) window.showToast(text, isError);
+  if (text) window.showToast?.(text, isError);
 }
 
 function fillForm(form, values) {
@@ -244,6 +244,8 @@ async function loadSettings() {
 function bindForm(name, label, endpointName = name) {
   forms[name].addEventListener('submit', async (event) => {
     event.preventDefault();
+    const btn = forms[name].querySelector('[type="submit"]');
+    if (btn) btn.disabled = true;
     try {
       const updated = await api(`/api/settings/system/${endpointName}`, { method: 'PUT', body: JSON.stringify(payloadFor(forms[name])) });
       fillForm(forms[name], updated);
@@ -252,6 +254,8 @@ function bindForm(name, label, endpointName = name) {
       // Skip UI updates if api() triggered a 401 redirect
       if (window.daygleAuth?.redirecting) return;
       setMessage(error.message, true);
+    } finally {
+      if (btn) btn.disabled = false;
     }
   });
 }
@@ -388,7 +392,7 @@ function initSoftwareUpdateSection() {
   function showUpdateStatus(message, type = '') {
     if (!statusEl) return;
     statusEl.style.display = '';
-    statusEl.textContent = message;
+    statusEl.innerHTML = message;
     statusEl.className = 'status-panel' + (type ? ` status-${type}` : '');
   }
 

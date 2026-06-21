@@ -59,13 +59,15 @@ def delete_all_events(request: Request, db=Depends(get_database)):
 
 
 @router.post('/api/events/dismiss-all')
-def dismiss_all_events_route(db=Depends(get_database)):
+def dismiss_all_events_route(request: Request, db=Depends(get_database)):
+    require_admin(request)
     dismissed = db.dismiss_all_events()
     return {'ok': True, 'dismissed': dismissed}
 
 
 @router.post('/api/events/{event_id}/dismiss')
-def dismiss_event_route(event_id: int, db=Depends(get_database)):
+def dismiss_event_route(event_id: int, request: Request, db=Depends(get_database)):
+    require_admin(request)
     ok = db.dismiss_event(event_id)
     if not ok:
         raise HTTPException(status_code=404, detail='Event not found')

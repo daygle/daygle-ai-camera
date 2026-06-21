@@ -20,7 +20,7 @@ const statCamera = document.getElementById('statCamera');
 function setMessage(text, isError = false) {
   messageEl.textContent = text || '';
   messageEl.className = isError ? 'error' : 'muted cameras-list-status';
-  if (text) window.showToast(text, isError);
+  if (text) window.showToast?.(text, isError);
 }
 
 // api() is provided by web/utils.js (loaded before this script). It throws

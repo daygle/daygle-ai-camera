@@ -99,8 +99,8 @@ def record_live_detection_history(camera_id: str, detections: list[dict[str, Any
     history_maxlen = max(120, history_minutes * 120)
     with _state.live_detection_history_lock:
         history = _state.live_detection_history.get(camera_id)
-        if history is None:
-            history = deque(maxlen=history_maxlen)
+        if history is None or history.maxlen != history_maxlen:
+            history = deque(history or [], maxlen=history_maxlen)
             _state.live_detection_history[camera_id] = history
         history.append((sample_ts, sample))
 
@@ -181,15 +181,15 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
                 return (False, 0.0, None)
             diff_mask = np.abs(current - background) > pixel_threshold
             changed_fraction = float(np.mean(diff_mask))
-            if changed_fraction < gate_fraction:
-                updated_bg = (1.0 - background_alpha) * background + background_alpha * current
-                _state._frame_motion_prev[camera_id] = updated_bg
+            updated_bg = (1.0 - background_alpha) * background + background_alpha * current
+            _state._frame_motion_prev[camera_id] = updated_bg
             _state._frame_motion_error_cameras.discard(camera_id)
         if changed_fraction < gate_fraction:
             return (False, 0.0, diff_mask)
         return (True, round(min(1.0, changed_fraction / scale_fraction), 3), diff_mask)
     except Exception as exc:
-        if camera_id not in _state._frame_motion_error_cameras:
-            logger.warning('Motion gate unavailable for camera %s: %s; failing open', camera_id, exc)
-            _state._frame_motion_error_cameras.add(camera_id)
+        with _state._frame_motion_lock:
+            if camera_id not in _state._frame_motion_error_cameras:
+                logger.warning('Motion gate unavailable for camera %s: %s; failing open', camera_id, exc)
+                _state._frame_motion_error_cameras.add(camera_id)
         return (True, 0.4, None)

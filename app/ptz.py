@@ -89,11 +89,15 @@ def _soap(url: str, body: str, username: str, password: str) -> str:
 
 def _get_profile_token(host: str, http_port: int, username: str, password: str) -> str:
     key = (host, http_port)
+    now = time.monotonic()
     cached = _profile_token_cache.get(key)
     if cached is not None:
         token, cached_at = cached
-        if time.monotonic() - cached_at < _PROFILE_TOKEN_TTL:
+        if now - cached_at < _PROFILE_TOKEN_TTL:
             return token
+    expired = [k for k, (_, t) in _profile_token_cache.items() if now - t >= _PROFILE_TOKEN_TTL]
+    for k in expired:
+        del _profile_token_cache[k]
     url = f'http://{host}:{http_port}/onvif/media_service'
     response = _soap(url, '<trt:GetProfiles/>', username, password)
     match = re.search(r'<[^>]*Profiles[^>]+token=["\']([^"\']+)["\']', response)

@@ -64,6 +64,9 @@ class _SentinelRecordingService:
             return ''
         return _SentinelRecordingService._no_op
 
+    def should_record(self, *args: Any, **kwargs: Any) -> tuple[bool, str, str | None]:
+        return (False, '', None)
+
     @staticmethod
     def _no_op(*args: Any, **kwargs: Any) -> Any:
         # Match the return-shape of the most-common monitor queries so the
@@ -163,7 +166,7 @@ def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
             _state.camera_config = settings_list[0] if settings_list else {}
             _state.camera_instances = new_instances
             new_config = _state.camera_config
-            _state.camera = new_instances[new_config['id']] if new_config else None
+            _state.camera = new_instances.get(str(new_config.get('id') or '')) if new_config else None
         for old_cam in (old_instances or {}).values():
             try:
                 old_cam.close()

@@ -10,7 +10,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.ai_settings import ai_status_payload
-from app.auth_gates import require_admin, require_session
+from app.auth_gates import require_admin, require_session, require_user
 from app.config_facades import (
     effective_ai_config,
     effective_auth_config,
@@ -64,7 +64,8 @@ def me(request: Request):
 
 
 @router.get('/api/config')
-def runtime_config(auth_enabled: bool = Depends(get_auth_enabled)):
+def runtime_config(request: Request, auth_enabled: bool = Depends(get_auth_enabled)):
+    require_user(request)
     ai_state = ai_status_payload()
     ai_cfg = effective_ai_config()
     return {
@@ -105,6 +106,7 @@ def runtime_config(auth_enabled: bool = Depends(get_auth_enabled)):
 
 @router.post('/api/detect/frame')
 async def detect_frame(request: Request, detector=Depends(get_detector)):
+    require_admin(request)
     image_bytes, _filename, _content_type = await _read_uploaded_image(request)
     if not image_bytes:
         raise HTTPException(status_code=400, detail='Uploaded image is empty')

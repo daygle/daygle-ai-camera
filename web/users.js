@@ -10,7 +10,7 @@ const message = document.getElementById('userMessage');
 
 function setMessage(text, isError = false) {
   message.textContent = text;
-  if (text) window.showToast(text, isError);
+  if (text) window.showToast?.(text, isError);
 }
 
 function roleLabel(value) {
@@ -50,6 +50,7 @@ usersEl.addEventListener('change', async (event) => {
     setMessage('Role updated.');
     await loadUsers();
   } catch (error) {
+    if (window.daygleAuth?.redirecting) return;
     setMessage(error.message, true);
   }
 });
@@ -61,8 +62,7 @@ usersEl.addEventListener('click', async (event) => {
     if (button.dataset.action === 'toggle') {
       await api(`/api/users/${button.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ is_active: button.dataset.active !== 'true' }) });
       setMessage('User status updated.');
-    }
-    if (button.dataset.action === 'reset') {
+    } else if (button.dataset.action === 'reset') {
       const password = window.prompt('Enter the new password:');
       if (!password) return;
       await api(`/api/users/${button.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ password }) });
@@ -70,6 +70,7 @@ usersEl.addEventListener('click', async (event) => {
     }
     await loadUsers();
   } catch (error) {
+    if (window.daygleAuth?.redirecting) return;
     setMessage(error.message, true);
   }
 });
@@ -83,6 +84,7 @@ form.addEventListener('submit', async (event) => {
     setMessage('User created.');
     await loadUsers();
   } catch (error) {
+    if (window.daygleAuth?.redirecting) return;
     setMessage(error.message, true);
   }
 });

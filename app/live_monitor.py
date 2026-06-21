@@ -172,7 +172,9 @@ def stop_live_alert_monitor() -> None:
 def _encode_frame_jpeg(image: Any) -> bytes:
     """Encode a numpy BGR frame to JPEG bytes for snapshot storage."""
     import cv2
-    _, buffer = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    ok, buffer = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if not ok or buffer is None:
+        raise RuntimeError('Failed to encode frame as JPEG')
     return buffer.tobytes()
 
 

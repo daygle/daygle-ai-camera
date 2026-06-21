@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import app.state as _state
 
 ALERT_DATETIME_PREFS_TTL_SECONDS = 30.0
-_alert_datetime_prefs_cache: tuple[float, tuple[str, str, str]] | None = None
+_alert_datetime_prefs_cache: tuple[tuple[str, str, str], float] | None = None
 _alert_datetime_prefs_lock = threading.Lock()
 
 

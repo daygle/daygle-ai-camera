@@ -228,7 +228,7 @@ def write_live_history_detection_track(
 ) -> bool:
     """Persist the monitor's detections over the capture window as the clip's track."""
     from app.detection_state import build_track_from_live_history
-    if not str(file_path):
+    if not file_path.name:
         return False
     track = build_track_from_live_history(camera_id, start_ts, end_ts)
     if track is None:
@@ -344,7 +344,7 @@ def _parse_chunk_start_time(file_path: Path) -> datetime | None:
     if len(parts) != 2:
         return None
     try:
-        return datetime.strptime(parts[1], '%Y%m%dT%H%M%S').astimezone(timezone.utc)
+        return datetime.strptime(parts[1], '%Y%m%dT%H%M%S').replace(tzinfo=timezone.utc)
     except ValueError:
         return None
 
