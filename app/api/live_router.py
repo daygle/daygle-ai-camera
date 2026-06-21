@@ -25,11 +25,17 @@ def live_detection_status_api(camera_id: str | None = None):
 def live_snapshot(camera_id: str | None = None, recording_service=Depends(get_recording_service)):
     selected_config = get_camera_config(camera_id)
     resolved_id = str(selected_config.get('id') or camera_id or '')
-    if resolved_id and build_stream_url(selected_config):
+    has_stream = bool(resolved_id and build_stream_url(selected_config))
+    if has_stream:
         sample = recording_service.latest_frame_jpeg(resolved_id)
         if sample is not None:
             return Response(content=sample[0], media_type='image/jpeg')
-    selected_camera = get_camera_instance(camera_id)
+    try:
+        selected_camera = get_camera_instance(camera_id)
+    except HTTPException:
+        if has_stream:
+            raise HTTPException(status_code=503, detail='Camera ingest is warming up; no frame available yet.') from None
+        raise
     if hasattr(selected_camera, 'read_jpeg'):
         try:
             image_bytes, frame = selected_camera.read_jpeg()

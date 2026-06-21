@@ -6,6 +6,7 @@ const liveEls = {
   frameTitle: document.getElementById('liveFrameTitle'),
   frameMeta: document.getElementById('liveFrameMeta'),
   cameraEmpty: document.getElementById('liveCameraEmpty'),
+  detectionSubtitle: document.getElementById('liveDetectionSubtitle'),
   detectionStatus: document.getElementById('liveDetectionStatus'),
   detectionChips: document.getElementById('liveDetectionChips'),
   detectionState: document.getElementById('liveDetectionState'),
@@ -405,6 +406,23 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
 }
 
 function renderDetectionStatus(summary) {
+  // Subtitle: summarise what is actively seen/heard, or fall back to the default description.
+  if (liveEls.detectionSubtitle) {
+    const objParts = (summary.chips || []).slice(0, 3).map((c) =>
+      c.confidence > 0 ? `${titleCase(c.label)} (${Math.round(c.confidence * 100)}%)` : titleCase(c.label)
+    );
+    const sndParts = (summary.soundChips || []).filter((c) => !c.isBelowThreshold).slice(0, 2).map((c) =>
+      c.confidence > 0 ? `${titleCase(c.label)} (${Math.round(c.confidence * 100)}%)` : titleCase(c.label)
+    );
+    if (objParts.length || sndParts.length) {
+      const parts = [];
+      if (objParts.length) parts.push(`Seeing: ${objParts.join(', ')}`);
+      if (sndParts.length) parts.push(`Hearing: ${sndParts.join(', ')}`);
+      liveEls.detectionSubtitle.textContent = parts.join(' · ');
+    } else {
+      liveEls.detectionSubtitle.textContent = 'What the AI is currently seeing on the live feed.';
+    }
+  }
   // Object state chip (👁️ Monitoring / Detected / Alerted).
   if (liveEls.detectionState) {
     liveEls.detectionState.textContent = `👁️ ${summary.stateLabel}`;
