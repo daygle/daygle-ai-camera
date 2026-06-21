@@ -15,6 +15,8 @@ import logging
 from typing import Any
 
 import app.state as _state
+from app.camera_backend import OpenCvStreamCamera
+from app.utils import build_stream_url
 
 logger = logging.getLogger('daygle.ai')
 
@@ -45,7 +47,6 @@ def read_ingest_frame(camera_id: str) -> tuple[Any, dict[str, Any]] | None:
 
 
 def create_camera(settings: dict[str, Any]) -> Any:
-    from app.main import OpenCvStreamCamera, build_stream_url
     width = int(settings.get('width', 1280))
     height = int(settings.get('height', 720))
     fps = int(settings.get('fps', 15))

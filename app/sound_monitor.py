@@ -61,7 +61,6 @@ def _sound_status_reason(diagnostics: list[dict[str, Any]]) -> dict[str, Any] | 
 
 def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence: float, meta: dict[str, Any]) -> None:
     """Callback invoked by a per-camera SoundDetector when a sound class is detected."""
-    from app.main import camera_event_recording_config
     from app.recording_extension import attach_event_recording
     class_label = SOUND_CLASSES.get(class_id, {}).get('label', class_id)
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -88,7 +87,7 @@ def _on_sound_detected(camera_id: str, class_id: str, rule_name: str, confidence
     if should_record and cam_settings:
         stream_url = build_stream_url(cam_settings)
         if stream_url:
-            cam_rec_config = camera_event_recording_config(cam_settings)
+            cam_rec_config = _state.camera_event_recording_config(cam_settings)
             _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config)
             rid = attach_event_recording(event_id, now_iso, 'rtsp', [sound_detection], camera_id=camera_id, recording_config=cam_rec_config)
             if rid is not None:
@@ -115,7 +114,6 @@ def _make_sound_detect_callback(camera_id: str):
 
 def apply_sound_settings() -> None:
     """Start one SoundDetector per RTSP camera that has sound detection enabled."""
-    from app.main import camera_event_recording_config
     with _state._sound_detectors_lock:
         for det in list(_state._sound_detectors.values()):
             det.stop()
@@ -135,7 +133,7 @@ def apply_sound_settings() -> None:
             with _state._sound_statuses_lock:
                 _state._sound_statuses[cam_id] = {'state': 'disabled', 'last_detected_at': None, 'last_confidence': 0.0, 'backend': None}
             continue
-        _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=cam_id, recording_config=camera_event_recording_config(cam))
+        _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=cam_id, recording_config=_state.camera_event_recording_config(cam))
         det = SoundDetector(on_detect=_make_sound_detect_callback(cam_id), rules=enabled_rules, source='ingest', sample_duration_seconds=1.0, audio_segment_provider=lambda after, _cid=cam_id: _state.recording_service.audio_segments_after(_cid, after))
         det.start()
         with _state._sound_detectors_lock:
