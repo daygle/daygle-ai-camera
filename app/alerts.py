@@ -209,11 +209,11 @@ class AlertEngine:
         """
         start = rule.get('active_start')
         end = rule.get('active_end')
-        if not start or not end:
+        start_text = str(start or '')
+        end_text = str(end or '')
+        if not start_text or not end_text or start_text == end_text:
             return True
         now = _now_hm_in_admin_tz()
-        start_text = str(start)
-        end_text = str(end)
         if start_text <= end_text:
             return start_text <= now <= end_text
         return now >= start_text or now <= end_text

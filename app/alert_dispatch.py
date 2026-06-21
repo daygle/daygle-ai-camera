@@ -190,7 +190,7 @@ def _rule_notify_active_now(rule: dict[str, Any]) -> bool:
     """
     start = str(rule.get('notify_start') or '').strip()
     end = str(rule.get('notify_end') or '').strip()
-    if not start or not end:
+    if not start or not end or start == end:
         return True
     now_hm = _now_hm_in_admin_tz()
     if start <= end:
@@ -253,6 +253,10 @@ def deliver_email_alerts(
 ) -> None:
     if not triggered:
         return
+    email_settings = effective_email_alert_settings()
+    if not email_settings.get('enabled'):
+        logger.debug('Email alerts disabled globally; skipping event %s', event_id)
+        return
     event = _state.database.get_event(event_id) or {}
     metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
     camera_name = str(metadata.get('camera_name') or '').strip() or None
@@ -293,7 +297,7 @@ def deliver_email_alerts(
                 snapshot_bytes = render_live_snapshot_jpeg_overlay(raw_bytes, overlay_detections)
         except Exception as exc:
             logger.debug('Failed to annotate snapshot for email alert event %s: %s', event_id, exc)
-    mailer = EmailAlertService(effective_email_alert_settings())
+    mailer = EmailAlertService(email_settings)
     all_triggered_labels = sorted(
         {
             str(alert.get('label') or '').strip()

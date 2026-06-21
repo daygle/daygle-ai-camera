@@ -381,10 +381,20 @@ class EmailAlertService:
         # return the fresh session alive after a successful retry. This
         # keeps the reconnect cost at exactly one handshake+login per
         # batch instead of one per recipient.
+        #
+        # IMPORTANT: ``cm`` must be kept alive for as long as ``new_smtp``
+        # is in use. In CPython, reference counting would otherwise close
+        # ``cm`` the moment ``_send_via`` returns (``cm`` is a local
+        # variable, so its refcount drops to 0 during frame teardown),
+        # firing the generator's ``finally: smtp.quit()`` on ``new_smtp``
+        # before the caller can reuse it. Attaching ``cm`` as an attribute
+        # of ``new_smtp`` ties their lifetimes together: ``cm`` stays alive
+        # until the caller drops its reference to ``new_smtp``.
         cm = self._create_smtp_session()
         new_smtp = cm.__enter__()
         try:
             new_smtp.send_message(message)
+            new_smtp._daygle_smtp_cm = cm  # keep cm (and its generator) alive
             return new_smtp
         except smtplib.SMTPServerDisconnected as disconnect_exc:
             # Retry ALSO disconnected -- quit the fresh socket and
