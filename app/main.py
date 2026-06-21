@@ -10,7 +10,6 @@ import shutil
 import subprocess
 import threading
 import app.state as _state
-import gc
 import time
 from collections import deque
 from contextlib import asynccontextmanager
@@ -25,7 +24,6 @@ from app.database import EventDatabase
 from app.detector import create_detector
 from app.email_alerts import EmailAlertError, EmailAlertService
 from app.push_notifications import PushNotificationError, PushNotificationService
-from app.camera_backend import OpenCvStreamCamera
 from app.recordings import RecordingService
 from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, config_file_path as config_file_path, load_settings
 from app.storage import Storage
@@ -65,12 +63,20 @@ from app.state import (
     _camera_health_lock as _camera_health_lock,
     _camera_health_state as _camera_health_state,
 )
+# Pool A: camera-id normalizer → app/camera_id.py
+from app.camera_id import normalize_camera_id as normalize_camera_id
 # Pool A: camera-config helpers → app/camera_config.py
 from app.camera_config import (
     _migrate_camera_id as _migrate_camera_id,
     _redact_camera as _redact_camera,
-    normalize_camera_id as normalize_camera_id,
     normalize_camera_settings as normalize_camera_settings,
+)
+# Pool A: camera lifecycle helpers → app/camera_lifecycle.py
+from app.camera_lifecycle import (
+    camera_event_recording_config as camera_event_recording_config,
+    apply_cameras_settings as apply_cameras_settings,
+    apply_storage_and_recording_settings as apply_storage_and_recording_settings,
+    reload_detector as reload_detector,
 )
 # Pool A: config facade accessors → app/config_facades.py
 from app.config_facades import (
@@ -332,8 +338,8 @@ async def app_lifespan(_app: FastAPI):
     try:
         yield
     finally:
-        recording_service.stop_prebuffer_workers()
-        recording_service.stop_all_continuous_recordings()
+        _state.recording_service.stop_prebuffer_workers()
+        _state.recording_service.stop_all_continuous_recordings()
         stop_live_alert_monitor()
         stop_sound_monitor()
 app = FastAPI(title='Daygle AI Camera', lifespan=app_lifespan)
@@ -341,13 +347,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 static_dir = BASE_DIR / 'web'
 if static_dir.exists():
     app.mount('/static', StaticFiles(directory=static_dir), name='static')
-
-def camera_event_recording_config(settings: dict[str, Any]) -> dict[str, Any]:
-    base = effective_recording_config()
-    camera_recording = normalize_camera_recording_settings(settings.get('recording'))
-    base.update({'continuous': camera_recording['continuous']})
-    return base
-_state.camera_event_recording_config = camera_event_recording_config
 
 database = EventDatabase(config['storage']['database'])
 _state.database = database
@@ -358,6 +357,7 @@ _state.cameras_config = cameras_config
 camera_instances: dict[str, Any] = {}
 _state.camera_instances = camera_instances
 camera = None
+_state.camera = camera
 storage = Storage({**config, 'storage': effective_storage_config()})
 _state.storage = storage
 recording_service = RecordingService({**config, 'storage': effective_storage_config(), 'recording': effective_recording_config()})
@@ -429,8 +429,9 @@ _state.camera_config = camera_config
 camera_instances = create_camera_instances(cameras_config)
 _state.camera_instances = camera_instances
 camera = camera_instances[camera_config['id']] if camera_config else None
+_state.camera = camera
 
-recording_service.diagnostic_callback = log_camera_diagnostic
+_state.recording_service.diagnostic_callback = log_camera_diagnostic
 
 GITHUB_REPO = 'daygle/daygle-ai-camera'
 _update_in_progress = False
@@ -497,66 +498,6 @@ def _recording_timeline_segment(recording: dict[str, Any], day_start: datetime, 
 
 
 
-
-
-def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
-    global camera, camera_config, cameras_config, camera_instances
-    new_instances = create_camera_instances(settings_list)
-    with _state._camera_instances_lock:
-        old_instances = camera_instances
-        cameras_config = settings_list
-        _state.cameras_config = cameras_config
-        camera_config = settings_list[0] if settings_list else {}
-        _state.camera_config = camera_config
-        camera_instances = new_instances
-        _state.camera_instances = camera_instances
-        camera = camera_instances[camera_config['id']] if camera_config else None
-    for old_cam in (old_instances or {}).values():
-        try:
-            old_cam.close()
-        except Exception as unexpected_exc:
-            _logger.warning('Unexpected error updating camera: %s', unexpected_exc)
-    apply_sound_settings()
-_state.apply_cameras_settings = apply_cameras_settings
-
-def apply_storage_and_recording_settings() -> None:
-    global storage, recording_service
-    storage = Storage({**config, 'storage': effective_storage_config()})
-    _state.storage = storage
-    old_service = recording_service
-    recording_service = RecordingService({**config, 'storage': effective_storage_config(), 'recording': effective_recording_config()})
-    recording_service.diagnostic_callback = log_camera_diagnostic
-    _state.recording_service = recording_service
-    if old_service is not None:
-        try:
-            old_service.stop_prebuffer_workers()
-            old_service.stop_all_continuous_recordings()
-        except Exception as unexpected_exc:
-            _logger.warning('Unexpected error deleting camera: %s', unexpected_exc)
-_state.apply_storage_and_recording_settings = apply_storage_and_recording_settings
-
-def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
-    import app.alert_dispatch as _alert_dispatch
-    global last_detector_error
-    _alert_dispatch._min_rule_confidence_cache = None
-    previous_detector = _state.detector
-    old_session = getattr(previous_detector, 'session', None)
-    if old_session is not None:
-        previous_detector.session = None
-        del old_session
-        gc.collect()
-    candidate = create_detector(ai_settings)
-    candidate_error = getattr(candidate, 'unavailable_reason', None)
-    if ai_settings['backend'] == 'onnx' and (not getattr(candidate, 'available', False)):
-        _state.detector = previous_detector
-        last_detector_error = candidate_error or 'Failed to load ONNX detector.'
-        log_detector_initialization('reload_failed')
-        return (False, last_detector_error)
-    _state.detector = candidate
-    last_detector_error = candidate_error
-    log_detector_initialization('reload')
-    return (True, last_detector_error)
-_state.reload_detector = reload_detector
 
 
 def _current_version() -> str:

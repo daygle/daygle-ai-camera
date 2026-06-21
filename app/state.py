@@ -68,6 +68,7 @@ auth_config: dict = {}      # pre-stripped snapshot of config['auth']
 # Camera runtime state (reassigned by app.main.apply_cameras_settings)
 # ---------------------------------------------------------------------------
 
+camera: Any = None          # active camera instance (first camera, or None)
 cameras_config: list = []
 camera_config: dict = {}
 camera_instances: dict = {}

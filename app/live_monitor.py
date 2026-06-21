@@ -41,6 +41,7 @@ from app.recording_extension import (
     extend_active_rtsp_recording,
     recording_skip_reason,
 )
+from app.backup import purge_camera_diagnostics_by_policy
 from app.utils import build_stream_url, normalize_bool_setting
 from app.zone_detection import (
     detection_has_matching_record_rule,
@@ -137,7 +138,6 @@ def _prune_frame_motion_state() -> None:
         logger.debug('Pruned stale motion state for cameras: %s', stale)
 
 def live_alert_monitor_loop() -> None:
-    from app.backup import purge_camera_diagnostics_by_policy
     _last_prune = 0.0
     while not _state.live_alert_monitor_stop.is_set():
         live_settings = effective_live_config()

@@ -38,10 +38,10 @@ implementations with no source edits.
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 import app.state as _state
+from app.camera_id import normalize_camera_id as normalize_camera_id  # noqa: PLC0414  re-export
 from app.recording_settings import (
     _migrate_legacy_camera_motion,
     _normalize_camera_sound_settings,
@@ -50,24 +50,15 @@ from app.recording_settings import (
 )
 from app.recordings import RecordingService
 from app.utils import camera_default_name, default_camera_detection_settings
+from app.zone_schema import normalize_label_list, normalize_monitoring_zones
 
 logger = logging.getLogger('daygle.ai')
-
-
-def normalize_camera_id(value: Any, fallback: str = 'camera-1') -> str:
-    camera_id = re.sub(
-        '[^a-zA-Z0-9_-]+',
-        '-',
-        str(value or '').strip().lower(),
-    ).strip('-')
-    return camera_id or fallback
 
 
 def normalize_camera_settings(
     settings: dict[str, Any],
     index: int = 1,
 ) -> dict[str, Any]:
-    from app.zone_schema import normalize_label_list, normalize_monitoring_zones
     camera_settings = dict(settings or {})
     camera_settings['id'] = normalize_camera_id(
         camera_settings.get('id'),

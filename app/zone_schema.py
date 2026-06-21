@@ -83,7 +83,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.camera_config import normalize_camera_id
+from app.camera_id import normalize_camera_id
 from app.utils import normalize_bool_setting, normalize_email_recipients
 
 
