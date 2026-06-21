@@ -5306,3 +5306,76 @@ def test_multi_object_recording_labels_and_trigger_type(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+def test_redact_password_for_viewer_on_alert_settings(tmp_path, monkeypatch):
+    """Viewer can read alert-email/alert-push settings but does NOT see the password.
+    Admin sees the full dict for round-trip through PUT.
+
+    Closes the security gap the 40fc988 admin gate was reaching for via the
+    right mechanism: server-side redaction rather than blanket-rejecting the
+    GET (which broke ``test_admin_ai_settings_viewer_denied_and_db_override``).
+    See ``app.deps.get_redacted_email_alert_settings`` and
+    ``app.deps.get_redacted_push_notification_settings`` for the deps that
+    drive this behavior.
+    """
+    endpoints = [
+        (
+            "/api/settings/alert-email",
+            {
+                "enabled": True,
+                "host": "smtp.example.com",
+                "port": 587,
+                "from_address": "alerts@example.com",
+                "password": "admin-test-password",
+            },
+        ),
+        (
+            "/api/settings/alert-push",
+            {
+                "enabled": True,
+                "server_url": "https://ntfy.sh",
+                "topic": "daygle-test",
+                "priority": "default",
+                "password": "admin-test-password",
+            },
+        ),
+    ]
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        for endpoint, put_payload in endpoints:
+            status, _headers, _body = client.request(
+                endpoint,
+                method="PUT",
+                json_body=put_payload,
+                headers={"X-CSRF-Token": csrf},
+            )
+            assert status == 200, f"PUT {endpoint} expected 200, got {status}"
+            status, _headers, admin_settings = client.request(endpoint)
+            assert status == 200, f"admin GET {endpoint} expected 200, got {status}"
+            assert admin_settings.get("password") == "admin-test-password", (
+                f"admin {endpoint}: expected password present, got {admin_settings.get('password')!r}"
+            )
+        # Now create viewer + verify redaction on both endpoints.
+        status, _headers, viewer = client.request(
+            "/api/users",
+            method="POST",
+            json_body={"username": "viewer-redact", "password": "Viewer123!", "role": "viewer"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200, f"viewer create expected 200, got {status}"
+        viewer_client = LocalClient(base_url)
+        _login(viewer_client, viewer["username"], "Viewer123!")
+        for endpoint, _put_payload in endpoints:
+            status, _headers, viewer_settings = viewer_client.request(endpoint)
+            assert status == 200, f"viewer GET {endpoint} expected 200, got {status}"
+            assert "password" not in viewer_settings, (
+                f"viewer {endpoint}: expected password stripped, got {viewer_settings.get('password')!r}"
+            )
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)

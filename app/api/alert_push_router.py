@@ -9,8 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.auth import utc_now
 from app.auth_gates import require_admin
-from app.config_facades import effective_push_notification_settings
-from app.deps import get_database
+from app.deps import get_database, get_redacted_push_notification_settings
 from app.payload_validators import validate_push_notification_settings
 from app.push_notifications import PushNotificationError, PushNotificationService
 from app.request_helpers import write_audit_log
@@ -19,12 +18,12 @@ router = APIRouter()
 
 
 @router.get('/api/settings/alert-push')
-def get_push_notification_settings(request: Request):
-    # Settings include the ntfy username/password in plaintext, so they
-    # must only be readable by admins (the middleware only enforces admin
-    # auth on mutating verbs on this prefix).
-    require_admin(request)
-    return effective_push_notification_settings()
+def get_push_notification_settings(settings=Depends(get_redacted_push_notification_settings)):
+    # The dep strips ``password`` for non-admin callers (see
+    # ``app.deps.get_redacted_push_notification_settings``). Admin
+    # still receives the full dict so the ntfy credentials round-trip
+    # through PUT.
+    return settings
 
 
 @router.put('/api/settings/alert-push')
