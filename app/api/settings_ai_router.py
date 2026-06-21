@@ -56,7 +56,8 @@ async def update_ai_settings(
 
 
 @router.post('/api/settings/ai/reload')
-def reload_ai_detector(reload_detector=Depends(get_reload_detector)):
+def reload_ai_detector(request: Request, reload_detector=Depends(get_reload_detector)):
+    require_admin(request)
     ai_settings = effective_ai_config()
     reloaded, error = reload_detector(ai_settings)
     response = detector_status(ai_settings)
@@ -69,7 +70,7 @@ def reload_ai_detector(reload_detector=Depends(get_reload_detector)):
 
 @router.post('/api/settings/ai/check-model')
 def check_ai_model():
-    return ai_status_payload(effective_ai_config())
+    return detector_status(effective_ai_config())
 
 
 @router.get('/api/settings/ai/models')
@@ -99,6 +100,7 @@ def list_ai_models():
 
 @router.post('/api/settings/ai/download-model')
 async def download_ai_model(request: Request):
+    require_admin(request)
     body = await request.json()
     return _do_download_model(str(body.get('model') or '').strip().lower())
 
@@ -163,7 +165,7 @@ async def update_ai_model(request: Request):
 @router.post('/api/settings/ai/test-detector')
 def test_ai_detector(detector=Depends(get_detector)):
     ai_settings = effective_ai_config()
-    ai_state = ai_status_payload(ai_settings)
+    ai_state = detector_status(ai_settings)
     ai_error: str | None = None
     detections: list = []
     if not hasattr(detector, 'detect_image'):

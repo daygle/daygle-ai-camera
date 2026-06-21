@@ -170,6 +170,7 @@ function renderCameraStatuses(rows) {
 }
 
 async function loadSoundStatus() {
+  await window.daygleAuthReady;
   messageEl.textContent = '';
   refreshBtn.disabled = true;
   try {
