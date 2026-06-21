@@ -22,14 +22,11 @@ from app.config_facades import (
 )
 from app.deps import get_auth_enabled, get_database, get_detector
 from app.detector import DetectorUnavailableError
-from app.request_helpers import write_audit_log
+from app.request_helpers import write_audit_log, _read_uploaded_image
 from app.state import active_rtsp_recordings, active_rtsp_recordings_lock
 from app.alert_dispatch import compute_minimum_rule_confidence
 from app.recording_extension import clear_runtime_media_directory, delete_recording_files
-from app.main import (
-    _read_uploaded_image,
-    config,
-)
+import app.state as _state
 
 router = APIRouter()
 
@@ -71,7 +68,7 @@ def runtime_config(auth_enabled: bool = Depends(get_auth_enabled)):
     ai_state = ai_status_payload()
     ai_cfg = effective_ai_config()
     return {
-        'server': {'host': config.get('server', {}).get('host'), 'port': config.get('server', {}).get('port')},
+        'server': {'host': _state.config.get('server', {}).get('host'), 'port': _state.config.get('server', {}).get('port')},
         'camera': get_camera_config(None),
         'cameras': effective_cameras_config(),
         'ai': {
@@ -89,7 +86,7 @@ def runtime_config(auth_enabled: bool = Depends(get_auth_enabled)):
             'error': ai_state['error'],
             'categories': ai_cfg.get('categories', []),
         },
-        'alerts': config.get('alerts', {}),
+        'alerts': _state.config.get('alerts', {}),
         'auth': {
             'enabled': auth_enabled,
             'session_timeout_hours': effective_auth_config().get('session_timeout_hours'),

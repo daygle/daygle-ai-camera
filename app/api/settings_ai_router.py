@@ -24,7 +24,7 @@ from app.model_management import (
     _read_installed_models,
 )
 from app.request_helpers import write_audit_log
-from app.main import ONE_PIXEL_PNG
+from app.media_utils import ONE_PIXEL_PNG
 
 router = APIRouter()
 

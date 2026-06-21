@@ -21,9 +21,33 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
+
+from app.utils import _parse_iso_datetime
 
 logger = logging.getLogger('daygle.ai')
+
+ONE_PIXEL_PNG = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82'
+
+
+def _recording_timeline_segment(recording: dict[str, Any], day_start: datetime, day_end: datetime) -> dict[str, Any] | None:
+    started_at = _parse_iso_datetime(recording.get('started_at'))
+    ended_at = _parse_iso_datetime(recording.get('ended_at'))
+    duration_seconds = max(0.0, float(recording.get('duration_seconds') or 0.0))
+    if started_at is None:
+        return None
+    if ended_at is None or ended_at <= started_at:
+        ended_at = started_at + timedelta(seconds=max(duration_seconds, 1.0))
+    visible_start = max(started_at, day_start)
+    visible_end = min(ended_at, day_end)
+    if visible_end <= visible_start:
+        return None
+    trigger_type = str(recording.get('trigger_type') or 'motion').lower()
+    trigger_label = str(recording.get('trigger_label') or '').strip().lower()
+    color_key = trigger_label if trigger_type in {'human', 'object', 'alert'} and trigger_label else trigger_type
+    return {**recording, 'timeline_start_seconds': max(0.0, (visible_start - day_start).total_seconds()), 'timeline_end_seconds': min(86400.0, (visible_end - day_start).total_seconds()), 'timeline_duration_seconds': max(1.0, (visible_end - visible_start).total_seconds()), 'color_key': color_key, 'color_label': color_key}
 
 _FFPROBE: str | None = shutil.which('ffprobe')
 _FFMPEG: str | None = shutil.which('ffmpeg')
