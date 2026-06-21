@@ -340,29 +340,37 @@ class EmailAlertService:
         so a single mid-batch disconnect costs exactly ONE reconnect
         instead of one per subsequent recipient.
 
-        Errors propagate to the caller. ``send_alert`` catches them per
-        recipient so a single bounce in a multi-recipient batch does not
-        abort the remaining deliveries.
+        Errors raised here are wrapped as ``EmailAlertError`` so the
+        per-recipient ``except EmailAlertError`` capture in
+        ``send_alert`` / ``_deliver_camera_offline_notification``
+        records the bounce and continues with the next recipient
+        instead of aborting the entire batch on the first failure.
 
         Mid-batch socket drops (``smtplib.SMTPServerDisconnected`` --
         typically a server-side close after an SMTP error response, an
         idle timeout, or transient network instability) are recovered
         automatically: best-effort quit the dead socket, open a fresh
         session via ``_create_smtp_session``, retry the send once, then
-        return the new handle. The originally failing recipient is
-        still recorded as a per-recipient error ONLY if the retry
-        itself disconnects (in which case the ORIGINAL exception is
-        surfaced so callers can attribute the failure correctly).
+        return the new handle. If the retry ALSO disconnects, the
+        retry-time ``SMTPServerDisconnected`` is wrapped as
+        ``EmailAlertError(f'SMTP disconnect during retry: {...}')``
+        for per-recipient capture; the surviving SMTP session stays
+        usable for subsequent recipients.
 
-        Other ``smtplib`` failures (e.g. ``SMTPRecipientsRefused`` that
-        does NOT tear down the socket) bubble up unchanged so the
-        caller's per-recipient error capture still gets a precise
-        signal.
+        Other ``smtplib`` failures (e.g. ``SMTPRecipientsRefused``
+        that does NOT tear down the socket) are wrapped as
+        ``EmailAlertError(f'SMTP error: {...}')`` so the per-recipient
+        catch site in ``send_alert`` /
+        ``_deliver_camera_offline_notification`` records this single
+        recipient's bounce and continues to the next. The surviving
+        SMTP session is returned to the caller so subsequent
+        recipients reuse the same connection -- this is what closes
+        the Tier-1 batch-abort gap.
         """
         try:
             smtp.send_message(message)
             return smtp
-        except smtplib.SMTPServerDisconnected as primary_exc:
+        except smtplib.SMTPServerDisconnected:
             # Best-effort quit the dead socket so we don't leak the
             # file descriptor while we open a fresh session below.
             try:
@@ -378,18 +386,35 @@ class EmailAlertService:
         try:
             new_smtp.send_message(message)
             return new_smtp
-        except smtplib.SMTPServerDisconnected:
+        except smtplib.SMTPServerDisconnected as disconnect_exc:
             # Retry ALSO disconnected -- quit the fresh socket and
-            # surface the ORIGINAL exception so the caller attributes
-            # the failure to the initial drop rather than masking it
-            # with the retry-time error.
+            # wrap the RETRY-time ``SMTPServerDisconnected`` as
+            # ``EmailAlertError`` so the per-recipient loop's
+            # ``except EmailAlertError`` capture in ``send_alert`` /
+            # ``_deliver_camera_offline_notification`` records this
+            # single recipient's bounce and continues to the next.
+            # Raw ``smtplib`` types are NOT subclasses of
+            # ``EmailAlertError`` so without this wrap the loop would
+            # abort on the first failed recipient and skip the rest of
+            # the batch. The session-level ``except EmailAlertError:
+            # raise`` outer wrapper in ``send_alert`` is unaffected --
+            # it sees the converted error and propagates unchanged.
+            # The pre-retry ``primary_exc`` is no longer bound here
+            # because retry-time information is fresher and more
+            # diagnostic for the per-recipient error capture.
             cm.__exit__(None, None, None)
-            raise primary_exc
-        except (smtplib.SMTPException, OSError):
-            # Other network-layer failure on the new session -- clean
-            # teardown so we don't leak the connection, then propagate.
-            # Narrow catch (NOT plain ``Exception``) so programmer-error
-            # exceptions like ``AttributeError`` or ``TypeError`` still
-            # surface raw instead of being masked as socket drops.
+            raise EmailAlertError(f'SMTP disconnect during retry: {disconnect_exc}') from disconnect_exc
+        except (smtplib.SMTPException, OSError) as exc:
+            # Other network-layer failure on the new session --
+            # ``SMTPRecipientsRefused`` (recipient blocked but the
+            # underlying connection stays alive and reusable for the
+            # next recipient) and other ``SMTPException`` subclasses
+            # land here. Clean teardown so we don't leak the
+            # connection, then wrap as ``EmailAlertError`` so the
+            # per-recipient loop's capture records this single
+            # recipient's bounce and continues. Narrow catch (NOT
+            # plain ``Exception``) so programmer-error exceptions like
+            # ``AttributeError`` or ``TypeError`` still surface raw
+            # instead of being masked as SMTP drops.
             cm.__exit__(None, None, None)
-            raise
+            raise EmailAlertError(f'SMTP error: {exc}') from exc
