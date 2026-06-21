@@ -729,11 +729,24 @@ if (els.clipOverlayToggle) {
   });
 }
 
-els.cameraFilter?.addEventListener('change', () => loadRecordings());
-els.labelFilter?.addEventListener('change', () => loadRecordings());
+els.cameraFilter?.addEventListener('change', () => {
+  loadRecordings().catch((error) => {
+    if (window.daygleAuth?.redirecting) return;
+    if (els.listStatus) els.listStatus.textContent = error.message;
+  });
+});
+els.labelFilter?.addEventListener('change', () => {
+  loadRecordings().catch((error) => {
+    if (window.daygleAuth?.redirecting) return;
+    if (els.listStatus) els.listStatus.textContent = error.message;
+  });
+});
 els.filterForm?.addEventListener('submit', (event) => {
   event.preventDefault();
-  loadRecordings();
+  loadRecordings().catch((error) => {
+    if (window.daygleAuth?.redirecting) return;
+    if (els.listStatus) els.listStatus.textContent = error.message;
+  });
 });
 els.recordingClearBtn.addEventListener('click', () => {
   if (els.labelFilter) els.labelFilter.value = '';
@@ -743,7 +756,10 @@ els.recordingClearBtn.addEventListener('click', () => {
   if (els.recordingDateTo) els.recordingDateTo.value = '';
   if (els.recordingTimeTo) els.recordingTimeTo.value = '23:59';
   if (els.recordingSort) els.recordingSort.value = 'newest';
-  loadRecordings();
+  loadRecordings().catch((error) => {
+    if (window.daygleAuth?.redirecting) return;
+    if (els.listStatus) els.listStatus.textContent = error.message;
+  });
 });
 
 // ── Label filter options ────────────────────────────────────────────────
