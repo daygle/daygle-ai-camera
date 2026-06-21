@@ -48,11 +48,11 @@ Tests pin three contracts:
      ``rectangle_zone_points``; rebuilds ``object_rules``; folds legacy
      ``monitor_motion`` into motion rule.
 3. **Top-level preload pattern.** ``import app.main`` BEFORE
-   ``import app.zone_schema`` at module top -- same pattern as
-   Phase-16 / 17 / 18 / 19 / 20 tests. Without this, pytest collection
-   triggers the circular-import gate at ``app.zone_schema`` load time
-   (its top has ``import app.main as main`` for the 3 Pool C reach
-   sites).
+   ``import app.zone_schema`` at module top. After Pool C elimination
+   zone_schema.py no longer imports from app.main at the function level,
+   but app.main still imports from zone_schema via Pool A rebinds so
+   preloading app.main first prevents any residual circular-import issues
+   during pytest collection.
 """
 
 from __future__ import annotations
@@ -66,14 +66,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# Top-level lazy-ordered preloads to break the Phase-21 circular-import
-# gate (same pattern as the 5 earlier phases' tests). Importing
-# ``app.zone_schema`` FIRST would cause Python's fresh-load chain to run
-# the top-of-file rebind ``from app.zone_schema import (...)`` inside
-# ``app/main.py`` while ``app.zone_schema`` is still mid-load -> ImportError.
-# Preloading ``app.main`` fully first populates ``sys.modules['app.main']``
-# so ``app.zone_schema``'s own ``import app.main as main`` returns the
-# cached module rather than triggering a recursive fresh-load chain.
+# Preload app.main before zone_schema to ensure all Pool A rebinds on
+# app.main are wired before zone_schema's own top-level imports resolve.
 import app.main  # noqa: E402  -- must precede the import below
 import app.zone_schema as zone_schema  # noqa: E402
 
@@ -195,16 +189,16 @@ def _install_zone_dependencies(
     normalize_email_recipients=None,
     normalize_camera_id=None,
 ):
-    """Install hermetic stand-ins for the 3 ``main`` attributes that the
-    cluster reaches at call time:
-    - ``main.normalize_bool_setting`` (called 5x in normalize_zone_object_rules)
-    - ``main.normalize_email_recipients`` (called 1x)
-    - ``main.normalize_camera_id`` (called 1x in normalize_monitoring_zones)
+    """Install hermetic stand-ins for the 3 module-level names in
+    ``app.zone_schema`` that the cluster calls at runtime:
+    - ``zone_schema.normalize_bool_setting`` (called 5x in normalize_zone_object_rules)
+    - ``zone_schema.normalize_email_recipients`` (called 1x)
+    - ``zone_schema.normalize_camera_id`` (called 1x in normalize_monitoring_zones)
 
-    Returns ``(main, bs, er, cid)`` so callers can introspect the
-    captured calls if needed.
+    Patches on the zone_schema module namespace (the true home after Pool C
+    elimination) so monkeypatch intercepts the actual call sites.
     """
-    import app.main as main
+    zs = sys.modules['app.zone_schema']
 
     if normalize_bool_setting is None:
         normalize_bool_setting = _BoolBool()
@@ -213,11 +207,9 @@ def _install_zone_dependencies(
     if normalize_camera_id is None:
         normalize_camera_id = _CameraIdStub()
 
-    monkeypatch.setattr(main, 'normalize_bool_setting', normalize_bool_setting)
-    monkeypatch.setattr(main, 'normalize_email_recipients', normalize_email_recipients)
-    monkeypatch.setattr(main, 'normalize_camera_id', normalize_camera_id)
-
-    return main, normalize_bool_setting, normalize_email_recipients, normalize_camera_id
+    monkeypatch.setattr(zs, 'normalize_bool_setting', normalize_bool_setting)
+    monkeypatch.setattr(zs, 'normalize_email_recipients', normalize_email_recipients)
+    monkeypatch.setattr(zs, 'normalize_camera_id', normalize_camera_id)
 
 
 # -- _LABEL_ALIASES ---------------------------------------------------------

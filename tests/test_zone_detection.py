@@ -294,17 +294,16 @@ def test_zone_motion_detections_threshold_filters_low_confidence():
     assert zd.zone_motion_detections(settings, 0.5, diff_mask=None) == []
 
 
-def test_zone_motion_detections_default_gate_fraction_resolves_via_main(
-    monkeypatch, main_module, zd
+def test_zone_motion_detections_default_gate_fraction_resolves_via_state(
+    monkeypatch, zd
 ):
-    """gate_fraction=None must resolve to ``main._MOTION_GATE_FRACTION`` at call time.
+    """gate_fraction=None must resolve to ``_state._MOTION_GATE_FRACTION`` at call time.
 
-    Strengthens the round-1 reviewer gap: ensures the actual gate value is read
-    from main by raising ``main._MOTION_GATE_FRACTION`` past the diff_mask fraction
-    and verifying the function THEN returns []. A regression that hardcoded the
-    gate value would silently pass the basic version of this test.
+    Ensures the actual gate value is read from app.state by raising
+    ``_state._MOTION_GATE_FRACTION`` past the diff_mask fraction and verifying
+    the function THEN returns [].
     """
-    import app.main as main
+    import app.state as _state
     np = pytest.importorskip('numpy')
     settings = {
         'id': 'cam-1',
@@ -327,28 +326,26 @@ def test_zone_motion_detections_default_gate_fraction_resolves_via_main(
     mask = np.zeros((120, 160), dtype=bool)
     mask[10:110, 10:150] = True  # ~73% of pixels changed
 
-    # Default resolution: gate is main._MOTION_GATE_FRACTION (0.003) -> zone fires.
-    original = main._MOTION_GATE_FRACTION
+    # Default resolution: gate is _state._MOTION_GATE_FRACTION (0.003) -> zone fires.
+    original = _state._MOTION_GATE_FRACTION
     try:
         result_default = zd.zone_motion_detections(settings, 0.5, diff_mask=mask)
         assert len(result_default) == 1
 
-        # Crank the gate up so the SAME mask is below threshold. If lazy resolution
-        # works, this should filter the zone out. A hardcoded fallback (instead of
-        # reading main._MOTION_GATE_FRACTION) would silently return the zone.
-        monkeypatch.setattr(main, '_MOTION_GATE_FRACTION', 0.99)
+        # Crank the gate up so the SAME mask is below threshold.
+        monkeypatch.setattr(_state, '_MOTION_GATE_FRACTION', 0.99)
         result_filtered = zd.zone_motion_detections(settings, 0.5, diff_mask=mask)
         assert result_filtered == [], (
-            'gate_fraction must resolve from main._MOTION_GATE_FRACTION at call time; '
-            'cranking the main constant past the diff_mask fraction should filter the zone out'
+            'gate_fraction must resolve from _state._MOTION_GATE_FRACTION at call time; '
+            'cranking the state constant past the diff_mask fraction should filter the zone out'
         )
 
         # And back to original: zone fires again.
-        monkeypatch.setattr(main, '_MOTION_GATE_FRACTION', original)
+        monkeypatch.setattr(_state, '_MOTION_GATE_FRACTION', original)
         result_restored = zd.zone_motion_detections(settings, 0.5, diff_mask=mask)
         assert len(result_restored) == 1
     finally:
-        monkeypatch.setattr(main, '_MOTION_GATE_FRACTION', original)
+        monkeypatch.setattr(_state, '_MOTION_GATE_FRACTION', original)
 
 
 # ---------------------------------------------------------------------------
@@ -838,10 +835,10 @@ def test_normalize_detection_boxes_for_frame_non_dict_box_pass_through():
 # ---------------------------------------------------------------------------
 
 def test_get_camera_instance_returns_instance(monkeypatch, zd):
-    import app.main as main
+    import app.state as _state
     sentinel_instance = object()
-    # get_camera_config returns the configured camera; camera_instances.get must
-    # yield the sentinel.
+    # get_camera_config is imported at module top in zone_detection; patch there.
+    # camera_instances lives on _state; patch there.
     class FakeConfig:
         def __init__(self, source_id):
             self.source_id = source_id
@@ -850,16 +847,13 @@ def test_get_camera_instance_returns_instance(monkeypatch, zd):
         def get(self, key, default=None):
             return self.source_id if key == 'id' else default
 
-    monkeypatch.setattr(
-        main, 'get_camera_config',
-        lambda camera_id: FakeConfig('cam-1'),
-    )
-    monkeypatch.setattr(main, 'camera_instances', {'cam-1': sentinel_instance})
+    monkeypatch.setattr(zd, 'get_camera_config', lambda camera_id: FakeConfig('cam-1'))
+    monkeypatch.setattr(_state, 'camera_instances', {'cam-1': sentinel_instance})
     assert zd.get_camera_instance('cam-1') is sentinel_instance
 
 
 def test_get_camera_instance_missing_raises_404(monkeypatch, zd):
-    import app.main as main
+    import app.state as _state
     from fastapi import HTTPException
 
     class FakeConfig:
@@ -870,11 +864,8 @@ def test_get_camera_instance_missing_raises_404(monkeypatch, zd):
         def get(self, key, default=None):
             return self.source_id if key == 'id' else default
 
-    monkeypatch.setattr(
-        main, 'get_camera_config',
-        lambda camera_id: FakeConfig('cam-99'),
-    )
-    monkeypatch.setattr(main, 'camera_instances', {})
+    monkeypatch.setattr(zd, 'get_camera_config', lambda camera_id: FakeConfig('cam-99'))
+    monkeypatch.setattr(_state, 'camera_instances', {})
     with pytest.raises(HTTPException) as exc_info:
         zd.get_camera_instance('cam-99')
     assert exc_info.value.status_code == 404

@@ -171,14 +171,15 @@ from typing import Any
 from fastapi import HTTPException
 import numpy as np
 
+import app.state as _state
+from app.config_facades import get_camera_config
+from app.utils import normalize_email_recipients
 from app.zone_schema import _LABEL_ALIASES, normalize_label_list, zone_motion_min_confidence
 
 
 def get_camera_instance(camera_id: str | None = None):
-    from app.main import get_camera_config
     configured = get_camera_config(camera_id)
-    import app.main as main
-    instance = main.camera_instances.get(str(configured['id']))
+    instance = _state.camera_instances.get(str(configured['id']))
     if instance is None:
         raise HTTPException(status_code=404, detail='Camera not found')
     return instance
@@ -271,7 +272,6 @@ def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
     ``main._MOTION_FRAME_H × main._MOTION_FRAME_W`` resolution.  Zone coordinates are
     normalised (0–1) and are converted to pixel indices before slicing.
     """
-    import app.main as main
     try:
         x = zone.get('x')
         y = zone.get('y')
@@ -290,10 +290,10 @@ def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
         y = float(y if y is not None else 0)
         w = float(w if w is not None else 1)
         h = float(h if h is not None else 1)
-        px1 = max(0, int(x * main._MOTION_FRAME_W))
-        py1 = max(0, int(y * main._MOTION_FRAME_H))
-        px2 = min(main._MOTION_FRAME_W, max(px1 + 1, int(round((x + w) * main._MOTION_FRAME_W))))
-        py2 = min(main._MOTION_FRAME_H, max(py1 + 1, int(round((y + h) * main._MOTION_FRAME_H))))
+        px1 = max(0, int(x * _state._MOTION_FRAME_W))
+        py1 = max(0, int(y * _state._MOTION_FRAME_H))
+        px2 = min(_state._MOTION_FRAME_W, max(px1 + 1, int(round((x + w) * _state._MOTION_FRAME_W))))
+        py2 = min(_state._MOTION_FRAME_H, max(py1 + 1, int(round((y + h) * _state._MOTION_FRAME_H))))
         return float(np.mean(diff_mask[py1:py2, px1:px2]))
     except Exception:
         return 0.0
@@ -307,20 +307,10 @@ def zone_motion_detections(
     gate_fraction: float | None = None,
     scale_fraction: float | None = None,
 ) -> list[dict[str, Any]]:
-    # ``gate_fraction`` / ``scale_fraction`` default to None rather than the
-    # main.py constants so the function-definition time defaults don't fire
-    # during the Pool A rebind loop -- ``main._MOTION_GATE_FRACTION`` is
-    # defined at L309 of main.py and is not yet present on ``app.main``'s
-    # namespace when ``app.zone_detection`` is first imported via the rebind.
-    # Call-time resolution below reads the canonical value with main.py
-    # fully loaded. Callers that pass explicit kwargs (process_live_stream_alerts)
-    # are unaffected. Tests that omit the kwargs fall back to main's value
-    # transparently.
-    import app.main as main
     if gate_fraction is None:
-        gate_fraction = main._MOTION_GATE_FRACTION
+        gate_fraction = _state._MOTION_GATE_FRACTION
     if scale_fraction is None:
-        scale_fraction = main._MOTION_SCALE_FRACTION
+        scale_fraction = _state._MOTION_SCALE_FRACTION
     detection_settings = settings.get('detection') or {}
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_motion', True)]
     if not zones:
@@ -423,7 +413,6 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
 
 
 def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
-    from app.utils import normalize_email_recipients
     detection_settings = settings.get('detection') or {}
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
     rules: list[dict[str, Any]] = []

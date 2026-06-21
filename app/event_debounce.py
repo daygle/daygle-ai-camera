@@ -58,6 +58,8 @@ import time
 from typing import Any
 
 import app.state as _state
+from app.detection_status import update_live_detection_status
+from app.diagnostics import log_camera_diagnostic
 
 
 def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: float) -> bool:
@@ -115,8 +117,6 @@ def schedule_live_camera_backoff(camera_id: str, message: str) -> float:
       app.detection_status)
     - ``log_camera_diagnostic`` (top-level helper on main.py at L1265).
     """
-    from app.diagnostics import log_camera_diagnostic
-    from app.main import update_live_detection_status
     with _state._live_backoff_lock:
         failure_count = _state.live_detection_failure_count.get(camera_id, 0) + 1
         _state.live_detection_failure_count[camera_id] = failure_count
