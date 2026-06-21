@@ -95,7 +95,12 @@ const SEGMENT_COLORS = [
   '#14b8a6',
 ];
 
-const GENERIC_TIMELINE_LABELS = new Set(['motion', 'alert', 'human', 'object', 'none', 'off', 'continuous']);
+// Generic trigger labels are shared with the rest of the app via
+// web/utils.js (loaded before this script). The bare name
+// `GENERIC_TRIGGER_LABELS` resolves to the same set the recordings list,
+// the dashboard activity feed and the playback modal use so the
+// motion-vs-object boundary lives in one place.
+const GENERIC_TIMELINE_LABELS = GENERIC_TRIGGER_LABELS;
 
 // DETECTION_EYE_ICON, SOUND_CLASS_IDS, isSoundLabel and detectionPill() all
 // live in web/utils.js now (loaded before this script). Existing call sites
@@ -375,6 +380,12 @@ function timelineSegmentLabel(recording) {
 
 function recordingColorKey(recording) {
   if (isSoundRecording(recording)) return '__sound__';
+  // Motion-only clips get a single reserved color key so every segment,
+  // legend swatch and timeline-recording-item bar for motion uses the
+  // fixed teal accent instead of being hashed against the random
+  // SEGMENT_COLORS palette (which would generate one random color per
+  // distinct recording and split same-category clips across hues).
+  if (isMotionOnlyRecording(recording)) return '__motion__';
   return recordingTypeLabel(recording).toLowerCase();
 }
 
@@ -421,8 +432,11 @@ function matchesRecordingFilter(recording, filterValue) {
   if (normalized === '__sound__') return isSoundRecording(recording);
   if (normalized === '__object__') return !isSoundRecording(recording);
   if (normalized === 'motion') {
-    const triggerType = recordingTriggerType(recording);
-    return !['continuous', 'off', 'none'].includes(triggerType);
+    // Tightened to motion-only recordings now that motion is a real
+    // category on its own. The previous "trigger type != placeholder"
+    //    heuristic also matched object recordings with a non-continuous
+    //    trigger, which made the dropdown a worse label than All.
+    return !isSoundRecording(recording) && isMotionOnlyRecording(recording);
   }
   return recordingFilterTokens(recording).has(normalized);
 }
@@ -438,6 +452,7 @@ function isSoundRecording(recording) {
 
 function colorForKey(key) {
   if (key === '__sound__') return '#a855f7';
+  if (key === '__motion__') return '#2dd4bf';
   const normalized = String(key || 'motion').trim().toLowerCase() || 'motion';
   let hash = 0;
   for (let index = 0; index < normalized.length; index += 1) {
@@ -614,12 +629,17 @@ function renderLegend(recordings) {
     return;
   }
   els.timelineLegend.innerHTML = unique.map((item) => {
+    // Reserve the dedicated icons so the legend reads the same as the
+    // row + pill treatments on the other surfaces: speaker for sound,
+    // running man for motion, eye for everything else.
     const isSound = item.key === '__sound__';
-    const icon = isSound ? '🔊' : DETECTION_EYE_ICON;
+    const isMotion = item.key === '__motion__';
+    const labelText = isMotion ? 'Motion' : titleCase(item.label);
+    const icon = isSound ? '🔊' : isMotion ? DETECTION_MOTION_ICON : DETECTION_EYE_ICON;
     return `
     <span class="timeline-legend-chip">
       <span class="timeline-legend-swatch" style="background:${item.color}"></span>
-      ${icon} <span>${escapeHtml(titleCase(item.label))}</span>
+      ${icon} <span>${escapeHtml(labelText)}</span>
     </span>
   `;
   }).join('');
@@ -727,22 +747,47 @@ function renderRecordingList(recordings) {
     const camera = escapeHtml(cameraLabel(recording));
     const detections = recordingDetectionSummary(recording);
     const isSound = isSoundRecording(recording);
-    // Show a pill per detected object (e.g. Person and Dog), including secondary
-    // objects whose confidence is unknown - detectionPill omits the percentage
-    // when there is no confidence rather than rendering a misleading 0%.
-    const confidenceBadges = detections
-      .map((d) => detectionPill(d.label, d.confidence, isSound))
-      .join('');
-    const tooltip = detections
-      .map((d) => (d.confidence == null
+    const isMotionOnly = isMotionOnlyRecording(recording);
+    // Show a pill per detected object (e.g. Person and Dog) for object
+    // recordings; for sound + sound label, for motion-only the teal
+    // motion pill (with motion intensity %). Detection pills omit the
+    // percentage when there is no confidence rather than render a
+    // misleading 0%.
+    let confidenceBadges;
+    if (isMotionOnly) {
+      confidenceBadges = motionPill(motionConfidenceFor(recording));
+    } else if (isSound) {
+      confidenceBadges = detections
+        .map((d) => detectionPill(d.label, d.confidence, true))
+        .join('');
+    } else {
+      confidenceBadges = detections
+        .map((d) => detectionPill(d.label, d.confidence))
+        .join('');
+    }
+    const motionConfidence = motionConfidenceFor(recording);
+    const tooltipLines = [];
+    if (isMotionOnly) {
+      tooltipLines.push(motionConfidence == null
+        ? 'Motion'
+        : `Motion · ${Math.round(motionConfidence * 100)}%`);
+    }
+    detections.forEach((d) => {
+      tooltipLines.push(d.confidence == null
         ? titleCase(d.label)
-        : `${titleCase(d.label)} · ${Math.round(d.confidence * 100)}%`))
-      .join('\n');
-    const typeLabel = isSound ? 'Sound' : 'Object';
+        : `${titleCase(d.label)} · ${Math.round(d.confidence * 100)}%`);
+    });
+    const tooltip = tooltipLines.join('\n');
+    // Mirror the recordings list: type pill says "Motion" (teal), "Sound",
+    // or "Object"; the activity-item-* class on the row drives the inner
+    // .activity-item-type colour via shared CSS rules.
+    const typeLabel = isMotionOnly ? 'Motion' : isSound ? 'Sound' : 'Object';
+    const typeClass = isMotionOnly ? 'activity-item-motion' : isSound ? 'activity-item-sound' : 'activity-item-event';
+    const motionTooltip = motionConfidence == null ? '' : `Motion · ${Math.round(motionConfidence * 100)}%\n`;
     const zones = recordingZoneNames(recording);
     const zoneSuffix = zones.length ? ` · ${zones.map(escapeHtml).join(', ')}` : '';
     return `
-      <button class="timeline-recording-item${activeClass}" type="button" data-recording-id="${escapeHtml(String(recording.id))}" data-tooltip="${escapeHtml(tooltip)}">
+      <button class="timeline-recording-item${activeClass} ${typeClass}" type="button" data-recording-id="${escapeHtml(String(recording.id))}" data-tooltip="${escapeHtml(motionTooltip + tooltip)}">
         <span class="timeline-recording-color" style="background:${color}"></span>
         <span class="timeline-recording-main">
           <span class="timeline-recording-title-row">
@@ -766,11 +811,28 @@ function recordingConfidenceText() {
 
 function renderRecordingDetails(recording) {
   const isSound = isSoundRecording(recording);
+  const isMotionOnly = isMotionOnlyRecording(recording);
   const detections = recordingDetectionSummary(recording);
-  const detectionBadges = detections.length
-    ? detections.map((d) => detectionPill(d.label, d.confidence, isSound)).join(' ')
-    : 'none';
-  const detectionLabel = isSound ? 'Sound' : 'Detections';
+  // The "Sound" / "Motion" / "Detections" label tracks the source the row
+  // uses on the timeline + recordings list so opening a clip never
+  // surprises users with a different category name. Motion-only clips
+  // render the teal motion pill instead of the bare "none" placeholder.
+  let detectionBadges;
+  let detectionLabel;
+  if (isMotionOnly) {
+    detectionLabel = 'Motion';
+    detectionBadges = motionPill(motionConfidenceFor(recording));
+  } else if (isSound) {
+    detectionLabel = 'Sound';
+    detectionBadges = detections.length
+      ? detections.map((d) => detectionPill(d.label, d.confidence, true)).join(' ')
+      : 'none';
+  } else {
+    detectionLabel = 'Detections';
+    detectionBadges = detections.length
+      ? detections.map((d) => detectionPill(d.label, d.confidence)).join(' ')
+      : 'none';
+  }
   const zones = recordingZoneNames(recording);
   const zoneRow = zones.length ? `<div><span>Zone</span><strong>${zones.map(escapeHtml).join(', ')}</strong></div>` : '';
   const triggerRow = detections.length ? '' : `<div><span>Trigger</span><strong>${escapeHtml(recordingTriggerSummary(recording))}</strong></div>`;

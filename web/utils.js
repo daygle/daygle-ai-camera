@@ -102,6 +102,26 @@ function isSoundLabel(label) {
 
 const DETECTION_EYE_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg>';
 
+// Running-man icon (lucide-style "user-running") used for motion-only
+// detections, recordings and dashboard items. Sized for inline pills (11px);
+// callers that need a larger standalone icon can wrap it in their own svg.
+const DETECTION_MOTION_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="m4 19.5 4-4.5 1.5 4 5.5-3-2-7 4-3"/></svg>';
+
+// Same icon, scaled up for row-level list rendering (recordings row icon).
+const MOTION_RUNNING_ROW_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="m4 19.5 4-4.5 1.5 4 5.5-3-2-7 4-3"/></svg>';
+
+// Generic trigger labels are not concrete object classes - they describe
+// the trigger condition that caused the recording/event/alert instead of
+// naming a recognised object ('motion', 'alert', 'object', 'human', and
+// the recording-mode placeholders 'none', 'off', 'continuous'). Used to
+// distinguish "motion-only" frames from frames carrying a real object label,
+// so the recordings list, the dashboard activity feed and the timeline
+// page all agree on which clips qualify as pure motion.
+const GENERIC_TRIGGER_LABELS = new Set(['motion', 'alert', 'human', 'object', 'none', 'off', 'continuous']);
+function isGenericTriggerLabel(label) {
+  return GENERIC_TRIGGER_LABELS.has(String(label || '').trim().toLowerCase());
+}
+
 // Render a single detection pill (eye icon for objects, speaker for sounds).
 // Each label decides its own icon independently of `isSound` so a sound class
 // that sneaks into an object list still renders with the speaker icon.
@@ -118,6 +138,119 @@ function detectionPill(label, confidence, isSound = false) {
     return `<span class="detection detection-sound">🔊 ${escapeHtml(display)}${confidenceText}</span>`;
   }
   return `<span class="detection detection-object">${DETECTION_EYE_ICON} ${escapeHtml(display)}${confidenceText}</span>`;
+}
+
+// Render the teal/green "Motion" pill (running-man icon + optional motion
+// intensity confidence). Shared by the recordings list, dashboard activity
+// feed and timeline so every surface shows the same chip styling.
+function motionPill(confidence = null) {
+  const numericConfidence = confidence == null ? NaN : Number(confidence);
+  const confidenceText = Number.isFinite(numericConfidence)
+    ? ` · ${Math.round(numericConfidence * 100)}%`
+    : '';
+  return `<span class="detection detection-motion">${DETECTION_MOTION_ICON} Motion${confidenceText}</span>`;
+}
+
+// A recording is "motion-only" when:
+//  * it isn't a sound recording,
+//  * no concrete object label is attached to it (the join-table labels
+//    array and the per-event detections are both empty once the generic
+//    trigger words are filtered out), and
+//  * its trigger type isn't one of the always-on / disabled placeholders
+//    ('continuous', 'none', 'off') so we don't accidentally label
+//    always-on clips as motion.
+//
+// Used by every surface that renders a recording (recordings list, the
+// playback modal on both pages, and the timeline) so the boundary lives in
+// exactly one place.
+function isMotionOnlyRecording(recording) {
+  if (!recording) return false;
+  if (recording?.event?.metadata?.source === 'sound-detection') return false;
+  const labelCandidates = [];
+  if (Array.isArray(recording.labels)) labelCandidates.push(...recording.labels);
+  if (Array.isArray(recording.detections)) {
+    for (const d of recording.detections) labelCandidates.push(d?.label);
+  }
+  const hasConcrete = labelCandidates.some((label) => {
+    const normalized = String(label || '').trim().toLowerCase();
+    return normalized && !GENERIC_TRIGGER_LABELS.has(normalized);
+  });
+  if (hasConcrete) return false;
+  const triggerType = String(recording.trigger_type || 'motion').trim().toLowerCase();
+  if (['continuous', 'none', 'off'].includes(triggerType)) return false;
+  return true;
+}
+
+// Motion intensity lives as a 'motion'-labelled entry on either the event
+// detections or any track frame. Surface the strongest one so the
+// recordings list / modal / timeline can render "Motion · NN%" alongside
+// the concrete-object pills.
+function motionConfidenceFor(recording) {
+  let best = null;
+  const consider = (det) => {
+    if (!det) return;
+    if (String(det.label || '').trim().toLowerCase() !== 'motion') return;
+    const c = Number(det.confidence);
+    if (!Number.isFinite(c)) return;
+    if (best === null || c > best) best = c;
+  };
+  for (const d of (recording?.detections || [])) consider(d);
+  for (const sample of (recording?.track || [])) {
+    for (const d of (sample?.detections || [])) consider(d);
+  }
+  return best;
+}
+
+// ---------------------------------------------------------------------------
+// Motion-vs-object boundary helpers - shared by every page that renders a
+// motion / object / sound split (recordings, recordings modal, timeline,
+// dashboard activity feed, stat cards). Each helper takes the exact payload
+// shape the corresponding API or item builder produces, so the tests can
+// pin behaviour at every layer without re-implementing the logic.
+//
+// "Motion-only" means:
+//   * it isn't a sound recording / event / alert (sound source or sound
+//     class label), AND
+//   * every detection / label sits inside GENERIC_TRIGGER_LABELS (motion,
+//     alert, human, object, none, off, continuous) - i.e. no concrete
+//     object or sound class labels.
+//
+// Edge cases: events / alerts / recordings with zero detections / labels
+// are NOT classified as motion-only - they're just under-recorded samples
+// and shouldn't pull the counts.
+// ---------------------------------------------------------------------------
+function _hasOnlyGenericLabels(labels) {
+  const normalized = (Array.isArray(labels) ? labels : []).map((entry) => {
+    if (typeof entry === 'string') return String(entry || '').trim().toLowerCase();
+    return String(entry?.label || '').trim().toLowerCase();
+  }).filter(Boolean);
+  if (!normalized.length) return false;
+  return normalized.every(isGenericTriggerLabel);
+}
+
+function isMotionOnlyEvent(event) {
+  if (!event) return false;
+  if (event.source === 'sound') return false;
+  return _hasOnlyGenericLabels(event.detections);
+}
+
+function isMotionOnlyEventItem(item) {
+  if (!item || item.isSound) return false;
+  return _hasOnlyGenericLabels(item.detections);
+}
+
+function isMotionOnlyAlertGroup(group) {
+  if (!group) return false;
+  // Alert groups carry a labels Set (or array) - include the sound-class
+  // check so a single mixed alert (motion + doorbell) is treated as sound.
+  const raw = Array.isArray(group.labels) ? group.labels : Array.from(group.labels || []);
+  if (raw.some(isSoundLabel)) return false;
+  return _hasOnlyGenericLabels(raw);
+}
+
+function isMotionOnlyAlertItem(item) {
+  if (!item || item.isSound) return false;
+  return _hasOnlyGenericLabels(item.labels);
 }
 
 // ─── Shared log table formatting ──────────────────────────────────────────
@@ -352,7 +485,10 @@ window.daygleUi = {
   api, setApiAuth, getApiAuth,
   // UI helpers
   showToast, escapeHtml, titleCase,
-  detectionPill, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON,
+  detectionPill, motionPill, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, MOTION_RUNNING_ROW_ICON,
+  isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,
+  isMotionOnlyRecording, motionConfidenceFor,
+  isMotionOnlyEvent, isMotionOnlyEventItem, isMotionOnlyAlertGroup, isMotionOnlyAlertItem,
   renderTimeSelect, timeSelectValue,
   // Logs (audit + camera-log share these)
   formatLogTime, LOG_PAGE_SIZE,

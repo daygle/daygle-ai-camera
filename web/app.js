@@ -2,7 +2,9 @@
 const els = {
   totalEvents: document.getElementById('totalEvents'),
   soundEvents: document.getElementById('soundEvents'),
+  motionEvents: document.getElementById('motionEvents'),
   objectAlerts: document.getElementById('objectAlerts'),
+  motionAlerts: document.getElementById('motionAlerts'),
   soundAlerts: document.getElementById('soundAlerts'),
   activityFeed: document.getElementById('activityFeed'),
   listStatus: document.getElementById('listStatus'),
@@ -17,8 +19,9 @@ const els = {
 // read auth state from there rather than a local copy.
 let configuredLabels = null;
 
-// SOUND_CLASS_IDS, isSoundLabel, DETECTION_EYE_ICON and detectionPill() are
-// provided by web/utils.js (loaded before this script).
+// SOUND_CLASS_IDS, isSoundLabel, GENERIC_TRIGGER_LABELS, DETECTION_EYE_ICON,
+// DETECTION_MOTION_ICON, MOTION_RUNNING_ROW_ICON, detectionPill() and
+// motionPill() are provided by web/utils.js (loaded before this script).
 
 let events = [];
 let alertGroups = [];
@@ -164,6 +167,17 @@ function groupAlertsByEvent(alerts) {
 // language consistent between detections and alerts (one icon + main + actions
 // column) without duplicating structure across two renderers.
 
+// isMotionOnlyEvent / isMotionOnlyEventItem / isMotionOnlyAlertGroup /
+// isMotionOnlyAlertItem live in web/utils.js (loaded before this script) and
+// are also exposed on window.daygleUi for callers that prefer the explicit
+// namespace. Keep these references as bare-name globals so app.js can still
+// call updateMotionStats() without touching the daygleUi object.
+
+function updateMotionStats() {
+  if (els.motionEvents) els.motionEvents.textContent = events.filter(isMotionOnlyEvent).length;
+  if (els.motionAlerts) els.motionAlerts.textContent = alertGroups.filter(isMotionOnlyAlertGroup).length;
+}
+
 function buildActivityItems() {
   const eventItems = events.map((event) => {
     const isSound = event.source === 'sound';
@@ -211,6 +225,14 @@ function buildActivityItems() {
     const ev = item.eventId !== null ? eventsById.get(item.eventId) : null;
     item.camera = ev ? eventSourceLabel(ev) : '';
   }
+  // Annotate motion-only items so the renderer can swap the icon, type pill
+  // and badge for the teal motion treatment without recomputing it.
+  for (const item of eventItems) {
+    if (isMotionOnlyEventItem(item)) item.isMotionOnly = true;
+  }
+  for (const item of alertItems) {
+    if (isMotionOnlyAlertItem(item)) item.isMotionOnly = true;
+  }
   // Deduplicate sound events by recordingId: multiple sound detections during
   // the same recording share a recordingId (via extend_active_rtsp_recording),
   // so collapse them into one entry - matching how object detections appear
@@ -239,15 +261,21 @@ function buildActivityItems() {
 }
 
 function applyFilter(items) {
-  if (activeFilter === 'object-detections') return items.filter((i) => i.type === 'event' && !i.isSound);
+  if (activeFilter === 'object-detections') return items.filter((i) => i.type === 'event' && !i.isSound && !i.isMotionOnly);
+  if (activeFilter === 'motion-detections') return items.filter((i) => i.type === 'event' && i.isMotionOnly);
   if (activeFilter === 'sound-detections') return items.filter((i) => i.type === 'event' && i.isSound);
-  if (activeFilter === 'object-alerts') return items.filter((i) => i.type === 'alert' && !i.isSound);
+  if (activeFilter === 'object-alerts') return items.filter((i) => i.type === 'alert' && !i.isSound && !i.isMotionOnly);
+  if (activeFilter === 'motion-alerts') return items.filter((i) => i.type === 'alert' && i.isMotionOnly);
   if (activeFilter === 'sound-alerts') return items.filter((i) => i.type === 'alert' && i.isSound);
   return items;
 }
 
 function eventIcon() {
   return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg>';
+}
+
+function motionActivityIcon() {
+  return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="m4 19.5 4-4.5 1.5 4 5.5-3-2-7 4-3"/></svg>';
 }
 
 function alertIcon() {
@@ -267,9 +295,10 @@ function recordingLink(recordingId, label) {
 function renderActivityItem(item) {
   const isEvent = item.type === 'event';
   const isSound = Boolean(item.isSound);
-  const icon = isSound ? soundIcon() : isEvent ? eventIcon() : alertIcon();
-  const typeClass = isSound ? 'activity-item-sound' : isEvent ? 'activity-item-event' : 'activity-item-alert';
-  const typeLabel = isSound ? (isEvent ? 'Sound Detection' : 'Sound Alert') : isEvent ? 'Object Detection' : 'Object Alert';
+  const isMotionOnly = Boolean(item.isMotionOnly);
+  const icon = isSound ? soundIcon() : isMotionOnly ? motionActivityIcon() : isEvent ? eventIcon() : alertIcon();
+  const typeClass = isSound ? 'activity-item-sound' : isMotionOnly ? 'activity-item-motion' : isEvent ? 'activity-item-event' : 'activity-item-alert';
+  const typeLabel = isSound ? (isEvent ? 'Sound Detection' : 'Sound Alert') : isMotionOnly ? (isEvent ? 'Motion Detection' : 'Motion Alert') : isEvent ? 'Object Detection' : 'Object Alert';
   const title = item.recordingId
     ? `Recording #${item.recordingId}`
     : isEvent
@@ -309,7 +338,7 @@ function renderActivityItem(item) {
           </div>
         </div>
         <p class="muted activity-item-meta">${metaLine}</p>
-        <div class="activity-item-badges">${isSound ? soundDetectionBadges(item.detections) : detectionBadges(item.detections)}</div>
+        <div class="activity-item-badges">${isMotionOnly ? motionPill() : isSound ? soundDetectionBadges(item.detections) : detectionBadges(item.detections)}</div>
       </div>
       ${actions.length ? `<div class="activity-item-actions">${actions.join('')}</div>` : ''}
     </article>
@@ -320,8 +349,10 @@ function renderEmptyState() {
   const messages = {
     all: { title: 'No activity yet', subtitle: 'Detections and alerts will appear here as your cameras report them.' },
     'object-detections': { title: 'No object detections yet', subtitle: 'Detected objects will show up here once the AI starts seeing events.' },
+    'motion-detections': { title: 'No motion detections yet', subtitle: 'Motion-only events will appear here once a camera reports frame motion without a recognised object.' },
     'sound-detections': { title: 'No sound detections yet', subtitle: 'Detected sounds will show up here once the AI starts hearing events.' },
     'object-alerts': { title: 'No object alerts yet', subtitle: 'Object alerts from your zone rules will appear here when they fire.' },
+    'motion-alerts': { title: 'No motion alerts yet', subtitle: 'Motion alerts from your zone rules will appear here when they fire.' },
     'sound-alerts': { title: 'No sound alerts yet', subtitle: 'Sound alerts from your zone rules will appear here when they fire.' },
   };
   const { title, subtitle } = messages[activeFilter] || messages.all;
@@ -352,7 +383,7 @@ function renderActivityFeed() {
 
 function updateListStatus(count) {
   if (!els.listStatus) return;
-  const labels = { all: 'activity items', 'object-detections': 'object detections', 'sound-detections': 'sound detections', 'object-alerts': 'object alerts', 'sound-alerts': 'sound alerts' };
+  const labels = { all: 'activity items', 'object-detections': 'object detections', 'motion-detections': 'motion detections', 'sound-detections': 'sound detections', 'object-alerts': 'object alerts', 'motion-alerts': 'motion alerts', 'sound-alerts': 'sound alerts' };
   const label = labels[activeFilter] || 'items';
   if (count === 0) {
     els.listStatus.textContent = '';
@@ -420,6 +451,7 @@ async function loadStats() {
 async function loadEvents() {
   try {
     events = await api('/api/events?with_recording=true');
+    updateMotionStats();
   } catch (error) {
     if (window.daygleAuth?.redirecting) return;
     events = [];
@@ -431,6 +463,7 @@ async function loadAlerts() {
   try {
     const alerts = await api('/api/alerts');
     alertGroups = groupAlertsByEvent(alerts);
+    updateMotionStats();
   } catch (error) {
     if (window.daygleAuth?.redirecting) return;
     alertGroups = [];

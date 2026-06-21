@@ -45,7 +45,10 @@ let _frameDuration = 1 / 30; // default 30fps, updated on each VFC frame
 // bare name here so call sites read the same way as before.
 // On by default; users can turn it off per-browser via the toggle.
 let overlayEnabled = true;
-const GENERIC_TRIGGER_LABELS = new Set(['motion', 'alert', 'human', 'object', 'none', 'off', 'continuous']);
+// GENERIC_TRIGGER_LABELS lives in web/utils.js (loaded before this script);
+// the bare name resolves via the shared realm so recordings.js, the timeline
+// and the dashboard activity feed all agree on what counts as a non-concrete
+// trigger word (motion / alert / human / object / none / off / continuous).
 
 function filterByConfiguredLabels(detections) {
   if (!configuredLabels) return detections;
@@ -62,10 +65,24 @@ let configuredLabels = null; // null = no filter loaded yet
 // the CSRF token from window.daygleAuth.csrfToken and handles 401 redirects
 // so every page shares identical auth and error semantics.
 
-// detectionPill(), isSoundLabel(), SOUND_CLASS_IDS and DETECTION_EYE_ICON now
-// live in web/utils.js (loaded before this script) so the same rendering is
-// shared with the dashboard and the timeline page. Keeping only the local
-// helpers that are specific to this page (e.g. recording-selection logic).
+// detectionPill(), motionPill(), isSoundLabel(), SOUND_CLASS_IDS,
+// DETECTION_EYE_ICON, DETECTION_MOTION_ICON, MOTION_RUNNING_ROW_ICON and
+// GENERIC_TRIGGER_LABELS now live in web/utils.js (loaded before this
+// script) so the same rendering is shared with the dashboard and the
+// timeline page. Keeping only the local helpers that are specific to this
+// page (e.g. recording-selection logic).
+
+// A recording is "motion-only" when:
+//  * it isn't a sound recording (sound already has its own visual treatment),
+//  * no concrete object labels were detected during the clip (the join-table
+//    labels + per-event detections are both empty once generic trigger words
+//    are stripped), and
+//  * the trigger type wasn't the always-on / disabled placeholders
+//    ('continuous', 'none', 'off') so we don't accidentally label
+//    always-on clips as motion recordings.
+// isMotionOnlyRecording + motionConfidenceFor live in web/utils.js so the
+// recordings list, the recordings playback modal, the timeline page and
+// the dashboard activity feed all share the same boundary.
 
 function cameraLabel(recording) {
   const metadata = recording?.event?.metadata || {};
@@ -235,17 +252,28 @@ function renderRecordings(recordings) {
   els.recordings.innerHTML = recordings.map((recording) => {
     const mediaReady = recording.media_ready !== false;
     const isSound = isSoundRecording(recording);
-    const typeClass = isSound ? 'activity-item-sound' : 'activity-item-event';
-    const typeLabel = isSound ? 'Sound Recording' : 'Object Recording';
+    const isMotion = isMotionOnlyRecording(recording);
+    const typeClass = isSound ? 'activity-item-sound' : isMotion ? 'activity-item-motion' : 'activity-item-event';
+    const typeLabel = isSound ? 'Sound Recording' : isMotion ? 'Motion Recording' : 'Object Recording';
     const icon = isSound
       ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>'
-      : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>';
+      : isMotion
+        ? MOTION_RUNNING_ROW_ICON
+        : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>';
     const zones = recordingZoneNames(recording);
     const metaParts = [`Camera: ${escapeHtml(cameraLabel(recording))}`];
     if (zones.length) metaParts.push(`Zone: ${zones.map(escapeHtml).join(', ')}`);
     metaParts.push(`Duration: ${Number(recording.duration_seconds || 0).toFixed(1)}s`);
     if (!mediaReady) metaParts.push('Preparing...');
-    const badges = recordingDetectionSummary(recording).map((d) => detectionPill(d.label, d.confidence, isSound)).join('') || '<span class="muted">No detections</span>';
+    let badges;
+    if (isMotion) {
+      // Motion-only clips have no concrete object labels - show a single
+      // teal "Motion · NN%" pill so the row reads distinctly from object
+      // and sound recordings without falling back to "No detections".
+      badges = motionPill(motionConfidenceFor(recording));
+    } else {
+      badges = recordingDetectionSummary(recording).map((d) => detectionPill(d.label, d.confidence, isSound)).join('') || '<span class="muted">No detections</span>';
+    }
     return `
       <div class="item activity-item ${typeClass}" data-recording-row="${recording.id}">
         <div class="activity-item-icon">${icon}</div>
@@ -347,10 +375,28 @@ function recordingDetectionSummary(recording) {
 function renderRecordingDetails(recording) {
   const detections = recordingDetectionSummary(recording);
   const isSound = isSoundRecording(recording);
-  const detectionBadges = detections.length
-    ? detections.map((d) => detectionPill(d.label, d.confidence, isSound)).join(' ')
-    : 'none';
-  const detectionLabel = isSound ? 'Sound' : 'Detections';
+  const isMotionOnly = isMotionOnlyRecording(recording);
+  // The \"Sound\" / \"Motion\" / \"Detections\" label tracks the source the row on
+  // the list uses, so opening a clip never surprises users with a different
+  // category name. Motion-only clips render the teal motion pill (with the
+  // strongest motion intensity confidence for the clip) rather than the
+  // bare \"none\" placeholder the row used to show.
+  let detectionBadges;
+  let detectionLabel;
+  if (isMotionOnly) {
+    detectionLabel = 'Motion';
+    detectionBadges = motionPill(motionConfidenceFor(recording));
+  } else if (isSound) {
+    detectionLabel = 'Sound';
+    detectionBadges = detections.length
+      ? detections.map((d) => detectionPill(d.label, d.confidence, true)).join(' ')
+      : 'none';
+  } else {
+    detectionLabel = 'Detections';
+    detectionBadges = detections.length
+      ? detections.map((d) => detectionPill(d.label, d.confidence)).join(' ')
+      : 'none';
+  }
   const zones = recordingZoneNames(recording);
   const zoneRow = zones.length ? `<div><span>Zone</span><strong>${zones.map(escapeHtml).join(', ')}</strong></div>` : '';
   els.recordingDetails.innerHTML = `
@@ -664,7 +710,20 @@ async function loadRecordings(filters = {}) {
   if (startedBefore) params.set('started_before', startedBefore);
   if (resolved.sort) params.set('sort', resolved.sort);
   const queryString = params.toString();
-  const recordings = await api(`/api/recordings${queryString ? `?${queryString}` : ''}`);
+  let recordings;
+  if (resolved.label === 'motion') {
+    // Backend strips generic trigger words (motion/alert/human/object/none/off/
+    // continuous) from `recording.labels` so a server-side `label=motion`
+    // query returns nothing. Fetch without a label filter and re-filter
+    // motion-only recordings on the client so the dropdown option works.
+    const draftParams = new URLSearchParams(params);
+    draftParams.delete('label');
+    const draftQuery = draftParams.toString();
+    const all = await api(`/api/recordings${draftQuery ? `?${draftQuery}` : ''}`);
+    recordings = all.filter((rec) => isMotionOnlyRecording(rec));
+  } else {
+    recordings = await api(`/api/recordings${queryString ? `?${queryString}` : ''}`);
+  }
   const activeFilters = describeFilters(resolved);
   if (activeFilters.length) {
     updateFilterStat('Filtered', `Showing clips matching ${activeFilters.join(' and ')}.`);
