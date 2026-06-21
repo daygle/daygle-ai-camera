@@ -2,14 +2,27 @@ from __future__ import annotations
 
 import base64
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
-
-from app.email_alerts import _encode_subject
 
 
 class PushNotificationError(Exception):
     pass
+
+
+def _encode_ntfy_header(value: str) -> str:
+    """Percent-encode non-ASCII characters for ntfy HTTP header values.
+
+    ntfy decodes percent-encoded UTF-8 before displaying (e.g. in the
+    push notification title). RFC 2047 encoded-words are NOT appropriate
+    here — those are an email-layer convention; HTTP clients display them
+    as literal ``=?utf-8?q?...?=`` blobs rather than decoding them.
+    Pure-ASCII values pass through unchanged.
+    """
+    if any(ord(c) > 127 for c in value):
+        return urllib.parse.quote(value, safe=" ,.:;-_/!?()[]@#$&*+=")
+    return value
 
 
 class PushNotificationService:
@@ -86,21 +99,8 @@ class PushNotificationService:
         password = str(self.settings.get("password") or "").strip()
 
         url = f"{server_url}/{topic}"
-        # Gate RFC 2047 encoding on non-ASCII so pure ASCII titles (the
-        # common case -- "Daygle AI Camera alert: Cat, Person detected")
-        # pass through unchanged for downstream consumers (push clients
-        # display them verbatim, tests assert the raw string) while non-
-        # ASCII camera names / detection labels still get encoded for
-        # safe transit. ``Header(...).encode()`` would always emit
-        # encoded-word form, which is why we route through the shared
-        # ``_encode_subject`` helper that gates on
-        # ``any(ord(c) > 127 for c in title)``. Without the gate the
-        # ``test_push_notification_title_lists_all_triggered_labels``
-        # assertion fails because the captured title was an
-        # ``=?utf-8?q?...?=`` blob. Same pattern as the email Subject
-        # fix in ``app/email_alerts.send_alert`` / ``send_test``.
         headers: dict[str, str] = {
-            "Title": _encode_subject(title),
+            "Title": _encode_ntfy_header(title),
             "Priority": priority,
             "Content-Type": "text/plain; charset=utf-8",
         }

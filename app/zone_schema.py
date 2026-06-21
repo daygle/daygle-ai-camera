@@ -87,6 +87,29 @@ from app.camera_id import normalize_camera_id
 from app.utils import normalize_bool_setting, normalize_email_recipients
 
 
+def _normalize_hhmm(value: Any) -> str | None:
+    """Return a zero-padded ``HH:MM`` string, or ``None`` for empty/unset values.
+
+    Ensures lexicographic comparison in ``_rule_notify_active_now`` and
+    ``AlertEngine._is_active_now`` works correctly: "9:00" stored verbatim
+    compares as "9:00" > "10:00" (wrong), while "09:00" compares correctly.
+    Values that are already zero-padded or that can't be parsed pass through
+    unchanged so existing well-formed data is unaffected.
+    """
+    s = str(value or '').strip()
+    if not s:
+        return None
+    parts = s.split(':')
+    if len(parts) == 2:
+        try:
+            h, m = int(parts[0]), int(parts[1])
+            if 0 <= h <= 23 and 0 <= m <= 59:
+                return f'{h:02d}:{m:02d}'
+        except ValueError:
+            pass
+    return s
+
+
 # Module-private label canonicalization: maps alternative spellings of the
 # same detection label to a single canonical form. Used exclusively by
 # ``normalize_label_list`` below. main.py keeps a Pool A rebind so its 4
@@ -157,10 +180,10 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
             'cooldown_seconds': max(0, cooldown_seconds),
             'email_enabled': normalize_bool_setting(rule.get('email_enabled'), False),
             'email_recipients': normalize_email_recipients(rule.get('email_recipients', [])),
-            'active_start': str(rule.get('active_start') or '').strip() or None,
-            'active_end': str(rule.get('active_end') or '').strip() or None,
-            'notify_start': str(rule.get('notify_start') or '').strip() or None,
-            'notify_end': str(rule.get('notify_end') or '').strip() or None,
+            'active_start': _normalize_hhmm(rule.get('active_start')),
+            'active_end': _normalize_hhmm(rule.get('active_end')),
+            'notify_start': _normalize_hhmm(rule.get('notify_start')),
+            'notify_end': _normalize_hhmm(rule.get('notify_end')),
             'push_enabled': normalize_bool_setting(rule.get('push_enabled'), False),
         })
     return rules
