@@ -77,18 +77,17 @@ def _isolate_health_state(main_module):
 
 
 @pytest.fixture
-def stub_logger(main_module, monkeypatch):
-    """Stand in for main.log_camera_diagnostic and main.logger.warning."""
+def stub_logger(ch, monkeypatch):
+    """Stand in for log_camera_diagnostic and camera_health.logger.warning."""
     diagnostics: list[tuple[str, str]] = []
     warnings: list[tuple[str, tuple]] = []
 
     def fake_log_camera_diagnostic(camera_id, event_type, message='', *, severity='info', details=None, camera_name=None):
         diagnostics.append((camera_id, event_type))
 
-    import app.diagnostics as _diag
-    monkeypatch.setattr(_diag, 'log_camera_diagnostic', fake_log_camera_diagnostic)
+    monkeypatch.setattr(ch, 'log_camera_diagnostic', fake_log_camera_diagnostic)
     monkeypatch.setattr(
-        main_module, 'logger', type('FakeLogger', (), {
+        ch, 'logger', type('FakeLogger', (), {
             'warning': staticmethod(lambda *args, **kwargs: warnings.append((args, kwargs))),
             'info': staticmethod(lambda *args, **kwargs: None),
             'debug': staticmethod(lambda *args, **kwargs: None),
@@ -99,7 +98,7 @@ def stub_logger(main_module, monkeypatch):
 
 
 @pytest.fixture
-def stub_delivery_services(main_module, monkeypatch):
+def stub_delivery_services(ch, monkeypatch):
     """Capture push + email notifications without an outbound network call."""
     push_calls: list[tuple[str, str]] = []
     email_calls: list[tuple[str, dict, str]] = []
@@ -116,8 +115,8 @@ def stub_delivery_services(main_module, monkeypatch):
         def _deliver(self, msg):
             email_calls.append((msg['Subject'], dict(self.settings), msg['To']))
 
-    monkeypatch.setattr(main_module, 'PushNotificationService', FakePush)
-    monkeypatch.setattr(main_module, 'EmailAlertService', FakeEmail)
+    monkeypatch.setattr(ch, 'PushNotificationService', FakePush)
+    monkeypatch.setattr(ch, 'EmailAlertService', FakeEmail)
     return push_calls, email_calls
 
 
@@ -154,11 +153,9 @@ def test_state_primitives_live_on_main(main_module):
     """``app.main`` re-exports ``_camera_health_state`` and ``_camera_health_lock``
     via Pool A from-import rebinds from ``app.state``.
 
-    The canonical home of these primitives is ``app.state`` (introduced in the
-    state-pool migration). ``app/main.py`` re-exports them so that call sites
-    that do ``from app.main import _camera_health_state`` (Pool C) and
-    monkeypatch targets that do ``setattr(main_module, '_camera_health_state', ...)``
-    continue to reach the same objects.
+    The canonical home of these primitives is ``app.state``. ``app/main.py``
+    re-exports them so that tests that access state via ``main_module.<X>``
+    reach the live objects (same dict/lock as ``app.state.<X>``).
     """
     assert hasattr(main_module, '_camera_health_state'), (
         '_camera_health_state re-export missing from app.main -- '
@@ -200,15 +197,18 @@ def test_state_primitives_not_promoted_into_camera_health(ch):
 #
 # Two attribute surfaces exist in this codebase:
 #
-# - `main_module.<X>` patches the rebind on `app.main` (Pool A from-import
-#   surface; e.g. `from app.push_notifications import PushNotificationService
-#   as PushNotificationService` at the top of `app/main.py`).
-# - `_app_state.<X>`  patches the underlying registry module `app.state`
+# - `ch.<X>` patches a name that `app/camera_health.py` owns as a
+#   module-level binding (top-level import or definition). Service classes
+#   (`PushNotificationService`, `EmailAlertService`) and config-facade
+#   functions (`effective_push_notification_settings`,
+#   `effective_email_alert_settings`) are imported at module top in
+#   camera_health.py, so patching `ch.<X>` is the correct surface.
+# - `_app_state.<X>` patches the underlying registry module `app.state`
 #   ("Application-scoped singleton and shared-state registry" per
 #   `app/state.py`'s docstring).
 #
-# The choice between them is dictated by HOW the production code under test
-# imports the symbol. Three rules follow.
+# The choice is dictated by HOW the production code under test imports the
+# symbol. Two rules follow.
 #
 # 1. Registry imports MUST happen inside the test function body, not at the
 #    top of this file. `tests/test_api.py::_load_app()` reloads `app.main`
@@ -218,29 +218,11 @@ def test_state_primitives_not_promoted_into_camera_health(ch):
 #    would then land monkeypatches on a phantom module that production no
 #    longer reads from. The function-body `import app.state as _app_state`
 #    re-binds to whatever `sys.modules['app.state']` holds at call time,
-#    AFTER `_load_app()`, so it always lands on the live singleton. The three
-#    pre-existing `test_check_cameras_health_*` sites in this file already
-#    use this pattern; the three sites migrated below match them.
+#    AFTER `_load_app()`, so it always lands on the live singleton.
 #
 # 2. Stateful singletons (`database`, `cameras_config`,
 #    `live_detection_retry_after`, ...) live canonically on `app.state`.
-#    After startup, `app.main.<X>` and `app.state.<X>` name the same object
-#    because `app/main.py` does `import app.state as _state` (line 20) and
-#    writes the registry via `_state.<X> = <X>` post-construction (e.g.
-#    `_state.database = database` at line 637). `app.state` is the file's
-#    stated home, so we patch there.
-#
-# 3. Stateless helpers consumed via `from app.main import X` inside a
-#    function body (e.g. `PushNotificationService`, `EmailAlertService`,
-#    `effective_push_notification_settings`, `effective_email_alert_settings`
-#    reached at `app/camera_health.py:205`, `app/alert_dispatch.py:234`,
-#    `app/alert_dispatch.py:323`) MUST be patched on `main_module.<X>`. The
-#    Pool A from-import rebind creates a SEPARATE binding in the app.main
-#    namespace that source-module patches cannot reach. The 11 other
-#    `monkeypatch.setattr(main_module, ...)` sites in this file (service-
-#    class fakes for `PushNotificationService` / `EmailAlertService` at :119,
-#    :120, :535; settings fakes for `effective_*_alert_settings` in delivery
-#    tests at :451-:541) rely on this contract.
+#    `app.state` is the file's stated home, so we patch there.
 #
 
 # ---------------------------------------------------------------------------
@@ -515,8 +497,8 @@ def test_deliver_fires_push_only_when_only_push_enabled(ch, main_module, monkeyp
         main_module.database, 'get_setting',
         lambda key: {'enabled': True, 'offline_delay_minutes': 10, 'recipients': []},  # offline_alert_settings
     )
-    monkeypatch.setattr(main_module, 'effective_push_notification_settings', lambda: {'enabled': True})
-    monkeypatch.setattr(main_module, 'effective_email_alert_settings', lambda: {'enabled': False})
+    monkeypatch.setattr(ch, 'effective_push_notification_settings', lambda: {'enabled': True})
+    monkeypatch.setattr(ch, 'effective_email_alert_settings', lambda: {'enabled': False})
     main_module._camera_health_state['cam-1'] = {
         'online': False, 'offline_since': time.time() - 600,
         'offline_notified': False, 'recovery_notified': False,
@@ -534,9 +516,9 @@ def test_deliver_fires_email_with_recipients(ch, main_module, monkeypatch, stub_
         main_module.database, 'get_setting',
         lambda key: {'enabled': True, 'offline_delay_minutes': 10, 'recipients': ['admin@example.com', 'ops@example.com']},
     )
-    monkeypatch.setattr(main_module, 'effective_push_notification_settings', lambda: {'enabled': False})
+    monkeypatch.setattr(ch, 'effective_push_notification_settings', lambda: {'enabled': False})
     monkeypatch.setattr(
-        main_module, 'effective_email_alert_settings',
+        ch, 'effective_email_alert_settings',
         lambda: {'enabled': True, 'from_address': 'alerts@example.com'},
     )
     main_module._camera_health_state['cam-1'] = {
@@ -556,9 +538,9 @@ def test_deliver_email_falls_back_to_from_address_when_no_recipients(ch, main_mo
         main_module.database, 'get_setting',
         lambda key: {'enabled': True, 'offline_delay_minutes': 10, 'recipients': []},
     )
-    monkeypatch.setattr(main_module, 'effective_push_notification_settings', lambda: {'enabled': False})
+    monkeypatch.setattr(ch, 'effective_push_notification_settings', lambda: {'enabled': False})
     monkeypatch.setattr(
-        main_module, 'effective_email_alert_settings',
+        ch, 'effective_email_alert_settings',
         lambda: {'enabled': True, 'from_address': 'alerts@example.com'},
     )
     main_module._camera_health_state['cam-1'] = {
@@ -577,8 +559,8 @@ def test_deliver_recovery_event_uses_online_title(ch, main_module, monkeypatch, 
         main_module.database, 'get_setting',
         lambda key: {'enabled': True, 'offline_delay_minutes': 10, 'recipients': []},
     )
-    monkeypatch.setattr(main_module, 'effective_push_notification_settings', lambda: {'enabled': True})
-    monkeypatch.setattr(main_module, 'effective_email_alert_settings', lambda: {'enabled': False})
+    monkeypatch.setattr(ch, 'effective_push_notification_settings', lambda: {'enabled': True})
+    monkeypatch.setattr(ch, 'effective_email_alert_settings', lambda: {'enabled': False})
     main_module._camera_health_state['cam-1'] = {
         'online': True, 'offline_since': None, 'offline_notified': True, 'recovery_notified': False,
     }
@@ -599,13 +581,13 @@ def test_deliver_push_failure_logs_warning_but_marks_still(ch, main_module, monk
             pass
         def _deliver(self, title, body):
             raise RuntimeError('push service unavailable')
-    monkeypatch.setattr(main_module, 'PushNotificationService', FailingPush)
+    monkeypatch.setattr(ch, 'PushNotificationService', FailingPush)
     monkeypatch.setattr(
         main_module.database, 'get_setting',
         lambda key: {'enabled': True, 'offline_delay_minutes': 10, 'recipients': []},
     )
-    monkeypatch.setattr(main_module, 'effective_push_notification_settings', lambda: {'enabled': True})
-    monkeypatch.setattr(main_module, 'effective_email_alert_settings', lambda: {'enabled': False})
+    monkeypatch.setattr(ch, 'effective_push_notification_settings', lambda: {'enabled': True})
+    monkeypatch.setattr(ch, 'effective_email_alert_settings', lambda: {'enabled': False})
     main_module._camera_health_state['cam-1'] = {
         'online': False, 'offline_since': time.time() - 600,
         'offline_notified': False, 'recovery_notified': False,

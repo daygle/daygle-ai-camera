@@ -750,9 +750,9 @@ def test_every_main_module_patch_reaches_a_pool_a_consumer():
     """
     reachable = _collect_app_main_definitions()
     sites = _collect_test_main_module_patches()
-    # Currently 13 sites across tests/test_api.py + tests/test_camera_health.py.
-    # Floor of 5 catches vacuous walker without over-fitting.
-    assert len(sites) >= 5, (
+    # Currently 2 sites in tests/test_api.py (camera_health.py migrated to ch).
+    # Floor of 1 catches vacuous walker without over-fitting.
+    assert len(sites) >= 1, (
         f"walker went suspiciously vacuous (saw {len(sites)} main_module "
         f"monkeypatch sites); refusing to silently pass on a possibly-"
         f"broken AST scanner"

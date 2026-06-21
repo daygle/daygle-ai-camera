@@ -72,10 +72,10 @@ Cluster membership (8 helpers, 108 original lines):
   but for the recovery-streak.
 
 - ``_deliver_camera_offline_notification`` -- builds the email + push
-  message through ``main.EmailAlertService`` /
-  ``main.PushNotificationService`` and stamps the notification flag on
-  the state dict via the two ``_mark_*`` helpers so subsequent cycles
-  of ``_check_cameras_health`` don't re-send.
+  message through ``EmailAlertService`` / ``PushNotificationService``
+  (top-level imports from their source modules) and stamps the
+  notification flag on the state dict via the two ``_mark_*`` helpers
+  so subsequent cycles of ``_check_cameras_health`` don't re-send.
 
 - ``_check_cameras_health`` -- the periodic monitor loop entry point
   (called from ``live_alert_monitor_loop``). Iterates ``main.cameras_config``
@@ -84,7 +84,7 @@ Cluster membership (8 helpers, 108 original lines):
   ``main.live_detection_retry_after`` to mark detection-backoff
   cameras as offline, then runs the helpers above.
 
-State and service access (via ``_state.*`` and ``from app.main import ...``):
+State and service access:
 
 - ``_state.database`` (``effective_camera_offline_alert_settings``)
 - ``_state._camera_health_state`` + ``_state._camera_health_lock`` (every
@@ -92,13 +92,8 @@ State and service access (via ``_state.*`` and ``from app.main import ...``):
 - ``_state.cameras_config`` (``_check_cameras_health`` -- iterated as
   ``for cfg in list(_state.cameras_config)`` to thread-safely snapshot)
 - ``_state.live_detection_retry_after`` (``_check_cameras_health``)
-- ``main.PushNotificationService`` / ``main.EmailAlertService``
-  (``_deliver_camera_offline_notification`` -- instantiated per-call
-  via ``from app.main import ...`` inside function body)
-
-Stdlib imports at module top (NOT Pool C):
-- ``time.time()`` for offline_since stamping + delay-elapsed math
-- ``email.mime.text.MIMEText`` for the email body
+- ``PushNotificationService`` / ``EmailAlertService`` / config-facade
+  functions -- top-level imports from their source modules (no Pool C).
 """
 
 from __future__ import annotations
@@ -109,6 +104,10 @@ from email.mime.text import MIMEText
 from typing import Any
 
 import app.state as _state
+from app.config_facades import effective_email_alert_settings, effective_push_notification_settings
+from app.diagnostics import log_camera_diagnostic
+from app.email_alerts import EmailAlertService
+from app.push_notifications import PushNotificationService
 
 logger = logging.getLogger('daygle.ai')
 
@@ -122,7 +121,6 @@ def effective_camera_offline_alert_settings() -> dict[str, Any]:
 
 
 def _update_camera_health(camera_id: str, online: bool) -> None:
-    from app.diagnostics import log_camera_diagnostic
     with _state._camera_health_lock:
         state = _state._camera_health_state.get(camera_id, {'online': True, 'offline_since': None, 'offline_notified': False, 'recovery_notified': False})
         was_online = state.get('online', True)
@@ -183,7 +181,6 @@ def _mark_camera_recovery_notified(camera_id: str) -> None:
 
 
 def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event_type: str) -> None:
-    from app.main import PushNotificationService, EmailAlertService, effective_push_notification_settings, effective_email_alert_settings, logger as _main_logger
     settings = effective_camera_offline_alert_settings()
     if not settings.get('enabled'):
         return
@@ -199,7 +196,7 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
             notifier = PushNotificationService(push_settings_obj)
             notifier._deliver(title, body)
         except Exception as exc:
-            _main_logger.warning('Push notify failed for camera %s %s: %s', camera_id, event_type, exc)
+            logger.warning('Push notify failed for camera %s %s: %s', camera_id, event_type, exc)
     email_settings_obj = effective_email_alert_settings()
     if email_settings_obj.get('enabled'):
         try:
@@ -216,7 +213,7 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
                 msg['To'] = ', '.join(recipients)
                 mailer._deliver(msg)
         except Exception as exc:
-            _main_logger.warning('Email notify failed for camera %s %s: %s', camera_id, event_type, exc)
+            logger.warning('Email notify failed for camera %s %s: %s', camera_id, event_type, exc)
     if event_type == 'offline':
         _mark_camera_offline_notified(camera_id)
     else:
