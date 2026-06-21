@@ -15,8 +15,7 @@ from starlette.concurrency import run_in_threadpool
 from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.camera_config import _migrate_camera_id, _redact_camera, normalize_camera_id
-from app.config_facades import effective_cameras_config
-from app.main import get_camera_config
+from app.config_facades import effective_cameras_config, get_camera_config
 from app.utils import build_stream_url
 from app.state import _camera_health_lock, _camera_health_state
 from app.deps import (

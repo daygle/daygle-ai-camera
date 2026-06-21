@@ -15,23 +15,13 @@ mutable state**. The state primitives are:
 - ``_camera_health_lock`` -- ``threading.Lock`` guarding every read /
   write of ``_camera_health_state``.
 
-Both primitives **stay on ``app.main``** for this extraction (Phase-24
-does NOT migrate them). This is the **state-migration template**:
-
-- State stays on the host module so the live-detection history rebuild
-  pattern (e.g. ``camera_config.py:_migrate_camera_id`` rewriting
-  ``main.live_detection_history`` across a camera rename) continues to
-  work without a cross-module write barrier.
-- Helpers read/write via ``main._camera_health_state`` /
-  ``main._camera_health_lock`` **at call time**, never as default args,
-  to dodge the Phase-23 circular-import trap (default-arg evaluation
-  fires during the Pool A rebind loop before main.py finishes defining
-  the primitives).
-- Lock discipline is preserved verbatim: every mutation is inside
-  ``with main._camera_health_lock:`` and the lock is RELEASED before any
-  cross-module side effect (e.g. ``log_camera_diagnostic`` writes to
-  SQLite -- releasing the lock first prevents waiting on a DB write
-  while holding the in-memory state lock).
+Both primitives live in ``app.state`` and are accessed via ``_state.*``
+(canonical home is ``app.state``, re-exported via Pool A on ``app.main``).
+Lock discipline is preserved verbatim: every mutation is inside
+``with _state._camera_health_lock:`` and the lock is RELEASED before any
+cross-module side effect (e.g. ``log_camera_diagnostic`` writes to
+SQLite -- releasing the lock first prevents waiting on a DB write
+while holding the in-memory state lock).
 
 The cluster's only callers live inside ``process_live_stream_alerts``
 background thread (``live_alert_monitor_loop`` invokes
@@ -82,10 +72,10 @@ Cluster membership (8 helpers, 108 original lines):
   but for the recovery-streak.
 
 - ``_deliver_camera_offline_notification`` -- builds the email + push
-  message through ``main.EmailAlertService`` /
-  ``main.PushNotificationService`` and stamps the notification flag on
-  the state dict via the two ``_mark_*`` helpers so subsequent cycles
-  of ``_check_cameras_health`` don't re-send.
+  message through ``EmailAlertService`` / ``PushNotificationService``
+  (top-level imports from their source modules) and stamps the
+  notification flag on the state dict via the two ``_mark_*`` helpers
+  so subsequent cycles of ``_check_cameras_health`` don't re-send.
 
 - ``_check_cameras_health`` -- the periodic monitor loop entry point
   (called from ``live_alert_monitor_loop``). Iterates ``main.cameras_config``
@@ -94,30 +84,16 @@ Cluster membership (8 helpers, 108 original lines):
   ``main.live_detection_retry_after`` to mark detection-backoff
   cameras as offline, then runs the helpers above.
 
-Pool C reach sites (resolved via ``main.<attr>`` at call time):
+State and service access:
 
-- ``main.database`` (``effective_camera_offline_alert_settings``)
-- ``main._camera_health_state`` + ``main._camera_health_lock`` (every
-  state-touching helper; resolved at call time inside the helper body
-  -- never as default arg)
-- ``main.log_camera_diagnostic`` (``_update_camera_health`` -- the
-  logger is called OUTSIDE the lock block to avoid holding the in-memory
-  state lock while waiting on a SQLite write)
-- ``main.cameras_config`` (``_check_cameras_health`` -- iterated as
-  ``for cfg in list(main.cameras_config)`` to thread-safely snapshot)
-- ``main.live_detection_retry_after`` (``_check_cameras_health`` --
-  read inside the loop, point-in-time get())
-- ``main.logger`` (``_deliver_camera_offline_notification`` -- warning
-  on push/email delivery failures)
-- ``main.effective_push_notification_settings`` (``_deliver_camera_offline_notification``)
-- ``main.effective_email_alert_settings`` (``_deliver_camera_offline_notification``)
-- ``main.PushNotificationService`` / ``main.EmailAlertService``
-  (``_deliver_camera_offline_notification`` -- instantiated per-call
-  from the effective settings)
-
-Stdlib imports at module top (NOT Pool C):
-- ``time.time()`` for offline_since stamping + delay-elapsed math
-- ``email.mime.text.MIMEText`` for the email body
+- ``_state.database`` (``effective_camera_offline_alert_settings``)
+- ``_state._camera_health_state`` + ``_state._camera_health_lock`` (every
+  state-touching helper; accessed via ``_state.*`` directly)
+- ``_state.cameras_config`` (``_check_cameras_health`` -- iterated as
+  ``for cfg in list(_state.cameras_config)`` to thread-safely snapshot)
+- ``_state.live_detection_retry_after`` (``_check_cameras_health``)
+- ``PushNotificationService`` / ``EmailAlertService`` / config-facade
+  functions -- top-level imports from their source modules (no Pool C).
 """
 
 from __future__ import annotations
@@ -128,6 +104,10 @@ from email.mime.text import MIMEText
 from typing import Any
 
 import app.state as _state
+from app.config_facades import effective_email_alert_settings, effective_push_notification_settings
+from app.diagnostics import log_camera_diagnostic
+from app.email_alerts import EmailAlertService
+from app.push_notifications import PushNotificationService
 
 logger = logging.getLogger('daygle.ai')
 
@@ -141,7 +121,6 @@ def effective_camera_offline_alert_settings() -> dict[str, Any]:
 
 
 def _update_camera_health(camera_id: str, online: bool) -> None:
-    from app.diagnostics import log_camera_diagnostic
     with _state._camera_health_lock:
         state = _state._camera_health_state.get(camera_id, {'online': True, 'offline_since': None, 'offline_notified': False, 'recovery_notified': False})
         was_online = state.get('online', True)
@@ -202,7 +181,6 @@ def _mark_camera_recovery_notified(camera_id: str) -> None:
 
 
 def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event_type: str) -> None:
-    from app.main import PushNotificationService, EmailAlertService, effective_push_notification_settings, effective_email_alert_settings, logger as _main_logger
     settings = effective_camera_offline_alert_settings()
     if not settings.get('enabled'):
         return
@@ -218,7 +196,7 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
             notifier = PushNotificationService(push_settings_obj)
             notifier._deliver(title, body)
         except Exception as exc:
-            _main_logger.warning('Push notify failed for camera %s %s: %s', camera_id, event_type, exc)
+            logger.warning('Push notify failed for camera %s %s: %s', camera_id, event_type, exc)
     email_settings_obj = effective_email_alert_settings()
     if email_settings_obj.get('enabled'):
         try:
@@ -235,7 +213,7 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
                 msg['To'] = ', '.join(recipients)
                 mailer._deliver(msg)
         except Exception as exc:
-            _main_logger.warning('Email notify failed for camera %s %s: %s', camera_id, event_type, exc)
+            logger.warning('Email notify failed for camera %s %s: %s', camera_id, event_type, exc)
     if event_type == 'offline':
         _mark_camera_offline_notified(camera_id)
     else:

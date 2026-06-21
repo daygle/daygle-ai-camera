@@ -23,10 +23,9 @@ from app.config_facades import (
 from app.deps import get_auth_enabled, get_database, get_detector
 from app.detector import DetectorUnavailableError
 from app.request_helpers import write_audit_log
+from app.state import active_rtsp_recordings, active_rtsp_recordings_lock
 from app.main import (
     _read_uploaded_image,
-    active_rtsp_recordings,
-    active_rtsp_recordings_lock,
     compute_minimum_rule_confidence,
     delete_recording_files,
     clear_runtime_media_directory,
