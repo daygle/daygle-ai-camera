@@ -184,18 +184,15 @@ def _install_validator_dependencies(
 ):
     """Install hermetic stand-ins for the cross-module deps of the 9 validators.
 
-    After Pool C elimination, all names except ``config`` and
-    ``cameras_config`` are module-level bindings in
-    ``app.payload_validators``. Patch on ``pv`` so the bare-name
-    lookups inside each validator body see the stub.
+    All names are module-level bindings in ``app.payload_validators``; patch
+    on ``pv`` so the bare-name lookups inside each validator body see the stub.
 
     Two special cases:
-    - ``config`` -- still Pool C (``from app.main import config`` lazy
-      inside ``validate_storage_settings``); patch on ``main``.
+    - ``config`` -- accessed as ``_state.config`` inside
+      ``validate_storage_settings``; patch on ``app.state``.
     - ``cameras_config`` -- accessed as ``_state.cameras_config``; patch
       on ``app.state``.
     """
-    import app.main as main
     import app.state as _state
     pv = sys.modules['app.payload_validators']
 
@@ -259,11 +256,9 @@ def _install_validator_dependencies(
     monkeypatch.setattr(pv, 'normalize_camera_recording_settings', normalize_camera_recording_settings)
     monkeypatch.setattr(pv, 'normalize_camera_ptz_settings', normalize_camera_ptz_settings)
 
-    # cameras_config accessed via _state.cameras_config.
+    # cameras_config and config accessed via _state.
     monkeypatch.setattr(_state, 'cameras_config', cameras_config)
-
-    # config still Pool C -- lazy from app.main import config inside validate_storage_settings.
-    monkeypatch.setattr(main, 'config', config)
+    monkeypatch.setattr(_state, 'config', config)
 
 
 # ---------------------------------------------------------------------------

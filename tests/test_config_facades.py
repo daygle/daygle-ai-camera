@@ -163,17 +163,17 @@ def test_default_live_config_calls_do_not_mutate_constant():
 
 
 def test_effective_ai_config_merges_overrides_via_deepcopy(monkeypatch):
-    """``effective_ai_config`` deep-copies ``config['ai']`` first, then
-    layers ``database.get_setting('ai')`` on top -- mutating the returned
+    """``effective_ai_config`` deep-copies ``_state.config['ai']`` first, then
+    layers ``_state.database.get_setting('ai')`` on top -- mutating the returned
     dict must NOT leak into the source.
     """
-    import app.main as main
+    import app.state as _state
     import app.config_facades as cf
 
     original_config_ai = {'backend': 'onnx', 'confidence': 0.45}
     override_db = {'ai': {'confidence': 0.99}}
-    monkeypatch.setattr(main, 'config', {'ai': original_config_ai})
-    monkeypatch.setattr(main, 'database', _FakeDb(override_db))
+    monkeypatch.setattr(_state, 'config', {'ai': original_config_ai})
+    monkeypatch.setattr(_state, 'database', _FakeDb(override_db))
 
     result = cf.effective_ai_config()
     assert result['backend'] == 'onnx'
@@ -189,7 +189,7 @@ def test_effective_storage_config_preserves_database_path_from_source(monkeypatc
     If a database override contains a different ``database`` value, the
     returned config must STILL carry the source ``database`` path.
     """
-    import app.main as main
+    import app.state as _state
     import app.config_facades as cf
 
     source_storage = {
@@ -201,8 +201,8 @@ def test_effective_storage_config_preserves_database_path_from_source(monkeypatc
         'database': '/some/other/path.sqlite3',  # attempted overwrite
         'retention_days': 30,
     }
-    monkeypatch.setattr(main, 'config', {'storage': source_storage})
-    monkeypatch.setattr(main, 'database', _FakeDb({'storage': override_storage}))
+    monkeypatch.setattr(_state, 'config', {'storage': source_storage})
+    monkeypatch.setattr(_state, 'database', _FakeDb({'storage': override_storage}))
 
     result = cf.effective_storage_config()
     assert result['database'] == '/data/store.sqlite3', (
@@ -220,19 +220,19 @@ def test_effective_live_config_layered_order_defaults_then_config_then_db(monkey
     config['live'] -> database.get_setting('live'), each layer
     overriding any keys it specifies.
     """
-    import app.main as main
+    import app.state as _state
     import app.config_facades as cf
 
     # Empty config + no override -> exactly DEFAULT_LIVE_CONFIG
-    monkeypatch.setattr(main, 'config', {})
-    monkeypatch.setattr(main, 'database', _FakeDb({}))
+    monkeypatch.setattr(_state, 'config', {})
+    monkeypatch.setattr(_state, 'database', _FakeDb({}))
     only_defaults = cf.effective_live_config()
     assert only_defaults == cf.DEFAULT_LIVE_CONFIG
 
     # Layered: config['live'] provides detection_interval_seconds, database
     # override provides motion_pixel_threshold; DEFAULT carries background_detection_enabled.
-    monkeypatch.setattr(main, 'config', {'live': {'detection_interval_seconds': 0.55}})
-    monkeypatch.setattr(main, 'database', _FakeDb({'live': {'motion_pixel_threshold': 99}}))
+    monkeypatch.setattr(_state, 'config', {'live': {'detection_interval_seconds': 0.55}})
+    monkeypatch.setattr(_state, 'database', _FakeDb({'live': {'motion_pixel_threshold': 99}}))
     layered = cf.effective_live_config()
     assert layered['detection_interval_seconds'] == 0.55
     assert layered['motion_pixel_threshold'] == 99
@@ -241,10 +241,9 @@ def test_effective_live_config_layered_order_defaults_then_config_then_db(monkey
 
 def test_effective_cameras_config_normalizes_via_main_helper(monkeypatch):
     """When a database override is present, ``effective_cameras_config``
-    calls ``main.normalize_camera_settings(camera, index)`` for each
-    entry -- verifying the cross-module Pool C reach.
+    calls ``normalize_camera_settings(camera, index)`` for each entry.
     """
-    import app.main as main
+    import app.state as _state
     import app.config_facades as cf
 
     captured: list[tuple] = []
@@ -253,8 +252,8 @@ def test_effective_cameras_config_normalizes_via_main_helper(monkeypatch):
         captured.append((camera, index))
         return {'id': f'normalized-{index}', 'source': camera}
 
-    monkeypatch.setattr(main, 'database', _FakeDb({'cameras': [{'raw': 1}, {'raw': 2}]}))
-    monkeypatch.setattr(main, 'normalize_camera_settings', fake_normalize)
+    monkeypatch.setattr(_state, 'database', _FakeDb({'cameras': [{'raw': 1}, {'raw': 2}]}))
+    monkeypatch.setattr(cf, 'normalize_camera_settings', fake_normalize)
 
     result = cf.effective_cameras_config()
     assert [c['id'] for c in result] == ['normalized-1', 'normalized-2']
@@ -268,31 +267,31 @@ def test_effective_cameras_config_empty_when_no_override(monkeypatch):
     """If the database has no 'cameras' override, return []. Cameras are
     managed via the mutating API endpoints, not the on-disk config.
     """
-    import app.main as main
+    import app.state as _state
     import app.config_facades as cf
 
-    monkeypatch.setattr(main, 'database', _FakeDb({'cameras': None}))
+    monkeypatch.setattr(_state, 'database', _FakeDb({'cameras': None}))
     assert cf.effective_cameras_config() == []
 
-    monkeypatch.setattr(main, 'database', _FakeDb({'cameras': []}))
+    monkeypatch.setattr(_state, 'database', _FakeDb({'cameras': []}))
     assert cf.effective_cameras_config() == []
 
     # Non-list override (defensive) yields empty result too.
-    monkeypatch.setattr(main, 'database', _FakeDb({'cameras': {'unexpected': 'object'}}))
+    monkeypatch.setattr(_state, 'database', _FakeDb({'cameras': {'unexpected': 'object'}}))
     assert cf.effective_cameras_config() == []
 
 
 def test_get_camera_config_raises_404_on_missing_id_when_runtime_list_non_empty(monkeypatch):
-    """When ``main.cameras_config`` is non-empty AND a camera_id is
+    """When ``_state.cameras_config`` is non-empty AND a camera_id is
     requested that doesn't match any entry, raise HTTPException(404,
     'Camera not found').
     """
-    import app.main as main
+    import app.state as _state
     import app.config_facades as cf
     from fastapi import HTTPException
 
-    monkeypatch.setattr(main, 'cameras_config', [{'id': 'front', 'name': 'Front'}])
-    monkeypatch.setattr(main, 'camera_config', {'id': 'fallback', 'name': 'Fallback'})
+    monkeypatch.setattr(_state, 'cameras_config', [{'id': 'front', 'name': 'Front'}])
+    monkeypatch.setattr(_state, 'camera_config', {'id': 'fallback', 'name': 'Fallback'})
 
     with pytest.raises(HTTPException) as exc_info:
         cf.get_camera_config('unknown-camera')
@@ -301,31 +300,31 @@ def test_get_camera_config_raises_404_on_missing_id_when_runtime_list_non_empty(
 
 
 def test_get_camera_config_returns_first_when_no_id_and_runtime_list_non_empty(monkeypatch):
-    """When ``main.cameras_config`` is non-empty and ``camera_id`` is
+    """When ``_state.cameras_config`` is non-empty and ``camera_id`` is
     None, return ``cameras_config[0]`` (the legacy "first camera" behaviour).
     """
-    import app.main as main
+    import app.state as _state
     import app.config_facades as cf
 
-    monkeypatch.setattr(main, 'cameras_config', [
+    monkeypatch.setattr(_state, 'cameras_config', [
         {'id': 'first', 'name': 'First'},
         {'id': 'second', 'name': 'Second'},
     ])
-    monkeypatch.setattr(main, 'camera_config', {'id': 'fallback'})
+    monkeypatch.setattr(_state, 'camera_config', {'id': 'fallback'})
 
     assert cf.get_camera_config(None) == {'id': 'first', 'name': 'First'}
 
 
 def test_get_camera_config_falls_back_to_camera_config_when_runtime_list_empty(monkeypatch):
-    """When ``main.cameras_config`` is empty, ``get_camera_config``
-    returns the singular ``main.camera_config`` fallback regardless of
+    """When ``_state.cameras_config`` is empty, ``get_camera_config``
+    returns the singular ``_state.camera_config`` fallback regardless of
     camera_id (single-camera legacy setups).
     """
-    import app.main as main
+    import app.state as _state
     import app.config_facades as cf
 
-    monkeypatch.setattr(main, 'cameras_config', [])
-    monkeypatch.setattr(main, 'camera_config', {'id': 'legacy-single', 'name': 'Legacy'})
+    monkeypatch.setattr(_state, 'cameras_config', [])
+    monkeypatch.setattr(_state, 'camera_config', {'id': 'legacy-single', 'name': 'Legacy'})
 
     # No id -> camera_config returned
     assert cf.get_camera_config(None) == {'id': 'legacy-single', 'name': 'Legacy'}
