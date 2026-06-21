@@ -206,12 +206,15 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
                 fallback = str(email_settings_obj.get('from_address') or '').strip()
                 if fallback and '@' in fallback:
                     recipients = [fallback]
+            # Send a one-to-one envelope per recipient so subscribers' email
+            # addresses never leak to fellow recipients in the To: header.
             if recipients:
-                msg = MIMEText(body, 'plain', 'utf-8')
-                msg['Subject'] = title
-                msg['From'] = str(email_settings_obj.get('from_address'))
-                msg['To'] = ', '.join(recipients)
-                mailer._deliver(msg)
+                for recipient in recipients:
+                    msg = MIMEText(body, 'plain', 'utf-8')
+                    msg['Subject'] = title
+                    msg['From'] = str(email_settings_obj.get('from_address'))
+                    msg['To'] = recipient
+                    mailer._deliver(msg)
         except Exception as exc:
             logger.warning('Email notify failed for camera %s %s: %s', camera_id, event_type, exc)
     if event_type == 'offline':

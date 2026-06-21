@@ -4485,6 +4485,43 @@ def test_object_detection_with_email_rule_delivers_email(tmp_path, monkeypatch, 
     assert label in sent[0]['Subject'].lower()
 
 
+def test_object_detection_with_email_rule_delivers_one_envelope_per_recipient(tmp_path, monkeypatch):
+    """Loop-send regression net: an alert rule listing N recipients must
+    trigger N one-to-one envelopes, each with a single To: header. The
+    headers must never carry a multi-address To so subscribers do not see
+    each other's email addresses.
+    """
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _bytes, confidence=None):
+            return [{'label': 'cat', 'confidence': 0.9, 'box': {'x': 0.2, 'y': 0.2, 'width': 0.2, 'height': 0.2}}]
+
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    main.live_detection_last_checked.clear()
+    main.alerts.last_triggered.clear()
+
+    sent = _email_alert_capture(main, monkeypatch)
+    settings = _zone_camera_settings_with_email('cat')
+    # Override recipients on the nested rule so the alert fans out to 2 addresses.
+    settings['detection']['zones'][0]['object_rules'][0]['email_recipients'] = ['alice@example.com', 'bob@example.com']
+    event_id = main.process_live_stream_alerts(
+        b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False,
+    )
+    main.wait_for_pending_alert_notifications()
+
+    assert event_id is not None
+    assert len(sent) == 2, 'one envelope per recipient, never a multi-recipient To'
+    assert [entry['To'] for entry in sent] == ['alice@example.com', 'bob@example.com']
+    assert 'cat' in sent[0]['Subject'].lower()
+
+
 def test_sound_rule_normalization_keeps_email_recipients_and_active_window(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main

@@ -118,25 +118,30 @@ class EmailAlertService:
             '</body></html>'
         )
 
-        if snapshot_bytes:
-            related: Message = MIMEMultipart('related')
-            related.attach(MIMEText(html_content, 'html', 'utf-8'))
-            img = MIMEImage(snapshot_bytes, 'jpeg')
-            img.add_header('Content-ID', f'<{cid}>')
-            img.add_header('Content-Disposition', 'inline', filename=f'alert_{event_id}.jpg')
-            related.attach(img)
-            message: Message = MIMEMultipart('alternative')
-            message.attach(MIMEText(plain_text, 'plain', 'utf-8'))
-            message.attach(related)
-        else:
-            message = MIMEMultipart('alternative')
-            message.attach(MIMEText(plain_text, 'plain', 'utf-8'))
-            message.attach(MIMEText(html_content, 'html', 'utf-8'))
+        # Send one envelope per recipient so each subscriber only sees their
+        # own address in the To: header. Loop inline (rather than reuse a
+        # shared Message) so every multipart structure gets its own boundary
+        # and the wires never carry a multi-address To.
+        for recipient in recipients:
+            if snapshot_bytes:
+                related: Message = MIMEMultipart('related')
+                related.attach(MIMEText(html_content, 'html', 'utf-8'))
+                img = MIMEImage(snapshot_bytes, 'jpeg')
+                img.add_header('Content-ID', f'<{cid}>')
+                img.add_header('Content-Disposition', 'inline', filename=f'alert_{event_id}.jpg')
+                related.attach(img)
+                message: Message = MIMEMultipart('alternative')
+                message.attach(MIMEText(plain_text, 'plain', 'utf-8'))
+                message.attach(related)
+            else:
+                message = MIMEMultipart('alternative')
+                message.attach(MIMEText(plain_text, 'plain', 'utf-8'))
+                message.attach(MIMEText(html_content, 'html', 'utf-8'))
 
-        message['Subject'] = subject
-        message['From'] = str(self.settings.get('from_address'))
-        message['To'] = ', '.join(recipients)
-        self._deliver(message)
+            message['Subject'] = subject
+            message['From'] = str(self.settings.get('from_address'))
+            message['To'] = recipient
+            self._deliver(message)
 
     def send_test(self, recipient: str) -> None:
         recipient = recipient.strip()
