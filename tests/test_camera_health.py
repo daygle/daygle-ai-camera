@@ -50,6 +50,28 @@ if str(REPO_ROOT) not in sys.path:
 # Fixtures
 # ---------------------------------------------------------------------------
 
+class _StubDb:
+    """Minimal database stub: get_setting returns None (no overrides)."""
+    def get_setting(self, key):
+        return None
+
+
+@pytest.fixture(autouse=True)
+def _stub_database(monkeypatch):
+    """Ensure _state.database and main.database are stub objects for tests that
+    don't use _load_app (i.e. lifespan has not run and singletons are None).
+
+    Individual tests that need specific return values replace _state.database
+    with their own stub via monkeypatch.setattr(_state, 'database', ...).
+    """
+    import app.state as _s
+    import app.main as _m
+    if _s.database is None:
+        stub = _StubDb()
+        monkeypatch.setattr(_s, 'database', stub)
+        monkeypatch.setattr(_m, 'database', stub)
+
+
 @pytest.fixture
 def ch():
     from app import camera_health as _ch
@@ -199,24 +221,34 @@ def test_state_primitives_not_promoted_into_camera_health(ch):
 
 def test_effective_offline_alert_settings_defaults(ch, monkeypatch):
     import app.state as _app_state
-    monkeypatch.setattr(_app_state.database, 'get_setting', lambda key: None)
+
+    class _DB:
+        def get_setting(self, key): return None
+
+    monkeypatch.setattr(_app_state, 'database', _DB())
     out = ch.effective_camera_offline_alert_settings()
     assert out == {'enabled': False, 'offline_delay_minutes': 1, 'recipients': []}
 
 
 def test_effective_offline_alert_settings_overrides_with_dict(ch, monkeypatch):
     import app.state as _app_state
-    monkeypatch.setattr(
-        _app_state.database, 'get_setting',
-        lambda key: {'enabled': True, 'offline_delay_minutes': 5, 'recipients': ['admin@example.com']},
-    )
+
+    class _DB:
+        def get_setting(self, key):
+            return {'enabled': True, 'offline_delay_minutes': 5, 'recipients': ['admin@example.com']}
+
+    monkeypatch.setattr(_app_state, 'database', _DB())
     out = ch.effective_camera_offline_alert_settings()
     assert out == {'enabled': True, 'offline_delay_minutes': 5, 'recipients': ['admin@example.com']}
 
 
 def test_effective_offline_alert_settings_ignores_non_dict_override(ch, monkeypatch):
     import app.state as _app_state
-    monkeypatch.setattr(_app_state.database, 'get_setting', lambda key: 'just-a-string')
+
+    class _DB:
+        def get_setting(self, key): return 'just-a-string'
+
+    monkeypatch.setattr(_app_state, 'database', _DB())
     # Non-dict override must not crash and must leave defaults intact.
     out = ch.effective_camera_offline_alert_settings()
     assert out == {'enabled': False, 'offline_delay_minutes': 1, 'recipients': []}

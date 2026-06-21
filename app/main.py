@@ -52,10 +52,56 @@ _state.config = config
 auth_config = config.get('auth', {})
 _state.auth_config = auth_config
 
+# Singletons are None until _startup() runs (called from lifespan or test bootstrap).
+database: Any = None
+storage: Any = None
+recording_service: Any = None
+auth: Any = None
+alerts: Any = None
+
+
+def _startup() -> None:
+    """Create and register all application singletons.
+
+    Called from ``app_lifespan`` when the server starts, and explicitly from
+    ``tests/test_api.py::_load_app`` for tests that exercise internal logic
+    without starting an HTTP server. Idempotent: a second call is a no-op so
+    test monkeypatches applied after the first call are preserved when the
+    lifespan also calls this.
+    """
+    global database, storage, recording_service, auth, alerts
+    if _state.database is not None:
+        return
+    database = EventDatabase(config['storage']['database'])
+    _state.database = database
+    _state.camera_config = {}
+    _state.cameras_config = []
+    _state.camera_instances = {}
+    _state.camera = None
+    storage = Storage({**config, 'storage': effective_storage_config()})
+    _state.storage = storage
+    recording_service = RecordingService({**config, 'storage': effective_storage_config(), 'recording': effective_recording_config()})
+    _state.recording_service = recording_service
+    auth = AuthService(config['storage']['database'], effective_auth_config())
+    _state.auth = auth
+    _state.detector = create_detector(effective_ai_config())
+    _state.last_detector_error = getattr(_state.detector, 'unavailable_reason', None)
+    alerts = AlertEngine([])
+    _state.alerts = alerts
+    cameras_config = effective_cameras_config()
+    _state.cameras_config = cameras_config
+    camera_config = cameras_config[0] if cameras_config else {}
+    _state.camera_config = camera_config
+    camera_instances = create_camera_instances(cameras_config)
+    _state.camera_instances = camera_instances
+    _state.camera = camera_instances[camera_config['id']] if camera_config else None
+    _state.recording_service.diagnostic_callback = log_camera_diagnostic
+
 
 @asynccontextmanager
 async def app_lifespan(_app: FastAPI):
-    removed = database.cleanup_incomplete_recordings()
+    _startup()
+    removed = _state.database.cleanup_incomplete_recordings()
     if removed:
         _logger.info(f'Cleaned up {len(removed)} incomplete recording(s) from previous session')
     log_detector_initialization()
@@ -75,39 +121,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 static_dir = BASE_DIR / 'web'
 if static_dir.exists():
     app.mount('/static', StaticFiles(directory=static_dir), name='static')
-
-database = EventDatabase(config['storage']['database'])
-_state.database = database
-camera_config: dict[str, Any] = {}
-_state.camera_config = camera_config
-cameras_config: list[dict[str, Any]] = []
-_state.cameras_config = cameras_config
-camera_instances: dict[str, Any] = {}
-_state.camera_instances = camera_instances
-camera = None
-_state.camera = camera
-storage = Storage({**config, 'storage': effective_storage_config()})
-_state.storage = storage
-recording_service = RecordingService({**config, 'storage': effective_storage_config(), 'recording': effective_recording_config()})
-_state.recording_service = recording_service
-auth = AuthService(config['storage']['database'], effective_auth_config())
-_state.auth = auth
-_state.detector = create_detector(effective_ai_config())
-last_detector_error: str | None = getattr(_state.detector, 'unavailable_reason', None)
-_state.last_detector_error = last_detector_error
-alerts = AlertEngine([])
-_state.alerts = alerts
-
-cameras_config = effective_cameras_config()
-_state.cameras_config = cameras_config
-camera_config = cameras_config[0] if cameras_config else {}
-_state.camera_config = camera_config
-camera_instances = create_camera_instances(cameras_config)
-_state.camera_instances = camera_instances
-camera = camera_instances[camera_config['id']] if camera_config else None
-_state.camera = camera
-
-_state.recording_service.diagnostic_callback = log_camera_diagnostic
 
 from app.api.sound_router import router as sound_router
 app.include_router(sound_router)
