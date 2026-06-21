@@ -562,8 +562,6 @@ def _configure_file_logging() -> None:
     root.addHandler(handler)
     root.setLevel(logging.INFO)
 _configure_file_logging()
-_FFPROBE: str | None = shutil.which('ffprobe')
-_FFMPEG: str | None = shutil.which('ffmpeg')
 ONE_PIXEL_PNG = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82'
 config = load_settings()
 _state.config = config
@@ -680,40 +678,6 @@ camera = camera_instances[camera_config['id']] if camera_config else None
 def config_file_path() -> Path:
     return Path(os.environ.get(CONFIG_ENV_VAR) or DEFAULT_CONFIG_PATH)
 
-
-def set_session_cookie(response: Response, request: Request, token: str, expires_at: str) -> None:
-    session_hours = float(effective_auth_config().get('session_timeout_hours', 12))
-    response.set_cookie(SESSION_COOKIE_NAME, token, httponly=True, secure=request.url.scheme == 'https', samesite='lax', expires=expires_at, max_age=int(session_hours * 3600))
-
-def set_csrf_cookie(response: Response, token: str, request: Request) -> None:
-    response.set_cookie(CSRF_COOKIE, token, httponly=True, secure=request.url.scheme == 'https', samesite='lax', max_age=3600)
-
-def clear_auth_cookies(response: Response) -> None:
-    response.delete_cookie(SESSION_COOKIE_NAME)
-    response.delete_cookie(CSRF_COOKIE)
-
-async def form_data(request: Request) -> dict[str, str]:
-    body = (await request.body()).decode('utf-8')
-    return {key: values[-1] for key, values in parse_qs(body, keep_blank_values=True).items()}
-
-def auth_page(title: str, body: str) -> HTMLResponse:
-    return HTMLResponse(f'<!doctype html>\n<html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />\n<title>{escape(title)} · Daygle AI Camera</title><link rel="stylesheet" href="/static/styles.css" /></head>\n<body><main class="auth-shell"><section class="card auth-card"><p class="eyebrow">Daygle AI Camera</p>{body}</section></main></body></html>')
-
-def csrf_token_response(request: Request, title: str, body_template: str, *, status_code: int=200) -> HTMLResponse:
-    token = secrets.token_urlsafe(32)
-    response = auth_page(title, body_template.format(csrf=escape(token)))
-    response.status_code = status_code
-    set_csrf_cookie(response, token, request)
-    return response
-
-def write_audit_log(request: Request, action: str, resource: str, resource_id: Any=None, details: dict[str, Any] | None=None, status: str='success') -> None:
-    user: dict[str, Any] | None = getattr(request.state, 'user', None)
-    user_id: int | None = int(user['id']) if user else None
-    username: str = str(user['username']) if user else 'anonymous'
-    try:
-        database.add_audit_log(created_at=utc_now(), user_id=user_id, username=username, action=action, resource=resource, resource_id=str(resource_id) if resource_id is not None else None, details=details, ip_address=_request_ip(request), status=status)
-    except Exception as exc:
-        _logger.warning('Failed to write audit log: %s', exc)
 
 recording_service.diagnostic_callback = log_camera_diagnostic
 

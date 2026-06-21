@@ -2652,10 +2652,11 @@ def test_playback_transcode_preserves_optional_audio_stream(tmp_path, monkeypatc
         Path(command[-1]).write_bytes(b'playback-video')
         return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
 
-    monkeypatch.setattr(main.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
-    monkeypatch.setattr(main.subprocess, 'run', fake_run)
-    monkeypatch.setattr(main, 'probe_video_duration', lambda _path: 5.0)
-    monkeypatch.setattr(main, 'mp4_has_video_stream', lambda _path: True)
+    import app.media_utils as _media_utils
+    monkeypatch.setattr(_media_utils.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(_media_utils.subprocess, 'run', fake_run)
+    monkeypatch.setattr(_media_utils, 'probe_video_duration', lambda _path: 5.0)
+    monkeypatch.setattr(_media_utils, 'mp4_has_video_stream', lambda _path: True)
 
     source_path = tmp_path / 'source.mkv'
     output_path = main.recording_playback_sidecar_path(source_path)
@@ -2676,15 +2677,16 @@ def test_h264_mp4_with_browser_playable_audio_streams_directly(tmp_path, monkeyp
     _load_app(tmp_path, monkeypatch)
     import app.main as main
 
+    import app.media_utils as _media_utils
     source_path = tmp_path / 'source.mp4'
     source_path.write_bytes(b'input-video')
-    monkeypatch.setattr(main, 'probe_video_codec', lambda _path: 'h264')
-    monkeypatch.setattr(main, 'probe_audio_codec', lambda _path: 'aac')
+    monkeypatch.setattr(_media_utils, 'probe_video_codec', lambda _path: 'h264')
+    monkeypatch.setattr(_media_utils, 'probe_audio_codec', lambda _path: 'aac')
 
     def fail_transcode(*_args, **_kwargs):
         raise AssertionError('browser-playable MP4 should not be transcoded')
 
-    monkeypatch.setattr(main, 'transcode_recording_to_mp4', fail_transcode)
+    monkeypatch.setattr(_media_utils, 'transcode_recording_to_mp4', fail_transcode)
 
     assert main.recording_stream_path(source_path) == source_path
 
@@ -2692,16 +2694,17 @@ def test_h264_mp4_with_browser_playable_audio_streams_directly(tmp_path, monkeyp
 def test_h264_mp4_without_audio_streams_directly(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.media_utils as _media_utils
 
     source_path = tmp_path / 'source.mp4'
     source_path.write_bytes(b'input-video')
-    monkeypatch.setattr(main, 'probe_video_codec', lambda _path: 'h264')
-    monkeypatch.setattr(main, 'probe_audio_codec', lambda _path: None)
+    monkeypatch.setattr(_media_utils, 'probe_video_codec', lambda _path: 'h264')
+    monkeypatch.setattr(_media_utils, 'probe_audio_codec', lambda _path: None)
 
     def fail_transcode(*_args, **_kwargs):
         raise AssertionError('video-only MP4 should not be transcoded')
 
-    monkeypatch.setattr(main, 'transcode_recording_to_mp4', fail_transcode)
+    monkeypatch.setattr(_media_utils, 'transcode_recording_to_mp4', fail_transcode)
 
     assert main.recording_stream_path(source_path) == source_path
 
@@ -2713,11 +2716,12 @@ def test_h264_mp4_without_audio_streams_directly(tmp_path, monkeypatch):
 def test_h264_mp4_with_unsupported_audio_is_transcoded_for_playback(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     import app.main as main
+    import app.media_utils as _media_utils
 
     source_path = tmp_path / 'source.mp4'
     source_path.write_bytes(b'input-video')
-    monkeypatch.setattr(main, 'probe_video_codec', lambda _path: 'h264')
-    monkeypatch.setattr(main, 'probe_audio_codec', lambda _path: 'pcm_mulaw')
+    monkeypatch.setattr(_media_utils, 'probe_video_codec', lambda _path: 'h264')
+    monkeypatch.setattr(_media_utils, 'probe_audio_codec', lambda _path: 'pcm_mulaw')
 
     transcoded = []
 
@@ -2725,7 +2729,7 @@ def test_h264_mp4_with_unsupported_audio_is_transcoded_for_playback(tmp_path, mo
         transcoded.append((input_path, output_path))
         output_path.write_bytes(b'playback-video-with-aac')
 
-    monkeypatch.setattr(main, 'transcode_recording_to_mp4', fake_transcode)
+    monkeypatch.setattr(_media_utils, 'transcode_recording_to_mp4', fake_transcode)
 
     stream_path = main.recording_stream_path(source_path)
 
