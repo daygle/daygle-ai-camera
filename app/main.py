@@ -109,9 +109,6 @@ _state.camera = camera
 
 _state.recording_service.diagnostic_callback = log_camera_diagnostic
 
-_update_in_progress = False
-_update_lock = threading.Lock()
-
 from app.api.sound_router import router as sound_router
 app.include_router(sound_router)
 from app.api.settings_ai_router import router as settings_ai_router
