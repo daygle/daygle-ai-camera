@@ -151,16 +151,17 @@ class _LoggerStub:
 
 
 def _stub_main_with_camera_recording_renamer(monkeypatch):
-    """Install a hermetic stand-in for the ``main`` attributes that
-    ``_migrate_camera_id`` reaches at call time: ``RecordingService``,
+    """Install a hermetic stand-in for the attributes that
+    ``_migrate_camera_id`` reaches: ``RecordingService`` (on cc module),
     ``live_detection_history``, ``live_detection_history_lock``,
-    ``_frame_motion_prev``, ``_frame_motion_lock``, ``recording_service``,
-    ``logger``.
+    ``_frame_motion_prev``, ``_frame_motion_lock``, ``recording_service``
+    (on _state), and ``logger`` (on cc module).
 
-    Returns ``(main, lock_log)`` so callers can read back side-effects
+    Returns ``(_state, lock_log)`` so callers can read back side-effects
     (rename ops, lock contention, log calls) post-call.
     """
-    import app.main as main
+    import app.state as _state
+    import app.camera_config as cc
 
     class _RecordingServiceStub:
         def __init__(self) -> None:
@@ -173,14 +174,14 @@ def _stub_main_with_camera_recording_renamer(monkeypatch):
             return f'cam-{camera_id}'
 
     log: list[str] = []
-    monkeypatch.setattr(main, 'RecordingService', _RecordingServiceStub)
-    monkeypatch.setattr(main, 'live_detection_history_lock', _LockStub('history', log))
-    monkeypatch.setattr(main, 'live_detection_history', {'old': ['a', 'b']})
-    monkeypatch.setattr(main, '_frame_motion_lock', _LockStub('motion', log))
-    monkeypatch.setattr(main, '_frame_motion_prev', {'old': {'m': 1}})
-    monkeypatch.setattr(main, 'recording_service', _RecordingServiceStub())
-    monkeypatch.setattr(main, 'logger', _LoggerStub(log))
-    return main, log
+    monkeypatch.setattr(cc, 'RecordingService', _RecordingServiceStub)
+    monkeypatch.setattr(_state, 'live_detection_history_lock', _LockStub('history', log))
+    monkeypatch.setattr(_state, 'live_detection_history', {'old': ['a', 'b']})
+    monkeypatch.setattr(_state, '_frame_motion_lock', _LockStub('motion', log))
+    monkeypatch.setattr(_state, '_frame_motion_prev', {'old': {'m': 1}})
+    monkeypatch.setattr(_state, 'recording_service', _RecordingServiceStub())
+    monkeypatch.setattr(cc, 'logger', _LoggerStub(log))
+    return _state, log
 
 
 class _FakePath:
@@ -291,50 +292,42 @@ def test_redact_camera_reports_has_password_false_when_no_password(cc):
 def test_migrate_camera_id_renames_in_memory_state_across_both_locks(monkeypatch, cc):
     """``_migrate_camera_id`` pops the old id from both
     ``live_detection_history`` and ``_frame_motion_prev`` under their
-    respective locks, and rebinds the value under the new id. The
-    ``cc`` fixture re-resolves the current ``app.camera_config`` module
-    instance so the call goes through the SAME instance the test's
-    monkeypatched ``main`` is also bound to (defeats the
-    ``tests/test_api.py::_load_app`` sys-modules-wipe state leak -- same
-    lesson as Phase-17).
+    respective locks, and rebinds the value under the new id.
     """
-    main, lock_log = _stub_main_with_camera_recording_renamer(monkeypatch)
+    state, lock_log = _stub_main_with_camera_recording_renamer(monkeypatch)
 
     cc._migrate_camera_id('old', 'new')
 
-    assert 'old' not in main.live_detection_history
-    assert main.live_detection_history['new'] == ['a', 'b']
-    assert 'old' not in main._frame_motion_prev
-    assert main._frame_motion_prev['new'] == {'m': 1}
+    assert 'old' not in state.live_detection_history
+    assert state.live_detection_history['new'] == ['a', 'b']
+    assert 'old' not in state._frame_motion_prev
+    assert state._frame_motion_prev['new'] == {'m': 1}
     # Both locks were taken + released in order.
     assert lock_log == ['acquire:history', 'release:history', 'acquire:motion', 'release:motion']
 
 
 def test_migrate_camera_id_is_noop_when_old_id_absent_from_state(monkeypatch, cc):
     """If neither in-memory dict has the old id, ``_migrate_camera_id``
-    acquires both locks but leaves the dicts untouched. The ``cc``
-    fixture re-resolves the current instance -- see comment above for
-    the state-leak rationale."""
-    main, lock_log = _stub_main_with_camera_recording_renamer(monkeypatch)
-    main.live_detection_history.clear()
-    main._frame_motion_prev.clear()
+    acquires both locks but leaves the dicts untouched."""
+    state, lock_log = _stub_main_with_camera_recording_renamer(monkeypatch)
+    state.live_detection_history.clear()
+    state._frame_motion_prev.clear()
 
     cc._migrate_camera_id('ghost', 'new')
 
     assert lock_log == ['acquire:history', 'release:history', 'acquire:motion', 'release:motion']
-    assert main.live_detection_history == {}
-    assert main._frame_motion_prev == {}
+    assert state.live_detection_history == {}
+    assert state._frame_motion_prev == {}
 
 
 def test_migrate_camera_id_handles_recording_service_none(monkeypatch, cc):
-    """When ``main.recording_service`` is ``None`` (e.g. before bring-up),
+    """When ``_state.recording_service`` is ``None`` (e.g. before bring-up),
     the in-memory state migration still runs and the renaming path
-    skips cleanly without raising. The ``cc`` fixture re-resolves the
-    current instance -- see comment above for the state-leak rationale."""
-    main, _lock_log = _stub_main_with_camera_recording_renamer(monkeypatch)
-    monkeypatch.setattr(main, 'recording_service', None)
+    skips cleanly without raising."""
+    state, _lock_log = _stub_main_with_camera_recording_renamer(monkeypatch)
+    monkeypatch.setattr(state, 'recording_service', None)
 
     cc._migrate_camera_id('old', 'new')
 
-    assert main.live_detection_history['new'] == ['a', 'b']
-    assert main._frame_motion_prev['new'] == {'m': 1}
+    assert state.live_detection_history['new'] == ['a', 'b']
+    assert state._frame_motion_prev['new'] == {'m': 1}

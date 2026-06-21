@@ -91,19 +91,21 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.responses import Response
 
+import app.state as _state
 from app.auth import CSRF_HEADER
+from app.config_facades import effective_auth_config
+from app.state import ADMIN_PATHS, MUTATING_METHODS, PUBLIC_PATHS, PUBLIC_PREFIXES
 
 
 async def authentication_middleware(request: Request, call_next):
-    import app.main as main
-    if not main.effective_auth_config().get('enabled', True):
+    if not effective_auth_config().get('enabled', True):
         return await call_next(request)
     path = request.url.path
-    if path in main.PUBLIC_PATHS or any(
-        (path.startswith(prefix) for prefix in main.PUBLIC_PREFIXES)
+    if path in PUBLIC_PATHS or any(
+        (path.startswith(prefix) for prefix in PUBLIC_PREFIXES)
     ):
         return await call_next(request)
-    has_users = main.auth.users_exist()
+    has_users = _state.auth.users_exist()
     if not has_users:
         if path.startswith('/api/'):
             return JSONResponse(
@@ -111,8 +113,8 @@ async def authentication_middleware(request: Request, call_next):
                 status_code=403,
             )
         return RedirectResponse('/setup', status_code=303)
-    _cookie_name = str(main.effective_auth_config().get('cookie_name', 'session'))
-    session = main.auth.get_session(request.cookies.get(_cookie_name))
+    _cookie_name = str(effective_auth_config().get('cookie_name', 'session'))
+    session = _state.auth.get_session(request.cookies.get(_cookie_name))
     if session is None:
         if path.startswith('/api/'):
             return JSONResponse(
@@ -122,26 +124,26 @@ async def authentication_middleware(request: Request, call_next):
     request.state.session = session
     request.state.user = session['user']
     admin_required = (
-        path in main.ADMIN_PATHS
+        path in ADMIN_PATHS
         or path.startswith('/api/users')
         or path.startswith('/api/settings/ai')
         or path.startswith('/api/settings/system')
         or path.startswith('/api/update/')
-        or (path.startswith('/api/cameras') and request.method in main.MUTATING_METHODS)
-        or (path.startswith('/api/settings/alert-email') and request.method in main.MUTATING_METHODS)
-        or (path.startswith('/api/settings/alert-push') and request.method in main.MUTATING_METHODS)
-        or (path.startswith('/api/settings/camera-offline') and request.method in main.MUTATING_METHODS)
+        or (path.startswith('/api/cameras') and request.method in MUTATING_METHODS)
+        or (path.startswith('/api/settings/alert-email') and request.method in MUTATING_METHODS)
+        or (path.startswith('/api/settings/alert-push') and request.method in MUTATING_METHODS)
+        or (path.startswith('/api/settings/camera-offline') and request.method in MUTATING_METHODS)
         or (
             (path.startswith('/api/events') or path.startswith('/api/alerts'))
             and 'dismiss' in path
-            and (request.method in main.MUTATING_METHODS)
+            and (request.method in MUTATING_METHODS)
         )
     )
     if admin_required and session['user']['role'] != 'admin':
         return JSONResponse(
             {'detail': 'Admin access required'}, status_code=403,
         )
-    if (path.startswith('/api/') or path == '/logout') and request.method in main.MUTATING_METHODS:
+    if (path.startswith('/api/') or path == '/logout') and request.method in MUTATING_METHODS:
         csrf_header = request.headers.get(CSRF_HEADER)
         if not csrf_header or csrf_header != session['csrf_token']:
             return JSONResponse(
@@ -151,10 +153,9 @@ async def authentication_middleware(request: Request, call_next):
 
 
 async def app_navigation_middleware(request: Request, call_next):
-    import app.main as main
     response = await call_next(request)
     content_type = response.headers.get('content-type', '')
-    if request.url.path in main.PUBLIC_PATHS or not content_type.startswith('text/html'):
+    if request.url.path in PUBLIC_PATHS or not content_type.startswith('text/html'):
         return response
     body = b''
     async for chunk in response.body_iterator:

@@ -27,7 +27,7 @@ from app.email_alerts import EmailAlertError, EmailAlertService
 from app.push_notifications import PushNotificationError, PushNotificationService
 from app.camera_backend import OpenCvStreamCamera
 from app.recordings import RecordingService
-from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, load_settings
+from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, config_file_path as config_file_path, load_settings
 from app.storage import Storage
 
 # Pool A state rebinds: canonical home is app.state; re-exported so tests and
@@ -347,6 +347,7 @@ def camera_event_recording_config(settings: dict[str, Any]) -> dict[str, Any]:
     camera_recording = normalize_camera_recording_settings(settings.get('recording'))
     base.update({'continuous': camera_recording['continuous']})
     return base
+_state.camera_event_recording_config = camera_event_recording_config
 
 database = EventDatabase(config['storage']['database'])
 _state.database = database
@@ -358,6 +359,7 @@ camera_instances: dict[str, Any] = {}
 _state.camera_instances = camera_instances
 camera = None
 storage = Storage({**config, 'storage': effective_storage_config()})
+_state.storage = storage
 recording_service = RecordingService({**config, 'storage': effective_storage_config(), 'recording': effective_recording_config()})
 _state.recording_service = recording_service
 auth = AuthService(config['storage']['database'], effective_auth_config())
@@ -367,6 +369,7 @@ _state.detector = create_detector(effective_ai_config())
 last_detector_error: str | None = getattr(_state.detector, 'unavailable_reason', None)
 _state.last_detector_error = last_detector_error
 alerts = AlertEngine([])
+_state.alerts = alerts
 
 
 
@@ -426,10 +429,6 @@ _state.camera_config = camera_config
 camera_instances = create_camera_instances(cameras_config)
 _state.camera_instances = camera_instances
 camera = camera_instances[camera_config['id']] if camera_config else None
-
-def config_file_path() -> Path:
-    return Path(os.environ.get(CONFIG_ENV_VAR) or DEFAULT_CONFIG_PATH)
-
 
 recording_service.diagnostic_callback = log_camera_diagnostic
 
@@ -518,10 +517,12 @@ def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
         except Exception as unexpected_exc:
             _logger.warning('Unexpected error updating camera: %s', unexpected_exc)
     apply_sound_settings()
+_state.apply_cameras_settings = apply_cameras_settings
 
 def apply_storage_and_recording_settings() -> None:
     global storage, recording_service
     storage = Storage({**config, 'storage': effective_storage_config()})
+    _state.storage = storage
     old_service = recording_service
     recording_service = RecordingService({**config, 'storage': effective_storage_config(), 'recording': effective_recording_config()})
     recording_service.diagnostic_callback = log_camera_diagnostic
@@ -532,6 +533,7 @@ def apply_storage_and_recording_settings() -> None:
             old_service.stop_all_continuous_recordings()
         except Exception as unexpected_exc:
             _logger.warning('Unexpected error deleting camera: %s', unexpected_exc)
+_state.apply_storage_and_recording_settings = apply_storage_and_recording_settings
 
 def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
     import app.alert_dispatch as _alert_dispatch
@@ -554,7 +556,7 @@ def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
     last_detector_error = candidate_error
     log_detector_initialization('reload')
     return (True, last_detector_error)
-
+_state.reload_detector = reload_detector
 
 
 def _current_version() -> str:

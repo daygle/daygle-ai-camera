@@ -19,16 +19,24 @@ from app.alert_dispatch import (
     compute_minimum_rule_confidence,
     deliver_alert_notifications as _deliver_alert_notifications,
 )
-from app.config_facades import effective_live_config
+from app.camera_health import _check_cameras_health
+from app.camera_instance import read_ingest_frame
+from app.config_facades import effective_email_alert_settings, effective_live_config
 from app.detection_state import (
     detect_frame_motion,
     detection_label_set,
     record_live_detection_history,
 )
-from app.detection_status import update_live_detection_status
+from app.detection_status import _camera_has_live_alert_stream, update_live_detection_status
 from app.detector import DetectorUnavailableError
-from app.event_debounce import live_event_is_debounced, remember_live_event
+from app.event_debounce import (
+    clear_live_camera_backoff,
+    live_event_is_debounced,
+    remember_live_event,
+    schedule_live_camera_backoff,
+)
 from app.recording_extension import (
+    _make_continuous_chunk_callback,
     attach_event_recording,
     extend_active_rtsp_recording,
     recording_skip_reason,
@@ -51,11 +59,6 @@ from app.zone_detection import (
 logger = logging.getLogger('daygle.ai')
 
 def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> int:
-    from app.main import (
-        _camera_has_live_alert_stream, camera_event_recording_config,
-        read_ingest_frame, schedule_live_camera_backoff,
-        clear_live_camera_backoff, _make_continuous_chunk_callback,
-    )
     if live_settings is None:
         live_settings = effective_live_config()
     background_detection_enabled = normalize_bool_setting(live_settings.get('background_detection_enabled'), True)
@@ -66,7 +69,7 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
             continue
         now = time.time()
         stream_url = build_stream_url(selected_config)
-        cam_rec_config = camera_event_recording_config(selected_config)
+        cam_rec_config = _state.camera_event_recording_config(selected_config)
         if stream_url:
             _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config)
             if cam_rec_config.get('continuous'):
@@ -87,10 +90,6 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
             _state.active_live_detection_cameras.add(camera_id)
 
         def _detect_bg(cid: str=camera_id, cfg: dict[str, Any]=dict(selected_config)) -> None:
-            from app.main import (
-                read_ingest_frame, schedule_live_camera_backoff,
-                clear_live_camera_backoff,
-            )
             try:
                 sample = read_ingest_frame(cid)
                 if sample is None:
@@ -139,7 +138,6 @@ def _prune_frame_motion_state() -> None:
 
 def live_alert_monitor_loop() -> None:
     from app.backup import purge_camera_diagnostics_by_policy
-    from app.main import _check_cameras_health
     _last_prune = 0.0
     while not _state.live_alert_monitor_stop.is_set():
         live_settings = effective_live_config()
@@ -179,11 +177,10 @@ def _encode_frame_jpeg(image: Any) -> bytes:
 
 
 def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any]) -> None:
-    from app.main import camera_event_recording_config
     camera_id = str(settings.get('id') or 'camera')
     stream_url = build_stream_url(settings)
     if stream_url:
-        _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=camera_event_recording_config(settings))
+        _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=_state.camera_event_recording_config(settings))
     live_cfg = effective_live_config()
     if normalize_bool_setting(live_cfg.get('background_detection_enabled'), True):
         return
@@ -210,7 +207,6 @@ def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings
 
 
 def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict[str, Any], *, enforce_interval: bool = True) -> int | None:
-    from app.main import alerts, camera_event_recording_config, effective_email_alert_settings, storage
     camera_id = str(settings.get('id') or 'camera')
     live_settings = effective_live_config()
     detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 0.25))
@@ -298,7 +294,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     if not alert_detections:
         update_live_detection_status(camera_id, state='checked', reason='No detections matched this camera and its monitoring areas.', detected_labels=raw_labels, matched_labels=[], detections=list(detections))
         return None
-    triggered = alerts.process(alert_detections, rules=zone_rules)
+    triggered = _state.alerts.process(alert_detections, rules=zone_rules)
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     triggered_labels = {str(alert.get('label') or '').lower() for alert in triggered}
     _confident_object_detections: list[dict[str, Any]] = []
@@ -314,7 +310,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         _motion_record = zone_motion_record_on_detect(settings)
         recording_detections.append({**strongest_motion, 'label': 'motion', 'motion_event': True, 'alert_matched': 'motion' in triggered_labels, 'alert_triggered': 'motion' in triggered_labels or _motion_record or detection_has_matching_record_rule({**strongest_motion, 'label': 'motion'}, zone_rules)})
     matched_labels = [str(detection.get('label')) for detection in alert_detections if detection.get('label')]
-    camera_recording_config = camera_event_recording_config(settings)
+    camera_recording_config = _state.camera_event_recording_config(settings)
     should_record_event, _trigger_type, _trigger_label = _state.recording_service.should_record(recording_detections, camera_recording_config)
     debounced_labels = detection_label_set([detection for detection in recording_detections if detection.get('alert_triggered')])
     if not debounced_labels:
@@ -347,7 +343,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         image_bytes = _encode_frame_jpeg(image)
     else:
         image_bytes = image
-    snapshot_path = storage.save_image_snapshot(image_bytes, f'{camera_id}.jpg')
+    snapshot_path = _state.storage.save_image_snapshot(image_bytes, f'{camera_id}.jpg')
     event_id = _state.database.add_event(created_at=event_time, source='rtsp', snapshot_path=snapshot_path, detections=recording_detections, alert_triggered=bool(triggered), metadata={'camera_id': settings.get('id'), 'camera_name': settings.get('name'), 'ai_backend': ai_state['configured_backend'], 'detector_backend': ai_state['active_backend'], 'source': 'live-stream'})
     recording_id = attach_event_recording(event_id, event_time, 'rtsp', recording_detections, camera_id=camera_id, recording_config=camera_recording_config)
     if recording_id is not None:
@@ -366,5 +362,5 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             _state._notification_threads.append(notify_thread)
     email_rules = [rule for rule in zone_rules if rule.get('enabled', True) and rule.get('email_enabled') and _rule_notify_active_now(rule) and (str(rule.get('name') or '') in {str(alert.get('rule_name') or '') for alert in triggered})]
     email_recipients = sorted({recipient for rule in email_rules for recipient in rule.get('email_recipients', [])})
-    update_live_detection_status(camera_id, state='alerted' if triggered else 'checked', reason='Alert matched.' if triggered else 'Detections found. No new alert event was created because no alert rule matched, or a matching rule is still in cooldown.', detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, triggered_alerts=triggered, event_id=event_id, recording_id=recording_id, recording_state='linked' if recording_id is not None else 'skipped', recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(recording_detections, camera_event_recording_config(settings)), email_enabled_rules=len(email_rules), email_recipients=email_recipients, email_attempted=bool(triggered and email_recipients and effective_email_alert_settings().get('enabled')))
+    update_live_detection_status(camera_id, state='alerted' if triggered else 'checked', reason='Alert matched.' if triggered else 'Detections found. No new alert event was created because no alert rule matched, or a matching rule is still in cooldown.', detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, triggered_alerts=triggered, event_id=event_id, recording_id=recording_id, recording_state='linked' if recording_id is not None else 'skipped', recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(recording_detections, _state.camera_event_recording_config(settings)), email_enabled_rules=len(email_rules), email_recipients=email_recipients, email_attempted=bool(triggered and email_recipients and effective_email_alert_settings().get('enabled')))
     return event_id

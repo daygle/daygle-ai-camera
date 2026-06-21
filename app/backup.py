@@ -117,11 +117,10 @@ def overwrite_database_from_file(restore_source: Path) -> None:
 
 
 def refresh_runtime_after_database_restore() -> None:
-    from app.main import apply_cameras_settings, apply_storage_and_recording_settings
     _state.database.init()
     _state.auth.init()
-    apply_cameras_settings(effective_cameras_config())
-    apply_storage_and_recording_settings()
+    _state.apply_cameras_settings(effective_cameras_config())
+    _state.apply_storage_and_recording_settings()
     _state.auth.apply_config(effective_auth_config())
 
 

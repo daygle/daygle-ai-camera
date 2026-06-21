@@ -136,3 +136,19 @@ _sound_detectors: dict = {}
 _sound_detectors_lock: threading.Lock = threading.Lock()
 _sound_statuses: dict = {}
 _sound_statuses_lock: threading.Lock = threading.Lock()
+
+# ---------------------------------------------------------------------------
+# Alert / storage singletons (assigned at module load by app.main)
+# ---------------------------------------------------------------------------
+
+alerts: Any = None      # AlertEngine instance
+storage: Any = None     # Storage instance
+
+# ---------------------------------------------------------------------------
+# Startup-registered callables (assigned by app.main after they are defined)
+# ---------------------------------------------------------------------------
+
+camera_event_recording_config: Any = None
+apply_cameras_settings: Any = None
+apply_storage_and_recording_settings: Any = None
+reload_detector: Any = None
