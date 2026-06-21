@@ -18,13 +18,13 @@ This module owns the four helpers that previously lived inline on
   returning ``None`` on any missing-file / corrupt / non-detection
   shape.
 
-The two pieces of exclusive state STAY on ``app.main`` (NOT moved
-here, reachable via Pool C):
+The two pieces of exclusive state live in ``app.state`` (accessed via
+``_state.*``):
 
-* ``app.main.active_rtsp_recordings`` — ``dict`` keyed by camera_id,
+* ``_state.active_rtsp_recordings`` — ``dict`` keyed by camera_id,
   holding ``{recording_id, capture_deadline_ts,
   max_capture_deadline_ts, start_capture_ts}`` per in-flight session.
-* ``app.main.active_rtsp_recordings_lock`` — ``threading.Lock``
+* ``_state.active_rtsp_recordings_lock`` — ``threading.Lock``
   guarding ``active_rtsp_recordings``.
 
 Mirrors the Phase-26 (``live_detection_history`` /
@@ -37,24 +37,17 @@ precedent for keeping state on ``app.main``.
 as ``main.<orig_name>``. No underscore stripping needed — none of the
 four are originally underscored.
 
-**Pool-C reach sites used by this module (each resolved lazily via
-``import app.main as main``):**
+**State and service access (via ``_state.*``):**
 
-* ``main.active_rtsp_recordings`` + ``main.active_rtsp_recordings_lock``
-  — state primitives (exclusive to ``extend_active_rtsp_recording``).
-* ``main.database`` — the singleton DB handle, instantiated on
-  ``app/main.py``. NOTE this is NOT a module-level export of
-  ``app/database.py``; that module only exposes the ``EventDatabase``
-  class.
-* ``main.recording_service`` — the ``RecordingService`` singleton
-  instantiated on ``app/main.py``. Used for ``should_record`` policy
-  lookup.
-* ``main.effective_recording_config`` — Phase-17 rebind from
-  ``app.config_facades`` for the active recording config dict.
-* ``main.detection_label_strings`` — Phase-29 rebind from
-  ``app.detection_status`` for label dedup + sort.
-* ``main.detection_label_confidences`` — Phase-29 rebind from
-  ``app.detection_status`` for per-label max-confidence selection.
+* ``_state.active_rtsp_recordings`` + ``_state.active_rtsp_recordings_lock``
+  — state primitives in ``app.state``.
+* ``_state.database`` — the singleton DB handle via ``app.state``.
+* ``_state.recording_service`` — the ``RecordingService`` singleton
+  via ``app.state``. Used for ``should_record`` policy lookup.
+* ``effective_recording_config`` — imported directly from
+  ``app.config_facades``.
+* ``detection_label_strings`` + ``detection_label_confidences``
+  — imported directly from ``app.detection_status``.
 
 **Track trio Pool-C reach:** NONE. Pure helper group. Uses only
 stdlib (``json``, ``pathlib.Path``, ``typing.Any``) and resolves

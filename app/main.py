@@ -1,52 +1,33 @@
 from __future__ import annotations
-import asyncio
-import copy
-import hashlib
 import importlib.metadata
 import importlib.util
-import io
-import json
 import logging
 import logging.handlers
-import mimetypes
 import os
 import re
 import secrets
 import shutil
-import sqlite3
 import subprocess
-import sys
 import threading
 import app.state as _state
 import gc
 import time
-import urllib.error
-import urllib.request
 from collections import deque
-from email.mime.text import MIMEText
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-from html import escape
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote, urlsplit, urlunsplit
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from starlette.background import BackgroundTask
-from starlette.concurrency import run_in_threadpool
 from app.alerts import AlertEngine
-from app.auth import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, AuthError, AuthService, utc_now
+from app.auth import SESSION_COOKIE, AuthService, utc_now
 from app.database import EventDatabase
-from app.detector import DetectorUnavailableError, create_detector, load_labels
+from app.detector import create_detector
 from app.email_alerts import EmailAlertError, EmailAlertService
 from app.push_notifications import PushNotificationError, PushNotificationService
 from app.camera_backend import OpenCvStreamCamera
-from app.ptz import send_ptz_command, VALID_COMMANDS as PTZ_VALID_COMMANDS
 from app.recordings import RecordingService
 from app.settings import CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH, load_settings
-from app.sound_detector import SoundDetector, SOUND_CLASSES, DEFAULT_RULES
 from app.storage import Storage
 
 # State-registry Pool A rebinds: background modules and tests reach these via
@@ -352,17 +333,14 @@ from app.event_debounce import (
 )
 
 # Phase 28: Pool A rebinds for the live-alert delivery cluster
-# (app/alert_dispatch.py). Only the three names with active consumers
-# are retained: ``tests/test_api.py`` reaches ``main._rule_notify_active_now``
-# and ``main.compute_minimum_rule_confidence`` as bare attrs; tests also
-# reach ``main.wait_for_pending_alert_notifications``. The remaining
-# names (_alert_datetime_prefs, _format_alert_datetime, deliver_email_alerts,
-# deliver_push_notifications, the two underscore-aliased deliver_* functions)
-# were removed because alert_dispatch.py uses them as module-internal bare
-# names and no Pool C consumer reaches them via main.<name>.
+# (app/alert_dispatch.py). Four names with active consumers are retained:
+# ``tests/test_api.py`` reaches ``main._rule_notify_active_now``,
+# ``main.compute_minimum_rule_confidence``, ``main.wait_for_pending_alert_notifications``,
+# and ``main.deliver_push_notifications`` as bare attrs.
 from app.alert_dispatch import (
     _rule_notify_active_now as _rule_notify_active_now,
     compute_minimum_rule_confidence as compute_minimum_rule_confidence,
+    deliver_push_notifications as deliver_push_notifications,
     wait_for_pending_alert_notifications as wait_for_pending_alert_notifications,
 )
 
@@ -600,7 +578,6 @@ def camera_event_recording_config(settings: dict[str, Any]) -> dict[str, Any]:
 database = EventDatabase(config['storage']['database'])
 _state.database = database
 camera_config: dict[str, Any] = {}
-_state.camera_config = camera_config
 cameras_config: list[dict[str, Any]] = []
 _state.cameras_config = cameras_config
 camera_instances: dict[str, Any] = {}
@@ -756,7 +733,6 @@ def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
         cameras_config = settings_list
         _state.cameras_config = cameras_config
         camera_config = settings_list[0] if settings_list else {}
-        _state.camera_config = camera_config
         camera_instances = new_instances
         _state.camera_instances = camera_instances
         camera = camera_instances[camera_config['id']] if camera_config else None

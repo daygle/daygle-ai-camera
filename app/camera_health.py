@@ -15,23 +15,13 @@ mutable state**. The state primitives are:
 - ``_camera_health_lock`` -- ``threading.Lock`` guarding every read /
   write of ``_camera_health_state``.
 
-Both primitives **stay on ``app.main``** for this extraction (Phase-24
-does NOT migrate them). This is the **state-migration template**:
-
-- State stays on the host module so the live-detection history rebuild
-  pattern (e.g. ``camera_config.py:_migrate_camera_id`` rewriting
-  ``main.live_detection_history`` across a camera rename) continues to
-  work without a cross-module write barrier.
-- Helpers read/write via ``main._camera_health_state`` /
-  ``main._camera_health_lock`` **at call time**, never as default args,
-  to dodge the Phase-23 circular-import trap (default-arg evaluation
-  fires during the Pool A rebind loop before main.py finishes defining
-  the primitives).
-- Lock discipline is preserved verbatim: every mutation is inside
-  ``with main._camera_health_lock:`` and the lock is RELEASED before any
-  cross-module side effect (e.g. ``log_camera_diagnostic`` writes to
-  SQLite -- releasing the lock first prevents waiting on a DB write
-  while holding the in-memory state lock).
+Both primitives live in ``app.state`` and are accessed via ``_state.*``
+(canonical home is ``app.state``, re-exported via Pool A on ``app.main``).
+Lock discipline is preserved verbatim: every mutation is inside
+``with _state._camera_health_lock:`` and the lock is RELEASED before any
+cross-module side effect (e.g. ``log_camera_diagnostic`` writes to
+SQLite -- releasing the lock first prevents waiting on a DB write
+while holding the in-memory state lock).
 
 The cluster's only callers live inside ``process_live_stream_alerts``
 background thread (``live_alert_monitor_loop`` invokes
@@ -94,26 +84,17 @@ Cluster membership (8 helpers, 108 original lines):
   ``main.live_detection_retry_after`` to mark detection-backoff
   cameras as offline, then runs the helpers above.
 
-Pool C reach sites (resolved via ``main.<attr>`` at call time):
+State and service access (via ``_state.*`` and ``from app.main import ...``):
 
-- ``main.database`` (``effective_camera_offline_alert_settings``)
-- ``main._camera_health_state`` + ``main._camera_health_lock`` (every
-  state-touching helper; resolved at call time inside the helper body
-  -- never as default arg)
-- ``main.log_camera_diagnostic`` (``_update_camera_health`` -- the
-  logger is called OUTSIDE the lock block to avoid holding the in-memory
-  state lock while waiting on a SQLite write)
-- ``main.cameras_config`` (``_check_cameras_health`` -- iterated as
-  ``for cfg in list(main.cameras_config)`` to thread-safely snapshot)
-- ``main.live_detection_retry_after`` (``_check_cameras_health`` --
-  read inside the loop, point-in-time get())
-- ``main.logger`` (``_deliver_camera_offline_notification`` -- warning
-  on push/email delivery failures)
-- ``main.effective_push_notification_settings`` (``_deliver_camera_offline_notification``)
-- ``main.effective_email_alert_settings`` (``_deliver_camera_offline_notification``)
+- ``_state.database`` (``effective_camera_offline_alert_settings``)
+- ``_state._camera_health_state`` + ``_state._camera_health_lock`` (every
+  state-touching helper; accessed via ``_state.*`` directly)
+- ``_state.cameras_config`` (``_check_cameras_health`` -- iterated as
+  ``for cfg in list(_state.cameras_config)`` to thread-safely snapshot)
+- ``_state.live_detection_retry_after`` (``_check_cameras_health``)
 - ``main.PushNotificationService`` / ``main.EmailAlertService``
   (``_deliver_camera_offline_notification`` -- instantiated per-call
-  from the effective settings)
+  via ``from app.main import ...`` inside function body)
 
 Stdlib imports at module top (NOT Pool C):
 - ``time.time()`` for offline_since stamping + delay-elapsed math

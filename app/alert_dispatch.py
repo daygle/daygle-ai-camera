@@ -14,15 +14,11 @@ This module owns the five helpers that previously lived inline on
 * ``deliver_sound_alert_notifications`` — sound-rule specific
   orchestrator that delegates to email + push.
 
-The two state primitives stay on ``app.main`` (NOT moved here):
+The two state primitives live in ``app.state`` (accessed via ``_state.*``):
 
 * ``_notification_threads_lock`` — ``threading.Lock`` guarding
   ``_notification_threads``.
 * ``_notification_threads`` — list of in-flight delivery threads.
-
-This mirrors the Phase-26 ``live_detection_history`` +
-``live_detection_history_lock`` precedent (state stays on main, the new
-module reaches it through Pool C).
 
 **Pool-A rebind (in ``app/main.py``):** every helper is re-bound as
 ``main.<orig_name>``. The two originally-underscored names
@@ -35,18 +31,16 @@ modification (the new module exposes them as clean public APIs:
 **Pool-C reach sites used by this module (each resolved lazily via
 ``import app.main as main``):**
 
-* ``main._notification_threads_lock``, ``main._notification_threads``
-  — state primitives.
-* ``main.database`` — the singleton DB handle, instantiated in
-  ``app/main.py`` (~L248: ``database = EventDatabase(...)``). NOTE
-  this is NOT a module-level export of ``app/database.py``;
-  ``app/database.py`` only exposes the ``EventDatabase`` class.
-* ``main.effective_email_alert_settings()``,
-  ``main.effective_push_notification_settings()`` — Phase-9/10
-  top-of-file rebound accessors.
-* ``main._format_alert_datetime(...)``, ``main._rule_notify_active_now(...)``,
-  ``main.compute_minimum_rule_confidence()`` — top-level helpers on
-  ``main.py``.
+* ``_state._notification_threads_lock``, ``_state._notification_threads``
+  — state primitives in ``app.state`` (not reached via ``main.*``).
+* ``_state.database`` — the singleton DB handle via ``app.state``.
+* ``_state.auth`` — the AuthService singleton via ``app.state``
+  (used by ``_alert_datetime_prefs``).
+* ``main._rule_notify_active_now(...)``,
+  ``main.compute_minimum_rule_confidence()`` — helpers on ``main.py``
+  (reached via ``from app.main import ...`` inside function bodies).
+* ``_format_alert_datetime`` and ``_alert_datetime_prefs`` are LOCAL
+  to this module (not Pool C).
 * ``main.render_live_snapshot_jpeg_overlay(...)`` — Phase-25 rebind
   from ``app.live_snapshot``.
 * ``main.EmailAlertService``, ``main.EmailAlertError``,
