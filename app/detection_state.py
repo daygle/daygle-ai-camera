@@ -184,7 +184,7 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
             if changed_fraction < gate_fraction:
                 updated_bg = (1.0 - background_alpha) * background + background_alpha * current
                 _state._frame_motion_prev[camera_id] = updated_bg
-        _state._frame_motion_error_cameras.discard(camera_id)
+            _state._frame_motion_error_cameras.discard(camera_id)
         if changed_fraction < gate_fraction:
             return (False, 0.0, diff_mask)
         return (True, round(min(1.0, changed_fraction / scale_fraction), 3), diff_mask)

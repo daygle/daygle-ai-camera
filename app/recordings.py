@@ -115,7 +115,7 @@ class RecordingService:
                 label = str(candidate.get('label') or '').strip().lower()
                 if not label:
                     continue
-                if not allow_motion and (label == 'motion' or label in self.GENERIC_TRIGGER_LABELS):
+                if not allow_motion and label in self.GENERIC_TRIGGER_LABELS:
                     continue
                 return label
             return None
@@ -236,7 +236,8 @@ class RecordingService:
                 return
             if tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
-            error_detail = self.redact_stream_credentials(f'{result.stderr[:500]}\n...\n{result.stderr[-1000:]}')
+            stderr = result.stderr or ''
+            error_detail = self.redact_stream_credentials(stderr if len(stderr) <= 500 else f'{stderr[:500]}\n...\n{stderr[-1000:]}')
             raise RuntimeError(f'ffmpeg failed to record RTSP clip: {error_detail}')
         if not tmp_path.exists():
             raise RuntimeError('ffmpeg did not create an RTSP recording file.')
