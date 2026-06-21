@@ -1,36 +1,25 @@
-"""Phase-17 integration tests for ``app/config_facades.py``.
-
-Phase-17 extracted the 7 config-facade helpers from ``app/main.py`` into
-``app/config_facades.py`` using the hybrid-pattern template. Routers
-reach them via ``main.<name>`` (Pool C bare-name reach), preserved by
-Pool A from-import rebinds at the top of ``app/main.py`` (NOT the
-bottom -- module-load callers in main.py need them earlier; see
-.phase17_fix_main.py for the placement rationale).
+"""Integration tests for ``app/config_facades.py``.
 
 Tests pin three contracts:
 
-1. **Pool A back-compat identity.** The 7 Pool A rebinds in
-   ``app/main.py`` MUST wire ``main.<name>`` to the SAME function
-   object as ``app.config_facades.<name>``.
+1. **Import identity.** The 5 facades imported into ``app/main.py`` for
+   internal use in ``_startup()`` must be the same function objects as
+   those in ``app.config_facades``.
 
-2. **Behavior of each facade.** Each of the 7 helpers has subtle
+2. **Behavior of each facade.** Each of the 9 helpers has subtle
    ordering / fallback semantics that we exercise in-process via
    ``monkeypatch.setattr`` (NOT raw attribute assignment -- the latter
    leaks state across test invocations). Specifically: deep-copy
    isolation, hardcoded-defaults-vs-config-vs-database ordering, the
    storage ``database`` path preservation rule, the cameras-list
-   normalization, the 404-on unknown id behavior in
-   ``get_camera_config``.
+   normalization, the 404-on-unknown-id behavior in ``get_camera_config``.
 
-3. **DEFAULT_LIVE_CONFIG constant.** The hardcoded defaults live as a
-   module-level ``dict`` in ``app.config_facades.py`` -- must remain
-   immutable across calls (effective_live_config uses
-   ``copy.deepcopy(DEFAULT_LIVE_CONFIG)`` to ensure this).
+3. **DEFAULT_LIVE_CONFIG constant.** The hardcoded defaults dict in
+   ``app.config_facades`` must remain immutable across calls
+   (``effective_live_config`` uses ``copy.deepcopy(DEFAULT_LIVE_CONFIG)``).
 
-Top-level preload pattern (import app.main BEFORE app.config_facades)
-breaks the circular import gate at collection time. Without this,
-pytest collection triggers auth_gates.py-style reverse-direction
-circular import (Phase-16 lesson re-applied here for Phase-17).
+Top-level preload (import app.main BEFORE app.config_facades) is
+required to avoid a circular import at collection time.
 """
 
 from __future__ import annotations

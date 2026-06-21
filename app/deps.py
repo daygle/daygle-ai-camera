@@ -64,7 +64,7 @@ def get_web_dir(request: Request) -> Path:
 
 
 def get_detector(request: Request):
-    """Active AI detector (Pool A rebind of ``state.detector``)."""
+    """Active AI detector from application state."""
     return _state.detector
 
 
@@ -96,8 +96,7 @@ def get_reload_detector(request: Request):
 
     Returns ``(reloaded: bool, error: str | None)`` after attempting to
     swap in the configured ONNX model. Routers consume it via
-    ``Depends(...)`` instead of importing it through the ``app.main``
-    back-compat rebind.
+    ``Depends(...)``.
     """
     return reload_detector
 

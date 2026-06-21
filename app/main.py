@@ -128,10 +128,6 @@ from app.api.settings_ai_router import router as settings_ai_router
 app.include_router(settings_ai_router)
 from app.api.recordings_router import router as recordings_router
 app.include_router(recordings_router)
-if __name__ == '__main__':
-    import uvicorn
-    server_config = config.get('server', {})
-    uvicorn.run('app.main:app', host=server_config.get('host', '0.0.0.0'), port=int(server_config.get('port', 8080)), reload=False)
 from app.api.cameras_router import router as cameras_router
 app.include_router(cameras_router)
 from app.api.events_router import router as events_router
@@ -167,3 +163,8 @@ app.include_router(auth_router)
 from app.middleware import authentication_middleware, app_navigation_middleware
 app.middleware('http')(authentication_middleware)
 app.middleware('http')(app_navigation_middleware)
+
+if __name__ == '__main__':
+    import uvicorn
+    server_config = config.get('server', {})
+    uvicorn.run('app.main:app', host=server_config.get('host', '0.0.0.0'), port=int(server_config.get('port', 8080)), reload=False)
