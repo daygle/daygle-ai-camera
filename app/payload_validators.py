@@ -101,6 +101,29 @@ from typing import Any
 
 from fastapi import HTTPException
 
+import app.state as _state
+from app.camera_config import normalize_camera_id
+from app.config_facades import (
+    effective_auth_config,
+    effective_email_alert_settings,
+    effective_live_config,
+    effective_push_notification_settings,
+    effective_recording_config,
+    effective_storage_config,
+)
+from app.recording_settings import (
+    _migrate_legacy_camera_motion,
+    normalize_camera_ptz_settings,
+    normalize_camera_recording_settings,
+)
+from app.utils import (
+    build_stream_url,
+    camera_default_name,
+    default_camera_detection_settings,
+    normalize_bool_setting,
+)
+from app.zone_schema import normalize_label_list, normalize_monitoring_zones
+
 
 def _int_field(payload: dict[str, Any], field: str, default: int, minimum: int, maximum: int) -> int:
     try:
@@ -113,7 +136,6 @@ def _int_field(payload: dict[str, Any], field: str, default: int, minimum: int, 
 
 
 def validate_alert_email_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    from app.main import effective_email_alert_settings
     current = effective_email_alert_settings()
     allowed = {'enabled', 'host', 'port', 'username', 'password', 'from_address', 'use_tls', 'use_ssl'}
     updated = {key: current.get(key) for key in allowed if key in current}
@@ -143,8 +165,6 @@ def validate_alert_email_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_push_notification_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    from app.utils import normalize_bool_setting
-    from app.main import effective_push_notification_settings
     current = effective_push_notification_settings()
     allowed = {'enabled', 'server_url', 'topic', 'priority', 'username', 'password'}
     updated = {key: current.get(key) for key in allowed if key in current}
@@ -170,10 +190,6 @@ def validate_push_notification_settings(payload: dict[str, Any]) -> dict[str, An
 
 
 def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | None=None, index: int=1) -> dict[str, Any]:
-    from app.utils import normalize_bool_setting, build_stream_url, camera_default_name, default_camera_detection_settings
-    from app.camera_config import normalize_camera_id
-    from app.zone_schema import normalize_label_list, normalize_monitoring_zones
-    from app.recording_settings import _migrate_legacy_camera_motion, normalize_camera_recording_settings, normalize_camera_ptz_settings
     current = current or {}
     updated = {key: current.get(key) for key in ('id', 'name', 'backend', 'device', 'width', 'height', 'fps', 'flip', 'stream_url', 'host', 'port', 'path', 'username', 'password') if key in current}
     updated.update({key: payload[key] for key in ('id', 'name', 'backend', 'device', 'flip', 'stream_url', 'host', 'port', 'path', 'username', 'password') if key in payload})
@@ -235,17 +251,16 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
 
 
 def validate_cameras_settings(payload: Any) -> list[dict[str, Any]]:
-    import app.main as main
     raw_cameras = payload.get('cameras') if isinstance(payload, dict) else payload
     if not isinstance(raw_cameras, list):
         raise HTTPException(status_code=400, detail='cameras must be a list.')
     validated: list[dict[str, Any]] = []
     seen: set[str] = set()
-    current_by_id = {str(camera_settings.get('id')): camera_settings for camera_settings in main.cameras_config}
+    current_by_id = {str(camera_settings.get('id')): camera_settings for camera_settings in _state.cameras_config}
     for index, raw_camera in enumerate(raw_cameras, start=1):
         if not isinstance(raw_camera, dict):
             raise HTTPException(status_code=400, detail='Each camera must be an object.')
-        current = current_by_id.get(str(raw_camera.get('id'))) or (main.cameras_config[index - 1] if index <= len(main.cameras_config) else {})
+        current = current_by_id.get(str(raw_camera.get('id'))) or (_state.cameras_config[index - 1] if index <= len(_state.cameras_config) else {})
         camera_settings = validate_camera_settings(raw_camera, current=current, index=index)
         if camera_settings['id'] in seen:
             raise HTTPException(status_code=400, detail=f"Duplicate camera id: {camera_settings['id']}.")
@@ -255,8 +270,6 @@ def validate_cameras_settings(payload: Any) -> list[dict[str, Any]]:
 
 
 def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    from app.utils import normalize_bool_setting
-    from app.config_facades import effective_recording_config
     current = effective_recording_config()
     merged = {**current, **payload}
     fmt = str(merged.get('format', 'mp4')).strip().lstrip('.').lower() or 'mp4'
@@ -268,7 +281,7 @@ def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_storage_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    from app.main import config, effective_storage_config
+    from app.main import config  # raw loaded config; not on app.state until Tier 2
     current = effective_storage_config()
     updated = {key: str(current.get(key) or '') for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir', 'database')}
     for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir'):
@@ -282,8 +295,7 @@ def validate_storage_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_auth_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    import app.main as main
-    current = main.effective_auth_config()
+    current = effective_auth_config()
     merged = {**current, **payload}
     try:
         session_timeout_hours = float(merged.get('session_timeout_hours', 12))
@@ -295,12 +307,11 @@ def validate_auth_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    import app.main as main
-    current = main.effective_live_config()
+    current = effective_live_config()
     merged = {**current, **payload}
     snapshot_refresh_ms = _int_field(merged, 'snapshot_refresh_ms', 500, 150, 5000)
     detection_status_refresh_ms = _int_field(merged, 'detection_status_refresh_ms', 2000, 100, 15000)
-    background_detection_enabled = main.normalize_bool_setting(merged.get('background_detection_enabled'), True)
+    background_detection_enabled = normalize_bool_setting(merged.get('background_detection_enabled'), True)
     try:
         detection_interval_seconds = float(merged.get('detection_interval_seconds', 0.25))
     except (TypeError, ValueError) as exc:
