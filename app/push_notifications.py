@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import urllib.error
 import urllib.request
+from email.header import Header
 from typing import Any
 
 
@@ -84,8 +85,14 @@ class PushNotificationService:
         password = str(self.settings.get("password") or "").strip()
 
         url = f"{server_url}/{topic}"
+        # RFC 2047-encode the Title header so non-ASCII camera names and
+        # detection labels don't crash urllib.request.Request (Python
+        # Latin-1-encodes raw str headers and raises UnicodeEncodeError on
+        # code points outside that range). `Header(...).encode()` passes
+        # pure-ASCII titles through unchanged and emits encoded-word form
+        # only when non-ASCII characters are present.
         headers: dict[str, str] = {
-            "Title": title,
+            "Title": Header(title, 'utf-8').encode(),
             "Priority": priority,
             "Content-Type": "text/plain; charset=utf-8",
         }

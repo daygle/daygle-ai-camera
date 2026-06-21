@@ -1,16 +1,37 @@
 from __future__ import annotations
 
 import smtplib
+from contextlib import contextmanager
+from email.header import Header
 from email.message import Message
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from html import escape
-from typing import Any
+from typing import Any, Iterator
 
 
 class EmailAlertError(Exception):
     pass
+
+
+def _encode_subject(subject: str) -> str:
+    """RFC 2047-encode a Subject header only when it contains non-ASCII chars.
+
+    Pure ASCII Subjects stay as raw ``str`` so:
+
+    - Strict mail clients (Gmail, Outlook) display the subject verbatim
+      instead of ``=?utf-8?q?...?=``.
+    - Tests can assert exact strings (no decode round-trip needed).
+
+    Non-ASCII Subjects (e.g. Cyrillic, accented Latin camera names) get
+    RFC 2047-encoded so the bytes on the wire are safe ASCII and any MTA
+    can transport them. ``Header(subject, 'utf-8').encode()`` returns a
+    ``str`` of ASCII bytes, so both branches return ``str``.
+    """
+    if any(ord(c) > 127 for c in subject):
+        return Header(subject, 'utf-8').encode()
+    return subject
 
 
 class EmailAlertService:
@@ -122,26 +143,100 @@ class EmailAlertService:
         # own address in the To: header. Loop inline (rather than reuse a
         # shared Message) so every multipart structure gets its own boundary
         # and the wires never carry a multi-address To.
-        for recipient in recipients:
-            if snapshot_bytes:
-                related: Message = MIMEMultipart('related')
-                related.attach(MIMEText(html_content, 'html', 'utf-8'))
-                img = MIMEImage(snapshot_bytes, 'jpeg')
-                img.add_header('Content-ID', f'<{cid}>')
-                img.add_header('Content-Disposition', 'inline', filename=f'alert_{event_id}.jpg')
-                related.attach(img)
-                message: Message = MIMEMultipart('alternative')
-                message.attach(MIMEText(plain_text, 'plain', 'utf-8'))
-                message.attach(related)
-            else:
-                message = MIMEMultipart('alternative')
-                message.attach(MIMEText(plain_text, 'plain', 'utf-8'))
-                message.attach(MIMEText(html_content, 'html', 'utf-8'))
+        #
+        # The whole broadcast reuses ONE SMTP session via
+        # ``_create_smtp_session`` so a 10-recipient fan-out performs one
+        # TLS handshake + one LOGIN instead of ten. The per-recipient loop
+        # routes through ``self._deliver(message, smtp=smtp)`` so existing
+        # tests that monkeypatch ``EmailAlertService._deliver`` to capture
+        # outbound messages still see each envelope (the lambda ignores the
+        # extra ``smtp=...`` kwarg). A single failing recipient does NOT
+        # abort the remaining batch -- smtplib can drop the underlying
+        # socket mid-loop, so we log each per-recipient failure.
+        snapshot_image: MIMEImage | None = None
+        if snapshot_bytes:
+            snapshot_image = MIMEImage(snapshot_bytes, 'jpeg')
+            snapshot_image.add_header('Content-ID', f'<{cid}>')
+            snapshot_image.add_header('Content-Disposition', 'inline', filename=f'alert_{event_id}.jpg')
+        session_send_errors: list[str] = []
+        try:
+            with self._create_smtp_session() as smtp:
+                # ``active_smtp`` is the canonical reference for the
+                # per-recipient loop. If ``_send_via`` reconnects mid-batch
+                # on ``SMTPServerDisconnected`` it returns the FRESH
+                # handle; we swap it in here so subsequent recipients ride
+                # that fresh session instead of triggering one reconnect
+                # each. The outer ``with`` block's __exit__ only knows
+                # about the ORIGINAL handle (the one captured at session-
+                # open via ``_create_smtp_session``'s ``finally``). We
+                # therefore close ``active_smtp`` explicitly in the
+                # ``finally`` so the active socket -- the ORIGINAL handle
+                # when no reconnect happened, or the FRESH handle after
+                # a mid-batch reconnect -- is closed deterministically
+                # instead of leaking until GC eventually reclaims the
+                # suspended ``_create_smtp_session`` generator and
+                # surfaces ``GeneratorExit`` into its ``finally`` block.
+                # ``or active_smtp`` keeps the active reference when the
+                # test fake returns ``None`` (back-compat: previous
+                # callers assigned into ``smtp`` and relied on
+                # monkeypatched ``_deliver`` returning ``None``).
+                active_smtp: smtplib.SMTP = smtp
+                try:
+                    for recipient in recipients:
+                        if snapshot_bytes and snapshot_image is not None:
+                            related: Message = MIMEMultipart('related')
+                            related.attach(MIMEText(html_content, 'html', 'utf-8'))
+                            related.attach(snapshot_image)
+                            message: Message = MIMEMultipart('alternative')
+                            message.attach(MIMEText(plain_text, 'plain', 'utf-8'))
+                            message.attach(related)
+                        else:
+                            message = MIMEMultipart('alternative')
+                            message.attach(MIMEText(plain_text, 'plain', 'utf-8'))
+                            message.attach(MIMEText(html_content, 'html', 'utf-8'))
 
-            message['Subject'] = subject
-            message['From'] = str(self.settings.get('from_address'))
-            message['To'] = recipient
-            self._deliver(message)
+                        # RFC 2047-encode non-ASCII Subjects (camera names like
+                        # "Héllo" / "Ворота"). Pure ASCII Subjects stay as raw
+                        # text so strict mail clients display them verbatim and
+                        # tests can assert exact strings without decoding.
+                        message['Subject'] = _encode_subject(subject)
+                        message['From'] = str(self.settings.get('from_address'))
+                        message['To'] = recipient
+                        try:
+                            # ``_deliver`` returns the smtp it ended up using;
+                            # swap ``active_smtp`` to the returned handle so
+                            # after a mid-batch ``SMTPServerDisconnected`` the
+                            # ``_send_via`` reconnect handle is the active one
+                            # for subsequent recipients. ``or active_smtp``
+                            # preserves the active reference when the test
+                            # fake returns ``None`` (back-compat).
+                            active_smtp = self._deliver(message, smtp=active_smtp) or active_smtp
+                        except EmailAlertError as exc:
+                            session_send_errors.append(f'{recipient}: {exc}')
+                finally:
+                    # Deterministic close of the LAST-recipient's SMTP
+                    # session. Wrapped in its own try/except so close
+                    # errors (already-closed socket, garbage fakes
+                    # returned by test mocks) never block the outer
+                    # ``with`` __exit__ from running. Same disconnect
+                    # graceful-teardown pattern as ``_send_via``'s
+                    # reconnect path. Idempotent w.r.t. the outer
+                    # ``with``-block's __exit__ (which also calls
+                    # ``smtp.quit()`` via ``_create_smtp_session``'s
+                    # ``finally``) -- double-quit() on the same handle
+                    # is harmless in smtplib.
+                    try:
+                        active_smtp.quit()
+                    except Exception:
+                        pass
+        except EmailAlertError:
+            # Session-level failure (connect / TLS / login / quit) -- propagate
+            # so the outer ``deliver_email_alerts`` exception handler logs it.
+            raise
+        if session_send_errors:
+            # Best-effort partial delivery: surface per-recipient failures so
+            # operators see which addresses bounced in this batch.
+            raise EmailAlertError('; '.join(session_send_errors))
 
     def send_test(self, recipient: str) -> None:
         recipient = recipient.strip()
@@ -159,31 +254,142 @@ class EmailAlertService:
             'plain',
             'utf-8',
         )
-        message['Subject'] = "Daygle AI Camera test email"
+        message['Subject'] = _encode_subject("Daygle AI Camera test email")
         message['From'] = str(self.settings.get('from_address'))
         message['To'] = recipient
         self._deliver(message)
 
-    def _deliver(self, message: Message) -> None:
+    def _deliver(
+        self,
+        message: Message,
+        *,
+        smtp: smtplib.SMTP | None = None,
+    ) -> smtplib.SMTP | None:
+        """Send a single message via SMTP; return the smtp session used.
+
+        When ``smtp`` is provided (e.g. by ``send_alert``'s per-recipient
+        loop), the message goes out over the existing session -- this is
+        how multi-recipient broadcasts reuse ONE handshake + LOGIN. If
+        a mid-batch ``SMTPServerDisconnected`` happens, ``_send_via``
+        reconnects and returns the fresh handle so the caller can keep
+        batching on it (one reconnect per batch instead of one per
+        recipient). The caller should swap its smtp reference to the
+        returned value: ``smtp = self._deliver(message, smtp=smtp)``.
+
+        When ``smtp`` is omitted, a fresh one-shot session is opened
+        via ``_create_smtp_session`` and ``None`` is returned (used by
+        ``send_test`` and other single-envelope callers).
+
+        Kept as an instance method so tests can monkeypatch
+        ``EmailAlertService._deliver`` to capture outbound messages
+        without an SMTP network setup. The common test signature is
+        ``(self, message)``; if the call site adds ``smtp=...`` as a
+        kwarg, Python's lazy arg-style acceptance means the test lambda
+        continues to capture every message. Test fakes ignore the
+        return value (default ``None``), so the ``or smtp`` fallback
+        in the call site keeps the live smtp reference intact.
+        """
+        if smtp is None:
+            with self._create_smtp_session() as session:
+                self._send_via(session, message)
+            return None
+        return self._send_via(smtp, message)
+
+    @contextmanager
+    def _create_smtp_session(self) -> Iterator[smtplib.SMTP]:
+        """Open, optionally STARTTLS, and log in to the configured SMTP host.
+
+        Yields an authenticated SMTP session suitable for one or more
+        ``_send_via`` calls. Quits cleanly on context exit. Any connect /
+        TLS / login failure is wrapped in ``EmailAlertError`` so callers can
+        catch a uniform exception type.
+        """
         host = str(self.settings.get("host"))
         port = int(self.settings.get("port") or (465 if self.settings.get("use_ssl") else 587))
         username = str(self.settings.get("username") or "")
         password = str(self.settings.get("password") or "")
 
+        smtp: smtplib.SMTP | None = None
         try:
             if self.settings.get("use_ssl"):
-                with smtplib.SMTP_SSL(host, port, timeout=10) as smtp:
-                    self._send(smtp, message, username, password)
+                smtp = smtplib.SMTP_SSL(host, port, timeout=10)
             else:
-                with smtplib.SMTP(host, port, timeout=10) as smtp:
-                    if self.settings.get("use_tls", True):
-                        smtp.starttls()
-                    self._send(smtp, message, username, password)
+                smtp = smtplib.SMTP(host, port, timeout=10)
+                if self.settings.get("use_tls", True):
+                    smtp.starttls()
+            if username:
+                smtp.login(username, password)
+            yield smtp
+        except EmailAlertError:
+            raise
         except Exception as exc:  # pragma: no cover - depends on external mail servers
             raise EmailAlertError(str(exc)) from exc
+        finally:
+            if smtp is not None:
+                try:
+                    smtp.quit()
+                except Exception:
+                    pass
 
-    @staticmethod
-    def _send(smtp: smtplib.SMTP, message: Message, username: str, password: str) -> None:
-        if username:
-            smtp.login(username, password)
-        smtp.send_message(message)
+    def _send_via(self, smtp: smtplib.SMTP, message: Message) -> smtplib.SMTP:
+        """Send a single message over an open SMTP session.
+
+        Returns the smtp session used (the input ``smtp`` on a clean
+        send, a fresh session on a successful mid-batch reconnect). The
+        caller should swap its own smtp reference to the returned value
+        so a single mid-batch disconnect costs exactly ONE reconnect
+        instead of one per subsequent recipient.
+
+        Errors propagate to the caller. ``send_alert`` catches them per
+        recipient so a single bounce in a multi-recipient batch does not
+        abort the remaining deliveries.
+
+        Mid-batch socket drops (``smtplib.SMTPServerDisconnected`` --
+        typically a server-side close after an SMTP error response, an
+        idle timeout, or transient network instability) are recovered
+        automatically: best-effort quit the dead socket, open a fresh
+        session via ``_create_smtp_session``, retry the send once, then
+        return the new handle. The originally failing recipient is
+        still recorded as a per-recipient error ONLY if the retry
+        itself disconnects (in which case the ORIGINAL exception is
+        surfaced so callers can attribute the failure correctly).
+
+        Other ``smtplib`` failures (e.g. ``SMTPRecipientsRefused`` that
+        does NOT tear down the socket) bubble up unchanged so the
+        caller's per-recipient error capture still gets a precise
+        signal.
+        """
+        try:
+            smtp.send_message(message)
+            return smtp
+        except smtplib.SMTPServerDisconnected as primary_exc:
+            # Best-effort quit the dead socket so we don't leak the
+            # file descriptor while we open a fresh session below.
+            try:
+                smtp.quit()
+            except Exception:
+                pass
+        # Use explicit __enter__/__exit__ rather than ``with`` so we can
+        # return the fresh session alive after a successful retry. This
+        # keeps the reconnect cost at exactly one handshake+login per
+        # batch instead of one per recipient.
+        cm = self._create_smtp_session()
+        new_smtp = cm.__enter__()
+        try:
+            new_smtp.send_message(message)
+            return new_smtp
+        except smtplib.SMTPServerDisconnected:
+            # Retry ALSO disconnected -- quit the fresh socket and
+            # surface the ORIGINAL exception so the caller attributes
+            # the failure to the initial drop rather than masking it
+            # with the retry-time error.
+            cm.__exit__(None, None, None)
+            raise primary_exc
+        except (smtplib.SMTPException, OSError):
+            # Other network-layer failure on the new session -- clean
+            # teardown so we don't leak the connection, then propagate.
+            # Narrow catch (NOT plain ``Exception``) so programmer-error
+            # exceptions like ``AttributeError`` or ``TypeError`` still
+            # surface raw instead of being masked as socket drops.
+            cm.__exit__(None, None, None)
+            raise

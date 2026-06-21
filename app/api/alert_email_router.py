@@ -19,7 +19,11 @@ router = APIRouter()
 
 
 @router.get('/api/settings/alert-email')
-def get_alert_email_settings():
+def get_alert_email_settings(request: Request):
+    # Settings include the SMTP password in plaintext, so they must only
+    # be readable by admins (the middleware only enforces admin auth on
+    # mutating verbs on this prefix).
+    require_admin(request)
     return effective_email_alert_settings()
 
 

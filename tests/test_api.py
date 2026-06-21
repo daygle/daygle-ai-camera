@@ -7,6 +7,7 @@ import shutil
 import socket
 import sqlite3
 import subprocess
+import contextlib
 import sys
 import threading
 import time
@@ -4426,12 +4427,21 @@ def _email_alert_capture(main, monkeypatch):
     )
     sent: list[dict[str, str]] = []
 
-    def fake_deliver(self, message):
+    @staticmethod
+    @contextlib.contextmanager
+    def _create_smtp_session():
+        yield "fake-smtp-session"
+
+    def fake_deliver(self, message, **kwargs):
         sent.append({
             'To': message['To'],
             'Subject': message['Subject'],
         })
 
+    @contextlib.contextmanager
+    def _fake_create_smtp_session(self):
+        yield 'fake-smtp-session'
+    monkeypatch.setattr(main.EmailAlertService, '_create_smtp_session', _fake_create_smtp_session)
     monkeypatch.setattr(main.EmailAlertService, '_deliver', fake_deliver)
     return sent
 

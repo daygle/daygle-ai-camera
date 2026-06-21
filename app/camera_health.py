@@ -106,7 +106,7 @@ from typing import Any
 import app.state as _state
 from app.config_facades import effective_email_alert_settings, effective_push_notification_settings
 from app.diagnostics import log_camera_diagnostic
-from app.email_alerts import EmailAlertService
+from app.email_alerts import EmailAlertService, _encode_subject
 from app.push_notifications import PushNotificationService
 
 logger = logging.getLogger('daygle.ai')
@@ -122,16 +122,24 @@ def effective_camera_offline_alert_settings() -> dict[str, Any]:
 
 def _update_camera_health(camera_id: str, online: bool) -> None:
     with _state._camera_health_lock:
-        state = _state._camera_health_state.get(camera_id, {'online': True, 'offline_since': None, 'offline_notified': False, 'recovery_notified': False})
+        state = _state._camera_health_state.get(camera_id, {'online': True, 'offline_since': None, 'offline_notified': False, 'recovery_notified': False, 'recovery_pending': False})
         was_online = state.get('online', True)
         state['online'] = online
         transition: str | None = None
         if not online and was_online:
             state['offline_since'] = state.get('offline_since') or time.time()
             state['recovery_notified'] = False
+            state['recovery_pending'] = False
             transition = 'offline'
         elif online and (not was_online):
             state['offline_since'] = None
+            # Snapshot the offline-notified flag BEFORE resetting it so the
+            # next eligibility check can fire the recovery notification.
+            # Without this, recovery notifications were never delivered:
+            # `_camera_recovery_notification_eligible` would observe
+            # `offline_notified=False` immediately after the reset.
+            if state.get('offline_notified', False):
+                state['recovery_pending'] = True
             state['offline_notified'] = False
             transition = 'online'
         _state._camera_health_state[camera_id] = state
@@ -163,7 +171,11 @@ def _camera_recovery_notification_eligible(camera_id: str) -> bool:
             return False
         if state.get('recovery_notified'):
             return False
-        return state.get('offline_notified', False)
+        # Eligible iff the prior offline streak had a notification OR
+        # `_update_camera_health` snapshotted `recovery_pending=True` on
+        # the online edge. Both are accepted so already-seeded callers
+        # (tests, migrations) still trigger the recovery path.
+        return bool(state.get('recovery_pending', False)) or bool(state.get('offline_notified', False))
 
 
 def _mark_camera_offline_notified(camera_id: str) -> None:
@@ -178,6 +190,7 @@ def _mark_camera_recovery_notified(camera_id: str) -> None:
         state = _state._camera_health_state.get(camera_id)
         if state:
             state['recovery_notified'] = True
+            state['recovery_pending'] = False
 
 
 def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event_type: str) -> None:
@@ -208,13 +221,78 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
                     recipients = [fallback]
             # Send a one-to-one envelope per recipient so subscribers' email
             # addresses never leak to fellow recipients in the To: header.
+            # Reuse ONE SMTP session across the whole batch via the shared
+            # ``_create_smtp_session`` helper -- previously this loop opened
+            # N connections for an N-recipient fan-out. The per-recipient
+            # loop routes through ``mailer._deliver(msg, smtp=smtp)`` so
+            # tests that monkeypatch ``EmailAlertService._deliver`` to
+            # capture outbound messages still see each envelope (the
+            # patched lambda accepts the extra ``smtp=...`` kwarg silently).
+            # A failing recipient does NOT abort the remaining batch.
+            session_send_errors: list[str] = []
             if recipients:
-                for recipient in recipients:
-                    msg = MIMEText(body, 'plain', 'utf-8')
-                    msg['Subject'] = title
-                    msg['From'] = str(email_settings_obj.get('from_address'))
-                    msg['To'] = recipient
-                    mailer._deliver(msg)
+                try:
+                    with mailer._create_smtp_session() as smtp:
+                        # ``active_smtp`` is the canonical reference --
+                        # if ``mailer._send_via`` reconnects mid-batch
+                        # on ``SMTPServerDisconnected`` it returns the
+                        # FRESH handle; we swap it in here so subsequent
+                        # recipients ride that fresh session instead of
+                        # triggering one reconnect each. See
+                        # ``EmailAlertService.send_alert`` for the full
+                        # comment on why the outer ``with`` __exit__
+                        # only knows about the ORIGINAL handle and we
+                        # must close ``active_smtp`` explicitly in
+                        # ``finally``. ``or active_smtp`` keeps the
+                        # active reference when the test fake returns
+                        # ``None`` (back-compat).
+                        active_smtp = smtp
+                        try:
+                            for recipient in recipients:
+                                msg = MIMEText(body, 'plain', 'utf-8')
+                                # Gate Subject encoding on non-ASCII so pure
+                                # ASCII strings render verbatim in strict mail
+                                # clients (and tests can assert them without
+                                # decoding) while non-ASCII camera names
+                                # (e.g. Cyrillic / accents) get RFC 2047-encoded.
+                                msg['Subject'] = _encode_subject(title)
+                                msg['From'] = str(email_settings_obj.get('from_address'))
+                                msg['To'] = recipient
+                                try:
+                                    # ``mailer._deliver`` returns the smtp
+                                    # it ended up using; swap
+                                    # ``active_smtp`` so after a mid-
+                                    # batch ``SMTPServerDisconnected``
+                                    # reconnect, subsequent recipients
+                                    # ride the FRESH session. ``or
+                                    # active_smtp`` preserves the active
+                                    # reference when the test fake
+                                    # returns ``None`` (back-compat).
+                                    active_smtp = mailer._deliver(msg, smtp=active_smtp) or active_smtp
+                                except Exception as exc:  # noqa: BLE001 - per-recipient
+                                    session_send_errors.append(f'{recipient}: {exc}')
+                        finally:
+                            # Deterministic close of the LAST-recipient's
+                            # SMTP session -- see
+                            # ``EmailAlertService.send_alert`` for the
+                            # full rationale. Same disconnect graceful-
+                            # teardown pattern as ``_send_via``'s
+                            # reconnect path.
+                            try:
+                                active_smtp.quit()
+                            except Exception:
+                                pass
+                except Exception as exc:
+                    # Session-level (connect / TLS / login) failure: record so
+                    # operators see it, but do NOT block the flag stamp below.
+                    session_send_errors.append(f'session: {exc}')
+            if session_send_errors:
+                logger.warning(
+                    'Offline email notify had partial failures for camera %s %s: %s',
+                    camera_id,
+                    event_type,
+                    '; '.join(session_send_errors),
+                )
         except Exception as exc:
             logger.warning('Email notify failed for camera %s %s: %s', camera_id, event_type, exc)
     if event_type == 'offline':

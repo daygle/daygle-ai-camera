@@ -4,6 +4,85 @@ import threading
 import time
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+import app.state as _state
+
+ALERT_DATETIME_PREFS_TTL_SECONDS = 30.0
+_alert_datetime_prefs_cache: tuple[float, tuple[str, str, str]] | None = None
+_alert_datetime_prefs_lock = threading.Lock()
+
+
+def _alert_datetime_prefs() -> tuple[str, str, str]:
+    """Return (timezone_name, date_format, time_format) from the primary admin user.
+
+    Result is cached for ``ALERT_DATETIME_PREFS_TTL_SECONDS`` to avoid hitting
+    the auth store (a SQLite SELECT) on every alert-dispatch call. ``deliver_email_alerts``
+    and ``deliver_push_notifications`` invoke ``_rule_notify_active_now`` once per
+    triggered alert × matched rule, so uncached this read could fire dozens of
+    SELECTs per multi-object event.
+    """
+    global _alert_datetime_prefs_cache
+    cached = _alert_datetime_prefs_cache
+    if cached is not None:
+        cached_value, cached_at = cached
+        if time.time() - cached_at < ALERT_DATETIME_PREFS_TTL_SECONDS:
+            return cached_value
+    with _alert_datetime_prefs_lock:
+        cached = _alert_datetime_prefs_cache
+        if cached is not None:
+            cached_value, cached_at = cached
+            if time.time() - cached_at < ALERT_DATETIME_PREFS_TTL_SECONDS:
+                return cached_value
+        try:
+            users = _state.auth.list_users()
+            admin = None
+            for entry in users:
+                if entry.get('role') == 'admin' and entry.get('is_active'):
+                    admin = entry
+                    break
+            if admin is None:
+                admin = next(iter(users), None)
+            if admin:
+                value = (
+                    str(admin.get('timezone') or 'UTC'),
+                    str(admin.get('date_format') or 'iso'),
+                    str(admin.get('time_format') or '24h'),
+                )
+            else:
+                value = ('UTC', 'iso', '24h')
+        except Exception:
+            value = ('UTC', 'iso', '24h')
+        _alert_datetime_prefs_cache = (value, time.time())
+        return value
+
+
+def _clear_datetime_prefs_cache() -> None:
+    """Drop the cached admin datetime prefs. Exposed for test teardown so
+    per-test timezones (mutated via ``monkeypatch.setattr`` on
+    ``_state.auth.list_users``) are picked up on the next call without
+    waiting for the 30s TTL to expire.
+    """
+    global _alert_datetime_prefs_cache
+    with _alert_datetime_prefs_lock:
+        _alert_datetime_prefs_cache = None
+
+
+def _now_hm_in_admin_tz() -> str:
+    """Return ``HH:MM`` for the current time evaluated in the admin's timezone.
+
+    Used by both ``AlertEngine._is_active_now`` (the rule's active_start /
+    active_end detection window) and ``_rule_notify_active_now`` in
+    ``alert_dispatch`` (the rule's notify_start / notify_end delivery
+    window) so both gates use a single admin-local clock instead of mixing
+    server-local time with admin-local time.
+    """
+    tz_name, _, _ = _alert_datetime_prefs()
+    try:
+        now_local = datetime.now(timezone.utc).astimezone(ZoneInfo(tz_name))
+    except (ZoneInfoNotFoundError, KeyError):
+        now_local = datetime.now(timezone.utc)
+    return now_local.strftime('%H:%M')
 
 
 class AlertEngine:
@@ -121,12 +200,18 @@ class AlertEngine:
         This gates whether the rule raises an alert at all (in-app, email and
         push). The separate email/push notification window (notify_start /
         notify_end) is applied later, only to email and push delivery.
+
+        Evaluated in the admin's timezone (via ``_now_hm_in_admin_tz``) so the
+        active window matches the admin's local clock. Previously this used
+        ``datetime.now``, which is the host's local time -- a server running
+        in UTC and an admin in ``America/Los_Angeles`` would suppress alerts
+        during the admin's local night even when UTC is daytime.
         """
         start = rule.get('active_start')
         end = rule.get('active_end')
         if not start or not end:
             return True
-        now = datetime.now().strftime('%H:%M')
+        now = _now_hm_in_admin_tz()
         start_text = str(start)
         end_text = str(end)
         if start_text <= end_text:

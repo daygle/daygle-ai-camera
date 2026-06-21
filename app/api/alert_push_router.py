@@ -19,7 +19,11 @@ router = APIRouter()
 
 
 @router.get('/api/settings/alert-push')
-def get_push_notification_settings():
+def get_push_notification_settings(request: Request):
+    # Settings include the ntfy username/password in plaintext, so they
+    # must only be readable by admins (the middleware only enforces admin
+    # auth on mutating verbs on this prefix).
+    require_admin(request)
     return effective_push_notification_settings()
 
 

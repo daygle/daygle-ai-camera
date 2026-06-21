@@ -138,40 +138,61 @@ def compute_minimum_rule_confidence(fallback: float | None = None) -> float:
         return result
 
 
+# ``_alert_datetime_prefs`` and ``_now_hm_in_admin_tz`` live canonically in
+# ``app.alerts`` (the foundational alert-time module; the 30s cache lives
+# there). Here in ``app.alert_dispatch`` we define LOCAL thin delegates so
+# bare-name lookups in this module's namespace (``_alert_datetime_prefs()``
+# inside ``_now_hm_in_admin_tz`` and ``_format_alert_datetime``,
+# ``_now_hm_in_admin_tz()`` inside ``_rule_notify_active_now``) honor any
+# ``monkeypatch.setattr('app.alert_dispatch._alert_datetime_prefs', ...)``
+# by rebinding THIS module's name. The patch would otherwise bypass the
+# cache in ``app.alerts`` (because that module's bare-name lookup resolves
+# in its OWN namespace, unaffected by patches on a sibling module).
+from app.alerts import _clear_datetime_prefs_cache
+
+
 def _alert_datetime_prefs() -> tuple[str, str, str]:
-    """Return (timezone_name, date_format, time_format) from the primary admin user."""
+    """Local delegate. Honors ``app.alert_dispatch._alert_datetime_prefs``
+    monkeypatches (bare-name lookup resolves in this module's namespace).
+    Falls through to the canonical cached implementation in ``app.alerts``.
+    """
+    from app.alerts import _alert_datetime_prefs as _alerts_impl
+    return _alerts_impl()
+
+
+def _now_hm_in_admin_tz() -> str:
+    """Local delegate. Computes ``HH:MM`` for ``now`` in the admin's timezone.
+
+    Honors ``app.alert_dispatch._alert_datetime_prefs`` monkeypatches
+    because the timezone lookup uses the bare-name binding in this
+    module's namespace, NOT the cached value in ``app.alerts``.
+
+    Uses module-level ``datetime`` / ``ZoneInfo`` imports (not
+    ``from datetime import datetime`` inline) so that tests can
+    ``monkeypatch.setattr('app.alert_dispatch.datetime', _FakeDateTime)``
+    and still pin the now-time to a deterministic value.
+    """
+    tz_name, _, _ = _alert_datetime_prefs()  # bare name in this module
     try:
-        users = _state.auth.list_users()
-        admin = next((u for u in users if u.get('role') == 'admin' and u.get('is_active')), None)
-        if admin is None:
-            admin = next(iter(users), None)
-        if admin:
-            return (
-                str(admin.get('timezone') or 'UTC'),
-                str(admin.get('date_format') or 'iso'),
-                str(admin.get('time_format') or '24h'),
-            )
-    except Exception:
-        pass
-    return ('UTC', 'iso', '24h')
+        now_local = datetime.now(timezone.utc).astimezone(ZoneInfo(tz_name))
+    except (ZoneInfoNotFoundError, KeyError):
+        now_local = datetime.now(timezone.utc)
+    return now_local.strftime('%H:%M')
 
 
 def _rule_notify_active_now(rule: dict[str, Any]) -> bool:
     """Return True if a rule's notify_start/notify_end window covers now.
 
-    An empty or partial window means "notify any time". Evaluated in the admin
-    user's timezone so windows that wrap past midnight (start > end) work.
+    An empty or partial window means "notify any time". Uses
+    ``_now_hm_in_admin_tz`` (defined alongside the cached admin prefs in
+    ``app.alerts``) so the window is evaluated in the admin's timezone and
+    matches the clock used by ``AlertEngine._is_active_now``.
     """
     start = str(rule.get('notify_start') or '').strip()
     end = str(rule.get('notify_end') or '').strip()
     if not start or not end:
         return True
-    tz_name, _, _ = _alert_datetime_prefs()
-    try:
-        now_local = datetime.now(timezone.utc).astimezone(ZoneInfo(tz_name))
-    except (ZoneInfoNotFoundError, KeyError):
-        now_local = datetime.now(timezone.utc)
-    now_hm = now_local.strftime('%H:%M')
+    now_hm = _now_hm_in_admin_tz()
     if start <= end:
         return start <= now_hm <= end
     return now_hm >= start or now_hm <= end

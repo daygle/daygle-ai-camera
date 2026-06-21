@@ -37,6 +37,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -112,7 +113,21 @@ def stub_delivery_services(ch, monkeypatch):
     class FakeEmail:
         def __init__(self, settings):
             self.settings = settings
-        def _deliver(self, msg):
+
+        @contextmanager
+        def _create_smtp_session(self):
+            # Yield a sentinel so the production ``send_alert`` /
+            # ``_deliver_camera_offline_notification`` shared-session loop
+            # enters the ``with`` block. The real ``smtp.send_message`` is
+            # never reached because the fake ``_deliver`` short-circuits
+            # to the capture list -- this keeps the batched dispatcher
+            # exercised without ever opening a real SMTP connection.
+            yield 'fake-smtp-session'
+
+        def _deliver(self, msg, **kwargs):
+            # ``**kwargs`` swallows the ``smtp=...`` kwarg the production
+            # ``_deliver`` forwards when sharing a session across a
+            # multi-recipient broadcast.
             email_calls.append((msg['Subject'], dict(self.settings), msg['To']))
 
     monkeypatch.setattr(ch, 'PushNotificationService', FakePush)
