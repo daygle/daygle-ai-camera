@@ -14,6 +14,8 @@ import urllib.request
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+import app.state as _state
+
 from app.auth_gates import require_admin
 from app.deps import get_logger
 from app.model_management import BASE_DIR, _parse_semver
@@ -69,26 +71,25 @@ def check_update(request: Request):
 
 @router.post('/api/update/apply')
 def apply_update(request: Request, logger=Depends(get_logger)):
-    import app.main as _main_mod
     require_admin(request)
-    with _main_mod._update_lock:
-        if _main_mod._update_in_progress:
+    with _state._update_lock:
+        if _state._update_in_progress:
             raise HTTPException(status_code=409, detail='An update is already in progress.')
-        _main_mod._update_in_progress = True
+        _state._update_in_progress = True
     update_script = BASE_DIR / 'scripts' / 'update.sh'
     if not update_script.exists():
-        with _main_mod._update_lock:
-            _main_mod._update_in_progress = False
+        with _state._update_lock:
+            _state._update_in_progress = False
         raise HTTPException(status_code=503, detail='Update script not found.')
     try:
         result = subprocess.run(['bash', str(update_script)], capture_output=True, text=True, timeout=300, cwd=str(BASE_DIR))
     except subprocess.TimeoutExpired:
-        with _main_mod._update_lock:
-            _main_mod._update_in_progress = False
+        with _state._update_lock:
+            _state._update_in_progress = False
         raise HTTPException(status_code=504, detail='Update timed out after 5 minutes.')
     except Exception as exc:
-        with _main_mod._update_lock:
-            _main_mod._update_in_progress = False
+        with _state._update_lock:
+            _state._update_in_progress = False
         raise HTTPException(status_code=500, detail=f'Update failed: {exc}') from exc
     output = ((result.stdout or '') + ('\n' + result.stderr if result.stderr else '')).strip()
     service_restart_scheduled = False
@@ -103,17 +104,17 @@ def apply_update(request: Request, logger=Depends(get_logger)):
                 except Exception as exc:
                     logger.warning('Service restart after update failed: %s', exc)
                 finally:
-                    with _main_mod._update_lock:
-                        _main_mod._update_in_progress = False
+                    with _state._update_lock:
+                        _state._update_in_progress = False
 
             threading.Thread(target=_delayed_restart, daemon=True, name='update-restart').start()
             service_restart_scheduled = True
         else:
-            with _main_mod._update_lock:
-                _main_mod._update_in_progress = False
+            with _state._update_lock:
+                _state._update_in_progress = False
     else:
-        with _main_mod._update_lock:
-            _main_mod._update_in_progress = False
+        with _state._update_lock:
+            _state._update_in_progress = False
     return {
         'ok': result.returncode == 0,
         'output': output[-4000:],

@@ -153,3 +153,10 @@ camera_event_recording_config: Any = None
 apply_cameras_settings: Any = None
 apply_storage_and_recording_settings: Any = None
 reload_detector: Any = None
+
+# ---------------------------------------------------------------------------
+# In-flight update guard (used by update_router)
+# ---------------------------------------------------------------------------
+
+_update_in_progress: bool = False
+_update_lock: threading.Lock = threading.Lock()
