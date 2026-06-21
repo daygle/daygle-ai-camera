@@ -78,16 +78,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# Top-level lazy-ordered preloads to break the Phase-22 circular-import
-# gate (same pattern as the 6 earlier phases). Importing
-# ``app.payload_validators`` FIRST would cause Python's fresh-load
-# chain to run the top-of-file rebind
-# ``from app.payload_validators import (...)`` inside ``app/main.py``
-# while ``app.payload_validators`` is still mid-load -> ImportError.
-# Preloading ``app.main`` fully first populates
-# ``sys.modules['app.main']`` so ``app.payload_validators``'s own
-# ``import app.main as main`` returns the cached module rather than
-# triggering a recursive fresh-load chain.
+# Preload app.main before payload_validators. After Pool C elimination,
+# payload_validators.py has no module-level import of app.main (only one
+# remaining lazy ``from app.main import config`` inside
+# validate_storage_settings). The preload is kept for safety: app.main's
+# Pool A rebind block imports from payload_validators, so loading
+# payload_validators first could still trigger a partial-load cycle.
 import app.main  # noqa: E402  -- must precede the import below
 import app.payload_validators as payload_validators  # noqa: E402
 
@@ -186,64 +182,22 @@ def _install_validator_dependencies(
     effective_live_config=None,
     cameras_config=None,
 ):
-    """Install hermetic stand-ins for the cross-module deps reached by
-    the 9 validators at call time.
+    """Install hermetic stand-ins for the cross-module deps of the 9 validators.
 
-    Defaults are sensible identity stubs (returning the input verbatim
-    for dict inputs, identity-transform for string inputs, etc.) so
-    tests can pass on a focused subset of behavior by setting only the
-    stubs they need to override.
+    After Pool C elimination, all names except ``config`` and
+    ``cameras_config`` are module-level bindings in
+    ``app.payload_validators``. Patch on ``pv`` so the bare-name
+    lookups inside each validator body see the stub.
 
-    The validators use a MIX of reach patterns:
-    - Some helpers do ``from app.utils import X`` (call-time local
-      import at the top of the validator body) -- those reach
-      ``app.utils.X``, NOT ``main.X``.
-    - Others do ``import app.main as main`` and call ``main.X(...)`` --
-      those reach ``main.X``.
-    - For Pool-A rebound helpers that live on ``app.utils`` but are
-      also rebind-imported on ``main``, the rebind reference in ``main``
-      is captured at main.py module-load time and does NOT refresh
-      when we patch ``app.utils.<attr>``.
-
-    Therefore every helper that's reached via call-time ``from X
-    import y`` MUST be patched on the actual source module ``X`` --
-    patching on ``main`` is ineffective for those. For Pool C reach
-    via ``import app.main as main`` ``main.normalize_bool_setting(...)``,
-    we keep the ``main.<attr>`` patch so that one outlier
-    (``validate_live_settings``) intercepts too. Helpers reached only
-    via ``from app.main import ...`` or ``import app.main as main``
-    stay patched on ``main`` (effective_*_config, config,
-    cameras_config, etc.).
-
-    Concretely:
-    - ``normalize_bool_setting`` -- patch BOTH ``app.utils`` (for
-      ``validate_camera_settings`` / ``validate_push_notification_settings``
-      / ``validate_recording_settings`` call-time imports) AND
-      ``main`` (for ``validate_live_settings``'s ``import app.main as
-      main`` reach).
-    - ``build_stream_url``, ``camera_default_name``,
-      ``default_camera_detection_settings`` -- patch on ``app.utils``
-      (call-time import in ``validate_camera_settings``).
-    - ``normalize_camera_id`` -- patch on ``app.camera_config``
-      (call-time import in ``validate_camera_settings``).
-    - ``normalize_label_list``, ``normalize_monitoring_zones`` -- patch
-      on ``app.zone_schema`` (call-time import in
-      ``validate_camera_settings``).
-    - ``_migrate_legacy_camera_motion``,
-      ``normalize_camera_recording_settings``,
-      ``normalize_camera_ptz_settings`` -- patch on
-      ``app.recording_settings`` (call-time import in
-      ``validate_camera_settings``).
-    - ``effective_recording_config`` -- patch on
-      ``app.config_facades`` (call-time import in
-      ``validate_recording_settings``); back-compat rebind patch on
-      ``main`` kept for symmetry.
-    - The ``main.<name>`` patches are kept where the name is reached via
-      ``from app.main import ...`` or ``import app.main as main`` in
-      the validators (effective_*_settings, config, cameras_config,
-      effective_auth_config, effective_live_config, etc.).
+    Two special cases:
+    - ``config`` -- still Pool C (``from app.main import config`` lazy
+      inside ``validate_storage_settings``); patch on ``main``.
+    - ``cameras_config`` -- accessed as ``_state.cameras_config``; patch
+      on ``app.state``.
     """
     import app.main as main
+    import app.state as _state
+    pv = sys.modules['app.payload_validators']
 
     if effective_email_alert_settings is None:
         effective_email_alert_settings = lambda: {}
@@ -268,14 +222,6 @@ def _install_validator_dependencies(
     if normalize_monitoring_zones is None:
         normalize_monitoring_zones = lambda raw: list(raw) if isinstance(raw, list) else []
     if _migrate_legacy_camera_motion is None:
-        # Default stub is a no-op, but tests can pass a custom stub to
-        # verify the cluster threads the detection dict through. The
-        # ``test_validate_camera_settings_threads_detection_through_migration``
-        # test inspects a stub that sets ``detection['migrated'] = True``
-        # so the state-side-effect can be observed after the helper
-        # returns. This avoids the round-1 reviewer concern that
-        # ``_migrate_legacy_camera_motion`` could be silently replaced
-        # with a no-op without detection.
         def _migrate_legacy_camera_motion_stub(detection): pass
         _migrate_legacy_camera_motion = _migrate_legacy_camera_motion_stub
     if normalize_camera_recording_settings is None:
@@ -295,75 +241,29 @@ def _install_validator_dependencies(
     if cameras_config is None:
         cameras_config = []
 
-    # Pool A reach via ``import app.main as main`` or
-    # ``from app.main import ...`` -- patch on ``main``. These are
-    # consulted directly by validators like ``validate_live_settings``
-    # which does ``import app.main as main`` and reaches
-    # ``main.normalize_bool_setting(...)``, AND by
-    # ``validate_storage_settings`` which does ``from app.main import
-    # config, effective_storage_config``.
-    monkeypatch.setattr(main, 'effective_email_alert_settings', effective_email_alert_settings)
-    monkeypatch.setattr(main, 'effective_push_notification_settings', effective_push_notification_settings)
-    monkeypatch.setattr(main, 'effective_storage_config', effective_storage_config)
-    monkeypatch.setattr(main, 'effective_auth_config', effective_auth_config)
-    monkeypatch.setattr(main, 'effective_live_config', effective_live_config)
-    monkeypatch.setattr(main, 'cameras_config', cameras_config)
+    # All module-level names in pv -- patch where the call sites look them up.
+    monkeypatch.setattr(pv, 'effective_email_alert_settings', effective_email_alert_settings)
+    monkeypatch.setattr(pv, 'effective_push_notification_settings', effective_push_notification_settings)
+    monkeypatch.setattr(pv, 'effective_storage_config', effective_storage_config)
+    monkeypatch.setattr(pv, 'effective_auth_config', effective_auth_config)
+    monkeypatch.setattr(pv, 'effective_live_config', effective_live_config)
+    monkeypatch.setattr(pv, 'effective_recording_config', effective_recording_config)
+    monkeypatch.setattr(pv, 'normalize_bool_setting', normalize_bool_setting)
+    monkeypatch.setattr(pv, 'normalize_camera_id', normalize_camera_id)
+    monkeypatch.setattr(pv, 'camera_default_name', camera_default_name)
+    monkeypatch.setattr(pv, 'default_camera_detection_settings', default_camera_detection_settings)
+    monkeypatch.setattr(pv, 'build_stream_url', build_stream_url)
+    monkeypatch.setattr(pv, 'normalize_label_list', normalize_label_list)
+    monkeypatch.setattr(pv, 'normalize_monitoring_zones', normalize_monitoring_zones)
+    monkeypatch.setattr(pv, '_migrate_legacy_camera_motion', _migrate_legacy_camera_motion)
+    monkeypatch.setattr(pv, 'normalize_camera_recording_settings', normalize_camera_recording_settings)
+    monkeypatch.setattr(pv, 'normalize_camera_ptz_settings', normalize_camera_ptz_settings)
+
+    # cameras_config accessed via _state.cameras_config.
+    monkeypatch.setattr(_state, 'cameras_config', cameras_config)
+
+    # config still Pool C -- lazy from app.main import config inside validate_storage_settings.
     monkeypatch.setattr(main, 'config', config)
-    # Back-compat rebind coverage: ``main.normalize_bool_setting`` /
-    # ``main.normalize_camera_id`` / recording / label list / zones are
-    # all Pool-A rebinds from older phases. ``validate_live_settings``
-    # and a couple of bare-name callers still consult the rebind on
-    # main, so patch on main as well as the source module
-    # (see below).
-    monkeypatch.setattr(main, 'normalize_bool_setting', normalize_bool_setting)
-    monkeypatch.setattr(main, 'normalize_camera_id', normalize_camera_id)
-    monkeypatch.setattr(main, 'normalize_label_list', normalize_label_list)
-    monkeypatch.setattr(main, 'normalize_monitoring_zones', normalize_monitoring_zones)
-    monkeypatch.setattr(main, 'normalize_camera_recording_settings', normalize_camera_recording_settings)
-    monkeypatch.setattr(main, 'normalize_camera_ptz_settings', normalize_camera_ptz_settings)
-    monkeypatch.setattr(main, 'effective_recording_config', effective_recording_config)
-
-    # Pool C reach via call-time ``from app.utils import X`` -- patch
-    # on the SOURCE module so the bare-name lookup inside
-    # ``validate_camera_settings``, ``validate_push_notification_settings``,
-    # ``validate_recording_settings`` actually fires. Without these
-    # source-module patches the validators silently call the live
-    # ``app.utils`` helpers (as Phase-A extraction made them the
-    # contractually-public location), so any prior tests that put a
-    # stub on ``main.<attr>`` were testing nothing. The
-    # ``normalize_bool_setting`` patch is on BOTH ``app.utils`` (for the
-    # validators that call-time import) AND ``app.main`` (for
-    # ``validate_live_settings`` which uses ``import app.main as main``).
-    import app.utils as _utils
-    monkeypatch.setattr(_utils, 'normalize_bool_setting', normalize_bool_setting)
-    monkeypatch.setattr(_utils, 'build_stream_url', build_stream_url)
-    monkeypatch.setattr(_utils, 'camera_default_name', camera_default_name)
-    monkeypatch.setattr(_utils, 'default_camera_detection_settings', default_camera_detection_settings)
-
-    # Pool C reach via ``from app.camera_config import normalize_camera_id``.
-    import app.camera_config as _camera_config
-    monkeypatch.setattr(_camera_config, 'normalize_camera_id', normalize_camera_id)
-
-    # Pool C reach via ``from app.zone_schema import ...``.
-    import app.zone_schema as _zone_schema
-    monkeypatch.setattr(_zone_schema, 'normalize_label_list', normalize_label_list)
-    monkeypatch.setattr(_zone_schema, 'normalize_monitoring_zones', normalize_monitoring_zones)
-
-    # Pool C reach via ``from app.recording_settings import ...``.
-    # ``_migrate_legacy_camera_motion`` is verified by the
-    # ``test_validate_camera_settings_threads_detection_through_migration``
-    # test via side-effect on the detection dict, so the source-module
-    # patch is what actually intercepts the call.
-    import app.recording_settings as _recording_settings
-    monkeypatch.setattr(_recording_settings, '_migrate_legacy_camera_motion', _migrate_legacy_camera_motion)
-    monkeypatch.setattr(_recording_settings, 'normalize_camera_recording_settings', normalize_camera_recording_settings)
-    monkeypatch.setattr(_recording_settings, 'normalize_camera_ptz_settings', normalize_camera_ptz_settings)
-
-    # Hybrid: ``from app.config_facades import effective_recording_config``
-    # in ``validate_recording_settings`` -- patch on the source module
-    # for the actual reach (plus the main rebind for back-compat).
-    import app.config_facades as _config_facades
-    monkeypatch.setattr(_config_facades, 'effective_recording_config', effective_recording_config)
 
 
 # ---------------------------------------------------------------------------
