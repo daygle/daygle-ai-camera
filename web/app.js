@@ -65,8 +65,14 @@ function timeAgo(isoString) {
   return formatDate(isoString);
 }
 
-function soundDetectionBadges(detections = []) {
-  if (!detections.length) return '<span class="muted">No sound detections</span>';
+// Deduplicate detections by label (keeping the best confidence per label) and
+// render one pill each, sorted by confidence descending. No config filtering,
+// so historical data always shows everything that was actually detected.
+// `isSound` swaps the empty-state copy and forces the speaker-icon pill (object
+// pills still upgrade to the speaker icon on their own via isSoundLabel).
+function detectionBadges(detections = [], { isSound = false } = {}) {
+  const emptyText = isSound ? 'No sound detections' : 'No detections';
+  if (!detections.length) return `<span class="muted">${emptyText}</span>`;
   const best = new Map();
   for (const d of detections) {
     const label = String(d.label || '').trim().toLowerCase();
@@ -78,32 +84,10 @@ function soundDetectionBadges(detections = []) {
     }
     if (!best.has(label) || best.get(label) === null || conf > best.get(label)) best.set(label, conf);
   }
-  if (!best.size) return '<span class="muted">No sound detections</span>';
+  if (!best.size) return `<span class="muted">${emptyText}</span>`;
   return Array.from(best.entries())
     .sort((a, b) => (b[1] ?? -1) - (a[1] ?? -1))
-    .map(([label, conf]) => detectionPill(label, conf, true))
-    .join('');
-}
-
-function detectionBadges(detections = []) {
-  if (!detections.length) return '<span class="muted">No detections</span>';
-  // Deduplicate by label, keep best confidence per label - no config filtering
-  // so historical data always shows everything that was actually detected.
-  const best = new Map();
-  for (const d of detections) {
-    const label = String(d.label || '').trim().toLowerCase();
-    if (!label) continue;
-    const conf = Number(d.confidence);
-    if (!Number.isFinite(conf)) {
-      if (!best.has(label)) best.set(label, null);
-      continue;
-    }
-    if (!best.has(label) || best.get(label) === null || conf > best.get(label)) best.set(label, conf);
-  }
-  if (!best.size) return '<span class="muted">No detections</span>';
-  return Array.from(best.entries())
-    .sort((a, b) => (b[1] ?? -1) - (a[1] ?? -1))
-    .map(([label, conf]) => detectionPill(label, conf))
+    .map(([label, conf]) => detectionPill(label, conf, isSound))
     .join('');
 }
 
@@ -338,7 +322,7 @@ function renderActivityItem(item) {
           </div>
         </div>
         <p class="muted activity-item-meta">${metaLine}</p>
-        <div class="activity-item-badges">${isMotionOnly ? motionPill() : isSound ? soundDetectionBadges(item.detections) : detectionBadges(item.detections)}</div>
+        <div class="activity-item-badges">${isMotionOnly ? motionPill() : detectionBadges(item.detections, { isSound })}</div>
       </div>
       ${actions.length ? `<div class="activity-item-actions">${actions.join('')}</div>` : ''}
     </article>

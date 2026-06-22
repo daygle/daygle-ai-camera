@@ -1548,20 +1548,6 @@ input[type="file"] { padding: 10px; }
   border-color: rgba(255,255,255,.38);
   transform: translateY(-1px);
 }
-.timeline-segment-label,
-.timeline-segment-time {
-  font-size: 10px;
-  font-weight: 900;
-  white-space: nowrap;
-}
-.timeline-segment-time {
-  color: rgba(237,243,255,.78);
-}
-.timeline-segment.compact {
-  padding-left: 4px;
-  padding-right: 4px;
-  gap: 4px;
-}
 .timeline-segment.tiny {
   padding-left: 0;
   padding-right: 0;
@@ -1571,11 +1557,6 @@ input[type="file"] { padding: 10px; }
   background: var(--segment-color);
   border-color: rgba(255,255,255,.22);
   box-shadow: 0 0 8px var(--segment-color), 0 10px 24px rgba(0,0,0,.22);
-}
-.timeline-segment.tiny .timeline-segment-label,
-.timeline-segment.compact .timeline-segment-time,
-.timeline-segment.tiny .timeline-segment-time {
-  display: none;
 }
 .timeline-recordings {
   gap: 8px;

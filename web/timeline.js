@@ -304,14 +304,6 @@ function formatDuration(seconds) {
   return `${remainder}s`;
 }
 
-function recordingTriggerType(recording) {
-  return String(recording.trigger_type || 'motion').trim().toLowerCase() || 'motion';
-}
-
-function recordingTriggerLabel(recording) {
-  return String(recording.trigger_label || '').trim().toLowerCase() || null;
-}
-
 function recordingDetectionLabels(recording) {
   const labels = new Set((recording.detections || [])
     .filter((d) => {
@@ -327,48 +319,6 @@ function recordingDetectionLabels(recording) {
   const uniqueLabels = Array.from(labels);
   const specificLabels = uniqueLabels.filter((label) => !GENERIC_TIMELINE_LABELS.has(label));
   return specificLabels.length ? specificLabels : uniqueLabels;
-}
-
-/**
- * Returns an array of { label, confidence } sorted by confidence descending,
- * filtered to non-generic labels that pass the configuredLabels threshold.
- */
-function recordingDetectionSummary(recording) {
-  if (isSoundRecording(recording)) {
-    const meta = recording.event?.metadata || {};
-    const label = (meta.class_label || meta.label || recording.trigger_label || 'sound').toLowerCase();
-    const confidence = Number(meta.confidence || 0);
-    return [{ label, confidence }];
-  }
-  // Build best-confidence map from the saved event detections and, when
-  // present, the clip's live detection track. Multi-object recordings can pick
-  // up additional labels while the clip is extended; those labels are persisted
-  // in recording.labels, but their confidence may only exist in the track.
-  const best = new Map();
-  const rememberBest = (detection) => {
-    const label = String(detection?.label || '').trim().toLowerCase();
-    if (!label) return;
-    const rawConfidence = Number(detection?.confidence);
-    if (!Number.isFinite(rawConfidence)) return;
-    if (!best.has(label) || rawConfidence > best.get(label)) best.set(label, rawConfidence);
-  };
-  for (const d of (recording.detections || [])) rememberBest(d);
-  for (const sample of (recording.track || [])) {
-    for (const d of (sample?.detections || [])) rememberBest(d);
-  }
-  // Persisted per-label confidence (recording_labels.confidence) covers secondary
-  // objects that only appeared after the trigger, whose confidence is otherwise
-  // absent from the event detections the timeline list endpoint loads.
-  for (const [label, confidence] of Object.entries(recording.label_confidences || {})) {
-    rememberBest({ label, confidence });
-  }
-  // Use recording.labels as the authoritative label list when available.
-  const authLabels = Array.isArray(recording.labels) && recording.labels.length
-    ? recording.labels.map((l) => String(l || '').trim().toLowerCase()).filter((l) => l && !GENERIC_TIMELINE_LABELS.has(l))
-    : Array.from(best.keys()).filter((l) => !GENERIC_TIMELINE_LABELS.has(l));
-  return authLabels
-    .map((label) => ({ label, confidence: best.has(label) ? best.get(label) : null }))
-    .sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1));
 }
 
 function recordingTypeLabel(recording) {
@@ -392,23 +342,6 @@ function recordingTypeLabel(recording) {
   }
   if (triggerLabel && !GENERIC_TIMELINE_LABELS.has(triggerLabel)) return triggerLabel;
   return triggerLabel || triggerType;
-}
-
-/**
- * Returns a compact timeline label for multi-object recordings:
- * shows the primary label with a count of extra objects, e.g. "Person +2".
- * Falls back to recordingTypeLabel() for single-object or generic triggers.
- */
-function timelineSegmentLabel(recording) {
-  const primaryLabel = recordingTypeLabel(recording);
-  const detectionLabels = recordingDetectionLabels(recording);
-  const extraCount = detectionLabels.filter(
-    (label) => !GENERIC_TIMELINE_LABELS.has(label)
-  ).length - 1;
-  if (extraCount > 0) {
-    return `${primaryLabel} +${extraCount}`;
-  }
-  return primaryLabel;
 }
 
 function recordingColorKey(recording) {
@@ -474,13 +407,12 @@ function matchesRecordingFilter(recording, filterValue) {
   return recordingFilterTokens(recording).has(normalized);
 }
 
+// Kept page-local (not hoisted to utils.js): app.js and yamnet-tflite.js
+// define their own cameraLabel() with different signatures, and a shared
+// global would collide on the dashboard / yamnet pages.
 function cameraLabel(recording) {
   const metadata = recording?.event?.metadata || {};
   return metadata.camera_name || recording.camera_id || recording.source || 'unknown';
-}
-
-function isSoundRecording(recording) {
-  return recording?.event?.metadata?.source === 'sound-detection';
 }
 
 function colorForKey(key) {
@@ -493,11 +425,6 @@ function colorForKey(key) {
     hash |= 0;
   }
   return SEGMENT_COLORS[Math.abs(hash) % SEGMENT_COLORS.length];
-}
-
-function recordingZoneNames(recording) {
-  if (isSoundRecording(recording)) return [];
-  return [...new Set((recording.detections || []).map((d) => d.zone_name).filter(Boolean))];
 }
 
 function timelineParams(overrides = {}) {
@@ -652,13 +579,39 @@ function setTimelineStatusChip(state) {
 }
 
 function renderLegend(recordings) {
+  // The legend is a "what happened today" key: one chip per distinct object
+  // label, one per distinct sound class, plus a single Motion chip for
+  // motion-only clips. A multi-object recording therefore contributes a chip
+  // for every object it saw (e.g. Person AND Dog), not just its primary label,
+  // and every sound class gets its own chip rather than collapsing into one.
   const unique = [];
   const seen = new Set();
+  const addChip = (dedupKey, label, color, kind) => {
+    if (seen.has(dedupKey)) return;
+    seen.add(dedupKey);
+    unique.push({ label, color, kind });
+  };
   recordings.forEach((recording) => {
-    const key = recordingColorKey(recording);
-    if (seen.has(key)) return;
-    seen.add(key);
-    unique.push({ key, label: recordingTypeLabel(recording), color: colorForKey(key) });
+    if (isMotionOnlyRecording(recording)) {
+      addChip('__motion__', 'Motion', colorForKey('__motion__'), 'motion');
+      return;
+    }
+    const isSound = isSoundRecording(recording);
+    // recordingDetectionSummary returns one entry per unique label already
+    // (the sound class for sounds; every detected object for object clips),
+    // with generic trigger words filtered out. Fall back to the type label for
+    // the rare label-less clip (e.g. a continuous recording).
+    const summary = recordingDetectionSummary(recording);
+    const labels = summary.length ? summary.map((entry) => entry.label) : [recordingTypeLabel(recording)];
+    labels.forEach((rawLabel) => {
+      const label = String(rawLabel || '').toLowerCase();
+      if (!label) return;
+      if (isSound) {
+        addChip(`__sound__:${label}`, label, colorForKey('__sound__'), 'sound');
+      } else {
+        addChip(label, label, colorForKey(label), 'object');
+      }
+    });
   });
   if (!unique.length) {
     els.timelineLegend.innerHTML = '<p class="muted">No recordings match this filter for the selected day.</p>';
@@ -668,10 +621,8 @@ function renderLegend(recordings) {
     // Reserve the dedicated icons so the legend reads the same as the
     // row + pill treatments on the other surfaces: speaker for sound,
     // running man for motion, eye for everything else.
-    const isSound = item.key === '__sound__';
-    const isMotion = item.key === '__motion__';
-    const labelText = isMotion ? 'Motion' : titleCase(item.label);
-    const icon = isSound ? '🔊' : isMotion ? DETECTION_MOTION_ICON : DETECTION_EYE_ICON;
+    const labelText = item.kind === 'motion' ? 'Motion' : titleCase(item.label);
+    const icon = item.kind === 'sound' ? '🔊' : item.kind === 'motion' ? DETECTION_MOTION_ICON : DETECTION_EYE_ICON;
     return `
     <span class="timeline-legend-chip">
       <span class="timeline-legend-swatch" style="background:${item.color}"></span>
@@ -751,19 +702,15 @@ function renderTimeline(payload) {
     const width = Math.max((duration / totalSeconds) * 100, 0.1);
     const color = colorForKey(recordingColorKey(recording));
     const activeClass = Number(recording.id) === Number(state.activeRecordingId) ? ' active' : '';
-    const compactClass = width < 0.7 ? ' compact' : '';
     const tinyClass = width < 0.25 ? ' tiny' : '';
     return `
       <button
-        class="timeline-segment${activeClass}${compactClass}${tinyClass}"
+        class="timeline-segment${activeClass}${tinyClass}"
         type="button"
         data-recording-id="${escapeHtml(String(recording.id))}"
-        title="${escapeHtml(`${recordingTriggerSummary(recording)} · ${formatClock(origStart)} · ${formatDuration(recording.duration_seconds)}${recordingConfidenceText(recording)}`)}"
+        title="${escapeHtml(`${recordingTriggerSummary(recording)} · ${formatClock(origStart)} · ${formatDuration(recording.duration_seconds)}`)}"
         style="left:${left}%;width:${width}%;top:${recording.rowIndex * TIMELINE_ROW_HEIGHT + 8}px;--segment-color:${color};"
-      >
-        <span class="timeline-segment-label" hidden>${escapeHtml(timelineSegmentLabel(recording))}</span>
-        <span class="timeline-segment-time" hidden>${escapeHtml(formatClock(origStart))}</span>
-      </button>
+      ></button>
     `;
   }).join('');
 }
@@ -776,7 +723,6 @@ function renderRecordingList(recordings) {
   els.timelineRecordings.innerHTML = recordings.map((recording) => {
     const activeClass = Number(recording.id) === Number(state.activeRecordingId) ? ' active' : '';
     const color = colorForKey(recordingColorKey(recording));
-    const label = titleCase(timelineSegmentLabel(recording));
     const start = formatClock(recording.timeline_start_seconds || 0);
     const end = formatClock(recording.timeline_end_seconds || 0);
     const duration = formatDuration(recording.duration_seconds);
@@ -839,10 +785,6 @@ function renderRecordingList(recordings) {
       </button>
     `;
   }).join('');
-}
-
-function recordingConfidenceText() {
-  return '';
 }
 
 function renderRecordingDetails(recording) {
