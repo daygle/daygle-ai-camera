@@ -71,6 +71,7 @@
       </div>
       <div class="live-frame-wrap" id="liveFrameWrap">
         <img id="liveFrame" class="live-frame" alt="Live camera footage" />
+        <div id="liveMotionTint" class="live-motion-tint" aria-hidden="true"></div>
         <canvas id="liveAiTrackCanvas" class="clip-overlay" aria-hidden="true"></canvas>
         <div id="liveStatus" class="live-status-pill">Connecting to camera…</div>
         <div id="ptzOverlay" class="ptz-overlay" hidden aria-label="PTZ controls">
@@ -131,6 +132,20 @@
       <div id="liveDetectionChips" class="live-detection-chips"></div>
       <p id="liveDetectionStatus" class="muted live-detection-message">Live AI status waiting for frames.</p>
       <p id="liveSoundStatus" class="muted live-detection-message" style="display:none"></p>
+    </section>
+
+    <section class="card live-motion-card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon live-motion-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="4" r="2"/><path d="m4 19.5 4-4.5 1.5 4 5.5-3-2-7 4-3"/></svg>
+        </div>
+        <div>
+          <h2>Live Motion</h2>
+          <p class="settings-section-subtitle" id="liveMotionSubtitle">Frame-motion intensity over the last 60 seconds.</p>
+        </div>
+      </div>
+      <div id="liveMotionStrip" class="live-motion-strip" aria-label="Live motion intensity"></div>
+      <p id="liveMotionEmpty" class="muted live-motion-empty" hidden>No motion samples in the last 60 seconds.</p>
     </section>
   </main>
   <script src="/static/nav.js"></script>

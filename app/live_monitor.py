@@ -265,11 +265,21 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         _state._periodic_scan_last_ts[camera_id] = now
     frame_has_motion, frame_motion_confidence, diff_mask = detect_frame_motion(camera_id, image, pixel_threshold=_pixel_threshold, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, background_alpha=_background_alpha)
     if not frame_has_motion and (not force_scan):
+        # Append the zero-confidence sample BEFORE returning so the /live
+        # motion sparkline reflects 'no motion this frame' as a quiet gap
+        # rather than a missing window.
+        with _state._motion_history_lock:
+            _state._motion_history[camera_id].append((now, 0.0))
         update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[])
         return None
     if not frame_has_motion:
         frame_motion_confidence = 0.0
         diff_mask = None
+    # Mirror the (effective) frame_motion_confidence into the per-camera ring
+    # buffer so /api/live/motion-history can return a smooth 4Hz sparkline
+    # without polluting /api/live/detection-status's polling cadence.
+    with _state._motion_history_lock:
+        _state._motion_history[camera_id].append((now, float(frame_motion_confidence)))
     min_conf = compute_minimum_rule_confidence()
     try:
         if frame_is_numpy and hasattr(_state.detector, 'detect_frame'):

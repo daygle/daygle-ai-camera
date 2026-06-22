@@ -3173,3 +3173,104 @@ a.activity-item-action {
   opacity: 1;
 }
 
+/* ─── Live motion chart strip ───────────────────────────────────────────────── */
+.live-motion-card { display: grid; gap: 14px; }
+.live-motion-icon {
+  /* Reuse .settings-section-icon base; pick up the teal motion accent so the
+     running-man icon reads as the same category used on recordings/timeline. */
+  border-color: rgba(45, 212, 191, 0.4);
+  background: rgba(45, 212, 191, 0.08);
+  color: #2dd4bf;
+}
+.live-motion-subtitle { margin-top: 2px; }
+.live-motion-strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 80px;
+  padding: 8px 10px 6px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(7, 11, 19, 0.72), rgba(7, 11, 19, 0.96));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+.live-motion-strip.all-cameras {
+  height: 28px;
+  padding: 4px 8px 2px;
+}
+.live-motion-bar {
+  flex: 1 1 0;
+  min-width: 2px;
+  border-top: 2px solid #2dd4bf;
+  background: linear-gradient(180deg, rgba(45, 212, 191, 0.65), rgba(45, 212, 191, 0.18));
+  border-radius: 3px 3px 2px 2px;
+  transition: height 0.18s ease, opacity 0.18s ease;
+  align-self: flex-end;
+}
+.live-motion-bar.peak {
+  border-top-color: #5eead4;
+  background: linear-gradient(180deg, rgba(94, 234, 212, 0.85), rgba(94, 234, 212, 0.25));
+}
+.live-motion-bar.faint {
+  border-top-color: rgba(45, 212, 191, 0.28);
+  background: linear-gradient(180deg, rgba(45, 212, 191, 0.22), rgba(45, 212, 191, 0.05));
+  opacity: 0.7;
+}
+.live-motion-empty {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+.live-motion-empty:not([hidden]) { display: block; }
+
+/* All-cameras mode stacks one mini-strip per camera row. */
+.live-motion-multi-row {
+  display: grid;
+  gap: 10px;
+}
+.live-motion-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.live-motion-row-name {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.live-motion-row-meta {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .live-motion-strip { height: 60px; }
+  .live-motion-strip.all-cameras { height: 24px; }
+}
+
+/* ─── Full-frame motion tint overlay ─────────────────────────────────────── */
+/* Plain div overlaid on the live frame so the operator can see "something is
+   moving" on a motion-only frame without us inventing bounding boxes for
+   objects the detector didn't actually find. Opacity is driven per-frame
+   from JS via the --motion-tint-opacity CSS variable so the fade is on the
+   same RAF path as the box overlay (no extra timers).
+   No z-index + no CSS transition: the tint relies on DOM order to sit below
+   the detection canvas and PTZ overlay (both later siblings with explicit
+   positioning). The 60Hz JS update already owns the exact fade curve, so a
+   200ms CSS transition would just *add* latency if a frame ever dropped. */
+.live-motion-tint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgba(45, 212, 191, var(--motion-tint-opacity, 0));
+  /* Match the wrap's border-radius so corners stay flush. */
+  border-radius: inherit;
+}

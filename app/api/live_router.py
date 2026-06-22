@@ -7,6 +7,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 
+import time
+
+import app.state as _state
 from app.config_facades import get_camera_config
 from app.deps import get_recording_service
 from app.detection_status import live_detection_status_payload
@@ -19,6 +22,42 @@ router = APIRouter()
 @router.get('/api/live/detection-status')
 def live_detection_status_api(camera_id: str | None = None):
     return live_detection_status_payload(camera_id)
+
+
+@router.get('/api/live/motion-history')
+def live_motion_history(camera_id: str | None = None, window_seconds: int = 60) -> dict[str, object]:
+    """Return the per-camera motion-intensity history for the last N seconds.
+
+    Powers the /live page's "Live motion" chart strip. The underlying ring
+    buffer is fed by ``app.live_monitor.process_live_stream_alerts`` at the
+    monitor's native cadence (~4 Hz) so clients refreshing at 0.5 Hz still
+    see a smooth curve. ``window_seconds`` is clamped to [5, 300] to avoid
+    unbounded snapshot work on slow clients.
+    """
+    selected_config = get_camera_config(camera_id)
+    resolved_id = str(selected_config.get('id') or camera_id or 'camera')
+    # Clamp the requested window to a sane range; a worst-case monitor runs
+    # at ~4Hz, so MOTION_HISTORY_CAP // 4 seconds is the buffer's actual reach.
+    # Anything beyond that returns the same answer, so we trim it here and
+    # report the effective window back to the client.
+    window = min(max(5, int(window_seconds or 60)), 300)
+    cap_seconds = max(5, _state.MOTION_HISTORY_CAP // 4)
+    effective_window = min(window, cap_seconds)
+    cutoff = time.time() - float(effective_window)
+    with _state._motion_history_lock:
+        buffer = _state._motion_history.get(resolved_id) or []
+        samples = [
+            {'ts': float(ts), 'confidence': float(conf)}
+            for (ts, conf) in list(buffer)
+            if ts >= cutoff
+        ]
+    return {
+        'camera_id': resolved_id,
+        'camera_name': selected_config.get('name'),
+        'window_seconds': effective_window,
+        'sample_count': len(samples),
+        'samples': samples,
+    }
 
 
 @router.get('/api/live/snapshot')
