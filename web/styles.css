@@ -2735,6 +2735,127 @@ a.activity-item-action {
 .time-select-wrap .time-select-ampm {
   width: 4rem;
 }
+
+/* ── Form-grid time picker override (Recordings + Timeline filters) ──── */
+/* The compact `.time-select-wrap` + `.time-select-wrap select` rules above
+   render the picker as a tiny inline-flex pill (~32 px tall) ideal for
+   the dense `.sound-rule-field` / `.zone-object-rule` rows, but the
+   From / To mounts in `.form-grid` (Recordings filter, Timeline filter)
+   sit next to full-width native `<input type="date">` / `<select>` fields
+   that use the global input chrome (display: block; width: 100%;
+   padding: 12px 14px; border-radius: 14px; ~44 px tall). Without this
+   override the picker is a tiny pill wedged into a full-width row,
+   making From Time / To Time look like they belong to a different
+   control family than Camera / Label / From Date, and on /recordings
+   the bottom-anchored Apply Filters button label lands off-baseline
+   from the rows around it.
+
+   Treat the wrapped period (hour : minute [: am/pm]) as a single
+   full-width input. The wrap carries the visual chrome (border, bg,
+   radius, ~44 px min-height) and the inner selects reset their own
+   border/background, share the wrap's padding/font-size, and are
+   separated by a thin `border-right` divider. The `.sound-rule-field`
+   and `.zone-object-rule` pickers keep their existing compact
+   pill look — this override is scoped to `.form-grid` only. */
+.form-grid .time-select-wrap {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  outline: none;
+  overflow: hidden;
+  transition: border-color 0.15s;
+  /* Chevrons (wrap ::after) anchor to the wrap. */
+  position: relative;
+}
+.form-grid .time-select-wrap:hover {
+  border-color: rgba(71, 214, 255, 0.2);
+}
+.form-grid .time-select-wrap:focus-within {
+  border-color: var(--accent);
+  /* Paint the focus ring via `outline` rather than `box-shadow`. The wrap
+     sets `overflow: hidden` to clip inner overflow to the radius, which
+     would also clip an outer box-shadow halo. `outline` paints outside
+     the border edge and isn't subject to overflow clipping, so keyboard
+     Tab into Hour / Minute / AM/PM still produces a visible 2 px focus
+     ring on the wrap. */
+  outline: 2px solid rgba(71, 214, 255, 0.55);
+  outline-offset: 0;
+}
+.form-grid .time-select-wrap > select {
+  /* Reset the global `input, select` block / width:100% so each inner
+     select sits inline, shares the wrap's border-radius, and inherits
+     the wrap's bg/border. Padding + font-size match a native select so
+     the inner segments are the same height as the surrounding
+     `<input type="date">` / `<select>` fields in the form-grid. */
+  display: inline-block;
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+  padding: 12px 10px;
+  font-size: 14px;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+  /* Strip the native dropdown chevron so the picker reads as one cohesive
+     input. The wrap paints its own chevron via ::after below; otherwise
+     Hour / Minute / AM/PM each render their own arrow next to each other
+     and the picker visually crashes into the surrounding single-chevron
+     inputs. */
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+}
+.form-grid .time-select-wrap > select:last-child {
+  /* Reserve space on the rightmost segment for the wrap's custom chevron
+     so the selected value isn't overrun by the arrow glyph. Same width in
+     24h (minute) and 12h (AM/PM) modes for visual consistency. */
+  padding-right: 28px;
+}
+.form-grid .time-select-wrap > select:focus {
+  outline: none;
+  background: rgba(71, 214, 255, 0.06);
+}
+.form-grid .time-select-wrap > select:not(:last-child) {
+  border-right: 1px solid var(--border);
+}
+.form-grid .time-select-wrap .time-select-colon {
+  align-self: center;
+  padding: 12px 0;
+  font-size: 14px;
+  color: var(--muted);
+  user-select: none;
+  flex: 0 0 auto;
+}
+.form-grid .time-select-wrap > select.time-select-ampm {
+  flex: 0 0 auto;
+  min-width: 4.2rem;
+}
+.form-grid .time-select-wrap::after {
+  /* Single chevron for the whole picker so it reads as one cohesive input
+     the way the original `<input type="time">` did. Painted inside the
+     wrap's content rect so it's never clipped by overflow:hidden, with
+     pointer-events: none so the chevron never eats clicks meant for the
+     inner selects underneath it. */
+  content: '▾';
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  pointer-events: none;
+  z-index: 1;
+}
 .sound-rule-field input[type="email"] {
   width: min(18rem, 100%);
   padding: 6px 8px;

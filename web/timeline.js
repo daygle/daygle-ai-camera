@@ -1,8 +1,8 @@
 const els = {
   cameraSelect: document.getElementById('timelineCameraSelect'),
   timelineDate: document.getElementById('timelineDate'),
-  fromTime: document.getElementById('timelineFromTime'),
-  toTime: document.getElementById('timelineToTime'),
+  fromTime: null, // populated by renderTimelineTimeSelects() below
+  toTime: null,   // populated by renderTimelineTimeSelects() below
   filterSelect: document.getElementById('timelineFilterSelect'),
   timelineLoadBtn: document.getElementById('timelineLoadBtn'),
   timelineStatus: document.getElementById('timelineStatus'),
@@ -30,6 +30,35 @@ const els = {
   statCamera: document.getElementById('statCamera'),
   statCameraSub: document.getElementById('statCameraSub'),
 };
+
+// ── Filter state & pickers ────────────────────────────────────────────────
+// The From/To mounts in the Timeline Controls form render through the shared
+// `renderTimeSelect` / `setTimeSelectValue` pair (web/utils.js) so the time
+// pickers follow the user's Profile > Time Format choice (12h + AM/PM vs.
+// 24h), matching /recordings, /sounds and /zones. Re-rendered on init, on
+// the "Now" shortcut, on URL deep-link, and whenever the cross-tab prefs
+// hook fires so a profile change instantly swaps the picker style without
+// a manual refresh.
+const TIMELINE_FILTER_TIME_FROM_DEFAULT = '00:00';
+// Minute resolution is 5 minutes (shared with /recordings, /sounds and
+// /zones), so 23:55 is the latest valid value that still pins to the end
+// of the day.
+const TIMELINE_FILTER_TIME_TO_DEFAULT = '23:55';
+
+function renderTimelineTimeSelect(mountId, defaultValue) {
+  const mount = document.getElementById(mountId);
+  if (!mount) return null;
+  const role = mount.dataset.timeRole || '';
+  mount.innerHTML = renderTimeSelect(defaultValue, 'data-timeline-time-role', role);
+  return mount.querySelector('.time-select-wrap');
+}
+
+function renderTimelineTimeSelects() {
+  els.fromTime = renderTimelineTimeSelect('timelineFromTimeMount', TIMELINE_FILTER_TIME_FROM_DEFAULT);
+  els.toTime = renderTimelineTimeSelect('timelineToTimeMount', TIMELINE_FILTER_TIME_TO_DEFAULT);
+}
+
+renderTimelineTimeSelects();
 
 // CSRF token and current user live on window.daygleAuth (loaded by
 // web/utils.js) and are populated by each page's loadAuth() via
@@ -68,8 +97,12 @@ function parseTimeInput(value, fallback) {
 }
 
 function getTimeRangeConfig() {
-  const fromSeconds = parseTimeInput(els.fromTime.value, 0);
-  const toRaw = parseTimeInput(els.toTime.value, DAY_SECONDS);
+  // Read via timeSelectValue() so the values reflect the hour+minute(/AM/PM)
+  // the user sees in the picker rather than the browser-native
+  // `<input type="time">` element which rendered in the viewer's locale
+  // (often 12-hour even when 24h is preferred).
+  const fromSeconds = parseTimeInput(timeSelectValue(els.fromTime) || TIMELINE_FILTER_TIME_FROM_DEFAULT, 0);
+  const toRaw = parseTimeInput(timeSelectValue(els.toTime) || TIMELINE_FILTER_TIME_TO_DEFAULT, DAY_SECONDS);
   const toSeconds = Math.min(toRaw <= fromSeconds ? fromSeconds + 3600 : toRaw, DAY_SECONDS);
   const totalSeconds = toSeconds - fromSeconds;
   const totalHours = totalSeconds / 3600;
@@ -477,12 +510,15 @@ function replaceUrl(recordingId = state.activeRecordingId) {
   const params = new URLSearchParams();
   const { cameraId, day } = timelineParams();
   const filter = els.filterSelect.value || '';
-  const fromTime = els.fromTime.value || '';
-  const toTime = els.toTime.value || '';
+  const fromTime = timeSelectValue(els.fromTime) || '';
+  const toTime = timeSelectValue(els.toTime) || '';
   if (cameraId) params.set('camera_id', cameraId);
   if (day) params.set('day', day);
-  if (fromTime && fromTime !== '00:00') params.set('from_time', fromTime);
-  if (toTime && toTime !== '23:59') params.set('to_time', toTime);
+  // Skip the URL params when the filter matches the picker's default so deep
+  // links stay clean (and old `to_time=23:59` URLs no longer match the new
+  // 23:55 end-of-day sentinel — treat them as "all day" via the constant).
+  if (fromTime && fromTime !== TIMELINE_FILTER_TIME_FROM_DEFAULT) params.set('from_time', fromTime);
+  if (toTime && toTime !== TIMELINE_FILTER_TIME_TO_DEFAULT) params.set('to_time', toTime);
   if (filter) params.set('filter', filter);
   if (recordingId) params.set('recording_id', String(recordingId));
   const query = params.toString();
@@ -1031,14 +1067,17 @@ els.timelineLoadBtn.addEventListener('click', () => {
 });
 
 // "Now" shortcut: set Day=today, From=00:00, To=current local time, then reload.
+// setTimeSelectValue (utils.js) snaps minutes to the nearest 5-min step
+// on assignment, so passing the live "now" clock value (e.g. 14:23) still
+// lands on a value the picker can represent (14:25).
 els.timelineNowBtn?.addEventListener('click', () => {
   const now = new Date();
   const today = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  els.timelineDate.value = today;
+  setTimeSelectValue(els.fromTime, '00:00');
   const hh = String(now.getHours()).padStart(2, '0');
   const mm = String(now.getMinutes()).padStart(2, '0');
-  els.timelineDate.value = today;
-  els.fromTime.value = '00:00';
-  els.toTime.value = `${hh}:${mm}`;
+  setTimeSelectValue(els.toTime, `${hh}:${mm}`);
   loadTimeline({ preserveSelection: false }).catch((error) => {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
@@ -1074,23 +1113,37 @@ els.filterSelect.addEventListener('change', () => {
   });
 });
 
-els.fromTime.addEventListener('change', () => {
-  renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
-    // Skip UI updates if api() triggered a 401 redirect
-    if (window.daygleAuth?.redirecting) return;
-    els.timelineStatus.textContent = error.message;
-    setTimelineStatusChip({ kind: 'error', label: 'Error' });
-  });
-});
+// Debounce the From/To time-picker change handler. The picker renders as
+// three separate <select> elements (hour / minute / AM/PM in 12h mode),
+// each firing its own change event — so a user who adjusts both hour and
+// minute triggers two roundtrips if we re-fire the timeline fetch on every
+// event. Coalesce consecutive edits within a 150ms window into a single
+// /api/recordings/timeline refresh; still reactive enough to feel instant
+// while editing one field at a time.
+//
+// Attach the listeners to the outer mount spans (not the inner
+// .time-select-wrap). renderTimelineTimeSelect replaces innerHTML on
+// every re-render — including the daygleDatePrefsChanged 24h <-> 12h+AM/PM
+// format-swap path — so a listener attached to the wrap dies with the
+// old wrap. The mount spans aren't recreated, so they reliably catch
+// change events from inner <select>s (via DOM bubbling) on every render.
+let timelineTimeChangeTimer = null;
+function scheduleTimelineTimeRefresh() {
+  if (timelineTimeChangeTimer !== null) clearTimeout(timelineTimeChangeTimer);
+  timelineTimeChangeTimer = setTimeout(() => {
+    timelineTimeChangeTimer = null;
+    renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
+      // Skip UI updates if api() triggered a 401 redirect
+      if (window.daygleAuth?.redirecting) return;
+      els.timelineStatus.textContent = error.message;
+      setTimelineStatusChip({ kind: 'error', label: 'Error' });
+    });
+  }, 150);
+}
 
-els.toTime.addEventListener('change', () => {
-  renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
-    // Skip UI updates if api() triggered a 401 redirect
-    if (window.daygleAuth?.redirecting) return;
-    els.timelineStatus.textContent = error.message;
-    setTimelineStatusChip({ kind: 'error', label: 'Error' });
-  });
-});
+document.getElementById('timelineFromTimeMount').addEventListener('change', scheduleTimelineTimeRefresh);
+
+document.getElementById('timelineToTimeMount').addEventListener('change', scheduleTimelineTimeRefresh);
 
 els.timelineRows.addEventListener('click', (event) => {
   const button = event.target.closest('[data-recording-id]');
@@ -1183,8 +1236,8 @@ loadAuth().then(async () => {
   els.timelineDate.value = queryDay || new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   if (queryCameraId) els.cameraSelect.innerHTML = `<option value="${escapeHtml(queryCameraId)}" selected>${escapeHtml(queryCameraId)}</option>`;
   if (queryFilter) els.filterSelect.innerHTML = `<option value="${escapeHtml(queryFilter)}" selected>${escapeHtml(titleCase(queryFilter))}</option>`;
-  if (queryFromTime) els.fromTime.value = queryFromTime;
-  if (queryToTime) els.toTime.value = queryToTime;
+  if (queryFromTime) setTimeSelectValue(els.fromTime, queryFromTime);
+  if (queryToTime) setTimeSelectValue(els.toTime, queryToTime);
   setTimelineStatusChip({ kind: 'idle', label: 'Loading' });
   await loadConfiguredLabels();
   await loadTimeline({ preserveSelection: true });
@@ -1199,8 +1252,16 @@ loadAuth().then(async () => {
 // Re-render the timeline (ticks, segments, list, modal) when the user's
 // date_format / time_format changes in another tab. Preserves the
 // currently selected camera / day / filter / time range so the user keeps
-// what they were looking at - only the rendered formatting changes.
+// what they were looking at - only the rendered formatting changes. The
+// From/To time pickers also need to swap between 24h and 12h+AM/PM, so
+// they're re-rendered here too (translation handled by renderTimeSelect
+// reading selH/selM so a 14:30 selection in 24h mode becomes "2:30 PM"
+// in 12h mode instead of snapping back to the defaults).
 window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
+  const preservedFrom = els.fromTime ? timeSelectValue(els.fromTime) : TIMELINE_FILTER_TIME_FROM_DEFAULT;
+  const preservedTo = els.toTime ? timeSelectValue(els.toTime) : TIMELINE_FILTER_TIME_TO_DEFAULT;
+  els.fromTime = renderTimelineTimeSelect('timelineFromTimeMount', preservedFrom || TIMELINE_FILTER_TIME_FROM_DEFAULT);
+  els.toTime = renderTimelineTimeSelect('timelineToTimeMount', preservedTo || TIMELINE_FILTER_TIME_TO_DEFAULT);
   if (typeof loadTimeline !== 'function' || !state || !state.payload) return;
   loadTimeline({ preserveSelection: true }).catch((error) => {
     // Skip UI updates if api() triggered a 401 redirect
