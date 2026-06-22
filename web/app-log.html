@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>App Log - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell page-stack">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Administration</p>
+        <h1>App Log</h1>
+        <p class="muted">Live application log from <code>journalctl -u daygle-ai-camera</code>. Filter by level to focus on errors or warnings. New entries stream in real time.</p>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">📋</div>
+        <div>
+          <h2>Log Stream</h2>
+          <p class="settings-section-subtitle">Showing recent entries from the system journal. New entries appear automatically when Live is active.</p>
+        </div>
+      </div>
+
+      <div class="audit-filters">
+        <select id="filterLevel">
+          <option value="">All levels</option>
+          <option value="error">Error and above</option>
+          <option value="warning">Warning and above</option>
+          <option value="info">Info and above</option>
+          <option value="debug">Debug (all)</option>
+        </select>
+        <input id="filterSearch" type="search" placeholder="Search messages…" />
+        <button id="applyFiltersBtn" type="button">Apply Filters</button>
+        <button id="clearFiltersBtn" class="secondary" type="button">Reset Filters</button>
+      </div>
+
+      <div class="app-log-toolbar">
+        <button id="liveBtn" type="button" class="app-log-live-btn app-log-live-active">Live</button>
+        <label class="app-log-autoscroll-label">
+          <input type="checkbox" id="autoScrollCheck" checked />
+          Auto-scroll
+        </label>
+        <span id="liveStatus" class="app-log-status">Connecting…</span>
+        <span id="entryCount" class="app-log-count">0 entries</span>
+      </div>
+
+      <div id="appLogEmpty" hidden>No log entries found. The service may not be running under systemd, or no entries match the current filters.</div>
+      <div class="app-log-output-wrap" id="appLogOutputWrap">
+        <table class="audit-table" id="appLogTable">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Level</th>
+              <th>Message</th>
+            </tr>
+          </thead>
+          <tbody id="appLogBody"></tbody>
+        </table>
+      </div>
+
+      <div class="button-row">
+        <button id="refreshBtn" class="secondary" type="button">Refresh</button>
+        <button id="clearDisplayBtn" class="secondary" type="button">Clear Display</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/nav.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/app-log.js"></script>
+</body>
+</html>

@@ -152,6 +152,8 @@ from app.api.admin_router import router as admin_router
 app.include_router(admin_router)
 from app.api.camera_log_router import router as camera_log_router
 app.include_router(camera_log_router)
+from app.api.app_log_router import router as app_log_router
+app.include_router(app_log_router)
 from app.api.update_router import router as update_router
 app.include_router(update_router)
 from app.api.utility_router import router as utility_router
