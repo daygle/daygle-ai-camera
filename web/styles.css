@@ -3077,6 +3077,16 @@ a.activity-item-action {
   color: var(--danger);
   border-color: rgba(255, 92, 138, 0.3);
 }
+.status-pending {
+  background: rgba(251, 191, 36, 0.14);
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.3);
+}
+.status-muted {
+  background: rgba(145, 161, 186, 0.1);
+  color: var(--muted);
+  border-color: rgba(145, 161, 186, 0.2);
+}
 .details-cell {
   max-width: 260px;
   word-break: break-all;
@@ -3386,4 +3396,111 @@ a.activity-item-action {
   background: rgba(45, 212, 191, var(--motion-tint-opacity, 0));
   /* Match the wrap's border-radius so corners stay flush. */
   border-radius: inherit;
+}
+
+/* ─── Application log page ───────────────────────────────────────────────── */
+.application-log-output-wrap {
+  max-height: 60vh;
+  min-height: 200px;
+  overflow-y: auto;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+#applicationLogEmpty {
+  padding: 2rem 0;
+  text-align: center;
+  color: var(--muted);
+}
+#applicationLogTable td:last-child {
+  font-family: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+  font-size: 0.8rem;
+  word-break: break-all;
+  white-space: pre-wrap;
+  max-width: 640px;
+}
+.application-log-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+}
+.application-log-live-btn {
+  padding: 4px 14px;
+  font-size: 0.8rem;
+  border-radius: 999px;
+  min-width: 76px;
+}
+.application-log-live-btn.application-log-live-active {
+  background: rgba(73, 230, 163, 0.15);
+  color: var(--success);
+  border-color: rgba(73, 230, 163, 0.4);
+}
+.application-log-autoscroll-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  color: var(--muted);
+  user-select: none;
+}
+.application-log-autoscroll-label input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+.application-log-status {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.application-log-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+@media (max-width: 700px) {
+  #applicationLogTable {
+    display: block;
+    font-size: 0.84rem;
+  }
+  #applicationLogTable thead { display: none; }
+  #applicationLogTable tbody { display: grid; gap: 10px; }
+  #applicationLogTable tr {
+    display: grid;
+    gap: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.035);
+  }
+  #applicationLogTable td {
+    display: grid;
+    grid-template-columns: minmax(74px, 34%) minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    padding: 7px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    white-space: normal !important;
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+  #applicationLogTable td:last-child {
+    border-bottom: 0;
+    max-width: none;
+  }
+  #applicationLogTable td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1.4;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+  #applicationLogTable .status-badge { width: fit-content; max-width: 100%; }
+  .application-log-output-wrap { max-height: none; }
+  .application-log-count { margin-left: 0; }
 }

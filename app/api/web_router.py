@@ -25,6 +25,7 @@ Routes:
 - GET  /users         -- users_page
 - GET  /audit         -- audit_page
 - GET  /camera-log    -- camera_log_page
+- GET  /application-log -- application_log_page
 """
 
 from __future__ import annotations
@@ -228,6 +229,14 @@ def audit_page(web_dir: Path = Depends(get_web_dir)):
 @router.get('/camera-log')
 def camera_log_page(web_dir: Path = Depends(get_web_dir)):
     page_path = web_dir / 'camera-log.html'
+    if page_path.exists():
+        return FileResponse(page_path)
+    return root(web_dir=web_dir)
+
+
+@router.get('/application-log')
+def application_log_page(web_dir: Path = Depends(get_web_dir)):
+    page_path = web_dir / 'application-log.html'
     if page_path.exists():
         return FileResponse(page_path)
     return root(web_dir=web_dir)
