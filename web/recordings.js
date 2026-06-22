@@ -2,9 +2,9 @@ const els = {
   recordings: document.getElementById('recordings'),
   cameraFilter: document.getElementById('cameraFilter'),
   recordingDateFrom: document.getElementById('recordingDateFrom'),
-  recordingTimeFrom: document.getElementById('recordingTimeFrom'),
+  recordingTimeFrom: null, // populated by renderFilterTimeSelects() below
   recordingDateTo: document.getElementById('recordingDateTo'),
-  recordingTimeTo: document.getElementById('recordingTimeTo'),
+  recordingTimeTo: null,   // populated by renderFilterTimeSelects() below
   recordingSort: document.getElementById('recordingSort'),
   recordingSearchBtn: document.getElementById('recordingSearchBtn'),
   recordingClearBtn: document.getElementById('recordingClearBtn'),
@@ -195,6 +195,34 @@ function formatIsoDateForFilter(dateString, endOfDay = false, timeString = '') {
   return date.toISOString();
 }
 
+// ── Filter state & pickers ────────────────────────────────────────────────
+// Mount spans in the filter form render through the shared `renderTimeSelect`
+// helper (web/utils.js) so the From / To time pickers follow the user's
+// Profile > Time Format choice (12h with AM/PM vs. 24h), matching the same
+// UX on the /timeline page. Re-rendered on init, on Reset Filters, and
+// whenever the cross-tab prefs hook fires so a profile change instantly
+// swaps the picker style without a manual refresh.
+const FILTER_TIME_FROM_DEFAULT = '00:00';
+// Minute resolution is 5 minutes (shared with the timeline + /sounds and
+// /zones rule editors), so 23:55 is the latest valid value that still
+// pins against the end of the day.
+const FILTER_TIME_TO_DEFAULT = '23:55';
+
+function renderFilterTimeSelect(mountId, defaultValue) {
+  const mount = document.getElementById(mountId);
+  if (!mount) return null;
+  const role = mount.dataset.timeRole || '';
+  mount.innerHTML = renderTimeSelect(defaultValue, 'data-filter-time-role', role);
+  return mount.querySelector('.time-select-wrap');
+}
+
+function renderFilterTimeSelects() {
+  els.recordingTimeFrom = renderFilterTimeSelect('recordingTimeFromMount', FILTER_TIME_FROM_DEFAULT);
+  els.recordingTimeTo = renderFilterTimeSelect('recordingTimeToMount', FILTER_TIME_TO_DEFAULT);
+}
+
+renderFilterTimeSelects();
+
 // ── Label filter state ────────────────────────────────────────────
 
 function currentFilterValues() {
@@ -202,9 +230,13 @@ function currentFilterValues() {
     label: els.labelFilter?.value || '',
     cameraId: els.cameraFilter?.value || '',
     dateFrom: els.recordingDateFrom?.value || '',
-    timeFrom: els.recordingTimeFrom?.value || '00:00',
+    // Read from the custom hour/minute (/AM/PM) selects so the filter value
+    // always matches what the user sees in the picker rather than the
+    // browser-native `<input type="time">` element which rendered in the
+    // viewer's locale (often 12-hour even when 24h is preferred).
+    timeFrom: timeSelectValue(els.recordingTimeFrom) || FILTER_TIME_FROM_DEFAULT,
     dateTo: els.recordingDateTo?.value || '',
-    timeTo: els.recordingTimeTo?.value || '23:59',
+    timeTo: timeSelectValue(els.recordingTimeTo) || FILTER_TIME_TO_DEFAULT,
     sort: els.recordingSort?.value || 'newest',
   };
 }
@@ -219,8 +251,8 @@ function describeFilters(filters) {
     const cameraOption = Array.from(els.cameraFilter?.options || []).find((o) => o.value === filters.cameraId);
     parts.push(`camera “${cameraOption?.textContent || filters.cameraId}”`);
   }
-  if (filters.dateFrom) parts.push(`from ${formatUserDate(filters.dateFrom)} ${filters.timeFrom || '00:00'}`);
-  if (filters.dateTo) parts.push(`through ${formatUserDate(filters.dateTo)} ${filters.timeTo || '23:59'}`);
+  if (filters.dateFrom) parts.push(`from ${formatUserDate(filters.dateFrom)} ${filters.timeFrom || FILTER_TIME_FROM_DEFAULT}`);
+  if (filters.dateTo) parts.push(`through ${formatUserDate(filters.dateTo)} ${filters.timeTo || FILTER_TIME_TO_DEFAULT}`);
   return parts;
 }
 
@@ -811,10 +843,12 @@ els.recordingClearBtn.addEventListener('click', () => {
   if (els.labelFilter) els.labelFilter.value = '';
   if (els.cameraFilter) els.cameraFilter.value = '';
   if (els.recordingDateFrom) els.recordingDateFrom.value = '';
-  if (els.recordingTimeFrom) els.recordingTimeFrom.value = '00:00';
   if (els.recordingDateTo) els.recordingDateTo.value = '';
-  if (els.recordingTimeTo) els.recordingTimeTo.value = '23:59';
   if (els.recordingSort) els.recordingSort.value = 'newest';
+  // Re-render the From/To time pickers back to their defaults. Going through
+  // renderFilterTimeSelects (rather than poking child selects directly) means
+  // Reset Filters also handles the 12h vs 24h AM/PM swap correctly.
+  renderFilterTimeSelects();
   loadRecordings().catch((error) => {
     if (window.daygleAuth?.redirecting) return;
     if (els.listStatus) els.listStatus.textContent = error.message;
@@ -877,11 +911,18 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !els.videoModal.hidden) closeVideoModal();
 });
 
-// Re-render the recordings list (and any open modal's "Started" line)
-// when the user's date_format / time_format changes in another tab. Uses
-// loadRecordings() so the active filter inputs (camera, label, dates,
-// sort) are preserved - only the displayed formatting changes.
+// Re-render the recordings list (and any open modal's "Started" line) when
+// the user's date_format / time_format changes in another tab. The From/To
+// time pickers also need to swap between 24h and 12h+AM/PM, so they're
+// re-rendered here too - translation between formats is handled by
+// renderTimeSelect reading the current selection via selH/selM, so a
+// 14:30 selection in 24h mode becomes "2:30 PM" in 12h mode rather than
+// snapping back to the defaults.
 window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
+  const preservedFrom = els.recordingTimeFrom ? timeSelectValue(els.recordingTimeFrom) : FILTER_TIME_FROM_DEFAULT;
+  const preservedTo = els.recordingTimeTo ? timeSelectValue(els.recordingTimeTo) : FILTER_TIME_TO_DEFAULT;
+  els.recordingTimeFrom = renderFilterTimeSelect('recordingTimeFromMount', preservedFrom || FILTER_TIME_FROM_DEFAULT);
+  els.recordingTimeTo = renderFilterTimeSelect('recordingTimeToMount', preservedTo || FILTER_TIME_TO_DEFAULT);
   if (typeof loadRecordings !== 'function' || !els || !els.listStatus) return;
   loadRecordings().catch((error) => { els.listStatus.textContent = error.message; });
 };
