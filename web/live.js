@@ -654,7 +654,7 @@ function renderDetectionStatus(summary) {
       if (sndParts.length) parts.push(`Hearing: ${sndParts.join(', ')}`);
       liveEls.detectionSubtitle.textContent = parts.join(' · ');
     } else {
-      liveEls.detectionSubtitle.textContent = 'What the AI is currently seeing on the live feed.';
+      liveEls.detectionSubtitle.textContent = 'What the AI is currently seeing and hearing on the live feed.';
     }
   }
   // Object state chip (👁️ Monitoring / Detected / Alerted).
