@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>App Log - Daygle AI Camera</title>
+  <title>Application Log - Daygle AI Camera</title>
   <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
@@ -12,7 +12,7 @@
     <header class="hero">
       <div>
         <p class="eyebrow">Administration</p>
-        <h1>App Log</h1>
+        <h1>Application Log</h1>
         <p class="muted">Live application log from <code>journalctl -u daygle-ai-camera</code>. Filter by level to focus on errors or warnings. New entries stream in real time.</p>
       </div>
     </header>
@@ -39,19 +39,19 @@
         <button id="clearFiltersBtn" class="secondary" type="button">Reset Filters</button>
       </div>
 
-      <div class="app-log-toolbar">
-        <button id="liveBtn" type="button" class="app-log-live-btn app-log-live-active">Live</button>
-        <label class="app-log-autoscroll-label">
+      <div class="application-log-toolbar">
+        <button id="liveBtn" type="button" class="application-log-live-btn application-log-live-active">Live</button>
+        <label class="application-log-autoscroll-label">
           <input type="checkbox" id="autoScrollCheck" checked />
           Auto-scroll
         </label>
-        <span id="liveStatus" class="app-log-status">Connecting…</span>
-        <span id="entryCount" class="app-log-count">0 entries</span>
+        <span id="liveStatus" class="application-log-status">Connecting…</span>
+        <span id="entryCount" class="application-log-count">0 entries</span>
       </div>
 
-      <div id="appLogEmpty" hidden>No log entries found. The service may not be running under systemd, or no entries match the current filters.</div>
-      <div class="app-log-output-wrap" id="appLogOutputWrap">
-        <table class="audit-table" id="appLogTable">
+      <div id="applicationLogEmpty" hidden>No log entries found. The service may not be running under systemd, or no entries match the current filters.</div>
+      <div class="application-log-output-wrap" id="applicationLogOutputWrap">
+        <table class="audit-table" id="applicationLogTable">
           <thead>
             <tr>
               <th>Time</th>
@@ -59,7 +59,7 @@
               <th>Message</th>
             </tr>
           </thead>
-          <tbody id="appLogBody"></tbody>
+          <tbody id="applicationLogBody"></tbody>
         </table>
       </div>
 
@@ -72,6 +72,6 @@
 
   <script src="/static/nav.js"></script>
   <script src="/static/utils.js"></script>
-  <script src="/static/app-log.js"></script>
+  <script src="/static/application-log.js"></script>
 </body>
 </html>

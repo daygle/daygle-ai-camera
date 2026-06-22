@@ -1,13 +1,13 @@
 // Streams journalctl output for daygle-ai-camera.
-// REST:  GET /api/app-log?lines=200&level=...   (initial batch, server-side filtered)
-// SSE:   GET /api/app-log/stream                (live follow, client-side filtered)
+// REST:  GET /api/application-log?lines=200&level=...   (initial batch, server-side filtered)
+// SSE:   GET /api/application-log/stream                (live follow, client-side filtered)
 
 const MAX_ROWS = 500;
 
-const appLogBody = document.getElementById('appLogBody');
-const appLogTable = document.getElementById('appLogTable');
-const appLogEmpty = document.getElementById('appLogEmpty');
-const appLogOutputWrap = document.getElementById('appLogOutputWrap');
+const applicationLogBody = document.getElementById('applicationLogBody');
+const applicationLogTable = document.getElementById('applicationLogTable');
+const applicationLogEmpty = document.getElementById('applicationLogEmpty');
+const applicationLogOutputWrap = document.getElementById('applicationLogOutputWrap');
 const entryCount = document.getElementById('entryCount');
 const liveBtn = document.getElementById('liveBtn');
 const liveStatus = document.getElementById('liveStatus');
@@ -82,41 +82,41 @@ function makeRow(entry) {
 }
 
 function updateCount() {
-  const total = appLogBody.children.length;
-  const visible = Array.from(appLogBody.children).filter((r) => !r.hidden).length;
+  const total = applicationLogBody.children.length;
+  const visible = Array.from(applicationLogBody.children).filter((r) => !r.hidden).length;
   if (visible === total) {
     entryCount.textContent = `${total} entr${total === 1 ? 'y' : 'ies'}`;
   } else {
     entryCount.textContent = `${visible} of ${total} entr${total === 1 ? 'y' : 'ies'}`;
   }
   const hasVisible = visible > 0;
-  appLogEmpty.hidden = hasVisible || total === 0;
-  appLogTable.hidden = total === 0;
+  applicationLogEmpty.hidden = hasVisible || total === 0;
+  applicationLogTable.hidden = total === 0;
 }
 
 function applyClientFilters() {
-  for (const tr of appLogBody.children) {
+  for (const tr of applicationLogBody.children) {
     tr.hidden = !isRowVisible(tr);
   }
   updateCount();
 }
 
 function trimOldRows() {
-  while (appLogBody.children.length > MAX_ROWS) {
-    appLogBody.removeChild(appLogBody.firstChild);
+  while (applicationLogBody.children.length > MAX_ROWS) {
+    applicationLogBody.removeChild(applicationLogBody.firstChild);
   }
 }
 
 function appendEntry(entry) {
   const tr = makeRow(entry);
   tr.hidden = !isRowVisible(tr);
-  appLogBody.appendChild(tr);
+  applicationLogBody.appendChild(tr);
   trimOldRows();
-  appLogTable.hidden = false;
-  if (!tr.hidden) appLogEmpty.hidden = true;
+  applicationLogTable.hidden = false;
+  if (!tr.hidden) applicationLogEmpty.hidden = true;
   updateCount();
   if (!tr.hidden && autoScrollCheck.checked) {
-    appLogOutputWrap.scrollTop = appLogOutputWrap.scrollHeight;
+    applicationLogOutputWrap.scrollTop = applicationLogOutputWrap.scrollHeight;
   }
 }
 
@@ -125,26 +125,26 @@ async function loadEntries() {
   const params = new URLSearchParams({ lines: 200 });
   if (level) params.set('level', level);
   try {
-    const data = await api(`/api/app-log?${params}`);
-    appLogBody.innerHTML = '';
+    const data = await api(`/api/application-log?${params}`);
+    applicationLogBody.innerHTML = '';
     if (data.unavailable) {
       liveStatus.textContent = 'journalctl unavailable';
-      appLogEmpty.hidden = false;
-      appLogTable.hidden = true;
+      applicationLogEmpty.hidden = false;
+      applicationLogTable.hidden = true;
       updateCount();
       return;
     }
     for (const entry of data.entries || []) {
       const tr = makeRow(entry);
       tr.hidden = !isRowVisible(tr);
-      appLogBody.appendChild(tr);
+      applicationLogBody.appendChild(tr);
     }
     trimOldRows();
-    appLogTable.hidden = appLogBody.children.length === 0;
-    appLogEmpty.hidden = appLogBody.children.length > 0;
+    applicationLogTable.hidden = applicationLogBody.children.length === 0;
+    applicationLogEmpty.hidden = applicationLogBody.children.length > 0;
     updateCount();
     if (autoScrollCheck.checked) {
-      appLogOutputWrap.scrollTop = appLogOutputWrap.scrollHeight;
+      applicationLogOutputWrap.scrollTop = applicationLogOutputWrap.scrollHeight;
     }
   } catch (err) {
     if (window.daygleAuth?.redirecting) return;
@@ -153,7 +153,7 @@ async function loadEntries() {
 }
 
 function setLiveActive(active) {
-  liveBtn.classList.toggle('app-log-live-active', active);
+  liveBtn.classList.toggle('application-log-live-active', active);
   liveBtn.textContent = active ? 'Live' : 'Resume';
 }
 
@@ -165,7 +165,7 @@ function connectStream() {
   liveStatus.textContent = 'Connecting…';
   setLiveActive(true);
 
-  eventSource = new EventSource('/api/app-log/stream');
+  eventSource = new EventSource('/api/application-log/stream');
 
   eventSource.onopen = () => {
     liveStatus.textContent = 'Live';
@@ -240,9 +240,9 @@ document.getElementById('filterSearch').addEventListener('keydown', (e) => {
 document.getElementById('refreshBtn').addEventListener('click', () => loadEntries());
 
 document.getElementById('clearDisplayBtn').addEventListener('click', () => {
-  appLogBody.innerHTML = '';
-  appLogTable.hidden = true;
-  appLogEmpty.hidden = false;
+  applicationLogBody.innerHTML = '';
+  applicationLogTable.hidden = true;
+  applicationLogEmpty.hidden = false;
   updateCount();
 });
 

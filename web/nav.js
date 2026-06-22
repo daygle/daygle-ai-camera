@@ -237,7 +237,7 @@ window.daygleAuthReady = (async () => {
         { href: '/settings', match: '/settings', label: 'Settings' },
         { href: '/users', match: '/users', label: 'Users' },
         { href: '/camera-log', match: '/camera-log', label: 'Camera Log' },
-        { href: '/app-log', match: '/app-log', label: 'App Log' },
+        { href: '/application-log', match: '/application-log', label: 'Application Log' },
         { href: '/audit', match: '/audit', label: 'Audit Log' },
       ],
     },

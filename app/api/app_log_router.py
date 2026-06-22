@@ -57,7 +57,7 @@ def _parse_entry(raw: dict) -> dict:
     }
 
 
-@router.get('/api/app-log')
+@router.get('/api/application-log')
 def get_app_log(
     request: Request,
     lines: int = Query(200, ge=1, le=1000),
@@ -85,7 +85,7 @@ def get_app_log(
         return {'entries': [], 'error': 'journalctl timed out'}
 
 
-@router.get('/api/app-log/stream')
+@router.get('/api/application-log/stream')
 async def stream_app_log(request: Request):
     require_admin(request)
 

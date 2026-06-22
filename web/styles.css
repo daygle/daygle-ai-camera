@@ -3398,8 +3398,8 @@ a.activity-item-action {
   border-radius: inherit;
 }
 
-/* ─── App log page ────────────────────────────────────────────────────────── */
-.app-log-output-wrap {
+/* ─── Application log page ───────────────────────────────────────────────── */
+.application-log-output-wrap {
   max-height: 60vh;
   min-height: 200px;
   overflow-y: auto;
@@ -3409,19 +3409,19 @@ a.activity-item-action {
   border-radius: 8px;
   margin-bottom: 1rem;
 }
-#appLogEmpty {
+#applicationLogEmpty {
   padding: 2rem 0;
   text-align: center;
   color: var(--muted);
 }
-#appLogTable td:last-child {
+#applicationLogTable td:last-child {
   font-family: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
   font-size: 0.8rem;
   word-break: break-all;
   white-space: pre-wrap;
   max-width: 640px;
 }
-.app-log-toolbar {
+.application-log-toolbar {
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -3429,18 +3429,18 @@ a.activity-item-action {
   margin-bottom: 0.75rem;
   font-size: 0.85rem;
 }
-.app-log-live-btn {
+.application-log-live-btn {
   padding: 4px 14px;
   font-size: 0.8rem;
   border-radius: 999px;
   min-width: 76px;
 }
-.app-log-live-btn.app-log-live-active {
+.application-log-live-btn.application-log-live-active {
   background: rgba(73, 230, 163, 0.15);
   color: var(--success);
   border-color: rgba(73, 230, 163, 0.4);
 }
-.app-log-autoscroll-label {
+.application-log-autoscroll-label {
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -3448,27 +3448,27 @@ a.activity-item-action {
   color: var(--muted);
   user-select: none;
 }
-.app-log-autoscroll-label input[type="checkbox"] {
+.application-log-autoscroll-label input[type="checkbox"] {
   width: auto;
   margin: 0;
 }
-.app-log-status {
+.application-log-status {
   color: var(--muted);
   font-size: 0.8rem;
 }
-.app-log-count {
+.application-log-count {
   margin-left: auto;
   color: var(--muted);
   font-size: 0.8rem;
 }
 @media (max-width: 700px) {
-  #appLogTable {
+  #applicationLogTable {
     display: block;
     font-size: 0.84rem;
   }
-  #appLogTable thead { display: none; }
-  #appLogTable tbody { display: grid; gap: 10px; }
-  #appLogTable tr {
+  #applicationLogTable thead { display: none; }
+  #applicationLogTable tbody { display: grid; gap: 10px; }
+  #applicationLogTable tr {
     display: grid;
     gap: 0;
     padding: 10px 12px;
@@ -3476,7 +3476,7 @@ a.activity-item-action {
     border-radius: 12px;
     background: rgba(255, 255, 255, 0.035);
   }
-  #appLogTable td {
+  #applicationLogTable td {
     display: grid;
     grid-template-columns: minmax(74px, 34%) minmax(0, 1fr);
     gap: 10px;
@@ -3487,11 +3487,11 @@ a.activity-item-action {
     word-break: normal;
     overflow-wrap: anywhere;
   }
-  #appLogTable td:last-child {
+  #applicationLogTable td:last-child {
     border-bottom: 0;
     max-width: none;
   }
-  #appLogTable td::before {
+  #applicationLogTable td::before {
     content: attr(data-label);
     color: var(--muted);
     font-size: 11px;
@@ -3500,7 +3500,7 @@ a.activity-item-action {
     text-transform: uppercase;
     letter-spacing: .05em;
   }
-  #appLogTable .status-badge { width: fit-content; max-width: 100%; }
-  .app-log-output-wrap { max-height: none; }
-  .app-log-count { margin-left: 0; }
+  #applicationLogTable .status-badge { width: fit-content; max-width: 100%; }
+  .application-log-output-wrap { max-height: none; }
+  .application-log-count { margin-left: 0; }
 }
