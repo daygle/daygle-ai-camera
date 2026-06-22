@@ -2776,10 +2776,21 @@ a.activity-item-action {
 }
 
 /* ─── Zones page: section dividers ─────────────────────────────────────── */
+/* Pull the divider line off the zone list above (margin-top) and away from
+   the section header below (padding-top) so "Object Detection Rules" reads
+   as a distinct section rather than crashing into "Zone Areas". */
 .camera-object-detection-settings {
-  margin-top: 0;
+  margin-top: 1.5rem;
   padding-top: 1.5rem;
   border-top: 1px solid var(--border);
+}
+/* The wrapper already provides the section's top divider, so suppress the
+   default border-bottom on the inner section header that would otherwise
+   draw a second line right below the icon + H2. Keep a small padding-bottom
+   so the subtitle doesn't pin straight against the rule editor below. */
+.camera-object-detection-settings > .settings-section-header {
+  border-bottom: 0;
+  padding-bottom: 0.5rem;
 }
 
 /* ─── Rule tables ───────────────────────────────────────────────────────── */
