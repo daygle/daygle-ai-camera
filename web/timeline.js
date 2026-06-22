@@ -394,23 +394,6 @@ function recordingTypeLabel(recording) {
   return triggerLabel || triggerType;
 }
 
-/**
- * Returns a compact timeline label for multi-object recordings:
- * shows the primary label with a count of extra objects, e.g. "Person +2".
- * Falls back to recordingTypeLabel() for single-object or generic triggers.
- */
-function timelineSegmentLabel(recording) {
-  const primaryLabel = recordingTypeLabel(recording);
-  const detectionLabels = recordingDetectionLabels(recording);
-  const extraCount = detectionLabels.filter(
-    (label) => !GENERIC_TIMELINE_LABELS.has(label)
-  ).length - 1;
-  if (extraCount > 0) {
-    return `${primaryLabel} +${extraCount}`;
-  }
-  return primaryLabel;
-}
-
 function recordingColorKey(recording) {
   if (isSoundRecording(recording)) return '__sound__';
   // Motion-only clips get a single reserved color key so every segment,
@@ -761,19 +744,15 @@ function renderTimeline(payload) {
     const width = Math.max((duration / totalSeconds) * 100, 0.1);
     const color = colorForKey(recordingColorKey(recording));
     const activeClass = Number(recording.id) === Number(state.activeRecordingId) ? ' active' : '';
-    const compactClass = width < 0.7 ? ' compact' : '';
     const tinyClass = width < 0.25 ? ' tiny' : '';
     return `
       <button
-        class="timeline-segment${activeClass}${compactClass}${tinyClass}"
+        class="timeline-segment${activeClass}${tinyClass}"
         type="button"
         data-recording-id="${escapeHtml(String(recording.id))}"
-        title="${escapeHtml(`${recordingTriggerSummary(recording)} · ${formatClock(origStart)} · ${formatDuration(recording.duration_seconds)}${recordingConfidenceText(recording)}`)}"
+        title="${escapeHtml(`${recordingTriggerSummary(recording)} · ${formatClock(origStart)} · ${formatDuration(recording.duration_seconds)}`)}"
         style="left:${left}%;width:${width}%;top:${recording.rowIndex * TIMELINE_ROW_HEIGHT + 8}px;--segment-color:${color};"
-      >
-        <span class="timeline-segment-label" hidden>${escapeHtml(timelineSegmentLabel(recording))}</span>
-        <span class="timeline-segment-time" hidden>${escapeHtml(formatClock(origStart))}</span>
-      </button>
+      ></button>
     `;
   }).join('');
 }
@@ -786,7 +765,6 @@ function renderRecordingList(recordings) {
   els.timelineRecordings.innerHTML = recordings.map((recording) => {
     const activeClass = Number(recording.id) === Number(state.activeRecordingId) ? ' active' : '';
     const color = colorForKey(recordingColorKey(recording));
-    const label = titleCase(timelineSegmentLabel(recording));
     const start = formatClock(recording.timeline_start_seconds || 0);
     const end = formatClock(recording.timeline_end_seconds || 0);
     const duration = formatDuration(recording.duration_seconds);
@@ -849,10 +827,6 @@ function renderRecordingList(recordings) {
       </button>
     `;
   }).join('');
-}
-
-function recordingConfidenceText() {
-  return '';
 }
 
 function renderRecordingDetails(recording) {
