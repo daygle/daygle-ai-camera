@@ -2860,7 +2860,7 @@ a.activity-item-action {
   display: flex;
   align-items: center;
   gap: .6rem;
-  margin-bottom: .5rem;
+  margin-bottom: 1.125rem;
 }
 .rule-select-wrapper select,
 .rule-add-select {
