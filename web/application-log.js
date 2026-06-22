@@ -20,11 +20,11 @@ let activeSearch = '';
 // Priority order for level filtering (highest severity first)
 const LEVEL_ORDER = ['EMERG', 'ALERT', 'CRIT', 'ERROR', 'WARNING', 'NOTICE', 'INFO', 'DEBUG'];
 const LEVEL_SETS = {
-  error:   new Set(['EMERG', 'ALERT', 'CRIT', 'ERROR']),
-  warning: new Set(['EMERG', 'ALERT', 'CRIT', 'ERROR', 'WARNING']),
-  notice:  new Set(['EMERG', 'ALERT', 'CRIT', 'ERROR', 'WARNING', 'NOTICE']),
-  info:    new Set(['EMERG', 'ALERT', 'CRIT', 'ERROR', 'WARNING', 'NOTICE', 'INFO']),
-  debug:   new Set(LEVEL_ORDER),
+  error:   ['EMERG', 'ALERT', 'CRIT', 'ERROR'],
+  warning: ['EMERG', 'ALERT', 'CRIT', 'ERROR', 'WARNING'],
+  notice:  ['EMERG', 'ALERT', 'CRIT', 'ERROR', 'WARNING', 'NOTICE'],
+  info:    ['EMERG', 'ALERT', 'CRIT', 'ERROR', 'WARNING', 'NOTICE', 'INFO'],
+  debug:   LEVEL_ORDER,
 };
 
 function levelBadgeClass(level) {
