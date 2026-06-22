@@ -655,10 +655,20 @@ function renderLegend(recordings) {
   const unique = [];
   const seen = new Set();
   recordings.forEach((recording) => {
-    const key = recordingColorKey(recording);
-    if (seen.has(key)) return;
-    seen.add(key);
-    unique.push({ key, label: recordingTypeLabel(recording), color: colorForKey(key) });
+    const colorKey = recordingColorKey(recording);
+    const isSound = isSoundRecording(recording);
+    const isMotion = colorKey === '__motion__';
+    const label = recordingTypeLabel(recording);
+    // All sound recordings share the '__sound__' colour key, so deduping on
+    // that key alone would collapse every distinct sound class (Dog Bark,
+    // Car Alarm, Doorbell, ...) into a single legend chip labelled by
+    // whichever sound happened to come first. Dedupe sounds by their class
+    // label instead so each sound class earns its own pill - matching how
+    // object recordings already get one chip per label.
+    const dedupKey = isSound ? `__sound__:${String(label).toLowerCase()}` : colorKey;
+    if (seen.has(dedupKey)) return;
+    seen.add(dedupKey);
+    unique.push({ isSound, isMotion, label, color: colorForKey(colorKey) });
   });
   if (!unique.length) {
     els.timelineLegend.innerHTML = '<p class="muted">No recordings match this filter for the selected day.</p>';
@@ -668,8 +678,8 @@ function renderLegend(recordings) {
     // Reserve the dedicated icons so the legend reads the same as the
     // row + pill treatments on the other surfaces: speaker for sound,
     // running man for motion, eye for everything else.
-    const isSound = item.key === '__sound__';
-    const isMotion = item.key === '__motion__';
+    const isSound = item.isSound;
+    const isMotion = item.isMotion;
     const labelText = isMotion ? 'Motion' : titleCase(item.label);
     const icon = isSound ? '🔊' : isMotion ? DETECTION_MOTION_ICON : DETECTION_EYE_ICON;
     return `
