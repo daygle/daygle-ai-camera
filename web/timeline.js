@@ -304,14 +304,6 @@ function formatDuration(seconds) {
   return `${remainder}s`;
 }
 
-function recordingTriggerType(recording) {
-  return String(recording.trigger_type || 'motion').trim().toLowerCase() || 'motion';
-}
-
-function recordingTriggerLabel(recording) {
-  return String(recording.trigger_label || '').trim().toLowerCase() || null;
-}
-
 function recordingDetectionLabels(recording) {
   const labels = new Set((recording.detections || [])
     .filter((d) => {
@@ -327,48 +319,6 @@ function recordingDetectionLabels(recording) {
   const uniqueLabels = Array.from(labels);
   const specificLabels = uniqueLabels.filter((label) => !GENERIC_TIMELINE_LABELS.has(label));
   return specificLabels.length ? specificLabels : uniqueLabels;
-}
-
-/**
- * Returns an array of { label, confidence } sorted by confidence descending,
- * filtered to non-generic labels that pass the configuredLabels threshold.
- */
-function recordingDetectionSummary(recording) {
-  if (isSoundRecording(recording)) {
-    const meta = recording.event?.metadata || {};
-    const label = (meta.class_label || meta.label || recording.trigger_label || 'sound').toLowerCase();
-    const confidence = Number(meta.confidence || 0);
-    return [{ label, confidence }];
-  }
-  // Build best-confidence map from the saved event detections and, when
-  // present, the clip's live detection track. Multi-object recordings can pick
-  // up additional labels while the clip is extended; those labels are persisted
-  // in recording.labels, but their confidence may only exist in the track.
-  const best = new Map();
-  const rememberBest = (detection) => {
-    const label = String(detection?.label || '').trim().toLowerCase();
-    if (!label) return;
-    const rawConfidence = Number(detection?.confidence);
-    if (!Number.isFinite(rawConfidence)) return;
-    if (!best.has(label) || rawConfidence > best.get(label)) best.set(label, rawConfidence);
-  };
-  for (const d of (recording.detections || [])) rememberBest(d);
-  for (const sample of (recording.track || [])) {
-    for (const d of (sample?.detections || [])) rememberBest(d);
-  }
-  // Persisted per-label confidence (recording_labels.confidence) covers secondary
-  // objects that only appeared after the trigger, whose confidence is otherwise
-  // absent from the event detections the timeline list endpoint loads.
-  for (const [label, confidence] of Object.entries(recording.label_confidences || {})) {
-    rememberBest({ label, confidence });
-  }
-  // Use recording.labels as the authoritative label list when available.
-  const authLabels = Array.isArray(recording.labels) && recording.labels.length
-    ? recording.labels.map((l) => String(l || '').trim().toLowerCase()).filter((l) => l && !GENERIC_TIMELINE_LABELS.has(l))
-    : Array.from(best.keys()).filter((l) => !GENERIC_TIMELINE_LABELS.has(l));
-  return authLabels
-    .map((label) => ({ label, confidence: best.has(label) ? best.get(label) : null }))
-    .sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1));
 }
 
 function recordingTypeLabel(recording) {
@@ -457,13 +407,12 @@ function matchesRecordingFilter(recording, filterValue) {
   return recordingFilterTokens(recording).has(normalized);
 }
 
+// Kept page-local (not hoisted to utils.js): app.js and yamnet-tflite.js
+// define their own cameraLabel() with different signatures, and a shared
+// global would collide on the dashboard / yamnet pages.
 function cameraLabel(recording) {
   const metadata = recording?.event?.metadata || {};
   return metadata.camera_name || recording.camera_id || recording.source || 'unknown';
-}
-
-function isSoundRecording(recording) {
-  return recording?.event?.metadata?.source === 'sound-detection';
 }
 
 function colorForKey(key) {
@@ -476,11 +425,6 @@ function colorForKey(key) {
     hash |= 0;
   }
   return SEGMENT_COLORS[Math.abs(hash) % SEGMENT_COLORS.length];
-}
-
-function recordingZoneNames(recording) {
-  if (isSoundRecording(recording)) return [];
-  return [...new Set((recording.detections || []).map((d) => d.zone_name).filter(Boolean))];
 }
 
 function timelineParams(overrides = {}) {

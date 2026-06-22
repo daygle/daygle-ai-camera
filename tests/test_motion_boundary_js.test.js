@@ -53,7 +53,69 @@ const {
   isMotionOnlyAlertItem,
   motionConfidenceFor,
   GENERIC_TRIGGER_LABELS,
+  isSoundRecording,
+  recordingDetectionSummary,
+  recordingZoneNames,
 } = ui;
+
+// ─── Shared recording readers (recordings list + timeline) ─────────────────
+// recordingDetectionSummary() and friends are hoisted into utils.js so the
+// recordings list and the timeline page share one copy and cannot drift
+// (the Dog Bark legend bug was a drift between the two surfaces).
+//
+// The helpers build their return values inside the vm realm, whose Array /
+// Object prototypes differ from the test realm - so deepStrictEqual's
+// reference-equal prototype check fails on otherwise-identical structures.
+// Round-trip through JSON to re-home the values in the test realm first.
+const plain = (value) => JSON.parse(JSON.stringify(value));
+
+test('isSoundRecording keys off event.metadata.source', () => {
+  assert.equal(isSoundRecording({ event: { metadata: { source: 'sound-detection' } } }), true);
+  assert.equal(isSoundRecording({ event: { metadata: { source: 'live-stream' } } }), false);
+  assert.equal(isSoundRecording({}), false);
+  assert.equal(isSoundRecording(null), false);
+});
+
+test('recordingDetectionSummary: sound recording collapses to its class label', () => {
+  const summary = recordingDetectionSummary({
+    event: { metadata: { source: 'sound-detection', class_label: 'Dog Bark', confidence: 0.82 } },
+  });
+  assert.deepEqual(plain(summary), [{ label: 'dog bark', confidence: 0.82 }]);
+});
+
+test('recordingDetectionSummary: objects dedupe per label, keeping best confidence', () => {
+  // Two people + two dogs -> two pills (Person, Dog), not four; each carries
+  // the highest-seen confidence for that class, sorted descending.
+  const summary = recordingDetectionSummary({
+    labels: ['person', 'dog'],
+    detections: [
+      { label: 'person', confidence: 0.71 },
+      { label: 'person', confidence: 0.93 },
+      { label: 'dog', confidence: 0.66 },
+      { label: 'dog', confidence: 0.80 },
+    ],
+  });
+  assert.deepEqual(plain(summary), [
+    { label: 'person', confidence: 0.93 },
+    { label: 'dog', confidence: 0.80 },
+  ]);
+});
+
+test('recordingDetectionSummary: generic trigger labels are filtered out', () => {
+  const summary = recordingDetectionSummary({
+    labels: ['motion', 'person'],
+    detections: [{ label: 'person', confidence: 0.5 }],
+  });
+  assert.deepEqual(plain(summary), [{ label: 'person', confidence: 0.5 }]);
+});
+
+test('recordingZoneNames: empty for sounds, deduped for objects', () => {
+  assert.deepEqual(plain(recordingZoneNames({ event: { metadata: { source: 'sound-detection' } } })), []);
+  assert.deepEqual(
+    plain(recordingZoneNames({ detections: [{ zone_name: 'Drive' }, { zone_name: 'Drive' }, { zone_name: 'Porch' }, {}] })),
+    ['Drive', 'Porch'],
+  );
+});
 
 // ─── GENERIC_TRIGGER_LABELS sanity ─────────────────────────────────────────
 
