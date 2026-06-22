@@ -178,9 +178,12 @@ function updateSelectionStyles() {
 
 function objectRuleOptions(selectedLabel) {
   const labels = [...new Set([...availableLabels, selectedLabel].filter((l) => Boolean(l) && l !== 'motion'))];
-  const coco = labels.map((label) => `<option value="${escapeHtml(label)}" ${label === selectedLabel ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
+  // Display labels in title case for readability; the value attribute stays
+  // raw lowercase because rule.label is the canonical lookup key used by
+  // defaultObjectRule, normalizeObjectRules, and backend filters.
+  const coco = labels.map((label) => `<option value="${escapeHtml(label)}" ${label === selectedLabel ? 'selected' : ''}>${escapeHtml(titleCase(label))}</option>`).join('');
   const motionSelected = selectedLabel === 'motion';
-  return `<option value="">Add Object...</option><option value="motion" ${motionSelected ? 'selected' : ''}>motion</option>${coco}`;
+  return `<option value="">Add Object...</option><option value="motion" ${motionSelected ? 'selected' : ''}>Motion</option>${coco}`;
 }
 
 function renderObjectRules(zone, zoneIndex) {
