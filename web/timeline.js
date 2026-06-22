@@ -33,12 +33,12 @@ const els = {
 
 // ── Filter state & pickers ────────────────────────────────────────────────
 // The From/To mounts in the Timeline Controls form render through the shared
-// `renderTimeSelect` helper (web/utils.js) so the pickers follow the user's
-// Profile > Time Format choice (12h + AM/PM vs. 24h), matching /recordings,
-// /sounds and /zones. An inline writer (writeTimeToTimelinePicker, see below)
-// handles the snapshot / URL deep-link writes; a follow-up refactor will
-// lift it into web/utils.js as setTimeSelectValue so /recordings and
-// /timeline can share it.
+// `renderTimeSelect` / `setTimeSelectValue` pair (web/utils.js) so the time
+// pickers follow the user's Profile > Time Format choice (12h + AM/PM vs.
+// 24h), matching /recordings, /sounds and /zones. Re-rendered on init, on
+// the "Now" shortcut, on URL deep-link, and whenever the cross-tab prefs
+// hook fires so a profile change instantly swaps the picker style without
+// a manual refresh.
 const TIMELINE_FILTER_TIME_FROM_DEFAULT = '00:00';
 // Minute resolution is 5 minutes (shared with /recordings, /sounds and
 // /zones), so 23:55 is the latest valid value that still pins to the end
@@ -59,35 +59,6 @@ function renderTimelineTimeSelects() {
 }
 
 renderTimelineTimeSelects();
-
-// Inline writer used by the Now button + URL deep-link. Mirrors the 12h/24h
-// translation done by renderTimeSelect reading selH/selM, snaps minutes to
-// the nearest 5-minute step, and clamps to 23:55 - same shape as the reader
-// in timeSelectValue so writes land on values the picker can represent
-// (e.g. "14:23" -> "14:25"). A follow-up commit will hoist this into
-// web/utils.js as setTimeSelectValue.
-function writeTimeToTimelinePicker(wrap, hhmm) {
-  if (!wrap) return;
-  const [hStr, mStr] = String(hhmm || '').split(':');
-  const h = parseInt(hStr, 10);
-  if (!Number.isFinite(h)) return;
-  const totalMinutes = h * 60 + (parseInt(mStr, 10) || 0);
-  const clampedTotal = Math.max(0, Math.min(1439, totalMinutes));
-  const snappedMinutes = Math.min(1435, Math.round(clampedTotal / 5) * 5);
-  const snappedHour = Math.floor(snappedMinutes / 60);
-  const snappedMinute = snappedMinutes % 60;
-  const minuteEl = wrap.querySelector('.time-select-minute');
-  const hourEl = wrap.querySelector('.time-select-hour');
-  const ampmEl = wrap.querySelector('.time-select-ampm');
-  if (minuteEl) minuteEl.value = String(snappedMinute).padStart(2, '0');
-  if (ampmEl) {
-    const h12 = snappedHour % 12 || 12;
-    if (hourEl) hourEl.value = String(h12);
-    ampmEl.value = snappedHour >= 12 ? 'pm' : 'am';
-  } else if (hourEl) {
-    hourEl.value = String(snappedHour).padStart(2, '0');
-  }
-}
 
 // CSRF token and current user live on window.daygleAuth (loaded by
 // web/utils.js) and are populated by each page's loadAuth() via
@@ -1096,17 +1067,17 @@ els.timelineLoadBtn.addEventListener('click', () => {
 });
 
 // "Now" shortcut: set Day=today, From=00:00, To=current local time, then reload.
-// writeTimeToTimelinePicker (inline above) snaps minutes to the nearest
-// 5-minute step on assignment, so passing the live "now" clock value (e.g.
-// 14:23) still lands on a value the picker can represent (14:25).
+// setTimeSelectValue (utils.js) snaps minutes to the nearest 5-min step
+// on assignment, so passing the live "now" clock value (e.g. 14:23) still
+// lands on a value the picker can represent (14:25).
 els.timelineNowBtn?.addEventListener('click', () => {
   const now = new Date();
   const today = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   els.timelineDate.value = today;
-  writeTimeToTimelinePicker(els.fromTime, '00:00');
+  setTimeSelectValue(els.fromTime, '00:00');
   const hh = String(now.getHours()).padStart(2, '0');
   const mm = String(now.getMinutes()).padStart(2, '0');
-  writeTimeToTimelinePicker(els.toTime, `${hh}:${mm}`);
+  setTimeSelectValue(els.toTime, `${hh}:${mm}`);
   loadTimeline({ preserveSelection: false }).catch((error) => {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
@@ -1265,8 +1236,8 @@ loadAuth().then(async () => {
   els.timelineDate.value = queryDay || new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   if (queryCameraId) els.cameraSelect.innerHTML = `<option value="${escapeHtml(queryCameraId)}" selected>${escapeHtml(queryCameraId)}</option>`;
   if (queryFilter) els.filterSelect.innerHTML = `<option value="${escapeHtml(queryFilter)}" selected>${escapeHtml(titleCase(queryFilter))}</option>`;
-  if (queryFromTime) writeTimeToTimelinePicker(els.fromTime, queryFromTime);
-  if (queryToTime) writeTimeToTimelinePicker(els.toTime, queryToTime);
+  if (queryFromTime) setTimeSelectValue(els.fromTime, queryFromTime);
+  if (queryToTime) setTimeSelectValue(els.toTime, queryToTime);
   setTimelineStatusChip({ kind: 'idle', label: 'Loading' });
   await loadConfiguredLabels();
   await loadTimeline({ preserveSelection: true });

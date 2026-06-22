@@ -312,6 +312,39 @@ function timeSelectValue(wrap) {
   return `${hRaw}:${m}`;
 }
 
+// Writes an HH:MM value into a renderTimeSelect picker. Snaps minutes to
+// the nearest 5-minute step and clamps the result to 23:55 so deep-link
+// / clock values that can't be represented (e.g. "14:23" -> "14:25",
+// "23:59" -> "23:55") still land on a choice the picker can display.
+// Mirrors the 12h↔24h conventions used by timeSelectValue and
+// renderTimeSelect: hour 0 (midnight) and hour 12 (noon) both surface
+// as "12" with the matching AM/PM, and the 24h writer pads to two
+// digits ("00"–"23"). Programmatic writes do NOT fire a 'change' event
+// on <select>, so callers that need the surrounding UI to react
+// (loadRecordings, loadTimeline) invoke their own handler.
+function setTimeSelectValue(wrap, hhmm) {
+  if (!wrap) return;
+  const [hStr, mStr] = String(hhmm || '').split(':');
+  const h = parseInt(hStr, 10);
+  if (!Number.isFinite(h)) return;
+  const totalMinutes = h * 60 + (parseInt(mStr, 10) || 0);
+  const clampedTotal = Math.max(0, Math.min(1439, totalMinutes));
+  const snappedMinutes = Math.min(1435, Math.round(clampedTotal / 5) * 5);
+  const snappedHour = Math.floor(snappedMinutes / 60);
+  const snappedMinute = snappedMinutes % 60;
+  const minuteEl = wrap.querySelector('.time-select-minute');
+  const hourEl = wrap.querySelector('.time-select-hour');
+  const ampmEl = wrap.querySelector('.time-select-ampm');
+  if (minuteEl) minuteEl.value = String(snappedMinute).padStart(2, '0');
+  if (ampmEl) {
+    const h12 = snappedHour % 12 || 12;
+    if (hourEl) hourEl.value = String(h12);
+    ampmEl.value = snappedHour >= 12 ? 'pm' : 'am';
+  } else if (hourEl) {
+    hourEl.value = String(snappedHour).padStart(2, '0');
+  }
+}
+
 function titleCase(value) {
   return String(value || '')
     .split(/[-_\s]+/)
@@ -489,7 +522,7 @@ window.daygleUi = {
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,
   isMotionOnlyRecording, motionConfidenceFor,
   isMotionOnlyEvent, isMotionOnlyEventItem, isMotionOnlyAlertGroup, isMotionOnlyAlertItem,
-  renderTimeSelect, timeSelectValue,
+  renderTimeSelect, timeSelectValue, setTimeSelectValue,
   // Logs (audit + camera-log share these)
   formatLogTime, LOG_PAGE_SIZE,
   // User-facing date/time renderers (honour daygleDatePrefs)
