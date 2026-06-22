@@ -203,7 +203,11 @@ function renderLiveMotionSingle() {
     return;
   }
   if (liveEls.motionEmpty) liveEls.motionEmpty.hidden = true;
-  const maxConf = Math.max(0.05, ...samples.map((s) => s.confidence));
+  // `maxConf` carries a 0.05 floor so a quiet window's small bars stay visible
+  // (normalisation only). `trueMax` is the real peak used for the subtitle so
+  // it never implies 5% of motion when the window was effectively still.
+  const trueMax = samples.reduce((acc, s) => Math.max(acc, s.confidence), 0);
+  const maxConf = Math.max(0.05, trueMax);
   const lastTs = samples[samples.length - 1].ts;
   const spanSeconds = samples.length ? Math.max(1, Math.round(lastTs - samples[0].ts)) : 0;
   const html = samples.map((s) => {
@@ -220,7 +224,7 @@ function renderLiveMotionSingle() {
   liveEls.motionStrip.innerHTML = html;
   if (liveEls.motionSubtitle) {
     const cam = selectedCamera?.name || selectedCamera?.id || 'this camera';
-    liveEls.motionSubtitle.textContent = `${cam} - ${samples.length} samples across ~${spanSeconds}s (max ${Math.round(maxConf * 100)}%).`;
+    liveEls.motionSubtitle.textContent = `${cam} - ${samples.length} samples across ~${spanSeconds}s (max ${Math.round(trueMax * 100)}%).`;
   }
 }
 
@@ -736,6 +740,9 @@ async function refreshDetectionStatus() {
       chips: [],
       message: 'Live AI: showing all cameras. Select one camera for detailed status.',
     });
+    // Keep the per-camera "Live motion" strips refreshing in all-cameras mode -
+    // the early return above otherwise skips the single-camera refresh below.
+    if (!window.daygleAuth?.redirecting) refreshMotionHistory();
     return;
   }
   if (!selectedCamera) return;
