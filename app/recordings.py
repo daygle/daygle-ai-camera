@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 import app.state as _state
-from app.config_facades import effective_live_config
 
 
 logger = logging.getLogger('daygle.ai')
@@ -993,6 +992,8 @@ class RecordingService:
         just_disabled_audio = False
 
         while not stop_event.is_set():
+            from app.config_facades import effective_live_config as _elc  # noqa: PLC0415
+            _ingest_fps = int(_elc().get('ingest_frame_fps', self.INGEST_FRAME_FPS))
             command = [
                 ffmpeg,
                 '-nostdin',
@@ -1035,7 +1036,7 @@ class RecordingService:
                 '-map',
                 '0:v:0',
                 '-vf',
-                f'fps={int(effective_live_config().get("ingest_frame_fps", self.INGEST_FRAME_FPS))}',
+                f'fps={_ingest_fps}',
                 # High JPEG quality (2 on mjpeg's 2-31 scale, lower=better) so the
                 # live snapshot matches the old OpenCV-encoded quality; ffmpeg's
                 # mjpeg default is noticeably more compressed.
