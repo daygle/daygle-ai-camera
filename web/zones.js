@@ -198,7 +198,7 @@ function renderObjectRules(zone, zoneIndex) {
     <thead><tr>
       <th>Object</th>
       <th class="cell-center">On</th>
-      <th class="cell-center">Rec</th>
+      <th class="cell-center">Record</th>
       <th class="cell-center">Email</th>
       <th class="cell-center">Push</th>
       <th>Confidence</th>
@@ -261,7 +261,7 @@ function renderZones() {
   liveEls.zoneOverlay.innerHTML = zones.map((zone, index) => (zone.enabled === false ? '' : renderZoneBox(zone, index))).join('');
   updateZonesStats();
   if (!zones.length) {
-    liveEls.zoneList.innerHTML = '<div class="empty">No monitoring areas yet. Click "Draw area", place corner dots on the footage, then click the first dot to close the area.</div>';
+    liveEls.zoneList.innerHTML = '<div class="empty">No zone areas yet. Click "Draw area", place corner dots on the footage, then click the first dot to close the area.</div>';
     renderObjectDetectionRules();
     return;
   }
@@ -284,7 +284,7 @@ function renderObjectDetectionRules() {
   if (!selectedCamera) { container.innerHTML = ''; return; }
   const zones = cameraDetection().zones;
   if (!zones.length) {
-    container.innerHTML = '<p class="muted empty-message">No monitoring areas configured. Draw an area above first.</p>';
+    container.innerHTML = '<p class="muted empty-message">No zone areas configured. Draw an area above first.</p>';
     return;
   }
   container.innerHTML = zones.map((zone, zoneIndex) => {
@@ -616,7 +616,7 @@ liveEls.addZoneBtn?.addEventListener('click', () => {
 
 liveEls.fullFrameZoneBtn?.addEventListener('click', () => {
   addFullFrameZone();
-  liveEls.status.textContent = 'Full-frame monitoring area added. Save areas to keep it.';
+  liveEls.status.textContent = 'Full-frame zone area added. Save areas to keep it.';
 });
 
 liveEls.saveZonesBtn?.addEventListener('click', async () => {
@@ -628,8 +628,8 @@ liveEls.saveZonesBtn?.addEventListener('click', async () => {
     const cameraId = selectedCamera.id;
     cameras = payload.cameras || [];
     setSelectedCamera(cameraId);
-    liveEls.status.textContent = 'Monitoring areas saved.';
-    window.showToast?.('Monitoring areas saved.');
+    liveEls.status.textContent = 'Zone areas saved.';
+    window.showToast?.('Zone areas saved.');
     await refreshDetectionStatus();
   } catch (error) {
     // Skip UI updates if api() triggered a 401 redirect

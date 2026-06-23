@@ -152,7 +152,7 @@ function renderRules() {
       <thead><tr>
         <th>Sound</th>
         <th class="cell-center">On</th>
-        <th class="cell-center">Rec</th>
+        <th class="cell-center">Record</th>
         <th class="cell-center">Email</th>
         <th class="cell-center">Push</th>
         <th>Threshold</th>
