@@ -101,6 +101,18 @@ def normalize_camera_settings(
     camera_settings['ptz'] = normalize_camera_ptz_settings(
         camera_settings.get('ptz'),
     )
+    # Migrate legacy nested motion override dict to flat motion_* keys so
+    # per-camera overrides use the same naming convention as global live settings.
+    _legacy_cam_motion = camera_settings.pop('motion', None)
+    if isinstance(_legacy_cam_motion, dict):
+        for _flat_key, _short_key in (
+            ('motion_pixel_threshold', 'pixel_threshold'),
+            ('motion_gate_fraction', 'gate_fraction'),
+            ('motion_scale_fraction', 'scale_fraction'),
+            ('motion_background_alpha', 'background_alpha'),
+        ):
+            if camera_settings.get(_flat_key) is None and _legacy_cam_motion.get(_short_key) is not None:
+                camera_settings[_flat_key] = _legacy_cam_motion[_short_key]
     return camera_settings
 
 

@@ -237,25 +237,29 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _gate_fraction = float(live_settings.get('motion_gate_fraction', _state._MOTION_GATE_FRACTION))
     _scale_fraction = float(live_settings.get('motion_scale_fraction', _state._MOTION_SCALE_FRACTION))
     _background_alpha = float(live_settings.get('motion_background_alpha', _state._MOTION_BACKGROUND_ALPHA))
-    _cam_motion = settings.get('motion') or {}
-    if _cam_motion.get('pixel_threshold') is not None:
+    _cam_motion_nest = settings.get('motion') if isinstance(settings.get('motion'), dict) else {}
+    _cam_pt = settings.get('motion_pixel_threshold') if settings.get('motion_pixel_threshold') is not None else _cam_motion_nest.get('pixel_threshold')
+    if _cam_pt is not None:
         try:
-            _pixel_threshold = float(_cam_motion['pixel_threshold'])
+            _pixel_threshold = float(_cam_pt)
         except (TypeError, ValueError):
             pass
-    if _cam_motion.get('gate_fraction') is not None:
+    _cam_gf = settings.get('motion_gate_fraction') if settings.get('motion_gate_fraction') is not None else _cam_motion_nest.get('gate_fraction')
+    if _cam_gf is not None:
         try:
-            _gate_fraction = float(_cam_motion['gate_fraction'])
+            _gate_fraction = float(_cam_gf)
         except (TypeError, ValueError):
             pass
-    if _cam_motion.get('scale_fraction') is not None:
+    _cam_sf = settings.get('motion_scale_fraction') if settings.get('motion_scale_fraction') is not None else _cam_motion_nest.get('scale_fraction')
+    if _cam_sf is not None:
         try:
-            _scale_fraction = float(_cam_motion['scale_fraction'])
+            _scale_fraction = float(_cam_sf)
         except (TypeError, ValueError):
             pass
-    if _cam_motion.get('background_alpha') is not None:
+    _cam_ba = settings.get('motion_background_alpha') if settings.get('motion_background_alpha') is not None else _cam_motion_nest.get('background_alpha')
+    if _cam_ba is not None:
         try:
-            _background_alpha = float(_cam_motion['background_alpha'])
+            _background_alpha = float(_cam_ba)
         except (TypeError, ValueError):
             pass
     periodic_scan_interval = float(live_settings.get('periodic_scan_interval_seconds', 0))
