@@ -273,11 +273,10 @@ function fillModal(camera, index) {
   document.getElementById('editStaleFrameGrabs').value = staleVal != null ? staleVal : '';
   document.getElementById('editContinuous').value = String(camera.recording?.continuous === true);
 
-  const motion = camera.motion || {};
-  document.getElementById('editMotionPixelThreshold').value = motion.pixel_threshold != null ? motion.pixel_threshold : '';
-  document.getElementById('editMotionGateFraction').value = motion.gate_fraction != null ? motion.gate_fraction : '';
-  document.getElementById('editMotionScaleFraction').value = motion.scale_fraction != null ? motion.scale_fraction : '';
-  document.getElementById('editMotionBackgroundAlpha').value = motion.background_alpha != null ? motion.background_alpha : '';
+  document.getElementById('editMotionPixelThreshold').value = camera.motion_pixel_threshold != null ? camera.motion_pixel_threshold : '';
+  document.getElementById('editMotionGateFraction').value = camera.motion_gate_fraction != null ? camera.motion_gate_fraction : '';
+  document.getElementById('editMotionScaleFraction').value = camera.motion_scale_fraction != null ? camera.motion_scale_fraction : '';
+  document.getElementById('editMotionBackgroundAlpha').value = camera.motion_background_alpha != null ? camera.motion_background_alpha : '';
 
   const ptz = camera.ptz || {};
   document.getElementById('editPtzEnabled').value = String(ptz.enabled === true);
@@ -332,18 +331,10 @@ function collectModalData() {
       speed: parseInt(document.getElementById('editPtzSpeed').value || '5', 10),
     },
     detection: {},
-    motion: (function () {
-      const m = {};
-      const pt = document.getElementById('editMotionPixelThreshold').value.trim();
-      const gf = document.getElementById('editMotionGateFraction').value.trim();
-      const sf = document.getElementById('editMotionScaleFraction').value.trim();
-      const ba = document.getElementById('editMotionBackgroundAlpha').value.trim();
-      if (pt !== '') m.pixel_threshold = Number.parseInt(pt, 10);
-      if (gf !== '') m.gate_fraction = Number(gf);
-      if (sf !== '') m.scale_fraction = Number(sf);
-      if (ba !== '') m.background_alpha = Number(ba);
-      return m;
-    }()),
+    motion_pixel_threshold: (() => { const v = document.getElementById('editMotionPixelThreshold').value.trim(); return v !== '' ? Number.parseInt(v, 10) : null; })(),
+    motion_gate_fraction: (() => { const v = document.getElementById('editMotionGateFraction').value.trim(); return v !== '' ? Number(v) : null; })(),
+    motion_scale_fraction: (() => { const v = document.getElementById('editMotionScaleFraction').value.trim(); return v !== '' ? Number(v) : null; })(),
+    motion_background_alpha: (() => { const v = document.getElementById('editMotionBackgroundAlpha').value.trim(); return v !== '' ? Number(v) : null; })(),
   };
 }
 

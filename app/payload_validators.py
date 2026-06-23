@@ -232,21 +232,60 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     existing_ptz = current.get('ptz') if isinstance(current.get('ptz'), dict) else {}
     payload_ptz = payload.get('ptz') if isinstance(payload.get('ptz'), dict) else {}
     updated['ptz'] = normalize_camera_ptz_settings({**existing_ptz, **payload_ptz})
-    if 'motion' in payload:
-        raw_motion = payload.get('motion') if isinstance(payload.get('motion'), dict) else {}
-        cam_motion: dict[str, Any] = {}
-        if raw_motion.get('pixel_threshold') is not None:
-            cam_motion['pixel_threshold'] = _int_field({'pixel_threshold': raw_motion['pixel_threshold']}, 'pixel_threshold', 30, 1, 255)
-        for _key in ('gate_fraction', 'scale_fraction', 'background_alpha'):
-            if raw_motion.get(_key) is not None:
+    # Per-camera motion overrides. Accept flat motion_* keys (current UI format)
+    # or the legacy nested motion dict (old format). Always persist flat motion_*
+    # keys so the naming convention matches global live settings.
+    #
+    # Resolution order for each key:
+    #   1. Flat key present in payload with a non-None value → use it
+    #   2. Flat key present in payload as None (explicit clear) → omit the key
+    #   3. Legacy nested motion dict in payload with a non-None value → use it
+    #   4. Existing flat key in stored config → carry it forward (preserve)
+    #   5. Existing nested motion dict in stored config → carry it forward
+    _payload_motion_nest = payload.get('motion') if isinstance(payload.get('motion'), dict) else {}
+    _cur_motion_nest = current.get('motion') if isinstance(current.get('motion'), dict) else {}
+    _flat_keys = ('motion_pixel_threshold', 'motion_gate_fraction', 'motion_scale_fraction', 'motion_background_alpha')
+    _flat_in_payload = any(k in payload for k in _flat_keys) or bool(_payload_motion_nest)
+
+    for _flat_key, _short_key in (
+        ('motion_pixel_threshold', 'pixel_threshold'),
+        ('motion_gate_fraction', 'gate_fraction'),
+        ('motion_scale_fraction', 'scale_fraction'),
+        ('motion_background_alpha', 'background_alpha'),
+    ):
+        if _flat_key in payload:
+            # Explicit send from UI: None means "clear override", value means "set"
+            _v = payload[_flat_key]
+            if _v is None:
+                continue  # cleared — omit from updated
+            try:
+                if _flat_key == 'motion_pixel_threshold':
+                    updated[_flat_key] = max(1, min(255, int(_v)))
+                else:
+                    updated[_flat_key] = round(float(_v), 6)
+            except (TypeError, ValueError):
+                pass
+        elif _payload_motion_nest.get(_short_key) is not None:
+            # Legacy nested dict in payload
+            _v = _payload_motion_nest[_short_key]
+            try:
+                if _flat_key == 'motion_pixel_threshold':
+                    updated[_flat_key] = max(1, min(255, int(_v)))
+                else:
+                    updated[_flat_key] = round(float(_v), 6)
+            except (TypeError, ValueError):
+                pass
+        elif not _flat_in_payload:
+            # Payload has no motion keys at all — preserve stored override
+            _cur_v = current.get(_flat_key) if current.get(_flat_key) is not None else _cur_motion_nest.get(_short_key)
+            if _cur_v is not None:
                 try:
-                    cam_motion[_key] = round(float(raw_motion[_key]), 6)
+                    if _flat_key == 'motion_pixel_threshold':
+                        updated[_flat_key] = max(1, min(255, int(_cur_v)))
+                    else:
+                        updated[_flat_key] = round(float(_cur_v), 6)
                 except (TypeError, ValueError):
                     pass
-        if cam_motion:
-            updated['motion'] = cam_motion
-    elif current.get('motion'):
-        updated['motion'] = current['motion']
     return updated
 
 
