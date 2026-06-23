@@ -72,8 +72,6 @@ def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: 
     elapsed = time.time() - float(previous.get('timestamp', 0))
     if elapsed > debounce_seconds:
         return False
-    if labels <= {'motion'}:
-        return True
     previous_labels = {str(label).strip().lower() for label in previous.get('labels', []) if str(label).strip()}
     return bool(previous_labels & labels)
 
