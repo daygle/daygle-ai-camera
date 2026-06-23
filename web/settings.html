@@ -103,6 +103,21 @@
           <input name="motion_background_alpha" type="number" min="0.001" max="0.5" step="0.001" placeholder="0.05" />
           <span class="field-help">How fast the background adapts to scene changes when no motion is detected (0.05 = 5% per frame). Higher = adapts faster. Default: 0.05</span>
         </label>
+        <label>
+          <span>Motion Frame Width</span>
+          <input name="motion_frame_width" type="number" min="40" max="640" step="1" placeholder="160" />
+          <span class="field-help">Width in pixels of the thumbnail used for motion detection (default 160). Larger = finer zone precision but more CPU. Changing this resets all camera background models. Default: 160</span>
+        </label>
+        <label>
+          <span>Motion Frame Height</span>
+          <input name="motion_frame_height" type="number" min="30" max="480" step="1" placeholder="120" />
+          <span class="field-help">Height in pixels of the thumbnail used for motion detection (default 120). Larger = finer zone precision but more CPU. Changing this resets all camera background models. Default: 120</span>
+        </label>
+        <label>
+          <span>Detection Frame Rate (fps)</span>
+          <input name="ingest_frame_fps" type="number" min="1" max="30" step="1" placeholder="4" />
+          <span class="field-help">Frames per second decoded from the camera stream for AI detection. Lower = less CPU; higher = catches faster movements. Takes effect on next camera reconnect. Default: 4</span>
+        </label>
       </form>
       <div class="button-row">
         <button type="submit" form="liveSettingsForm">Save Live Settings</button>

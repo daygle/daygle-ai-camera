@@ -61,6 +61,9 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     'motion_gate_fraction': 0.003,
     'motion_scale_fraction': 0.1,
     'motion_background_alpha': 0.05,
+    'motion_frame_width': 160,
+    'motion_frame_height': 120,
+    'ingest_frame_fps': 4,
     'periodic_scan_interval_seconds': 0,
 }
 

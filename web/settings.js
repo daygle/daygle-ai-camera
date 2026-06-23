@@ -42,6 +42,9 @@ const FIELD_LABELS = {
   motion_gate_fraction: 'Motion Gate Fraction',
   motion_scale_fraction: 'Motion Scale Fraction',
   motion_background_alpha: 'Motion Background Alpha',
+  motion_frame_width: 'Motion Frame Width',
+  motion_frame_height: 'Motion Frame Height',
+  ingest_frame_fps: 'Detection Frame Rate (fps)',
   data_dir: 'Data Directory',
   snapshots_dir: 'Snapshots Directory',
   events_dir: 'Events Directory',
@@ -164,7 +167,7 @@ function payloadFor(form) {
   if ('detection_interval_seconds' in data && data.detection_interval_seconds !== '') data.detection_interval_seconds = Number(data.detection_interval_seconds);
   if ('event_debounce_seconds' in data && data.event_debounce_seconds !== '') data.event_debounce_seconds = Number(data.event_debounce_seconds);
   if ('detection_history_minutes' in data && data.detection_history_minutes !== '') data.detection_history_minutes = Number(data.detection_history_minutes);
-  for (const key of ['motion_pixel_threshold', 'periodic_scan_interval_seconds']) {
+  for (const key of ['motion_pixel_threshold', 'periodic_scan_interval_seconds', 'motion_frame_width', 'motion_frame_height', 'ingest_frame_fps']) {
     if (key in data && data[key] !== '') data[key] = Number.parseInt(data[key], 10);
   }
   for (const key of ['motion_gate_fraction', 'motion_scale_fraction', 'motion_background_alpha']) {
