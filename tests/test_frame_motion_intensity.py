@@ -81,3 +81,34 @@ def test_above_gate_motion_reports_matching_confidence_and_intensity():
     assert has_motion is True
     assert confidence > 0.0
     assert intensity == confidence
+
+
+def test_background_freezes_during_motion():
+    """Background must NOT adapt while motion is above the gate.
+
+    If the background learns the moving subject, the pixel diff shrinks on
+    each successive frame and motion detection silently stops -- the reported
+    bug where motion-only recording produced nothing after the first second.
+    After many frames of identical above-gate motion the confidence should be
+    unchanged, not decayed.
+    """
+    cam = "motion-freeze"
+    base = np.full((120, 160, 3), 50, dtype=np.uint8)
+    _seed_background(cam, base)
+
+    loud = base.copy()
+    loud[:, :] = 200  # large whole-frame change, well above the default gate
+
+    _, first_conf, _, _ = ds.detect_frame_motion(cam, loud)
+    assert first_conf > 0.0, "First motion frame must be detected"
+
+    # Feed the same "motion" frame many more times. If the background were
+    # updating during motion, the diff would shrink toward zero; with the
+    # freeze the diff should stay constant and confidence should not decay.
+    for _ in range(40):  # 40 frames ≈ 10 s at 4 Hz
+        _, conf, _, _ = ds.detect_frame_motion(cam, loud)
+
+    assert conf == first_conf, (
+        f"Confidence decayed from {first_conf} to {conf} -- "
+        "background is adapting during motion (freeze-on-motion bug)"
+    )
