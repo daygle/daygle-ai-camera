@@ -53,7 +53,7 @@ def render_live_snapshot_svg(frame: dict[str, Any], detections: list[dict[str, A
                 continue
             label_x = max(0, float(points[0].get('x') or 0) * width) + 12
             label_y = max(30, float(points[0].get('y') or 0) * height + 30)
-            zone_name = escape(str(zone.get('name') or 'Monitoring area'))
+            zone_name = escape(str(zone.get('name') or 'Zone area'))
             zone_markup.append(f'''<g class="monitor-zone"><polygon points="{' '.join(svg_points)}" /><text x="{label_x:.1f}" y="{label_y:.1f}">{zone_name}</text></g>''')
     detection_markup: list[str] = []
     if overlay:

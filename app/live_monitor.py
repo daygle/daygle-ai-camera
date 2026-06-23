@@ -306,7 +306,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     for _mot in motion_detections:
         alert_detections.append({**_mot, 'label': 'motion', 'motion_event': True})
     if not alert_detections:
-        update_live_detection_status(camera_id, state='checked', reason='No detections matched this camera and its monitoring areas.', detected_labels=raw_labels, matched_labels=[], detections=list(detections))
+        update_live_detection_status(camera_id, state='checked', reason='No detections matched this camera and its zone areas.', detected_labels=raw_labels, matched_labels=[], detections=list(detections))
         return None
     triggered = _state.alerts.process(alert_detections, rules=zone_rules)
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}

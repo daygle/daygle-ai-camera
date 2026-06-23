@@ -215,7 +215,7 @@ Add and manage multiple RTSP/ONVIF cameras. Each camera can have:
 - Optional PTZ settings for ONVIF or compatible network PTZ controls.
 - Camera health status for online/offline troubleshooting.
 
-After saving cameras, configure per-camera monitoring areas from the Zones page and optional audio rules from the Sounds page.
+After saving cameras, configure per-camera zone areas from the Zones page and optional audio rules from the Sounds page.
 
 ### Zones
 
