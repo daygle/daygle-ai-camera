@@ -237,6 +237,13 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _gate_fraction = float(live_settings.get('motion_gate_fraction', _state._MOTION_GATE_FRACTION))
     _scale_fraction = float(live_settings.get('motion_scale_fraction', _state._MOTION_SCALE_FRACTION))
     _background_alpha = float(live_settings.get('motion_background_alpha', _state._MOTION_BACKGROUND_ALPHA))
+    _frame_w = max(40, int(live_settings.get('motion_frame_width', _state._MOTION_FRAME_W)))
+    _frame_h = max(30, int(live_settings.get('motion_frame_height', _state._MOTION_FRAME_H)))
+    if _frame_w != _state._MOTION_FRAME_W or _frame_h != _state._MOTION_FRAME_H:
+        with _state._frame_motion_lock:
+            _state._MOTION_FRAME_W = _frame_w
+            _state._MOTION_FRAME_H = _frame_h
+            _state._frame_motion_prev.clear()
     _cam_motion_nest = settings.get('motion') if isinstance(settings.get('motion'), dict) else {}
     _cam_pt = settings.get('motion_pixel_threshold') if settings.get('motion_pixel_threshold') is not None else _cam_motion_nest.get('pixel_threshold')
     if _cam_pt is not None:
