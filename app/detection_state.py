@@ -185,8 +185,12 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
                 return (False, 0.0, None, 0.0)
             diff_mask = np.abs(current - background) > pixel_threshold
             changed_fraction = float(np.mean(diff_mask))
-            updated_bg = (1.0 - background_alpha) * background + background_alpha * current
-            _state._frame_motion_prev[camera_id] = updated_bg
+            # Only adapt the background when no motion is detected. Freezing the
+            # background during motion keeps moving subjects visible indefinitely
+            # instead of being absorbed into the background model within seconds.
+            if changed_fraction < gate_fraction:
+                updated_bg = (1.0 - background_alpha) * background + background_alpha * current
+                _state._frame_motion_prev[camera_id] = updated_bg
             _state._frame_motion_error_cameras.discard(camera_id)
         # Raw frame-motion intensity, scaled the same way as the gated
         # confidence but WITHOUT applying the alert gate. The /live "Live
