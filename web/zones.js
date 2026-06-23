@@ -9,8 +9,11 @@ let selectedZoneIndex = null;
 let drawingMode = false;
 let draftPolygon = null;
 let zoneDrag = null;
+let expandedZoneRules = new Set();
 
 const ZONE_ICON_REMOVE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+const ZONE_ICON_CHEVRON_DOWN = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>';
+const ZONE_ICON_CHEVRON_UP = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15"/></svg>';
 
 // Update only the label text on the Draw Area button so its icon (a sibling
 // <svg>) survives. Setting button.textContent would replace all child nodes,
@@ -191,65 +194,63 @@ function renderObjectRules(zone, zoneIndex) {
   if (!zone.object_rules.length) {
     return '<div class="empty compact-empty">No object rules yet. Choose an object above to add detection settings for this zone.</div>';
   }
-  return zone.object_rules.map((rule, ruleIndex) => {
-    const key = `${zoneIndex}:${ruleIndex}`;
-    const label = escapeHtml(titleCase(rule.label));
-    return `
-      <div class="sound-rule-row">
-        <div class="sound-rule-row-header">
-          <span class="sound-rule-name">${label}</span>
-          <button class="secondary delete-btn zone-action-btn" type="button" data-delete-zone-rule="${key}">${ZONE_ICON_REMOVE}Remove</button>
-        </div>
-        <div class="sound-rule-row-fields">
-          <label class="sound-rule-field">
-            <span>Confidence</span>
-            <input type="number" data-zone-rule-confidence="${key}" value="${escapeHtml(rule.min_confidence)}" min="0" max="1" step="0.05" />
-          </label>
-          <label class="sound-rule-field">
-            <span>Cooldown (s)</span>
-            <input type="number" data-zone-rule-cooldown="${key}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" />
-          </label>
-          <label class="sound-rule-field sound-rule-email-field">
-            <span>Email recipients</span>
-            <input type="email" data-zone-rule-email-recipients="${key}" value="${escapeHtml(normalizeEmailList(rule.email_recipients).join(', '))}" placeholder="alerts@example.com" multiple autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore />
-          </label>
-          <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
-            <span>Active from</span>
-            ${renderTimeSelect(rule.active_start, 'data-zone-rule-active-start', key)}
-          </label>
-          <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
-            <span>Active to</span>
-            ${renderTimeSelect(rule.active_end, 'data-zone-rule-active-end', key)}
-          </label>
-          <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
-            <span>Email/Push from</span>
-            ${renderTimeSelect(rule.notify_start, 'data-zone-rule-notify-start', key)}
-          </label>
-          <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
-            <span>Email/Push to</span>
-            ${renderTimeSelect(rule.notify_end, 'data-zone-rule-notify-end', key)}
-          </label>
-          <div class="sound-rule-toggles">
-            <label class="sound-rule-toggle">
-              <input type="checkbox" data-zone-rule-enabled="${key}" ${rule.enabled !== false ? 'checked' : ''} />
-              <span>Enabled</span>
-            </label>
-            <label class="sound-rule-toggle">
-              <input type="checkbox" data-zone-rule-record="${key}" ${rule.record_on_detect !== false ? 'checked' : ''} />
-              <span>Record</span>
-            </label>
-            <label class="sound-rule-toggle">
-              <input type="checkbox" data-zone-rule-email="${key}" ${rule.email_enabled === true ? 'checked' : ''} />
-              <span>Email</span>
-            </label>
-            <label class="sound-rule-toggle">
-              <input type="checkbox" data-zone-rule-push="${key}" ${rule.push_enabled === true ? 'checked' : ''} />
-              <span>Push</span>
-            </label>
-          </div>
-        </div>
-      </div>`;
-  }).join('');
+  return `<table class="rule-table">
+    <thead><tr>
+      <th>Object</th>
+      <th class="cell-center">On</th>
+      <th class="cell-center">Rec</th>
+      <th class="cell-center">Email</th>
+      <th class="cell-center">Push</th>
+      <th>Confidence</th>
+      <th>Cooldown (s)</th>
+      <th></th>
+    </tr></thead>
+    <tbody>${zone.object_rules.map((rule, ruleIndex) => {
+      const key = `${zoneIndex}:${ruleIndex}`;
+      const label = escapeHtml(titleCase(rule.label));
+      const expanded = expandedZoneRules.has(key);
+      return `
+        <tr>
+          <td class="cell-label">${label}</td>
+          <td class="cell-center"><input type="checkbox" data-zone-rule-enabled="${key}" ${rule.enabled !== false ? 'checked' : ''} /></td>
+          <td class="cell-center"><input type="checkbox" data-zone-rule-record="${key}" ${rule.record_on_detect !== false ? 'checked' : ''} /></td>
+          <td class="cell-center"><input type="checkbox" data-zone-rule-email="${key}" ${rule.email_enabled === true ? 'checked' : ''} /></td>
+          <td class="cell-center"><input type="checkbox" data-zone-rule-push="${key}" ${rule.push_enabled === true ? 'checked' : ''} /></td>
+          <td><input type="number" data-zone-rule-confidence="${key}" value="${escapeHtml(rule.min_confidence)}" min="0" max="1" step="0.05" /></td>
+          <td><input type="number" data-zone-rule-cooldown="${key}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" /></td>
+          <td><div class="cell-actions">
+            <button class="rule-expand-btn secondary" type="button" data-expand-zone-rule="${key}" title="Time windows &amp; email">${expanded ? ZONE_ICON_CHEVRON_UP : ZONE_ICON_CHEVRON_DOWN}</button>
+            <button class="secondary delete-btn zone-action-btn" type="button" data-delete-zone-rule="${key}">${ZONE_ICON_REMOVE}</button>
+          </div></td>
+        </tr>
+        <tr class="rule-expand-row" ${expanded ? '' : 'hidden'}>
+          <td colspan="8">
+            <div class="rule-expand-body">
+              <label class="sound-rule-field sound-rule-email-field">
+                <span>Email recipients</span>
+                <input type="email" data-zone-rule-email-recipients="${key}" value="${escapeHtml(normalizeEmailList(rule.email_recipients).join(', '))}" placeholder="alerts@example.com" multiple autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore />
+              </label>
+              <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
+                <span>Active from</span>
+                ${renderTimeSelect(rule.active_start, 'data-zone-rule-active-start', key)}
+              </label>
+              <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
+                <span>Active to</span>
+                ${renderTimeSelect(rule.active_end, 'data-zone-rule-active-end', key)}
+              </label>
+              <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
+                <span>Email/Push from</span>
+                ${renderTimeSelect(rule.notify_start, 'data-zone-rule-notify-start', key)}
+              </label>
+              <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
+                <span>Email/Push to</span>
+                ${renderTimeSelect(rule.notify_end, 'data-zone-rule-notify-end', key)}
+              </label>
+            </div>
+          </td>
+        </tr>`;
+    }).join('')}</tbody>
+  </table>`;
 }
 
 function renderZones() {
@@ -318,10 +319,19 @@ function bindObjectRuleControls() {
       renderZones();
     });
   });
+  document.querySelectorAll('[data-expand-zone-rule]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.expandZoneRule;
+      if (expandedZoneRules.has(key)) expandedZoneRules.delete(key);
+      else expandedZoneRules.add(key);
+      renderObjectDetectionRules();
+    });
+  });
   document.querySelectorAll('[data-delete-zone-rule]').forEach((button) => {
     button.addEventListener('click', () => {
       const zones = cameraDetection().zones;
       const { zoneIndex, ruleIndex } = parseZoneRuleKey(button.dataset.deleteZoneRule);
+      expandedZoneRules.delete(button.dataset.deleteZoneRule);
       zones[zoneIndex].object_rules.splice(ruleIndex, 1);
       zones[zoneIndex].object_labels = zones[zoneIndex].object_rules.filter((r) => r.label !== 'motion').map((r) => r.label);
       renderZones();

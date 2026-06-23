@@ -3,6 +3,11 @@ let soundClasses = [];
 let selectedCameraId = '';
 let editingSound = { enabled: false, rules: [] };
 let selectedStatus = null;
+let expandedSoundRules = new Set();
+
+const SOUND_ICON_REMOVE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+const SOUND_ICON_CHEVRON_DOWN = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>';
+const SOUND_ICON_CHEVRON_UP = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15"/></svg>';
 
 const cameraSelect = document.getElementById('soundCameraSelect');
 const soundEnabled = document.getElementById('soundEnabled');
@@ -142,71 +147,78 @@ function renderRules() {
     return;
   }
 
-  rulesWrap.innerHTML = rules.map((rule) => {
-    const cls = soundClasses.find((item) => item.id === rule.class);
-    const label = cls ? cls.label : titleCase(String(rule.class || '').replace(/_/g, ' '));
-    const id = escapeHtml(rule.class);
-    return `
-      <div class="sound-rule-row ${rule.enabled ? '' : 'sound-rule-row-disabled'}" data-sound-class="${id}">
-        <div class="sound-rule-row-header">
-          <span class="sound-rule-name">${escapeHtml(label)}</span>
-          <button class="secondary delete-btn" type="button" data-remove-rule="${id}">Remove</button>
-        </div>
-        <div class="sound-rule-row-fields">
-          <label class="sound-rule-field">
-            <span>Threshold</span>
-            <input type="number" data-rule-threshold="${id}" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" min="0.1" max="1.0" step="0.05" />
-          </label>
-          <label class="sound-rule-field">
-            <span>Cooldown (s)</span>
-            <input type="number" data-rule-cooldown="${id}" value="${escapeHtml(String(rule.cooldown_seconds ?? 30))}" min="5" max="3600" step="5" />
-          </label>
-          <label class="sound-rule-field sound-rule-email-field">
-            <span>Email recipients</span>
-            <input type="email" data-rule-email-recipients="${id}" value="${escapeHtml(normalizeEmailList(rule.email_recipients).join(', '))}" placeholder="alerts@example.com" multiple autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore />
-          </label>
-          <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
-            <span>Active from</span>
-            ${renderTimeSelect(rule.active_start, 'data-rule-active-start', id)}
-          </label>
-          <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
-            <span>Active to</span>
-            ${renderTimeSelect(rule.active_end, 'data-rule-active-end', id)}
-          </label>
-          <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
-            <span>Email/Push from</span>
-            ${renderTimeSelect(rule.notify_start, 'data-rule-notify-start', id)}
-          </label>
-          <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
-            <span>Email/Push to</span>
-            ${renderTimeSelect(rule.notify_end, 'data-rule-notify-end', id)}
-          </label>
-          <div class="sound-rule-toggles">
-            <label class="sound-rule-toggle">
-              <input type="checkbox" data-rule-enabled="${id}" ${rule.enabled ? 'checked' : ''} />
-              <span>Enabled</span>
-            </label>
-            <label class="sound-rule-toggle">
-              <input type="checkbox" data-rule-record="${id}" ${rule.record_on_detect !== false ? 'checked' : ''} />
-              <span>Record</span>
-            </label>
-            <label class="sound-rule-toggle">
-              <input type="checkbox" data-rule-email="${id}" ${rule.email_enabled ? 'checked' : ''} />
-              <span>Email</span>
-            </label>
-            <label class="sound-rule-toggle">
-              <input type="checkbox" data-rule-push="${id}" ${rule.push_enabled ? 'checked' : ''} />
-              <span>Push</span>
-            </label>
-          </div>
-        </div>
-      </div>`;
-  }).join('');
+  rulesWrap.innerHTML = `
+    <table class="rule-table">
+      <thead><tr>
+        <th>Sound</th>
+        <th class="cell-center">On</th>
+        <th class="cell-center">Rec</th>
+        <th class="cell-center">Email</th>
+        <th class="cell-center">Push</th>
+        <th>Threshold</th>
+        <th>Cooldown (s)</th>
+        <th></th>
+      </tr></thead>
+      <tbody>${rules.map((rule) => {
+        const cls = soundClasses.find((item) => item.id === rule.class);
+        const label = cls ? cls.label : titleCase(String(rule.class || '').replace(/_/g, ' '));
+        const id = escapeHtml(rule.class);
+        const expanded = expandedSoundRules.has(rule.class);
+        return `
+          <tr class="${rule.enabled ? '' : 'sound-rule-row-disabled'}">
+            <td class="cell-label">${escapeHtml(label)}</td>
+            <td class="cell-center"><input type="checkbox" data-rule-enabled="${id}" ${rule.enabled ? 'checked' : ''} /></td>
+            <td class="cell-center"><input type="checkbox" data-rule-record="${id}" ${rule.record_on_detect !== false ? 'checked' : ''} /></td>
+            <td class="cell-center"><input type="checkbox" data-rule-email="${id}" ${rule.email_enabled ? 'checked' : ''} /></td>
+            <td class="cell-center"><input type="checkbox" data-rule-push="${id}" ${rule.push_enabled ? 'checked' : ''} /></td>
+            <td><input type="number" data-rule-threshold="${id}" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" min="0.1" max="1.0" step="0.05" /></td>
+            <td><input type="number" data-rule-cooldown="${id}" value="${escapeHtml(String(rule.cooldown_seconds ?? 30))}" min="5" max="3600" step="5" /></td>
+            <td><div class="cell-actions">
+              <button class="rule-expand-btn secondary" type="button" data-expand-rule="${id}" title="Time windows &amp; email">${expanded ? SOUND_ICON_CHEVRON_UP : SOUND_ICON_CHEVRON_DOWN}</button>
+              <button class="delete-btn secondary" type="button" data-remove-rule="${id}">${SOUND_ICON_REMOVE}</button>
+            </div></td>
+          </tr>
+          <tr class="rule-expand-row" ${expanded ? '' : 'hidden'}>
+            <td colspan="8">
+              <div class="rule-expand-body">
+                <label class="sound-rule-field sound-rule-email-field">
+                  <span>Email recipients</span>
+                  <input type="email" data-rule-email-recipients="${id}" value="${escapeHtml(normalizeEmailList(rule.email_recipients).join(', '))}" placeholder="alerts@example.com" multiple autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore />
+                </label>
+                <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
+                  <span>Active from</span>
+                  ${renderTimeSelect(rule.active_start, 'data-rule-active-start', id)}
+                </label>
+                <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
+                  <span>Active to</span>
+                  ${renderTimeSelect(rule.active_end, 'data-rule-active-end', id)}
+                </label>
+                <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
+                  <span>Email/Push from</span>
+                  ${renderTimeSelect(rule.notify_start, 'data-rule-notify-start', id)}
+                </label>
+                <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
+                  <span>Email/Push to</span>
+                  ${renderTimeSelect(rule.notify_end, 'data-rule-notify-end', id)}
+                </label>
+              </div>
+            </td>
+          </tr>`;
+      }).join('')}</tbody>
+    </table>`;
 
+  rulesWrap.querySelectorAll('[data-expand-rule]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.expandRule;
+      if (expandedSoundRules.has(id)) expandedSoundRules.delete(id);
+      else expandedSoundRules.add(id);
+      renderRules();
+    });
+  });
   rulesWrap.querySelectorAll('[data-rule-enabled]').forEach((input) => {
     input.addEventListener('change', () => {
       updateRule(input.dataset.ruleEnabled, 'enabled', input.checked);
-      const row = input.closest('.sound-rule-row');
+      const row = input.closest('tr');
       if (row) row.classList.toggle('sound-rule-row-disabled', !input.checked);
     });
   });
@@ -242,6 +254,7 @@ function renderRules() {
   });
   rulesWrap.querySelectorAll('[data-remove-rule]').forEach((button) => {
     button.addEventListener('click', () => {
+      expandedSoundRules.delete(button.dataset.removeRule);
       editingSound.rules = editingSound.rules.filter((rule) => rule.class !== button.dataset.removeRule);
       renderEditor();
     });
