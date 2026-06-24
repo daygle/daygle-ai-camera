@@ -59,7 +59,7 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     'detection_history_minutes': 10,
     'motion_pixel_threshold': 30,
     'motion_gate_fraction': 0.003,
-    'motion_scale_fraction': 0.1,
+    'motion_scale_fraction': 0.03,
     'motion_background_alpha': 0.05,
     'motion_frame_width': 160,
     'motion_frame_height': 120,

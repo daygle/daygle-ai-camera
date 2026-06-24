@@ -166,12 +166,15 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import HTTPException
 import numpy as np
 
 import app.state as _state
+
+logger = logging.getLogger('daygle.ai')
 from app.config_facades import get_camera_config
 from app.utils import normalize_email_recipients
 from app.zone_schema import _LABEL_ALIASES, normalize_label_list, zone_motion_min_confidence
@@ -321,6 +324,7 @@ def zone_motion_detections(
         zone_id = str(zone.get('id') or zone.get('name') or id(zone))
         if zone_id in seen_zones:
             continue
+        zone_fraction = -1.0
         if diff_mask is not None:
             zone_fraction = _zone_pixel_motion_fraction(diff_mask, zone)
             if zone_fraction < gate_fraction:
@@ -330,6 +334,10 @@ def zone_motion_detections(
             zone_confidence = frame_motion_confidence
         conf_threshold = zone_motion_min_confidence(zone)
         if zone_confidence < conf_threshold:
+            logger.debug(
+                'Motion zone %r: zone_fraction=%.4f zone_confidence=%.3f below conf_threshold=%.3f (scale_fraction=%.4f)',
+                zone_id, zone_fraction, zone_confidence, conf_threshold, scale_fraction,
+            )
             continue
         seen_zones.add(zone_id)
         result.append({
