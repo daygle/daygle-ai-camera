@@ -4760,19 +4760,38 @@ def test_compute_minimum_rule_confidence(tmp_path, monkeypatch, zone_rules, glob
     _alert_dispatch._min_rule_confidence_cache = None
     assert _alert_dispatch.compute_minimum_rule_confidence() == pytest.approx(expected)
 
-def test_trailing_motion_after_object_event_is_debounced(tmp_path, monkeypatch):
-    """Generic motion right after any event on the camera is the trailing edge of the
-    same activity (background model re-settling) and must be suppressed even though
-    'motion' does not overlap the remembered object labels."""
+def test_motion_debounce_trailing_window_and_independent_recording(tmp_path, monkeypatch):
+    """Motion uses a short trailing suppression window after non-motion events.
+
+    Within _MOTION_TRAILING_SUPPRESSION_SECONDS of a prior object/sound event,
+    motion is suppressed (background re-settling noise). Beyond that window it
+    fires independently. Motion after a prior motion event always uses the normal
+    label-overlap path so back-to-back motion events still merge correctly.
+    """
     _load_app(tmp_path, monkeypatch)
     import app.main as main
     import app.event_debounce as _ed
 
+    # Motion within the trailing window after a non-motion event → suppressed.
     main._state.live_event_last_emitted.clear()
     _ed.remember_live_event('camera-1', {'person'})
-    assert _ed.live_event_is_debounced('camera-1', {'motion'}, 10.0) is True
-    # A different concrete object is genuinely new activity and must NOT be debounced.
+    assert _ed.live_event_is_debounced('camera-1', {'motion'}, 60.0) is True
+
+    # Simulate elapsed time beyond the trailing window — motion records independently.
+    with main._state.live_event_last_emitted_lock:
+        main._state.live_event_last_emitted['camera-1']['timestamp'] = (
+            time.time() - _ed._MOTION_TRAILING_SUPPRESSION_SECONDS - 1
+        )
+    assert _ed.live_event_is_debounced('camera-1', {'motion'}, 60.0) is False
+
+    # A concrete object never uses the trailing path — label overlap decides.
+    _ed.remember_live_event('camera-1', {'person'})
     assert _ed.live_event_is_debounced('camera-1', {'cat'}, 10.0) is False
+
+    # Motion after a prior motion event IS debounced via normal label overlap.
+    main._state.live_event_last_emitted.clear()
+    _ed.remember_live_event('camera-1', {'motion'})
+    assert _ed.live_event_is_debounced('camera-1', {'motion'}, 10.0) is True
 
 
 def test_debounce_window_refreshes_while_activity_continues(tmp_path, monkeypatch):
