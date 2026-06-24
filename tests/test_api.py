@@ -4760,21 +4760,35 @@ def test_compute_minimum_rule_confidence(tmp_path, monkeypatch, zone_rules, glob
     _alert_dispatch._min_rule_confidence_cache = None
     assert _alert_dispatch.compute_minimum_rule_confidence() == pytest.approx(expected)
 
-def test_motion_after_object_event_is_not_debounced(tmp_path, monkeypatch):
-    """Motion after an object event must NOT be suppressed — motion-only recordings
-    are a distinct detection type and must fire independently of object events.
-    Only a previous motion event within the window should debounce a new motion event."""
+def test_motion_debounce_trailing_window_and_independent_recording(tmp_path, monkeypatch):
+    """Motion uses a short trailing suppression window after non-motion events.
+
+    Within _MOTION_TRAILING_SUPPRESSION_SECONDS of a prior object/sound event,
+    motion is suppressed (background re-settling noise). Beyond that window it
+    fires independently. Motion after a prior motion event always uses the normal
+    label-overlap path so back-to-back motion events still merge correctly.
+    """
     _load_app(tmp_path, monkeypatch)
     import app.main as main
     import app.event_debounce as _ed
 
+    # Motion within the trailing window after a non-motion event → suppressed.
     main._state.live_event_last_emitted.clear()
     _ed.remember_live_event('camera-1', {'person'})
-    # Motion after an object event is a distinct activity — not debounced.
-    assert _ed.live_event_is_debounced('camera-1', {'motion'}, 10.0) is False
-    # A different concrete object is also genuinely new activity.
+    assert _ed.live_event_is_debounced('camera-1', {'motion'}, 60.0) is True
+
+    # Simulate elapsed time beyond the trailing window — motion records independently.
+    with main._state.live_event_last_emitted_lock:
+        main._state.live_event_last_emitted['camera-1']['timestamp'] = (
+            time.time() - _ed._MOTION_TRAILING_SUPPRESSION_SECONDS - 1
+        )
+    assert _ed.live_event_is_debounced('camera-1', {'motion'}, 60.0) is False
+
+    # A concrete object never uses the trailing path — label overlap decides.
+    _ed.remember_live_event('camera-1', {'person'})
     assert _ed.live_event_is_debounced('camera-1', {'cat'}, 10.0) is False
-    # Motion after a prior motion event IS debounced (prevents duplicate motion recordings).
+
+    # Motion after a prior motion event IS debounced via normal label overlap.
     main._state.live_event_last_emitted.clear()
     _ed.remember_live_event('camera-1', {'motion'})
     assert _ed.live_event_is_debounced('camera-1', {'motion'}, 10.0) is True

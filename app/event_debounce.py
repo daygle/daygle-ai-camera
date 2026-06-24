@@ -61,6 +61,13 @@ import app.state as _state
 from app.detection_status import update_live_detection_status
 from app.diagnostics import log_camera_diagnostic
 
+# After a non-motion event (person, car, sound) the background model briefly
+# re-settles and can produce a short burst of spurious pixel-diff hits. Suppress
+# motion-only events within this window so they don't create a second recording
+# that's just noise from the same activity. Beyond this window, motion is treated
+# as a genuinely independent event and records normally.
+_MOTION_TRAILING_SUPPRESSION_SECONDS = 5.0
+
 
 def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: float) -> bool:
     if debounce_seconds <= 0 or not labels:
@@ -73,6 +80,11 @@ def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: 
     if elapsed > debounce_seconds:
         return False
     previous_labels = {str(label).strip().lower() for label in previous.get('labels', []) if str(label).strip()}
+    # Motion-only events use a short trailing suppression window rather than the
+    # full debounce window. If the prior event was also motion, use the normal
+    # label-overlap path so back-to-back motion events still merge correctly.
+    if labels <= {'motion'} and 'motion' not in previous_labels:
+        return elapsed < _MOTION_TRAILING_SUPPRESSION_SECONDS
     return bool(previous_labels & labels)
 
 
