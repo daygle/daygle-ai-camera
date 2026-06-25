@@ -160,8 +160,10 @@ def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
     # apply-side state mutations are atomic with respect to each other.
     with _state._apply_settings_lock:
         new_instances = create_camera_instances(settings_list)
+        new_ids = {str(cfg.get('id') or '') for cfg in settings_list if cfg.get('id')}
         with _state._camera_instances_lock:
             old_instances = _state.camera_instances
+            removed_ids = (set(old_instances.keys()) if old_instances else set()) - new_ids
             _state.cameras_config = settings_list
             _state.camera_config = settings_list[0] if settings_list else {}
             _state.camera_instances = new_instances
@@ -172,6 +174,21 @@ def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
                 old_cam.close()
             except Exception as unexpected_exc:
                 logger.warning('Unexpected error updating camera: %s', unexpected_exc)
+        if removed_ids:
+            # Stop prebuffer/continuous ingest workers for cameras that were
+            # removed from the config so their ffmpeg processes don't keep
+            # running (and logging ingest_restart diagnostics) after deletion.
+            rs = _state.recording_service
+            for cam_id in removed_ids:
+                try:
+                    rs.stop_camera_workers(cam_id)
+                except Exception as unexpected_exc:
+                    logger.warning('Unexpected error stopping workers for deleted camera %s: %s', cam_id, unexpected_exc)
+            # Remove deleted cameras from the health-state dict so the
+            # /api/cameras/health response no longer counts them.
+            with _state._camera_health_lock:
+                for cam_id in removed_ids:
+                    _state._camera_health_state.pop(cam_id, None)
         apply_sound_settings()
 
 
