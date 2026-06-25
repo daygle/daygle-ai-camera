@@ -406,6 +406,24 @@ class RecordingService:
             for worker in workers:
                 self._stop_worker(worker, join_timeout=self.CONTINUOUS_WORKER_JOIN_TIMEOUT_SECONDS)
 
+    def stop_camera_workers(self, camera_id: str) -> None:
+        """Stop the prebuffer and continuous workers for a single camera.
+
+        Called when a camera is removed from the active configuration so that
+        its ffmpeg ingest process is torn down immediately rather than continuing
+        to run (and emitting ingest_restart diagnostics) until the whole
+        RecordingService is rebuilt.
+        """
+        camera_key = self._camera_key(camera_id)
+        with self._prebuffer_lock:
+            worker = self._prebuffer_workers.pop(camera_key, None)
+            if worker:
+                self._stop_worker(worker, join_timeout=self.PREBUFFER_WORKER_JOIN_TIMEOUT_SECONDS)
+        with self._continuous_lock:
+            worker = self._continuous_workers.pop(camera_key, None)
+            if worker:
+                self._stop_worker(worker, join_timeout=self.CONTINUOUS_WORKER_JOIN_TIMEOUT_SECONDS)
+
     def _ensure_continuous_chunk_worker(
         self,
         camera_key: str,
