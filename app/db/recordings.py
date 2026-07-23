@@ -216,7 +216,9 @@ class RecordingsMixin:
                     }
                 self._insert_recording_labels(db, recording_id, labels, source='backfill', confidences=confidences)
                 total += len(labels)
-        return total    def list_recordings(
+        return total
+
+    def list_recordings(
         self,
         label: str | None = None,
         labels: list[str] | None = None,
