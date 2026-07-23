@@ -156,6 +156,14 @@ class RecordingService:
             created = datetime.now(timezone.utc)
         if created.tzinfo is None:
             created = created.replace(tzinfo=timezone.utc)
+        # Normalize to UTC so the derived ``started_at`` / ``ended_at``
+        # strings compare cleanly against the SQL cutoff / day-window
+        # timestamps in ``DB.purge_recordings`` / ``list_recordings_for_camera_day``
+        # -- which are bound in canonical UTC ``+00:00`` form. Without
+        # this, a source event with a negative tz offset (e.g.
+        # ``-05:00``) sorts lexicographically BEFORE the cutoff and the
+        # recording gets purged up to TZ-offset hours early.
+        created = created.astimezone(timezone.utc)
 
         pre_seconds = max(0, int(active_config.get('pre_event_seconds', 5)))
         post_seconds = max(0, int(active_config.get('post_event_seconds', 10)))

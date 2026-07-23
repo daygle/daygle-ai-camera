@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from app.utils import _normalize_iso_to_utc
+
 
 class RecordingsMixin:
     """CRUD + query helpers for the ``recordings`` and ``recording_labels`` tables.
@@ -34,6 +36,20 @@ class RecordingsMixin:
         labels: list[str] | None = None,
         label_confidences: dict[str, float] | None = None,
     ) -> int:
+        # SQLite compares ISO timestamps as strings. Normalise every
+        # datetime column that participates in WHERE-clause comparisons
+        # (started_at / ended_at / created_at) to canonical UTC ``+00:00``
+        # form so events authored in a different timezone (e.g. EST
+        # ``-05:00``) don't lexically sort before the cutoff strings
+        # ``purge_recordings`` / ``list_recordings_for_camera_day`` /
+        # the size-based grace window bind to -- which would otherwise
+        # drop recordings well inside the retention / day boundaries.
+        # Best-effort on parse failures: keeps the original string so
+        # the DB layer can surface a useful error rather than silently
+        # mis-normalising.
+        started_at = _normalize_iso_to_utc(started_at) or started_at
+        ended_at = _normalize_iso_to_utc(ended_at) or ended_at
+        created_at = _normalize_iso_to_utc(created_at) or created_at
         with self.connect() as db:
             cursor = db.execute(
                 """
@@ -200,9 +216,7 @@ class RecordingsMixin:
                     }
                 self._insert_recording_labels(db, recording_id, labels, source='backfill', confidences=confidences)
                 total += len(labels)
-        return total
-
-    def list_recordings(
+        return total    def list_recordings(
         self,
         label: str | None = None,
         labels: list[str] | None = None,
@@ -214,6 +228,18 @@ class RecordingsMixin:
         sort: str = 'newest',
         source_type: str | None = None,
     ) -> list[dict[str, Any]]:
+        # Normalise filter bounds through the same canonical UTC +00:00
+        # form rows are stored in. The recordings page constructs these
+        # from ``Date.toISOString()`` on the browser side, which yields
+        # ``YYYY-MM-DDTHH:MM:SS.sssZ`` (Z suffix); our storage uses
+        # ``YYYY-MM-DDTHH:MM:SS+00:00`` (Python ``.isoformat`` against a
+        # UTC datetime). Lexically ``+`` (0x2B) sorts BEFORE ``Z`` (0x5A)
+        # and ``.`` (0x2E) sorts AFTER ``+`` so a Z-form filter at the
+        # exact boundary would otherwise exclude or include rows that
+        # represent the same wall-clock instant on the wrong side. The
+        # normaliser is idempotent on already-canonical inputs.
+        started_after = _normalize_iso_to_utc(started_after) if started_after else None
+        started_before = _normalize_iso_to_utc(started_before) if started_before else None
         with self.connect() as db:
             conditions: list[str] = []
             params: list[Any] = []
@@ -270,9 +296,15 @@ class RecordingsMixin:
             return self._assemble_recordings(db, rows)
 
     def list_recordings_for_camera_day(self, camera_id: str, day_start: str, day_end: str) -> list[dict[str, Any]]:
+        # Normalise the day bounds to canonical UTC +00:00 form so SQLite's
+        # lexical comparison against ``started_at`` / ``ended_at`` rows -- which
+        # ``add_recording`` already stores in the same form -- doesn't mis-sort
+        # a same-instant recording as out-of-window. Defense in depth on top of
+        # the timeline endpoint's own ``.astimezone(timezone.utc).isoformat()``
+        # so any future caller (script, test, external client) is also covered.
+        day_start = _normalize_iso_to_utc(day_start) or day_start
+        day_end = _normalize_iso_to_utc(day_end) or day_end
         with self.connect() as db:
-            # Escape LIKE wildcards in camera_id so % and _ in the id do not alter the pattern scope.
-            safe_camera_id = str(camera_id).replace('%', '\\%').replace('_', '\\_')
             rows = db.execute(
                 """
                 SELECT DISTINCT r.*
@@ -282,14 +314,26 @@ class RecordingsMixin:
                     r.camera_id = ?
                     OR (
                         r.camera_id IS NULL
-                        AND e.metadata LIKE ? ESCAPE '\\'
+                        -- Use ``json_extract`` (JSON1 extension) to read the
+                        -- ``camera_id`` field out of ``events.metadata`` by
+                        -- key instead of substring-matching a hand-built LIKE
+                        -- pattern. The previous LIKE-on-text form was brittle
+                        -- to whether ``json.dumps`` separated keys/values with
+                        -- ``", "`` (default) vs ``","`` vs ``": "`` vs ``":"``,
+                        -- to incidental whitespace inside the JSON for the
+                        -- same string id, and to escaping rules for ``%`` /
+                        -- ``_`` / ``\``. ``json_extract`` is shape-agnostic and
+                        -- returns NULL when the key isn't present so a
+                        -- missing camera_id metadata cleanly excludes the row
+                        -- (rather than a LIKE wildcard catching one).
+                        AND json_extract(e.metadata, '$.camera_id') = ?
                     )
                 )
                 AND r.started_at < ?
                 AND COALESCE(r.ended_at, r.started_at) >= ?
                 ORDER BY r.started_at ASC, r.id ASC
                 """,
-                (camera_id, f'%\"camera_id\": \"{safe_camera_id}\"%', day_end, day_start),
+                (camera_id, camera_id, day_end, day_start),
             ).fetchall()
             return self._assemble_recordings(db, rows)
 
@@ -299,11 +343,17 @@ class RecordingsMixin:
             return self._recording_with_event(db, row) if row else None
 
     def update_recording_timing(self, recording_id: int, *, ended_at: str, duration_seconds: float, started_at: str | None = None) -> bool:
+        # Normalise timestamps to canonical UTC ``+00:00`` before binding
+        # so the size-based purge grace window and timeline day-window
+        # queries don't mis-classify an update whose source datetime was
+        # in a different timezone.
+        ended_at = _normalize_iso_to_utc(ended_at) or ended_at
+        started_at_value = _normalize_iso_to_utc(started_at) if started_at is not None else None
         with self.connect() as db:
-            if started_at is not None:
+            if started_at_value is not None:
                 cursor = db.execute(
                     "UPDATE recordings SET started_at = ?, ended_at = ?, duration_seconds = ? WHERE id = ?",
-                    (started_at, ended_at, float(duration_seconds), recording_id),
+                    (started_at_value, ended_at, float(duration_seconds), recording_id),
                 )
             else:
                 cursor = db.execute(
@@ -353,31 +403,45 @@ class RecordingsMixin:
             return dict(row)
 
     def purge_recordings(self, *, older_than: str | None = None, max_storage_bytes: int | None = None) -> list[dict[str, Any]]:
+        # Normalise the age cutoff to canonical UTC ``+00:00`` form so the
+        # SQLite string comparison against row ``started_at`` values (which
+        # are also canonical UTC ``+00:00`` after ``add_recording``'s
+        # normalisation) lands on the right side of the boundary. Without
+        # this, ``datetime.now(timezone.utc) - timedelta(days=N)`` already
+        # yields UTC ``+00:00`` but defensive normalisation also catches
+        # any caller passing a non-canonical cutoff (e.g. one carrying a
+        # a non-UTC tz suffix from upstream policy code).
+        bound_older_than = _normalize_iso_to_utc(older_than) if older_than else None
+        bound_grace_cutoff = _normalize_iso_to_utc(
+            (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        )
         with self.connect() as db:
             # When only age-based purge is needed, filter in the database.
             # Size-based purge needs all rows to correctly identify oldest recordings.
-            if older_than and max_storage_bytes is None:
+            if bound_older_than and max_storage_bytes is None:
                 candidates = [dict(row) for row in db.execute(
                     "SELECT * FROM recordings WHERE started_at < ? ORDER BY started_at ASC",
-                    (older_than,),
+                    (bound_older_than,),
                 ).fetchall()]
             else:
                 candidates = [dict(row) for row in db.execute("SELECT * FROM recordings ORDER BY started_at ASC").fetchall()]
             purge_ids: set[int] = set()
-            if older_than:
-                purge_ids.update(int(row["id"]) for row in candidates if str(row["started_at"]) < older_than)
+            if bound_older_than:
+                purge_ids.update(int(row["id"]) for row in candidates if str(row["started_at"]) < bound_older_than)
             if max_storage_bytes is not None:
                 # Grace period: recordings created in the last 10 minutes may still be
                 # written by a background capture thread. Don't treat a missing file as
                 # an orphan if the record is this new — purging it would leave the file
                 # on disk with no database entry once the thread finishes writing.
-                grace_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+                # ``bound_grace_cutoff`` is the canonical UTC ``+00:00`` form computed
+                # at the top so the ``created_at`` <=> grace_cutoff string compare
+                # below lands on the correct side of the boundary too.
                 existing_with_sizes: list[tuple[dict[str, Any], int]] = []
                 for row in candidates:
                     try:
                         existing_with_sizes.append((row, Path(str(row["file_path"])).stat().st_size))
                     except OSError:
-                        if str(row.get("created_at") or "") < grace_cutoff:
+                        if str(row.get("created_at") or "") < bound_grace_cutoff:
                             purge_ids.add(int(row["id"]))
                 total = sum(size for _, size in existing_with_sizes)
                 for row, size in existing_with_sizes:

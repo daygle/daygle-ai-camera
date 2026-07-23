@@ -108,3 +108,43 @@ def _parse_iso_datetime(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _normalize_iso_to_utc(value: Any) -> str | None:
+    """Coerce an ISO-8601 timestamp to canonical UTC ISO with ``+00:00`` offset.
+
+    Inverse of :func:`_parse_iso_datetime`: takes a string in (works with
+    the Python ``isoformat()`` ``+HH:MM`` form, the JavaScript
+    ``Date.toISOString()`` ``Z`` suffix, or a naive timestamp with no
+    timezone at all) and returns the canonical ``YYYY-MM-DDTHH:MM:SS.ffffff+00:00``
+    form that every other datetime column in the recordings table is
+    stored in. Used at all SQL datetime-binding sites so SQLite's lexical
+    string comparison can never sort a timezone-encoded row before a
+    UTC-encoded cutoff / filter bound -- a real failure mode that otherwise
+    purges recordings near the retention boundary or excludes them from
+    the timeline day-window query.
+
+    Naive timestamps (no tzinfo) are assumed UTC; aware timestamps are
+    converted to UTC. Returns ``None`` for falsy input; returns the input
+    unchanged on parse failure (best-effort -- lets the DB layer surface
+    a useful error rather than silently dropping the row).
+    """
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    # Python <3.11's ``datetime.fromisoformat`` does not accept the trailing
+    # ``Z`` UTC marker that ``Date.prototype.toISOString()`` emits in
+    # JavaScript (and that JS code may pass into our API as ``started_after``
+    # / ``started_before`` filter arguments). Rewrite it to an explicit
+    # ``+00:00`` so the same helper is portable across Python versions.
+    if text.endswith('Z'):
+        text = text[:-1] + '+00:00'
+    try:
+        parsed = datetime.fromisoformat(text)
+    except (ValueError, TypeError):
+        return str(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat()

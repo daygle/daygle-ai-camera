@@ -152,7 +152,17 @@ def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
         return {'purged': 0, 'files_deleted': 0, 'bytes_deleted': 0, 'recordings': []}
     retention_days = int(recording_settings.get('retention_days', 14))
     max_storage_gb = int(recording_settings.get('max_storage_gb', 20))
-    older_than = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+    # ``older_than`` is already in canonical UTC ``+00:00`` form from
+    # ``datetime.now(timezone.utc).isoformat()`` but we run it through the
+    # normaliser so it matches the bound SQL receives + the
+    # UTC-``+00:00`` form rows get stored in once ``add_recording``'s
+    # normaliser runs (defense in depth on every layer where a TZ
+    # mismatch could sort a cutoff before the row it should be comparing
+    # against).
+    from app.utils import _normalize_iso_to_utc
+    older_than = _normalize_iso_to_utc(
+        (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+    )
     max_storage_bytes = max_storage_gb * 1024 * 1024 * 1024
     purged = _state.database.purge_recordings(older_than=older_than, max_storage_bytes=max_storage_bytes)
     bytes_deleted = 0
