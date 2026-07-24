@@ -76,7 +76,7 @@ def get_app_log(
                 continue
             try:
                 entries.append(_parse_entry(json.loads(line)))
-            except (json.JSONDecodeError, Exception):
+            except Exception:
                 continue
         return {'entries': entries}
     except FileNotFoundError:
@@ -117,7 +117,7 @@ async def stream_app_log(request: Request):
                 try:
                     entry = _parse_entry(json.loads(line_str))
                     yield f'data: {json.dumps(entry)}\n\n'
-                except (json.JSONDecodeError, Exception):
+                except Exception:
                     continue
         finally:
             try:
