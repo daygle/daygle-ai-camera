@@ -157,14 +157,15 @@ window.daygleAuthReady = (async () => {
     const payload = await response.json();
     const user = payload.user || {};
     const csrfToken = payload.csrf_token || '';
+    const expiresAt = payload.expires_at || '';
     // Pipe into the shared holder. By the time we reach here the fetch has
     // resolved, so utils.js (which loads synchronously between nav.js and
     // the page's JS) has registered setApiAuth and the window.daygleUi
     // registry. setApiAuth() is the canonical writer of window.daygleAuth -
-    // this single call covers the user + csrfToken pairing, so there's no
-    // redundant direct assignment below it.
+    // this single call covers the user + csrfToken + expiresAt trio, so
+    // there's no redundant direct assignment below it.
     if (typeof setApiAuth === 'function') {
-      setApiAuth(user, csrfToken);
+      setApiAuth(user, csrfToken, expiresAt);
     }
     // Propagate display preferences so utils.formatDate honours the
     // user's chosen date_format / time_format on every page (dashboard,
@@ -176,7 +177,21 @@ window.daygleAuthReady = (async () => {
         time_format: user.time_format || '24h',
       });
     }
-    return { user, csrfToken };
+    // scheduleNextAuthRefresh is idempotent and respects the cached token -
+    // safe to call here even on the initial load. Pairs with the lazy
+    // renewal in app/auth.py::get_session so the server-side row rotates
+    // on the very same cadence as the client-side refresh timer.
+    if (typeof window.scheduleNextAuthRefresh === 'function') {
+      window.scheduleNextAuthRefresh();
+    }
+    // Tell other Tabs of the same user about the new CSRF token. Without
+    // this, opening Tab B after Tab A logged in would leave Tab B showing
+    // a stale user's avatar (or "?" if its own session expired) until its
+    // scheduled refresh fires.
+    if (typeof window.broadcastAuthStateToOtherTabs === 'function' && user && csrfToken) {
+      window.broadcastAuthStateToOtherTabs(user, csrfToken, expiresAt);
+    }
+    return { user, csrfToken, expiresAt };
   } catch {
     return null;
   }
@@ -393,29 +408,21 @@ window.daygleAuthReady = (async () => {
   });
 
   /* ── Auth ── */
-  // Reuse the single /api/auth/me fetch kicked off at script load above
-  // (window.daygleAuthReady). When it resolves, window.daygleAuth is
-  // populated with { user, csrfToken } and api() in utils.js can attach
-  // X-CSRF-Token to subsequent state-changing calls.
+  // The single source of truth for the account dropdown lives at the TOP
+  // LEVEL of this file (``renderNavAccount`` below), exposed on
+  // ``window.daygleUi`` so the cross-tab auth-state-changed listener and
+  // the visibilitychange/focus refresh hooks below can all re-paint the
+  // avatar without coupling to the IIFE's captured ``nav`` reference.
+  // Resolving ``window.daygleUi?.renderNavAccount?.(...)`` keeps the call
+  // future-proof if the listener fires before utils.js's setApiAuth has
+  // had a chance to dispatch the very first event (e.g. on the login page
+  // where the bootstrap IIFE in nav.js never paints an account dropdown).
   await window.daygleAuthReady;
-  if (!window.daygleAuth.user) {
-    // Unauthenticated (e.g. /login or session expired). Leave the static
-    // account dropdown rendered; the server-side redirect handles gating.
-    return;
+  if (window.daygleUi?.renderNavAccount) {
+    window.daygleUi.renderNavAccount(window.daygleAuth.user);
   }
-  const user = window.daygleAuth.user;
+
   const csrfToken = window.daygleAuth.csrfToken;
-  const navUser = document.getElementById('navUser');
-  const navAvatar = document.getElementById('navAvatar');
-  if (user.username) {
-    if (navUser) navUser.textContent = user.username;
-    if (navAvatar) navAvatar.textContent = user.username.charAt(0).toUpperCase();
-  }
-  if (user.role !== 'admin') {
-    nav.querySelectorAll('[data-admin="true"]').forEach((el) => {
-      el.hidden = true;
-    });
-  }
   const logoutBtn = document.getElementById('navLogoutBtn');
   if (logoutBtn && csrfToken) {
     logoutBtn.addEventListener('click', async () => {
@@ -424,7 +431,100 @@ window.daygleAuthReady = (async () => {
       } catch {
         // Ignore network errors; the redirect below will clear the session server-side.
       }
-      window.location.href = '/login';
+      // Use window.defaultReturnTo defensively: by the time the user clicks
+      // Logout utils.js has long loaded, but a future refactor that defers
+      // the listener binding still has to work without us reading a bare
+      // identifier that resolves through the IIFE's closure.
+      const safeTo = window.defaultReturnTo ? window.defaultReturnTo() : '/';
+      window.location.href = '/login?returnTo=' + encodeURIComponent(safeTo);
     });
   }
-}());
+
+  /* ── Idle-refresh hooks (visibilitychange + focus) ──────────────────
+   * Thresholds:
+   *   1. Skip the refresh if the cached expires_at still has at least
+   *      ``AUTH_FOCUS_REFRESH_MARGIN_MS`` of runway. Rapidly Alt-Tabbing
+   *      between windows otherwise polls /api/auth/me once per focus.
+   *   2. visibilitychange -> visible is the cross-tab-aware trigger.
+   *      window.addEventListener('focus', ...) is a belt-and-braces
+   *      fallback for browsers that miss the visible transition.
+   *   3. The refresh result flows through setApiAuth -> CustomEvent ->
+   *      ``daygleUi.renderNavAccount`` via the listener at the bottom of
+   *      this file, so no inline render call is needed here.
+   */
+  const AUTH_FOCUS_REFRESH_MARGIN_MS = 5 * 60 * 1000;
+  function isFreshForRefresh() {
+    const exp = window.daygleAuth?.expiresAt;
+    if (!exp) return true;
+    const ms = Date.parse(exp) - Date.now();
+    return !Number.isFinite(ms) || ms > AUTH_FOCUS_REFRESH_MARGIN_MS;
+  }
+  function onReturnToForeground() {
+    if (typeof window.refreshDaygleAuth !== 'function') return;
+    if (!window.daygleAuth?.user) return; // handleSessionLoss already redirects on a 401 from any page's first request.
+    if (isFreshForRefresh()) return;
+    window.refreshDaygleAuth().catch(() => { /* keep last-known auth on transient network blips */ });
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') onReturnToForeground();
+  });
+  window.addEventListener('focus', onReturnToForeground);
+})();
+
+// ─── Top-level account-area renderer ────────────────────────────────────
+// Lives at the top level (NOT inside the nav-builder IIFE) so the cross-tab
+// listener below — which has to register before any user interaction — can
+// re-paint the account dropdown when a different tab toggles the auth
+// state. The IIFE bootstrap calls this once after building the DOM, and
+// every subsequent auth-state change (logout from another tab, csrf refresh,
+// session-loss redirect) flows through one of three entry points:
+//   1. window.daygleAuthReady resolution (initial paint)
+//   2. daygle:auth-state-changed CustomEvent (utils.js cross-tab listener)
+//   3. visibilitychange / window focus (idle-tab refresh)
+function renderNavAccount(user) {
+  const navUser = document.getElementById('navUser');
+  const navAvatar = document.getElementById('navAvatar');
+  const logoutBtn = document.getElementById('navLogoutBtn');
+  const nav = document.querySelector('.app-nav');
+  const safeReturnTo = (typeof window.defaultReturnTo === 'function')
+    ? window.defaultReturnTo()
+    : (window.location && (window.location.pathname + (window.location.search || ''))) || '/';
+  if (!user || !user.username) {
+    if (navUser) navUser.textContent = 'Sign in';
+    if (navAvatar) navAvatar.textContent = '↳';
+    // Promote the avatar into a clickable Sign in affordance rather than
+    // the bare dropdown trigger. The dropdown stays for screens that err
+    // on the keyboard-navigable side; the trigger now redirects when
+    // clicked without a real session.
+    const trigger = nav?.querySelector('.nav-dropdown[data-dropdown="account"] .nav-dropdown-trigger');
+    if (trigger) {
+      trigger.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        window.location.href = '/login?returnTo=' + encodeURIComponent(safeReturnTo);
+      };
+    }
+    if (logoutBtn) logoutBtn.hidden = true;
+    if (nav) nav.querySelectorAll('[data-admin="true"]').forEach((el) => { el.hidden = true; });
+    return;
+  }
+  if (navUser) navUser.textContent = user.username;
+  if (navAvatar) navAvatar.textContent = user.username.charAt(0).toUpperCase();
+  if (user.role !== 'admin' && nav) {
+    nav.querySelectorAll('[data-admin="true"]').forEach((el) => { el.hidden = true; });
+  }
+  if (logoutBtn) logoutBtn.hidden = false;
+}
+
+// Expose on the daygleUi registry so re-rendering is callable from any
+// per-page script that mounts after nav.js (no parallel/duplicate defs).
+window.daygleUi = Object.assign(window.daygleUi || {}, { renderNavAccount });
+
+// subscribeDaygleAuthCrossTabs (utils.js) emits CustomEvent('daygle:auth-state-changed')
+// on every localStorage 'storage' event received AND on a same-tab refresh
+// result. We listen here to re-paint the avatar/account dropdown so it
+// reflects the latest auth state without an explicit /api/auth/me round
+// trip on every cross-tab write.
+window.addEventListener('daygle:auth-state-changed', () => {
+  renderNavAccount(window.daygleAuth && window.daygleAuth.user || null);
+});

@@ -47,6 +47,34 @@ def _session_cookie_name() -> str:
     return str(effective_auth_config().get('cookie_name', SESSION_COOKIE))
 
 
+# Paths that must never be honoured as a ``returnTo`` target, even when the
+# caller forwards them via ``?returnTo=...``. Centralised so /login, /setup,
+# /logout never loop, and so authenticated admin paths can be guarded if a
+# pre-setup request ever lands on a non-admin account down the line.
+_LOGIN_DISALLOWED_REDIRECT_PREFIXES = (
+    '/login', '/logout', '/setup', '/api/', '/static/',
+)
+
+
+def _safe_return_to(raw: str | None) -> str:
+    """Validate a ``returnTo`` query value and return a safe redirect target.
+
+    Accepts ONLY same-origin relative paths whose first character is a
+    single ``/`` (NOT ``//`` — protocol-relative URLs would let a crafted
+    ``?returnTo=//evil.com`` hijack the redirect). Anything else — absolute
+    URLs, non-slash prefixes, paths that point back at /login/setup/logout
+    or to the JSON API or static-asset routes — collapses to ``/`` so a
+    typo or attacker tweak can never strand the user in an infinite auth
+    loop or worse.
+    """
+    candidate = str(raw or '').strip()
+    if not candidate or not candidate.startswith('/') or candidate.startswith('//'):
+        return '/'
+    if any(candidate == prefix.rstrip('/') or candidate.startswith(prefix) for prefix in _LOGIN_DISALLOWED_REDIRECT_PREFIXES):
+        return '/'
+    return candidate
+
+
 @router.get('/')
 def root(web_dir: Path = Depends(get_web_dir)):
     index_path = web_dir / 'index.html'
@@ -67,18 +95,30 @@ def favicon(web_dir: Path = Depends(get_web_dir)):
 def login_page(
     request: Request,
     error: str | None = None,
+    return_to: str | None = None,
     auth=Depends(get_auth),
     auth_enabled: bool = Depends(get_auth_enabled),
 ):
     if auth_enabled and auth.users_exist() and auth.get_session(request.cookies.get(_session_cookie_name())):
-        return RedirectResponse('/', status_code=303)
+        # If the caller was bounced away from a real page (e.g. session timed
+        # out while the tab was idle and api() triggered handleSessionLoss),
+        # honour their intended destination rather than dumping them at /.
+        safe_return = _safe_return_to(return_to)
+        return RedirectResponse(safe_return or '/', status_code=303)
+    safe_return = _safe_return_to(return_to)
     error_html = f'<p class="error">{escape(error)}</p>' if error else ''
+    return_field = (
+        f'  <input type="hidden" name="return_to" value="{escape(safe_return)}" />\n'
+        if safe_return not in ('', '/')
+        else ''
+    )
     return csrf_token_response(
         request,
         'Login',
         '\n<h1>Sign In</h1><p class="muted">Enter your Daygle AI Camera credentials.</p>'
         f'{error_html}\n<form class="form-stack" method="post" action="/login">\n'
         '  <input type="hidden" name="csrf_token" value="{csrf}" />\n'
+        f'{return_field}'
         '  <label>Username<input name="username" autocomplete="username" required /></label>\n'
         '  <label>Password<input name="password" type="password" autocomplete="current-password" required /></label>\n'
         '  <button class="primary" type="submit">Sign In</button>\n'

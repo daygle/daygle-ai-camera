@@ -21,7 +21,7 @@ from app.auth_helpers import clear_auth_cookies, set_session_cookie
 from app.config_facades import effective_auth_config
 from app.deps import get_auth, get_auth_enabled, get_database, get_logger
 from app.request_helpers import form_data
-from app.api.web_router import login_page, setup_page
+from app.api.web_router import _safe_return_to, login_page, setup_page
 
 router = APIRouter()
 
@@ -66,7 +66,11 @@ async def login(request: Request, db=Depends(get_database), auth=Depends(get_aut
         )
     except Exception as unexpected_exc:
         logger.warning('Unexpected error during login: %s', unexpected_exc)
-    response = RedirectResponse('/', status_code=303)
+    # Honour the page the user was on before being kicked to /login. Validated
+    # through the same hardened _safe_return_to() used by the GET handler so
+    # no caller can craft a post-body return_to to bypass the loop guards.
+    safe_return = _safe_return_to(data.get('return_to'))
+    response = RedirectResponse(safe_return or '/', status_code=303)
     set_session_cookie(response, request, token, expires_at)
     response.delete_cookie(CSRF_COOKIE)
     return response

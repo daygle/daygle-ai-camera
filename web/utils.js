@@ -61,13 +61,54 @@ window.showToast = showToast;
 // without re-fetching /api/auth/me. Populated by `setApiAuth()`.
 window.daygleAuth = window.daygleAuth || { user: null, csrfToken: null };
 
-function setApiAuth(user, csrfToken) {
+// Backwards-compatible: third arg is the ISO `expires_at` from
+// /api/auth/me, kept on window.daygleAuth so the scheduled refresh can
+// defer "re-fetch in (expiresAt - now - 60s)" without an extra round-trip.
+function setApiAuth(user, csrfToken, expiresAt = null) {
   window.daygleAuth.user = user || null;
   window.daygleAuth.csrfToken = csrfToken || null;
+  window.daygleAuth.expiresAt = expiresAt || '';
+  // Single dispatch point for auth-state-change notifications. Every writer
+  // (daygleAuthReady IIFE, refreshDaygleAuth, subscribeDaygleAuthCrossTabs,
+  // handleSessionLoss via its internal setApiAuth(null, null, null)) routes
+  // through here, so listeners get one event per real change regardless of
+  // how it was triggered - login, refresh, cross-tab CSRF rotation, or
+  // session-loss redirect. The event is a no-op in browsers without
+  // CustomEvent (which is essentially no one) and a no-op for any consumer
+  // that hasn't registered a listener.
+  try { window.dispatchEvent(new CustomEvent('daygle:auth-state-changed')); } catch (_err) { /* ignore */ }
 }
 
 function getApiAuth() {
   return window.daygleAuth;
+}
+
+// Where to send the user when their session has died. Public pages
+// (/login, /setup, /logout) would navigate to themselves in an infinite
+// loop if used as returnTo, so they normalise to '/'.
+function defaultReturnTo() {
+  const path = window.location?.pathname || '/';
+  if (path === '/login' || path === '/setup' || path === '/logout') return '/';
+  return path + (window.location?.search || '');
+}
+
+// Single redirect-on-session-loss path. Used by both 401 (auth gone) and a
+// CSRF-mismatch 403 (auth was working, now the cached csrf_token is stale).
+// Idempotent: a burst of in-flight requests collapse to a single redirect.
+function handleSessionLoss(reason, returnTo) {
+  if (!window.daygleAuth) return;
+  if (window.daygleAuth.redirecting) return;
+  if (typeof setApiAuth === 'function') setApiAuth(null, null, null);
+  window.daygleAuth.redirecting = true;
+  showToast(reason || 'Session expired - please sign in again', true);
+  const target = '/login?returnTo=' + encodeURIComponent(returnTo || defaultReturnTo());
+  try { window.location.href = target; } catch (_err) { /* ignore */ }
+  clearTimeout(window.daygleAuth._redirectTimer);
+  window.daygleAuth._redirectTimer = setTimeout(() => {
+    if (!window.daygleAuth) return;
+    window.daygleAuth.redirecting = false;
+    window.daygleAuth._redirectTimer = null;
+  }, 250);
 }
 
 async function api(path, options = {}) {
@@ -86,29 +127,118 @@ async function api(path, options = {}) {
   }
   const response = await fetch(path, { ...options, headers });
   if (response.status === 401) {
-    // Flag the redirect on daygleAuth (alongside user/csrfToken) so
-    // page-side catches short-circuit the 'Authentication required'
-    // panel flash on a page about to navigate. Cache the timer's id
-    // so a burst of 401s resets the 250 ms bound (exceeds typical
-    // redirect round-trip; short enough that a genuine non-401 error
-    // on the same still-alive page surfaces). clearTimeout(undefined)
-    // is a safe no-op.
-    window.daygleAuth.redirecting = true;
-    window.location.href = '/login';
-    clearTimeout(window.daygleAuth._redirectTimer);
-    window.daygleAuth._redirectTimer = setTimeout(() => {
-      window.daygleAuth.redirecting = false;
-      window.daygleAuth._redirectTimer = null;
-    }, 250);
+    handleSessionLoss('Authentication required', defaultReturnTo());
     throw new Error('Authentication required');
   }
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload.detail || `Request failed: ${response.status}`);
+  const payload = await response.json().catch(() => {});
+  // 403 with the CSRF markers in the body's `detail` AND we were
+  // previously authed = a stale CSRF cookie/token. The server-side
+  // ``csrf_protect`` returns ``CSRF token mismatch`` (or a similar
+  // ``Invalid token`` / ``Missing cookie``) on a session that no
+  // longer carries our csrf row. Admin-role denials surface as
+  // ``Admin access required`` and are intentionally NOT treated as
+  // session-loss here, so a non-admin hitting an admin endpoint gets
+  // the original 403 toast, not a login redirect.
+  if (response.status === 403 && window.daygleAuth?.user) {
+    const detail = String((payload && payload.detail) || '');
+    if (/csrf|invalid.?token|missing.?cookie|invalid.?x-csr/i.test(detail)) {
+      handleSessionLoss('Session expired - please sign in again', defaultReturnTo());
+      throw new Error('Session expired');
+    }
   }
-  return payload;
+  if (!response.ok) {
+    throw new Error((payload && payload.detail) || `Request failed: ${response.status}`);
+  }
+  return payload || {};
 }
 window.api = api;
+
+// ─── Background auth refresh ──────────────────────────────────────────────
+// Single source of truth used by nav.js's daygleAuthReady IIFE *and* by
+// visibilitychange / focus-driven refresh. Re-runs the same /api/auth/me
+// fetch and pipes the result through setApiAuth (now extended to carry
+// expiresAt). After every successful refresh, schedule the next one ~1
+// minute before the server-stated expiry so the CSRF token is rotated
+// before it goes stale, and never after the user has been logged out.
+//
+// Transient network failures keep the last-known auth state intact so
+// the user doesn't get bounced on a flaky connection; only a real 401
+// triggers handleSessionLoss.
+async function refreshDaygleAuth() {
+  let response;
+  try {
+    response = await fetch('/api/auth/me', { credentials: 'same-origin' });
+  } catch (_err) {
+    return window.daygleAuth?.user ? { user: window.daygleAuth.user, csrfToken: window.daygleAuth.csrfToken, expiresAt: window.daygleAuth.expiresAt || '' } : null;
+  }
+  if (response.status === 401) {
+    handleSessionLoss('Session expired - please sign in again', defaultReturnTo());
+    return null;
+  }
+  if (!response.ok) {
+    return window.daygleAuth?.user ? { user: window.daygleAuth.user, csrfToken: window.daygleAuth.csrfToken, expiresAt: window.daygleAuth.expiresAt || '' } : null;
+  }
+  let payload = null;
+  try { payload = await response.json(); } catch (_err) { return null; }
+  const user = payload?.user || null;
+  const csrfToken = payload?.csrf_token || '';
+  const expiresAt = payload?.expires_at || '';
+  setApiAuth(user, csrfToken, expiresAt);
+  scheduleNextAuthRefresh();
+  if (user && csrfToken) {
+    broadcastAuthStateToOtherTabs(user, csrfToken, expiresAt);
+  }
+  return { user, csrfToken, expiresAt };
+}
+
+function scheduleNextAuthRefresh() {
+  if (!window.daygleAuth) return;
+  clearTimeout(window.daygleAuth._refreshTimer);
+  const exp = window.daygleAuth.expiresAt;
+  if (!exp) return;
+  const ms = Date.parse(exp) - Date.now() - 60_000;
+  if (!Number.isFinite(ms)) return;
+  if (ms <= 0) {
+    // Already past the soft window - refresh now (network permitting).
+    window.daygleAuth._refreshTimer = setTimeout(refreshDaygleAuth, 0);
+  } else {
+    window.daygleAuth._refreshTimer = setTimeout(refreshDaygleAuth, ms);
+  }
+}
+
+// localStorage is the cross-tab transport. The ``storage`` event in every
+// OTHER open tab fires when one tab writes; the writing tab itself does
+// NOT receive the event (so this naturally avoids double-fetching within
+// the same tab on every refresh).
+const DAYGLE_AUTH_STORAGE_KEY = 'daygle.auth.v1';
+function broadcastAuthStateToOtherTabs(user, csrfToken, expiresAt) {
+  try {
+    localStorage.setItem(
+      DAYGLE_AUTH_STORAGE_KEY,
+      JSON.stringify({ u: user?.username || '', csrf: csrfToken, exp: expiresAt || '', ts: Date.now() }),
+    );
+  } catch (_err) { /* storage disabled / quota - silently no-op */ }
+}
+function subscribeDaygleAuthCrossTabs() {
+  window.addEventListener('storage', (event) => {
+    if (event.key !== DAYGLE_AUTH_STORAGE_KEY || !event.newValue) return;
+    let parsed;
+    try { parsed = JSON.parse(event.newValue); } catch (_err) { return; }
+    if (!parsed) return;
+    // Don't clobber a logged-in user with a logout-shaped event when the
+    // payload has no csrf; treat missing csrf as "session ended".
+    if (!parsed.csrf) {
+      if (typeof handleSessionLoss === 'function') {
+        handleSessionLoss('Session expired - please sign in again', defaultReturnTo());
+      }
+      return;
+    }
+    const userObj = (window.daygleAuth?.user) || null;
+    setApiAuth(userObj, parsed.csrf, parsed.exp || '');
+    if (typeof scheduleNextAuthRefresh === 'function') scheduleNextAuthRefresh();
+  });
+}
+subscribeDaygleAuthCrossTabs();
 
 // ─── Detection pill rendering (shared by dashboard, recordings, timeline) ─
 // Sound class identifiers (mirror SOUND_CLASSES in app/sound_detector.py). A
@@ -604,7 +734,8 @@ function getDaygleDatePrefs() {
 
 window.daygleUi = {
   // API + auth
-  api, setApiAuth, getApiAuth,
+  api, setApiAuth, getApiAuth, refreshDaygleAuth, scheduleNextAuthRefresh,
+  handleSessionLoss, defaultReturnTo,
   // UI helpers
   showToast, escapeHtml, titleCase, requireElements,
   detectionPill, motionPill, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, MOTION_RUNNING_ROW_ICON,

@@ -409,6 +409,45 @@ class AuthService:
                 except Exception:
                     pass
 
+    # Lazy-renewal window: any session that hasn't been touched in this much
+    # wall clock gets its ``expires_at`` extended by ``session_timeout`` on the
+    # next authenticated read. 5 minutes balances write amplification (cheap
+    # SELECT-then-UPDATE per call) against staleness (a refresh metadata in
+    # the browser typically fires every few minutes when the tab is active;
+    # 5 minutes leaves a wide margin to the default 12 h timeout). Tighter /
+    # wider values are both safe; this default matches common CRUD app
+    # practice for sliding windows.
+    _SESSION_RENEWAL_INTERVAL = timedelta(minutes=5)
+
+    def _renew_session_if_stale(self, db: sqlite3.Connection, session_token: str, current_expires_at: str, now_dt: datetime) -> str:
+        """Extend ``expires_at`` by ``session_timeout`` if the session hasn't
+        been touched in the last ``_SESSION_RENEWAL_INTERVAL`` minutes.
+        Returns the (possibly renewed) ``expires_at`` ISO string so the
+        caller can pass it back to the client. This is the server-side side
+        of the timeout UX fix in ``web/utils.js`` — every authenticated read
+        silently keeps the session alive while the user is actively using
+        the app, so an idle tab returning to the foreground is no longer
+        greeted by "Session expired" because the very GET that woke it
+        already extended the row.
+        """
+        try:
+            current_exp_dt = datetime.fromisoformat(current_expires_at)
+        except (TypeError, ValueError):
+            return current_expires_at
+        # If the row was last renewed < ``_SESSION_RENEWAL_INTERVAL`` ago we
+        # leave it alone. ``-now_dt`` is the inverse delta — last renew time
+        # isn't on the row, so use expires_at as the proxy: a session that
+        # still has plenty of runway was almost certainly just refreshed.
+        remaining = current_exp_dt - now_dt
+        if remaining >= self.session_timeout - self._SESSION_RENEWAL_INTERVAL:
+            return current_expires_at
+        new_expires_at = (now_dt + self.session_timeout).isoformat()
+        db.execute(
+            "UPDATE user_sessions SET expires_at = ?, last_seen_at = ? WHERE session_token = ?",
+            (new_expires_at, now_dt.isoformat(), session_token),
+        )
+        return new_expires_at
+
     def get_session(self, session_token: str | None) -> dict[str, Any] | None:
         if not session_token:
             return None
@@ -430,8 +469,13 @@ class AuthService:
             if not row["is_active"] or datetime.fromisoformat(row["expires_at"]) <= now_dt:
                 db.execute("DELETE FROM user_sessions WHERE session_token = ?", (session_token,))
                 return None
-            db.execute("UPDATE user_sessions SET last_seen_at = ? WHERE session_token = ?", (now, session_token))
-            return {"session_token": row["session_token"], "csrf_token": row["csrf_token"], "expires_at": row["expires_at"], "user": self.public_user(row)}
+            expires_at = self._renew_session_if_stale(db, row["session_token"], row["expires_at"], now_dt)
+            # Keep last_seen_at fresh regardless of whether we renewed. The
+            # ``_renew_session_if_stale`` already sets it on the renew path so
+            # only issue the no-op UPDATE when the session was just-up-to-date.
+            if expires_at == row["expires_at"]:
+                db.execute("UPDATE user_sessions SET last_seen_at = ? WHERE session_token = ?", (now, session_token))
+            return {"session_token": row["session_token"], "csrf_token": row["csrf_token"], "expires_at": expires_at, "user": self.public_user(row)}
 
     def delete_session(self, session_token: str | None) -> None:
         if not session_token:
