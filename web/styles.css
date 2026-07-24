@@ -3448,8 +3448,18 @@ a.activity-item-action {
 
 /* All-cameras mode stacks one mini-strip per camera row. */
 .live-motion-multi-row {
-  display: grid;
-  gap: 10px;
+           display: grid;
+           gap: 10px;
+           max-height: 300px;
+           overflow-y: auto;
+           padding-right: 4px;
+}
+.live-motion-multi-row::-webkit-scrollbar {
+           width: 4px;
+}
+.live-motion-multi-row::-webkit-scrollbar-thumb {
+           background: rgba(255,255,255,0.15);
+           border-radius: 999px;
 }
 .live-motion-row-head {
   display: flex;
