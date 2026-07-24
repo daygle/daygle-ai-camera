@@ -243,7 +243,7 @@ def write_live_history_detection_track(
         logger.warning('Could not write detection track for recording %s: %s', recording_id, exc)
         return False
     localized = sum(1 for sample in track if sample.get('detections'))
-    logger.info(
+    logger.debug(
         'Saved detection track for recording %s from live history (%d samples, %d with detections).',
         recording_id, len(track), localized,
     )
