@@ -152,6 +152,15 @@ async def camera_ptz(camera_id: str, request: Request):
     tcp_port = int(ptz.get('port') or 6060)
     address = int(ptz.get('address') or 1)
     speed = int(ptz.get('speed') or 5)
+    # Per-camera step duration: every ContinuousMove SOAP body carries an
+    # ``<Timeout>`` value of ``step_duration`` seconds, so the camera
+    # self-stops after that interval even if the explicit /api/.../ptz
+    # ``stop`` call is dropped. Defaults to 0.4s when missing or invalid;
+    # the normalizer is the canonical clamp site (0.1-5.0s).
+    try:
+        step_duration = float(ptz.get('step_duration') or 0.4)
+    except (TypeError, ValueError):
+        step_duration = 0.4
     username = str(cam.get('username') or '')
     password = str(cam.get('password') or '')
 
@@ -160,6 +169,7 @@ async def camera_ptz(camera_id: str, request: Request):
             send_ptz_command, host, command, speed, protocol,
             http_port=http_port, tcp_port=tcp_port, address=address,
             username=username, password=password,
+            timeout_seconds=step_duration,
         )
     except OSError as exc:
         raise HTTPException(status_code=502, detail=f'PTZ connection failed: {exc}') from exc

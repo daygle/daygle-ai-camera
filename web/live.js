@@ -904,31 +904,90 @@ async function sendPtz(command) {
   }
 }
 
+// Visual-feedback helpers for the PTZ overlay: pressed/active CSS state on
+// the pressed button plus the "Moving" status pill in the top-right corner.
+function setPtzMoving(btn, isMoving) {
+  if (btn) btn.setAttribute('data-moving', isMoving ? 'true' : 'false');
+  const status = document.getElementById('ptzStatus');
+  if (status) status.setAttribute('data-visible', isMoving ? 'true' : 'false');
+  if (ptzOverlay) ptzOverlay.classList.toggle('ptz-overlay--active', isMoving);
+}
+
+const PTZ_STEP_DURATION_DEFAULT = 0.4;   // seconds — matches normalize_camera_ptz_settings default
+const PTZ_STEP_DURATION_MIN = 0.1;
+const PTZ_STEP_DURATION_MAX = 5.0;
+
+function clampStepDuration(raw) {
+  const n = Number.parseFloat(raw);
+  if (!Number.isFinite(n)) return PTZ_STEP_DURATION_DEFAULT;
+  return Math.min(Math.max(n, PTZ_STEP_DURATION_MIN), PTZ_STEP_DURATION_MAX);
+}
+
+let ptzHoldTimer = null;
+let ptzActiveBtn = null;
+
+function endPtzHold({ sendStop = true } = {}) {
+  if (ptzHoldTimer !== null) {
+    clearInterval(ptzHoldTimer);
+    ptzHoldTimer = null;
+  }
+  const heldBtn = ptzActiveBtn;
+  ptzActiveBtn = null;
+  setPtzMoving(heldBtn, false);
+  if (!heldBtn) return;
+  const stopCmd = heldBtn.dataset.ptzStop;
+  if (sendStop && stopCmd) sendPtz(stopCmd);
+}
+
 if (ptzOverlay) {
+  // Global release handlers (capture phase) so we catch the release even if
+  // the cursor leaves the overlay, the browser tab loses focus mid-hold,
+  // or the touch is cancelled by the OS.
+  const releaseHold = () => endPtzHold();
+  document.addEventListener('mouseup', releaseHold, true);
+  document.addEventListener('touchend', releaseHold, true);
+  document.addEventListener('touchcancel', releaseHold, true);
+  document.addEventListener('pointerup', releaseHold, true);
+  window.addEventListener('blur', releaseHold);
+  window.addEventListener('pointercancel', releaseHold);
+
   ptzOverlay.querySelectorAll('[data-ptz]').forEach((btn) => {
     const startCmd = btn.dataset.ptz;
     const stopCmd = btn.dataset.ptzStop;
 
-    const start = (e) => {
+    const startHold = (e) => {
       e.preventDefault();
-      if (ptzActive && startCmd !== 'stop') return;
-      ptzActive = startCmd !== 'stop';
+      // Switching directions mid-hold: stop cleanly before starting the new
+      // direction so the camera's SOAP Timeout window resets cleanly.
+      if (ptzActiveBtn !== null) endPtzHold();
+
+      // Instant one-shot: Stop/Home button has `data-ptz="stop"` and no
+      // `data-ptz-stop` (and zooms without stop token still one-shot).
+      if (!stopCmd || startCmd === 'stop') {
+        sendPtz(startCmd);
+        return;
+      }
+
+      ptzActiveBtn = btn;
+      setPtzMoving(btn, true);
+
+      // First ContinuousMove: the backend emits ONVIF <Timeout> at the
+      // configured step duration, so the camera self-stops if our explicit
+      // Stop call is dropped on the wire.
       sendPtz(startCmd);
+
+      // Re-issue every ~70% of the step duration so the camera's self-stop
+      // timeout never fires while the user is still holding the button.
+      const stepDuration = clampStepDuration(selectedCamera?.ptz?.step_duration);
+      const refreshMs = Math.max(50, Math.round(stepDuration * 700));
+      ptzHoldTimer = setInterval(() => {
+        if (ptzActiveBtn === btn) sendPtz(startCmd);
+      }, refreshMs);
     };
 
-    const stop = (e) => {
-      e.preventDefault();
-      if (!stopCmd || startCmd === 'stop') return;
-      ptzActive = false;
-      sendPtz(stopCmd);
-    };
-
-    btn.addEventListener('mousedown', start);
-    btn.addEventListener('touchstart', start, { passive: false });
-    btn.addEventListener('mouseup', stop);
-    btn.addEventListener('mouseleave', stop);
-    btn.addEventListener('touchend', stop);
-    btn.addEventListener('touchcancel', stop);
+    btn.addEventListener('mousedown', startHold);
+    btn.addEventListener('touchstart', startHold, { passive: false });
+    // Release is handled globally via the capture-phase listeners above.
   });
 }
 

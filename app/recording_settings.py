@@ -80,6 +80,25 @@ def normalize_camera_ptz_settings(settings: Any) -> dict[str, Any]:
         except (TypeError, ValueError):
             return default
 
+    def _float(value: Any, default: float, lo: float, hi: float) -> float:
+        try:
+            f = float(value)
+        except (TypeError, ValueError):
+            return default
+        if f != f:  # NaN guard
+            return default
+        return max(lo, min(hi, f))
+
+    # ``step_duration`` is the ContinuousMove SOAP ``<Timeout>`` value in
+    # seconds. The camera self-stops after this many seconds even if the
+    # explicit /api/.../ptz ``stop`` command is dropped - addressing the
+    # "press left, see nothing, press left again, camera pans too far"
+    # failure mode by bounding every fresh send. The lower bound of 0.1s
+    # filters out machine-gun sub-second moves that thrash cheap motor
+    # controllers; the 5s upper bound keeps the safety net from
+    # accidentally disabling the safety.
+    step_duration = _float(raw.get('step_duration'), 0.4, 0.1, 5.0)
+
     return {
         'enabled': normalize_bool_setting(raw.get('enabled'), False),
         'protocol': protocol,
@@ -87,6 +106,7 @@ def normalize_camera_ptz_settings(settings: Any) -> dict[str, Any]:
         'port': _int(raw.get('port'), 6060, 1, 65535),
         'address': _int(raw.get('address'), 1, 1, 255),
         'speed': _int(raw.get('speed'), 5, 1, 8),
+        'step_duration': step_duration,
     }
 
 

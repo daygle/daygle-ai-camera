@@ -113,10 +113,18 @@ def _get_profile_token(host: str, http_port: int, username: str, password: str) 
 
 def send_ptz_command_onvif(
     host: str, http_port: int, command: str, speed: int, username: str, password: str,
+    timeout_seconds: float = 0.4,
 ) -> None:
     token = _get_profile_token(host, http_port, username, password)
     ptz_url = f'http://{host}:{http_port}/onvif/ptz_service'
     speed_factor = max(0.1, min(1.0, int(speed) / 8.0))
+    # ContinuousMove interprets ``<Timeout>`` as an xsd:duration ("PT{n}S").
+    # The camera self-stops after this many seconds even if the explicit
+    # /api/.../ptz ``stop`` command is dropped (network jitter, server
+    # restart, etc.). Clamp the value defensively so a misbehaving caller
+    # can't send an unreasonably long or short timeout to the camera.
+    safe_timeout = max(0.05, min(10.0, float(timeout_seconds or 0.4)))
+    timeout_iso = f'PT{safe_timeout:.2f}S'
 
     if command == 'stop':
         body = (
@@ -131,6 +139,7 @@ def send_ptz_command_onvif(
         body = (
             '<tptz:ContinuousMove>'
             f'<tptz:ProfileToken>{token}</tptz:ProfileToken>'
+            f'<tptz:Timeout>{timeout_iso}</tptz:Timeout>'
             '<tptz:Velocity>'
             f'<tt:PanTilt x="{pan * speed_factor:.3f}" y="{tilt * speed_factor:.3f}"/>'
             f'<tt:Zoom x="{zoom * speed_factor:.3f}"/>'
@@ -139,7 +148,7 @@ def send_ptz_command_onvif(
         )
 
     _soap(ptz_url, body, username, password)
-    logger.debug('ONVIF PTZ %s → %s:%d', command, host, http_port)
+    logger.debug('ONVIF PTZ %s → %s:%d (timeout=%s)', command, host, http_port, timeout_iso)
 
 
 # ─── Raw PelcoD over TCP (fallback for cameras without ONVIF) ─────────────────
@@ -180,10 +189,18 @@ def send_ptz_command(
     address: int = 1,
     username: str = '',
     password: str = '',
+    timeout_seconds: float = 0.4,
 ) -> None:
     if command not in VALID_COMMANDS:
         raise ValueError(f'Unknown PTZ command: {command!r}')
     if protocol == 'tcp_pelcod':
+        # PelcoD has no ``Timeout`` concept - the camera pans continuously
+        # until the next command. Clients that want a tap-to-step UX must
+        # pair a minimum-press-duration gate with their own JS-level Stop
+        # fire on release. The config knob is not consulted here.
         send_ptz_command_tcp(host, tcp_port, address, command, max(0, min(63, speed)))
     else:
-        send_ptz_command_onvif(host, http_port, command, speed, username, password)
+        send_ptz_command_onvif(
+            host, http_port, command, speed, username, password,
+            timeout_seconds=timeout_seconds,
+        )

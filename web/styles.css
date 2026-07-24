@@ -2322,6 +2322,73 @@ a.activity-item-action {
 }
 .ptz-btn:hover { background: rgba(255, 255, 255, 0.18); }
 .ptz-btn:active { background: rgba(255, 255, 255, 0.28); transform: scale(0.93); }
+
+/* ===================================================================
+   PTZ overlay UX (tap-for-step + hold-to-pan)
+   =================================================================== */
+
+/* Pressed / currently-holding state on a PTZ button. */
+.ptz-btn:active,
+.ptz-btn[data-moving="true"] {
+  background: rgba(255, 255, 255, 0.32);
+  transform: scale(0.92);
+  box-shadow: 0 0 0 2px rgba(120, 200, 255, 0.55) inset;
+}
+
+/* Fade the overlay label while a control is actively held. */
+.ptz-overlay.ptz-overlay--active .ptz-label {
+  opacity: 0.55;
+}
+
+/* "Moving" status pill shown in the top-right of the PTZ overlay. */
+.ptz-status {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.ptz-status[data-visible="true"] {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ptz-status::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff5252;
+  box-shadow: 0 0 6px rgba(255, 82, 82, 0.7);
+  animation: ptzStatusPulse 900ms ease-in-out infinite;
+}
+
+@keyframes ptzStatusPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+/* Respect users who prefer reduced motion: kill the pulse + transitions. */
+@media (prefers-reduced-motion: reduce) {
+  .ptz-status::before { animation: none; }
+  .ptz-btn:active,
+  .ptz-btn[data-moving="true"] { transform: none; }
+}
+
 .ptz-upleft  { grid-column: 1; grid-row: 1; }
 .ptz-up      { grid-column: 2; grid-row: 1; }
 .ptz-upright { grid-column: 3; grid-row: 1; }

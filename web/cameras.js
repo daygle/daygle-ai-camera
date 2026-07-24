@@ -285,6 +285,10 @@ function fillModal(camera, index) {
   document.getElementById('editPtzPort').value = ptz.port || 6060;
   document.getElementById('editPtzAddress').value = ptz.address || 1;
   document.getElementById('editPtzSpeed').value = ptz.speed || 5;
+  // Step duration: ONVIF ContinuousMove ``<Timeout>`` value. Empty string
+  // means "use server default (0.4s)"; validate_camera_settings will clamp.
+  const stepEl = document.getElementById('editPtzStepDuration');
+  if (stepEl) stepEl.value = ptz.step_duration != null ? Number(ptz.step_duration).toFixed(2) : '';
 
   const manual = camera.backend === 'rtsp';
   document.getElementById('rtspManualFields').hidden = !manual;
@@ -329,6 +333,12 @@ function collectModalData() {
       port: parseInt(document.getElementById('editPtzPort').value || '6060', 10),
       address: parseInt(document.getElementById('editPtzAddress').value || '1', 10),
       speed: parseInt(document.getElementById('editPtzSpeed').value || '5', 10),
+      // Empty input falls through to the server's 0.4 s default; the
+      // server-side normalizer clamps to [0.1, 5.0].
+      step_duration: (() => {
+        const raw = parseFloat(document.getElementById('editPtzStepDuration')?.value || '');
+        return Number.isFinite(raw) ? raw : 0.4;
+      })(),
     },
     detection: {},
     motion_pixel_threshold: (() => { const v = document.getElementById('editMotionPixelThreshold').value.trim(); return v !== '' ? Number.parseInt(v, 10) : null; })(),
