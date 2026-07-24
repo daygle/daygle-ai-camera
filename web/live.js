@@ -908,7 +908,12 @@ async function sendPtz(command) {
 function setPtzMoving(btn, isMoving) {
   if (btn) btn.setAttribute('data-moving', isMoving ? 'true' : 'false');
   const status = document.getElementById('ptzStatus');
-  if (status) status.setAttribute('data-visible', isMoving ? 'true' : 'false');
+  if (status) {
+    status.setAttribute('data-visible', isMoving ? 'true' : 'false');
+    status.textContent = isMoving
+      ? `${clampStepDuration(selectedCamera?.ptz?.step_duration).toFixed(1)} s step`
+      : '';
+  }
   if (ptzOverlay) ptzOverlay.classList.toggle('ptz-overlay--active', isMoving);
 }
 
