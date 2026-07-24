@@ -11,6 +11,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+from app.utils import _normalize_iso_to_utc
+
 _bcrypt_spec = importlib.util.find_spec("bcrypt")
 bcrypt = importlib.import_module("bcrypt") if _bcrypt_spec else None
 
@@ -298,7 +300,16 @@ class AuthService:
             )
 
     def too_many_recent_failures(self, db: sqlite3.Connection, username: str, ip_address: str, now: datetime) -> bool:
-        window_start = (now - self.lockout).isoformat()
+        _window_start_raw = (now - self.lockout).isoformat()
+        # Defence-in-depth -- cosmetically identical coverage to the
+        # recordings / events / camera_diagnostics lifecycle. ``(now -
+        # self.lockout).isoformat()`` against a tz-aware UTC ``now`` is
+        # already canonical ``+00:00`` so the helper is a no-op on the
+        # present call site. The wrap keeps the bound value on the
+        # same lexical form as the row's ``created_at`` even if a
+        # future caller hands ``too_many_recent_failures`` a tz-aware
+        # non-UTC datetime. Idempotent on already-canonical input.
+        window_start = _normalize_iso_to_utc(_window_start_raw) or _window_start_raw
         row = db.execute(
             """
             SELECT COUNT(*) AS count
@@ -316,7 +327,18 @@ class AuthService:
         with self.connect() as db:
             row = db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
             now_dt = datetime.now(timezone.utc)
-            now = now_dt.isoformat()
+            _now_raw = now_dt.isoformat()
+            # Defence-in-depth -- cosmetically identical coverage to the
+            # recordings / events / camera_diagnostics lifecycle.
+            # ``datetime.now(timezone.utc).isoformat()`` is canonical
+            # ``+00:00`` by construction so the helper is a no-op on the
+            # present source. The wrap ensures the ``login_attempts``
+            # ``INSERT`` below binds a canonical value even if any
+            # future patch sources ``now`` from a different shape
+            # (tz-aware non-UTC datetime, naive datetime assembled via
+            # ``.isoformat()``, etc.). Idempotent on already-canonical
+            # input.
+            now = _normalize_iso_to_utc(_now_raw) or _now_raw
             success = False
             try:
                 if row is None or not row["is_active"]:

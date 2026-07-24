@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.utils import _normalize_iso_to_utc
+
 
 class SettingsRepoMixin:
     """CRUD helpers for the ``app_settings`` key/value table.
@@ -27,6 +29,17 @@ class SettingsRepoMixin:
             return row is not None
 
     def set_setting(self, key: str, value: Any, updated_at: str) -> Any:
+        # Defence-in-depth -- cosmetically identical coverage to the
+        # recordings / events / camera_diagnostics lifecycle. Every
+        # current caller passes ``utc_now()`` from ``app.auth.utc_now``
+        # (which is canonical ``+00:00`` by construction), so the
+        # helper is a no-op on the present caller base. The wrap
+        # ensures a future caller -- a third-party settings sync, a
+        # hand-built timestamp from a CSV ingest, a JSON-LD importer
+        # -- still lands canonical on disk so an
+        # ``ORDER BY updated_at`` list page or any future age-based
+        # purge lex-compare behaves correctly.
+        updated_at = _normalize_iso_to_utc(updated_at) or updated_at
         with self.connect() as db:
             db.execute(
                 """

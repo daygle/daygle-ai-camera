@@ -733,3 +733,180 @@ def test_add_event_writes_canonical_storage(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Defence-in-depth tests -- one per remaining tz-bearing column to lock
+# in the helper-at-bind invariant on the write-side. These three
+# surfaces were A CLEAN per the prior lexical-compare audit (the
+# source already used `datetime.now(timezone.utc).isoformat()` /
+# `utc_now()` callers) but a future patch could swap the source for
+# a tz-bearing non-UTC datetime; the helper at the write bind catches
+# that. Tests are wired exactly like the existing additions above so
+# any future regression on the bind path breaks at least one of these
+# three tests immediately.
+# ─────────────────────────────────────────────────────────────────────
+
+def test_recording_labels_writes_canonical_created_at(tmp_path, monkeypatch):
+    """Defence-in-depth on ``recording_labels.created_at``.
+
+    The pre-defense source was ``datetime.now(timezone.utc).isoformat()``
+    (already canonical ``+00:00``) so the helper is a no-op on the
+    present call site. This test pins the idempotency contract:
+    ``_insert_recording_labels`` passes its bound ``now`` through
+    ``_normalize_iso_to_utc`` and shapes a canonical ``+00:00`` row
+    before the ``INSERT`` lands.
+    """
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        _login(client)
+        from app.database import EventDatabase  # noqa: PLC0415
+        database = EventDatabase(str(database_path))
+        # ``labels=[...]`` triggers ``_insert_recording_labels`` directly
+        # (the event-less path). event_id=None + labels=['person'] keeps
+        # the test deterministic; the source of ``now`` is the module's
+        # internal ``datetime.now(timezone.utc)``.
+        recording_id = database.add_recording(
+            event_id=None,
+            camera_id="camera-1",
+            started_at="2024-12-15T12:00:00+00:00",
+            ended_at="2024-12-15T12:00:10+00:00",
+            duration_seconds=10.0,
+            file_path="/tmp/r1.mp4",
+            thumbnail_path=None,
+            source="camera",
+            created_at="2024-12-15T12:00:00+00:00",
+            trigger_type="motion",
+            labels=["person"],
+        )
+        assert recording_id > 0
+        with sqlite3.connect(database_path) as db_conn:
+            rows = db_conn.execute(
+                "SELECT created_at FROM recording_labels WHERE recording_id = ? ORDER BY label ASC",
+                (recording_id,),
+            ).fetchall()
+        assert len(rows) == 1, rows
+        # The recorded ``created_at`` ends with the canonical suffix and
+        # lives on the wall-clock instant the recording was created at
+        # (right now, a few seconds after the test starts); the only
+        # fixed invariant we can assert is the suffix.
+        assert rows[0][0].endswith(CANONICAL_SUFFIX), rows[0][0]
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_app_settings_set_setting_writes_canonical_updated_at(tmp_path, monkeypatch):
+    """Defence-in-depth on ``app_settings.updated_at``.
+
+    The pre-defense source was ``utc_now()`` from ``app.auth.utc_now``
+    (already canonical ``+00:00``) so the helper is a no-op on the
+    present caller base. This test is the ONE concrete demonstration
+    of the helper fixing a non-canonical caller input: pass a
+    tz-bearing ``updated_at`` directly to ``set_setting`` and verify
+    the row stored is canonical ``+00:00`` -- NOT the raw input.
+    """
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        _login(client)
+        from app.database import EventDatabase  # noqa: PLC0415
+        database = EventDatabase(str(database_path))
+        # Pass a tz-bearing ISO string directly to set_setting. The
+        # helper must re-encode it to canonical ``+00:00`` before the
+        # row is stored.
+        database.set_setting(
+            "dt.test",
+            {"scenario": "defence_in_depth_app_settings"},
+            "2024-12-15T07:00:00-05:00",  # == 12:00:00 UTC
+        )
+        with sqlite3.connect(database_path) as db_conn:
+            row = db_conn.execute(
+                "SELECT value, updated_at FROM app_settings WHERE key = ?",
+                ("dt.test",),
+            ).fetchone()
+        assert row is not None, "set_setting should have stored the row"
+        assert row[0] == json.dumps({"scenario": "defence_in_depth_app_settings"}), row[0]
+        # The exact canonical form, NOT the tz-bearing string the
+        # caller passed in.
+        assert row[1] == "2024-12-15T12:00:00+00:00", row[1]
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_login_attempts_writes_canonical_created_at(tmp_path, monkeypatch):
+    """Defence-in-depth on ``login_attempts.created_at``.
+
+    The pre-defense source was ``datetime.now(timezone.utc).isoformat()``
+    and the bound is ``WHERE created_at >= ?`` against another UTC
+    source -- both canonical, so the helper is a no-op on the present
+    call sites. To PROVE the bind path actually catches a non-canonical
+    source we monkeypatch the ``datetime`` symbol in ``app.auth``'s
+    module namespace with a subclass whose ``now`` classmethod ignores
+    the timezone argument and returns a tz-aware EASTM datetime. We
+    then trigger an invalid login so ``authenticate``'s ``finally``
+    block writes a ``login_attempts`` row, and verify the stored
+    ``created_at`` is the canonical ``+00:00`` form (NOT the raw
+    ``-05:00`` the source produced).
+    """
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        _login(client)  # ensures an admin user exists for the DB row
+
+        import datetime as _stdlib_dt
+        import app.auth as _auth_module
+        import app.state as _state
+
+        # Fixed-offset ``datetime.timezone(timedelta(hours=-5))`` instead
+        # of ``zoneinfo.ZoneInfo('America/New_York')`` so the test does
+        # NOT require the optional ``tzdata`` package on the runtime.
+        # The shape that's actually exercised by the helper is the
+        # ``-05:00`` suffix on the bound value -- a fixed offset is
+        # enough to drive a non-canonical input through the bind path.
+        _minus_5h_tz = _stdlib_dt.timezone(_stdlib_dt.timedelta(hours=-5))
+
+        def _patched_now(cls, tz=None):
+            return _stdlib_dt.datetime(2024, 12, 15, 7, 0, 0, tzinfo=_minus_5h_tz)
+
+        # Build a datetime subclass with the patched ``now`` so
+        # patching ``app.auth.datetime`` does NOT mutate the stdlib
+        # datetime class globally (which would break concurrent tests
+        # outside this one's teardown).
+        _patched_class = type(
+            "PatchedDateTimeForDefenceInDepthTest",
+            (_stdlib_dt.datetime,),
+            {"now": classmethod(_patched_now)},
+        )
+        monkeypatch.setattr(_auth_module, "datetime", _patched_class)
+
+        # Trigger an invalid login so ``authenticate``'s ``finally``
+        # block writes a ``login_attempts`` row. ``AuthError`` is
+        # expected; we suppress it because the row is on disk
+        # regardless of the outcome.
+        try:
+            _state.auth.authenticate("no-such-user-12345", "wrong-password", "127.0.0.1")
+        except Exception:
+            pass
+
+        with sqlite3.connect(database_path) as db_conn:
+            row = db_conn.execute(
+                "SELECT created_at FROM login_attempts ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        assert row is not None, "login_attempts row not written"
+        # 2024-12-15T07:00:00 America/New_York == 2024-12-15T12:00:00+00:00 UTC.
+        # The helper must have produced the canonical form, NOT the
+        # raw tz-bearing form ``2024-12-15T07:00:00-05:00`` the source
+        # produced.
+        assert row[0] == "2024-12-15T12:00:00+00:00", row[0]
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)

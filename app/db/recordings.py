@@ -130,7 +130,16 @@ class RecordingsMixin:
         }
         seen: set[str] = set()
         rows: list[tuple[int, str, str, str, float | None]] = []
-        now = datetime.now(timezone.utc).isoformat()
+        # Defence-in-depth -- cosmetically identical coverage to the
+        # recordings / events / camera_diagnostics lifecycle.
+        # ``datetime.now(timezone.utc).isoformat()`` is canonical ``+00:00``
+        # by construction so the helper is a no-op on the present source,
+        # but routes any FUTURE change (third-party ingest script, naive
+        # datetime assembled with ``.replace(tzinfo=...)``, f-string of local
+        # time) through the same canonicaliser so the storage form stays
+        # uniform. Idempotent on already-canonical input.
+        _now_raw = datetime.now(timezone.utc).isoformat()
+        now = _normalize_iso_to_utc(_now_raw) or _now_raw
         for raw in labels:
             label = str(raw or '').strip().lower()
             if not label or label in seen:
