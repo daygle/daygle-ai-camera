@@ -4,6 +4,8 @@ import json
 import sqlite3
 from typing import Any
 
+from app.utils import _normalize_iso_to_utc
+
 
 class EventsMixin:
     """CRUD + query helpers for the ``events`` and ``detections`` tables.
@@ -22,6 +24,15 @@ class EventsMixin:
         alert_triggered: bool = False,
         metadata: dict[str, Any] | None = None,
     ) -> int:
+        # Coerce ``created_at`` to canonical UTC ``+00:00`` before binding
+        # so the storage form is consistent across every event row. There is
+        # no current lexical TIMING compare on ``events.created_at`` (no
+        # age-based purge), but the column participates in five
+        # ``ORDER BY e.created_at DESC`` sites and any future where-bound
+        # search window. Storing the canonical form now means a future
+        # query using the same helper normalising its bound value still
+        # sorts and compares correctly.
+        created_at = _normalize_iso_to_utc(created_at) or created_at
         with self.connect() as db:
             cursor = db.execute(
                 """

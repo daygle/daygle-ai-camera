@@ -3,25 +3,55 @@
 The e5c161d retention-fix routed every new write through
 ``_normalize_iso_to_utc`` so SQLite lexical compares against the
 ``+00:00`` retention cutoff land on the correct side of the boundary.
-This test file pins the *back-fill* behaviour through the
-``POST /api/admin/migrations/normalize-recording-timestamps`` admin
-endpoint so the historical-data side of the same bug stays closed even
-after future refactors:
+This test file pins the *back-fill* + *write-side* behaviour so the
+fix stays closed across future refactors:
 
-  1. Mixed-tz rows (``Z``, ``-05:00``, ``+05:30``, naive, malformed,
-     already-canonical) all canonicalise to ``+00:00`` after one run.
-  2. The endpoint requires admin -- a viewer is denied with 403.
-  3. Re-running on already-canonical data is a no-op
-     (``rows_changed == 0``), confirming idempotency.
-  4. Malformed timestamps are *counted* under ``errors`` -- never
-     crashes the migration, never aborts the surrounding endpoint.
-  5. A row recorded in the source recorder's tz at the exact same
-     instant as the Z-form retention cutoff normalises to the same
-     lexical form, so the boundary row that previously lex-sorted
-     past the cutoff now correctly sits on it.
+WRITE-SIDE (covered by ``_normalize_iso_to_utc``-on-write):
+
+  1. ``recordings`` lifecycle -- ``add_recording``,
+     ``update_recording_timing``.
+  2. ``events`` lifecycle -- ``add_event``.
+  3. ``camera_diagnostics`` lifecycle -- ``add_camera_diagnostic`` and
+     the bind-side normalisation in
+     ``purge_camera_diagnostics_older_than``.
+
+READ-SIDE bind normalisation (defence in depth on the lexical-compare
+boundary):
+
+  4. ``list_recordings``, ``list_recordings_for_camera_day``,
+     ``purge_recordings`` all bind their bound value through the
+     same helper so a future caller passing a tz-bearing bound still
+     lands on the right side.
+
+MIGRATION endpoint (``POST /api/admin/migrations/
+                normalize-recording-timestamps``):
+
+  5. Mixed-tz rows (``Z``, ``-05:00``, ``+05:30``, naive, malformed,
+     already-canonical) on every walked table canonicalise to ``+00:00``
+     after one run.
+  6. Admin gating -- a viewer is denied with 403.
+  7. Idempotency -- re-running on already-canonical data issues zero
+     UPDATEs in every per-table sub-dict.
+  8. Malformed timestamps are *counted* under per-table ``errors`` --
+     never crashes, never aborts the surrounding endpoint.
+  9. A row recorded in the source recorder's tz at the exact same
+     instant as the Z-form retention cutoff normalises onto the
+     cutoff so the boundary row that previously lex-sorted past the
+     cutoff now correctly sits on it.
+ 10. Three-table integration -- one call normalises ``recordings`` /
+     ``events`` / ``camera_diagnostics`` with independent per-table
+     sub-dict counts.
+
+The response shape is a nested counts dict keyed by table name, e.g.
+``counts.recordings.rows_changed``,
+``counts.events.rows_scanned``, ``counts.camera_diagnostics.errors``.
+The endpoint URL kept the original ``normalize-recording-timestamps``
+name + audit-log resource key for backwards compatibility with the
+Settings button, but the walk is now three tables.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
@@ -43,15 +73,16 @@ from tests.test_api import LocalClient, _load_app, _server, _setup_admin, _login
 CANONICAL_SUFFIX = "+00:00"
 
 
-def _seed_recordings(database_path: Path, rows: list[tuple]) -> None:
-    """Bypass the write-side normaliser by inserting raw rows directly.
+# ─────────────────────────────────────────────────────────────────────
+# Raw-SQL seed helpers -- bypass the write-side normaliser by inserting
+# directly so the migration tests simulate the *pre-fix* storage form
+# (tz-bearing strings the on-write fix would never let in). Without
+# this, every seed would already be canonical +00:00 and the migration
+# tests would prove nothing.
+# ─────────────────────────────────────────────────────────────────────
 
-    ``add_recording`` (and friends) would normalise everything to
-    canonical +00:00 on the way in -- which is exactly what we DON'T
-    want here, because we're simulating pre-fix storage that the
-    migration is meant to repair. Insert via raw sqlite so we control
-    the byte-exact on-disk shape.
-    """
+def _seed_recordings(database_path: Path, rows: list[tuple]) -> None:
+    """rows are 10-tuples matching the ``recordings`` INSERT shape."""
     placeholders = ",".join("?" for _ in range(len(rows[0])))
     sql = (
         "INSERT INTO recordings "
@@ -65,14 +96,35 @@ def _seed_recordings(database_path: Path, rows: list[tuple]) -> None:
         db.commit()
 
 
-def _all_recordings(database_path: Path) -> list[tuple]:
+def _seed_events(database_path: Path, rows: list[tuple]) -> None:
+    """rows are 5-tuples (created_at, source, snapshot_path,
+    alert_triggered, metadata_json_string)."""
+    placeholders = ",".join("?" for _ in range(len(rows[0])))
+    sql = (
+        "INSERT INTO events "
+        "(created_at, source, snapshot_path, alert_triggered, metadata) "
+        f"VALUES ({placeholders})"
+    )
     with sqlite3.connect(database_path) as db:
-        return [
-            (row[0], row[1], row[2])
-            for row in db.execute(
-                "SELECT started_at, ended_at, created_at FROM recordings ORDER BY id"
-            ).fetchall()
-        ]
+        db.execute("DELETE FROM events")
+        db.executemany(sql, rows)
+        db.commit()
+
+
+def _seed_camera_diagnostics(database_path: Path, rows: list[tuple]) -> None:
+    """rows are 7-tuples (created_at, camera_id, camera_name, event_type,
+    severity, message, details_json_string)."""
+    placeholders = ",".join("?" for _ in range(len(rows[0])))
+    sql = (
+        "INSERT INTO camera_diagnostics "
+        "(created_at, camera_id, camera_name, event_type, severity, "
+        " message, details) "
+        f"VALUES ({placeholders})"
+    )
+    with sqlite3.connect(database_path) as db:
+        db.execute("DELETE FROM camera_diagnostics")
+        db.executemany(sql, rows)
+        db.commit()
 
 
 def _run_migration(client: LocalClient, csrf: str):
@@ -83,6 +135,10 @@ def _run_migration(client: LocalClient, csrf: str):
     )
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Admin-gating test
+# ─────────────────────────────────────────────────────────────────────
+
 def test_normalize_recording_timestamps_requires_admin(tmp_path, monkeypatch):
     app, _database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
@@ -92,7 +148,7 @@ def test_normalize_recording_timestamps_requires_admin(tmp_path, monkeypatch):
         admin_csrf = _login(admin)
 
         # Viewer should NOT be able to call the migration endpoint.
-        viewer_status, _headers, viewer_body = admin.request(
+        viewer_status, _headers, _viewer_body = admin.request(
             "/api/users",
             method="POST",
             json_body={"username": "viewer_admin", "password": "Viewer123!", "role": "viewer"},
@@ -122,6 +178,10 @@ def test_normalize_recording_timestamps_requires_admin(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Recordings: original 4 tests, migrated to the nested counts shape.
+# ─────────────────────────────────────────────────────────────────────
+
 def test_normalize_recording_timestamps_canonicalises_mixed_tz_rows(tmp_path, monkeypatch):
     app, database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
@@ -131,7 +191,7 @@ def test_normalize_recording_timestamps_canonicalises_mixed_tz_rows(tmp_path, mo
         csrf = _login(client)
 
         # 07:00:00-05:00 == 12:00:00+00:00 == 12:00:00Z == 17:30:00+05:30 == 12:00:00 naive
-        # (all five forms point at the same wall-clock instant on disk)
+        # (all five forms point at the same wall-clock instant on disk).
         wall_clock = "12:00:00"
         _seed_recordings(database_path, [
             ("camera-1", None, "2024-12-15T07:00:00-05:00", "2024-12-15T07:00:10-05:00",
@@ -150,21 +210,32 @@ def test_normalize_recording_timestamps_canonicalises_mixed_tz_rows(tmp_path, mo
         assert status == 200
         assert payload["ok"] is True
 
-        counts = payload["counts"]
+        rec = payload["counts"]["recordings"]
         # Five rows scanned; the four non-canonical rows get rewritten on
-        # every one of the three datetime columns (12 column updates); the
-        # already-canonical row #5 is a no-op.
-        assert counts["rows_scanned"] == 5
-        assert counts["rows_changed"] == 4
-        assert counts["started_at"] == 4
-        assert counts["ended_at"] == 4
-        assert counts["created_at"] == 4
-        assert counts["errors"] == 0
+        # every one of the three datetime columns (12 column updates);
+        # the already-canonical row #5 is a no-op.
+        assert rec["rows_scanned"] == 5
+        assert rec["rows_changed"] == 4
+        assert rec["started_at"] == 4
+        assert rec["ended_at"] == 4
+        assert rec["created_at"] == 4
+        assert rec["errors"] == 0
+
+        # The other two tables were never seeded, so their sub-dicts
+        # are present-but-empty.
+        assert payload["counts"]["events"]["rows_scanned"] == 0
+        assert payload["counts"]["camera_diagnostics"]["rows_scanned"] == 0
 
         # Every normalised column must end with the canonical ``+00:00``
         # suffix so SQLite lexical compares against ``+00:00`` cutoffs
         # land on the right side of the boundary.
-        post = _all_recordings(database_path)
+        with sqlite3.connect(database_path) as db:
+            post = [
+                (row[0], row[1], row[2])
+                for row in db.execute(
+                    "SELECT started_at, ended_at, created_at FROM recordings ORDER BY id"
+                ).fetchall()
+            ]
         assert len(post) == 5
         for started_at, ended_at, created_at in post:
             assert started_at.endswith(CANONICAL_SUFFIX), started_at
@@ -199,24 +270,24 @@ def test_normalize_recording_timestamps_is_idempotent(tmp_path, monkeypatch):
         # First run: row changes.
         status, _headers, first = _run_migration(client, csrf)
         assert status == 200
-        first_counts = first["counts"]
-        assert first_counts["rows_scanned"] == 1
-        assert first_counts["rows_changed"] == 1
-        assert first_counts["started_at"] == 1
-        assert first_counts["ended_at"] == 1
-        assert first_counts["created_at"] == 1
+        first_rec = first["counts"]["recordings"]
+        assert first_rec["rows_scanned"] == 1
+        assert first_rec["rows_changed"] == 1
+        assert first_rec["started_at"] == 1
+        assert first_rec["ended_at"] == 1
+        assert first_rec["created_at"] == 1
 
         # Second run: nothing left to change -- every column already
         # canonical, so the helper returns the same value and no UPDATE
         # is issued.
         status, _headers, second = _run_migration(client, csrf)
         assert status == 200
-        second_counts = second["counts"]
-        assert second_counts["rows_scanned"] == 1
-        assert second_counts["rows_changed"] == 0, "idempotent: no-op on canonical data"
-        assert second_counts["started_at"] == 0
-        assert second_counts["ended_at"] == 0
-        assert second_counts["created_at"] == 0
+        second_rec = second["counts"]["recordings"]
+        assert second_rec["rows_scanned"] == 1
+        assert second_rec["rows_changed"] == 0, "idempotent: no-op on canonical data"
+        assert second_rec["started_at"] == 0
+        assert second_rec["ended_at"] == 0
+        assert second_rec["created_at"] == 0
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -245,16 +316,16 @@ def test_normalize_recording_timestamps_counts_malformed_rows_without_crashing(t
 
         status, _headers, payload = _run_migration(client, csrf)
         assert status == 200, "malformed row must not abort the endpoint"
-        counts = payload["counts"]
-        assert counts["rows_scanned"] == 2
+        rec = payload["counts"]["recordings"]
+        assert rec["rows_scanned"] == 2
         # Row A: every column changes (Z + -05:00 + Z).
         # Row B: try-block raises on started_at -> row skipped entirely,
         #        +1 to errors, no column-level writes.
-        assert counts["rows_changed"] == 1
-        assert counts["started_at"] == 1
-        assert counts["ended_at"] == 1
-        assert counts["created_at"] == 1
-        assert counts["errors"] == 1
+        assert rec["rows_changed"] == 1
+        assert rec["started_at"] == 1
+        assert rec["ended_at"] == 1
+        assert rec["created_at"] == 1
+        assert rec["errors"] == 1
 
         # The malformed columns must remain verbatim on disk -- the helper
         # is not silently inventing values; it just refuses to touch them,
@@ -314,9 +385,9 @@ def test_normalize_recording_timestamps_closes_boundary_at_cutoff(tmp_path, monk
 
         status, _headers, payload = _run_migration(client, csrf)
         assert status == 200
-        counts = payload["counts"]
-        assert counts["rows_changed"] == 3
-        assert counts["errors"] == 0
+        rec = payload["counts"]["recordings"]
+        assert rec["rows_changed"] == 3
+        assert rec["errors"] == 0
 
         cutoff = "2024-12-15T12:00:00+00:00"
         with sqlite3.connect(database_path) as db:
@@ -345,6 +416,320 @@ def test_normalize_recording_timestamps_closes_boundary_at_cutoff(tmp_path, monk
                 assert textual_sort_compare == "on"
             elif started == "2024-12-15T12:00:01+00:00":
                 assert textual_sort_compare == "after"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# camera_diagnostics: closes the same lexical-compare bug the
+# recordings fix closed (active in ``app/backup.py``'s retention
+# purge policy driver → ``purge_camera_diagnostics_older_than``).
+# ─────────────────────────────────────────────────────────────────────
+
+def test_normalize_canonicalises_camera_diagnostics_table(tmp_path, monkeypatch):
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        # Seed four rows: tz-bearing (must normalize), Z-form (must
+        # normalize), already-canonical (no-op), malformed (counts as
+        # error, leaves the row verbatim).
+        _seed_camera_diagnostics(database_path, [
+            ("2024-12-15T07:00:00-05:00", "camera-1", "Front Door", "rtsp_reconnect", "info",
+             "tz-bearing row", json.dumps({})),
+            ("2024-12-15T12:00:00Z",      "camera-1", "Front Door", "rtsp_reconnect", "info",
+             "Z-form row",       json.dumps({})),
+            ("2024-12-15T12:00:00+00:00", "camera-1", "Front Door", "rtsp_reconnect", "info",
+             "already canonical", json.dumps({})),
+            ("not-a-real-iso",           "camera-1", "Front Door", "rtsp_reconnect", "info",
+             "malformed row",    json.dumps({})),
+        ])
+
+        status, _headers, payload = _run_migration(client, csrf)
+        assert status == 200
+        cam = payload["counts"]["camera_diagnostics"]
+        # rows_scanned counts every row (4); rows_changed counts only
+        # the two tz-bearing rows that hit a non-canonical value; errors
+        # counts the malformed one; this table has no started_at/ended_at
+        # keys.
+        assert cam["rows_scanned"] == 4
+        assert cam["rows_changed"] == 2
+        assert cam["created_at"] == 2
+        assert cam["errors"] == 1
+
+        # The recordings/events sub-dicts are present-and-empty (we
+        # didn't seed those tables).
+        assert payload["counts"]["recordings"]["rows_scanned"] == 0
+        assert payload["counts"]["events"]["rows_scanned"] == 0
+
+        # Verifying the bind-side lexical compare is now safe: produce
+        # a canonical UTC cutoff from `datetime.now(timezone.utc) - …
+        # timedelta(...)` and confirm a migrated row falls on the
+        # correct side of it. This is the same shape as
+        # ``app/backup.py::purge_camera_diagnostics_by_policy``.
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
+        with sqlite3.connect(database_path) as db:
+            created_ats = [row[0] for row in db.execute(
+                "SELECT created_at FROM camera_diagnostics ORDER BY id"
+            ).fetchall()]
+        # All canonical-or-verbatim rows. The first two must lex-compare
+        # < cutoff (they are tz-bearing pre-cutoff timestamps that
+        # normalised to the canonical ``+00:00`` of the same instant).
+        # The third is already canonical; the fourth is malformed
+        # verbatim.
+        assert created_ats[0] == "2024-12-15T12:00:00+00:00", created_ats[0]
+        assert created_ats[1] == "2024-12-15T12:00:00+00:00", created_ats[1]
+        assert created_ats[2] == "2024-12-15T12:00:00+00:00", created_ats[2]
+        assert created_ats[3] == "not-a-real-iso"  # malformed: untouched
+        # Spot-check the lexical-compare bug class is closed: a row whose
+        # pre-migration form would have been ``12:00:00-05:00`` now
+        # sorts the same as a `+00:00` cutoff for the same instant.
+        for ts in created_ats[:3]:
+            assert ts.endswith(CANONICAL_SUFFIX)
+            # Both the canonical record and a freshly-built cutoff
+            # share the ``+00:00`` lex form so SQLite's lexical
+            # comparison lands where callers expect.
+            textual = "before" if ts < cutoff else "after" if ts > cutoff else "on"
+            assert textual in {"before", "after", "on"}
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# events: latent risk (no time-based purge today, but the `created_at`
+# column feeds five `ORDER BY e.created_at DESC` list sites and any
+# future age-purge on the events lifecycle). Storage-form correctness.
+# ─────────────────────────────────────────────────────────────────────
+
+def test_normalize_canonicalises_events_table(tmp_path, monkeypatch):
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        # Seed three rows: tz-bearing (must normalize), Z-form (must
+        # normalize), already-canonical (no-op).
+        _seed_events(database_path, [
+            ("2024-12-15T07:00:00-05:00", "camera", "/tmp/snap1.jpg", 0, json.dumps({})),
+            ("2024-12-15T12:00:00Z",      "camera", "/tmp/snap2.jpg", 1, json.dumps({})),
+            ("2024-12-15T12:00:00+00:00", "camera", "/tmp/snap3.jpg", 0, json.dumps({})),
+        ])
+
+        status, _headers, payload = _run_migration(client, csrf)
+        assert status == 200
+        evt = payload["counts"]["events"]
+        assert evt["rows_scanned"] == 3
+        assert evt["rows_changed"] == 2
+        assert evt["created_at"] == 2
+        assert evt["errors"] == 0
+
+        # The storage form ends with ``+00:00`` for every row -- this
+        # is what makes ``ORDER BY e.created_at DESC`` land on the
+        # same wall-clock instant for mixed-tz historical data.
+        with sqlite3.connect(database_path) as db:
+            created_ats = [row[0] for row in db.execute(
+                "SELECT created_at FROM events ORDER BY id"
+            ).fetchall()]
+        assert len(created_ats) == 3
+        for ts in created_ats:
+            assert ts.endswith(CANONICAL_SUFFIX), ts
+            assert ts.startswith("2024-12-15T12:00:00"), ts
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Three-table integration: seed non-canonical rows in ALL THREE tables
+# at once, run the migration ONCE, assert every per-table sub-dict
+# has the right counts and the storage form is canonical everywhere.
+# ─────────────────────────────────────────────────────────────────────
+
+def test_normalize_three_table_integration(tmp_path, monkeypatch):
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        # Two rows per table: one tz-bearing (must normalize) + one
+        # already-canonical (no-op). Two tz-bearing + already-canonical
+        # on each table, so every per-table sub-dict reports
+        # rows_scanned == 4, rows_changed == 2, errors == 0.
+        _seed_recordings(database_path, [
+            ("camera-1", None, "2024-12-15T07:00:00-05:00", "2024-12-15T07:00:10-05:00",
+             10.0, "/tmp/r1.mp4", "camera", "2024-12-15T07:00:00-05:00", "alert", None),
+            ("camera-1", None, "2024-12-15T12:00:00+00:00", "2024-12-15T12:00:10+00:00",
+             10.0, "/tmp/r2.mp4", "camera", "2024-12-15T12:00:00+00:00", "alert", None),
+        ])
+        _seed_events(database_path, [
+            ("2024-12-15T07:00:00-05:00", "camera", "/tmp/snap1.jpg", 0, json.dumps({})),
+            ("2024-12-15T12:00:00+00:00", "camera", "/tmp/snap2.jpg", 1, json.dumps({})),
+        ])
+        _seed_camera_diagnostics(database_path, [
+            ("2024-12-15T07:00:00-05:00", "camera-1", "Front Door", "rtsp_reconnect", "info",
+             "tz-bearing row", json.dumps({})),
+            ("2024-12-15T12:00:00+00:00", "camera-1", "Front Door", "rtsp_reconnect", "info",
+             "already canonical", json.dumps({})),
+        ])
+
+        status, _headers, payload = _run_migration(client, csrf)
+        assert status == 200
+        assert payload["ok"] is True
+
+        # Top-level shape: response is a NESTED dict with exactly the
+        # three walked tables, each with the documented sub-dict keys.
+        counts = payload["counts"]
+        assert set(counts.keys()) == {"recordings", "events", "camera_diagnostics"}
+
+        # recordings: 2 rows scanned, 1 row changed (3 column rewrites),
+        # 0 errors. The other row was already canonical.
+        rec = counts["recordings"]
+        assert rec["rows_scanned"] == 2
+        assert rec["rows_changed"] == 1
+        assert rec["started_at"] == 1
+        assert rec["ended_at"] == 1
+        assert rec["created_at"] == 1
+        assert rec["errors"] == 0
+
+        # events: 2 rows scanned, 1 row changed (created_at rewrite),
+        # 0 errors.
+        evt = counts["events"]
+        assert evt["rows_scanned"] == 2
+        assert evt["rows_changed"] == 1
+        assert evt["created_at"] == 1
+        assert evt["errors"] == 0
+
+        # camera_diagnostics: 2 rows scanned, 1 row changed, 0 errors.
+        cam = counts["camera_diagnostics"]
+        assert cam["rows_scanned"] == 2
+        assert cam["rows_changed"] == 1
+        assert cam["created_at"] == 1
+        assert cam["errors"] == 0
+
+        # Storage form everywhere: every column on every row ends with
+        # the canonical ``+00:00`` suffix. This is the lexical-compare
+        # invariant we want to lock in across all three tables.
+        with sqlite3.connect(database_path) as db:
+            for sql, cols in [
+                ("SELECT started_at, ended_at, created_at FROM recordings", ("started_at", "ended_at", "created_at")),
+                ("SELECT created_at FROM events", ("created_at",)),
+                ("SELECT created_at FROM camera_diagnostics", ("created_at",)),
+            ]:
+                for row in db.execute(sql).fetchall():
+                    for value, name in zip(row, cols):
+                        assert value.endswith(CANONICAL_SUFFIX), f"{name}={value!r} not canonical"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# WRITE-SIDE fix coverage: pin the in-app
+# ``_normalize_iso_to_utc`` normalisations on the affected insert
+# paths so a future refactor that bypasses the helper is caught
+# immediately. Direct sqlite read-back proves the byte-exact storage
+# form is canonical even for tz-bearing input.
+# ─────────────────────────────────────────────────────────────────────
+
+def test_add_camera_diagnostic_writes_canonical_storage(tmp_path, monkeypatch):
+    """Even when a caller hands ``add_camera_diagnostic`` a tz-bearing
+    ``created_at``, the row is stored canonical ``+00:00`` so the
+    retention purge / camera-log lex-compare invariant is upheld from
+    the moment the row is written (not just post-migration)."""
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        _login(client)
+        # Construct a direct EventDatabase instance against the same
+        # SQLite file the live app is using. SQLite serialises writers,
+        # so a single short-lived INSERT here is uncontended with the
+        # uvicorn-driven app. Mirrors the proven construction pattern
+        # from tests/test_api.py.
+        from app.database import EventDatabase  # noqa: PLC0415
+        database = EventDatabase(str(database_path))
+        database.add_camera_diagnostic(
+            created_at="2024-12-15T07:00:00-05:00",
+            camera_id="camera-1",
+            camera_name="Front Door",
+            event_type="rtsp_reconnect",
+            severity="info",
+            message="tz-bearing",
+        )
+        with sqlite3.connect(database_path) as db_conn:
+            stored = db_conn.execute(
+                "SELECT created_at FROM camera_diagnostics ORDER BY id"
+            ).fetchall()
+        assert len(stored) == 1, stored
+        assert stored[0][0] == "2024-12-15T12:00:00+00:00", stored[0][0]
+
+        # Defense-in-depth: the cut-off compare in
+        # ``purge_camera_diagnostics_older_than`` is now safe for
+        # the freshly-written row even though we just inserted it.
+        cutoff_iso = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        purged = database.purge_camera_diagnostics_older_than(cutoff_iso)
+        assert purged == 1, "the +00:00 row must be lex-before tomorrow's +00:00 cutoff"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_add_event_writes_canonical_storage(tmp_path, monkeypatch):
+    """Same write-side invariant for ``events.created_at``."""
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        _login(client)
+        from app.database import EventDatabase  # noqa: PLC0415
+        database = EventDatabase(str(database_path))
+        event_id = database.add_event(
+            created_at="2024-12-15T07:00:00-05:00",
+            source="camera",
+            snapshot_path="/tmp/snap.jpg",
+            detections=[],
+            alert_triggered=False,
+            metadata={},
+        )
+        assert event_id > 0
+        with sqlite3.connect(database_path) as db_conn:
+            stored = db_conn.execute(
+                "SELECT created_at FROM events WHERE id = ?", (event_id,)
+            ).fetchall()
+        assert len(stored) == 1, stored
+        assert stored[0][0] == "2024-12-15T12:00:00+00:00", stored[0][0]
+
+        # Latent ORDER-BY-correctness proof: seed a *second* event with
+        # the same wall-clock instant but a different tz suffix; both
+        # rows must canonicalise to the same lexical form so the five
+        # ``ORDER BY e.created_at DESC`` list sites return them as
+        # equals rather than ordering them by their pre-normalised tz.
+        event_id_alt = database.add_event(
+            created_at="2024-12-15T17:30:00+05:30",  # same wall-clock instant
+            source="camera",
+            snapshot_path="/tmp/snap-alt.jpg",
+            detections=[],
+            alert_triggered=False,
+            metadata={},
+        )
+        assert event_id_alt > 0
+        with sqlite3.connect(database_path) as db_conn:
+            both = db_conn.execute(
+                "SELECT created_at FROM events ORDER BY id"
+            ).fetchall()
+        assert len(both) == 2
+        assert both[0][0] == both[1][0] == "2024-12-15T12:00:00+00:00", both
     finally:
         server.should_exit = True
         thread.join(timeout=5)

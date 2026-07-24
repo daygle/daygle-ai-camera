@@ -161,16 +161,26 @@ def delete_runtime_data(request: Request, db=Depends(get_database)):
 
 @router.post('/api/admin/migrations/normalize-recording-timestamps')
 def normalize_recording_timestamps(request: Request, db=Depends(get_database)):
-    """One-shot migration: re-encode every recording row's ``started_at`` /
-    ``ended_at`` / ``created_at`` to canonical UTC ``+00:00`` form so
-    SQLite's lexical compares for retention / timeline / list filters
-    land on the correct side of the boundary for historical data.
+    """One-shot admin migration: re-encode every datetime column on
+    every row of ``recordings`` / ``events`` / ``camera_diagnostics``
+    to canonical UTC ``+00:00`` form so SQLite's lexical compares for
+    retention / timeline / list filters / camera-log purge all land
+    correctly on historical data.
 
-    Idempotent: re-running on an already-canonical database is a no-op
-    (every row's normalised value equals its stored value and no UPDATE
-    is issued, so ``rows_changed`` is ``0``). Malformed timestamps are
-    counted under ``errors`` and skipped so a single bad row doesn't
-    abort the whole operation. Admin-only.
+    The endpoint URL kept the original ``normalize-recording-timestamps``
+    name for backwards compatibility with the Settings → Database
+    button + the audit-log resource key, but the underlying walk is
+    now three tables. The response is a nested counts dict keyed by
+    table name (``recordings``, ``events``, ``camera_diagnostics``),
+    each carrying ``rows_scanned`` / ``rows_changed`` / `created_at``
+    (plus ``started_at`` / ``ended_at`` under ``recordings``) /
+    ``errors``.
+
+    Idempotent: a re-run on already-canonical data returns
+    ``rows_changed == 0`` for every table and issues no UPDATEs.
+    Malformed timestamps are counted under each table's ``errors``
+    and skipped so a single bad row doesn't abort the whole pass.
+    Admin-only.
     """
     require_admin(request)
     counts = db.migrate_recording_timestamps_to_utc()

@@ -362,22 +362,37 @@ document.getElementById('purgeRecordingsBtn').addEventListener('click', async ()
   }
 });
 
-// "Normalise Recording Timestamps" runs a one-shot admin migration that
-// re-encodes each recording row's started_at / ended_at / created_at to
-// canonical ``+00:00`` UTC. It closes out the lexical-compare boundary
-// risk for pre-fix data (rows persisted before the e5c161d retention
-// normalisation). Idempotent: a re-run on already-canonical data is a
-// no-op (counts.rows_changed === 0). Admin-only on the server side.
+// "Normalise Timestamps" runs a one-shot admin migration that re-encodes
+// every datetime column on every row of ``recordings`` (started_at /
+// ended_at / created_at), ``events`` (created_at), and
+// ``camera_diagnostics`` (created_at) to canonical ``+00:00`` UTC. It
+// closes out the lexical-compare boundary risk for pre-fix data (rows
+// persisted before the e5c161d retention normalisation, plus the same
+// bug class in ``purge_camera_diagnostics_older_than``). Idempotent: a
+// re-run on already-canonical data is a no-op (every per-table
+// ``rows_changed`` == 0). Admin-only on the server side. Response shape
+// is a nested counts dict keyed by table name so the audit log + this
+// toast can report changes per table.
 document.getElementById('normalizeTimestampsBtn')?.addEventListener('click', async () => {
   const btn = document.getElementById('normalizeTimestampsBtn');
   btn.disabled = true;
   try {
     const result = await api('/api/admin/migrations/normalize-recording-timestamps', { method: 'POST' });
     const counts = result?.counts || {};
+    const rec = counts.recordings || {};
+    const evt = counts.events || {};
+    const cam = counts.camera_diagnostics || {};
+    const recChanged = Number(rec.rows_changed || 0);
+    const recScanned = Number(rec.rows_scanned || 0);
+    const evtChanged = Number(evt.rows_changed || 0);
+    const evtScanned = Number(evt.rows_scanned || 0);
+    const camChanged = Number(cam.rows_changed || 0);
+    const camScanned = Number(cam.rows_scanned || 0);
+    const totalErrors =
+      Number(rec.errors || 0) + Number(evt.errors || 0) + Number(cam.errors || 0);
     setMessage(
-      `Normalised ${Number(counts.rows_changed || 0)} of ${Number(counts.rows_scanned || 0)} recording row(s) ` +
-      `(started_at: ${counts.started_at || 0}, ended_at: ${counts.ended_at || 0}, ` +
-      `created_at: ${counts.created_at || 0}, errors: ${counts.errors || 0}).`,
+      `Normalised ${recChanged}/${recScanned} recordings, ${evtChanged}/${evtScanned} events, ` +
+      `${camChanged}/${camScanned} camera-log rows (${totalErrors} errors).`,
     );
   } catch (error) {
     // Skip UI updates if api() triggered a 401 redirect

@@ -9,6 +9,28 @@ from typing import Any
 from app.utils import _normalize_iso_to_utc
 
 
+def _empty_table_counts(*, include_started_ended: bool) -> dict[str, int]:
+    """Per-table counts dict used by ``migrate_recording_timestamps_to_utc``.
+
+    Module-private helper so the migration body reads clean. The
+    ``started_at`` / ``ended_at`` keys are only meaningful for the
+    ``recordings`` table; the other two pass
+    ``include_started_ended=False`` so the resulting sub-dict is just
+    ``{rows_scanned, rows_changed, created_at, errors}``.
+    Lives at module scope (NOT inside ``RecordingsMixin``) because the
+    migration function on the same class builds these sub-dicts; placing
+    the helper inside the class would terminate the class body and
+    orphan every method declared after it (parser silently absorbs the
+    indented ``def`` statements as unreachable nested functions in the
+    helper -- verified during the c6e0bc6+1 fix for the same shape).
+    """
+    base: dict[str, int] = {'rows_scanned': 0, 'rows_changed': 0, 'created_at': 0, 'errors': 0}
+    if include_started_ended:
+        base['started_at'] = 0
+        base['ended_at'] = 0
+    return base
+
+
 class RecordingsMixin:
     """CRUD + query helpers for the ``recordings`` and ``recording_labels`` tables.
 
@@ -457,80 +479,158 @@ class RecordingsMixin:
             db.executemany("DELETE FROM recordings WHERE id = ?", [(row["id"],) for row in rows])
             return rows
 
-    def migrate_recording_timestamps_to_utc(self) -> dict[str, int]:
-        """One-shot migration: re-encode ``started_at`` / ``ended_at`` /
-        ``created_at`` of every recording row to canonical UTC ``+00:00``
-        form so SQLite's lexical compares against the retention cutoff
-        and timeline day-window land correctly for historical data.
+    def migrate_recording_timestamps_to_utc(self) -> dict[str, dict[str, int]]:
+        """One-shot migration: re-encode every datetime column on every
+        row of ``recordings`` / ``events`` / ``camera_diagnostics`` to
+        canonical UTC ``+00:00`` form so SQLite's lexical compares
+        against the retention cutoff, timeline day-window, and
+        camera-diagnostics retention purge all land correctly for
+        historical data.
 
-        Idempotent: re-running on an already-canonical database is a
-        no-op (every row's normalised value equals its stored value and
-        no UPDATE is issued). Malformed timestamps raise ``ValueError``
-        inside ``_normalize_iso_to_utc(..., raise_on_invalid=True)``;
-        those rows are counted under ``errors`` and skipped so a single
-        bad row doesn't abort the whole operation.
+        Originally landed for the ``recordings`` lifecycle bug
+        (c6e0bc6). Extended here to also walk the same-class bug in
+        ``camera_diagnostics`` (``DELETE FROM camera_diagnostics
+        WHERE created_at < ?`` in ``purge_camera_diagnostics_older_than``)
+        and to defensively canonicalise ``events.created_at`` so the
+        five ``ORDER BY e.created_at DESC`` list sites all sort on the
+        same lex form as the future timeline / future age-purge windows.
 
-        Concurrency: we do NOT hold a single connection through the
-        row loop. SQLite grants a write lock to the first UPDATE in a
+        Concurrency: we do NOT hold a single connection through a row
+        loop. SQLite grants a write lock to the first UPDATE in a
         transaction; holding it for tens of thousands of rows would
-        block every concurrent ``add_recording`` / ``update_recording_timing``
-        / ``purge_recordings`` call from live cameras. Instead we
-        ``SELECT`` all rows in one short-lived connection so the write
-        lock isn't held while we normalise in Python, then commit the
-        UPDATEs in chunks of ``commit_chunk_size`` -- each chunk opens
-        its own ``self.connect()`` context so SQLite's write lock is
-        released between batches and live cameras keep recording
-        throughout.
+        block every concurrent ``add_recording`` / ``add_event`` /
+        ``add_camera_diagnostic`` / ``purge_recordings`` /
+        ``purge_camera_diagnostics_older_than`` call from live cameras.
+        Instead ``SELECT`` happens in a single short-lived connection
+        so the write lock isn't held while we normalise in Python,
+        then the UPDATEs are committed in chunks of
+        ``commit_chunk_size`` -- each chunk opens its own
+        ``self.connect()`` context so SQLite's write lock is released
+        between batches and live cameras keep recording throughout.
+
+        Idempotency: every per-table ``rows_scanned`` is the row count
+        at SELECT time and ``rows_changed`` only increments when at
+        least one column of the row normalised to a different string,
+        so a re-run on already-canonical data returns
+        ``{table: {'rows_changed': 0, ...}, ...}``.
+
+        Malformed-row handling: ``_normalize_iso_to_utc(...,
+        raise_on_invalid=True)`` raises ``ValueError`` on unparseable
+        input; the per-table ``try / except ValueError`` increments the
+        table-level ``errors`` counter and skips the whole row (no
+        partial column writes -- a row whose only stored value is
+        garbage cannot be partially rescued and is left verbatim for
+        the operator to investigate via /camera-log or /api/camera-log).
         """
         commit_chunk_size = 500
-        counts: dict[str, int] = {
-            'rows_scanned': 0,
-            'rows_changed': 0,
-            'started_at': 0,
-            'ended_at': 0,
-            'created_at': 0,
-            'errors': 0,
+
+        # The nested counts dict. Each table has its own per-column and
+        # per-row sub-dict so the operator UI / audit-log detail can
+        # show changes per table. ``started_at`` / ``ended_at`` keys are
+        # only meaningful for ``recordings`` (cam + events have a
+        # single datetime column) but the key is present at zero so the
+        # sub-dict shape is uniform.
+        counts: dict[str, dict[str, int]] = {
+            'recordings': _empty_table_counts(include_started_ended=True),
+            'events': _empty_table_counts(include_started_ended=False),
+            'camera_diagnostics': _empty_table_counts(include_started_ended=False),
         }
-        # Phase 1: read all rows in one short-lived connection so the
-        # write lock isn't held while we normalise in Python.
+
+        # ============ recordings ============================================
+        # Three datetime columns; same UPDATE format as before c6e0bc6 just
+        # wrapped in the per-table accounting above.
         with self.connect() as db:
-            rows = [dict(r) for r in db.execute(
+            recording_rows = [dict(r) for r in db.execute(
                 "SELECT id, started_at, ended_at, created_at FROM recordings"
             ).fetchall()]
-        counts['rows_scanned'] = len(rows)
-
-        # Phase 2: normalise in memory; collect UPDATEs as a list so we
-        # can ``executemany`` them in chunks.
-        updates: list[tuple[str, str, str, int]] = []
-        for row in rows:
+        counts['recordings']['rows_scanned'] = len(recording_rows)
+        recording_updates: list[tuple[str, str, str, int]] = []
+        for row in recording_rows:
             try:
                 new_started = _normalize_iso_to_utc(row['started_at'], raise_on_invalid=True)
                 new_ended = _normalize_iso_to_utc(row['ended_at'], raise_on_invalid=True)
                 new_created = _normalize_iso_to_utc(row['created_at'], raise_on_invalid=True)
             except ValueError:
-                counts['errors'] += 1
+                counts['recordings']['errors'] += 1
                 continue
             row_changed = False
             if new_started != row['started_at']:
-                counts['started_at'] += 1
+                counts['recordings']['started_at'] += 1
                 row_changed = True
             if new_ended != row['ended_at']:
-                counts['ended_at'] += 1
+                counts['recordings']['ended_at'] += 1
                 row_changed = True
             if new_created != row['created_at']:
-                counts['created_at'] += 1
+                counts['recordings']['created_at'] += 1
                 row_changed = True
             if row_changed:
-                counts['rows_changed'] += 1
-                updates.append((new_started, new_ended, new_created, int(row['id'])))
-
-        # Phase 3: commit in chunks, with a fresh connection context for
-        # each chunk so SQLite's write lock is yielded between batches.
-        for chunk_start in range(0, len(updates), commit_chunk_size):
-            chunk = updates[chunk_start:chunk_start + commit_chunk_size]
+                counts['recordings']['rows_changed'] += 1
+                recording_updates.append((new_started, new_ended, new_created, int(row['id'])))
+        for chunk_start in range(0, len(recording_updates), commit_chunk_size):
+            chunk = recording_updates[chunk_start:chunk_start + commit_chunk_size]
             with self.connect() as db:
                 db.executemany(
                     "UPDATE recordings SET started_at = ?, ended_at = ?, created_at = ? WHERE id = ?",
+                    chunk,
+                )
+
+        # ============ events ================================================
+        # Single datetime column. ``created_at`` is the bound side of every
+        # ORDER BY and (defensively) any future WHERE-clause TIMING compare
+        # added to the events lifecycle.
+        with self.connect() as db:
+            event_rows = [dict(r) for r in db.execute(
+                "SELECT id, created_at FROM events"
+            ).fetchall()]
+        counts['events']['rows_scanned'] = len(event_rows)
+        event_updates: list[tuple[str, int]] = []
+        for row in event_rows:
+            try:
+                new_created = _normalize_iso_to_utc(row['created_at'], raise_on_invalid=True)
+            except ValueError:
+                counts['events']['errors'] += 1
+                continue
+            if new_created != row['created_at']:
+                counts['events']['created_at'] += 1
+                counts['events']['rows_changed'] += 1
+                event_updates.append((new_created, int(row['id'])))
+        for chunk_start in range(0, len(event_updates), commit_chunk_size):
+            chunk = event_updates[chunk_start:chunk_start + commit_chunk_size]
+            with self.connect() as db:
+                db.executemany(
+                    "UPDATE events SET created_at = ? WHERE id = ?",
+                    chunk,
+                )
+
+        # ============ camera_diagnostics ====================================
+        # Single datetime column. ``created_at`` is the bound side of
+        # ``DELETE FROM camera_diagnostics WHERE created_at < ?`` so this
+        # closes the same lexical-compare bug class the recordings fix
+        # closed -- a recorder tz-bearing timestamp would otherwise
+        # lex-sort before the canonical ``+00:00`` retention cutoff and
+        # an old diagnostic captured at the exact same wall-clock instant
+        # would be wrongly purged inside the retention window.
+        with self.connect() as db:
+            diag_rows = [dict(r) for r in db.execute(
+                "SELECT id, created_at FROM camera_diagnostics"
+            ).fetchall()]
+        counts['camera_diagnostics']['rows_scanned'] = len(diag_rows)
+        diag_updates: list[tuple[str, int]] = []
+        for row in diag_rows:
+            try:
+                new_created = _normalize_iso_to_utc(row['created_at'], raise_on_invalid=True)
+            except ValueError:
+                counts['camera_diagnostics']['errors'] += 1
+                continue
+            if new_created != row['created_at']:
+                counts['camera_diagnostics']['created_at'] += 1
+                counts['camera_diagnostics']['rows_changed'] += 1
+                diag_updates.append((new_created, int(row['id'])))
+        for chunk_start in range(0, len(diag_updates), commit_chunk_size):
+            chunk = diag_updates[chunk_start:chunk_start + commit_chunk_size]
+            with self.connect() as db:
+                db.executemany(
+                    "UPDATE camera_diagnostics SET created_at = ? WHERE id = ?",
                     chunk,
                 )
         return counts

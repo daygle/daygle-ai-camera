@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.utils import _normalize_iso_to_utc
+
 
 class CameraDiagnosticsMixin:
     """CRUD + retention helpers for the ``camera_diagnostics`` table.
@@ -30,6 +32,17 @@ class CameraDiagnosticsMixin:
         message: str = '',
         details: dict[str, Any] | None = None,
     ) -> None:
+        # Same lexical-compare concern as the recordings lifecycle: the
+        # ``purge_camera_diagnostics_older_than`` retention policy
+        # (driven by ``app/backup.py::purge_camera_diagnostics_by_policy``)
+        # lex-compares the row's ``created_at`` against a canonical
+        # ``+00:00`` cutoff. A source-tz-bearing string would lex-sort
+        # before the cutoff and a recording captured at the same wall-clock
+        # instant as the cutoff would be wrongly purged inside the
+        # retention window. Same fix shape: route through the same
+        # canonical UTC normaliser so every row stored here matches the
+        # canonical form of the bound it will be lex-compared against.
+        created_at = _normalize_iso_to_utc(created_at) or created_at
         with self.connect() as db:
             db.execute(
                 """
@@ -110,7 +123,18 @@ class CameraDiagnosticsMixin:
             return int(cursor.rowcount or 0)
 
     def purge_camera_diagnostics_older_than(self, older_than: str) -> int:
-        """Delete diagnostics created before the given ISO timestamp."""
+        """Delete diagnostics created before the given ISO timestamp.
+
+        ``older_than`` is already canonical ``+00:00`` from
+        ``datetime.now(timezone.utc) - timedelta(...)`` above the
+        call stack; we normalise it here too so any future caller
+        passing a non-canonical cutoff gets the same lexical-compare
+        alignment as the current ``utc_now()`` policy source.
+        """
+        older_than_bound = _normalize_iso_to_utc(older_than) or older_than
         with self.connect() as db:
-            cursor = db.execute("DELETE FROM camera_diagnostics WHERE created_at < ?", (older_than,))
+            cursor = db.execute(
+                "DELETE FROM camera_diagnostics WHERE created_at < ?",
+                (older_than_bound,),
+            )
             return int(cursor.rowcount or 0)
