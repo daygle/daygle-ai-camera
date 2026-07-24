@@ -341,8 +341,20 @@ function bindObjectRuleControls() {
     button.addEventListener('click', () => {
       const zones = cameraDetection().zones;
       const { zoneIndex, ruleIndex } = parseZoneRuleKey(button.dataset.deleteZoneRule);
+      const removedRule = zones[zoneIndex]?.object_rules?.[ruleIndex];
+      if (!removedRule) return;
+      const displayLabel = titleCase(removedRule.label || '');
+      const enabledFlip = [];
+      if (removedRule.enabled !== false) enabledFlip.push('detection');
+      if (removedRule.record_on_detect !== false) enabledFlip.push('recording');
+      if (removedRule.email_enabled === true) enabledFlip.push('email alerts');
+      if (removedRule.push_enabled === true) enabledFlip.push('push notifications');
+      const activeHint = enabledFlip.length
+        ? ` This rule currently has ${enabledFlip.join(' and ')} enabled.`
+        : '';
+      if (!window.confirm(`Delete the ${displayLabel} rule from this zone?${activeHint}`)) return;
       expandedZoneRules.delete(button.dataset.deleteZoneRule);
-      const removedLabel = String(zones[zoneIndex].object_rules[ruleIndex]?.label || '').trim().toLowerCase();
+      const removedLabel = String(removedRule.label || '').trim().toLowerCase();
       zones[zoneIndex].object_rules.splice(ruleIndex, 1);
       if (removedLabel === 'motion') {
         // Belt-and-suspenders alongside the normalizeZone() sync above: clear
@@ -382,7 +394,15 @@ function bindZoneControls(zones) {
   });
   document.querySelectorAll('[data-delete-zone]').forEach((button) => {
     button.addEventListener('click', () => {
-      zones.splice(Number(button.dataset.deleteZone), 1);
+      const index = Number(button.dataset.deleteZone);
+      const zone = zones[index];
+      const ruleCount = Array.isArray(zone?.object_rules) ? zone.object_rules.length : 0;
+      const label = escapeHtml(zone?.name || `Zone ${index + 1}`);
+      const ruleHint = ruleCount
+        ? ` This zone has ${ruleCount} object rule${ruleCount === 1 ? '' : 's'} that will also be deleted.`
+        : '';
+      if (!window.confirm(`Delete the ${label} area?${ruleHint}`)) return;
+      zones.splice(index, 1);
       selectedZoneIndex = null;
       renderZones();
       refreshFrame();
