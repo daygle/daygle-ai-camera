@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import subprocess
 from datetime import datetime, timezone
 
@@ -37,6 +38,14 @@ _LEVEL_TO_PRIORITY: dict[str, str] = {
 _SERVICE = 'daygle-ai-camera'
 
 
+# Strip the syslog-style level prefix from a raw log message.
+# Journalctl MESSAGE fields typically start with "LEVEL:     " (uvicorn access
+# logs) or "LEVEL:logger.name:" (app logger). Since the parser returns ``level``
+# as a separate field, stripping this prefix makes all log entries align
+# cleanly in the viewer. Safe no-op on messages without a level prefix.
+_LEVEL_PREFIX_PATTERN = re.compile(r'^[A-Z]+:(\S+:)?\s*')
+
+
 def _parse_entry(raw: dict) -> dict:
     ts_us = raw.get('__REALTIME_TIMESTAMP', '')
     try:
@@ -50,10 +59,15 @@ def _parse_entry(raw: dict) -> dict:
             message = bytes(message).decode('utf-8', errors='replace')
         except Exception:
             message = repr(message)
+    message = str(message)
+    # Strip redundant syslog level prefix — the ``level`` field already
+    # carries the severity, so "INFO:     " or "INFO:daygle.ai:" etc. from
+    # the raw message is just visual noise in the viewer.
+    message = _LEVEL_PREFIX_PATTERN.sub('', message, count=1)
     return {
         'timestamp': ts,
         'level': _PRIORITY_LABEL.get(priority, 'INFO'),
-        'message': str(message),
+        'message': message,
     }
 
 
