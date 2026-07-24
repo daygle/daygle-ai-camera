@@ -110,7 +110,7 @@ def _parse_iso_datetime(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _normalize_iso_to_utc(value: Any) -> str | None:
+def _normalize_iso_to_utc(value: Any, *, raise_on_invalid: bool = False) -> str | None:
     """Coerce an ISO-8601 timestamp to canonical UTC ISO with ``+00:00`` offset.
 
     Inverse of :func:`_parse_iso_datetime`: takes a string in (works with
@@ -128,6 +128,14 @@ def _normalize_iso_to_utc(value: Any) -> str | None:
     converted to UTC. Returns ``None`` for falsy input; returns the input
     unchanged on parse failure (best-effort -- lets the DB layer surface
     a useful error rather than silently dropping the row).
+
+    Set ``raise_on_invalid=True`` to make unparseable input raise
+    ``ValueError`` instead of falling back. Use this from
+    migration / audit contexts where silently storing a malformed
+    timestamp is worse than aborting the operation. Default ``False``
+    keeps backwards compat for every existing call site
+    (add / update / list / purge / timeline endpoints) where raising
+    would turn one bad request into a 500.
     """
     if not value:
         return None
@@ -143,7 +151,9 @@ def _normalize_iso_to_utc(value: Any) -> str | None:
         text = text[:-1] + '+00:00'
     try:
         parsed = datetime.fromisoformat(text)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
+        if raise_on_invalid:
+            raise ValueError(f"Invalid ISO timestamp {value!r}: {exc}") from exc
         return str(value)
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)

@@ -157,3 +157,22 @@ def delete_runtime_data(request: Request, db=Depends(get_database)):
     }
     write_audit_log(request, db, 'delete_all', 'runtime_data', details=result['deleted'])
     return result
+
+
+@router.post('/api/admin/migrations/normalize-recording-timestamps')
+def normalize_recording_timestamps(request: Request, db=Depends(get_database)):
+    """One-shot migration: re-encode every recording row's ``started_at`` /
+    ``ended_at`` / ``created_at`` to canonical UTC ``+00:00`` form so
+    SQLite's lexical compares for retention / timeline / list filters
+    land on the correct side of the boundary for historical data.
+
+    Idempotent: re-running on an already-canonical database is a no-op
+    (every row's normalised value equals its stored value and no UPDATE
+    is issued, so ``rows_changed`` is ``0``). Malformed timestamps are
+    counted under ``errors`` and skipped so a single bad row doesn't
+    abort the whole operation. Admin-only.
+    """
+    require_admin(request)
+    counts = db.migrate_recording_timestamps_to_utc()
+    write_audit_log(request, db, 'migrate', 'recording_timestamps', details=counts)
+    return {'ok': True, 'counts': counts}

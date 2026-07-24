@@ -457,6 +457,84 @@ class RecordingsMixin:
             db.executemany("DELETE FROM recordings WHERE id = ?", [(row["id"],) for row in rows])
             return rows
 
+    def migrate_recording_timestamps_to_utc(self) -> dict[str, int]:
+        """One-shot migration: re-encode ``started_at`` / ``ended_at`` /
+        ``created_at`` of every recording row to canonical UTC ``+00:00``
+        form so SQLite's lexical compares against the retention cutoff
+        and timeline day-window land correctly for historical data.
+
+        Idempotent: re-running on an already-canonical database is a
+        no-op (every row's normalised value equals its stored value and
+        no UPDATE is issued). Malformed timestamps raise ``ValueError``
+        inside ``_normalize_iso_to_utc(..., raise_on_invalid=True)``;
+        those rows are counted under ``errors`` and skipped so a single
+        bad row doesn't abort the whole operation.
+
+        Concurrency: we do NOT hold a single connection through the
+        row loop. SQLite grants a write lock to the first UPDATE in a
+        transaction; holding it for tens of thousands of rows would
+        block every concurrent ``add_recording`` / ``update_recording_timing``
+        / ``purge_recordings`` call from live cameras. Instead we
+        ``SELECT`` all rows in one short-lived connection so the write
+        lock isn't held while we normalise in Python, then commit the
+        UPDATEs in chunks of ``commit_chunk_size`` -- each chunk opens
+        its own ``self.connect()`` context so SQLite's write lock is
+        released between batches and live cameras keep recording
+        throughout.
+        """
+        commit_chunk_size = 500
+        counts: dict[str, int] = {
+            'rows_scanned': 0,
+            'rows_changed': 0,
+            'started_at': 0,
+            'ended_at': 0,
+            'created_at': 0,
+            'errors': 0,
+        }
+        # Phase 1: read all rows in one short-lived connection so the
+        # write lock isn't held while we normalise in Python.
+        with self.connect() as db:
+            rows = [dict(r) for r in db.execute(
+                "SELECT id, started_at, ended_at, created_at FROM recordings"
+            ).fetchall()]
+        counts['rows_scanned'] = len(rows)
+
+        # Phase 2: normalise in memory; collect UPDATEs as a list so we
+        # can ``executemany`` them in chunks.
+        updates: list[tuple[str, str, str, int]] = []
+        for row in rows:
+            try:
+                new_started = _normalize_iso_to_utc(row['started_at'], raise_on_invalid=True)
+                new_ended = _normalize_iso_to_utc(row['ended_at'], raise_on_invalid=True)
+                new_created = _normalize_iso_to_utc(row['created_at'], raise_on_invalid=True)
+            except ValueError:
+                counts['errors'] += 1
+                continue
+            row_changed = False
+            if new_started != row['started_at']:
+                counts['started_at'] += 1
+                row_changed = True
+            if new_ended != row['ended_at']:
+                counts['ended_at'] += 1
+                row_changed = True
+            if new_created != row['created_at']:
+                counts['created_at'] += 1
+                row_changed = True
+            if row_changed:
+                counts['rows_changed'] += 1
+                updates.append((new_started, new_ended, new_created, int(row['id'])))
+
+        # Phase 3: commit in chunks, with a fresh connection context for
+        # each chunk so SQLite's write lock is yielded between batches.
+        for chunk_start in range(0, len(updates), commit_chunk_size):
+            chunk = updates[chunk_start:chunk_start + commit_chunk_size]
+            with self.connect() as db:
+                db.executemany(
+                    "UPDATE recordings SET started_at = ?, ended_at = ?, created_at = ? WHERE id = ?",
+                    chunk,
+                )
+        return counts
+
     def _recording_row(self, row: sqlite3.Row) -> dict[str, Any]:
         recording = dict(row)
         file_path = Path(str(recording.get("file_path") or ""))

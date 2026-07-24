@@ -362,6 +362,32 @@ document.getElementById('purgeRecordingsBtn').addEventListener('click', async ()
   }
 });
 
+// "Normalise Recording Timestamps" runs a one-shot admin migration that
+// re-encodes each recording row's started_at / ended_at / created_at to
+// canonical ``+00:00`` UTC. It closes out the lexical-compare boundary
+// risk for pre-fix data (rows persisted before the e5c161d retention
+// normalisation). Idempotent: a re-run on already-canonical data is a
+// no-op (counts.rows_changed === 0). Admin-only on the server side.
+document.getElementById('normalizeTimestampsBtn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('normalizeTimestampsBtn');
+  btn.disabled = true;
+  try {
+    const result = await api('/api/admin/migrations/normalize-recording-timestamps', { method: 'POST' });
+    const counts = result?.counts || {};
+    setMessage(
+      `Normalised ${Number(counts.rows_changed || 0)} of ${Number(counts.rows_scanned || 0)} recording row(s) ` +
+      `(started_at: ${counts.started_at || 0}, ended_at: ${counts.ended_at || 0}, ` +
+      `created_at: ${counts.created_at || 0}, errors: ${counts.errors || 0}).`,
+    );
+  } catch (error) {
+    // Skip UI updates if api() triggered a 401 redirect
+    if (window.daygleAuth?.redirecting) return;
+    setMessage(error.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 forms.databaseRestore.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!window.confirm('Restore this database backup? This will replace current events, users, settings, alert rules, and sessions.')) return;
