@@ -70,7 +70,7 @@
           </span>
         </div>
         <strong id="statBackends" class="stat-card-value">0 / 0</strong>
-        <small class="muted stat-card-sub">ONVIF / RTSP manual</small>
+        <small class="muted stat-card-sub">ONVIF / RTSP Manual</small>
       </article>
       <article class="card stat-card">
         <div class="stat-card-head">
@@ -102,9 +102,9 @@
         <label>
           <span>Backend</span>
           <select id="cameraBackendFilter" aria-label="Filter by backend">
-            <option value="">All backends</option>
-            <option value="onvif">ONVIF / RTSP auto</option>
-            <option value="rtsp">RTSP manual</option>
+            <option value="">All Backends</option>
+            <option value="onvif">ONVIF / RTSP Auto</option>
+            <option value="rtsp">RTSP Manual</option>
           </select>
           <span class="field-help">Limit by connection type. Default: every backend</span>
         </label>
@@ -157,8 +157,8 @@
             <label><span>Camera ID</span><input id="editId" name="id" placeholder="e.g. front-door" /></label>
             <label class="full-width"><span>Backend</span>
               <select id="editBackend" name="backend">
-                <option value="onvif">ONVIF / RTSP (auto-build URL)</option>
-                <option value="rtsp">RTSP (manual URL)</option>
+                <option value="onvif">ONVIF / RTSP (Auto-Build URL)</option>
+                <option value="rtsp">RTSP (Manual URL)</option>
               </select>
             </label>
           </div>
@@ -175,7 +175,7 @@
             <div class="form-grid">
               <label><span>Host / IP</span><input id="editHost" name="host" placeholder="192.168.1.100" /></label>
               <label><span>Port</span><input id="editPort" name="port" type="number" min="1" max="65535" placeholder="554" /></label>
-              <label><span>Stream path</span><input id="editPath" name="path" placeholder="stream1" /></label>
+              <label><span>Stream Path</span><input id="editPath" name="path" placeholder="stream1" /></label>
               <label><span>Username</span><input id="editUsername" name="username" placeholder="admin" autocomplete="off" /></label>
               <label class="full-width"><span>Password</span><input id="editPassword" name="password" type="password" autocomplete="new-password" /></label>
             </div>
@@ -210,8 +210,8 @@
             </label>
             <label class="full-width"><span>Protocol</span>
               <select id="editPtzProtocol" name="ptz_protocol">
-                <option value="onvif">ONVIF (recommended)</option>
-                <option value="tcp_pelcod">TCP PelcoD (legacy cameras)</option>
+                <option value="onvif">ONVIF (Recommended)</option>
+                <option value="tcp_pelcod">TCP PelcoD (Legacy Cameras)</option>
               </select>
               <span class="field-help">ONVIF uses standard PTZ over the camera's HTTP port. TCP PelcoD sends raw binary commands to the Command Port.</span>
             </label>
