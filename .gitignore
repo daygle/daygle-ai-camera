@@ -12,3 +12,4 @@ models/*.pt
 data/*
 !data/
 .claude/
+.freebuff/
