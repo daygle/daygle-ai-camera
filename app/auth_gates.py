@@ -68,12 +68,26 @@ from typing import Any
 from fastapi import HTTPException, Request
 
 import app.state as _state
+from app.config_facades import effective_auth_config
+
+
+def _auth_enabled() -> bool:
+    """Live (post-DB-override) auth-enabled flag.
+
+    Replaces the stale ``_state.auth_config.get('enabled', True)`` reads that
+    used to disagree with ``authentication_middleware`` (which already reads
+    ``effective_auth_config()``), causing a split-brain where middleware let
+    unauthenticated requests through when admin disabled auth in the DB but
+    the route gates still raised 401. Routers and shared helpers should call
+    this function instead of reading ``_state.auth_config`` directly.
+    """
+    return bool(effective_auth_config().get('enabled', True))
 
 
 def require_user(request: Request) -> dict[str, Any]:
     user = getattr(request.state, 'user', None)
     if user is None:
-        if not _state.auth_config.get('enabled', True):
+        if not _auth_enabled():
             return {'id': None, 'role': 'admin', 'username': 'anonymous'}
         raise HTTPException(status_code=401, detail='Authentication required')
     return user
@@ -82,7 +96,7 @@ def require_user(request: Request) -> dict[str, Any]:
 def require_session(request: Request) -> dict[str, Any]:
     session = getattr(request.state, 'session', None)
     if session is None:
-        if not _state.auth_config.get('enabled', True):
+        if not _auth_enabled():
             anon: dict[str, Any] = {'id': None, 'role': 'admin', 'username': 'anonymous'}
             return {'user': anon, 'csrf_token': '', 'expires_at': ''}
         raise HTTPException(status_code=401, detail='Authentication required')

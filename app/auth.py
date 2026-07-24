@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from app.utils import _normalize_iso_to_utc
+from app.utils import _normalize_iso_to_utc, _parse_iso_datetime
 
 _bcrypt_spec = importlib.util.find_spec("bcrypt")
 bcrypt = importlib.import_module("bcrypt") if _bcrypt_spec else None
@@ -20,6 +20,26 @@ SESSION_COOKIE = "daygle_session"
 CSRF_COOKIE = "daygle_csrf"
 CSRF_HEADER = "X-CSRF-Token"
 VALID_ROLES = {"admin", "viewer"}
+
+
+def _is_locked_until_future(raw: Any, now_dt: datetime) -> bool:
+    """True iff ``raw`` is a parseable ISO datetime strictly in the future of ``now_dt``.
+
+    Defence-in-depth against legacy ``locked_until`` rows being naive
+    ``datetime`` strings (no tzinfo). Comparing a naive datetime against the
+    tz-aware ``now_dt`` used to raise ``TypeError`` and bubble out of
+    ``change_password`` / ``authenticate`` as an HTTP 500. Naive timestamps
+    are interpreted as UTC (matching the storage contract for any ISO
+    timestamp the auth layer writes, which is canonical ``+00:00``).
+    Unparseable values are treated as "not locked" so a corrupt row cannot
+    permanently brick an account.
+    """
+    if not raw:
+        return False
+    parsed = _parse_iso_datetime(raw)
+    if parsed is None:
+        return False
+    return parsed > now_dt
 
 
 class AuthError(Exception):
@@ -290,7 +310,7 @@ class AuthService:
             row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
             if row is None or not row["is_active"]:
                 raise AuthError("Current password is incorrect.")
-            if row["locked_until"] and datetime.fromisoformat(row["locked_until"]) > now_dt:
+            if _is_locked_until_future(row["locked_until"], now_dt):
                 raise AuthError("Account is temporarily locked. Try again later.")
             if not self.verify_password(current_password, row["password_hash"]):
                 raise AuthError("Current password is incorrect.")
@@ -345,7 +365,7 @@ class AuthService:
                     if self.too_many_recent_failures(db, username, ip_address, now_dt):
                         raise AuthError("Too many failed login attempts. Try again later.")
                     raise AuthError("Invalid username or password.")
-                if row["locked_until"] and datetime.fromisoformat(row["locked_until"]) > now_dt:
+                if _is_locked_until_future(row["locked_until"], now_dt):
                     raise AuthError("Account is temporarily locked. Try again later.")
                 if self.too_many_recent_failures(db, username, ip_address, now_dt):
                     raise AuthError("Too many failed login attempts. Try again later.")

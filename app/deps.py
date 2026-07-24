@@ -9,6 +9,7 @@ from fastapi import Request
 
 import app.state as _state
 from app.config_facades import (
+    effective_auth_config,
     effective_email_alert_settings,
     effective_push_notification_settings,
 )
@@ -42,10 +43,16 @@ def get_recording_service(request: Request):
 def get_auth_enabled(request: Request) -> bool:
     """Whether authentication is enabled in the resolved auth settings.
 
-    Computed at request time from ``state.auth_config`` so it tracks any
-    runtime override applied via ``auth.apply_config(...)``.
+    Computed at request time from ``effective_auth_config()`` so it reflects BOTH
+    the startup-on-disk ``auth`` block AND any ``auth`` override written to
+    ``app_settings`` via ``PUT /api/settings/system/auth``. The previous
+    implementation read ``_state.auth_config`` directly, which is only seeded
+    once at module load and so disagreed with ``authentication_middleware``
+    after an admin toggled auth off in the DB. Routes that branch on this value
+    (e.g. ``/api/config``) now match the middleware gate's answer for the
+    same request.
     """
-    return bool(_state.auth_config.get('enabled', True))
+    return bool(effective_auth_config().get('enabled', True))
 
 
 def get_logger(request: Request) -> logging.Logger:
