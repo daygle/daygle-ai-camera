@@ -106,6 +106,16 @@ function normalizeZone(zone) {
   zone.points = sourcePoints.map(normalizePoint);
   zone.object_rules = normalizeObjectRules(zone);
   zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion').map((rule) => rule.label);
+  // Keep the legacy `monitor_motion` flag in sync with the actual rule list
+  // so a removed or disabled Motion rule stays gone after save. The backend's
+  // normalize_monitoring_zones() re-inserts Motion when it sees
+  // ``monitor_motion=true`` but no Motion rule in ``object_rules`` -- without
+  // this sync that legacy-migration path would resurrect the rule on every
+  // save round-trip, making the delete appear to be ignored.
+  zone.monitor_motion = zone.object_rules.some(
+    (rule) => String(rule.label || '').trim().toLowerCase() === 'motion'
+      && rule.enabled !== false
+  );
   updateZoneBounds(zone);
   return zone;
 }
@@ -332,7 +342,14 @@ function bindObjectRuleControls() {
       const zones = cameraDetection().zones;
       const { zoneIndex, ruleIndex } = parseZoneRuleKey(button.dataset.deleteZoneRule);
       expandedZoneRules.delete(button.dataset.deleteZoneRule);
+      const removedLabel = String(zones[zoneIndex].object_rules[ruleIndex]?.label || '').trim().toLowerCase();
       zones[zoneIndex].object_rules.splice(ruleIndex, 1);
+      if (removedLabel === 'motion') {
+        // Belt-and-suspenders alongside the normalizeZone() sync above: clear
+        // the legacy flag immediately so the in-memory model is consistent
+        // even if the next save path bypasses a renderZones() re-render.
+        zones[zoneIndex].monitor_motion = false;
+      }
       zones[zoneIndex].object_labels = zones[zoneIndex].object_rules.filter((r) => r.label !== 'motion').map((r) => r.label);
       renderZones();
     });
