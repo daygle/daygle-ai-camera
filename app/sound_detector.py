@@ -417,14 +417,15 @@ class SoundDetector:
         self.source = source
         self.device_index = device_index
         self.rtsp_url = rtsp_url
-        self.sample_duration_seconds = sample_duration_seconds            # For source='ingest': returns audio WAV segments (path, mtime) written
-            # after the given timestamp by the shared per-camera ingest, so sound
-            # detection reuses that single RTSP connection instead of opening its own.
-            # Returning ``None`` (rather than ``[]``) is permitted for the producer
-            # to signal "no new segments right now" without paying for an empty list
-            # allocation per poll - the consumer coerces None to [] at the call
-            # site so an early-returning provider can't crash the daemon thread.
-            self.audio_segment_provider = audio_segment_provider
+        self.sample_duration_seconds = sample_duration_seconds
+        # For source='ingest': returns audio WAV segments (path, mtime) written
+        # after the given timestamp by the shared per-camera ingest, so sound
+        # detection reuses that single RTSP connection instead of opening its own.
+        # Returning ``None`` (rather than ``[]``) is permitted for the producer
+        # to signal "no new segments right now" without paying for an empty list
+        # allocation per poll - the consumer coerces None to [] at the call
+        # site so an early-returning provider can't crash the daemon thread.
+        self.audio_segment_provider = audio_segment_provider
 
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
