@@ -353,7 +353,17 @@ class AuthService:
                     failures = int(row["failed_attempts"]) + 1
                     locked_until = None
                     if failures >= self.max_login_attempts:
-                        locked_until = (now_dt + self.lockout).isoformat()
+                        # Defence-in-depth -- cosmetically identical coverage to the
+                        # rest of the users / login_attempts lifecycle.
+                        # ``(now_dt + self.lockout).isoformat()`` against a tz-aware
+                        # UTC ``now_dt`` is already canonical ``+00:00`` so the helper
+                        # is a no-op on the present source. The wrap routes any
+                        # FUTURE change (different tz derivation, naive ``datetime``,
+                        # f-string of local time) through the same canonicaliser so
+                        # the storage form on the ``UPDATE`` below stays uniform.
+                        # Idempotent on already-canonical input.
+                        _locked_raw = (now_dt + self.lockout).isoformat()
+                        locked_until = _normalize_iso_to_utc(_locked_raw) or _locked_raw
                     db.execute(
                         "UPDATE users SET failed_attempts = ?, locked_until = ?, updated_at = ? WHERE id = ?",
                         (failures, locked_until, now, row["id"]),

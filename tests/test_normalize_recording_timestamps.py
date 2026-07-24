@@ -910,3 +910,93 @@ def test_login_attempts_writes_canonical_created_at(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+# Defence-in-depth on ``users.locked_until`` -- the residual gap closed
+# by the auth/40af636+1 follow-up. The pre-defense source was
+# ``(now_dt + self.lockout).isoformat()`` against a tz-aware UTC
+# ``now_dt`` -- already canonical ``+00:00`` -- so the helper was a
+# no-op on the present call site, but the bound value was bypassing
+# the wrap. This test PROVES the wrap catches a non-canonical source
+# by monkeypatching ``app.auth.datetime`` -- same shape as the
+# login_attempts test -- so the lockout derivation sees a tz-aware
+# non-UTC datetime, then verifies ``users.locked_until`` is canonical
+# ``+00:00`` (NOT the raw ``-05:00`` form the source produced).
+def test_users_locked_until_writes_canonical_value(tmp_path, monkeypatch):
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        _login(client)
+
+        import datetime as _stdlib_dt
+        import app.auth as _auth_module
+        import app.state as _state  # noqa: PLC0415
+
+        # Fixed-offset ``-05:00`` (no ZoneInfo / tzdata dependency).
+        _minus_5h_tz = _stdlib_dt.timezone(_stdlib_dt.timedelta(hours=-5))
+
+        def _patched_now(cls, tz=None):
+            return _stdlib_dt.datetime(2024, 12, 15, 7, 0, 0, tzinfo=_minus_5h_tz)
+
+        _patched_class = type(
+            "PatchedDateTimeForLockoutWrapTest",
+            (_stdlib_dt.datetime,),
+            {"now": classmethod(_patched_now)},
+        )
+        monkeypatch.setattr(_auth_module, "datetime", _patched_class)
+
+        # Pre-set failed_attempts to one below max so a single bad
+        # password bumps ``failures`` to ``max_login_attempts``,
+        # firing the locked_until write inside the verify_password
+        # branch.
+        auth_singleton = _state.auth
+        with sqlite3.connect(database_path) as db_conn:
+            db_conn.execute(
+                "UPDATE users SET failed_attempts = ? WHERE username = ?",
+                (auth_singleton.max_login_attempts - 1, "admin"),
+            )
+            db_conn.commit()
+
+        # Single bad-password call → verify_password raises
+        # AuthError AFTER the UPDATE that wrote locked_until lands.
+        try:
+            auth_singleton.authenticate("admin", "wrong-password", "127.0.0.1")
+        except Exception:
+            pass
+
+        with sqlite3.connect(database_path) as db_conn:
+            row = db_conn.execute(
+                "SELECT locked_until FROM users WHERE username = ?", ("admin",)
+            ).fetchone()
+        assert row is not None, "no users row was read"
+        assert row[0] is not None, "locked_until should now be set after lockout"
+
+        # Lockout derivation:
+        #   source_now = 2024-12-15T07:00:00-05:00   (patched datetime.now)
+        #   plus self.lockout (default 15 min)      = 07:15:00-05:00
+        #   raw isoformat                             = "2024-12-15T07:15:00-05:00"
+        #   helper output (canonical UTC)           = "2024-12-15T12:15:00+00:00"
+        # The bound value must be the canonical form, NOT the raw form.
+        # If the wrap is bypassed the stored value would be
+        # ``2024-12-15T07:15:00-05:00`` which would then lex-sort BEFORE
+        # any ``+00:00`` cutoff -- the same bug class the recordings /
+        # camera_diagnostics / events fixes closed.
+        assert row[0] == "2024-12-15T12:15:00+00:00", row[0]
+        assert row[0].endswith(CANONICAL_SUFFIX), row[0]
+
+        # Spot-check the lexical-compare contract: a freshly-built
+        # canonical ``+00:00`` cutoff for "now + 1 hour" must lexically
+        # sort AFTER this locked_until row, so a future lockout-check
+        # shape (``WHERE locked_until <= ?``) places it correctly.
+        cutoff_canary = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        assert cutoff_canary.endswith(CANONICAL_SUFFIX), cutoff_canary
+        # The locked_until row is fixed at 07:00 source time + 15min
+        # == 12:15:00 UTC; the canary cutoff is from RIGHT NOW which
+        # is far in the future, so the locked_until row is lex-before
+        # the canary.
+        assert row[0] < cutoff_canary, (row[0], cutoff_canary)
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
