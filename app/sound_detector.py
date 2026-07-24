@@ -417,11 +417,14 @@ class SoundDetector:
         self.source = source
         self.device_index = device_index
         self.rtsp_url = rtsp_url
-        self.sample_duration_seconds = sample_duration_seconds
-        # For source='ingest': returns audio WAV segments (path, mtime) written
-        # after the given timestamp by the shared per-camera ingest, so sound
-        # detection reuses that single RTSP connection instead of opening its own.
-        self.audio_segment_provider = audio_segment_provider
+        self.sample_duration_seconds = sample_duration_seconds            # For source='ingest': returns audio WAV segments (path, mtime) written
+            # after the given timestamp by the shared per-camera ingest, so sound
+            # detection reuses that single RTSP connection instead of opening its own.
+            # Returning ``None`` (rather than ``[]``) is permitted for the producer
+            # to signal "no new segments right now" without paying for an empty list
+            # allocation per poll - the consumer coerces None to [] at the call
+            # site so an early-returning provider can't crash the daemon thread.
+            self.audio_segment_provider = audio_segment_provider
 
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -763,6 +766,15 @@ class SoundDetector:
                 segments = []
             except Exception as exc:
                 logger.error('Sound monitor ingest provider error: %s', exc)
+                segments = []
+            # The provider's contract documents that it MAY return ``None`` to
+            # signal "nothing new" - coerce to ``[]`` so the for-loop never
+            # unwraps a None and the daemon thread doesn't die on this very
+            # line with ``TypeError: 'NoneType' object is not iterable``. A
+            # buggy early-returning provider used to surface here as a fatal
+            # background-thread crash and the sound monitor went silent
+            # until the service was restarted.
+            if segments is None:
                 segments = []
             for path, mtime in segments:
                 if self._stop_event.is_set():
