@@ -3,6 +3,13 @@
 let currentOffset = 0;
 let currentTotal = 0;
 
+// requireElements() is provided by web/utils.js (loaded before this script).
+// Fail loud if a future HTML refactor removes any of these ids so we don't
+// crash with a cryptic TypeError on the first innerHTML write below.
+requireElements([
+  'logBody', 'logEmpty', 'logTable', 'pagination',
+  'pageInfo', 'prevBtn', 'nextBtn',
+]);
 const tbody = document.getElementById('logBody');
 const logEmpty = document.getElementById('logEmpty');
 const logTable = document.getElementById('logTable');

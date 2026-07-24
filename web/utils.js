@@ -2,6 +2,29 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
 }
 
+// ─── Required-element guard (used by API-shaped admin pages) ─────────────
+// Audit / camera-log / settings / sounds run as conventional scripts that
+// capture a handful of <div>/<button>/<form> ids at the top of the file and
+// then drive the page off those references. Each script is paired with a
+// specific HTML file, so today every getElementById() succeeds — but if a
+// future HTML refactor renames or removes an id without updating the JS,
+// the page would crash with a cryptic TypeError on the first innerHTML
+// write a few lines later. requireElements() is a single throw point per
+// page that fails loud (console.error + Error) with the offending ids
+// spelled out, so future drift surfaces immediately instead of hiding
+// behind a stack trace. Pages that legitimately reference elements
+// dynamically (live.js, zones.js, recordings.js, etc.) skip this — those
+// scripts tolerate missing elements per page (see users.js header
+// comment for the rationale).
+function requireElements(ids) {
+  if (!Array.isArray(ids) || !ids.length) return;
+  const missing = ids.filter((id) => !document.getElementById(id));
+  if (!missing.length) return;
+  const pageTitle = String(document.title || document.URL || 'current page').trim() || 'current page';
+  console.error(`[${pageTitle}] missing required element ids:`, missing);
+  throw new Error('This page is missing required DOM elements; check the HTML for matching ids.');
+}
+
 // ─── Toast notification (shared by every page that fires user feedback) ────
 // Moved here from nav.js so pages can fire toasts on their own. The toast
 // container is lazily created and the toast self-removes after a short delay.
@@ -583,7 +606,7 @@ window.daygleUi = {
   // API + auth
   api, setApiAuth, getApiAuth,
   // UI helpers
-  showToast, escapeHtml, titleCase,
+  showToast, escapeHtml, titleCase, requireElements,
   detectionPill, motionPill, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, MOTION_RUNNING_ROW_ICON,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,
   isMotionOnlyRecording, motionConfidenceFor,

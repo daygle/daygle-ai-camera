@@ -9,6 +9,15 @@ const SOUND_ICON_REMOVE = '<svg width="14" height="14" viewBox="0 0 24 24" fill=
 const SOUND_ICON_CHEVRON_DOWN = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>';
 const SOUND_ICON_CHEVRON_UP = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15"/></svg>';
 
+// requireElements() is provided by web/utils.js (loaded before this script).
+// Fail loud if a future HTML refactor removes any of these ids so we don't
+// crash with a cryptic TypeError when rendering the camera list or adding a
+// rule. (Stat-card ids and save/reload buttons are queried lazily inside
+// their own render handlers and tolerate absence individually.)
+requireElements([
+  'soundCameraSelect', 'soundEnabled', 'addSoundRuleSelect',
+  'soundRulesWrap', 'soundStatusPanel', 'soundMessage',
+]);
 const cameraSelect = document.getElementById('soundCameraSelect');
 const soundEnabled = document.getElementById('soundEnabled');
 const addRuleSelect = document.getElementById('addSoundRuleSelect');

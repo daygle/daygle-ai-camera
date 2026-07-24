@@ -1,6 +1,16 @@
+// Top-level page-element references. Each id MUST exist on users.html; if a
+// future HTML refactor drops one we bail out cleanly instead of crashing
+// on `usersEl.innerHTML = ...` two lines below. `loadUsers()` consumes the
+// same elements, so leaving any null silently propagated would surface as a
+// cryptic TypeError on the first render attempt. Logging here points the
+// developer at the missing id before any user interaction happens.
 const usersEl = document.getElementById('users');
 const form = document.getElementById('createUserForm');
 const message = document.getElementById('userMessage');
+if (!usersEl || !form || !message) {
+  console.error('[users.js] required page element missing:', { usersEl, form, message });
+  throw new Error('Users page is missing required elements; check users.html for the expected ids.');
+}
 
 // api() is provided by web/utils.js (loaded before this script). It reads
 // window.daygleAuth.csrfToken for state-changing verbs, redirects to /login

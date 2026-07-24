@@ -1,3 +1,14 @@
+// requireElements() is provided by web/utils.js (loaded before this script).
+// Fail loud if a future HTML refactor removes any of these ids so we don't
+// crash with a cryptic TypeError on the first form submit below. Element
+// refs further down (cameraOfflineForm, purgeRecordingsBtn, updateStatus,
+// etc.) live inside their own IIFE blocks which keep the surrounding
+// code defensive; only the page-spanning refs live up here.
+requireElements([
+  'systemMessage',
+  'emailSettingsForm', 'testEmailRecipient', 'testEmailBtn',
+  'pushSettingsForm', 'testPushBtn', 'startCleanBtn',
+]);
 const messageEl = document.getElementById('systemMessage');
 
 function titleCaseWords(value) {
