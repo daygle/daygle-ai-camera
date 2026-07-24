@@ -337,6 +337,11 @@ class RecordingsMixin:
         # so any future caller (script, test, external client) is also covered.
         day_start = _normalize_iso_to_utc(day_start) or day_start
         day_end = _normalize_iso_to_utc(day_end) or day_end
+        # Use json_extract over LIKE for metadata camera_id lookup.
+        # The previous LIKE-on-text form was brittle to JSON serialisation
+        # whitespace, escape characters (``%`` / ``_`` / ``\``), and
+        # incidental format changes. json_extract is shape-agnostic and
+        # returns NULL when the key is absent, cleanly excluding the row.
         with self.connect() as db:
             rows = db.execute(
                 """
@@ -347,18 +352,7 @@ class RecordingsMixin:
                     r.camera_id = ?
                     OR (
                         r.camera_id IS NULL
-                        -- Use ``json_extract`` (JSON1 extension) to read the
-                        -- ``camera_id`` field out of ``events.metadata`` by
-                        -- key instead of substring-matching a hand-built LIKE
-                        -- pattern. The previous LIKE-on-text form was brittle
-                        -- to whether ``json.dumps`` separated keys/values with
-                        -- ``", "`` (default) vs ``","`` vs ``": "`` vs ``":"``,
-                        -- to incidental whitespace inside the JSON for the
-                        -- same string id, and to escaping rules for ``%`` /
-                        -- ``_`` / ``\``. ``json_extract`` is shape-agnostic and
-                        -- returns NULL when the key isn't present so a
-                        -- missing camera_id metadata cleanly excludes the row
-                        -- (rather than a LIKE wildcard catching one).
+                        -- prefer json_extract for metadata camera_id
                         AND json_extract(e.metadata, '$.camera_id') = ?
                     )
                 )
