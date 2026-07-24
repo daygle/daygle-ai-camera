@@ -6,6 +6,7 @@ Direct imports replace the ``import app.main as main`` hybrid pattern.
 from __future__ import annotations
 import secrets
 import sqlite3
+import threading
 from pathlib import Path
 from fastapi import APIRouter, Depends, BackgroundTasks, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
@@ -14,6 +15,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.auth import utc_now
 from app.auth_gates import require_admin
+from app.camera_lifecycle import apply_storage_and_recording_settings
 from app.config_facades import (
     effective_auth_config,
     effective_cameras_config,
@@ -23,7 +25,6 @@ from app.config_facades import (
     get_camera_config,
 )
 from app.deps import (
-    get_apply_storage_and_recording_settings,
     get_auth,
     get_auth_enabled,
     get_database,
@@ -110,13 +111,15 @@ async def update_live_settings(request: Request, db=Depends(get_database)):
 async def update_recording_settings(
     request: Request,
     db=Depends(get_database),
-    apply_storage_and_recording_settings=Depends(get_apply_storage_and_recording_settings),
 ):
     require_admin(request)
     settings = validate_recording_settings(await request.json())
     db.set_setting('recording', settings, utc_now())
-    apply_storage_and_recording_settings()
     write_audit_log(request, db, 'update', 'settings.recording')
+    # Defer the expensive service restart to a background thread so the
+    # HTTP response returns immediately. The internal
+    # ``_apply_settings_lock`` serialises concurrent apply calls safely.
+    threading.Thread(target=apply_storage_and_recording_settings, daemon=True).start()
     return settings
 
 
@@ -124,13 +127,15 @@ async def update_recording_settings(
 async def update_storage_settings(
     request: Request,
     db=Depends(get_database),
-    apply_storage_and_recording_settings=Depends(get_apply_storage_and_recording_settings),
 ):
     require_admin(request)
     settings = validate_storage_settings(await request.json())
     db.set_setting('storage', settings, utc_now())
-    apply_storage_and_recording_settings()
     write_audit_log(request, db, 'update', 'settings.storage')
+    # Defer the expensive service restart to a background thread so the
+    # HTTP response returns immediately. The internal
+    # ``_apply_settings_lock`` serialises concurrent apply calls safely.
+    threading.Thread(target=apply_storage_and_recording_settings, daemon=True).start()
     return settings
 
 
