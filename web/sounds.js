@@ -126,7 +126,7 @@ function renderStatus() {
   const running = selectedStatus.running;
   const detail = selectedStatus.backend_reason || selectedStatus.status_detail || '';
   const stateClass = running ? 'status-ok' : (detail ? 'status-warning' : '');
-  const stateLabel = running ? 'Detector running' : 'Detector not running';
+  const stateLabel = running ? 'Detector Running' : 'Detector Not Running';
   statusPanel.innerHTML = `<div class="status-panel${stateClass ? ` ${stateClass}` : ''}"><span>${stateLabel}${detail ? ` · ${escapeHtml(detail)}` : ''}</span></div>`;
 }
 
