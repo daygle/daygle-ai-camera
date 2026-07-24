@@ -1,16 +1,16 @@
 """Database backup and recording-purge helpers extracted from ``app/main.py`` (Phase-J).
 
 Cluster membership:
-- ``DATABASE_RESTORE_REQUIRED_TABLES`` — set of table names required for a valid restore
-- ``DATABASE_RESTORE_LOCK`` — process-wide lock serialising database overwrites
-- ``backup_directory()`` — compute (and mkdir) the data/backups directory
-- ``safe_backup_timestamp()`` — UTC timestamp string for backup filenames
-- ``create_database_backup(prefix)`` — SQLite online-backup to a timestamped file
-- ``validate_restore_database(path)`` — integrity-check an uploaded database file
-- ``overwrite_database_from_file(restore_source)`` — hot-swap the live database
-- ``refresh_runtime_after_database_restore()`` — re-init singletons after restore
-- ``purge_recordings_by_policy(*, force)`` — age-out old recordings + disk files
-- ``purge_camera_diagnostics_by_policy()`` — age-out old camera-log rows
+- ``DATABASE_RESTORE_REQUIRED_TABLES`` - set of table names required for a valid restore
+- ``DATABASE_RESTORE_LOCK`` - process-wide lock serialising database overwrites
+- ``backup_directory()`` - compute (and mkdir) the data/backups directory
+- ``safe_backup_timestamp()`` - UTC timestamp string for backup filenames
+- ``create_database_backup(prefix)`` - SQLite online-backup to a timestamped file
+- ``validate_restore_database(path)`` - integrity-check an uploaded database file
+- ``overwrite_database_from_file(restore_source)`` - hot-swap the live database
+- ``refresh_runtime_after_database_restore()`` - re-init singletons after restore
+- ``purge_recordings_by_policy(*, force)`` - age-out old recordings + disk files
+- ``purge_camera_diagnostics_by_policy()`` - age-out old camera-log rows
 
 Pool-C reach (resolved lazily via lazy imports inside function bodies):
 - ``app.main.apply_cameras_settings`` (``refresh_runtime_after_database_restore``)

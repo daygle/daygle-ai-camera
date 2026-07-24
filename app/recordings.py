@@ -277,7 +277,7 @@ class RecordingService:
                 # blocked on a flush), NOT a graceful shutdown. The
                 # replacement worker is still started from the caller's
                 # perspective because denying camera ingest would be worse
-                # than a brief overlap, but operators deserve visibility —
+                # than a brief overlap, but operators deserve visibility -
                 # surface this through the same ``diagnostic_callback``
                 # already used by ``prebuffer_restart`` / ``ingest_restart``
                 # / ``prebuffer_fallback`` so a hung camera shows up in the
@@ -323,7 +323,7 @@ class RecordingService:
                         )
                     except Exception as exc:
                         # A misbehaving diagnostic surface must not crash
-                        # the shutdown path — the worker thread is hung, we
+                        # the shutdown path - the worker thread is hung, we
                         # are racing to start the replacement, every error
                         # here is operator-noise at best.
                         logger.debug(
@@ -403,7 +403,7 @@ class RecordingService:
                 self._stop_worker(worker, join_timeout=self.CONTINUOUS_WORKER_JOIN_TIMEOUT_SECONDS)
 
     def stop_all_continuous_recordings(self) -> None:
-        # Bug 4 fix: same pattern as ``stop_continuous_chunk_recording`` —
+        # Bug 4 fix: same pattern as ``stop_continuous_chunk_recording`` -
         # hold ``_continuous_lock`` through the per-worker join so a
         # concurrent ensure for any key can't race in. The join_timeout
         # (``CONTINUOUS_WORKER_JOIN_TIMEOUT_SECONDS``) matches
@@ -446,7 +446,7 @@ class RecordingService:
                 thread = existing.get('thread')
                 if isinstance(thread, threading.Thread) and thread.is_alive():
                     return
-            # Bug 2 fix: same pattern as ``_ensure_prebuffer_worker`` —
+            # Bug 2 fix: same pattern as ``_ensure_prebuffer_worker`` -
             # join the old worker's thread before starting a replacement so
             # two ffmpegs can't write into the same ``continuous-{key}/``
             # directory concurrently and a chunk callback can't observe a
@@ -680,7 +680,7 @@ class RecordingService:
 
         # Check for ffmpeg and pre-event segments BEFORE sleeping so that if we
         # must fall back to a live capture it starts now (at trigger time) rather
-        # than post_seconds later — giving the clip a meaningful timestamp.
+        # than post_seconds later - giving the clip a meaningful timestamp.
         ffmpeg = shutil.which('ffmpeg')
         if not ffmpeg:
             self._emit_diagnostic(
@@ -702,7 +702,7 @@ class RecordingService:
             self._emit_diagnostic(
                 camera_id,
                 'prebuffer_fallback',
-                'No pre-event buffer was available, so the clip was captured live from the trigger forward — '
+                'No pre-event buffer was available, so the clip was captured live from the trigger forward - '
                 'the moments before the trigger are missing.',
                 severity='warning',
                 details={'reason': 'no_segments'},
@@ -929,7 +929,7 @@ class RecordingService:
             # directories (``frames``/``latest.jpg``, ``.audio``/``*.wav``,
             # ``.prebuffer``/``segment-*.mp4``), and the old worker's
             # ``finally``-block pruner can silently delete freshly-written
-            # segments from the new worker — destroying event pre-roll footage
+            # segments from the new worker - destroying event pre-roll footage
             # immediately after every restart. Joining also closes the
             # URL-change marker-write-back race (P1 from earlier review): the
             # old worker has fully exited by the time we clear the .no_audio
@@ -942,7 +942,7 @@ class RecordingService:
             # worst-case ffmpeg shutdown (1s loop sleep + up to 2s
             # SIGTERM/terminate wait + SIGKILL); if a hung worker exceeds it,
             # the replacement is still started (denying camera ingest would
-            # be worse than a brief two-ffmpeg overlap) — see TODO note
+            # be worse than a brief two-ffmpeg overlap) - see TODO note
             # for issuing an operator diagnostic in that case.
             if existing:
                 self._stop_worker(existing, join_timeout=self.PREBUFFER_WORKER_JOIN_TIMEOUT_SECONDS)
@@ -1193,7 +1193,7 @@ class RecordingService:
                     self._emit_diagnostic(
                         camera_id,
                         'ingest_restart',
-                        f'Camera ingest process exited (code {return_code}) after {uptime:.0f}s — '
+                        f'Camera ingest process exited (code {return_code}) after {uptime:.0f}s - '
                         'reconnecting. If this happens frequently the pre-event buffer may be empty '
                         'when recordings are triggered.',
                         severity='warning',
@@ -1263,7 +1263,7 @@ class RecordingService:
         up, camera offline, or ffmpeg unavailable)."""
         path = self.frames_dir / self._camera_key(camera_id) / 'latest.jpg'
         # Open once and use fstat so the mtime and bytes come from the same
-        # inode — eliminates the TOCTOU race between a separate stat() and
+        # inode - eliminates the TOCTOU race between a separate stat() and
         # read_bytes() when ffmpeg atomically renames a new frame into place.
         # O_BINARY forces binary mode on Windows; without it os.open defaults to
         # text mode and reads stop at the first 0x1A (Ctrl-Z) byte, silently

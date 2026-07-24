@@ -149,7 +149,7 @@ if (document.readyState === 'loading') {
 // window.daygleAuth, so subsequent api() calls see the CSRF token.
 //
 // The try/catch / !response.ok guards leave window.daygleAuth empty when the
-// user is unauthenticated — every page bundle already handles that case.
+// user is unauthenticated - every page bundle already handles that case.
 window.daygleAuthReady = (async () => {
   try {
     const response = await fetch('/api/auth/me');
@@ -473,7 +473,7 @@ window.daygleAuthReady = (async () => {
 
 // ─── Top-level account-area renderer ────────────────────────────────────
 // Lives at the top level (NOT inside the nav-builder IIFE) so the cross-tab
-// listener below — which has to register before any user interaction — can
+// listener below - which has to register before any user interaction - can
 // re-paint the account dropdown when a different tab toggles the auth
 // state. The IIFE bootstrap calls this once after building the DOM, and
 // every subsequent auth-state change (logout from another tab, csrf refresh,

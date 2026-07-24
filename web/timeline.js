@@ -443,7 +443,7 @@ function replaceUrl(recordingId = state.activeRecordingId) {
   if (day) params.set('day', day);
   // Skip the URL params when the filter matches the picker's default so deep
   // links stay clean (and old `to_time=23:59` URLs no longer match the new
-  // 23:55 end-of-day sentinel — treat them as "all day" via the constant).
+  // 23:55 end-of-day sentinel - treat them as "all day" via the constant).
   if (fromTime && fromTime !== TIMELINE_FILTER_TIME_FROM_DEFAULT) params.set('from_time', fromTime);
   if (toTime && toTime !== TIMELINE_FILTER_TIME_TO_DEFAULT) params.set('to_time', toTime);
   if (filter) params.set('filter', filter);
@@ -776,7 +776,7 @@ function renderRecordingList(recordings) {
             <span class="activity-item-type">${typeLabel}</span>
             <strong>Recording #${escapeHtml(String(recording.id))}</strong>
           </span>
-          <span>${escapeHtml(start)} – ${escapeHtml(end)} · ${camera}${zoneSuffix}</span>
+          <span>${escapeHtml(start)} - ${escapeHtml(end)} · ${camera}${zoneSuffix}</span>
           ${confidenceBadges ? `<span class="timeline-recording-confidence-row">${confidenceBadges}</span>` : ''}
         </span>
         <span class="timeline-recording-meta">
@@ -1057,7 +1057,7 @@ els.filterSelect.addEventListener('change', () => {
 
 // Debounce the From/To time-picker change handler. The picker renders as
 // three separate <select> elements (hour / minute / AM/PM in 12h mode),
-// each firing its own change event — so a user who adjusts both hour and
+// each firing its own change event - so a user who adjusts both hour and
 // minute triggers two roundtrips if we re-fire the timeline fetch on every
 // event. Coalesce consecutive edits within a 150ms window into a single
 // /api/recordings/timeline refresh; still reactive enough to feel instant
@@ -1065,8 +1065,8 @@ els.filterSelect.addEventListener('change', () => {
 //
 // Attach the listeners to the outer mount spans (not the inner
 // .time-select-wrap). renderTimelineTimeSelect replaces innerHTML on
-// every re-render — including the daygleDatePrefsChanged 24h <-> 12h+AM/PM
-// format-swap path — so a listener attached to the wrap dies with the
+// every re-render - including the daygleDatePrefsChanged 24h <-> 12h+AM/PM
+// format-swap path - so a listener attached to the wrap dies with the
 // old wrap. The mount spans aren't recreated, so they reliably catch
 // change events from inner <select>s (via DOM bubbling) on every render.
 let timelineTimeChangeTimer = null;

@@ -36,7 +36,7 @@ function levelBadgeClass(level) {
 }
 
 function formatEntryTime(iso) {
-  if (!iso) return '—';
+  if (!iso) return '-';
   try {
     const d = new Date(iso);
     const date = d.toLocaleDateString([], { month: 'short', day: '2-digit' });

@@ -2,11 +2,11 @@
 
 Three contracts:
 
-1. ``main.normalize_camera_id is camera_config.normalize_camera_id`` — both
+1. ``main.normalize_camera_id is camera_config.normalize_camera_id`` - both
    Pool A re-exports point to the same ``camera_id.normalize_camera_id``
    function object (identity via sys.modules to survive test-isolation wipes).
 
-2. ``zone_schema.normalize_camera_id is camera_id.normalize_camera_id`` —
+2. ``zone_schema.normalize_camera_id is camera_id.normalize_camera_id`` -
    zone_schema's import is also the same object (it was previously imported
    from camera_config, which caused the mutual cycle; now it comes from
    camera_id directly).

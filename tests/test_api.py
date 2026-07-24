@@ -207,7 +207,7 @@ def _server(app):
 
 
 def _m():
-    """Canonical module namespace — call after _load_app() only."""
+    """Canonical module namespace - call after _load_app() only."""
     import types
     ns = types.SimpleNamespace()
     ns.state = sys.modules["app.state"]
@@ -904,7 +904,7 @@ def test_prebuffer_first_segment_uses_full_segment_length(tmp_path):
 
 def test_audio_retention_follows_prebuffer_window(tmp_path):
     # Audio sidecar segments must be retained for the full prebuffer window, not
-    # a fixed 20s — otherwise long event clips get audio shorter than the video
+    # a fixed 20s - otherwise long event clips get audio shorter than the video
     # and the player's buffered bar stops short (buffered = where all tracks exist).
     from app.recordings import RecordingService
 
@@ -4777,14 +4777,14 @@ def test_motion_debounce_trailing_window_and_independent_recording(tmp_path, mon
     _ed.remember_live_event('camera-1', {'person'})
     assert _ed.live_event_is_debounced('camera-1', {'motion'}, 60.0) is True
 
-    # Simulate elapsed time beyond the trailing window — motion records independently.
+    # Simulate elapsed time beyond the trailing window - motion records independently.
     with main._state.live_event_last_emitted_lock:
         main._state.live_event_last_emitted['camera-1']['timestamp'] = (
             time.time() - _ed._MOTION_TRAILING_SUPPRESSION_SECONDS - 1
         )
     assert _ed.live_event_is_debounced('camera-1', {'motion'}, 60.0) is False
 
-    # A concrete object never uses the trailing path — label overlap decides.
+    # A concrete object never uses the trailing path - label overlap decides.
     _ed.remember_live_event('camera-1', {'person'})
     assert _ed.live_event_is_debounced('camera-1', {'cat'}, 10.0) is False
 

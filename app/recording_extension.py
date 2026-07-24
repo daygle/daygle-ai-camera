@@ -4,27 +4,27 @@ This module owns the four helpers that previously lived inline on
 ``app/main.py``:
 
 * ``extend_active_rtsp_recording(*, camera_id, event_time,
-  recording_config=None, detections=None) -> int | None`` — extends
+  recording_config=None, detections=None) -> int | None`` - extends
   an in-flight RTSP recording's capture deadline by the configured
   ``extension_step_seconds`` post-event horizon and updates the
   associated recording row (timing, labels, trigger).
-* ``recording_track_sidecar_path(file_path: Path) -> Path`` —
+* ``recording_track_sidecar_path(file_path: Path) -> Path`` -
   computes the ``.track.json`` sidecar path next to a recording file.
 * ``write_recording_detection_track(file_path: Path, track:
-  list[dict[str, Any]]) -> None`` — atomic-ish write of the
+  list[dict[str, Any]]) -> None`` - atomic-ish write of the
   sidecar JSON next to ``file_path``.
 * ``load_recording_detection_track(file_path: Path) -> list[dict[str,
-  Any]] | None`` — reads + parses the sidecar JSON if present,
+  Any]] | None`` - reads + parses the sidecar JSON if present,
   returning ``None`` on any missing-file / corrupt / non-detection
   shape.
 
 The two pieces of exclusive state live in ``app.state`` (accessed via
 ``_state.*``):
 
-* ``_state.active_rtsp_recordings`` — ``dict`` keyed by camera_id,
+* ``_state.active_rtsp_recordings`` - ``dict`` keyed by camera_id,
   holding ``{recording_id, capture_deadline_ts,
   max_capture_deadline_ts, start_capture_ts}`` per in-flight session.
-* ``_state.active_rtsp_recordings_lock`` — ``threading.Lock``
+* ``_state.active_rtsp_recordings_lock`` - ``threading.Lock``
   guarding ``active_rtsp_recordings``.
 
 Mirrors the Phase-26 (``live_detection_history`` /
@@ -34,20 +34,20 @@ Phase-29 (``live_detection_status_lock`` / ``live_detection_status``)
 precedent for keeping state on ``app.main``.
 
 **Pool-A rebind (in ``app/main.py``):** all four helpers are re-bound
-as ``main.<orig_name>``. No underscore stripping needed — none of the
+as ``main.<orig_name>``. No underscore stripping needed - none of the
 four are originally underscored.
 
 **State and service access (via ``_state.*``):**
 
 * ``_state.active_rtsp_recordings`` + ``_state.active_rtsp_recordings_lock``
-  — state primitives in ``app.state``.
-* ``_state.database`` — the singleton DB handle via ``app.state``.
-* ``_state.recording_service`` — the ``RecordingService`` singleton
+  - state primitives in ``app.state``.
+* ``_state.database`` - the singleton DB handle via ``app.state``.
+* ``_state.recording_service`` - the ``RecordingService`` singleton
   via ``app.state``. Used for ``should_record`` policy lookup.
-* ``effective_recording_config`` — imported directly from
+* ``effective_recording_config`` - imported directly from
   ``app.config_facades``.
 * ``detection_label_strings`` + ``detection_label_confidences``
-  — imported directly from ``app.detection_status``.
+  - imported directly from ``app.detection_status``.
 
 **Track trio Pool-C reach:** NONE. Pure helper group. Uses only
 stdlib (``json``, ``pathlib.Path``, ``typing.Any``) and resolves
@@ -56,22 +56,22 @@ module.
 
 **External callers that must keep working via Phase-30 rebind:**
 
-* ``app/api/recordings_router.py`` — ``main.load_recording_detection_track``
+* ``app/api/recordings_router.py`` - ``main.load_recording_detection_track``
   + ``main.recording_track_sidecar_path``.
-* ``tests/test_api.py`` — extensive usage of all 4 helpers for
+* ``tests/test_api.py`` - extensive usage of all 4 helpers for
   recording-extension tests.
-* ``web/app.js`` — comment reference (no functional dependency).
+* ``web/app.js`` - comment reference (no functional dependency).
 
 **Internal main.py body callers (use bare names after rebind):**
 
-* ``extend_active_rtsp_recording(...)`` — called from L1149 (likely
+* ``extend_active_rtsp_recording(...)`` - called from L1149 (likely
   ``process_live_stream_alerts`` event-recording decision) and L1331
   (another recording-orchestration helper).
-* ``recording_track_sidecar_path(...)`` — called from L1500 + the
+* ``recording_track_sidecar_path(...)`` - called from L1500 + the
   track trio internally.
-* ``write_recording_detection_track(...)`` — called from L1589 (likely
+* ``write_recording_detection_track(...)`` - called from L1589 (likely
   the main stream-loop detection track persistence).
-* ``load_recording_detection_track(...)`` — called from various
+* ``load_recording_detection_track(...)`` - called from various
   playback + recording-access sites.
 
 **Generic-label-set duplication (recorded for follow-up):** the
@@ -153,7 +153,7 @@ def extend_active_rtsp_recording(
         recording_id, ended_at=ended_at, duration_seconds=duration_seconds,
     )
     # Re-check that this recording is still the active one for this camera before
-    # writing labels/trigger — a new capture may have started between lock release
+    # writing labels/trigger - a new capture may have started between lock release
     # and here, in which case these updates belong to a now-closed recording.
     with _state.active_rtsp_recordings_lock:
         current_session = _state.active_rtsp_recordings.get(camera_id)

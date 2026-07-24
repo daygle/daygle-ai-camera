@@ -3,9 +3,9 @@
 Owns three helpers for creating OpenCV/RTSP camera instances and reading
 ingest frames from the recording service.
 
-* ``create_camera(settings)`` — instantiate one ``OpenCvStreamCamera``
-* ``create_camera_instances(settings_list)`` — build the full id→camera dict
-* ``read_ingest_frame(camera_id)`` — pull the latest JPEG from the ingest
+* ``create_camera(settings)`` - instantiate one ``OpenCvStreamCamera``
+* ``create_camera_instances(settings_list)`` - build the full id→camera dict
+* ``read_ingest_frame(camera_id)`` - pull the latest JPEG from the ingest
   prebuffer and decode it to ``(bgr_image, frame_dict)``
 """
 

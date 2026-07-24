@@ -3,22 +3,22 @@
 This module owns the five helpers that previously lived inline on
 ``app/main.py``:
 
-* ``wait_for_pending_alert_notifications`` — sync barrier for tests,
+* ``wait_for_pending_alert_notifications`` - sync barrier for tests,
   blocks until in-flight email/push delivery threads complete.
-* ``deliver_alert_notifications`` — the main orchestrator that runs
+* ``deliver_alert_notifications`` - the main orchestrator that runs
   email + push delivery for a triggered event.
-* ``deliver_email_alerts`` — email-side delivery (uses
+* ``deliver_email_alerts`` - email-side delivery (uses
   ``app.email_alerts.EmailAlertService``).
-* ``deliver_push_notifications`` — push-side delivery (uses
+* ``deliver_push_notifications`` - push-side delivery (uses
   ``app.push_notifications.PushNotificationService``).
-* ``deliver_sound_alert_notifications`` — sound-rule specific
+* ``deliver_sound_alert_notifications`` - sound-rule specific
   orchestrator that delegates to email + push.
 
 The two state primitives live in ``app.state`` (accessed via ``_state.*``):
 
-* ``_notification_threads_lock`` — ``threading.Lock`` guarding
+* ``_notification_threads_lock`` - ``threading.Lock`` guarding
   ``_notification_threads``.
-* ``_notification_threads`` — list of in-flight delivery threads.
+* ``_notification_threads`` - list of in-flight delivery threads.
 
 **Pool-A rebind (in ``app/main.py``):** every helper is re-bound as
 ``main.<orig_name>``. The two originally-underscored names
@@ -32,31 +32,31 @@ modification (the new module exposes them as clean public APIs:
 ``import app.main as main``):**
 
 * ``_state._notification_threads_lock``, ``_state._notification_threads``
-  — state primitives in ``app.state`` (not reached via ``main.*``).
-* ``_state.database`` — the singleton DB handle via ``app.state``.
-* ``_state.auth`` — the AuthService singleton via ``app.state``
+  - state primitives in ``app.state`` (not reached via ``main.*``).
+* ``_state.database`` - the singleton DB handle via ``app.state``.
+* ``_state.auth`` - the AuthService singleton via ``app.state``
   (used by ``_alert_datetime_prefs``).
 * ``main._rule_notify_active_now(...)``,
-  ``main.compute_minimum_rule_confidence()`` — helpers on ``main.py``
+  ``main.compute_minimum_rule_confidence()`` - helpers on ``main.py``
   (reached via ``from app.main import ...`` inside function bodies).
 * ``_format_alert_datetime`` and ``_alert_datetime_prefs`` are LOCAL
   to this module (not Pool C).
-* ``main.render_live_snapshot_jpeg_overlay(...)`` — Phase-25 rebind
+* ``main.render_live_snapshot_jpeg_overlay(...)`` - Phase-25 rebind
   from ``app.live_snapshot``.
 * ``main.EmailAlertService``, ``main.EmailAlertError``,
   ``main.PushNotificationService``, ``main.PushNotificationError``
-  — service classes + exception types reached via Pool A so tests can
+  - service classes + exception types reached via Pool A so tests can
   monkeypatch ``main.<ServiceName>`` consistently (mirrors the Pool-A
   contract documented in :mod:`app.api.__init__` and the proven
   pattern in :mod:`app.detection_state`, :mod:`app.event_debounce`,
   :mod:`app.detection_status`). Replaces the previous direct
-  top-of-module imports (see commit history — the bypass produced a
+  top-of-module imports (see commit history - the bypass produced a
   single failing pytest case post-Phase-28, fixed by restoring the
   Pool-A reach).
 
 **Logger acquisition:** the module uses its OWN child logger via
 ``logging.getLogger('daygle.ai')`` (matching the Phase-26
-``app.detection_state`` precedent — same name, same logging tree.
+``app.detection_state`` precedent - same name, same logging tree.
 Not reached via ``main.logger``.
 
 **Bare-name internal calls.** ``deliver_alert_notifications`` and

@@ -1,7 +1,7 @@
 """Camera diagnostics helper extracted from ``app/main.py`` (Phase-D).
 
 Records operational camera/recording diagnostic events to the database.
-Best-effort — never raises into the calling path so recording and detection
+Best-effort - never raises into the calling path so recording and detection
 threads can't be broken by a logging failure.
 """
 

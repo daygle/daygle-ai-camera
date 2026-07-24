@@ -1,7 +1,7 @@
 """Regression test for the Windows os.open text-mode truncation fix.
 
 Locks down `RecordingService.latest_frame_jpeg` so it cannot regress to
-``os.open(str(path), os.O_RDONLY)`` on Windows — where MSVCRT's _open
+``os.open(str(path), os.O_RDONLY)`` on Windows - where MSVCRT's _open
 defaults to text mode and reads STOP at the first 0x1A (Ctrl-Z) byte
 interpreted as EOF. JPEG scan-data bytes routinely include 0x1A in the
 first few hundred bytes, so without O_BINARY the text-mode read silently

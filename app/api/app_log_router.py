@@ -1,4 +1,4 @@
-"""Application log router – streams journalctl output for daygle-ai-camera."""
+"""Application log router - streams journalctl output for daygle-ai-camera."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ def _parse_entry(raw: dict) -> dict:
         except Exception:
             message = repr(message)
     message = str(message)
-    # Strip redundant syslog level prefix — the ``level`` field already
+    # Strip redundant syslog level prefix - the ``level`` field already
     # carries the severity, so "INFO:     " or "INFO:daygle.ai:" etc. from
     # the raw message is just visual noise in the viewer.
     message = _LEVEL_PREFIX_PATTERN.sub('', message, count=1)

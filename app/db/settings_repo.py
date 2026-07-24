@@ -14,7 +14,7 @@ class SettingsRepoMixin:
 
     Renamed file from ``settings.py`` to ``settings_repo.py`` to avoid
     shadowing the application-level ``app.settings`` configuration module that
-    loads YAML/ENV config — both modules are unrelated but Python would
+    loads YAML/ENV config - both modules are unrelated but Python would
     otherwise resolve ``settings`` ambiguously inside the package.
     """
 

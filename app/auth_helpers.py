@@ -4,7 +4,7 @@ These functions were previously defined in app/main.py alongside the FastAPI
 application. Moving them here lets router files import them directly without
 going through the ``import app.main as main`` hybrid pattern.
 
-The functions do NOT import app.main — they use direct imports only.
+The functions do NOT import app.main - they use direct imports only.
 """
 from __future__ import annotations
 

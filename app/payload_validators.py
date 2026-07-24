@@ -257,7 +257,7 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
             # Explicit send from UI: None means "clear override", value means "set"
             _v = payload[_flat_key]
             if _v is None:
-                continue  # cleared — omit from updated
+                continue  # cleared - omit from updated
             try:
                 if _flat_key == 'motion_pixel_threshold':
                     updated[_flat_key] = max(1, min(255, int(_v)))
@@ -276,7 +276,7 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
             except (TypeError, ValueError):
                 pass
         elif not _flat_in_payload:
-            # Payload has no motion keys at all — preserve stored override
+            # Payload has no motion keys at all - preserve stored override
             _cur_v = current.get(_flat_key) if current.get(_flat_key) is not None else _cur_motion_nest.get(_short_key)
             if _cur_v is not None:
                 try:

@@ -63,7 +63,7 @@ This solves the standing-still problem: even if a person has been absorbed into 
 - Motion zone rules - **no**. Since no pixel motion was detected, the motion confidence is zero and motion rules stay silent.
 
 **When to use it:**
-- Set to `30` – `60` seconds if you need to track whether someone remains present in an area
+- Set to `30` - `60` seconds if you need to track whether someone remains present in an area
 - Set to `120` seconds or higher if CPU is limited and you mainly care about the moment of entry
 - Leave at `0` (disabled) if you only need to detect activity, not sustained presence
 
@@ -95,14 +95,14 @@ Default: `0` (disabled)
 
 ### Motion Pixel Threshold
 
-How much a single pixel's intensity must change (on a 0–255 scale) to be counted as a changed pixel.
+How much a single pixel's intensity must change (on a 0-255 scale) to be counted as a changed pixel.
 
 - **Too low:** Sensor noise, IR flicker, and minor lighting changes trigger the gate constantly
 - **Too high:** Subtle or distant motion is missed
 
 Default: `30`
 
-**Tuning tip:** On IR or night-vision cameras, raise this to `40`–`60` to filter out sensor noise.
+**Tuning tip:** On IR or night-vision cameras, raise this to `40`-`60` to filter out sensor noise.
 
 ---
 

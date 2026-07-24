@@ -256,7 +256,7 @@ class _YamnetBackend:
         """
         if not self._load():
             return {}
-        # Preprocess audio before acquiring the lock — these are pure numpy
+        # Preprocess audio before acquiring the lock - these are pure numpy
         # operations that do not touch model state, so they don't need
         # serialization and keeping them outside the lock reduces contention
         # between cameras sharing the singleton.
@@ -319,7 +319,7 @@ class _YamnetBackend:
                 logger.debug('YAMNet TFLite inference error: %s', exc)
                 return {}
 
-        # Build the result dict outside the lock — mean_scores is a local copy
+        # Build the result dict outside the lock - mean_scores is a local copy
         # and self._class_indices is immutable after _load().
         result: dict[str, float] = {}
         for class_id, idxs in self._class_indices.items():
@@ -395,11 +395,11 @@ class SoundDetector:
       - ``'rtsp'``: pipes audio from an RTSP stream through FFmpeg
 
     Each rule dict:
-        class                – key into SOUND_CLASSES
-        name                 – human-readable label used in alerts
-        enabled              – bool
-        confidence_threshold – minimum score to fire (YAMNet: 0.25–0.40 typical)
-        cooldown_seconds     – minimum seconds between consecutive alerts for this class
+        class                - key into SOUND_CLASSES
+        name                 - human-readable label used in alerts
+        enabled              - bool
+        confidence_threshold - minimum score to fire (YAMNet: 0.25-0.40 typical)
+        cooldown_seconds     - minimum seconds between consecutive alerts for this class
     """
 
     def __init__(
@@ -702,7 +702,7 @@ class SoundDetector:
         ingest, so sound detection adds no extra RTSP connection.
 
         Segments (16 kHz mono s16le) are appended to a rolling buffer and
-        classified in 50%-overlapping windows — the same sliding-window scheme
+        classified in 50%-overlapping windows - the same sliding-window scheme
         the microphone/RTSP paths use. Classifying each 1s segment in isolation
         (the previous behaviour) split short transients across the segment
         boundary, halving their energy in each window and missing barks, glass

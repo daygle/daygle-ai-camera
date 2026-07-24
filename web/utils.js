@@ -6,14 +6,14 @@ function escapeHtml(value) {
 // Audit / camera-log / settings / sounds run as conventional scripts that
 // capture a handful of <div>/<button>/<form> ids at the top of the file and
 // then drive the page off those references. Each script is paired with a
-// specific HTML file, so today every getElementById() succeeds — but if a
+// specific HTML file, so today every getElementById() succeeds - but if a
 // future HTML refactor renames or removes an id without updating the JS,
 // the page would crash with a cryptic TypeError on the first innerHTML
 // write a few lines later. requireElements() is a single throw point per
 // page that fails loud (console.error + Error) with the offending ids
 // spelled out, so future drift surfaces immediately instead of hiding
 // behind a stack trace. Pages that legitimately reference elements
-// dynamically (live.js, zones.js, recordings.js, etc.) skip this — those
+// dynamically (live.js, zones.js, recordings.js, etc.) skip this - those
 // scripts tolerate missing elements per page (see users.js header
 // comment for the rationale).
 function requireElements(ids) {
@@ -54,7 +54,7 @@ window.showToast = showToast;
 // Each page still owns its own `loadAuth()` flow that hits /api/auth/me and
 // pipes the result through `setApiAuth()` so subsequent api() calls find
 // the csrf token in `window.daygleAuth.csrfToken`. 401s trigger a redirect
-// to /login — pages that need a different policy can call `api(...)`
+// to /login - pages that need a different policy can call `api(...)`
 // directly with custom handlers.
 
 // CSRF auth state lives on `window.daygleAuth` so any page can read it
@@ -538,7 +538,7 @@ function timeSelectValue(wrap) {
 // Mirrors the 12h↔24h conventions used by timeSelectValue and
 // renderTimeSelect: hour 0 (midnight) and hour 12 (noon) both surface
 // as "12" with the matching AM/PM, and the 24h writer pads to two
-// digits ("00"–"23"). Programmatic writes do NOT fire a 'change' event
+// digits ("00"-"23"). Programmatic writes do NOT fire a 'change' event
 // on <select>, so callers that need the surrounding UI to react
 // (loadRecordings, loadTimeline) invoke their own handler.
 function setTimeSelectValue(wrap, hhmm) {
@@ -718,7 +718,7 @@ function formatUserClock(seconds) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-// ─── Explicit public surface (window.daygleUi) ───────────────────────────–
+// ─── Explicit public surface (window.daygleUi) ───────────────────────────-
 // All helpers above attach to window implicitly via top-level function / const
 // declarations. That's historically been good enough for these pages, but it
 // makes shadowing cheap (any local `let api = ...` would override the global)
@@ -726,7 +726,7 @@ function formatUserClock(seconds) {
 // ES module. Re-expose every helper on one explicit `daygleUi` object so the
 // contract is discoverable, future-module-friendly, and identical to what an
 // ambient type would declare: `window.daygleUi.api / showToast / ...`. The
-// bare-name call sites keep working as free aliases — they're now backed by
+// bare-name call sites keep working as free aliases - they're now backed by
 // the same functions you see here.
 function getDaygleDatePrefs() {
   return window.daygleDatePrefs;

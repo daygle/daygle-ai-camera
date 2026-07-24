@@ -60,10 +60,10 @@ def _safe_return_to(raw: str | None) -> str:
     """Validate a ``returnTo`` query value and return a safe redirect target.
 
     Accepts ONLY same-origin relative paths whose first character is a
-    single ``/`` (NOT ``//`` — protocol-relative URLs would let a crafted
-    ``?returnTo=//evil.com`` hijack the redirect). Anything else — absolute
+    single ``/`` (NOT ``//`` - protocol-relative URLs would let a crafted
+    ``?returnTo=//evil.com`` hijack the redirect). Anything else - absolute
     URLs, non-slash prefixes, paths that point back at /login/setup/logout
-    or to the JSON API or static-asset routes — collapses to ``/`` so a
+    or to the JSON API or static-asset routes - collapses to ``/`` so a
     typo or attacker tweak can never strand the user in an infinite auth
     loop or worse.
     """

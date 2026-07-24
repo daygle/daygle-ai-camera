@@ -464,7 +464,7 @@ class RecordingsMixin:
             if max_storage_bytes is not None:
                 # Grace period: recordings created in the last 10 minutes may still be
                 # written by a background capture thread. Don't treat a missing file as
-                # an orphan if the record is this new — purging it would leave the file
+                # an orphan if the record is this new - purging it would leave the file
                 # on disk with no database entry once the thread finishes writing.
                 # ``bound_grace_cutoff`` is the canonical UTC ``+00:00`` form computed
                 # at the top so the ``created_at`` <=> grace_cutoff string compare

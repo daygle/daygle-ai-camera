@@ -3,23 +3,23 @@
 This module owns the five helpers that previously lived inline on
 ``app/main.py``:
 
-* ``update_live_detection_status(camera_id, **updates)`` — thread-safe
+* ``update_live_detection_status(camera_id, **updates)`` - thread-safe
   status dict update with timestamp.
-* ``detection_label_strings(detections)`` — sorts + dedupes
+* ``detection_label_strings(detections)`` - sorts + dedupes
   non-generic labels from a detections list.
-* ``detection_label_confidences(detections)`` — returns the best
+* ``detection_label_confidences(detections)`` - returns the best
   confidence per non-generic label.
-* ``live_detection_status_payload(camera_id=None)`` — assembles the
+* ``live_detection_status_payload(camera_id=None)`` - assembles the
   API payload consumed by ``app/api/live_router.py`` and
   ``app/api/status_router.py``.
-* ``_camera_has_live_alert_stream(settings)`` — predicate: does the
+* ``_camera_has_live_alert_stream(settings)`` - predicate: does the
   camera have a stream URL?
 
 The two pieces of state this cluster exclusively owns STAY on
 ``app.main`` (NOT moved here, reachable via Pool C):
 
-* ``app.main.live_detection_status`` — ``dict`` keyed by camera_id.
-* ``app.main.live_detection_status_lock`` — ``threading.Lock`` guarding
+* ``app.main.live_detection_status`` - ``dict`` keyed by camera_id.
+* ``app.main.live_detection_status_lock`` - ``threading.Lock`` guarding
   the dict.
 
 This mirrors the Phase-26 (``live_detection_history`` /
@@ -36,38 +36,38 @@ main.py body callers need zero modification.
 ``import app.main as main``):**
 
 * ``main.live_detection_status`` and ``main.live_detection_status_lock``
-  — state primitives (only touched by ``update_live_detection_status``
+  - state primitives (only touched by ``update_live_detection_status``
   and ``live_detection_status_payload``).
-* ``main.get_camera_config`` — Phase-18 rebind from
+* ``main.get_camera_config`` - Phase-18 rebind from
   ``app.camera_config``. Used by ``live_detection_status_payload`` to
   resolve a camera_id to the camera config dict.
-* ``main.ai_status_payload`` — Phase-20 rebind from
+* ``main.ai_status_payload`` - Phase-20 rebind from
   ``app.ai_settings``. Used by ``live_detection_status_payload`` to
   attach the AI backend state to the response.
-* ``main.build_stream_url`` — top-level helper on ``main.py`` at L588.
+* ``main.build_stream_url`` - top-level helper on ``main.py`` at L588.
   Used by ``_camera_has_live_alert_stream`` to test for a viable RTSP
   stream URL.
 
 **External callers reaching these helpers via ``main.<name>``**
 (continued by Phase-29 rebind):
 
-* ``app/api/live_router.py`` — ``main.live_detection_status_payload(camera_id)``.
-* ``app/api/status_router.py`` — ``main.live_detection_status_payload(camera_id)``
+* ``app/api/live_router.py`` - ``main.live_detection_status_payload(camera_id)``.
+* ``app/api/status_router.py`` - ``main.live_detection_status_payload(camera_id)``
   (multiple call sites in response dicts).
-* ``tests/test_api.py`` — ``main.live_detection_status_payload('camera-1')``
+* ``tests/test_api.py`` - ``main.live_detection_status_payload('camera-1')``
   (multiple test cases).
 
 **Internal main.py body callers** (bare names, resolve through the
 Phase-29 rebind):
 
-* ``update_live_detection_status`` — called from many sites
+* ``update_live_detection_status`` - called from many sites
   (error handlers at L775, skip-detection branches at L1047/L1057,
   orchestration at L1099/L1128, alert/recording state updates at
   L1172/L1198, and more).
-* ``detection_label_strings`` + ``detection_label_confidences`` — used
+* ``detection_label_strings`` + ``detection_label_confidences`` - used
   in ``process_live_stream_alerts`` to seed per-recording label
   metadata.
-* ``live_detection_status_payload`` — only used by external callers
+* ``live_detection_status_payload`` - only used by external callers
   (API routers + tests), no main.py body callers.
 
 **Logger acquisition:** the module uses its own child logger via
@@ -84,7 +84,7 @@ and all Pool-C reaches resolve lazily at call time.
 (recording extension cluster, defer to a later phase) and
 ``schedule_live_camera_backoff`` (backoff scheduling, related to
 Phase-27 event_debounce but tightly coupled to recording expiry
-logic — defer). Both are left intact in ``main.py``.
+logic - defer). Both are left intact in ``main.py``.
 """
 
 from __future__ import annotations

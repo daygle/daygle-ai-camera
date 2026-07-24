@@ -15,7 +15,7 @@ const els = {
 
 // ─── State ──────────────────────────────────────────────────────────────────
 // CSRF token and current user live on window.daygleAuth (set in loadAuth()
-// via setApiAuth(...) — provided by web/utils.js). Per-page flashes should
+// via setApiAuth(...) - provided by web/utils.js). Per-page flashes should
 // read auth state from there rather than a local copy.
 let configuredLabels = null;
 

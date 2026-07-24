@@ -2698,7 +2698,7 @@ a.activity-item-action {
   font-weight: 700;
 }
 
-/* Zone editor footer — Save Area button */
+/* Zone editor footer - Save Area button */
 .zone-editor-footer {
   margin-top: 1.5rem;
   padding-top: 1.2rem;
@@ -2805,7 +2805,7 @@ a.activity-item-action {
    border/background, share the wrap's padding/font-size, and are
    separated by a thin `border-right` divider. The `.sound-rule-field`
    and `.zone-object-rule` pickers keep their existing compact
-   pill look — this override is scoped to `.form-grid` only. */
+   pill look - this override is scoped to `.form-grid` only. */
 .form-grid .time-select-wrap {
   display: flex;
   align-items: stretch;

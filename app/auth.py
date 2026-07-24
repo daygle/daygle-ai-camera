@@ -424,7 +424,7 @@ class AuthService:
         been touched in the last ``_SESSION_RENEWAL_INTERVAL`` minutes.
         Returns the (possibly renewed) ``expires_at`` ISO string so the
         caller can pass it back to the client. This is the server-side side
-        of the timeout UX fix in ``web/utils.js`` — every authenticated read
+        of the timeout UX fix in ``web/utils.js`` - every authenticated read
         silently keeps the session alive while the user is actively using
         the app, so an idle tab returning to the foreground is no longer
         greeted by "Session expired" because the very GET that woke it
@@ -435,7 +435,7 @@ class AuthService:
         except (TypeError, ValueError):
             return current_expires_at
         # If the row was last renewed < ``_SESSION_RENEWAL_INTERVAL`` ago we
-        # leave it alone. ``-now_dt`` is the inverse delta — last renew time
+        # leave it alone. ``-now_dt`` is the inverse delta - last renew time
         # isn't on the row, so use expires_at as the proxy: a session that
         # still has plenty of runway was almost certainly just refreshed.
         remaining = current_exp_dt - now_dt

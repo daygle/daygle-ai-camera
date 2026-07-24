@@ -879,7 +879,6 @@ document.querySelectorAll('[data-view-mode]').forEach((btn) => {
 // ─── PTZ Controls ─────────────────────────────────────────────────────────────
 
 const ptzOverlay = document.getElementById('ptzOverlay');
-let ptzActive = false;
 
 function updatePtzVisibility() {
   if (!ptzOverlay) return;
@@ -913,7 +912,7 @@ function setPtzMoving(btn, isMoving) {
   if (ptzOverlay) ptzOverlay.classList.toggle('ptz-overlay--active', isMoving);
 }
 
-const PTZ_STEP_DURATION_DEFAULT = 0.4;   // seconds — matches normalize_camera_ptz_settings default
+const PTZ_STEP_DURATION_DEFAULT = 0.4;   // seconds - matches normalize_camera_ptz_settings default
 const PTZ_STEP_DURATION_MIN = 0.1;
 const PTZ_STEP_DURATION_MAX = 5.0;
 

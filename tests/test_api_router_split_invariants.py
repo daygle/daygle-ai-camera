@@ -2,18 +2,18 @@
 
 Four assertions:
 
-1. ``test_all_main_attr_references_resolve_on_app_main`` — AST-walks every
+1. ``test_all_main_attr_references_resolve_on_app_main`` - AST-walks every
    ``main.<attr>`` reference in ``tests/test_api.py`` and asserts each
    ``<attr>`` is still defined on the freshly-loaded ``app.main`` module.
    Defends the hybrid-pattern rule documented in ``app/api/__init__.py``
    ("anything tests use as main.X must stay defined on app.main").
 
-2. ``test_hybrid_pattern_rule_docstring_is_present`` — defense-in-depth
+2. ``test_hybrid_pattern_rule_docstring_is_present`` - defense-in-depth
    check that ``app/api/__init__.py`` still documents the hybrid-pattern
    rule. The invariants in this file enforce the rule, and a stray doc
    removal would silently remove its documentation; this fails fast.
 
-3. ``test_every_request_path_has_a_registered_route`` (NEW for Phase-2) —
+3. ``test_every_request_path_has_a_registered_route`` (NEW for Phase-2) -
    AST-walks every ``LocalClient.request("<path>", ...)`` literal in
    ``tests/test_api.py`` and asserts each path matches a registered FastAPI
    route on the loaded ``main.app`` (matched via Starlette's
@@ -22,11 +22,11 @@ Four assertions:
    deleted every ``@app.X(...)`` decorator, so EVERY test callsite became
    unrouted at once.
 
-4. ``test_settings_ai_router_includes_exactly_ten_endpoints`` — simple
+4. ``test_settings_ai_router_includes_exactly_ten_endpoints`` - simple
    structural count check on the Phase-2 router file. Locks the inventory
    so future edits can't silently drop or duplicate an endpoint.
 
-All assertions load ``app.main`` fresh against a tmpdir ``DAYGLE_CONFIG`` —
+All assertions load ``app.main`` fresh against a tmpdir ``DAYGLE_CONFIG`` -
 mirrors ``tests/test_api.py::_load_app`` so any global that resolves there
 resolves here. ``APP_API_MODULES`` is auto-discovered via glob so future
 Phase-N routers (cameras/recordings/live/etc.) join the routes-coverage
@@ -63,7 +63,7 @@ def _discover_main_attr_references(*, source_text: str, source_path: Path) -> li
 
     Walks the AST for Attribute nodes whose value is ``Name('main')``. Names
     accessed via dynamic expressions (e.g. ``getattr(main, name)``) are
-    deliberately ignored — those can't be statically validated.
+    deliberately ignored - those can't be statically validated.
     """
     tree = ast.parse(source_text, filename=str(source_path))
     names: set[str] = set()
@@ -83,12 +83,12 @@ def _collect_api_imports_in_main(source_text: str, source_path: Path) -> dict[st
     Returns a dict mapping the effective binding name (the ``as Z`` if
     present, else ``Y``) to ``(lineno, module, original_name)``. The
     Phase-7.1 invariant consumes this to assert each binding is
-    referenced somewhere — either as a bare-name in ``app/main.py`` (the
+    referenced somewhere - either as a bare-name in ``app/main.py`` (the
     ``include_router`` pattern), as ``main.<attr>`` *inside*
     ``app/main.py``, or as ``main.<attr>`` in ``tests/test_api.py``
     (test-only back-compat aliases).
 
-    Walks module-level ``ImportFrom`` nodes only — nested from-imports
+    Walks module-level ``ImportFrom`` nodes only - nested from-imports
     inside function bodies are not relevant here (the hybrid pattern
     keeps all cross-module imports at module top). Filters to absolute
     imports whose module starts with ``app.api``; ignores ``from .api``
@@ -113,7 +113,7 @@ def _collect_bare_name_references(source_text: str, source_path: Path) -> set[st
     """Every bare ``Name`` loaded (read) in ``source_text``.
 
     Filters on ``ast.Load`` so import / function / assignment binding
-    sites are excluded — only the actual reference sites count. The
+    sites are excluded - only the actual reference sites count. The
     ``include_router`` pattern ``app.include_router(recordings_router)``
     registers as a bare ``Name`` read of ``recordings_router`` here.
 
@@ -121,7 +121,7 @@ def _collect_bare_name_references(source_text: str, source_path: Path) -> set[st
     is the signal that distinguishes router-assembly from-imports (which
     have NO ``main.<attr>`` reachability from main.py itself) from
     test-only back-compat aliases (which also have NO bare-name
-    reachability in main.py — they're consumed only by tests). Both pass
+    reachability in main.py - they're consumed only by tests). Both pass
     the Phase-7.1 invariant as long as they fall into one of the three
     consumption pools below.
     """
@@ -164,7 +164,7 @@ def _collect_test_request_paths() -> tuple[list[tuple[int, str]], int]:
 def _collect_decorator_paths(source_text: str, source_path: Path) -> list[tuple[int, str]]:
     """Every ``@app.X("<path>", ...)`` / ``@router.X("<path>", ...)`` decorator.
 
-    AST walk across the entire module — top-level and nested defs both. The
+    AST walk across the entire module - top-level and nested defs both. The
     ``app.X`` and ``router.X`` patterns both qualify because the latter is
     what routers in ``app/api/*.py`` use. Any decorator whose target matches
     one of those AND whose first positional arg is a string literal is
@@ -285,7 +285,7 @@ def test_every_request_path_has_a_registered_route(tmp_path, monkeypatch, caplog
         """Walk every APIRoute's ``path_regex`` reachable from ``app.routes``.
 
         ``app.include_router(small_router)`` does NOT flatten ``small_router.routes``
-        into ``app.routes`` as APIRoute objects — it adds a wrapper instance
+        into ``app.routes`` as APIRoute objects - it adds a wrapper instance
         (Starlette's ``_IncludedRouter`` or FastAPI 0.137+'s equivalent) that
         holds the inner routes. The storage location differs by version:
 
@@ -391,7 +391,7 @@ def test_settings_ai_router_includes_exactly_ten_endpoints():
     Independent of pytest's app loading (no DAYGLE_CONFIG, no sys.modules
     dance). Reads the new router file directly and counts @router.X(...)
     decorators whose first positional arg is a string starting with
-    '/api/settings/ai'. The router MUST contribute exactly 10 endpoints —
+    '/api/settings/ai'. The router MUST contribute exactly 10 endpoints -
     fewer and something's missing; more and the splice over-extracted.
     """
     router_path = PROJECT_ROOT / 'app' / 'api' / 'settings_ai_router.py'
@@ -406,7 +406,7 @@ def test_settings_ai_router_includes_exactly_ten_endpoints():
 
 def test_app_api_imports_in_main_are_consumed():
     """Phase-7.1 invariant. Every top-level ``from app.api.X import Y[ as Z]``
-    in ``app/main.py`` must be consumed somewhere — either as a bare-name
+    in ``app/main.py`` must be consumed somewhere - either as a bare-name
     read in ``app/main.py`` (the ``include_router`` pattern), as
     ``main.<attr>`` *inside* ``app/main.py``, or as ``main.<attr>`` in
     ``tests/test_api.py`` (the Phase-3 back-compat-alias pattern, e.g.
@@ -428,7 +428,7 @@ def test_app_api_imports_in_main_are_consumed():
     at audit / commit time so the bad edit never ships.
 
     Diagnostic shape on failure: ``file:lineno: from <module> import
-    <original>[ as <alias>]`` per orphan import — so the next refactor
+    <original>[ as <alias>]`` per orphan import - so the next refactor
     sees exactly which line to either drop or convert to a named
     back-compat alias.
     """
@@ -749,18 +749,18 @@ def test_every_main_module_patch_reaches_a_pool_a_consumer():
     ``tests/`` must target a name module-level defined in ``app/main.py``.
     Names defined only deep in production (Pool C function-body imports
     onto module-local aliases) cannot be intercepted via a module-attribute
-    patch — the mutation lands on the wrong surface and the test silently
+    patch - the mutation lands on the wrong surface and the test silently
     loses its fakes.
 
     The reference set is the Pool A TARGET surface (every module-level
-    binding in ``app/main.py``), NOT the consumer side — a module
+    binding in ``app/main.py``), NOT the consumer side - a module
     attribute is reached via the target, not the consumer.
     """
     reachable = _collect_app_main_definitions()
     sites = _collect_test_main_module_patches()
     # All monkeypatch.setattr(main_module, ...) sites have been migrated to
     # their true module homes (alert_dispatch, camera_health, state, etc.) as
-    # part of Pool C elimination. Floor is 0 — the walker is still exercised
+    # part of Pool C elimination. Floor is 0 - the walker is still exercised
     # by the unreachable-name assertion below.
     unreachable = [
         (ln, name, p) for ln, name, p in sites if name not in reachable

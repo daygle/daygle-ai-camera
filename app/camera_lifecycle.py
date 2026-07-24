@@ -1,13 +1,13 @@
 """Camera and storage lifecycle helpers extracted from ``app/main.py``.
 
 Cluster membership:
-- ``camera_event_recording_config(settings)`` — build per-camera recording
+- ``camera_event_recording_config(settings)`` - build per-camera recording
   config dict merging global recording policy with per-camera overrides
-- ``apply_cameras_settings(settings_list)`` — hot-swap camera instances on
+- ``apply_cameras_settings(settings_list)`` - hot-swap camera instances on
   config change; calls ``apply_sound_settings`` as a side-effect
-- ``apply_storage_and_recording_settings()`` — hot-swap Storage +
+- ``apply_storage_and_recording_settings()`` - hot-swap Storage +
   RecordingService on storage/recording config change
-- ``reload_detector(ai_settings)`` — hot-swap the AI detector while
+- ``reload_detector(ai_settings)`` - hot-swap the AI detector while
   gracefully evicting the previous ONNX session from memory
 
 All four functions are registered on ``app.state`` at module load so

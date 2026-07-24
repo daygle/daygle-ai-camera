@@ -80,7 +80,7 @@ def _make_event_recorder(monkeypatch, recordings_module, target_cls, *, stall_se
     enough for a concurrent ``_ensure_*_worker`` to either be blocked on
     it (NEW behavior) or to slip past the lock and start a fresh thread
     (OLD bug). Note: the stall is INTENTIONAL and intentionally lower
-    than the proper join_timeout — the join_timeout governs the
+    than the proper join_timeout - the join_timeout governs the
     *real* join time, the stall governs only the test-injected delay
     to expose the race."""
 
@@ -89,7 +89,7 @@ def _make_event_recorder(monkeypatch, recordings_module, target_cls, *, stall_se
 
     real_thread_start = recordings_module.threading.Thread.start
 
-    # Only log starts for thread names the recording service spawns — the
+    # Only log starts for thread names the recording service spawns - the
     # test itself spawns a ``concurrent_ensure`` plumbing thread whose
     # ``start()`` would otherwise inflate the perceived count.
     worker_name_prefixes = ("prebuffer-", "continuous-recorder-")

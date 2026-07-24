@@ -16,7 +16,7 @@ def _encode_ntfy_header(value: str) -> str:
 
     ntfy decodes percent-encoded UTF-8 before displaying (e.g. in the
     push notification title). RFC 2047 encoded-words are NOT appropriate
-    here — those are an email-layer convention; HTTP clients display them
+    here - those are an email-layer convention; HTTP clients display them
     as literal ``=?utf-8?q?...?=`` blobs rather than decoding them.
     Pure-ASCII values pass through unchanged.
     """

@@ -1,13 +1,13 @@
 """Sound-monitor helpers extracted from ``app/main.py`` (Phase-E).
 
 Cluster membership:
-- ``_sound_status_reason(diagnostics)`` — pick the most-relevant class from a
+- ``_sound_status_reason(diagnostics)`` - pick the most-relevant class from a
   diagnostic snapshot for status surface
-- ``_on_sound_detected(camera_id, class_id, rule_name, confidence, meta)`` —
+- ``_on_sound_detected(camera_id, class_id, rule_name, confidence, meta)`` -
   per-camera SoundDetector callback: record event, fire recording, queue alerts
-- ``_make_sound_detect_callback(camera_id)`` — factory that closes over camera_id
-- ``apply_sound_settings()`` — start one SoundDetector per enabled camera
-- ``stop_sound_monitor()`` — stop all running SoundDetectors
+- ``_make_sound_detect_callback(camera_id)`` - factory that closes over camera_id
+- ``apply_sound_settings()`` - start one SoundDetector per enabled camera
+- ``stop_sound_monitor()`` - stop all running SoundDetectors
 
 State lives in ``app.state``:
 - ``_sound_detectors`` / ``_sound_detectors_lock``

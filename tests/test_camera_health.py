@@ -526,7 +526,7 @@ def test_deliver_fires_email_with_recipients(ch, main_module, monkeypatch, stub_
         'offline_notified': False, 'recovery_notified': False,
     }
     ch._deliver_camera_offline_notification('cam-1', 'Front Yard', 'offline')
-    # One envelope per recipient — addresses never leak to fellow subscribers.
+    # One envelope per recipient - addresses never leak to fellow subscribers.
     assert email_calls == [
         ('Camera Offline: Front Yard', {'enabled': True, 'from_address': 'alerts@example.com'}, 'admin@example.com'),
         ('Camera Offline: Front Yard', {'enabled': True, 'from_address': 'alerts@example.com'}, 'ops@example.com'),

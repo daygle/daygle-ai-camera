@@ -7,7 +7,7 @@ Without joining:
   ``.audio``/``aud-*.wav``, ``continuous-{key}``) and a reader can observe a
   half-written JPEG/segment written by the new ffmpeg,
 * the old worker's ``finally``-block segment+audio pruner can silently
-  delete freshly-written segments from the new worker — destroying event
+  delete freshly-written segments from the new worker - destroying event
   pre-roll footage immediately after every restart,
 * on a URL change, the still-running old worker can touch the
   ``.no_audio`` marker AFTER we cleared it (P1 race from earlier review),

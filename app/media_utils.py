@@ -5,15 +5,15 @@ helpers for recording files.  No runtime state (locks, singletons, or DB) is
 needed; all dependencies are resolved from the local filesystem and stdlib.
 
 Exported symbols:
-* ``recording_playback_sidecar_path`` — ``.h264-audio.mp4`` sidecar path
-* ``recording_stream_path`` — choose the best streamable copy of a clip
-* ``probe_video_codec`` — first video-stream codec (e.g. ``'h264'``)
-* ``probe_audio_codec`` — first audio-stream codec (e.g. ``'aac'``)
-* ``probe_stream_codec`` — low-level codec probe via ``ffprobe``
-* ``mp4_is_browser_playable`` — True when H.264 + compatible audio
-* ``probe_video_duration`` — clip duration in seconds
-* ``transcode_recording_to_mp4`` — convert a clip to browser-playable MP4
-* ``mp4_has_video_stream`` — True when a video stream is present
+* ``recording_playback_sidecar_path`` - ``.h264-audio.mp4`` sidecar path
+* ``recording_stream_path`` - choose the best streamable copy of a clip
+* ``probe_video_codec`` - first video-stream codec (e.g. ``'h264'``)
+* ``probe_audio_codec`` - first audio-stream codec (e.g. ``'aac'``)
+* ``probe_stream_codec`` - low-level codec probe via ``ffprobe``
+* ``mp4_is_browser_playable`` - True when H.264 + compatible audio
+* ``probe_video_duration`` - clip duration in seconds
+* ``transcode_recording_to_mp4`` - convert a clip to browser-playable MP4
+* ``mp4_has_video_stream`` - True when a video stream is present
 """
 
 from __future__ import annotations

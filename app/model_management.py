@@ -1,19 +1,19 @@
 """YOLO model download and metadata helpers extracted from ``app/main.py`` (Phase-I).
 
 Cluster membership:
-- ``_installed_models_lock`` — threading.Lock guarding installed-models JSON I/O
-- ``PYPI_ULTRALYTICS_URL`` — PyPI endpoint for Ultralytics version checks
-- ``BASE_DIR`` — project root (same as ``main.BASE_DIR``)
-- ``_installed_models_path()`` — path to models/installed.json
-- ``_read_installed_models()`` — read installed-models JSON
-- ``_write_installed_models(data)`` — write installed-models JSON
-- ``_sha256_file(path)`` — SHA-256 digest of a file
-- ``_installed_package_version(package)`` — importlib.metadata version lookup
-- ``_fetch_ultralytics_version()`` — fetch latest Ultralytics version from PyPI
-- ``_parse_semver(v)`` — parse a semantic version string to a tuple
-- ``_fetch_models_manifest()`` — build the remote YOLO export-version manifest
-- ``export_yolo_onnx(model_name, destination)`` — run Ultralytics YOLO export
-- ``_do_download_model(model_name, switch_active)`` — full export + persist + reload flow
+- ``_installed_models_lock`` - threading.Lock guarding installed-models JSON I/O
+- ``PYPI_ULTRALYTICS_URL`` - PyPI endpoint for Ultralytics version checks
+- ``BASE_DIR`` - project root (same as ``main.BASE_DIR``)
+- ``_installed_models_path()`` - path to models/installed.json
+- ``_read_installed_models()`` - read installed-models JSON
+- ``_write_installed_models(data)`` - write installed-models JSON
+- ``_sha256_file(path)`` - SHA-256 digest of a file
+- ``_installed_package_version(package)`` - importlib.metadata version lookup
+- ``_fetch_ultralytics_version()`` - fetch latest Ultralytics version from PyPI
+- ``_parse_semver(v)`` - parse a semantic version string to a tuple
+- ``_fetch_models_manifest()`` - build the remote YOLO export-version manifest
+- ``export_yolo_onnx(model_name, destination)`` - run Ultralytics YOLO export
+- ``_do_download_model(model_name, switch_active)`` - full export + persist + reload flow
 
 Pool-C reach (resolved lazily via lazy imports inside function bodies):
 - ``app.main.reload_detector`` (``_do_download_model``)

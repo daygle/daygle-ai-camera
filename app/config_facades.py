@@ -7,27 +7,27 @@ routers can consume directly.
 
 Functions:
 
-- ``effective_ai_config`` — merges ``config['ai']`` with the ``'ai'``
+- ``effective_ai_config`` - merges ``config['ai']`` with the ``'ai'``
   database override; ``copy.deepcopy`` prevents callers from mutating
   the source dict.
-- ``effective_recording_config`` — same shape as AI.
-- ``effective_live_config`` — layers ``DEFAULT_LIVE_CONFIG`` defaults,
+- ``effective_recording_config`` - same shape as AI.
+- ``effective_live_config`` - layers ``DEFAULT_LIVE_CONFIG`` defaults,
   then ``config['live']``, then the ``'live'`` database override.
-- ``effective_storage_config`` — merges ``config['storage']`` with the
+- ``effective_storage_config`` - merges ``config['storage']`` with the
   ``'storage'`` database override but always preserves the startup
   ``database`` path (the DB file path must not be hot-reloaded).
-- ``effective_auth_config`` — merges ``_state.auth_config`` with the
+- ``effective_auth_config`` - merges ``_state.auth_config`` with the
   ``'auth'`` database override.
-- ``effective_email_alert_settings`` — merges ``config['alerts']['email']``
+- ``effective_email_alert_settings`` - merges ``config['alerts']['email']``
   with the ``'alert_email'`` database override.
-- ``effective_push_notification_settings`` — merges
+- ``effective_push_notification_settings`` - merges
   ``config['alerts']['push_notification']`` with the ``'alert_push'``
   database override.
-- ``effective_cameras_config`` — reads the ``'cameras'`` database
+- ``effective_cameras_config`` - reads the ``'cameras'`` database
   override only; normalizes each entry via ``normalize_camera_settings``.
   Returns ``[]`` when no override is present (cameras are managed via
   the ``/api/cameras`` mutators, not the on-disk config).
-- ``get_camera_config`` — resolves a camera's runtime config dict by id
+- ``get_camera_config`` - resolves a camera's runtime config dict by id
   from ``_state.cameras_config``; falls back to ``_state.camera_config``
   when the runtime list is empty; raises ``HTTPException(404)`` when the
   list is non-empty but the requested id is missing.

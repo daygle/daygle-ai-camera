@@ -1,6 +1,6 @@
 """Pure stateless utility helpers extracted from ``app/main.py`` (Phase A).
 
-This module contains helpers that have zero state dependencies — they only
+This module contains helpers that have zero state dependencies - they only
 use stdlib and their own arguments. Because they are pure, any sibling
 module can import them at the top level without any circular-import risk.
 

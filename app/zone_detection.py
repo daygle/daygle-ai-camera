@@ -273,7 +273,7 @@ def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
 
     ``diff_mask`` is the boolean (H×W) array from ``detect_frame_motion`` at
     ``main._MOTION_FRAME_H × main._MOTION_FRAME_W`` resolution.  Zone coordinates are
-    normalised (0–1) and are converted to pixel indices before slicing.
+    normalised (0-1) and are converted to pixel indices before slicing.
     """
     try:
         x = zone.get('x')
