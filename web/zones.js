@@ -16,6 +16,7 @@ const ZONE_ICON_CHEVRON_DOWN = '<svg width="12" height="12" viewBox="0 0 24 24" 
 const ZONE_ICON_CHEVRON_UP = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15"/></svg>';
 const ZONE_ICON_MOVE_UP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>';
 const ZONE_ICON_MOVE_DOWN = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/></svg>';
+const ZONE_ICON_GRIP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>';
 
 // Update only the label text on the Draw Area button so its icon (a sibling
 // <svg>) survives. Setting button.textContent would replace all child nodes,
@@ -206,8 +207,9 @@ function renderObjectRules(zone, zoneIndex) {
   if (!zone.object_rules.length) {
     return '<div class="empty compact-empty">No object rules yet. Choose an object above to add detection settings for this zone.</div>';
   }
-  return `<table class="rule-table">
+  return `<table class="rule-table" data-zone-rules-table="${zoneIndex}">
     <thead><tr>
+      <th class="cell-drag-header"></th>
       <th>Object</th>
       <th class="cell-center">On</th>
       <th class="cell-center">Record</th>
@@ -221,9 +223,9 @@ function renderObjectRules(zone, zoneIndex) {
       const key = `${zoneIndex}:${ruleIndex}`;
       const label = escapeHtml(titleCase(rule.label));
       const expanded = expandedZoneRules.has(key);
-      return `
-        <tr>
-          <td class="cell-label">${label}</td>
+      return `          <tr draggable="true" data-drag-zone-rule="${key}">
+            <td class="cell-drag"><span class="drag-handle" title="Drag to reorder">${ZONE_ICON_GRIP}</span></td>
+            <td class="cell-label">${label}</td>
           <td class="cell-center"><input type="checkbox" data-zone-rule-enabled="${key}" ${rule.enabled !== false ? 'checked' : ''} /></td>
           <td class="cell-center"><input type="checkbox" data-zone-rule-record="${key}" ${rule.record_on_detect !== false ? 'checked' : ''} /></td>
           <td class="cell-center"><input type="checkbox" data-zone-rule-email="${key}" ${rule.email_enabled === true ? 'checked' : ''} /></td>
@@ -238,7 +240,7 @@ function renderObjectRules(zone, zoneIndex) {
           </div></td>
         </tr>
         <tr class="rule-expand-row" ${expanded ? '' : 'hidden'}>
-          <td colspan="8">
+          <td colspan="9">
             <div class="rule-expand-body">
               <label class="sound-rule-field sound-rule-email-field">
                 <span>Email recipients</span>
@@ -338,6 +340,43 @@ function bindObjectRuleControls() {
       const key = btn.dataset.expandZoneRule;
       if (expandedZoneRules.has(key)) expandedZoneRules.delete(key);
       else expandedZoneRules.add(key);
+      renderObjectDetectionRules();
+    });
+  });
+  // Drag-and-drop reorder handlers for zone object rules
+  document.querySelectorAll('[data-drag-zone-rule]').forEach((row) => {
+    const table = row.closest('table[data-zone-rules-table]');
+    row.addEventListener('dragstart', (event) => {
+      row.classList.add('dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', row.dataset.dragZoneRule);
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      if (table) table.querySelectorAll('tr').forEach((r) => r.classList.remove('drag-over'));
+    });
+    row.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      if (table) table.querySelectorAll('tr[data-drag-zone-rule]').forEach((r) => r.classList.remove('drag-over'));
+      row.classList.add('drag-over');
+    });
+    row.addEventListener('drop', (event) => {
+      event.preventDefault();
+      row.classList.remove('drag-over');
+      const draggedKey = event.dataTransfer.getData('text/plain');
+      const targetKey = row.dataset.dragZoneRule;
+      if (!draggedKey || draggedKey === targetKey) return;
+      const [dZoneI, dRuleI] = draggedKey.split(':').map(Number);
+      const [tZoneI, tRuleI] = targetKey.split(':').map(Number);
+      if (dZoneI !== tZoneI) return;
+      const zones = cameraDetection().zones;
+      const zone = zones[dZoneI];
+      if (!zone) return;
+      const rules = zone.object_rules;
+      const dragged = rules.splice(dRuleI, 1)[0];
+      rules.splice(tRuleI, 0, dragged);
+      zone.object_labels = rules.filter((r) => r.label !== 'motion').map((r) => r.label);
       renderObjectDetectionRules();
     });
   });

@@ -10,6 +10,7 @@ const SOUND_ICON_CHEVRON_DOWN = '<svg width="12" height="12" viewBox="0 0 24 24"
 const SOUND_ICON_CHEVRON_UP = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15"/></svg>';
 const SOUND_ICON_MOVE_UP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>';
 const SOUND_ICON_MOVE_DOWN = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/></svg>';
+const SOUND_ICON_GRIP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>';
 
 // requireElements() is provided by web/utils.js (loaded before this script).
 // Fail loud if a future HTML refactor removes any of these ids so we don't
@@ -161,6 +162,7 @@ function renderRules() {
   rulesWrap.innerHTML = `
     <table class="rule-table">
       <thead><tr>
+        <th class="cell-drag-header"></th>
         <th>Sound</th>
         <th class="cell-center">On</th>
         <th class="cell-center">Record</th>
@@ -176,7 +178,8 @@ function renderRules() {
         const id = escapeHtml(rule.class);
         const expanded = expandedSoundRules.has(rule.class);
         return `
-          <tr class="${rule.enabled ? '' : 'sound-rule-row-disabled'}">
+          <tr draggable="true" data-drag-rule="${id}" class="${rule.enabled ? '' : 'sound-rule-row-disabled'}">
+            <td class="cell-drag"><span class="drag-handle" title="Drag to reorder">${SOUND_ICON_GRIP}</span></td>
             <td class="cell-label">${escapeHtml(label)}</td>
             <td class="cell-center"><input type="checkbox" data-rule-enabled="${id}" ${rule.enabled ? 'checked' : ''} /></td>
             <td class="cell-center"><input type="checkbox" data-rule-record="${id}" ${rule.record_on_detect !== false ? 'checked' : ''} /></td>
@@ -192,7 +195,7 @@ function renderRules() {
             </div></td>
           </tr>
           <tr class="rule-expand-row" ${expanded ? '' : 'hidden'}>
-            <td colspan="8">
+            <td colspan="9">
               <div class="rule-expand-body">
                 <label class="sound-rule-field sound-rule-email-field">
                   <span>Email recipients</span>
@@ -220,6 +223,38 @@ function renderRules() {
       }).join('')}</tbody>
     </table>`;
 
+  // Drag-and-drop reorder handlers for sound rules
+  rulesWrap.querySelectorAll('[data-drag-rule]').forEach((row) => {
+    row.addEventListener('dragstart', (event) => {
+      row.classList.add('dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', row.dataset.dragRule);
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      rulesWrap.querySelectorAll('tr').forEach((r) => r.classList.remove('drag-over'));
+    });
+    row.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      rulesWrap.querySelectorAll('tr[data-drag-rule]').forEach((r) => r.classList.remove('drag-over'));
+      row.classList.add('drag-over');
+    });
+    row.addEventListener('drop', (event) => {
+      event.preventDefault();
+      row.classList.remove('drag-over');
+      const draggedId = event.dataTransfer.getData('text/plain');
+      const targetId = row.dataset.dragRule;
+      if (!draggedId || draggedId === targetId) return;
+      const rules = editingSound.rules || [];
+      const dragIdx = rules.findIndex((r) => r.class === draggedId);
+      const dropIdx = rules.findIndex((r) => r.class === targetId);
+      if (dragIdx < 0 || dropIdx < 0) return;
+      const dragged = rules.splice(dragIdx, 1)[0];
+      rules.splice(dropIdx, 0, dragged);
+      renderRules();
+    });
+  });
   rulesWrap.querySelectorAll('[data-move-rule]').forEach((button) => {
     button.addEventListener('click', () => {
       const [classId, direction] = button.dataset.moveRule.split(':');

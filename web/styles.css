@@ -737,6 +737,39 @@ input[type="file"] { padding: 10px; }
   opacity: 0.3;
   cursor: not-allowed;
 }
+/* Drag-and-drop reorder styles for rule tables */
+.cell-drag-header {
+  width: 32px;
+}
+.cell-drag {
+  width: 32px;
+  padding: 0 2px;
+  text-align: center;
+  vertical-align: middle;
+}
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 3px;
+  transition: color 0.12s, background 0.12s;
+}
+.drag-handle:hover {
+  color: var(--text);
+  background: rgba(255,255,255,.08);
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+tr.dragging {
+  opacity: 0.4;
+}
+tr.drag-over {
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+}
 .zone-action-btn svg,
 .zone-editor-footer button svg {
   display: block;
