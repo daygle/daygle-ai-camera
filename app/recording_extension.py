@@ -74,13 +74,17 @@ module.
 * ``load_recording_detection_track(...)`` - called from various
   playback + recording-access sites.
 
-**Generic-label-set duplication (recorded for follow-up):** the
+**Generic-label-set consolidation (F9 cleanup):** the
 ``generic_labels = {'', 'motion', 'alert', 'human', 'object', 'none',
-'off', 'continuous'}`` set inside ``extend_active_rtsp_recording`` is
-near-duplicate of the ``generic`` set inside
-``app.detection_status.detection_label_strings``. Per Phase-29's
-reviewer-ship verdict, this is a known cosmetic duplication; defer to a
-future shared-constants cleanup.
+'off', 'continuous'}`` set inside ``extend_active_rtsp_recording`` and
+the ``generic`` set inside ``app.detection_status.detection_label_strings``
+are now both sourced from the canonical
+``app.detection_status.GENERIC_TRIGGER_LABELS`` frozenset. A third
+near-duplicate inside ``app/db/recordings.py``'s label-backfill
+script also pulls the same constant, so every "is this label a
+specific-object trigger or a generic marker?" decision in the repo
+shares one definition. Adding/removing a generic marker is a
+single-line edit to ``app/detection_status.py``.
 
 **Logger acquisition:** owns its own child logger via
 ``logging.getLogger('daygle.ai')`` (matches Phase-25/26/27/28/29
@@ -111,7 +115,11 @@ from typing import Any
 import app.state as _state
 from app.auth import utc_now
 from app.config_facades import effective_recording_config
-from app.detection_status import detection_label_confidences, detection_label_strings
+from app.detection_status import (
+    GENERIC_TRIGGER_LABELS,
+    detection_label_confidences,
+    detection_label_strings,
+)
 from app.media_utils import recording_playback_sidecar_path
 
 logger = logging.getLogger('daygle.ai')
@@ -175,13 +183,10 @@ def extend_active_rtsp_recording(
             current_recording = _state.database.get_recording(recording_id) or {}
             current_label = str(current_recording.get('trigger_label') or '').strip().lower()
             current_type = str(current_recording.get('trigger_type') or '').strip().lower()
-            generic_labels = {
-                '', 'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous',
-            }
             candidate_label = str(trigger_label).strip().lower()
             if (
-                candidate_label not in generic_labels
-                and (current_label in generic_labels or current_type in {'motion', 'human'})
+                candidate_label not in GENERIC_TRIGGER_LABELS
+                and (current_label in GENERIC_TRIGGER_LABELS or current_type in {'motion', 'human'})
             ):
                 _state.database.update_recording_trigger(
                     recording_id, trigger_type=trigger_type, trigger_label=candidate_label,

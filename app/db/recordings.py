@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from app.detection_status import GENERIC_TRIGGER_LABELS
 from app.utils import _normalize_iso_to_utc
 
 
@@ -222,17 +223,16 @@ class RecordingsMixin:
             """
         ).fetchall()
         total = 0
-        generic = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous', ''}
         for row in rows:
             recording_id = int(row['recording_id'])
             labels: list[str] = []
             if row['detection_labels']:
                 for label in str(row['detection_labels']).split(','):
                     normalized = label.strip().lower()
-                    if normalized and normalized not in generic:
+                    if normalized and normalized not in GENERIC_TRIGGER_LABELS:
                         labels.append(normalized)
             trigger_label = str(row['trigger_label'] or '').strip().lower()
-            if trigger_label and trigger_label not in generic and trigger_label not in labels:
+            if trigger_label and trigger_label not in GENERIC_TRIGGER_LABELS and trigger_label not in labels:
                 labels.append(trigger_label)
             if labels:
                 confidences: dict[str, float] = {}

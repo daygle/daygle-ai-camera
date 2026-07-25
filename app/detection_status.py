@@ -98,6 +98,22 @@ from app.config_facades import get_camera_config
 
 logger = logging.getLogger('daygle.ai')
 
+# Canonical set of detection labels that are NOT specific-object triggers.
+# Used by detection_label_strings / detection_label_confidences to skip
+# generic markers (motion, alert, human, object, none, off, continuous,
+# empty) when computing per-recording label metadata, and called inside
+# extend_active_rtsp_recording to decide whether a candidate trigger
+# label should overwrite an existing generic trigger_label on a recording.
+# Defined as a ``frozenset`` so callers cannot accidentally mutate the
+# canonical list (add / remove / clear are not available on frozenset).
+# Folded here as part of the F9 / P4 constants-extraction pass that
+# consolidates the previously-duplicated ``generic`` set inside each of
+# the two helpers below, plus the ``generic_labels`` literal that lived
+# inline in ``app/recording_extension.extend_active_rtsp_recording``.
+GENERIC_TRIGGER_LABELS: frozenset[str] = frozenset({
+    '', 'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous',
+})
+
 
 def update_live_detection_status(camera_id: str, **updates: Any) -> None:
     with _state.live_detection_status_lock:
@@ -117,12 +133,11 @@ def detection_label_strings(detections: list[dict[str, Any]]) -> list[str]:
     """
     if not detections:
         return []
-    generic = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous', ''}
     seen: set[str] = set()
     out: list[str] = []
     for detection in detections:
         label = str(detection.get('label') or '').strip().lower()
-        if not label or label in generic or label in seen:
+        if not label or label in GENERIC_TRIGGER_LABELS or label in seen:
             continue
         seen.add(label)
         out.append(label)
@@ -139,11 +154,10 @@ def detection_label_confidences(detections: list[dict[str, Any]]) -> dict[str, f
     """
     if not detections:
         return {}
-    generic = {'motion', 'alert', 'human', 'object', 'none', 'off', 'continuous', ''}
     best: dict[str, float] = {}
     for detection in detections:
         label = str(detection.get('label') or '').strip().lower()
-        if not label or label in generic:
+        if not label or label in GENERIC_TRIGGER_LABELS:
             continue
         try:
             confidence = float(detection.get('confidence'))
