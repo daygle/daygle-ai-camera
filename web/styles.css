@@ -726,6 +726,17 @@ input[type="file"] { padding: 10px; }
   gap: 6px;
   line-height: 1;
 }
+.zone-rule-move-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  border-radius: 8px;
+}
+.zone-rule-move-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
 .zone-action-btn svg,
 .zone-editor-footer button svg {
   display: block;

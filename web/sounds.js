@@ -8,6 +8,8 @@ let expandedSoundRules = new Set();
 const SOUND_ICON_REMOVE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
 const SOUND_ICON_CHEVRON_DOWN = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>';
 const SOUND_ICON_CHEVRON_UP = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15"/></svg>';
+const SOUND_ICON_MOVE_UP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>';
+const SOUND_ICON_MOVE_DOWN = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/></svg>';
 
 // requireElements() is provided by web/utils.js (loaded before this script).
 // Fail loud if a future HTML refactor removes any of these ids so we don't
@@ -168,7 +170,7 @@ function renderRules() {
         <th>Cooldown (s)</th>
         <th></th>
       </tr></thead>
-      <tbody>${rules.map((rule) => {
+      <tbody>${rules.map((rule, ruleIndex) => {
         const cls = soundClasses.find((item) => item.id === rule.class);
         const label = cls ? cls.label : titleCase(String(rule.class || '').replace(/_/g, ' '));
         const id = escapeHtml(rule.class);
@@ -183,6 +185,8 @@ function renderRules() {
             <td><input type="number" data-rule-threshold="${id}" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" min="0.1" max="1.0" step="0.05" /></td>
             <td><input type="number" data-rule-cooldown="${id}" value="${escapeHtml(String(rule.cooldown_seconds ?? 30))}" min="5" max="3600" step="5" /></td>
             <td><div class="cell-actions">
+              <button class="secondary zone-action-btn zone-rule-move-btn" type="button" data-move-rule="${id}:up" title="Move up"${ruleIndex === 0 ? ' disabled' : ''}>${SOUND_ICON_MOVE_UP}</button>
+              <button class="secondary zone-action-btn zone-rule-move-btn" type="button" data-move-rule="${id}:down" title="Move down"${ruleIndex === rules.length - 1 ? ' disabled' : ''}>${SOUND_ICON_MOVE_DOWN}</button>
               <button class="rule-expand-btn secondary" type="button" data-expand-rule="${id}" title="Time windows &amp; email">${expanded ? SOUND_ICON_CHEVRON_UP : SOUND_ICON_CHEVRON_DOWN}</button>
               <button class="delete-btn secondary" type="button" data-remove-rule="${id}">${SOUND_ICON_REMOVE}</button>
             </div></td>
@@ -216,6 +220,18 @@ function renderRules() {
       }).join('')}</tbody>
     </table>`;
 
+  rulesWrap.querySelectorAll('[data-move-rule]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const [classId, direction] = button.dataset.moveRule.split(':');
+      const rules = editingSound.rules || [];
+      const ruleIndex = rules.findIndex((r) => r.class === classId);
+      if (ruleIndex < 0) return;
+      const targetIndex = direction === 'up' ? ruleIndex - 1 : ruleIndex + 1;
+      if (targetIndex < 0 || targetIndex >= rules.length) return;
+      [rules[ruleIndex], rules[targetIndex]] = [rules[targetIndex], rules[ruleIndex]];
+      renderRules();
+    });
+  });
   rulesWrap.querySelectorAll('[data-expand-rule]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const id = btn.dataset.expandRule;

@@ -14,6 +14,8 @@ let expandedZoneRules = new Set();
 const ZONE_ICON_REMOVE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
 const ZONE_ICON_CHEVRON_DOWN = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>';
 const ZONE_ICON_CHEVRON_UP = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15"/></svg>';
+const ZONE_ICON_MOVE_UP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>';
+const ZONE_ICON_MOVE_DOWN = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/></svg>';
 
 // Update only the label text on the Draw Area button so its icon (a sibling
 // <svg>) survives. Setting button.textContent would replace all child nodes,
@@ -229,6 +231,8 @@ function renderObjectRules(zone, zoneIndex) {
           <td><input type="number" data-zone-rule-confidence="${key}" value="${escapeHtml(rule.min_confidence)}" min="0" max="1" step="0.05" /></td>
           <td><input type="number" data-zone-rule-cooldown="${key}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" /></td>
           <td><div class="cell-actions">
+            <button class="secondary zone-action-btn zone-rule-move-btn" type="button" data-move-zone-rule="${key}:up" title="Move up"${ruleIndex === 0 ? ' disabled' : ''}>${ZONE_ICON_MOVE_UP}</button>
+            <button class="secondary zone-action-btn zone-rule-move-btn" type="button" data-move-zone-rule="${key}:down" title="Move down"${ruleIndex === zone.object_rules.length - 1 ? ' disabled' : ''}>${ZONE_ICON_MOVE_DOWN}</button>
             <button class="rule-expand-btn secondary" type="button" data-expand-zone-rule="${key}" title="Time windows &amp; email">${expanded ? ZONE_ICON_CHEVRON_UP : ZONE_ICON_CHEVRON_DOWN}</button>
             <button class="secondary delete-btn zone-action-btn" type="button" data-delete-zone-rule="${key}">${ZONE_ICON_REMOVE}</button>
           </div></td>
@@ -334,6 +338,22 @@ function bindObjectRuleControls() {
       const key = btn.dataset.expandZoneRule;
       if (expandedZoneRules.has(key)) expandedZoneRules.delete(key);
       else expandedZoneRules.add(key);
+      renderObjectDetectionRules();
+    });
+  });
+  document.querySelectorAll('[data-move-zone-rule]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const [zoneI, ruleI, direction] = button.dataset.moveZoneRule.split(':');
+      const zones = cameraDetection().zones;
+      const zoneIndex = Number.parseInt(zoneI, 10);
+      const ruleIndex = Number.parseInt(ruleI, 10);
+      const zone = zones[zoneIndex];
+      if (!zone) return;
+      const targetIndex = direction === 'up' ? ruleIndex - 1 : ruleIndex + 1;
+      if (targetIndex < 0 || targetIndex >= zone.object_rules.length) return;
+      const rules = zone.object_rules;
+      [rules[ruleIndex], rules[targetIndex]] = [rules[targetIndex], rules[ruleIndex]];
+      zone.object_labels = rules.filter((r) => r.label !== 'motion').map((r) => r.label);
       renderObjectDetectionRules();
     });
   });
