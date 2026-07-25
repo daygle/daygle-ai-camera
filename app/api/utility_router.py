@@ -18,7 +18,8 @@ router = APIRouter()
 
 
 @router.get('/api/stats')
-def stats(cameras_config=Depends(get_cameras_config), db=Depends(get_database)):
+def stats(request: Request, cameras_config=Depends(get_cameras_config), db=Depends(get_database)):
+    require_admin(request)
     result = db.stats()
     result['total_cameras'] = len(cameras_config)
     return result

@@ -205,6 +205,31 @@ body {
 /* Account dropdown: align menu to the right so it doesn't overflow off-screen */
 .app-nav-account .nav-dropdown-menu { right: 0; left: auto; }
 
+/* ─── Session countdown ─────────────────────────────────────────────────── */
+.nav-countdown {
+  padding: 6px 12px;
+  margin: 2px 0;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  text-align: center;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: rgba(255,255,255,.02);
+  white-space: nowrap;
+}
+.nav-countdown.warn {
+  color: #f8c55d;
+  background: rgba(248, 197, 93, 0.08);
+  border-color: rgba(248, 197, 93, 0.25);
+}
+.nav-countdown.critical {
+  color: var(--danger);
+  background: rgba(255, 92, 138, 0.1);
+  border-color: rgba(255, 92, 138, 0.3);
+}
+
 .hero { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
 .eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: .18em; font-size: 12px; font-weight: 800; }
 h1 { font-size: clamp(34px, 5vw, 64px); margin: 0; line-height: 1; }

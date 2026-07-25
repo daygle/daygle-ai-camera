@@ -6,6 +6,7 @@ Direct imports replace the ``import app.main as main`` hybrid pattern.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -61,6 +62,30 @@ def list_audit_log(
 def me(request: Request):
     session = require_session(request)
     return {'user': session['user'], 'csrf_token': session['csrf_token'], 'expires_at': session['expires_at']}
+
+
+@router.get('/api/auth/session-remaining')
+def session_remaining(request: Request):
+    """Return the current session's remaining lifetime in seconds.
+
+    The server-side sliding window (``_renew_session_if_stale``) extends
+    ``expires_at`` on each authenticated request, so this endpoint always
+    reflects the most up-to-date expiry. A lightweight GET (no CSRF needed)
+    that the frontend can poll on a 10-30 s interval for the countdown.
+
+    When auth is disabled ``require_session`` returns an anonymous session
+    with an empty ``expires_at`` — we catch the parse error and return 0
+    so the frontend doesn't see a 500.
+    """
+    session = require_session(request)
+    try:
+        remaining = max(0, int(
+            datetime.fromisoformat(session['expires_at']).timestamp()
+            - datetime.now(timezone.utc).timestamp()
+        ))
+    except (TypeError, ValueError):
+        remaining = 0
+    return {'remaining_seconds': remaining, 'expires_at': session['expires_at']}
 
 
 @router.get('/api/config')

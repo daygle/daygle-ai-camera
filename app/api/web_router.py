@@ -38,6 +38,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 
 from app.auth import CSRF_COOKIE, SESSION_COOKIE
 from app.auth_helpers import csrf_token_response
+from app.auth_gates import require_admin
 from app.config_facades import effective_auth_config
 from app.deps import get_auth, get_auth_enabled, get_web_dir
 
@@ -162,7 +163,8 @@ def live_page(web_dir: Path = Depends(get_web_dir)):
 
 
 @router.get('/zones')
-def zones_page(web_dir: Path = Depends(get_web_dir)):
+def zones_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
     zones_path = web_dir / 'zones.html'
     if zones_path.exists():
         return FileResponse(zones_path)
@@ -170,7 +172,8 @@ def zones_page(web_dir: Path = Depends(get_web_dir)):
 
 
 @router.get('/sounds')
-def sounds_page(web_dir: Path = Depends(get_web_dir)):
+def sounds_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
     sounds_path = web_dir / 'sounds.html'
     if sounds_path.exists():
         return FileResponse(sounds_path)
@@ -178,7 +181,8 @@ def sounds_page(web_dir: Path = Depends(get_web_dir)):
 
 
 @router.get('/cameras')
-def cameras_page(web_dir: Path = Depends(get_web_dir)):
+def cameras_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
     cameras_path = web_dir / 'cameras.html'
     if cameras_path.exists():
         return FileResponse(cameras_path)
@@ -209,7 +213,8 @@ def recordings_timeline_page(web_dir: Path = Depends(get_web_dir)):
 
 
 @router.get('/onnx')
-def onnx_page(web_dir: Path = Depends(get_web_dir)):
+def onnx_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
     ai_path = web_dir / 'onnx.html'
     if ai_path.exists():
         return FileResponse(ai_path)
@@ -222,7 +227,8 @@ def ai_settings_page():
 
 
 @router.get('/yamnet-tflite')
-def yamnet_tflite_page(web_dir: Path = Depends(get_web_dir)):
+def yamnet_tflite_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
     yamnet_path = web_dir / 'yamnet-tflite.html'
     if yamnet_path.exists():
         return FileResponse(yamnet_path)
@@ -243,7 +249,8 @@ def profile_page(web_dir: Path = Depends(get_web_dir)):
 
 
 @router.get('/settings')
-def system_settings_page(web_dir: Path = Depends(get_web_dir)):
+def system_settings_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
     settings_path = web_dir / 'settings.html'
     if settings_path.exists():
         return FileResponse(settings_path)
@@ -251,7 +258,8 @@ def system_settings_page(web_dir: Path = Depends(get_web_dir)):
 
 
 @router.get('/users')
-def users_page(web_dir: Path = Depends(get_web_dir)):
+def users_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
     users_path = web_dir / 'users.html'
     if users_path.exists():
         return FileResponse(users_path)
@@ -259,7 +267,12 @@ def users_page(web_dir: Path = Depends(get_web_dir)):
 
 
 @router.get('/audit')
-def audit_page(web_dir: Path = Depends(get_web_dir)):
+def audit_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    # Defense-in-depth: the middleware already blocks non-admin users via
+    # the ADMIN_PATHS set, but the handler itself also checks so that a
+    # future refactor that accidentally drops /audit from ADMIN_PATHS does
+    # not silently expose the audit log.
+    require_admin(request)
     audit_path = web_dir / 'audit.html'
     if audit_path.exists():
         return FileResponse(audit_path)
@@ -267,7 +280,8 @@ def audit_page(web_dir: Path = Depends(get_web_dir)):
 
 
 @router.get('/camera-log')
-def camera_log_page(web_dir: Path = Depends(get_web_dir)):
+def camera_log_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
     page_path = web_dir / 'camera-log.html'
     if page_path.exists():
         return FileResponse(page_path)

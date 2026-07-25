@@ -320,6 +320,7 @@ window.daygleAuthReady = (async () => {
           </button>
           <div class="nav-dropdown-menu">
             <a href="/profile" class="nav-dropdown-item">Profile</a>
+            <div id="sessionCountdown" class="nav-countdown" hidden></div>
             <button id="navLogoutBtn" class="nav-dropdown-item" type="button">Logout</button>
           </div>
         </div>
@@ -422,14 +423,19 @@ window.daygleAuthReady = (async () => {
     window.daygleUi.renderNavAccount(window.daygleAuth.user);
   }
 
-  const csrfToken = window.daygleAuth.csrfToken;
   const logoutBtn = document.getElementById('navLogoutBtn');
-  if (logoutBtn && csrfToken) {
+  if (logoutBtn) {
     logoutBtn.addEventListener('click', async () => {
       try {
-        await fetch('/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } });
+        const token = (window.daygleAuth && window.daygleAuth.csrfToken) || '';
+        await fetch('/logout', { method: 'POST', headers: { 'X-CSRF-Token': token } });
       } catch {
         // Ignore network errors; the redirect below will clear the session server-side.
+      }
+      // Broadcast to other open tabs so they immediately know the session
+      // is gone, rather than waiting for their next refresh cycle or API 401.
+      if (typeof window.broadcastAuthStateToOtherTabs === 'function') {
+        window.broadcastAuthStateToOtherTabs(null, '', '');
       }
       // Use window.defaultReturnTo defensively: by the time the user clicks
       // Logout utils.js has long loaded, but a future refactor that defers
@@ -438,6 +444,118 @@ window.daygleAuthReady = (async () => {
       const safeTo = window.defaultReturnTo ? window.defaultReturnTo() : '/';
       window.location.href = '/login?returnTo=' + encodeURIComponent(safeTo);
     });
+  }
+
+  /* ── Session countdown ticker ───────────────────────────────────────
+   * Polls /api/auth/session-remaining every 15 s and updates the
+   * countdown element in the account dropdown. Falls back to the
+   * client-side expiresAt when the fetch fails (e.g. on a transitory
+   * network blip). The threshold classes give the user early warning.
+   *
+   * Timer reference lives on window.daygleAuth._cdTimer so the guard in
+   * renderNavAccount can detect whether the ticker is already running
+   * when auth state changes (cross-tab sync, refresh, etc.).
+   */
+  const SESSION_WARN_SECONDS = 30 * 60;   // 30 min → yellow
+  const SESSION_CRITICAL_SECONDS = 5 * 60;  //  5 min → red
+
+  function formatCountdown(seconds) {
+    if (seconds <= 0) return 'Expired';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) return `${h}h ${m}m remaining`;
+    if (m > 0) return `${m}m ${s}s remaining`;
+    return `${s}s remaining`;
+  }
+
+  function updateCountdown() {
+    const el = document.getElementById('sessionCountdown');
+    if (!el) return;
+    if (!window.daygleAuth?.user || !window.daygleAuth?.expiresAt) {
+      el.hidden = true;
+      return;
+    }
+    // Compute from local expiresAt as the fast path, then let the
+    // next server fetch correct any clock drift.
+    const ms = Date.parse(window.daygleAuth.expiresAt) - Date.now();
+    if (!Number.isFinite(ms) || ms <= 0) {
+      el.textContent = 'Expired';
+      el.className = 'nav-countdown critical';
+      el.hidden = false;
+      return;
+    }
+    const totalSec = Math.ceil(ms / 1000);
+    el.textContent = formatCountdown(totalSec);
+    el.className = 'nav-countdown' +
+      (totalSec <= SESSION_CRITICAL_SECONDS ? ' critical' :
+       totalSec <= SESSION_WARN_SECONDS ? ' warn' :
+       '');
+    el.hidden = false;
+  }
+
+  async function refreshCountdownFromServer() {
+    try {
+      const response = await fetch('/api/auth/session-remaining');
+      if (!response.ok) { updateCountdown(); return; }
+      const data = await response.json();
+      if (data && Number.isFinite(data.remaining_seconds)) {
+        // Sync the cached expiresAt so the local ticker stays accurate.
+        if (window.daygleAuth && data.expires_at) {
+          window.daygleAuth.expiresAt = data.expires_at;
+        }
+        const el = document.getElementById('sessionCountdown');
+        if (el) {
+          el.textContent = formatCountdown(data.remaining_seconds);
+          el.className = 'nav-countdown' +
+            (data.remaining_seconds <= SESSION_CRITICAL_SECONDS ? ' critical' :
+             data.remaining_seconds <= SESSION_WARN_SECONDS ? ' warn' :
+             '');
+          el.hidden = false;
+        }
+      } else {
+        updateCountdown();
+      }
+    } catch {
+      // Fall back to client-side tick on network error.
+      updateCountdown();
+    }
+  }
+
+  function tickCountdown() {
+    updateCountdown();
+    // Refresh from server every ~6 ticks (90 s) to catch sliding-window
+    // renewals and clock drift.
+    if ((tickCountdown._serverTick || 0) <= 0) {
+      tickCountdown._serverTick = 5;
+      refreshCountdownFromServer();
+    } else {
+      tickCountdown._serverTick--;
+    }
+  }
+  tickCountdown._serverTick = 5;
+
+  function startCountdownTicker() {
+    stopCountdownTicker();
+    // Initial fetch immediately so the display is fresh.
+    refreshCountdownFromServer();
+    if (window.daygleAuth) {
+      window.daygleAuth._cdTimer = setInterval(tickCountdown, 15_000);
+    }
+  }
+
+  function stopCountdownTicker() {
+    const timer = window.daygleAuth && window.daygleAuth._cdTimer;
+    if (timer) {
+      clearInterval(timer);
+      if (window.daygleAuth) window.daygleAuth._cdTimer = null;
+    }
+    tickCountdown._serverTick = 5;
+  }
+
+  // Kick off the ticker after the initial auth render.
+  if (window.daygleAuth?.user) {
+    startCountdownTicker();
   }
 
   /* ── Idle-refresh hooks (visibilitychange + focus) ──────────────────
@@ -489,9 +607,11 @@ function renderNavAccount(user) {
   const safeReturnTo = (typeof window.defaultReturnTo === 'function')
     ? window.defaultReturnTo()
     : (window.location && (window.location.pathname + (window.location.search || ''))) || '/';
+  const countdownEl = document.getElementById('sessionCountdown');
   if (!user || !user.username) {
     if (navUser) navUser.textContent = 'Sign in';
     if (navAvatar) navAvatar.textContent = '↳';
+    if (countdownEl) countdownEl.hidden = true;
     // Promote the avatar into a clickable Sign in affordance rather than
     // the bare dropdown trigger. The dropdown stays for screens that err
     // on the keyboard-navigable side; the trigger now redirects when
@@ -514,11 +634,21 @@ function renderNavAccount(user) {
     nav.querySelectorAll('[data-admin="true"]').forEach((el) => { el.hidden = true; });
   }
   if (logoutBtn) logoutBtn.hidden = false;
+  // The countdown element exists in the DOM; the ticker manages its
+  // visibility and content. If the ticker hasn't started yet (e.g.
+  // cross-tab auth change), kick it off.
+  if (countdownEl && typeof window.daygleUi?.startCountdownTicker === 'function' && !window.daygleAuth?._cdTimer) {
+    window.daygleUi.startCountdownTicker();
+  }
 }
 
 // Expose on the daygleUi registry so re-rendering is callable from any
 // per-page script that mounts after nav.js (no parallel/duplicate defs).
-window.daygleUi = Object.assign(window.daygleUi || {}, { renderNavAccount });
+window.daygleUi = Object.assign(window.daygleUi || {}, {
+  renderNavAccount,
+  startCountdownTicker,
+  stopCountdownTicker,
+});
 
 // subscribeDaygleAuthCrossTabs (utils.js) emits CustomEvent('daygle:auth-state-changed')
 // on every localStorage 'storage' event received AND on a same-tab refresh

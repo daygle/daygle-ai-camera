@@ -82,6 +82,12 @@ class EventDatabase(
                 db.execute("ALTER TABLE recording_labels ADD COLUMN confidence REAL")
             except sqlite3.OperationalError:
                 pass
+            # Migration: add the immutable column to existing databases.
+            # The CREATE TABLE below already includes it for fresh installs.
+            try:
+                db.execute("ALTER TABLE audit_log ADD COLUMN immutable INTEGER NOT NULL DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS events (
@@ -175,7 +181,8 @@ class EventDatabase(
                     resource_id TEXT,
                     details TEXT NOT NULL DEFAULT '{}',
                     ip_address TEXT,
-                    status TEXT NOT NULL DEFAULT 'success'
+                    status TEXT NOT NULL DEFAULT 'success',
+                    immutable INTEGER NOT NULL DEFAULT 1
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
@@ -205,3 +212,33 @@ class EventDatabase(
             # Resolved through MRO: this method lives on RecordingsMixin, which
             # the host class inherits.
             self.backfill_recording_labels(db)
+
+            # ── Immutable audit log triggers ────────────────────────────────
+            # These SQLite triggers are the last line of defense for the
+            # append-only audit log. They must be created AFTER the tables
+            # exist (inside the executescript above), so this block runs *after*
+            # the schema creation. ``CREATE TRIGGER IF NOT EXISTS`` makes them
+            # idempotent on upgrades.
+            #
+            # The UPDATE trigger lists every content column but deliberately
+            # OMITS ``immutable`` itself — this lets a future migration flip
+            # immutable to 0 for a narrow exception (e.g. court-ordered
+            # expungement) if ever needed. Without this carve-out, the only way
+            # to ever delete a row would be to drop the trigger first.
+            db.executescript("""
+                CREATE TRIGGER IF NOT EXISTS trg_audit_log_immutable_delete
+                BEFORE DELETE ON audit_log
+                WHEN OLD.immutable = 1
+                BEGIN
+                    SELECT RAISE(ABORT, 'Audit log is append-only — entries cannot be deleted.');
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS trg_audit_log_immutable_update
+                BEFORE UPDATE OF created_at, user_id, username, action, resource,
+                                       resource_id, details, ip_address, status
+                ON audit_log
+                WHEN OLD.immutable = 1
+                BEGIN
+                    SELECT RAISE(ABORT, 'Audit log is append-only — entries cannot be modified.');
+                END;
+            """)

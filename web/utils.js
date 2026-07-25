@@ -100,6 +100,13 @@ function handleSessionLoss(reason, returnTo) {
   if (window.daygleAuth.redirecting) return;
   if (typeof setApiAuth === 'function') setApiAuth(null, null, null);
   window.daygleAuth.redirecting = true;
+  // Broadcast session loss to other open tabs so they don't stay stuck with
+  // stale auth state. The empty csrf signals "session ended" to the cross-tab
+  // listener in subscribeDaygleAuthCrossTabs. Safe to call with null user -
+  // the function handles falsy input.
+  if (typeof broadcastAuthStateToOtherTabs === 'function') {
+    broadcastAuthStateToOtherTabs(null, '', '');
+  }
   showToast(reason || 'Session expired - please sign in again', true);
   const target = '/login?returnTo=' + encodeURIComponent(returnTo || defaultReturnTo());
   try { window.location.href = target; } catch (_err) { /* ignore */ }
@@ -131,15 +138,20 @@ async function api(path, options = {}) {
     throw new Error('Authentication required');
   }
   const payload = await response.json().catch(() => {});
-  // 403 with the CSRF markers in the body's `detail` AND we were
-  // previously authed = a stale CSRF cookie/token. The server-side
-  // ``csrf_protect`` returns ``CSRF token mismatch`` (or a similar
-  // ``Invalid token`` / ``Missing cookie``) on a session that no
-  // longer carries our csrf row. Admin-role denials surface as
-  // ``Admin access required`` and are intentionally NOT treated as
-  // session-loss here, so a non-admin hitting an admin endpoint gets
-  // the original 403 toast, not a login redirect.
-  if (response.status === 403 && window.daygleAuth?.user) {
+  // 403 with CSRF-related detail text = a stale CSRF cookie/token.
+  // The server-side ``csrf_protect`` returns ``CSRF token mismatch``
+  // (or similar ``Invalid token`` / ``Missing cookie``) when the
+  // cached token no longer matches the session row. Admin-role
+  // denials surface as ``Admin access required`` and intentionally
+  // do NOT match the regex below, so a non-admin hitting an admin
+  // endpoint gets the original 403 toast, not a login redirect.
+  //
+  // The ``window.daygleAuth?.user`` guard was REMOVED because a
+  // concurrent in-flight request may have already cleared auth state
+  // (via a prior 401 → handleSessionLoss → setApiAuth(null, null, null))
+  // before this 403 arrives. The server's error message alone is the
+  // authoritative signal — if it says CSRF, the session is gone.
+  if (response.status === 403) {
     const detail = String((payload && payload.detail) || '');
     if (/csrf|invalid.?token|missing.?cookie|invalid.?x-csr/i.test(detail)) {
       handleSessionLoss('Session expired - please sign in again', defaultReturnTo());
@@ -233,8 +245,16 @@ function subscribeDaygleAuthCrossTabs() {
       }
       return;
     }
+    // Keep the local CSRF token intact — it belongs to THIS tab's session
+    // cookie. Overwriting with the remote tab's token causes 403 CSRF
+    // mismatches when the two tabs hold different sessions (e.g. one tab
+    // re-logged in after its session expired while the other tab still has
+    // its original, still-valid session). Only update the user object and
+    // expiry so the UI stays consistent; the CSRF token is refreshed on the
+    // next local /api/auth/me fetch.
     const userObj = (window.daygleAuth?.user) || null;
-    setApiAuth(userObj, parsed.csrf, parsed.exp || '');
+    const existingCsrf = (window.daygleAuth && window.daygleAuth.csrfToken) || null;
+    setApiAuth(userObj, existingCsrf, parsed.exp || '');
     if (typeof scheduleNextAuthRefresh === 'function') scheduleNextAuthRefresh();
   });
 }

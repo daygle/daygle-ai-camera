@@ -88,7 +88,7 @@ applies verbatim.
 from __future__ import annotations
 
 from fastapi import Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.responses import Response
 
 import app.state as _state
@@ -140,10 +140,30 @@ async def authentication_middleware(request: Request, call_next):
         )
     )
     if admin_required and session['user']['role'] != 'admin':
-        return JSONResponse(
-            {'detail': 'Admin access required'}, status_code=403,
+        if path.startswith('/api/'):
+            return JSONResponse(
+                {'detail': 'Admin access required'}, status_code=403,
+            )
+        # Page routes: return a proper 403 HTML page instead of raw JSON.
+        return HTMLResponse(
+            content='''<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8">
+<title>Access Denied — Daygle AI Camera</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="error-page-body">
+<div class="error-page">
+<h1>403</h1>
+<p>You need administrator access to view this page.</p>
+<a href="/" class="button primary">Return to Dashboard</a>
+</div>
+</body>
+</html>''',
+            status_code=403,
         )
-    if (path.startswith('/api/') or path == '/logout') and request.method in MUTATING_METHODS:
+    if (path.startswith('/api/') and request.method in MUTATING_METHODS):
         csrf_header = request.headers.get(CSRF_HEADER)
         if not csrf_header or csrf_header != session['csrf_token']:
             return JSONResponse(

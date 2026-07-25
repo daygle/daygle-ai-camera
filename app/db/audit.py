@@ -5,10 +5,15 @@ from typing import Any
 
 
 class AuditLogMixin:
-    """CRUD + pagination helpers for the ``audit_log`` table.
+    """Append-only audit log.
 
-    Lives in app.db.audit so the EventDatabase class in app.database.py stays
-    small. Public method names + signatures are unchanged.
+    Every row carries an ``immutable`` flag (set to 1 on insert). A SQLite
+    trigger at the database level prevents any DELETE or UPDATE of rows where
+    ``immutable = 1``, making the audit trail tamper-proof even against
+    compromised sessions with direct database access.
+
+    This mixin provides only INSERT + SELECT. Delete and update methods are
+    INTENTIONALLY ABSENT — adding one would be blocked by the trigger.
     """
 
     def add_audit_log(
@@ -27,8 +32,8 @@ class AuditLogMixin:
         with self.connect() as db:
             db.execute(
                 """
-                INSERT INTO audit_log (created_at, user_id, username, action, resource, resource_id, details, ip_address, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO audit_log (created_at, user_id, username, action, resource, resource_id, details, ip_address, status, immutable)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """,
                 (created_at, user_id, username, action, resource, resource_id, json.dumps(details or {}), ip_address, status),
             )

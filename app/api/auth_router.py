@@ -107,10 +107,15 @@ def logout_get(request: Request):
 @router.post('/logout')
 def logout_post(request: Request, db=Depends(get_database), auth=Depends(get_auth)):
     session = require_session(request)
-    if request.headers.get(CSRF_HEADER) != session['csrf_token']:
-        return JSONResponse({'detail': 'CSRF token missing or invalid'}, status_code=403)
     from app.request_helpers import write_audit_log
-    write_audit_log(request, db, 'logout', 'session')
+    # Resilient CSRF check: if the token is stale (e.g. session timed out and was
+    # re-created, or the cross-tab sync overwrote the cached token), still honour
+    # the user's intent to log out. A stale CSRF token should never prevent logout.
+    csrf_ok = request.headers.get(CSRF_HEADER) == session['csrf_token']
+    if not csrf_ok:
+        write_audit_log(request, db, 'logout', 'session', details={'csrf_mismatch': True})
+    else:
+        write_audit_log(request, db, 'logout', 'session')
     auth.delete_session(request.cookies.get(_session_cookie_name()))
     response = JSONResponse({'ok': True})
     clear_auth_cookies(response)
