@@ -683,6 +683,65 @@ def test_validate_storage_settings_preserves_database_path_from_config(monkeypat
     assert out['database'] == 'data/source.sqlite3'
 
 
+# ── C1 fix: path-traversal rejection + data-envelope whitelist ────────
+
+
+def test_validate_storage_settings_rejects_path_outside_data_envelope(monkeypatch, pv):
+    """C1 fix: paths outside the captured data envelope (e.g. /etc, /var)
+    are rejected with HTTP 400.
+
+    Without this guard, an admin could PUT ``{"snapshots_dir": "/etc"}``
+    and the router's ``Path.mkdir(parents=True, exist_ok=True)`` would
+    happily create the directory; deleting /api/system/runtime-data
+    would then ``shutil.rmtree`` the contents.
+    """
+    from fastapi import HTTPException
+    _install_validator_dependencies(monkeypatch)
+    with pytest.raises(HTTPException) as exc_info:
+        pv.validate_storage_settings({'snapshots_dir': '/etc'})
+    assert exc_info.value.status_code == 400
+    assert 'must be inside' in exc_info.value.detail
+    assert '/etc' in exc_info.value.detail
+
+
+def test_validate_storage_settings_rejects_traversal_in_relative_path(monkeypatch, pv):
+    """C1 fix: ``data/../../etc`` resolves to ``/etc`` (after Path.resolve
+    collapses ``..``) and is rejected. The test asserts the canonicalised
+    underlying path is checked, NOT the raw string.
+    """
+    from fastapi import HTTPException
+    _install_validator_dependencies(monkeypatch)
+    with pytest.raises(HTTPException) as exc_info:
+        pv.validate_storage_settings({'snapshots_dir': 'data/../../etc'})
+    assert exc_info.value.status_code == 400
+    assert 'must be inside' in exc_info.value.detail
+
+
+def test_validate_storage_settings_rejects_ancestor_above_envelope(monkeypatch, pv):
+    """C1 fix: ``/usr`` (well outside the data envelope and its parent) is
+    rejected. Guards against the obvious mistake of treating any path
+    string as in-bounds just because it is non-empty.
+    """
+    from fastapi import HTTPException
+    _install_validator_dependencies(monkeypatch)
+    with pytest.raises(HTTPException) as exc_info:
+        pv.validate_storage_settings({'snapshots_dir': '/usr'})
+    assert exc_info.value.status_code == 400
+
+
+def test_validate_storage_settings_accepts_data_dir_descendant(monkeypatch, pv):
+    """C1 fix: paths INSIDE the captured data envelope are accepted; the
+    returned value is the absolute resolved path (so downstream callers
+    get a stable string regardless of the input was relative or had
+    ``..`` segments in a non-traversing direction).
+    """
+    _install_validator_dependencies(monkeypatch)
+    out = pv.validate_storage_settings({'snapshots_dir': 'data/snapshots'})
+    # Resolved to an absolute path ending in 'snapshots'.
+    assert out['snapshots_dir'].endswith('snapshots')
+    assert '/' in out['snapshots_dir']  # absolute, not relative
+
+
 def test_validate_storage_settings_returns_all_five_dir_fields(monkeypatch, pv):
     _install_validator_dependencies(monkeypatch)
     out = pv.validate_storage_settings({})

@@ -308,7 +308,7 @@ function renderActivityItem(item) {
     actions.push(`<button class="secondary delete-btn activity-item-action" ${dismissAttr} type="button">${dismissIcon} Dismiss</button>`);
   }
   return `
-    <article class="item activity-item ${typeClass}" data-activity-id="${escapeHtml(String(item.id))}" data-activity-type="${item.type}">
+    <article class="item activity-item ${typeClass}" data-activity-id="${escapeHtml(String(item.id))}" data-activity-type="${escapeHtml(String(item.type || ''))}">
       <div class="activity-item-icon">${icon}</div>
       <div class="activity-item-main">
         <div class="activity-item-header">

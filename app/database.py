@@ -145,7 +145,9 @@ class EventDatabase(
                     trigger_type TEXT NOT NULL DEFAULT 'motion',
                     trigger_label TEXT,
                     created_at TEXT NOT NULL,
-                    FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE SET NULL
+                    owner_user_id INTEGER,
+                    FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE SET NULL,
+                    FOREIGN KEY(owner_user_id) REFERENCES users(id) ON DELETE SET NULL
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_recordings_event ON recordings(event_id);
@@ -221,7 +223,7 @@ class EventDatabase(
             # idempotent on upgrades.
             #
             # The UPDATE trigger lists every content column but deliberately
-            # OMITS ``immutable`` itself — this lets a future migration flip
+            # OMITS ``immutable`` itself - this lets a future migration flip
             # immutable to 0 for a narrow exception (e.g. court-ordered
             # expungement) if ever needed. Without this carve-out, the only way
             # to ever delete a row would be to drop the trigger first.
@@ -230,7 +232,7 @@ class EventDatabase(
                 BEFORE DELETE ON audit_log
                 WHEN OLD.immutable = 1
                 BEGIN
-                    SELECT RAISE(ABORT, 'Audit log is append-only — entries cannot be deleted.');
+                    SELECT RAISE(ABORT, 'Audit log is append-only - entries cannot be deleted.');
                 END;
 
                 CREATE TRIGGER IF NOT EXISTS trg_audit_log_immutable_update
@@ -239,6 +241,6 @@ class EventDatabase(
                 ON audit_log
                 WHEN OLD.immutable = 1
                 BEGIN
-                    SELECT RAISE(ABORT, 'Audit log is append-only — entries cannot be modified.');
+                    SELECT RAISE(ABORT, 'Audit log is append-only - entries cannot be modified.');
                 END;
             """)

@@ -74,7 +74,7 @@ def session_remaining(request: Request):
     that the frontend can poll on a 10-30 s interval for the countdown.
 
     When auth is disabled ``require_session`` returns an anonymous session
-    with an empty ``expires_at`` — we catch the parse error and return 0
+    with an empty ``expires_at`` - we catch the parse error and return 0
     so the frontend doesn't see a 500.
     """
     session = require_session(request)
@@ -153,9 +153,92 @@ async def detect_frame(request: Request, detector=Depends(get_detector)):
     return {'detections': detections, 'count': len(detections), 'ai_backend': ai_state['active_backend'], 'ai_error': ai_error}
 
 
-@router.delete('/api/system/runtime-data')
-def delete_runtime_data(request: Request, db=Depends(get_database)):
+@router.post('/api/system/runtime-data/preview')
+def preview_delete_runtime_data(request: Request, db=Depends(get_database)):
+    """M2 fix preview half.
+
+    Returns a JSON body listing how many rows would be deleted by the
+    full wipe (recordings, events, alerts/detections, camera
+    diagnostics) and emits a single-use ``confirm_token`` that must be
+    echoed in the ``X-Runtime-Data-Confirm`` header of the next
+    ``DELETE /api/system/runtime-data?confirm=true`` call within
+    ``_RUNTIME_DELETE_TOKEN_TTL_SECONDS`` (30s by default).
+
+    The preview query is non-destructive: SELECT COUNT(*) against the
+    same five tables the wipe removes. The audit log records the
+    preview request itself (``preview_delete_all:runtime_data``) so a
+    denied intent is still forensic.
+    """
     require_admin(request)
+    user = getattr(request.state, 'user', None) or {}
+    user_id = user.get('id') if isinstance(user, dict) else None
+    counts: dict[str, int] = {}
+    with db.connect() as conn:
+        for source, sql in (
+            ('recordings', 'SELECT COUNT(*) FROM recordings'),
+            ('events', 'SELECT COUNT(*) FROM events'),
+            ('alerts', 'SELECT COUNT(*) FROM alert_history'),
+            ('objects', 'SELECT COUNT(*) FROM detections'),
+            ('camera_diagnostics', 'SELECT COUNT(*) FROM camera_diagnostics'),
+        ):
+            row = conn.execute(sql).fetchone()
+            counts[source] = int(row[0]) if row else 0
+    token = _state.issue_runtime_delete_token(user_id)
+    write_audit_log(
+        request, db, 'preview_delete_all', 'runtime_data',
+        details={**counts, 'confirm_token_issued': True},
+    )
+    return {
+        'ok': True,
+        'confirm_token': token,
+        'expires_in': int(_state._RUNTIME_DELETE_TOKEN_TTL_SECONDS),
+        'counts': counts,
+        'preserved': ['settings', 'users', 'sessions', 'rules'],
+        'warning': 'This preview shows counts only; the actual wipe still happens via DELETE /api/system/runtime-data?confirm=true.',
+    }
+
+
+@router.delete('/api/system/runtime-data')
+def delete_runtime_data(
+    request: Request,
+    confirm: str | None = Query(None, description='Must be the literal string "true" to confirm the destructive wipe.'),
+    db=Depends(get_database),
+):
+    """M2 fix wipe half.
+
+    Requires:
+    - admin session (via ``require_admin`` + middleware)
+    - ``?confirm=true`` query param (belt-and-braces against a
+      silent DELETE-with-no-opts being accepted as "confirmed")
+    - a still-valid ``X-Runtime-Data-Confirm`` header matching a token
+      the SAME admin received from the preview endpoint within
+      ``_RUNTIME_DELETE_TOKEN_TTL_SECONDS``
+    - middleware's CSRF gate (X-CSRF-Token header)
+
+    On any of the above failing, the response is HTTP 400 with a
+    short "what to do next" detail. No audit-log row is written for
+    the rejected attempts - only attempted wipes that PASS the
+    confirm gate go to the audit log, so a noisy fail-counter can't
+    be correlated to a compromised admin by an attacker who can
+    read the DB.
+    """
+    require_admin(request)
+    if confirm != 'true':
+        raise HTTPException(
+            status_code=400,
+            detail='Missing or wrong ?confirm=true. Send ?confirm=true to confirm the destructive wipe.',
+        )
+    presented_token = request.headers.get('X-Runtime-Data-Confirm')
+    if not presented_token:
+        raise HTTPException(
+            status_code=400,
+            detail='Missing X-Runtime-Data-Confirm header. POST /api/system/runtime-data/preview to receive a token first.',
+        )
+    user = getattr(request.state, 'user', None) or {}
+    user_id = user.get('id') if isinstance(user, dict) else None
+    err = _state.consume_runtime_delete_token(user_id, presented_token)
+    if err is not None:
+        raise HTTPException(status_code=400, detail=err)
     recordings = db.delete_all_recordings()
     delete_recording_files(recordings)
     deleted_events = db.delete_all_events()

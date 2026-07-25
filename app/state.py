@@ -13,7 +13,9 @@ Rules:
 from __future__ import annotations
 
 import collections
+import secrets
 import threading
+import time
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -192,3 +194,62 @@ _apply_settings_lock: threading.RLock = threading.RLock()
 
 _update_in_progress: bool = False
 _update_lock: threading.Lock = threading.Lock()
+
+# ── Runtime-data two-step delete (M2 fix) token store ──────────────────
+# Each admin who requests a preview of the
+# ``DELETE /api/system/runtime-data`` wipe gets a fresh 256-bit token.
+# The wipe endpoint refuses to run without ``?confirm=true`` AND a header
+# echoing a recent, unconsumed token for the SAME user. Tokens expire
+# after ``_RUNTIME_DELETE_TOKEN_TTL_SECONDS`` (currently 30s) and are
+# pruned lazily on every issue/consume call. The in-memory store is
+# bound to the process lifetime, so a service restart invalidates all
+# outstanding tokens (acceptable for a defensive belt-and-braces UI
+# affordance on a self-hosted service).
+
+_RUNTIME_DELETE_TOKEN_TTL_SECONDS: float = 30.0
+_runtime_delete_tokens: dict = {}
+_runtime_delete_lock: threading.Lock = threading.Lock()
+
+
+def issue_runtime_delete_token(user_id: Any) -> str:
+    """Mint a fresh delete-confirm token bound to ``user_id`` and stash it.
+
+    Lazy-prunes any pre-existing tokens older than the TTL on the way
+    in - defends against the dict leaking if a single admin never
+    follows up with a confirm.
+    """
+    with _runtime_delete_lock:
+        now = time.time()
+        for existing_user, _entry in list(_runtime_delete_tokens.items()):
+            issued_at = _runtime_delete_tokens[existing_user][1]
+            if now - issued_at > _RUNTIME_DELETE_TOKEN_TTL_SECONDS:
+                _runtime_delete_tokens.pop(existing_user, None)
+        token = secrets.token_urlsafe(32)
+        _runtime_delete_tokens[user_id] = (token, now)
+        return token
+
+
+def consume_runtime_delete_token(user_id: Any, presented_token: str) -> str | None:
+    """Validate + consume a delete-confirm token.
+
+    Returns ``None`` on success (token matched & removed). Returns a
+    short error string on any kind of mismatch - the same generic
+    message is used for missing / expired / wrong-owner to defeat
+    timing-based / enumeration side channels. ``user_id`` is the
+    resolved id from the *currently-authenticated* session, so a
+    token issued to admin A cannot be redeemed by admin B even if
+    the header leaks.
+    """
+    with _runtime_delete_lock:
+        now = time.time()
+        for existing_user, _entry in list(_runtime_delete_tokens.items()):
+            issued_at = _runtime_delete_tokens[existing_user][1]
+            if now - issued_at > _RUNTIME_DELETE_TOKEN_TTL_SECONDS:
+                _runtime_delete_tokens.pop(existing_user, None)
+        entry = _runtime_delete_tokens.pop(user_id, None)
+        if entry is None:
+            return 'Confirm token not recognised; please request a new preview first.'
+        stored_token, _issued_at = entry
+        if stored_token != presented_token:
+            return 'Confirm token invalid or has already been used.'
+        return None

@@ -5,6 +5,8 @@ Direct imports replace the ``import app.main as main`` hybrid pattern.
 
 from __future__ import annotations
 
+import json
+import logging
 import urllib.error
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -26,6 +28,8 @@ from app.model_management import (
 )
 from app.request_helpers import write_audit_log
 from app.media_utils import ONE_PIXEL_PNG
+
+logger = logging.getLogger('daygle.ai')
 
 router = APIRouter()
 
@@ -106,6 +110,26 @@ async def download_ai_model(request: Request):
     require_admin(request)
     body = await request.json()
     model_name = str(body.get('model') or '').strip().lower()
+    # H1 fix: add the same YOLO_MODELS whitelist gate that
+    # ``update_ai_model`` already enforces, so this handler cannot be
+    # used to ask ``_do_download_model`` to fetch an arbitrary off-list
+    # blob (path-traversal / SSRF depending on what the underlying
+    # ``_do_download_model`` does with the name). Same pattern, same
+    # 400 response, same whitelist; just tighter input validation.
+    if model_name not in YOLO_MODELS:
+        raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'.")
+    # Round-6 / N2 removal (drop N2 entirely (B3)): the previous SHA-256
+    # pin-on-upstream gate has been removed because ``_do_download_model``
+    # produces a locally-exported ONNX binary via the Ultralytics SDK
+    # rather than fetching a canonical .pt file. There is no upstream
+    # source-of-truth hash to pin against (Ultralytics does not publish
+    # SHA-256 digests for ``yolov8{}.pt``), so any "verify-against-pinned"
+    # attempt is unsatisfiable for these specific artefacts. Trust
+    # transfers to the Ultralytics SDK + pip TLS for delivery integrity,
+    # and the existing per-installed-model SHA-256 metadata record on
+    # ``_do_download_model`` continues to capture byte-fingerprints for
+    # local auditing. The whitelist above (``YOLO_MODELS`` membership
+    # check) remains the active gate against off-list blob fetches.
     return await run_in_threadpool(_do_download_model, model_name)
 
 
@@ -124,8 +148,18 @@ def check_model_updates(request: Request):
         manifest = _fetch_models_manifest()
     except urllib.error.HTTPError as exc:
         return {'error': f'Manifest fetch error {exc.code}: {exc.reason}', 'models': [], 'any_updates': False}
-    except Exception as exc:
-        return {'error': str(exc), 'models': [], 'any_updates': False}
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError) as exc:
+        # R9 H4: narrow + log + sanitize. The previous broad except
+        # collapsed every network / parse / config fault to one opaque
+        # ``str(exc)`` blob; the new shape keeps the full message on the
+        # operator-side ``app.log`` but only exposes the exception type
+        # name to the admin client.
+        logger.warning('check_model_updates manifest fetch failed (%s): %s', type(exc).__name__, exc)
+        return {
+            'error': f'Could not fetch model-update manifest ({type(exc).__name__}).',
+            'models': [],
+            'any_updates': False,
+        }
     manifest_models = manifest.get('models', {})
     result = []
     for model_id, info in YOLO_MODELS.items():

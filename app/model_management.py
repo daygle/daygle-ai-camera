@@ -46,8 +46,55 @@ PYPI_ULTRALYTICS_URL = 'https://pypi.org/pypi/ultralytics/json'
 _installed_models_lock = threading.Lock()
 
 
+MODELS_DIR: Path = BASE_DIR / 'models'
+
+
+def _safe_within_models_dir(filename: str) -> Path:
+    """Resolve ``filename`` against ``MODELS_DIR`` and refuse traversal.
+
+    M4 (round-7) defence-in-depth for any code path that takes a
+    user/operator-supplied filename and joins it onto the models directory:
+
+    - Strips any directory components (``pathlib.PurePosixPath(...).name``).
+    - Rejects empty / dot-only / leading-dot names so a misconfigured
+      ``YOLO_MODELS[model_name]['onnx'] = ''`` cannot resolve to MODELS_DIR
+      itself and ``.bashrc`` / ``..`` cannot pass through.
+    - Confirms the resolved path stays inside ``MODELS_DIR``.
+
+    Raises ``RuntimeError`` on rejection so the existing
+    ``_do_download_model`` HTTP-422 wrapper surfaces a clean 502 to the
+    caller without leaking ``str(filename)`` contents into the response
+    body. ``RuntimeError`` is also caught / mapped by ``export_yolo_onnx``
+    callers, which already return ``HTTPException(502, …)`` on the same
+    shape, so the new check composes cleanly.
+
+    The check is deliberately tighter than ``PurePath.is_relative_to``:
+    a filename like ``yolov8n.pt`` resolves identically to its origin
+    so ``is_relative_to(MODELS_DIR)`` returns True; a filename like
+    ``../etc/passwd`` becomes ``/etc/passwd`` after stripping and
+    ``is_relative_to(MODELS_DIR)`` returns False. Both branches covered.
+    """
+    if not isinstance(filename, str) or not filename.strip():
+        raise RuntimeError('Model filename must be a non-empty string.')
+    stripped = filename.strip()
+    name = Path(stripped).name  # strips any path separator + parent refs
+    if not name or name in {'.', '..'} or name.startswith('.'):
+        raise RuntimeError('Model filename must be a non-hidden basename.')
+    resolved = (MODELS_DIR / name).resolve()
+    if not resolved.is_relative_to(MODELS_DIR.resolve()):
+        raise RuntimeError('Model filename resolved outside the models directory.')
+    return resolved
+
+
 def _installed_models_path() -> Path:
-    return BASE_DIR / 'models' / 'installed.json'
+    # Use the M4 helper so this function is robust to any future caller
+    # that tries to re-use it with a derived / templated name. Today it's
+    # only called with the literal ``'installed.json'`` (a basename that
+    # trivially passes the check), but routing through the helper keeps
+    # the invariant in one place.
+    resolved = _safe_within_models_dir('installed.json')
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    return resolved
 
 
 def _read_installed_models() -> dict[str, Any]:
@@ -146,7 +193,14 @@ def _do_download_model(model_name: str, switch_active: bool = True) -> dict[str,
     if model_name not in YOLO_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
     info = YOLO_MODELS[model_name]
-    destination = BASE_DIR / 'models' / info['onnx']
+    # M4: route operator-supplied ``info['onnx']`` through the path
+    # canonicaliser so a misconfigured entry like
+    # ``YOLO_MODELS[model_name]['onnx'] = '../etc/passwd'`` cannot be
+    # used as the export destination. ``_safe_within_models_dir`` raises
+    # ``RuntimeError`` which is mapped to ``HTTPException(502, …)``
+    # below by the same try/except already wrapping ``export_yolo_onnx``,
+    # so no new error-path code is needed.
+    destination = _safe_within_models_dir(info['onnx'])
     try:
         exported_bytes = export_yolo_onnx(model_name, destination)
     except (RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:

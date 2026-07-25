@@ -7,7 +7,13 @@ numpy>=1.26,<3.0
 # install_python_deps.sh - that installs onnxruntime-gpu instead.
 onnxruntime>=1.18,<2.0
 onnx>=1.16,<2.0
-ultralytics>=8.3,<9.0
+# Round-9 H1a: exact-pin the in-house known-good SDK release. The B3
+# (R6) decision to rely on the Ultralytics SDK + pip TLS for ONNX
+# delivery integrity assumes a single verified release. A minor-version
+# range would silently absorb future 8.x.y PyPI drops -- bump this pin
+# only after reviewing the upstream release notes for supply-chain
+# concerns.
+ultralytics==8.3.40
 opencv-python-headless>=4.9,<5.0
 python-multipart>=0.0.9,<1.0
 sounddevice>=0.4,<1.0

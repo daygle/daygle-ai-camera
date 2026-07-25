@@ -51,7 +51,12 @@ router = APIRouter()
 
 
 @router.get('/api/settings/system')
-def get_system_settings(db=Depends(get_database), auth_enabled: bool = Depends(get_auth_enabled)):
+def get_system_settings(request: Request, db=Depends(get_database), auth_enabled: bool = Depends(get_auth_enabled)):
+    # M1 fix: handler-level admin gate. Middleware already enforces the
+    # admin role via the /api/settings/system branch-5 match, but the
+    # explicit gate here is the second line if a future refactor moves
+    # the path out of the middleware's admin match list.
+    require_admin(request)
     return {'version': _current_version(), 'camera': get_camera_config(None), 'cameras': effective_cameras_config(), 'live': effective_live_config(), 'recording': effective_recording_config(), 'storage': effective_storage_config(),        'auth': {
             'session_timeout_hours': effective_auth_config().get('session_timeout_hours'),
             'max_login_attempts': effective_auth_config().get('max_login_attempts'),

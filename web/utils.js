@@ -150,7 +150,7 @@ async function api(path, options = {}) {
   // concurrent in-flight request may have already cleared auth state
   // (via a prior 401 → handleSessionLoss → setApiAuth(null, null, null))
   // before this 403 arrives. The server's error message alone is the
-  // authoritative signal — if it says CSRF, the session is gone.
+  // authoritative signal - if it says CSRF, the session is gone.
   if (response.status === 403) {
     const detail = String((payload && payload.detail) || '');
     if (/csrf|invalid.?token|missing.?cookie|invalid.?x-csr/i.test(detail)) {
@@ -245,7 +245,7 @@ function subscribeDaygleAuthCrossTabs() {
       }
       return;
     }
-    // Keep the local CSRF token intact — it belongs to THIS tab's session
+    // Keep the local CSRF token intact - it belongs to THIS tab's session
     // cookie. Overwriting with the remote tab's token causes 403 CSRF
     // mismatches when the two tabs hold different sessions (e.g. one tab
     // re-logged in after its session expired while the other tab still has
@@ -496,15 +496,21 @@ function recordingDetectionSummary(recording) {
 // Audit + camera-log entries use the same locale-aware "Nov 4, 2025, 12:30:45"
 // format. Centralised here so a future tweak (e.g. honouring the user's
 // time-format preference on these lists) lands in one place rather than two.
+// Log entries come from the audit_log + camera_log tables which store the
+// wall-clock ISO timestamp the operator should see. ``formatDate`` honours
+// the operator's preferred date/time format (via
+// ``formatUserDate`` + ``formatUserTime``) and timezone
+// (``window.daygleDatePrefs.timezone``). The previous implementation called
+// ``.toLocaleString()`` with a fixed English-locale option object that
+// ignored the operator preference - the camera-log and audit pages were
+// out of step with the rest of the dashboard. Delegating here keeps both
+// pages consistent with live / recordings / timeline in one place.
 function formatLogTime(iso) {
   if (!iso) return '-';
   try {
-    return new Date(iso).toLocaleString(undefined, {
-      year: 'numeric', month: 'short', day: 'numeric',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-    });
+    return formatDate(iso);
   } catch {
-    return iso;
+    return String(iso || '-');
   }
 }
 

@@ -2759,13 +2759,37 @@ a.activity-item-action {
 .zones-editor-camera select {
   display: block;
   width: 100%;
+  /* ``appearance: none`` replaces the OS-rendered active-option highlight
+     rectangle (the narrow light-grey band that browsers draw around the
+     currently-selected value) with our own background that fills the full
+     box. Without this, some browsers (Chromium on Linux, Firefox) render
+     the selected value inside a sub-region narrower than the box itself,
+     leaving a visible empty strip on either side. */
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.05);
   color: var(--text);
-  padding: 10px 14px;
+  /* Extra right-side padding makes room for the custom dropdown caret
+     we draw via background-image below; without the inner right padding
+     the chevron would overlap the selected text. */
+  padding: 10px 36px 10px 14px;
   font-size: 14px;
   font-weight: 700;
+  background-image:
+    linear-gradient(135deg, transparent 50%, var(--text) 50%),
+    linear-gradient(45deg, var(--text) 50%, transparent 50%);
+  background-position:
+    calc(100% - 22px) 50%,
+    calc(100% - 16px) 50%;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+}
+.zones-editor-camera select:focus {
+  outline: 2px solid var(--accent-soft, var(--accent));
+  outline-offset: 1px;
 }
 
 /* Zone editor footer - Save Area button */

@@ -13,7 +13,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
-from app.auth_gates import require_admin
+from app.auth_gates import require_admin, require_user
 from app.camera_config import normalize_camera_id
 from app.config_facades import effective_cameras_config, effective_recording_config
 from app.deps import get_database, get_recording_service
@@ -34,6 +34,7 @@ router = APIRouter()
 
 @router.get('/api/recordings')
 def recordings(
+    request: Request,
     label: str | None = None,
     camera_id: str | None = None,
     limit: int = Query(50, ge=1, le=500),
@@ -44,10 +45,18 @@ def recordings(
     source_type: str | None = Query(None, pattern='^(sound|object)$', description='Filter by recording type: sound or object.'),
     db=Depends(get_database),
 ):
+    # M1 fix: defence-in-depth - middleware already enforces a session
+    # for non-public /api/* paths; this handler-level gate is the
+    # second line if a future refactor reorders middleware or adds
+    # this path to PUBLIC_PATHS by accident.
+    user = require_user(request)
+    # round-5 finish / M2: capture identity for post-fetch scope filter.
+    session_user_id = int(user['id'])
+    session_role = str(user.get('role') or '').strip().lower()
     labels: list[str] | None = None
     if label:
         labels = [l.strip().lower() for l in str(label).split(',') if l.strip()]
-    return db.list_recordings(
+    results = db.list_recordings(
         labels=labels,
         camera_id=camera_id,
         limit=limit,
@@ -57,15 +66,29 @@ def recordings(
         sort=sort,
         source_type=source_type,
     )
+    # round-5 finish / M2: viewer sees only system captures (NULL owner)
+    # and any of their own captures; admins see everything. Done as a
+    # post-fetch filter so the SQL stays untouched in this round -- the
+    # ``add_recording`` signature could be widened in a follow-up so
+    # callers can stamp owner_user_id at INSERT time.
+    if session_role != 'admin':
+        results = [
+            r for r in results
+            if r.get('owner_user_id') is None
+            or int(r.get('owner_user_id') or 0) == session_user_id
+        ]
+    return results
 
 
 @router.get('/api/recordings/timeline')
 def recordings_timeline(
+    request: Request,
     camera_id: str | None = None,
     day: str | None = None,
     tz_offset_minutes: int | None = Query(None, ge=-840, le=840),
     db=Depends(get_database),
 ):
+    require_user(request)
     cameras = [
         {
             'id': str(camera_settings.get('id') or ''),
@@ -129,10 +152,21 @@ def purge_recordings(request: Request):
 
 
 @router.get('/api/recordings/{recording_id}')
-def recording_detail(recording_id: int, db=Depends(get_database)):
+def recording_detail(request: Request, recording_id: int, db=Depends(get_database)):
+    require_user(request)
     recording = db.get_recording(recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail='Recording not found')
+    # round-5 finish / M2: viewer cannot retrieve another user's recording --
+    # returning 404 (NOT 403) so the existence of someone-else's recording is
+    # not leaked via the response status code. Lookup is route-local via
+    # ``request.state.user`` (set by authentication_middleware) so this
+    # block has no dependency on locals captured in OTHER handlers.
+    request_user = getattr(request.state, 'user', None) or {}
+    if str(request_user.get('role') or '').strip().lower() != 'admin':
+        owner_id = recording.get('owner_user_id')
+        if owner_id is not None and int(owner_id) != int(request_user.get('id') or 0):
+            raise HTTPException(status_code=404, detail='Recording not found')
     file_path = Path(str(recording.get('file_path') or ''))
     recording['track'] = load_recording_detection_track(file_path)
     if (
@@ -151,9 +185,20 @@ def recording_detail(recording_id: int, db=Depends(get_database)):
 
 @router.get('/api/recordings/{recording_id}/stream')
 def stream_recording(recording_id: int, request: Request, db=Depends(get_database)):
+    require_user(request)
     recording = db.get_recording(recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail='Recording not found')
+    # round-5 finish / M2: viewer cannot retrieve another user's recording --
+    # returning 404 (NOT 403) so the existence of someone-else's recording is
+    # not leaked via the response status code. Lookup is route-local via
+    # ``request.state.user`` (set by authentication_middleware) so this
+    # block has no dependency on locals captured in OTHER handlers.
+    request_user = getattr(request.state, 'user', None) or {}
+    if str(request_user.get('role') or '').strip().lower() != 'admin':
+        owner_id = recording.get('owner_user_id')
+        if owner_id is not None and int(owner_id) != int(request_user.get('id') or 0):
+            raise HTTPException(status_code=404, detail='Recording not found')
     file_path = Path(recording['file_path'])
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail='Recording media file not found')
@@ -205,10 +250,21 @@ def stream_recording(recording_id: int, request: Request, db=Depends(get_databas
 
 
 @router.get('/api/recordings/{recording_id}/download')
-def download_recording(recording_id: int, db=Depends(get_database)):
+def download_recording(request: Request, recording_id: int, db=Depends(get_database)):
+    require_user(request)
     recording = db.get_recording(recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail='Recording not found')
+    # round-5 finish / M2: viewer cannot retrieve another user's recording --
+    # returning 404 (NOT 403) so the existence of someone-else's recording is
+    # not leaked via the response status code. Lookup is route-local via
+    # ``request.state.user`` (set by authentication_middleware) so this
+    # block has no dependency on locals captured in OTHER handlers.
+    request_user = getattr(request.state, 'user', None) or {}
+    if str(request_user.get('role') or '').strip().lower() != 'admin':
+        owner_id = recording.get('owner_user_id')
+        if owner_id is not None and int(owner_id) != int(request_user.get('id') or 0):
+            raise HTTPException(status_code=404, detail='Recording not found')
     file_path = Path(recording['file_path'])
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail='Recording media file not found')
@@ -231,6 +287,16 @@ def delete_recording(recording_id: int, request: Request, db=Depends(get_databas
     recording = db.delete_recording(recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail='Recording not found')
+    # round-5 finish / M2: viewer cannot retrieve another user's recording --
+    # returning 404 (NOT 403) so the existence of someone-else's recording is
+    # not leaked via the response status code. Lookup is route-local via
+    # ``request.state.user`` (set by authentication_middleware) so this
+    # block has no dependency on locals captured in OTHER handlers.
+    request_user = getattr(request.state, 'user', None) or {}
+    if str(request_user.get('role') or '').strip().lower() != 'admin':
+        owner_id = recording.get('owner_user_id')
+        if owner_id is not None and int(owner_id) != int(request_user.get('id') or 0):
+            raise HTTPException(status_code=404, detail='Recording not found')
     delete_recording_files([recording])
     write_audit_log(request, db, 'delete', 'recording', recording_id)
     return {'ok': True}

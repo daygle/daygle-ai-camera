@@ -66,6 +66,27 @@ def create_database_backup(prefix: str = 'daygle-database') -> Path:
                 destination.close()
         finally:
             source.close()
+        # N1 (round-5): verify backup integrity BEFORE declaring success so
+        # torn writes, power losses, or filesystem mid-cycle faults don't get
+        # silently accepted as valid backups. ``source.backup()`` performs
+        # an internal page-by-page scan and copy, so the resulting
+        # destination is by-construction physically consistent on disk;
+        # ``PRAGMA integrity_check`` confirms the page tree + free lists
+        # on the new file before we hand the path back to the caller.
+        # Without this, corruption was only caught at the next
+        # ``validate_restore_database`` upload (round-trip time may be
+        # weeks or months).
+        verify = sqlite3.connect(backup_path)
+        try:
+            integrity = verify.execute('PRAGMA integrity_check').fetchone()
+            if not integrity or str(integrity[0]).lower() != 'ok':
+                offending = '<none>' if not integrity else str(integrity[0])
+                raise HTTPException(
+                    status_code=500,
+                    detail=f'Backup failed integrity check ({offending})',
+                )
+        finally:
+            verify.close()
     except BaseException:
         backup_path.unlink(missing_ok=True)
         raise
@@ -102,8 +123,56 @@ def overwrite_database_from_file(restore_source: Path) -> None:
     finally:
         live_flush.close()
 
+    # C2 fix: harden the SQLite restore path against malicious backup files.
+    # The pre-restore validation in ``validate_restore_database`` already
+    # checks integrity + minimum tables + admin presence, but it does NOT
+    # inspect stored SQL or control extension loading. Two additional
+    # defences are applied HERE, on the connection that backs the upcoming
+    # ``source.backup(...)``:
+    #
+    # 1. ``enable_load_extension(False)`` is called explicitly. Python's
+    #    standard library disables extension loading by default on 3.12+ but
+    #    some distros / SQLite compile flags flip the default; the explicit
+    #    call is a no-op when already disabled and a belt-and-braces fix
+    #    when it isn't. Without this, a stored trigger / view whose body
+    #    calls ``SELECT load_extension('/tmp/evil.so')`` would autoload
+    #    attacker code on the first connection-using query after restore.
+    #
+    # 2. ``sqlite_master`` is queried for VIEWs and TRIGGERs. The application
+    #    uses neither (verified across ``app/``); if either is present in
+    #    the uploaded backup, the restore is rejected with HTTP 400 before
+    #    any row-level SQL is run. This blocks the readfile / writefile /
+    #    load_extension wrapper vectors that can ride inside a view or
+    #    trigger body even when the live application never queries them
+    #    explicitly.
+    #
+    # Both defences are evaluated on the OPEN ``source`` connection; the
+    # subsequent ``source.backup(...)`` reuses the same connection after the
+    # checks pass, so the destination receives the still-validated schema.
     source = sqlite3.connect(str(restore_source))
     try:
+        try:
+            source.enable_load_extension(False)
+        except (AttributeError, sqlite3.NotSupportedError):
+            # Python <3.12 on some SQLite builds exposes no
+            # enable_load_extension; those builds default to False already,
+            # so the no-op is safe.
+            pass
+        offending = source.execute(
+            "SELECT type, name FROM sqlite_master "
+            "WHERE type IN ('view', 'trigger') "
+            "AND sql IS NOT NULL AND sql <> ''"
+        ).fetchall()
+        if offending:
+            sample = ', '.join(f'{row[0]}:{row[1]}' for row in offending[:5])
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Restored database contains views or triggers ({sample}"
+                    f"{'...' if len(offending) > 5 else ''}); restore rejected. "
+                    f"Only plain-table backups without views or triggers are accepted."
+                ),
+            )
         destination = sqlite3.connect(str(_state.database.database_path))
         try:
             source.backup(destination)

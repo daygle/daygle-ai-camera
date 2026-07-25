@@ -38,7 +38,7 @@ function createSandbox() {
 
   const location = { href: '', pathname: '/recordings', search: '' };
 
-  // Synchronous localStorage mock — storage events fire synchronously
+  // Synchronous localStorage mock - storage events fire synchronously
   // on all listeners on every setItem (including the writing "tab", which
   // differs from real browser behaviour but is fine for testing).
   const localStorage = (() => {
@@ -131,7 +131,7 @@ function createSandbox() {
   // Wrap handleSessionLoss to track calls for assertions.
   // The wrapper records calls BEFORE the redirecting guard so we can
   // assert the function was invoked. The guard itself still prevents
-  // double-redirects — our wrapper doesn't change that behaviour.
+  // double-redirects - our wrapper doesn't change that behaviour.
   const origHandleSessionLoss = sandbox.window.daygleUi.handleSessionLoss;
   sandbox.window.daygleUi.handleSessionLoss = function (reason, returnTo) {
     sessionLossCalls.push({ reason, returnTo });
@@ -179,7 +179,7 @@ describe('api() 403 CSRF handler', () => {
     // >1 because handleSessionLoss broadcasts empty-csrf to localStorage,
     // which fires a synchronous storage event, which invokes the listener
     // (subscribeDaygleAuthCrossTabs), which calls handleSessionLoss again
-    // — but the redirecting guard prevents the second call from acting.
+    // - but the redirecting guard prevents the second call from acting.
     assert.ok(sessionLossCalls.length >= 1,
       `handleSessionLoss must be called >=1 for CSRF 403 with user=null (got ${sessionLossCalls.length})`);
     assert.match(sessionLossCalls[0].reason, /session expired/i);
@@ -276,7 +276,7 @@ describe('handleSessionLoss broadcasts to other tabs', () => {
     assert.ok(sessionLossCalls.length >= 1,
       `handleSessionLoss must be called >=1 (got ${sessionLossCalls.length})`);
 
-    // Second call — still tracked by wrapper, but original logic returns
+    // Second call - still tracked by wrapper, but original logic returns
     // early due to redirecting guard.
     ui.handleSessionLoss('Second', '/');
     assert.ok(sandbox.window.daygleAuth.redirecting === true,
@@ -293,7 +293,7 @@ describe('Cross-tab auth sync', () => {
 
     sessionLossCalls.length = 0;
 
-    // Write empty-csrf to localStorage — fires storage listener synchronously.
+    // Write empty-csrf to localStorage - fires storage listener synchronously.
     // The listener calls handleSessionLoss, which broadcasts empty-csrf again,
     // triggering a recursive call, but the redirecting guard suppresses it.
     sandbox.localStorage.setItem('daygle.auth.v1',

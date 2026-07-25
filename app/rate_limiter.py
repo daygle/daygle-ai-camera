@@ -5,7 +5,7 @@ imposes an exponentially increasing delay before allowing the next attempt.
 The delay resets to zero on a successful login or when the sliding window
 empties (i.e. the IP stops hammering the endpoint).
 
-The rate limiter is purely in-memory — no persistent state, no database
+The rate limiter is purely in-memory - no persistent state, no database
 writes, no inter-process coordination. On restart the slate is clean,
 which is fine: an attacker cannot pre-seed state from a previous run.
 
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import deque
 from typing import Any
 
 
@@ -176,8 +177,82 @@ class IPRateLimiter:
             del self._attempts[k]
 
 
-# Module-level singleton — imported by auth_router directly.
+# Module-level singleton - imported by auth_router directly.
 login_limiter = IPRateLimiter()
+
+
+class SlidingWindowRateLimiter:
+    """Plain sliding-window counter. No exponential backoff, no penalty beyond drop.
+
+    Round-5 (M1 + M3): a primitive API/endpoint throttling limiter that
+    intentionally differs from :class:`IPRateLimiter` (which is an
+    exponential-backoff limiter designed for *failed* authentication
+    attempts). The sliding-window shape fits the use case:
+
+      * admin mutations (M1): a stolen admin cookie should not be able
+        to whale create/delete/write endpoints at wire speed -- an
+        honest admin might legitimately issue a string of POSTs in 30
+        seconds; a sliding-window cap of e.g. 60 per minute throttles a
+        burst without penalising an active admin the way an exponential
+        backoff would.
+      * setup endpoint brute-force (M3): same shape -- 10 setup POSTs
+        per 5 minutes, drop the rest.
+
+    NOT thread-affine-friendly for large key fan-out (in-process only)
+    but that matches Daygle's single-writer deployment shape.
+    """
+
+    def __init__(self, *, max_requests: int, window_seconds: float, name: str = 'sw') -> None:
+        self._max = int(max_requests)
+        self._window = float(window_seconds)
+        self._name = name
+        self._lock = threading.Lock()
+        self._hits: dict[str, deque[float]] = {}
+
+    def is_rate_limited(self, key: str) -> bool:
+        with self._lock:
+            now = time.monotonic()
+            self._evict_stale(key, now)
+            dq = self._hits.get(key)
+            return dq is not None and len(dq) >= self._max
+
+    def record(self, key: str) -> int:
+        """Insert a hit for *key* and return the current hit-count in-window."""
+        with self._lock:
+            now = time.monotonic()
+            self._evict_stale(key, now)
+            dq = self._hits.setdefault(key, deque())
+            dq.append(now)
+            return len(dq)
+
+    def reset(self, key: str) -> None:
+        with self._lock:
+            self._hits.pop(key, None)
+
+    def _evict_stale(self, key: str, now: float) -> None:
+        dq = self._hits.get(key)
+        if not dq:
+            return
+        cutoff = now - self._window
+        while dq and dq[0] < cutoff:
+            dq.popleft()
+        if not dq:
+            self._hits.pop(key, None)
+
+
+# Round-5 / M1: admin endpoint throttling, default 60 requests / 60 sec
+# per-IP. Tunable via auth.admin_rate_limit_* config keys (see
+# ``apply_config`` below).
+admin_limiter = SlidingWindowRateLimiter(
+    max_requests=60, window_seconds=60, name='admin',
+)
+
+# Round-5 / M3: setup-endpoint brute-force throttle, 10 POSTs per 5
+# minutes per IP. Reasonable for LAN first-admin bootstrap (typos,
+# password recalculation) while still bounding the brute-force window.
+setup_limiter = SlidingWindowRateLimiter(
+    max_requests=10, window_seconds=300, name='setup',
+)
 
 
 def _ts_to_iso(ts: float) -> str:

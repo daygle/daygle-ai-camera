@@ -31,6 +31,11 @@ async def update_profile(request: Request, auth=Depends(get_auth)):
             timezone_name=payload.get('timezone'),
             date_format=payload.get('date_format'),
             time_format=payload.get('time_format'),
+            # H4 fix: forward the optional ``current_password`` field so
+            # ``auth.update_profile`` can verify it when the request
+            # actually changes email or username. Non-sensitive updates
+            # leave it at ``None`` and bypass the verify.
+            current_password=payload.get('current_password') or None,
         )
     except AuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -55,7 +60,12 @@ async def change_profile_password(request: Request, auth=Depends(get_auth)):
 
 @router.get('/api/users')
 def list_users(request: Request, auth=Depends(get_auth)):
-    require_user(request)
+    # H2 fix: tighten from ``require_user`` (any signed-in account) to
+    # ``require_admin`` so viewers can no longer enumerate every other
+    # username + email on the system. The auth middleware already
+    # enforces the session check; this gate is the second line for
+    # role separation.
+    require_admin(request)
     return auth.list_users()
 
 

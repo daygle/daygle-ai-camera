@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import smtplib
 from contextlib import contextmanager
 from email.header import Header
@@ -13,6 +14,15 @@ from typing import Any, Iterator
 
 class EmailAlertError(Exception):
     pass
+
+
+# LOW fix (round-8): module-level logger so SMTP cleanup failures don't
+# disappear silently. The module is intentionally logger-light - only the
+# session-level except-pass swallow sites in ``_create_smtp_session`` and
+# ``_send_via`` get ``logger.warning`` calls so an operator chasing
+# "why does my batch break at recipient 3 of 10" can see the disconnect
+# trace in app.log without redeploying.
+logger = logging.getLogger('daygle.notifications')
 
 
 def _encode_subject(subject: str) -> str:
@@ -320,16 +330,34 @@ class EmailAlertService:
             if username:
                 smtp.login(username, password)
             yield smtp
-        except EmailAlertError:
+        except EmailAlertError as exc:
+            # LOW fix (round-8): log the underlying exception chain step
+            # before re-raising so the root cause is visible in app.log.
+            logger.warning('SMTP session setup failed: %s', exc)
             raise
         except Exception as exc:  # pragma: no cover - depends on external mail servers
+            logger.warning(
+                'SMTP session setup failed: host=%s port=%s exc=%s: %s',
+                host, port, type(exc).__name__, exc,
+            )
             raise EmailAlertError(str(exc)) from exc
         finally:
             if smtp is not None:
                 try:
                     smtp.quit()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # LOW fix (round-8): keep the resource-cleanup
+                    # best-effort semantics (original code was ``except
+                    # Exception: pass``) but log WHY the close failed so a
+                    # "the SMTP connection leaked" suspicion has a paper
+                    # trail. ``smtplib.SMTP.quit`` raises after the
+                    # transport is already torn down on the server side,
+                    # so this is normally ``smtplib.SMTPNotSupportedError``
+                    # / ``OSError`` - both safe to ignore AFTER logging.
+                    logger.warning(
+                        'SMTP session close failed (resource already gone?): %s: %s',
+                        type(exc).__name__, exc,
+                    )
 
     def _send_via(self, smtp: smtplib.SMTP, message: Message) -> smtplib.SMTP:
         """Send a single message over an open SMTP session.
@@ -370,13 +398,25 @@ class EmailAlertService:
         try:
             smtp.send_message(message)
             return smtp
-        except smtplib.SMTPServerDisconnected:
+        except smtplib.SMTPServerDisconnected as disconnect_exc:
             # Best-effort quit the dead socket so we don't leak the
             # file descriptor while we open a fresh session below.
             try:
                 smtp.quit()
-            except Exception:
-                pass
+            except Exception as quit_exc:
+                # LOW fix (round-8): log the dead-socket close failure so
+                # a real TLS / EOF issue doesn't masquerade as "just
+                # disconnected" in app.log. See companion block in
+                # ``_create_smtp_session`` for the rationale on why this
+                # stays ``pass``-equivalent after logging.
+                logger.warning(
+                    'SMTP dead-socket close failed: %s: %s',
+                    type(quit_exc).__name__, quit_exc,
+                )
+            logger.warning(
+                'SMTP mid-batch disconnect, opening fresh session: %s',
+                disconnect_exc,
+            )
         # Use explicit __enter__/__exit__ rather than ``with`` so we can
         # return the fresh session alive after a successful retry. This
         # keeps the reconnect cost at exactly one handshake+login per

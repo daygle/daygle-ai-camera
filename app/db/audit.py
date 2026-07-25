@@ -13,7 +13,7 @@ class AuditLogMixin:
     compromised sessions with direct database access.
 
     This mixin provides only INSERT + SELECT. Delete and update methods are
-    INTENTIONALLY ABSENT — adding one would be blocked by the trigger.
+    INTENTIONALLY ABSENT - adding one would be blocked by the trigger.
     """
 
     def add_audit_log(

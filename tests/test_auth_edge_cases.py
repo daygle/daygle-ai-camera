@@ -2,14 +2,14 @@
 
 Covers every fix applied in the auth-hardening conversation:
 
-1. **Stale-CSRF logout resilience** — POST /logout with a wrong or missing
+1. **Stale-CSRF logout resilience** - POST /logout with a wrong or missing
    CSRF token must still delete the session and return ``{'ok': True}``
    instead of 403.
 
-2. **Session deletion is permanent** — After a stale-CSRF logout, the old
+2. **Session deletion is permanent** - After a stale-CSRF logout, the old
    session cookie must not authenticate subsequent API calls.
 
-3. **Normal logout still works** — POST /logout with a valid CSRF token
+3. **Normal logout still works** - POST /logout with a valid CSRF token
    behaves identically.
 
 Tests start a real uvicorn server (same pattern as test_api.py's ``_load_app``
@@ -239,7 +239,7 @@ class TestStaleCsrfLogoutResilience:
             assert status == 200
             assert payload["ok"] is True
 
-            # Session should be gone — next API call gets 401.
+            # Session should be gone - next API call gets 401.
             status, _headers, _body = client.request("/api/status")
             assert status == 401
         finally:
@@ -268,7 +268,7 @@ class TestStaleCsrfLogoutResilience:
             )
             assert payload["ok"] is True
 
-            # Session must be deleted — subsequent API call gets 401.
+            # Session must be deleted - subsequent API call gets 401.
             status, _headers, _body = client.request("/api/status")
             assert status == 401
         finally:
@@ -347,7 +347,7 @@ class TestStaleCsrfLogoutResilience:
             _setup_admin(client)
             _login(client)
 
-            # First logout — succeeds.
+            # First logout - succeeds.
             status1, _headers, payload1 = client.request(
                 "/logout", method="POST", headers={"X-CSRF-Token": "stale-token"}
             )
@@ -359,7 +359,7 @@ class TestStaleCsrfLogoutResilience:
             status2, _headers, _body = client.request(
                 "/logout", method="POST", headers={"X-CSRF-Token": "stale-token"}
             )
-            # 401 is acceptable — the session is already gone, no crash.
+            # 401 is acceptable - the session is already gone, no crash.
             assert status2 in (200, 401), (
                 f"Rapid second logout should not 500, got {status2}"
             )
@@ -395,9 +395,107 @@ class TestStaleCsrfLogoutResilience:
             )
             # The middleware sees the now-expired session and returns 401
             # before the logout handler runs. The frontend's handleSessionLoss
-            # would have already redirected, so this is fine — no crash.
+            # would have already redirected, so this is fine - no crash.
             assert status in (200, 401), (
                 f"Logout after session expiry should not crash, got {status}: {payload}"
+            )
+        finally:
+            server.should_exit = True
+            thread.join(timeout=5)
+
+
+# ── Username-enumeration timing equaliser (Bug B) ────────────────────────
+
+
+class TestUsernameEnumerationTimingEqualiser:
+    """``AuthService.authenticate`` must cost-equalise the unknown-username
+    path with the known-username / wrong-password path.
+
+    Without the equaliser, an attacker can time login responses to
+    enumerate valid usernames: ``row is None`` short-circuits the
+    ``verify_password`` call (no bcrypt work), but a known user with a
+    wrong password pays the full ``bcrypt.checkpw`` round. The fix calls
+    ``_equalize_password_timing`` on the missing-row path so both paths
+    pay equivalent CPU.
+
+    The fix-level test below patches ``bcrypt.checkpw`` to count calls
+    and verifies that authenticate on an unknown username invokes
+    ``bcrypt.checkpw`` at least once (the dummy equaliser hit).
+    """
+
+    def test_authenticate_unknown_user_pays_full_password_verify_cost(
+        self, tmp_path, monkeypatch
+    ):
+        """An unknown-username login attempt must invoke ``bcrypt.checkpw`` at
+        least once via the timing equaliser.
+
+        Guards the Bug-B fix: without the equaliser, the unknown-user path
+        short-circuits before ``verify_password`` and an attacker can
+        differentiate unknown vs known usernames from response latency.
+        """
+        from app import auth as auth_module
+        from app import rate_limiter as rl_module
+
+        # Reset the in-memory rate limiter so this single test attempt isn't
+        # affected by earlier login attempts sharing the same peer IP.
+        rl_module.login_limiter.clear()
+
+        app, _database_path = _load_app(tmp_path, monkeypatch)
+        server, thread, base_url = _server(app)
+        client = LocalClient(base_url)
+        try:
+            _setup_admin(client)
+
+            # Patch bcrypt.checkpw to count invocations.
+            if auth_module.bcrypt is None:
+                pytest.skip("bcrypt not installed in this environment")
+            original = auth_module.bcrypt.checkpw
+            call_count = {"count": 0}
+
+            def counting(*args, **kwargs):
+                call_count["count"] += 1
+                return original(*args, **kwargs)
+
+            monkeypatch.setattr(auth_module.bcrypt, "checkpw", counting)
+
+            # Harvest a fresh CSRF token for the login submission.
+            status, _headers, _body = client.request("/login")
+            assert status == 200
+            csrf = client.cookie("daygle_csrf")
+            assert csrf, "POST /login requires a daygle_csrf cookie value"
+
+            # Reset the counter so we only count this attempt's calls.
+            call_count["count"] = 0
+
+            # Submit a login attempt with a username that cannot exist.
+            status, _headers, body = client.request(
+                "/login",
+                method="POST",
+                form={
+                    "username": "this-user-definitely-does-not-exist-xyz123",
+                    "password": "SomeRandomPassword!",
+                    "csrf_token": csrf or "",
+                },
+                follow_redirects=False,
+            )
+
+            # The request must NOT 500 (the dummy equaliser never raises) and
+            # must surface the standard "invalid credentials" error.
+            assert status == 200, (
+                f"Unknown-username login should return 200 error page, got "
+                f"{status}: {body!r}"
+            )
+            body_text = body if isinstance(body, str) else str(body)
+            assert "Invalid username or password" in body_text, (
+                f"Unknown-username error message missing: {body_text!r}"
+            )
+
+            # The Bug-B fix: at least one bcrypt.checkpw call (the equaliser
+            # dummy) must have occurred.
+            assert call_count["count"] >= 1, (
+                f"authenticate on unknown user must invoke bcrypt.checkpw at "
+                f"least once for timing equalisation; got {call_count['count']} "
+                f"calls. Username-enumeration timing oracle still present."
             )
         finally:
             server.should_exit = True

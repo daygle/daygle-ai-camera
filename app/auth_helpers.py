@@ -23,6 +23,24 @@ def _session_cookie_name() -> str:
     return str(effective_auth_config().get('cookie_name', SESSION_COOKIE))
 
 
+def _get_cookie_domain() -> str | None:
+    """Return the configured ``auth.cookie_domain`` (operator override) or
+    ``None`` so the cookie binds to the response host.
+
+    Returning ``None`` keeps the ``Domain`` attribute off the cookie entirely,
+    which is the LAN-friendly default: no subdomain-cookie-tossing surface for
+    the single-host deployment. If the operator sets ``auth.cookie_domain``
+    explicitly (e.g. ``.lab.example`` for a multi-subdomain rollout), honour
+    it here and the same value flows into BOTH the CSRF cookie and the
+    session cookie so neither can be subdomain-tossed separately.
+    """
+    raw = effective_auth_config().get('cookie_domain')
+    if not raw:
+        return None
+    candidate = str(raw).strip()
+    return candidate or None
+
+
 def auth_page(title: str, body: str) -> HTMLResponse:
     """Build an HTMLResponse for a standalone auth page (login / setup)."""
     return HTMLResponse(
@@ -44,6 +62,7 @@ def set_csrf_cookie(response: Response, token: str, request: Request) -> None:
         secure=request.url.scheme == 'https',
         samesite='lax',
         max_age=3600,
+        domain=_get_cookie_domain(),
     )
 
 
@@ -77,6 +96,10 @@ def set_session_cookie(
         samesite='lax',
         expires=expires_at,
         max_age=int(session_hours * 3600),
+        # M1 (round-7): bound the cookie to an explicit host if the
+        # operator has set ``auth.cookie_domain``. Same domain as the
+        # CSRF cookie so neither can be subdomain-tossed separately.
+        domain=_get_cookie_domain(),
     )
 
 

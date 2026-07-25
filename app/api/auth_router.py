@@ -12,6 +12,8 @@ Routes:
 
 from __future__ import annotations
 
+import logging
+
 from html import escape
 
 from fastapi import APIRouter, Depends, Request
@@ -20,11 +22,14 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from app.auth import CSRF_COOKIE, CSRF_HEADER, AuthError, SESSION_COOKIE, utc_now
 from app.auth_gates import _request_ip, require_session
 from app.auth_helpers import clear_auth_cookies, set_session_cookie
-from app.rate_limiter import login_limiter
+from app.rate_limiter import login_limiter, setup_limiter
+from app.auth_helpers import _client_ip_from_request
 from app.config_facades import effective_auth_config
 from app.deps import get_auth, get_auth_enabled, get_database, get_logger
 from app.request_helpers import form_data
 from app.api.web_router import _safe_return_to, login_page, setup_page
+
+logger = logging.getLogger('daygle.auth')
 
 router = APIRouter()
 
@@ -58,7 +63,7 @@ async def login(request: Request, db=Depends(get_database), auth=Depends(get_aut
                 resource='rate_limit',
                 ip_address=ip,
                 status='failed',
-                details={'reason': f'Rate limited — retry after {retry_after}s.'},
+                details={'reason': f'Rate limited - retry after {retry_after}s.'},
             )
         except Exception as unexpected_exc:
             logger.warning('Unexpected error during login rate-limit log: %s', unexpected_exc)
@@ -122,6 +127,41 @@ async def login(request: Request, db=Depends(get_database), auth=Depends(get_aut
 
 @router.post('/setup')
 async def setup(request: Request, auth=Depends(get_auth), auth_enabled=Depends(get_auth_enabled)):
+    # round-5 / M3: per-IP setup brute-force throttle. 10 POSTs per 5
+    # minutes per IP. The first-admin bootstrap is a one-time event; a
+    # legitimate operator on a stable LAN typically issues <3 attempts;
+    # bursting beyond the budget is a brute-force signal. Audit-log the
+    # rate-limit drop so an admin investigating later can see the prior
+    # fault.
+    setup_ip = _client_ip_from_request(request)
+    if setup_ip and setup_limiter.is_rate_limited(setup_ip):
+        try:
+            from app.request_helpers import write_audit_log
+            from app.database import EventDatabase
+            db_for_audit = EventDatabase(str(auth.database_path))
+            try:
+                write_audit_log(
+                    request=request,
+                    database=db_for_audit,
+                    action='setup_rate_limited',
+                    resource='setup',
+                    status='failure',
+                    details={'ip': setup_ip},
+                )
+            finally:
+                db_for_audit.close()
+        except Exception as exc:
+            # R9 H3: telemetrize the failure so admins can detect a
+            # degraded audit pipeline; keep best-effort so a logger
+            # fault STILL does not crash the request path.
+            logger.warning('Setup audit-log write failed (%s): %s', type(exc).__name__, exc)
+        raise HTTPException(
+            status_code=429,
+            detail='Setup rate-limited; try again in a few minutes.',
+            headers={'Retry-After': '60'},
+        )
+    if setup_ip:
+        setup_limiter.record(setup_ip)
     if auth.users_exist():
         return RedirectResponse('/login', status_code=303)
     data = await form_data(request)

@@ -66,6 +66,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "rate_limit_window_seconds": 60,
         "rate_limit_base_delay": 2.0,
         "rate_limit_max_delay": 300.0,
+        # Direct peer IPs (or CIDRs-as-equal-list) whose X-Forwarded-For
+        # header is honoured. Defaults to loopback so a localhost dev
+        # server trusts XFF produced by its own reverse proxy while any
+        # other deployment (Docker bridge, LAN, public) must explicitly
+        # add the reverse-proxy IP here to avoid client-side IP spoofing.
+        "trusted_proxies": ["127.0.0.1", "::1"],
     },
     "storage": {
         "data_dir": "data",

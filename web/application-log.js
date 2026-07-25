@@ -35,15 +35,21 @@ function levelBadgeClass(level) {
   return 'status-success';
 }
 
+// Honours the operator's preferred date + time format via
+// ``window.daygleDatePrefs`` (set on ``profile.js`` save and propagated
+// through ``daygleDatePrefsChanged``). ``formatDate`` composes the
+// configured ``dateFormat`` + ``timeFormat`` + ``timezone`` exactly the
+// same way the camera-log + audit pages already do, so all three log
+// pages stay in step with each other and the rest of the dashboard when
+// the operator changes their format under ``/profile``. The previous
+// implementation called ``toLocaleDateString`` / ``toLocaleTimeString``
+// with hard-coded option objects ignoring the operator preference.
 function formatEntryTime(iso) {
   if (!iso) return '-';
   try {
-    const d = new Date(iso);
-    const date = d.toLocaleDateString([], { month: 'short', day: '2-digit' });
-    const time = d.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    return `${date} ${time}`;
+    return formatDate(iso);
   } catch {
-    return iso;
+    return String(iso || '-');
   }
 }
 

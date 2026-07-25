@@ -26,6 +26,25 @@ if [[ "${CURRENT_BRANCH}" == "HEAD" ]]; then
   exit 1
 fi
 
+# ── Origin-URL allowlist ─────────────────────────────────────────────────────
+# Refuse to fetch from any remote other than the canonical daygle/daygle-ai-camera
+# repo. Without this guard a tampered .git/config (post any service-side breach
+# or future path-traversal reintroduction) can redirect 'git pull origin …' to a
+# malicious fork and achieve RCE-as-app-user on every Update click. The regex
+# matches SSH (``git@github.com:user/repo[.git]``) and HTTPS
+# (``https://github.com/user/repo[.git]``) forms; adds an optional ``.git``
+# suffix so the bare-URL form is also accepted.
+EXPECTED_REMOTE_REGEX='github\.com[:/]daygle/daygle-ai-camera(\.git)?$'
+CURRENT_REMOTE="$(git remote get-url origin 2>/dev/null || true)"
+if [[ -z "${CURRENT_REMOTE}" ]] || ! printf '%s' "${CURRENT_REMOTE}" | grep -Eq "${EXPECTED_REMOTE_REGEX}"; then
+  echo "ERROR: refusing to update from non-allowlisted origin remote." >&2
+  echo "  Current remote: '${CURRENT_REMOTE:-<empty>}'" >&2
+  echo "  Expected pattern: ${EXPECTED_REMOTE_REGEX}" >&2
+  echo "  Fix: 'git remote set-url origin https://github.com/daygle/daygle-ai-camera.git'" >&2
+  exit 1
+fi
+echo "Origin remote verified: ${CURRENT_REMOTE}"
+
 echo "Fetching latest changes from origin..."
 git fetch origin
 

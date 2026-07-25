@@ -87,6 +87,9 @@ applies verbatim.
 
 from __future__ import annotations
 
+import logging
+import urllib.parse
+
 from fastapi import Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.responses import Response
@@ -94,7 +97,59 @@ from starlette.responses import Response
 import app.state as _state
 from app.auth import CSRF_HEADER
 from app.config_facades import effective_auth_config
+from app.rate_limiter import admin_limiter
 from app.state import ADMIN_PATHS, MUTATING_METHODS, PUBLIC_PATHS, PUBLIC_PREFIXES
+
+# Module-level logger so the origin-check warning path doesn't need to
+# re-instantiate on every request. Same logging tree as ``daygle.ai``
+# elsewhere; logged at WARNING because Origin/Referer anomalies on
+# pre-auth paths are interesting but not necessarily hostile.
+logger = logging.getLogger(__name__)
+
+
+def _is_same_origin(request: Request) -> tuple[bool, str]:
+    """Same-origin check for state-changing requests (defence-in-depth vs CSRF).
+
+    Reads ``Origin`` first, then falls back to ``Referer`` (some privacy
+    extensions strip only one). Returns ``(True, '')`` on a match; on
+    mismatch returns ``(False, '<reason>')``. ``Origin: null`` is treated
+    as a mismatch for non-pre-auth paths so sandboxed iframes / ``data:``
+    URI exploits don't bypass the guard.
+
+    Mismatch criteria on state-changing ``/api/`` requests:
+      * missing BOTH Origin and Referer headers
+      * scheme / host / port disagree with ``request.url``
+      * ``Origin: null`` literal (privacy browser / sandboxed)
+    """
+    origin = request.headers.get('Origin')
+    referer = request.headers.get('Referer')
+    if origin is None and referer is None:
+        return False, 'Missing Origin and Referer headers'
+    source = origin or referer or ''
+    if not source or source.strip().lower() == 'null':
+        return False, (
+            f'{"Origin" if origin else "Referer"} is empty/null '
+            f'(sandboxed or privacy-mode browser)'
+        )
+    try:
+        parsed = urllib.parse.urlsplit(source)
+    except ValueError:
+        return False, f'Unparsable {"Origin" if origin else "Referer"} value'
+    expected = request.url
+    if (
+        parsed.scheme != expected.scheme
+        or parsed.hostname != expected.hostname
+        or parsed.port != expected.port
+    ):
+        return False, (
+            f'{"Origin" if origin else "Referer"} '
+            f'{parsed.scheme}://{parsed.hostname or "<empty>"}'
+            f'{":" + str(parsed.port) if parsed.port else ""} '
+            f'does not match request '
+            f'{expected.scheme}://{expected.hostname}'
+            f'{":" + str(expected.port) if expected.port else ""}'
+        )
+    return True, ''
 
 
 async def authentication_middleware(request: Request, call_next):
@@ -145,11 +200,33 @@ async def authentication_middleware(request: Request, call_next):
                 {'detail': 'Admin access required'}, status_code=403,
             )
         # Page routes: return a proper 403 HTML page instead of raw JSON.
+    # Round-5 / M1: per-IP sliding-window throttle on admin state-changing
+    # /api/* requests. Runs AFTER the role check (so 401/403 still fire
+    # without spending a throttle slot on unauth'd callers) and BEFORE the
+    # CSRF + Origin crypto work (so a wholesale flood cannot pin the CPU
+    # round-4 H4-style). The limiter key is the trusted first-hop IP from
+    # ``app.auth_gates._request_ip`` (RFC-7239-compatible).
+    if (
+        admin_required
+        and session['user']['role'] == 'admin'
+        and request.method in MUTATING_METHODS
+        and path.startswith('/api/')
+    ):
+        from app.auth_gates import _request_ip
+        admin_ip = _request_ip(request)
+        if admin_ip and admin_limiter.is_rate_limited(admin_ip):
+            return JSONResponse(
+                {'detail': 'Admin endpoint rate-limited; slow down.'},
+                status_code=429,
+                headers={'Retry-After': '1'},
+            )
+        if admin_ip:
+            admin_limiter.record(admin_ip)
         return HTMLResponse(
             content='''<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8">
-<title>Access Denied — Daygle AI Camera</title>
+<title>Access Denied - Daygle AI Camera</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="/static/styles.css">
 </head>
@@ -164,6 +241,27 @@ async def authentication_middleware(request: Request, call_next):
             status_code=403,
         )
     if (path.startswith('/api/') and request.method in MUTATING_METHODS):
+        # M1: same-origin guard runs BEFORE the cookie+header CSRF check as
+        # defence-in-depth. If the session cookie ever leaks cross-origin,
+        # the Origin/Referer mismatch rejects the request FIRST so an
+        # attacker can't ride the cookie on a /api/ POST. Pre-auth paths
+        # (/api/auth/login + /api/setup) log a warning instead of a hard
+        # reject: those POSTs are exposed to a real client that might
+        # legitimately send ``Origin: null`` (privacy-mode browsers,
+        # sandboxed iframes, ``data:``-URI navigations, etc.) -- the
+        # trade-off is documented and prefer-warning over lockout.
+        is_same_origin, origin_reason = _is_same_origin(request)
+        if path in PUBLIC_PATHS or path == '/api/setup':
+            if not is_same_origin:
+                logger.warning(
+                    'Same-origin check failed on pre-auth path %s: %s',
+                    path, origin_reason,
+                )
+        elif not is_same_origin:
+            return JSONResponse(
+                {'detail': f'Origin check failed: {origin_reason}'},
+                status_code=403,
+            )
         csrf_header = request.headers.get(CSRF_HEADER)
         if not csrf_header or csrf_header != session['csrf_token']:
             return JSONResponse(

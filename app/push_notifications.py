@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -9,6 +10,14 @@ from typing import Any
 
 class PushNotificationError(Exception):
     pass
+
+
+# LOW fix (round-8): module-level logger so ntfy delivery failures don't
+# disappear into PushNotificationError without a paper trail. The alert
+# dispatch path raises the error AND logs the original cause here so an
+# operator whose ntfy-config is misconfigured can debug from app.log
+# without redeploying with extra logging.
+logger = logging.getLogger('daygle.notifications')
 
 
 def _encode_ntfy_header(value: str) -> str:
@@ -113,6 +122,22 @@ class PushNotificationService:
             with urllib.request.urlopen(request, timeout=10):
                 pass
         except urllib.error.HTTPError as exc:
+            logger.warning(
+                'ntfy push delivery failed: server=%s status=%s reason=%s',
+                url, exc.code, exc.reason,
+            )
             raise PushNotificationError(f"ntfy server returned {exc.code}: {exc.reason}") from exc
-        except Exception as exc:
+        # LOW fix (round-8): narrow the catch to the network-layer exception
+        # triple. ``Exception`` was hiding ``KeyError`` / ``TypeError`` /
+        # ``AttributeError`` programmer errors under a misleading
+        # "ntfy delivery failed" headline. Network-layer issues
+        # (``URLError``, ``socket.timeout``-as-``TimeoutError``,
+        # ``OSError`` covering DNS / connect failures) are exactly what
+        # belongs in this except. ``HTTPError`` is a ``URLError``
+        # subclass so it's already covered by the explicit handler above.
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            logger.warning(
+                'ntfy push delivery failed: server=%s exc=%s: %s',
+                url, type(exc).__name__, exc,
+            )
             raise PushNotificationError(str(exc)) from exc

@@ -97,6 +97,7 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -319,15 +320,80 @@ def validate_recording_settings(payload: dict[str, Any]) -> dict[str, Any]:
     return {'pre_event_seconds': _int_field(merged, 'pre_event_seconds', 10, 0, 300), 'post_event_seconds': _int_field(merged, 'post_event_seconds', 15, 0, 300), 'extension_step_seconds': _int_field(merged, 'extension_step_seconds', 45, 0, 300), 'max_clip_seconds': _int_field(merged, 'max_clip_seconds', 300, 1, 3600), 'format': fmt, 'chunk_duration_seconds': _int_field(merged, 'chunk_duration_seconds', 3600, 60, 86400), 'retention_days': _int_field(merged, 'retention_days', 14, 1, 3650), 'max_storage_gb': _int_field(merged, 'max_storage_gb', 20, 1, 100000), 'auto_purge_enabled': normalize_bool_setting(merged.get('auto_purge_enabled', True), True)}
 
 
+def _resolve_within_data_envelope(value: str, *, key: str) -> str:
+    """C1 fix: canonicalise ``value`` and reject paths that escape the data envelope.
+
+    Allowed envelope:
+
+    1. The startup ``data_dir`` itself, or any descendant of it.
+    2. The parent of the startup ``data_dir`` (so an admin can relocate the
+       entire data root to a sibling like ``/srv/daygle-data`` without bypassing
+       the validator).
+
+    Anything else (``/etc/foo``, ``/var/spool/cron``, ``/root``, ancestors of
+    the data parent) is rejected with HTTP 400.
+
+    The resolver also collapses ``..``, ``~``, and symlink hops via
+    ``Path.resolve()`` so a payload like ``data/../../../etc/cron.d`` does
+    not pass the descendant check.
+
+    The anchor is captured at module load (``_STARTUP_DATA_DIR`` /
+    ``_STARTUP_DATA_PARENT``) so that an attacker who later mutates
+    ``_state.config['storage']['data_dir']`` via a previous settings update
+    cannot pivot the anchor to a directory of their choosing - the captured
+    anchor reflects the on-disk YAML config at process start.
+    """
+    stripped = str(value or '').strip()
+    if not stripped:
+        raise HTTPException(status_code=400, detail=f'{key} cannot be blank.')
+    candidate = Path(stripped).expanduser().resolve()
+    # Best-effort rejection: refuse paths that DO NOT resolve to a real or
+    # creatable filesystem location under the envelope. Path.resolve() does
+    # NOT require the path to exist, so this guard treats non-existent
+    # "future" paths the same as existing ones -- what matters is whether
+    # the resolved location is within the captured envelope.
+    if candidate == _STARTUP_DATA_DIR or _is_within(candidate, _STARTUP_DATA_DIR):
+        return str(candidate)
+    if _STARTUP_DATA_PARENT is not None and (
+        candidate == _STARTUP_DATA_PARENT or _is_within(candidate, _STARTUP_DATA_PARENT)
+    ):
+        return str(candidate)
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            f'{key} must be inside the application data directory '
+            f'({_STARTUP_DATA_DIR}) or a sibling under its parent '
+            f'({_STARTUP_DATA_PARENT}). Got: {value!r}.'
+        ),
+    )
+
+
+def _is_within(candidate: Path, anchor: Path) -> bool:
+    try:
+        candidate.relative_to(anchor)
+        return True
+    except ValueError:
+        return False
+
+
+_STARTUP_DATA_DIR: Path = Path(
+    str(_state.config.get('storage', {}).get('data_dir') or 'data')
+).expanduser().resolve()
+_STARTUP_DATA_PARENT: Path | None = (
+    _STARTUP_DATA_DIR.parent
+    if _STARTUP_DATA_DIR.parent != _STARTUP_DATA_DIR
+    else None
+)
+
+
 def validate_storage_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_storage_config()
     updated = {key: str(current.get(key) or '') for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir', 'database')}
     for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir'):
         if key in payload:
-            value = str(payload.get(key) or '').strip()
-            if not value:
-                raise HTTPException(status_code=400, detail=f'{key} cannot be blank.')
-            updated[key] = value
+            updated[key] = _resolve_within_data_envelope(
+                str(payload.get(key) or '').strip(), key=key,
+            )
     updated['database'] = str(_state.config.get('storage', {}).get('database') or updated.get('database') or 'data/daygle_ai_camera.sqlite3')
     return updated
 

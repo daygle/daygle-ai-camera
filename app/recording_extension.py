@@ -297,12 +297,86 @@ def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
                 thumbnail.unlink(missing_ok=True)
 
 
+def _safe_rmtree_no_follow(target: Path) -> int:
+    """Recursively delete *target* without following any symbolic link at any depth.
+
+    Symlinks encountered anywhere in the tree are unlinked AS LINKS - the
+    target they point at is NOT touched. Regular files are unlinked. Real
+    subdirectories (those that are not symlinks) are descended into and
+    ``rmdir``-ed once emptied. ``os.walk(followlinks=False)`` (the default)
+    ensures ``os.walk`` never recurses into a symlinked subdirectory, and the
+    in-place ``dirs[:] = ...`` prune additionally unlinks any directory-symlink
+    that surfaces at the current level.
+
+    Returns the count of entries removed (best-effort). Catches ``OSError``
+    per-entry so a single permission glitch on one file does not abort the
+    wipe - matching the prior ``shutil.rmtree(ignore_errors=True)`` semantics
+    for normal deletion while refusing to follow symlinks.
+    """
+    count = 0
+    try:
+        if target.is_symlink():
+            # Top-level target itself is a symlink - just drop the link.
+            target.unlink(missing_ok=True)
+            return 1
+        if not target.is_dir():
+            return 0
+        for root, dirs, files in os.walk(target, followlinks=False, topdown=True):
+            root_path = Path(root)
+            # Prune symlinked directories: unlink the link, tell os.walk NOT
+            # to descend into it (in-place list swap is how walk honours
+            # the descent set).
+            real_dirs: list[str] = []
+            for d in list(dirs):
+                p = root_path / d
+                if p.is_symlink():
+                    try:
+                        p.unlink(missing_ok=True)
+                        count += 1
+                    except OSError:
+                        pass
+                else:
+                    real_dirs.append(d)
+            dirs[:] = real_dirs
+            # Unlink every file at this level; cover both regular files and
+            # file-symlinks (which os.walk surfaces in `files` even when
+            # ``followlinks=False``).
+            for f in files:
+                p = root_path / f
+                try:
+                    if p.is_symlink() or p.is_file():
+                        p.unlink(missing_ok=True)
+                        count += 1
+                except OSError:
+                    continue
+        # Tree is now empty of real entries; lift the (possibly nested)
+        # empty directories upward. Each rmdir only succeeds if empty.
+        target.rmdir()
+        count += 1
+    except OSError:
+        # Mirrors prior ``shutil.rmtree(ignore_errors=True)`` policy:
+        # tolerate per-entry failures, do not abort the whole wipe.
+        pass
+    return count
+
+
 def clear_runtime_media_directory(path_value: str | None) -> int:
     if not path_value:
         return 0
     path = Path(str(path_value))
     if not path.exists() or not path.is_dir():
         return 0
+    # Refuse to descend into a symlinked storage root itself - an admin
+    # setting ``snapshots_dir = /var/lib/foo`` where /var/lib/foo is a
+    # planted symlink to /etc would otherwise let the M2 two-step delete
+    # expand into an rm-rf of a privileged tree. ``_safe_rmtree_no_follow``
+    # handles this case AND any descendant symlinks.
+    if path.is_symlink():
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return 1
     deleted = 0
     for child in path.iterdir():
         try:
@@ -310,8 +384,7 @@ def clear_runtime_media_directory(path_value: str | None) -> int:
                 child.unlink(missing_ok=True)
                 deleted += 1
             elif child.is_dir():
-                shutil.rmtree(child, ignore_errors=True)
-                deleted += 1
+                deleted += _safe_rmtree_no_follow(child)
         except OSError:
             continue
     return deleted

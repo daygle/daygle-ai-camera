@@ -64,6 +64,7 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import logging
 from pathlib import Path

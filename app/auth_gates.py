@@ -71,6 +71,40 @@ import app.state as _state
 from app.config_facades import effective_auth_config
 
 
+# Default trust set - matches the legacy ``_state._LOOPBACK`` behaviour so a
+# loopback direct peer is still trusted when ``trusted_proxies`` is missing
+# from the YAML/DB override (e.g. unit tests that import ``app.auth_gates``
+# without running ``_startup()``).
+_DEFAULT_TRUSTED_PROXIES: frozenset[str] = frozenset({"127.0.0.1", "::1"})
+
+
+def _trusted_proxies() -> frozenset[str]:
+    """Return the set of peer IPs whose ``X-Forwarded-For`` header is trusted.
+
+    Reads ``auth.trusted_proxies`` from ``effective_auth_config()`` so a
+    database override wins over the YAML default. Falls back to the
+    in-memory ``_state.auth_config`` snapshot (and finally to loopback)
+    when the database singleton is not yet initialised - keeps the helper
+    unit-test-friendly without forcing every test to mock ``effective_auth_config``.
+    Accepted value types: ``list[str]`` (preferred), ``str`` (comma-separated).
+    """
+    config: dict[str, Any] | None = None
+    try:
+        if getattr(_state, "database", None) is not None:
+            config = effective_auth_config()
+    except Exception:
+        config = None
+    if config is None:
+        config = getattr(_state, "auth_config", None) or {}
+    trusted = config.get("trusted_proxies")
+    if isinstance(trusted, str):
+        return frozenset(part.strip() for part in trusted.split(",") if part.strip()) or _DEFAULT_TRUSTED_PROXIES
+    if isinstance(trusted, (list, tuple, set)):
+        parsed = frozenset(str(item).strip() for item in trusted if item)
+        return parsed or _DEFAULT_TRUSTED_PROXIES
+    return _DEFAULT_TRUSTED_PROXIES
+
+
 def _auth_enabled() -> bool:
     """Live (post-DB-override) auth-enabled flag.
 
@@ -112,8 +146,24 @@ def require_admin(request: Request) -> dict[str, Any]:
 
 def _request_ip(request: Request) -> str:
     direct = request.client.host if request.client else ''
-    if direct in _state._LOOPBACK:
+    # Honour X-Forwarded-For ONLY when the direct peer is in the configured
+    # trusted-proxies set. Default is loopback so a localhost dev server
+    # trusts its own reverse proxy while a Docker / LAN deployment must
+    # explicitly whitelist the upstream-proxy IP. This defends against
+    # client-side IP spoofing when the app is exposed beyond the loopback
+    # interface (CSRF protection / rate-limit / audit-log poisoning).
+    if direct in _trusted_proxies():
         forwarded = request.headers.get('x-forwarded-for')
         if forwarded:
-            return forwarded.split(',')[-1].strip()
+            # X-Forwarded-For per RFC 7239 convention (and the XFF de-facto
+            # format used by Nginx / Traefik / Caddy / HAProxy / Cloudflare)
+            # is a comma-separated list where the LEFTMOST entry is the
+            # ORIGINAL client IP and each subsequent entry is one proxy hop.
+            # Reverse proxies commonly append their own IP to the right, so
+            # ``[-1]`` (the most recent hop) is the proxy, not the client.
+            # Always pick ``[0]`` -- and tolerate accidental whitespace by
+            # stripping each candidate before extracting the first entry.
+            first_hop = forwarded.split(',')[0].strip()
+            if first_hop:
+                return first_hop
     return direct or 'unknown'

@@ -9,6 +9,7 @@ import re
 import socket
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from html import escape as _xml_escape
 
@@ -64,6 +65,53 @@ def _wssec_header(username: str, password: str) -> str:
     )
 
 
+# Regex used to scrub any ``http(s)://user:pass@host`` substring that may
+# leak from a camera's response body or from an exception's stringified
+# form. Matches the scheme, the userinfo (anything up to the next ``/`` or
+# whitespace), and the trailing ``@``. Replaced with ``\1***@`` so the host
+# is preserved for diagnostics while credentials are wiped.
+_USERINFO_RE = re.compile(r'(https?://)[^/\s]+@')
+
+
+def _safe_url_for_error(url: str) -> str:
+    """Return a copy of *url* with the userinfo stripped.
+
+    ONVIF camera URLs commonly embed Basic-Auth credentials
+    (``http://admin:hunter2@192.168.1.20/onvif/...``). When an
+    ``urllib.error`` or socket-level exception bubbles up, Python's
+    default stringification includes the URL verbatim, which would leak
+    the credentials through any 4xx response body or log line. This
+    helper parses the URL, drops ``parsed.username``/``parsed.password``
+    from ``netloc`` while keeping the host and port intact, and
+    sanitises any userinfo embedded in the original string as a
+    belt-and-braces fallback for oddly-formatted URLs.
+    """
+    sanitized = url
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.username or parsed.password:
+            # ``parsed.netloc`` contains ``user:pass@host:port``; ``split('@', 1)[-1]``
+            # drops everything before (and including) the first ``@`` so we keep
+            # the literal ``host:port`` regardless of IPv6 brackets or ports.
+            safe_netloc = parsed.netloc.split('@', 1)[-1]
+            sanitized = urllib.parse.urlunparse(parsed._replace(netloc=f'***@{safe_netloc}'))
+        # Belt-and-braces: even if the URL has no parsed userinfo, the string
+        # form may still contain ``http://user:pass@`` (e.g. via a custom
+        # transport's repr). Run the regex scrub on the result so logs are
+        # never trusted to flag leaks.
+        sanitized = _USERINFO_RE.sub(r'\1***@', sanitized)
+    except Exception:
+        # If urlparse itself fails (extremely malformed URLs), fall back to a
+        # pure-regex scrub instead of leaking the original.
+        sanitized = _USERINFO_RE.sub(r'\1***@', url)
+    return sanitized
+
+
+def _sanitize_error_body(body: str) -> str:
+    """Strip embedded userinfo from any URL the camera parrots back."""
+    return _USERINFO_RE.sub(r'\1***@', body)
+
+
 def _soap(url: str, body: str, username: str, password: str) -> str:
     header = _wssec_header(username, password) if username else '<s:Header/>'
     envelope = (
@@ -79,12 +127,33 @@ def _soap(url: str, body: str, username: str, password: str) -> str:
     )
     req = urllib.request.Request(url, data=envelope.encode('utf-8'), method='POST')
     req.add_header('Content-Type', 'application/soap+xml; charset=utf-8')
+    safe_url = _safe_url_for_error(url)  # computed once so every branch can reuse it
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
             return resp.read().decode('utf-8', errors='replace')
     except urllib.error.HTTPError as exc:
+        # Camera returned a 4xx/5xx status; read up to 512 bytes of body for
+        # diagnostics, scrub any embedded userinfo URLs, then re-raise with
+        # only the sanitized URL in the message.
         body_bytes = exc.read(512) if exc.fp else b''
-        raise OSError(f'ONVIF HTTP {exc.code}: {body_bytes.decode(errors="replace")[:120]}') from exc
+        scrubbed_body = _sanitize_error_body(body_bytes.decode(errors='replace')[:120])
+        raise OSError(f'ONVIF HTTP {exc.code} (url={safe_url}): {scrubbed_body}') from exc
+    except urllib.error.URLError as exc:
+        # DNS failure, refused connection, TLS error or other transport-level
+        # failure with no body. ``str(exc.reason)`` includes the original URL
+        # in some Python builds, so we sanitize here too.
+        reason = _sanitize_error_body(str(getattr(exc, 'reason', '') or ''))
+        raise OSError(f'ONVIF transport error (url={safe_url}): {reason or exc.__class__.__name__}') from exc
+    except (OSError, TimeoutError) as exc:
+        # socket.timeout surfaces as TimeoutError; generic OSError covers
+        # ``Connection reset by peer`` and similar. Strip any userinfo that
+        # might leak via ``str(exc)`` (some socket errors include peername
+        # but we still defensively scrub).
+        raise OSError(f'ONVIF socket error (url={safe_url}): {_sanitize_error_body(str(exc))}') from exc
+    except Exception as exc:
+        # Last-resort catch: never let an unexpected exception type expose
+        # an unsanitised URL or leaked creds embedded in a repr().
+        raise OSError(f'ONVIF unexpected error (url={safe_url}): {exc.__class__.__name__}') from exc
 
 
 def _get_profile_token(host: str, http_port: int, username: str, password: str) -> str:

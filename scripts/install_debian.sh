@@ -41,6 +41,24 @@ fi
 mkdir -p "${APP_DIR}" "${CONFIG_DIR}" "${DATA_DIR}" "${MODEL_DIR}"
 
 # Sync application files
+# Origin-URL allowlist - refuse to install from a tampered repo. Mirrors the
+# guard in ``scripts/update.sh`` so that any future re-run of the installer
+# against a REPO_DIR with a poisoned ``.git/config`` fails FAST instead of
+# rsyncing attacker-controlled source into /opt. SSH and HTTPS forms both
+# supported, optional ``.git`` suffix tolerated.
+EXPECTED_REMOTE_REGEX='github\.com[:/]daygle/daygle-ai-camera(\.git)?$'
+REPO_REMOTE="$(git -C "${REPO_DIR}" remote get-url origin 2>/dev/null || true)"
+if [[ -n "${REPO_REMOTE}" ]] && ! printf '%s' "${REPO_REMOTE}" | grep -Eq "${EXPECTED_REMOTE_REGEX}"; then
+  echo "ERROR: refusing to install from non-allowlisted source repo." >&2
+  echo "  Repo origin remote: '${REPO_REMOTE}'" >&2
+  echo "  Expected pattern: ${EXPECTED_REMOTE_REGEX}" >&2
+  echo "  Fix: 'git -C \"${REPO_DIR}\" remote set-url origin https://github.com/daygle/daygle-ai-camera.git'" >&2
+  exit 1
+fi
+if [[ -n "${REPO_REMOTE}" ]]; then
+  echo "Source repo origin verified: ${REPO_REMOTE}"
+fi
+
 rsync -a --delete \
   --exclude '.git' \
   --exclude '.venv' \
