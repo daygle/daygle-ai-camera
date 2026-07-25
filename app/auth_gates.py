@@ -145,7 +145,7 @@ def require_admin(request: Request) -> dict[str, Any]:
 
 
 def _request_ip(request: Request) -> str:
-    direct = request.client.host if request.client else ''
+    direct = getattr(request, 'client', None).host if getattr(request, 'client', None) else ''
     # Honour X-Forwarded-For ONLY when the direct peer is in the configured
     # trusted-proxies set. Default is loopback so a localhost dev server
     # trusts its own reverse proxy while a Docker / LAN deployment must

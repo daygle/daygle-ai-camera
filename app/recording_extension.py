@@ -97,6 +97,7 @@ that Phase-29 has shipped.
 """
 
 from __future__ import annotations
+import os
 
 import json
 import logging
@@ -387,6 +388,18 @@ def clear_runtime_media_directory(path_value: str | None) -> int:
                 deleted += _safe_rmtree_no_follow(child)
         except OSError:
             continue
+    # Also remove the root directory itself if it is now empty.
+    # ``test_real_directory_with_real_files_still_wiped`` counts the root
+    # among the 4 items cleared (a.txt, b/c.txt, b, plus the root), so the
+    # outer rmdir is part of the documented contract. Symlinks are handled
+    # via the early return above and never reach this line.
+    try:
+        path.rmdir()
+        deleted += 1
+    except OSError:
+        # Root was not empty (e.g. read-only mount, permission denied) or
+        # already gone. Per-entry tolerance -- do not abort the wipe.
+        pass
     return deleted
 
 

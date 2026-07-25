@@ -672,15 +672,26 @@ class AuthService:
             db.execute("DELETE FROM user_sessions WHERE session_token = ?", (session_token,))
 
     def cleanup_expired_sessions(self) -> None:
-        with self.connect() as db:
-            now_str = utc_now()
-            # H2: also drop any session whose absolute_expires_at has elapsed,
-            # since the sliding ``expires_at`` may still be in the future.
-            db.execute(
-                "DELETE FROM user_sessions "
-                "WHERE expires_at <= ? "
-                "OR (absolute_expires_at IS NOT NULL AND absolute_expires_at <= ?)",
-                (now_str, now_str),
+        # M2 (round-7): the whole method is best-effort. Any per-phase failure
+        # (expired-session sweep, login_attempts purge, camera_diagnostics
+        # purge) is logged at warning level and swallowed so a transient
+        # backend hiccup never breaks the caller's maintenance tick. This is
+        # the contract ``test_purge_is_best_effort_on_exception`` exercises.
+        try:
+            with self.connect() as db:
+                now_str = utc_now()
+                # H2: also drop any session whose absolute_expires_at has elapsed,
+                # since the sliding ``expires_at`` may still be in the future.
+                db.execute(
+                    "DELETE FROM user_sessions "
+                    "WHERE expires_at <= ? "
+                    "OR (absolute_expires_at IS NOT NULL AND absolute_expires_at <= ?)",
+                    (now_str, now_str),
+                )
+        except Exception as exc:
+            import logging as _logging
+            _logging.getLogger('daygle.ai').warning(
+                'cleanup_expired_sessions: session sweep failed: %s', exc
             )
         # M2 (round-7): purge ``login_attempts`` rows older than a fixed
         # 90-day window. Cheap DELETE (low-volume table) without VACUUM /
