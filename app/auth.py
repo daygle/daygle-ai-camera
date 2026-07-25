@@ -221,32 +221,43 @@ class AuthService:
                 """
             )
             # Migration: add ``absolute_expires_at`` column to ``user_sessions``
-            # on databases created before the H2 fix. The ALTER + index +
-            # backfill are idempotent: re-running init() on an already-migrated
-            # DB produces a "duplicate column name" OperationalError which we
+            # on databases created before the H2 fix. The ALTER alone is
+            # idempotent: re-running init() on an already-migrated DB
+            # produces a "duplicate column name" OperationalError which we
             # swallow. Any other OperationalError is real schema corruption
             # and SHOULD propagate up at startup rather than silently passing.
+            #
+            # The CREATE INDEX and backfill UPDATE must run on EVERY
+            # startup, not just the first -- previously they lived inside
+            # the same try/except as the ALTER, so the duplicate-column
+            # short-circuit on the ALTER would skip both. Fresh
+            # installations would have an index; warm restarts would not.
+            # The index is required for the H2 absolute-expiry guard's
+            # SELECT performance on production-sized ``user_sessions``
+            # tables, and the backfill guarantees legacy sessions get a
+            # ``created_at + 14 days`` cap. Both are idempotent and safe
+            # to re-run.
             try:
                 db.execute("ALTER TABLE user_sessions ADD COLUMN absolute_expires_at TEXT")
-                db.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_user_sessions_absolute_expires "
-                    "ON user_sessions(absolute_expires_at)"
-                )
-                # Backfill legacy rows with a STRICT retroactive cap at
-                # ``created_at + 14 days`` (matching the default lifetime).
-                # Per the design-review verdict, grandfathering with NOW+14
-                # is REJECTED -- enforcing the cap strictly on existing
-                # long-lived sessions is the security-correct choice
-                # (otherwise stolen cookies for sessions older than 14d
-                # would quietly extend without bound).
-                db.execute(
-                    "UPDATE user_sessions "
-                    "SET absolute_expires_at = datetime(created_at, '+14 days') "
-                    "WHERE absolute_expires_at IS NULL"
-                )
             except sqlite3.OperationalError as exc:
                 if 'duplicate column name' not in str(exc).lower():
                     raise
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_user_sessions_absolute_expires "
+                "ON user_sessions(absolute_expires_at)"
+            )
+            # Backfill legacy rows with a STRICT retroactive cap at
+            # ``created_at + 14 days`` (matching the default lifetime).
+            # Per the design-review verdict, grandfathering with NOW+14
+            # is REJECTED -- enforcing the cap strictly on existing
+            # long-lived sessions is the security-correct choice
+            # (otherwise stolen cookies for sessions older than 14d
+            # would quietly extend without bound).
+            db.execute(
+                "UPDATE user_sessions "
+                "SET absolute_expires_at = datetime(created_at, '+14 days') "
+                "WHERE absolute_expires_at IS NULL"
+            )
             db.execute("DELETE FROM user_sessions WHERE expires_at <= ?", (utc_now(),))
 
     def users_exist(self) -> bool:
@@ -629,7 +640,7 @@ class AuthService:
         with self.connect() as db:
             row = db.execute(
                 """
-                SELECT s.session_token, s.csrf_token, s.expires_at, u.id, u.username, u.role, u.is_active,
+                SELECT s.session_token, s.csrf_token, s.expires_at, s.absolute_expires_at, u.id, u.username, u.role, u.is_active,
                        u.first_name, u.last_name, u.email, u.timezone, u.date_format, u.time_format
                 FROM user_sessions s
                 JOIN users u ON u.id = s.user_id
