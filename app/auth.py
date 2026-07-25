@@ -217,8 +217,7 @@ class AuthService:
                 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
                 CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(session_token);
                 CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at);
-                CREATE INDEX IF NOT EXISTS idx_user_sessions_absolute_expires ON user_sessions(absolute_expires_at);
-                CREATE INDEX IF NOT EXISTS idx_login_attempts_username_created ON login_attempts(username, created_at);
+                      CREATE INDEX IF NOT EXISTS idx_login_attempts_username_created ON login_attempts(username, created_at);
                 """
             )
             # Migration: add ``absolute_expires_at`` column to ``user_sessions``
