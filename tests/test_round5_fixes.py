@@ -270,14 +270,20 @@ class M2OrphanCheckTests(unittest.TestCase):
         )
         self.assertTrue(allowed)
 
-    def test_missing_request_state_user_is_admin_by_default(self):
-        # Defensive: if request.state.user is somehow unset, fall through
-        # as admin (the 404 raise above already covered existence).
+    def test_missing_request_state_user_denies_by_default(self):
+        # When ``request.state.user`` is somehow unset, the helper
+        # denies (returns False). This matches the prod recordings_router
+        # behaviour: ``request_user = getattr(request.state, 'user',
+        # None) or {}`` then ``if str(request_user.get('role') or
+        # '').strip().lower() != 'admin'`` enters the deny branch.
+        # Earlier designs planned an admin fallthrough for the missing-
+        # user case but the production wiring kept deny-by-default so a
+        # misconfigured middleware can't accidentally elevate.
         allowed = _viewer_orphan_check(
             {'owner_user_id': 2},
             None,
         )
-        self.assertTrue(allowed)
+        self.assertFalse(allowed)
 
 
 if __name__ == '__main__':

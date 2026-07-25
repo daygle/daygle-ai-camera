@@ -127,7 +127,7 @@ class EmailAlertsCleanupSwallowTests(unittest.TestCase):
     """SMTP ``quit()`` failures during cleanup are logged but don't escape."""
 
     def test_session_quit_failure_is_logged_but_swallowed(self) -> None:
-        from app.email_alerts import EmailAlertService, EmailAlertError
+        from app.email_alerts import EmailAlertService
         # Use the in-package module path that ``_create_smtp_session``
         # actually calls, so monkeypatching reaches the same call site.
         import app.email_alerts as _ea_mod
@@ -147,13 +147,13 @@ class EmailAlertsCleanupSwallowTests(unittest.TestCase):
         fake_smtp.quit.side_effect = OSError('socket already closed')
         with patch.object(_ea_mod.smtplib, 'SMTP', return_value=fake_smtp):
             with self.assertLogs('daygle.notifications', level='WARNING') as caplog:
-                with self.assertRaises(EmailAlertError):
-                    # The early-failure path: ``SMTP(host, port)`` already
-                    # raises before yielding the session. We force the
-                    # session to be re-raised by making ``quit`` itself
-                    # raise OSError; the ``finally`` block logs the quit
-                    # failure and re-raises nothing.
-                    svc._create_smtp_session().__enter__()
+                # ``_create_smtp_session()`` finally-block swallows the
+                # ``smtp.quit()`` OSError after logging a WARNING. The
+                # session __enter__() itself succeeds (SMTP() + starttls()
+                # + login() all return the fake), so no EmailAlertError
+                # escapes. The test asserts the BEST-EFFORT cleanup
+                # contract: a quit() failure does NOT propagate.
+                svc._create_smtp_session().__enter__()
             joined = '\n'.join(caplog.output)
             self.assertIn('SMTP session close failed', joined)
 
@@ -171,23 +171,23 @@ class EmailAlertsCleanupSwallowTests(unittest.TestCase):
         # the warning but doesn't crash the recovery path.
         fake_first = MagicMock()
         fake_first.send_message.side_effect = smtplib.SMTPServerDisconnected(
-            'server closed connection', code=421,
+            'server closed connection',
         )
         fake_first.quit.side_effect = OSError('socket already closed')
         fake_second = MagicMock()
         fake_second.send_message.return_value = {}
-        # The ``_create_smtp_session`` context manager must yield the
-        # ``fake_second`` instance. We set __enter__ on the cm to return
-        # it, and __exit__ to do nothing (no real quit).
-        fake_cm = MagicMock()
-        fake_cm.__enter__.return_value = fake_second
-        fake_cm.__exit__.return_value = False
-        # First call to SMTP() -> fake_first (which disconnects); second
-        # call -> fake_cm (which succeeds).
-        with patch.object(_ea_mod.smtplib, 'SMTP', side_effect=[fake_first, fake_first]), \
-                patch.object(_ea_mod.smtplib, 'SMTP_SSL', side_effect=[fake_first, fake_first]), \
-                patch.object(_ea_mod, '_create_smtp_session', side_effect=[fake_first, fake_cm]), \
-                self.assertLogs('daygle.notifications', level='WARNING') as caplog:
+        # Patch the bound ``_create_smtp_session`` method on the instance.
+        # We can't ``patch.object(svc, '_create_smtp_session')`` because
+        # the @contextmanager wrapper makes the attribute a generator
+        # function -- the patch path can't find it as a plain attribute.
+        # Monkeypatching the instance attribute directly sidesteps that.
+        from contextlib import contextmanager
+        @contextmanager
+        def _fake_session_factory():
+            yield fake_first
+            yield fake_second
+        svc._create_smtp_session = _fake_session_factory
+        with self.assertLogs('daygle.notifications', level='WARNING') as caplog:
             try:
                 svc._send_via(fake_first, MagicMock())
             except Exception:

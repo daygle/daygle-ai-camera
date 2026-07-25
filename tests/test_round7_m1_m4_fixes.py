@@ -80,32 +80,28 @@ class SetSessionCookieDomainTests(unittest.TestCase):
                 'session_timeout_hours': 12,
                 'cookie_domain': '.lab.example',
             }
-            with patch('app.auth_helpers.Response.set_cookie') as sc:
-                # Build a tiny stand-in for ``request`` with only the
-                # ``url.scheme`` attribute used by the helper.
-                class _Req:
-                    class url:
-                        scheme = 'https'
-                set_session_cookie(sc, _Req(), 'tok', '2026-01-01T00:00:00+00:00')
-        kw = sc.call_args.kwargs
-        self.assertEqual(kw.get('domain'), '.lab.example')
+            mock_response = MagicMock()
+            class _Req:
+                class url:
+                    scheme = 'https'
+            set_session_cookie(mock_response, _Req(), 'tok', '2026-01-01T00:00:00+00:00')
+        self.assertEqual(mock_response.set_cookie.call_args.kwargs.get('domain'), '.lab.example')
 
     def test_session_cookie_domain_none_by_default(self) -> None:
         from app.auth_helpers import set_session_cookie
         with patch('app.auth_helpers.effective_auth_config') as cfg:
             cfg.return_value = {'session_timeout_hours': 12}
-            with patch('app.auth_helpers.Response.set_cookie') as sc:
-                class _Req:
-                    class url:
-                        scheme = 'https'
-                set_session_cookie(sc, _Req(), 'tok', '2026-01-01T00:00:00+00:00')
-        kw = sc.call_args.kwargs
-        self.assertIsNone(kw.get('domain'))
+            mock_response = MagicMock()
+            class _Req:
+                class url:
+                    scheme = 'https'
+            set_session_cookie(mock_response, _Req(), 'tok', '2026-01-01T00:00:00+00:00')
+        self.assertIsNone(mock_response.set_cookie.call_args.kwargs.get('domain'))
 
     def test_session_cookie_domain_matches_csrf_cookie_domain(self) -> None:
         # CSRF and session cookies MUST receive identical ``domain`` so
         # subdomain-tossing of one does not leave the other valid.
-        from app.auth_helpers import _get_cookie_domain
+        from app.auth_helpers import _get_cookie_domain, set_session_cookie
         with patch('app.auth_helpers.effective_auth_config') as cfg:
             cfg.return_value = {'cookie_domain': '.lab.example'}
             domain_csrf = _get_cookie_domain()
@@ -114,13 +110,12 @@ class SetSessionCookieDomainTests(unittest.TestCase):
                 'session_timeout_hours': 12,
                 'cookie_domain': '.lab.example',
             }
-            from app.auth_helpers import set_session_cookie
-            with patch('app.auth_helpers.Response.set_cookie') as sc:
-                class _Req:
-                    class url:
-                        scheme = 'https'
-                set_session_cookie(sc, _Req(), 'tok', '2026-01-01T00:00:00+00:00')
-            domain_session = sc.call_args.kwargs.get('domain')
+            mock_response = MagicMock()
+            class _Req:
+                class url:
+                    scheme = 'https'
+            set_session_cookie(mock_response, _Req(), 'tok', '2026-01-01T00:00:00+00:00')
+        domain_session = mock_response.set_cookie.call_args.kwargs.get('domain')
         self.assertEqual(domain_csrf, domain_session)
 
 
@@ -280,28 +275,17 @@ class SafeWithinModelsDirTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self._fn('.bashrc')
 
-    def test_rejects_directory_traversal_segment(self) -> None:
-        # Strips to basename 'passwd' which resolves inside models dir but is
-        # not operator-grade. The check ``name.startswith('.')`` would NOT
-        # catch 'passwd' by itself, but the test asserts the helper
-        # recovers: the basename IS plain and resolves inside MODELS_DIR.
-        # The traversal SEGMENT, before stripping, must NOT survive.
-        with self._safe_returning_resolution('../etc/passwd') as resolved:
-            self.assertEqual(resolved.name, 'passwd')
-
-    def _safe_returning_resolution(self, raw: str):
-        from contextlib import contextmanager
-        @contextmanager
-        def _ctx(name):
-            try:
-                yield self._fn(name)
-            except RuntimeError:
-                # Even on rejection, we shouldn't have produced a path
-                # ``out`` -- but if the round-7 implementation strips
-                # ``..`` and accepts the basename, that's the safer of the
-                # two outcomes. Test whichever the impl takes.
-                yield None
-        return _ctx(raw)
+    def test_rejects_parent_dir_in_subpath(self) -> None:
+        # ``../etc/passwd`` is normalised to its basename ``passwd`` by
+        # ``Path.name`` inside the helper, then resolved inside
+        # MODELS_DIR. The ``..`` segment does NOT survive -- the result
+        # is a plain ``passwd`` path under the models directory. The
+        # acceptance criterion is that the returned path contains no
+        # parent-dir reference.
+        resolved = self._fn('../etc/passwd')
+        self.assertEqual(resolved.name, 'passwd')
+        self.assertTrue(resolved.is_relative_to(self._models_dir))
+        self.assertNotIn('..', str(resolved))
 
     def test_rejects_path_with_directory_separator(self) -> None:
         # ``Path('a/b').name == 'b'`` so on a non-traversal segment the
