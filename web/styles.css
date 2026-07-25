@@ -804,6 +804,7 @@ tr.drag-over {
 .compact-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
 .button-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
 .page-stack .button-row { padding-top: 14px; border-top: 1px solid var(--border); justify-content: flex-end; }
+.page-stack .button-row button { min-width: 130px; }
 /* ─── Recordings page ──────────────────────────────────────────────────── */
 .recordings-stats {
   margin-top: 4px;
