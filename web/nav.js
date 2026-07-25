@@ -629,7 +629,22 @@ function renderNavAccount(user) {
     return;
   }
   if (navUser) navUser.textContent = user.username;
-  if (navAvatar) navAvatar.textContent = user.username.charAt(0).toUpperCase();
+  if (navAvatar) {
+    // Prefer personal names for the avatar initial: first_name if available,
+    // first+last initials (e.g. "JD") when both are set, fall back to the
+    // first letter of the username.  Names are stripped/empty-safe so a user
+    // without a configured name always shows something sensible.
+    const firstInitial = (user.first_name || '').trim().charAt(0).toUpperCase();
+    const lastInitial = (user.last_name || '').trim().charAt(0).toUpperCase();
+    const usernameInitial = (user.username || '').charAt(0).toUpperCase();
+    if (firstInitial && lastInitial) {
+      navAvatar.textContent = firstInitial + lastInitial;
+    } else if (firstInitial) {
+      navAvatar.textContent = firstInitial;
+    } else {
+      navAvatar.textContent = usernameInitial;
+    }
+  }
   if (user.role !== 'admin' && nav) {
     nav.querySelectorAll('[data-admin="true"]').forEach((el) => { el.hidden = true; });
   }
