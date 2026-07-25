@@ -69,20 +69,27 @@ function formPayload(form) {
 }
 
 function renderStatus(status) {
-  const modelDisplay = status.model_name
-    ? `${escapeHtml(status.model_name)} <span class="muted" style="font-weight:400;font-size:12px">${escapeHtml(status.model_path || '')}</span>`
-    : escapeHtml(status.model_path || 'Not Set');
-  statusPanel.innerHTML = `
-    <div><span>Current Backend</span><strong>${escapeHtml(displayValue(status.current_backend || status.configured_backend, 'Not Set'))}</strong></div>
-    <div><span>Model</span><strong>${modelDisplay}</strong></div>
-    <div><span>Labels Path</span><strong>${escapeHtml(status.labels_path || 'Not Set')}</strong></div>
-    <div><span>Model exists</span><strong>${yesNo(status.model_exists)}</strong></div>
-    <div><span>ONNX Runtime Installed</span><strong>${yesNo(status.onnx_runtime_installed)}</strong></div>
-    <div><span>Detector Loaded</span><strong>${yesNo(status.detector_loaded)}</strong></div>
-    <div><span>Active Config Source</span><strong>${escapeHtml(displayValue(status.active_config_source, 'None'))}</strong></div>
-    <div><span>Mode</span><strong class="ai-mode ${escapeHtml(String(status.mode || '').toLowerCase().replace(/\s+/g, '-'))}">${escapeHtml(displayValue(status.mode, 'None'))}</strong></div>
-    <div class="wide"><span>Last Detector Error</span><strong>${escapeHtml(displayValue(status.last_detector_error, 'None'))}</strong></div>
-  `;
+  // ``Model`` is the only row whose value can be HTML markup (the
+  // ``status.model_name`` branch embeds a ``<span class="muted">`` for the
+  // secondary path text). Building the row with ``safeHtml`` keeps that
+  // literal span intact while still passing ``status.model_name`` /
+  // ``status.model_path`` through ``escapeHtml``; the no-name branch falls
+  // through to a plain-text row.
+  const modelRow = status.model_name
+    ? safeHtml`<div><span>Model</span><strong>${status.model_name} <span class="muted" style="font-weight:400;font-size:12px">${status.model_path || ''}</span></strong></div>`
+    : safeHtml`<div><span>Model</span><strong>${status.model_path || 'Not Set'}</strong></div>`;
+  const rows = [
+    safeHtml`<div><span>Current Backend</span><strong>${displayValue(status.current_backend || status.configured_backend, 'Not Set')}</strong></div>`,
+    modelRow,
+    safeHtml`<div><span>Labels Path</span><strong>${status.labels_path || 'Not Set'}</strong></div>`,
+    safeHtml`<div><span>Model exists</span><strong>${yesNo(status.model_exists)}</strong></div>`,
+    safeHtml`<div><span>ONNX Runtime Installed</span><strong>${yesNo(status.onnx_runtime_installed)}</strong></div>`,
+    safeHtml`<div><span>Detector Loaded</span><strong>${yesNo(status.detector_loaded)}</strong></div>`,
+    safeHtml`<div><span>Active Config Source</span><strong>${displayValue(status.active_config_source, 'None')}</strong></div>`,
+    safeHtml`<div><span>Mode</span><strong class="ai-mode ${String(status.mode || '').toLowerCase().replace(/\s+/g, '-')}">${displayValue(status.mode, 'None')}</strong></div>`,
+    safeHtml`<div class="wide"><span>Last Detector Error</span><strong>${displayValue(status.last_detector_error, 'None')}</strong></div>`,
+  ];
+  statusPanel.innerHTML = rows.join('');
 }
 
 function renderLabels(labels) {

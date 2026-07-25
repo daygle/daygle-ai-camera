@@ -2,6 +2,31 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
 }
 
+// Tagged template literal helper for safe HTML construction. Same shape as
+// ``escapeHtml`` but applied automatically to every interpolation, so call
+// sites can mix literal HTML markup with interpolated user data without
+// having to remember to call ``escapeHtml`` on each value individually. The
+// literal parts of the template (the HTML markup between ``${...}``) pass
+// through verbatim; only the interpolated values get escaped.
+//
+//   const row = safeHtml`<div><span>${label}</span><strong>${value}</strong></div>`;
+//
+// All interpolations are coerced via ``escapeHtml``, which escapes ``&``, ``<``,
+// ``>``, ``'``, and ``"`` - enough to defang every XSS payload that doesn't
+// require complex character-level tricks. Single source of truth for the
+// rule that backs the H2RegressionGuardTests regression guard in
+// ``tests/test_xss_static_guards.py``: every ``.innerHTML`` write that
+// interpolates server data must route through this helper (or compose with
+// it), so a future raw ``.innerHTML = `...${...}...``` write fails the test.
+function safeHtml(strings, ...values) {
+  let result = strings[0];
+  for (let i = 0; i < values.length; i += 1) {
+    result += escapeHtml(values[i]);
+    result += strings[i + 1];
+  }
+  return result;
+}
+
 // ─── Required-element guard (used by API-shaped admin pages) ─────────────
 // Audit / camera-log / settings / sounds run as conventional scripts that
 // capture a handful of <div>/<button>/<form> ids at the top of the file and
@@ -763,7 +788,7 @@ window.daygleUi = {
   api, setApiAuth, getApiAuth, refreshDaygleAuth, scheduleNextAuthRefresh,
   handleSessionLoss, defaultReturnTo,
   // UI helpers
-  showToast, escapeHtml, titleCase, requireElements,
+  showToast, escapeHtml, safeHtml, titleCase, requireElements,
   detectionPill, motionPill, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, MOTION_RUNNING_ROW_ICON,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,
   isMotionOnlyRecording, motionConfidenceFor,

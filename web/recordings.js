@@ -377,17 +377,33 @@ function renderRecordingDetails(recording) {
       : 'none';
   }
   const zones = recordingZoneNames(recording);
-  const zoneRow = zones.length ? `<div><span>Zone</span><strong>${zones.map(escapeHtml).join(', ')}</strong></div>` : '';
-  els.recordingDetails.innerHTML = `
-    <div><span>Recording</span><strong>#${recording.id}</strong></div>
-    <div><span>Event</span><strong>${recording.event_id || 'none'}</strong></div>
-    <div><span>Camera</span><strong>${escapeHtml(cameraLabel(recording))}</strong></div>
-    ${zoneRow}
-    <div><span>Trigger</span><strong>${escapeHtml(recordingDisplayTrigger(recording))}</strong></div>
-    <div><span>Started</span><strong>${escapeHtml(formatDateTime(recording.started_at))}</strong></div>
-    <div><span>Duration</span><strong>${Number(recording.duration_seconds || 0).toFixed(1)}s</strong></div>
-    <div class="wide"><span>${detectionLabel}</span><strong class="recording-detail-detections">${detectionBadges}</strong></div>
-  `;
+  // Build the label/value rows via the shared ``safeHtml`` tagged template
+  // (web/utils.js). Each row passes the value through ``escapeHtml`` while
+  // leaving the literal markup intact, so server-supplied fields (camera
+  // name, trigger, started_at, etc.) can't smuggle HTML into the DOM.
+  const zoneRow = zones.length
+    ? safeHtml`<div><span>Zone</span><strong>${zones.join(', ')}</strong></div>`
+    : '';
+  const detailRows = [
+    safeHtml`<div><span>Recording</span><strong>#${recording.id}</strong></div>`,
+    safeHtml`<div><span>Event</span><strong>${recording.event_id || 'none'}</strong></div>`,
+    safeHtml`<div><span>Camera</span><strong>${cameraLabel(recording)}</strong></div>`,
+    zoneRow,
+    safeHtml`<div><span>Trigger</span><strong>${recordingDisplayTrigger(recording)}</strong></div>`,
+    safeHtml`<div><span>Started</span><strong>${formatDateTime(recording.started_at)}</strong></div>`,
+    safeHtml`<div><span>Duration</span><strong>${Number(recording.duration_seconds || 0).toFixed(1)}s</strong></div>`,
+  ].filter(Boolean);
+  // ``detectionBadges`` is pre-rendered HTML markup (detectionPill / motionPill
+  // / 'No detections' fallback, each already routing its user-supplied label
+  // through escapeHtml internally). Route that markup through
+  // ``insertAdjacentHTML`` rather than ``safeHtml`` so the badge HTML isn't
+  // re-escaped; the static label uses ``escapeHtml`` on its own line so the
+  // surrounding div is still built without a raw ``.innerHTML`` template.
+  els.recordingDetails.innerHTML = detailRows.join('');
+  els.recordingDetails.insertAdjacentHTML(
+    'beforeend',
+    `<div class="wide"><span>${escapeHtml(detectionLabel)}</span><strong class="recording-detail-detections">${detectionBadges}</strong></div>`,
+  );
 }
 
 function detectionAnchorSeconds(recording) {

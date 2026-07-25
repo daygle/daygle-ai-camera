@@ -22,14 +22,22 @@ function renderProfile(user) {
   profileForm.elements.date_format.value = user.date_format || 'locale';
   profileForm.elements.time_format.value = user.time_format || '24h';
   const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ');
-  summaryEl.innerHTML = `
-    <div><span>Username</span><strong>${escapeHtml(user.username)}</strong></div>
-    ${fullName ? `<div><span>Name</span><strong>${escapeHtml(fullName)}</strong></div>` : ''}
-    ${user.email ? `<div><span>Email</span><strong>${escapeHtml(user.email)}</strong></div>` : ''}
-    <div><span>Role</span><strong>${escapeHtml(user.role)}</strong></div>
-    <div><span>Timezone</span><strong>${escapeHtml(user.timezone || 'Australia/Sydney')}</strong></div>
-    <div><span>Date/time</span><strong>${escapeHtml(user.date_format || 'locale')} / ${escapeHtml(user.time_format || '24h')}</strong></div>
-  `;
+  // Each row is built via ``safeHtml`` (web/utils.js) so server-supplied
+  // fields (username, role, timezone, etc.) can't smuggle HTML into the
+  // profile summary. Conditional rows (Name, Email) are pushed onto the
+  // array separately so the optional markup is not re-escaped by an outer
+  // ``safeHtml`` template.
+  const rows = [
+    safeHtml`<div><span>Username</span><strong>${user.username}</strong></div>`,
+  ];
+  if (fullName) rows.push(safeHtml`<div><span>Name</span><strong>${fullName}</strong></div>`);
+  if (user.email) rows.push(safeHtml`<div><span>Email</span><strong>${user.email}</strong></div>`);
+  rows.push(
+    safeHtml`<div><span>Role</span><strong>${user.role}</strong></div>`,
+    safeHtml`<div><span>Timezone</span><strong>${user.timezone || 'Australia/Sydney'}</strong></div>`,
+    safeHtml`<div><span>Date/time</span><strong>${user.date_format || 'locale'} / ${user.time_format || '24h'}</strong></div>`,
+  );
+  summaryEl.innerHTML = rows.join('');
 }
 
 async function loadProfile() {
