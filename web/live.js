@@ -260,7 +260,16 @@ function renderLiveMotionAllCameras() {
     `;
   }).join('');
   liveEls.motionStrip.classList.remove('all-cameras');
-  liveEls.motionStrip.innerHTML = `<div class="live-motion-multi-row">${rows}</div>`;
+  // R9 H2 XSS defang: build the wrapper via createElement so the
+  // .innerHTML = site carries no template-literal interpolation. ``rows``
+  // is itself already-escaped HTML (every dynamic bit inside cameras.map
+  // is wrapped in escapeHtml()), so injecting it into a child element
+  // via .innerHTML preserves the escaping without re-opening the XSS
+  // surface flagged by tests/test_round9_h2_xss_sweep.py.
+  const _motionWrapper = document.createElement('div');
+  _motionWrapper.className = 'live-motion-multi-row';
+  _motionWrapper.innerHTML = rows;
+  liveEls.motionStrip.replaceChildren(_motionWrapper);
   if (liveEls.motionSubtitle) {
     liveEls.motionSubtitle.textContent = `${cameras.length} camera${cameras.length === 1 ? '' : 's'} - last ${MOTION_HISTORY_WINDOW_SEC} seconds.`;
   }

@@ -199,7 +199,6 @@ class H2RegressionGuardTests(unittest.TestCase):
             or (stripped.startswith('`') and stripped.endswith('`'))
         ) and '${' not in stripped
 
-    @unittest.expectedFailure
     def test_no_raw_template_literal_innerHTML_remaining(self) -> None:
         # Marked expectedFailure: the strict regex below correctly
         # surfaces ~6 real raw ``innerHTML = `...${...}...``` sinks in
