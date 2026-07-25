@@ -52,7 +52,15 @@ router = APIRouter()
 
 @router.get('/api/settings/system')
 def get_system_settings(db=Depends(get_database), auth_enabled: bool = Depends(get_auth_enabled)):
-    return {'version': _current_version(), 'camera': get_camera_config(None), 'cameras': effective_cameras_config(), 'live': effective_live_config(), 'recording': effective_recording_config(), 'storage': effective_storage_config(), 'auth': {'session_timeout_hours': effective_auth_config().get('session_timeout_hours'), 'max_login_attempts': effective_auth_config().get('max_login_attempts'), 'lockout_minutes': effective_auth_config().get('lockout_minutes')}, 'bootstrap': {'database': _state.config.get('storage', {}).get('database'), 'auth_enabled': auth_enabled, 'cookie_name': str(effective_auth_config().get('cookie_name', SESSION_COOKIE)), 'server': _state.config.get('server', {})}}
+    return {'version': _current_version(), 'camera': get_camera_config(None), 'cameras': effective_cameras_config(), 'live': effective_live_config(), 'recording': effective_recording_config(), 'storage': effective_storage_config(),        'auth': {
+            'session_timeout_hours': effective_auth_config().get('session_timeout_hours'),
+            'max_login_attempts': effective_auth_config().get('max_login_attempts'),
+            'lockout_minutes': effective_auth_config().get('lockout_minutes'),
+            'rate_limit_max_attempts': effective_auth_config().get('rate_limit_max_attempts'),
+            'rate_limit_window_seconds': effective_auth_config().get('rate_limit_window_seconds'),
+            'rate_limit_base_delay': effective_auth_config().get('rate_limit_base_delay'),
+            'rate_limit_max_delay': effective_auth_config().get('rate_limit_max_delay'),
+        }, 'bootstrap': {'database': _state.config.get('storage', {}).get('database'), 'auth_enabled': auth_enabled, 'cookie_name': str(effective_auth_config().get('cookie_name', SESSION_COOKIE)), 'server': _state.config.get('server', {})}}
 
 
 @router.get('/api/settings/system/database/backup')

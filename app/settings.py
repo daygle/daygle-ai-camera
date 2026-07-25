@@ -62,6 +62,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_login_attempts": 5,
         "lockout_minutes": 15,
         "cookie_name": "daygle_session",
+        "rate_limit_max_attempts": 5,
+        "rate_limit_window_seconds": 60,
+        "rate_limit_base_delay": 2.0,
+        "rate_limit_max_delay": 300.0,
     },
     "storage": {
         "data_dir": "data",

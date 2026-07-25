@@ -341,7 +341,27 @@ def validate_auth_settings(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail='session_timeout_hours must be a number.') from exc
     if session_timeout_hours < 0.25 or session_timeout_hours > 720:
         raise HTTPException(status_code=400, detail='session_timeout_hours must be between 0.25 and 720.')
-    return {'session_timeout_hours': session_timeout_hours, 'max_login_attempts': _int_field(merged, 'max_login_attempts', 5, 1, 100), 'lockout_minutes': _int_field(merged, 'lockout_minutes', 15, 1, 1440)}
+    try:
+        rate_limit_base_delay = float(merged.get('rate_limit_base_delay', 2.0))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='rate_limit_base_delay must be a number.') from exc
+    if rate_limit_base_delay < 0.5 or rate_limit_base_delay > 60.0:
+        raise HTTPException(status_code=400, detail='rate_limit_base_delay must be between 0.5 and 60.')
+    try:
+        rate_limit_max_delay = float(merged.get('rate_limit_max_delay', 300.0))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='rate_limit_max_delay must be a number.') from exc
+    if rate_limit_max_delay < 5 or rate_limit_max_delay > 3600:
+        raise HTTPException(status_code=400, detail='rate_limit_max_delay must be between 5 and 3600.')
+    return {
+        'session_timeout_hours': session_timeout_hours,
+        'max_login_attempts': _int_field(merged, 'max_login_attempts', 5, 1, 100),
+        'lockout_minutes': _int_field(merged, 'lockout_minutes', 15, 1, 1440),
+        'rate_limit_max_attempts': _int_field(merged, 'rate_limit_max_attempts', 5, 1, 100),
+        'rate_limit_window_seconds': _int_field(merged, 'rate_limit_window_seconds', 60, 10, 3600),
+        'rate_limit_base_delay': rate_limit_base_delay,
+        'rate_limit_max_delay': rate_limit_max_delay,
+    }
 
 
 def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:

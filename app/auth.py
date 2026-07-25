@@ -61,6 +61,8 @@ class AuthService:
         self.session_timeout = timedelta(hours=float(self.config.get("session_timeout_hours", 12)))
         self.max_login_attempts = int(self.config.get("max_login_attempts", 5))
         self.lockout = timedelta(minutes=float(self.config.get("lockout_minutes", 15)))
+        from app.rate_limiter import login_limiter
+        login_limiter.apply_config(self.config)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
