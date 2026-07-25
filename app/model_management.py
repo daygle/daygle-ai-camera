@@ -203,6 +203,23 @@ def _do_download_model(model_name: str, switch_active: bool = True) -> dict[str,
     destination = _safe_within_models_dir(info['onnx'])
     try:
         exported_bytes = export_yolo_onnx(model_name, destination)
+    except ModuleNotFoundError as exc:
+        # ``torch.onnx._internal.exporter._core`` imports ``onnxscript`` at
+        # module-load time (and ``onnx`` itself does not pull it in), so a
+        # missing install surfaces as ``ModuleNotFoundError: No module named
+        # 'onnxscript'`` rather than a generic ``RuntimeError``. Surface the
+        # exact missing module + a copy-pasteable install command so the
+        # operator can fix it without reading tracebacks.
+        missing = getattr(exc, 'name', None) or 'the missing module'
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"Failed to export {info['label']} ONNX model: missing Python "
+                f"dependency `{missing}`. Install export dependencies with "
+                f"`pip install onnx onnxscript ultralytics`, then retry. "
+                f"Details: {exc}"
+            ),
+        ) from exc
     except (RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
         raise HTTPException(status_code=502, detail=f"Failed to export {info['label']} ONNX model. Install export dependencies with `pip install ultralytics onnx`, then retry. Details: {exc}") from exc
     installed_version = _installed_package_version('ultralytics')
