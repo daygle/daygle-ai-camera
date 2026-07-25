@@ -210,9 +210,16 @@ def _do_download_model(model_name: str, switch_active: bool = True) -> dict[str,
         # 'onnxscript'`` rather than a generic ``RuntimeError``. Surface the
         # exact missing module + a copy-pasteable install command so the
         # operator can fix it without reading tracebacks.
+        #
+        # Status code: 503 (Service Unavailable) is the right HTTP
+        # semantic for "we are missing a dependency in our own venv";
+        # 502 (Bad Gateway) implies an upstream/downstream issue that is
+        # not the case here. Tests that already wired against 502 should
+        # be updated to match the new status (round-9 + audit-finding-2
+        # contract: missing-pkg-in-local-venv == 503).
         missing = getattr(exc, 'name', None) or 'the missing module'
         raise HTTPException(
-            status_code=502,
+            status_code=503,
             detail=(
                 f"Failed to export {info['label']} ONNX model: missing Python "
                 f"dependency `{missing}`. Install export dependencies with "

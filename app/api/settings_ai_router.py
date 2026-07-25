@@ -106,7 +106,7 @@ def list_ai_models():
 
 
 @router.post('/api/settings/ai/download-model')
-async def download_ai_model(request: Request):
+async def download_ai_model(request: Request, db=Depends(get_database)):
     require_admin(request)
     body = await request.json()
     model_name = str(body.get('model') or '').strip().lower()
@@ -118,6 +118,13 @@ async def download_ai_model(request: Request):
     # 400 response, same whitelist; just tighter input validation.
     if model_name not in YOLO_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'.")
+    # Audit-log gate (audit-trail finding): admin downloads of
+    # bin/exported artefacts must leave a trail, mirroring
+    # ``update_ai_settings``. Without this row, an admin replacement
+    # of the active ONNX model has no audit entry pointing back to
+    # who kicked it off.
+    write_audit_log(request, db, 'download', 'settings.ai.model',
+                    details={'model_id': model_name, 'switch_active': True})
     # Round-6 / N2 removal (drop N2 entirely (B3)): the previous SHA-256
     # pin-on-upstream gate has been removed because ``_do_download_model``
     # produces a locally-exported ONNX binary via the Ultralytics SDK
@@ -134,8 +141,16 @@ async def download_ai_model(request: Request):
 
 
 @router.post('/api/settings/ai/download-yolov8n')
-def download_yolov8n_model(request: Request):
+def download_yolov8n_model(request: Request, db=Depends(get_database)):
     require_admin(request)
+    # Audit-log gate (audit-trail finding): mirror
+    # ``download_ai_model`` so the legacy convenience route also
+    # leaves a trail. ``switch_active`` mirrors the default of
+    # ``_do_download_model(model_name, switch_active=True)`` so the
+    # logged ``switch_active`` value reflects the actual effect on
+    # the active model.
+    write_audit_log(request, db, 'download', 'settings.ai.model',
+                    details={'model_id': 'yolov8n', 'switch_active': True})
     return _do_download_model('yolov8n')
 
 
@@ -192,12 +207,17 @@ def check_model_updates(request: Request):
 
 
 @router.post('/api/settings/ai/update-model')
-async def update_ai_model(request: Request):
+async def update_ai_model(request: Request, db=Depends(get_database)):
     require_admin(request)
     body = await request.json()
     model_name = str(body.get('model') or '').strip().lower()
     if model_name not in YOLO_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'.")
+    # Audit-log gate (audit-trail finding): same shape as
+    # ``download_ai_model`` so the admin actions for the matching
+    # model endpoint is traceable.
+    write_audit_log(request, db, 'update', 'settings.ai.model',
+                    details={'model_id': model_name, 'switch_active': False})
     return await run_in_threadpool(_do_download_model, model_name, False)
 
 

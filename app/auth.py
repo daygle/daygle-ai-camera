@@ -590,8 +590,19 @@ class AuthService:
                         (username, ip_address, int(success), now),
                     )
                     db.commit()
-                except Exception:
-                    pass
+                except Exception as audit_write_exc:
+                    # Best-effort audit-write. A missing row here is a
+                    # compliance-traceability gap, not an auth failure --
+                    # the surrounding flow still committed the user's
+                    # outcome -- but the operator deserves a breadcrumb if
+                    # the audit log ever falls over (disk full, SQLite
+                    # locked, permission denied). We intentionally do NOT
+                    # raised-and-propagate: that would convert a 5-minute
+                    # disk hiccup into a full login outage.
+                    _logging.getLogger('daygle.ai').warning(
+                        'login_attempts audit-write failed for %s/%s: %s',
+                        username, ip_address, audit_write_exc,
+                    )
 
     # Lazy-renewal window: any session that hasn't been touched in this much
     # wall clock gets its ``expires_at`` extended by ``session_timeout`` on the
@@ -715,10 +726,17 @@ class AuthService:
                     'DELETE FROM login_attempts WHERE created_at < ?',
                     (cutoff_iso,),
                 )
-        except Exception:
-            # Best-effort; never let audit-log-adjacent cleanup crash session
-            # cleanup. Admin can re-run manually if needed.
-            pass
+        except Exception as login_purge_exc:
+            # Best-effort; never let audit-log-adjacent cleanup crash
+            # session cleanup. Admin can re-run manually if needed.
+            # Logged at warning level so a long-running retention bug
+            # (disk full, schema mismatch, corrupted row) is visible
+            # rather than silently failing forever.
+            import logging as _logging
+            _logging.getLogger('daygle.ai').warning(
+                'cleanup_expired_sessions: login_attempts purge failed: %s',
+                login_purge_exc,
+            )
         # M3 wiring (round-7): the camera_diagnostics purger already lives
         # at ``app.backup.purge_camera_diagnostics_by_policy``; we just
         # invoke it from this same regularly-scheduled maintenance point
@@ -728,8 +746,17 @@ class AuthService:
         try:
             from app.backup import purge_camera_diagnostics_by_policy
             purge_camera_diagnostics_by_policy()
-        except Exception:
-            pass
+        except Exception as diag_purge_exc:
+            # Same best-effort policy as the login_attempts sweep above:
+            # a failed diagnostics purge should NOT collapse the
+            # surrounding session-sweep cleanup, but a recurrence MUST
+            # show up in the operator log so disk-/schema-related
+            # retention bugs are diagnosable rather than silent.
+            import logging as _logging
+            _logging.getLogger('daygle.ai').warning(
+                'cleanup_expired_sessions: camera_diagnostics purge failed: %s',
+                diag_purge_exc,
+            )
 
     def public_user(self, row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
         return {

@@ -197,10 +197,34 @@ def write_recording_detection_track(
     file_path: Path,
     track: list[dict[str, Any]],
 ) -> None:
-    recording_track_sidecar_path(file_path).write_text(
-        json.dumps(track),
-        encoding='utf-8',
-    )
+    # Atomic write: dump to a ``.tmp`` sibling then ``os.replace`` into
+    # the final path. If the writer process dies mid-dump, partially
+    # written JSON never replaces the existing sidecar, so the reader
+    # (``load_recording_detection_track``) keeps seeing the prior
+    # well-formed file (or knows the sidecar doesn't exist). Without
+    # this guard, a process-kill between ``open()`` and ``close()``
+    # leaves a half-written sidecar that ``json.loads`` rejects and
+    # the reader silently retries against ``None`` -- the prior
+    # safe-fail contract still works, but operators lost an entire
+    # detection run for that recording. Mirrors the same tmp+replace
+    # pattern ``app.recordings.write_rtsp_clip`` uses for the clip
+    # itself. OSError on tmp write or replace is allowed to propagate
+    # (the caller already logs ``warning(... could not write
+    # detection track)``).
+    sidecar_path = recording_track_sidecar_path(file_path)
+    tmp_path = sidecar_path.with_suffix(sidecar_path.suffix + '.tmp')
+    try:
+        tmp_path.write_text(json.dumps(track), encoding='utf-8')
+        os.replace(tmp_path, sidecar_path)
+    except OSError:
+        # Best-effort cleanup of the orphan tmp file so a future
+        # successful write is not blocked by the junk sitting next to
+        # the sidecar.
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def load_recording_detection_track(
