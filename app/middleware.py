@@ -200,6 +200,24 @@ async def authentication_middleware(request: Request, call_next):
                 {'detail': 'Admin access required'}, status_code=403,
             )
         # Page routes: return a proper 403 HTML page instead of raw JSON.
+        return HTMLResponse(
+            content='''<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8">
+<title>Access Denied - Daygle AI Camera</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="error-page-body">
+<div class="error-page">
+<h1>403</h1>
+<p>You need administrator access to view this page.</p>
+<a href="/" class="button primary">Return to Dashboard</a>
+</div>
+</body>
+</html>''',
+            status_code=403,
+        )
     # Round-5 / M1: per-IP sliding-window throttle on admin state-changing
     # /api/* requests. Runs AFTER the role check (so 401/403 still fire
     # without spending a throttle slot on unauth'd callers) and BEFORE the
@@ -222,24 +240,6 @@ async def authentication_middleware(request: Request, call_next):
             )
         if admin_ip:
             admin_limiter.record(admin_ip)
-        return HTMLResponse(
-            content='''<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8">
-<title>Access Denied - Daygle AI Camera</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="stylesheet" href="/static/styles.css">
-</head>
-<body class="error-page-body">
-<div class="error-page">
-<h1>403</h1>
-<p>You need administrator access to view this page.</p>
-<a href="/" class="button primary">Return to Dashboard</a>
-</div>
-</body>
-</html>''',
-            status_code=403,
-        )
     if (path.startswith('/api/') and request.method in MUTATING_METHODS):
         # M1: same-origin guard runs BEFORE the cookie+header CSRF check as
         # defence-in-depth. If the session cookie ever leaks cross-origin,
