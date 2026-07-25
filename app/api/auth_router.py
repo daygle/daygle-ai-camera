@@ -23,7 +23,6 @@ from app.auth import CSRF_COOKIE, CSRF_HEADER, AuthError, SESSION_COOKIE, utc_no
 from app.auth_gates import _request_ip, require_session
 from app.auth_helpers import clear_auth_cookies, set_session_cookie
 from app.rate_limiter import login_limiter, setup_limiter
-from app.auth_helpers import _client_ip_from_request
 from app.config_facades import effective_auth_config
 from app.deps import get_auth, get_auth_enabled, get_database, get_logger
 from app.request_helpers import form_data
@@ -133,7 +132,7 @@ async def setup(request: Request, auth=Depends(get_auth), auth_enabled=Depends(g
     # bursting beyond the budget is a brute-force signal. Audit-log the
     # rate-limit drop so an admin investigating later can see the prior
     # fault.
-    setup_ip = _client_ip_from_request(request)
+    setup_ip = _request_ip(request)
     if setup_ip and setup_limiter.is_rate_limited(setup_ip):
         try:
             from app.request_helpers import write_audit_log
