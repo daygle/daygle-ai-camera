@@ -553,6 +553,18 @@ window.daygleAuthReady = (async () => {
     tickCountdown._serverTick = 5;
   }
 
+  // Expose the countdown helpers on window.daygleUi HERE (inside the IIFE)
+  // so the bareword identifiers resolve. The bottom-of-file Object.assign
+  // below runs at module top-level where startCountdownTicker /
+  // stopCountdownTicker are out of scope and the shorthand-property syntax
+  // would otherwise throw ``ReferenceError: startCountdownTicker is not
+  // defined`` (regression observed in browser console when triggering
+  // ONNX model download from the settings page).
+  window.daygleUi = Object.assign(window.daygleUi || {}, {
+    startCountdownTicker,
+    stopCountdownTicker,
+  });
+
   // Kick off the ticker after the initial auth render.
   if (window.daygleAuth?.user) {
     startCountdownTicker();
@@ -661,8 +673,6 @@ function renderNavAccount(user) {
 // per-page script that mounts after nav.js (no parallel/duplicate defs).
 window.daygleUi = Object.assign(window.daygleUi || {}, {
   renderNavAccount,
-  startCountdownTicker,
-  stopCountdownTicker,
 });
 
 // subscribeDaygleAuthCrossTabs (utils.js) emits CustomEvent('daygle:auth-state-changed')
