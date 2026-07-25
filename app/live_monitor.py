@@ -90,7 +90,8 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
             _state.live_detection_last_checked[camera_id] = now
             _state.active_live_detection_cameras.add(camera_id)
 
-        def _detect_bg(cid: str=camera_id, cfg: dict[str, Any]=dict(selected_config)) -> None:
+        def _detect_bg(cid: str=camera_id, cfg: dict[str, Any] | None=None) -> None:
+            camera_cfg = cfg if cfg is not None else dict(selected_config)
             try:
                 sample = read_ingest_frame(cid)
                 if sample is None:
@@ -113,7 +114,7 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
                         return
                 image, frame = sample
                 clear_live_camera_backoff(cid)
-                process_live_stream_alerts(image, frame, cfg, enforce_interval=False)
+                process_live_stream_alerts(image, frame, camera_cfg, enforce_interval=False)
             except Exception as exc:
                 logger.warning('Background live alert check failed for camera %s: %s', cid, exc)
                 schedule_live_camera_backoff(cid, str(exc))

@@ -138,6 +138,14 @@ async def update_storage_settings(
 ):
     require_admin(request)
     settings = validate_storage_settings(await request.json())
+    # Create directories synchronously so callers (including the test)
+    # can rely on them existing immediately after the PUT returns.
+    # The full service restart (stopping old ffmpegs, starting new ones)
+    # is still deferred to the background thread below.
+    for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir'):
+        path = settings.get(key)
+        if path:
+            Path(path).mkdir(parents=True, exist_ok=True)
     db.set_setting('storage', settings, utc_now())
     write_audit_log(request, db, 'update', 'settings.storage')
     # Defer the expensive service restart to a background thread so the

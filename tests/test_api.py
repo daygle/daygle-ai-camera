@@ -148,6 +148,7 @@ auth:
   session_timeout_hours: 12
   max_login_attempts: 5
   lockout_minutes: 15
+  rate_limit_max_attempts: 10
 ai:
   backend: onnx
   confidence: 0.45

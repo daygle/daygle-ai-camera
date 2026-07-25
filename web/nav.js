@@ -314,7 +314,7 @@ window.daygleAuthReady = (async () => {
       <div class="app-nav-account">
         <div class="nav-dropdown" data-dropdown="account">
           <button type="button" class="nav-dropdown-trigger" aria-haspopup="true" aria-expanded="false">
-            <span id="navAvatar" class="nav-avatar">?</span>
+            <span id="navAvatar" class="nav-avatar"></span>
             <span id="navUser" class="nav-dropdown-label">Profile</span>
             <svg class="nav-dropdown-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
@@ -420,7 +420,7 @@ window.daygleAuthReady = (async () => {
   // where the bootstrap IIFE in nav.js never paints an account dropdown).
   await window.daygleAuthReady;
   if (window.daygleUi?.renderNavAccount) {
-    window.daygleUi.renderNavAccount(window.daygleAuth.user);
+    window.daygleUi.renderNavAccount(window.daygleAuth?.user || null);
   }
 
   const logoutBtn = document.getElementById('navLogoutBtn');

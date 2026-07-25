@@ -55,6 +55,7 @@ class AuthService:
         self.max_login_attempts = int(config.get("max_login_attempts", 5))
         self.lockout = timedelta(minutes=float(config.get("lockout_minutes", 15)))
         self.init()
+        self.apply_config(self.config)
 
     def apply_config(self, config: dict[str, Any]) -> None:
         self.config.update(config)
