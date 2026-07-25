@@ -942,8 +942,16 @@ class RecordingService:
             # worst-case ffmpeg shutdown (1s loop sleep + up to 2s
             # SIGTERM/terminate wait + SIGKILL); if a hung worker exceeds it,
             # the replacement is still started (denying camera ingest would
-            # be worse than a brief two-ffmpeg overlap) - see TODO note
-            # for issuing an operator diagnostic in that case.
+            # be worse than a brief two-ffmpeg overlap). The operator
+            # diagnostic itself is emitted by ``_stop_worker`` which derives
+            # ``worker_kind`` from the worker dict ('prebuffer' for the
+            # rolling-buffer workers spawned here, 'continuous' for the
+            # chunk workers) and fires
+            # ``worker_stop_join_timeout_prebuffer`` (this path) or
+            # ``worker_stop_join_timeout_continuous`` (the chunk-worker
+            # equivalent) through the per-worker ``diagnostic_callback``
+            # captured below. Behaviour covered by
+            # ``tests/test_stop_join_timeout_diagnostic.py``.
             if existing:
                 self._stop_worker(existing, join_timeout=self.PREBUFFER_WORKER_JOIN_TIMEOUT_SECONDS)
             if restart_reason == 'stream_url_changed':

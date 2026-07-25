@@ -118,12 +118,9 @@ function renderOverall(status, enabledCameras) {
   const backend = status.backend || 'none';
   statusPanel.className = `status-panel yamnet-status-grid ${backendTone(backend)}`;
   statusPanel.innerHTML = `
-    <div><span>Backend</span><strong>${escapeHtml(displayValue(backend, 'None'))}</strong></div>
-    <div><span>Running</span><strong>${yesNo(status.running)}</strong></div>
-    <div><span>Detector Status</span><strong>${escapeHtml(displayValue(status.detector_status || status.state, 'Disabled'))}</strong></div>
-    <div><span>Sound Cameras</span><strong>${enabledCameras.length}</strong></div>
-    <div><span>Last Sound</span><strong>${escapeHtml(status.last_class_label || displayValue(status.last_class, 'None'))}</strong></div>
-    <div><span>Last Confidence</span><strong>${percentValue(status.last_confidence)}</strong></div>
+    <div><span>Backend</span><strong>${escapeHtml(displayValue(backend, 'None'))}</strong></div>            <div><span>Running</span><strong>${escapeHtml(yesNo(status.running))}</strong></div>
+    <div><span>Detector Status</span><strong>${escapeHtml(displayValue(status.detector_status || status.state, 'Disabled'))}</strong></div>            <div><span>Sound Cameras</span><strong>${escapeHtml(enabledCameras.length)}</strong></div>
+    <div><span>Last Sound</span><strong>${escapeHtml(status.last_class_label || displayValue(status.last_class, 'None'))}</strong></div>            <div><span>Last Confidence</span><strong>${escapeHtml(percentValue(status.last_confidence))}</strong></div>
     <div class="wide"><span>Status Detail</span><strong>${escapeHtml(backendNote(backend, status.backend_reason))}</strong></div>
   `;
 }
@@ -153,10 +150,10 @@ function renderCameraStatuses(rows) {
           ${rows.map(({ camera, status }) => `
             <tr class="${escapeHtml(cameraSoundClass(camera, status))}">
               <td class="cell-label">${escapeHtml(cameraLabel(camera))}</td>
-              <td>${yesNo(soundConfigured(camera))}</td>
-              <td>${enabledSoundRules(camera).length}</td>
+              <td>${escapeHtml(yesNo(soundConfigured(camera)))}</td>
+              <td>${escapeHtml(enabledSoundRules(camera).length)}</td>
               <td>${escapeHtml(displayValue(status.backend, 'None'))}</td>
-              <td>${yesNo(status.running)}</td>
+              <td>${escapeHtml(yesNo(status.running))}</td>
               <td>${escapeHtml(cameraSoundReason(camera, status))}</td>
               <td>${escapeHtml(status.last_class_label || displayValue(status.last_class, 'None'))}</td>
               <td>${escapeHtml(formatConfidenceMap(status.last_confidences))}</td>
