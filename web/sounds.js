@@ -50,11 +50,6 @@ function cloneSound(sound) {
   return JSON.parse(JSON.stringify(sound || { enabled: false, rules: [] }));
 }
 
-function normalizeEmailList(value) {
-  const source = Array.isArray(value) ? value : String(value || '').split(',');
-  return source.map((recipient) => String(recipient).trim()).filter(Boolean);
-}
-
 function currentCamera() {
   return cameras.find((camera) => camera.id === selectedCameraId) || cameras[0] || null;
 }

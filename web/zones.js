@@ -53,11 +53,6 @@ function updateZoneBounds(zone) {
   zone.height = roundCoord(Math.max(0.01, bottom - top));
 }
 
-function normalizeEmailList(value) {
-  const source = Array.isArray(value) ? value : String(value || '').split(',');
-  return source.map((recipient) => String(recipient).trim()).filter(Boolean);
-}
-
 function defaultObjectRule(label = '') {
   const isMotion = String(label || '').trim().toLowerCase() === 'motion';
   return {

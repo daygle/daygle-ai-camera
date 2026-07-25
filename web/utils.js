@@ -623,6 +623,17 @@ function titleCase(value) {
     .join(' ');
 }
 
+// Normalise the persisted shape of an email-recipients field so the
+// /sounds and /zones rule editors agree on what the backend needs to see.
+// Inputs arrive in two shapes: (1) a comma-separated string from the rule
+// row's <input type="email"> field, (2) a list of strings from the JSON
+// round-trip. Both collapse to the canonical ``Array<string> of trimmed,
+// non-empty addresses`` that the API expects.
+function normalizeEmailList(value) {
+  const source = Array.isArray(value) ? value : String(value || '').split(',');
+  return source.map((recipient) => String(recipient).trim()).filter(Boolean);
+}
+
 // ─── User display preferences (date_format / time_format) ──────────────────
 // Populated by nav.js after /api/auth/me resolves, but exposed as early as
 // possible so every page (dashboard, events, alerts, recordings, etc.) renders
@@ -788,7 +799,7 @@ window.daygleUi = {
   api, setApiAuth, getApiAuth, refreshDaygleAuth, scheduleNextAuthRefresh,
   handleSessionLoss, defaultReturnTo,
   // UI helpers
-  showToast, escapeHtml, safeHtml, titleCase, requireElements,
+  showToast, escapeHtml, safeHtml, titleCase, normalizeEmailList, requireElements,
   detectionPill, motionPill, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, MOTION_RUNNING_ROW_ICON,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,
   isMotionOnlyRecording, motionConfidenceFor,
