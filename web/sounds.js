@@ -299,32 +299,7 @@ function buildSoundRuleRow(rule, ruleIndex, rules) {
         <button class="delete-btn secondary" type="button" data-remove-rule="${id}">${ICONS.remove}</button>
       </div></td>
     </tr>
-    <tr class="rule-expand-row" ${expanded ? '' : 'hidden'}>
-      <td colspan="9">
-        <div class="rule-expand-body">
-          <label class="sound-rule-field sound-rule-email-field">
-            <span>Email recipients</span>
-            <input type="email" data-rule-email-recipients="${id}" value="${escapeHtml(normalizeEmailList(rule.email_recipients).join(', '))}" placeholder="alerts@example.com" multiple autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore />
-          </label>
-          <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
-            <span>Active from</span>
-            ${renderTimeSelect(rule.active_start, 'data-rule-active-start', id)}
-          </label>
-          <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
-            <span>Active to</span>
-            ${renderTimeSelect(rule.active_end, 'data-rule-active-end', id)}
-          </label>
-          <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
-            <span>Email/Push from</span>
-            ${renderTimeSelect(rule.notify_start, 'data-rule-notify-start', id)}
-          </label>
-          <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
-            <span>Email/Push to</span>
-            ${renderTimeSelect(rule.notify_end, 'data-rule-notify-end', id)}
-          </label>
-        </div>
-      </td>
-    </tr>`;
+    ${renderRuleExpandRow('rule', id, rule, expanded)}`;
 }
 
 function renderEditor() {

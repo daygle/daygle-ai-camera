@@ -227,32 +227,7 @@ function renderObjectRules(zone, zoneIndex) {
             <button class="secondary delete-btn zone-action-btn" type="button" data-delete-zone-rule="${key}">${ICONS.remove}</button>
           </div></td>
         </tr>
-        <tr class="rule-expand-row" ${expanded ? '' : 'hidden'}>
-          <td colspan="9">
-            <div class="rule-expand-body">
-              <label class="sound-rule-field sound-rule-email-field">
-                <span>Email recipients</span>
-                <input type="email" data-zone-rule-email-recipients="${key}" value="${escapeHtml(normalizeEmailList(rule.email_recipients).join(', '))}" placeholder="alerts@example.com" multiple autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore />
-              </label>
-              <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
-                <span>Active from</span>
-                ${renderTimeSelect(rule.active_start, 'data-zone-rule-active-start', key)}
-              </label>
-              <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
-                <span>Active to</span>
-                ${renderTimeSelect(rule.active_end, 'data-zone-rule-active-end', key)}
-              </label>
-              <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
-                <span>Email/Push from</span>
-                ${renderTimeSelect(rule.notify_start, 'data-zone-rule-notify-start', key)}
-              </label>
-              <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
-                <span>Email/Push to</span>
-                ${renderTimeSelect(rule.notify_end, 'data-zone-rule-notify-end', key)}
-              </label>
-            </div>
-          </td>
-        </tr>`;
+        ${renderRuleExpandRow('zone-rule', key, rule, expanded)}`;
     }).join('')}</tbody>
   </table>`;
 }
