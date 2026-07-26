@@ -947,6 +947,11 @@ function subscribeDaygleThemePref() {
       try { data = JSON.parse(raw); } catch (_err) { return; }
     }
     if (!data || data.type !== DAYGLE_THEME_MESSAGE_TYPE) return;
+    // Skip if the theme hasn't actually changed. BroadcastChannel delivers
+    // messages to the SAME tab that posted them, which would otherwise
+    // re-enter setDaygleThemePref → broadcastDaygleThemePref and create an
+    // infinite loop causing the site to flash between themes every second.
+    if (data.theme === window.daygleThemePref) return;
     setDaygleThemePref(data.theme);
   }
   if (typeof BroadcastChannel === 'function') {

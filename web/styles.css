@@ -898,17 +898,18 @@ input[type="file"] { padding: 10px; }
 .close-draft-point:active { cursor: pointer; }
 .zones-layout {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 28px;
   align-items: start;
 }
-.zones-left-col {
-  display: grid;
-  gap: 28px;
-  align-content: start;
+@media (max-width: 899px) {
+  .zones-layout { grid-template-columns: 1fr; }
 }
-@media (min-width: 900px) {
-  .zones-layout { grid-template-columns: 300px 1fr; }
+.zones-layout .live-detection-status {
+  grid-column: 1;
+}
+.zones-layout .zone-rules-card {
+  grid-column: 1 / -1;
 }
 .zones-shell .live-frame { height: min(68vh, 720px); }
 .zone-editor-card { margin-top: 18px; }
