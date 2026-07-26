@@ -65,6 +65,7 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
 from __future__ import annotations
 
 import logging
+import importlib.util
 from pathlib import Path
 from typing import Any
 
