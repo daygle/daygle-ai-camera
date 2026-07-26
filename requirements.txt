@@ -16,8 +16,8 @@ onnxscript>=0.5,<1.0
 # range would silently absorb future 8.x.y PyPI drops -- bump this pin
 # only after reviewing the upstream release notes for supply-chain
 # concerns.
-ultralytics==8.3.40
-opencv-python-headless>=4.9,<5.0
+ultralytics==8.4.106
+opencv-python-headless>=4.9,<6.0
 python-multipart>=0.0.9,<1.0
 sounddevice>=0.4,<1.0
 # CPU-only YAMNet sound classifier runtime.
