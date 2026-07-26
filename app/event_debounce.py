@@ -55,7 +55,6 @@ Cross-module consumers unchanged:
 from __future__ import annotations
 
 import time
-from typing import Any
 
 import app.state as _state
 from app.detection_status import update_live_detection_status

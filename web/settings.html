@@ -30,8 +30,8 @@
       </div>
       <div id="updateStatus" class="status-panel" style="display:none"></div>
       <div class="button-row">
-        <button id="checkUpdateBtn" type="button">Check for Updates</button>
-        <button id="applyUpdateBtn" class="secondary" type="button" style="display:none">Apply Update</button>
+        <button id="checkUpdateBtn" class="btn-info" type="button">Check for Updates</button>
+        <button id="applyUpdateBtn" class="btn-warning" type="button" style="display:none">Apply Update</button>
       </div>
       <pre id="updateOutput" class="update-output" style="display:none"></pre>
     </section>
@@ -42,7 +42,7 @@
         <div>
           <h2>Live Performance</h2>
           <p class="settings-section-subtitle">Tune refresh rates and detection frequency to balance responsiveness with resource usage.</p>
-          <p class="field-help" style="margin: 2px 0 0;">The live object overlay may appear slightly behind the video feed. This is normal on CPU hardware — AI inference takes time, and there is no further optimisation possible beyond the extrapolation already applied.</p>
+          <p class="field-help" style="margin: 2px 0 0;">The live object overlay may appear slightly behind the video feed. This is normal on CPU hardware - AI inference takes time, and there is no further optimisation possible beyond the extrapolation already applied.</p>
         </div>
       </div>
       <form id="liveSettingsForm" class="form-grid">
@@ -150,7 +150,7 @@
           <input name="max_storage_gb" type="number" min="1" max="100000" placeholder="50" /></label>
       </form>
       <div class="button-row">
-        <button id="purgeRecordingsBtn" class="secondary" type="button">Run Purge Now</button>
+        <button id="purgeRecordingsBtn" class="btn-danger" type="button">Run Purge Now</button>
         <button type="submit" form="retentionSettingsForm">Save Retention</button>
       </div>
     </section>
@@ -196,11 +196,9 @@
           <input name="file" type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3,application/x-sqlite3" required /></label>
       </form>
       <div class="button-row">
-        <button class="secondary daygle-icon-button" type="submit" form="databaseRestoreForm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg>Restore Database</button>
-        <button id="normalizeTimestampsBtn" class="secondary daygle-icon-button" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Normalise Timestamps</button>
+        <button class="btn-info daygle-icon-button" type="submit" form="databaseRestoreForm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg>Restore Database</button>
         <a class="button-link daygle-icon-button" href="/api/settings/system/database/backup"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>Download Database Backup</a>
       </div>
-      <p class="muted field-help" style="margin-top: 0.75rem;">Normalise rewrites every timestamp on <strong>recordings</strong> (<code>started_at</code> / <code>ended_at</code> / <code>created_at</code>), <strong>events</strong> (<code>created_at</code>), and <strong>camera diagnostics</strong> (<code>created_at</code>) to canonical UTC <code>+00:00</code> so retention, timeline, list-filter, and camera-log purge queries classify historical rows correctly against canonical cutoffs. Safe to re-run on already-normalised rows; rows with unparseable timestamps are counted under per-table <code>errors</code> and preserved in place so a single bad row doesn't abort the run.</p>
     </section>
 
     <section class="card">
@@ -241,7 +239,7 @@
           <input name="password" type="password" placeholder="Optional" autocomplete="new-password" /></label>
       </form>
       <div class="button-row">
-        <button id="testPushBtn" class="secondary" type="button">Send Test Notification</button>
+        <button id="testPushBtn" class="btn-info" type="button">Send Test Notification</button>
         <button type="submit" form="pushSettingsForm">Save Push Settings</button>
       </div>
     </section>
@@ -317,7 +315,7 @@
           <input id="testEmailRecipient" type="email" placeholder="you@example.com" autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore /></label>
       </form>
       <div class="button-row">
-        <button id="testEmailBtn" class="secondary" type="button">Send Test Email</button>
+        <button id="testEmailBtn" class="btn-info" type="button">Send Test Email</button>
         <button type="submit" form="emailSettingsForm">Save Mail Server</button>
       </div>
     </section>
@@ -361,7 +359,7 @@
       <p class="muted danger-zone-warning"><strong>Settings, users, sessions, and alert rules are preserved.</strong> This action cannot be undone.</p>
       <p class="danger-zone-confirm-hint">Confirmation required: type START CLEAN when prompted.</p>
       <div class="button-row">
-        <button id="startCleanBtn" class="secondary delete-btn" type="button">Start Clean</button>
+        <button id="startCleanBtn" class="btn-danger" type="button">Start Clean</button>
       </div>
     </section>
 

@@ -8,7 +8,7 @@ import secrets
 import sqlite3
 import threading
 from pathlib import Path
-from fastapi import APIRouter, Depends, BackgroundTasks, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool

@@ -148,9 +148,6 @@ def compute_minimum_rule_confidence(fallback: float | None = None) -> float:
 # by rebinding THIS module's name. The patch would otherwise bypass the
 # cache in ``app.alerts`` (because that module's bare-name lookup resolves
 # in its OWN namespace, unaffected by patches on a sibling module).
-from app.alerts import _clear_datetime_prefs_cache
-
-
 def _alert_datetime_prefs() -> tuple[str, str, str]:
     """Local delegate. Honors ``app.alert_dispatch._alert_datetime_prefs``
     monkeypatches (bare-name lookup resolves in this module's namespace).

@@ -221,10 +221,10 @@ function renderObjectRules(zone, zoneIndex) {
           <td><input type="number" data-zone-rule-confidence="${key}" value="${escapeHtml(rule.min_confidence)}" min="0" max="1" step="0.05" /></td>
           <td><input type="number" data-zone-rule-cooldown="${key}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" /></td>
           <td><div class="cell-actions">
-            <button class="secondary zone-action-btn zone-rule-move-btn" type="button" data-move-zone-rule="${key}:up" title="Move up"${ruleIndex === 0 ? ' disabled' : ''}>${ICONS.moveUp}</button>
-            <button class="secondary zone-action-btn zone-rule-move-btn" type="button" data-move-zone-rule="${key}:down" title="Move down"${ruleIndex === zone.object_rules.length - 1 ? ' disabled' : ''}>${ICONS.moveDown}</button>
-            <button class="rule-expand-btn secondary" type="button" data-expand-zone-rule="${key}" title="Time windows &amp; email">${expanded ? ICONS.chevronUp : ICONS.chevronDown}</button>
-            <button class="secondary delete-btn zone-action-btn" type="button" data-delete-zone-rule="${key}">${ICONS.remove}</button>
+            <button class="btn-info zone-action-btn zone-rule-move-btn" type="button" data-move-zone-rule="${key}:up" title="Move up"${ruleIndex === 0 ? ' disabled' : ''}>${ICONS.moveUp}</button>
+            <button class="btn-info zone-action-btn zone-rule-move-btn" type="button" data-move-zone-rule="${key}:down" title="Move down"${ruleIndex === zone.object_rules.length - 1 ? ' disabled' : ''}>${ICONS.moveDown}</button>
+            <button class="rule-expand-btn btn-info" type="button" data-expand-zone-rule="${key}" title="Time windows &amp; email">${expanded ? ICONS.chevronUp : ICONS.chevronDown}</button>
+            <button class="btn-danger zone-action-btn" type="button" data-delete-zone-rule="${key}">${ICONS.remove}</button>
           </div></td>
         </tr>
         ${renderRuleExpandRow('zone-rule', key, rule, expanded)}`;
@@ -252,7 +252,7 @@ function renderZones() {
           <input data-zone-name="${index}" value="${escapeHtml(zone.name || `Zone ${index + 1}`)}" placeholder="Zone name…" />
         </div>
         <label><span>Zone</span><select data-zone-enabled="${index}"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Shown</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
-        <button class="secondary delete-btn zone-action-btn" type="button" data-delete-zone="${index}">${ICONS.remove}Remove</button>
+        <button class="btn-danger zone-action-btn" type="button" data-delete-zone="${index}">${ICONS.remove}Remove</button>
       </div>
     </div>
   `).join('');

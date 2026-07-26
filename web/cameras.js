@@ -81,8 +81,8 @@ function renderCameraRow(camera, index) {
       <td class="cell-camera">
         <div class="cam-info"><span class="cam-name">${name}</span>${id ? `<span class="cam-id">${id}</span>` : ''}</div>
         <div class="cell-actions">
-          <button class="secondary cam-edit-btn" data-index="${index}" type="button" title="Edit camera">${ICONS.edit}<span class="action-label">Edit</span></button>
-          <button class="secondary delete-btn cam-remove-btn" data-index="${index}" type="button" title="Remove camera">${ICONS.remove}<span class="action-label">Remove</span></button>
+          <button class="btn-info cam-edit-btn" data-index="${index}" type="button" title="Edit camera">${ICONS.edit}<span class="action-label">Edit</span></button>
+          <button class="btn-danger cam-remove-btn" data-index="${index}" type="button" title="Remove camera">${ICONS.remove}<span class="action-label">Remove</span></button>
         </div>
       </td>
       <td><span class="chip">${backend}</span></td>

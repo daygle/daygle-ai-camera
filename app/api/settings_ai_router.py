@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from app.ai_settings import YOLO_MODELS, ai_status_payload, detector_status, validate_ai_settings
+from app.ai_settings import YOLO_MODELS, detector_status, validate_ai_settings
 from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.config_facades import effective_ai_config

@@ -160,17 +160,17 @@ function renderModelList(models) {
     // Action buttons
     let actionsHtml = '';
     if (isActive) {
-      actionsHtml = '<button class="model-action-btn model-action-active" disabled>\u2713 In Use</button>';
+      actionsHtml = '<button class="btn-success model-action-btn" disabled>\u2713 In Use</button>';
     } else if (!isInstalled) {
-      actionsHtml = `<button class="model-action-btn model-action-download" data-action="download" data-model-id="${escapeHtml(m.id)}">\u2B07 Download</button>`;
+      actionsHtml = `<button class="btn-info model-action-btn" data-action="download" data-model-id="${escapeHtml(m.id)}">\u2B07 Download</button>`;
     } else {
       const updateBtn = hasUpdate
-        ? `<button class="model-action-btn model-action-update" data-action="update" data-model-id="${escapeHtml(m.id)}">\u21BB Update</button>`
+        ? `<button class="btn-warning model-action-btn" data-action="update" data-model-id="${escapeHtml(m.id)}">\u21BB Update</button>`
         : '';
       actionsHtml = `
-        <button class="model-action-btn model-action-use" data-action="use" data-model-id="${escapeHtml(m.id)}" data-model-path="${escapeHtml(m.path)}">\u25B6 Use</button>
+        <button class="btn-success model-action-btn" data-action="use" data-model-id="${escapeHtml(m.id)}" data-model-path="${escapeHtml(m.path)}">\u25B6 Use</button>
         ${updateBtn}
-        <button class="model-action-btn model-action-delete" data-action="delete" data-model-id="${escapeHtml(m.id)}">\u2715 Delete</button>`;
+        <button class="btn-danger model-action-btn" data-action="delete" data-model-id="${escapeHtml(m.id)}">\u2715 Delete</button>`;
     }
 
     return `

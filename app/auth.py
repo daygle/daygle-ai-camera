@@ -496,7 +496,7 @@ class AuthService:
                 # Invalidate existing sessions when the username changes.
                 # Without this, a stolen session cookie for the old username
                 # remains valid after the rename.  Only the username change
-                # triggers invalidation — email changes are less security-
+                # triggers invalidation - email changes are less security-
                 # sensitive since the username is the primary identifier.
                 if username_changed:
                     db.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))

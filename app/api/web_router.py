@@ -36,7 +36,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 
-from app.auth import CSRF_COOKIE, SESSION_COOKIE
+from app.auth import SESSION_COOKIE
 from app.auth_helpers import csrf_token_response
 from app.auth_gates import require_admin
 from app.config_facades import effective_auth_config

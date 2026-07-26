@@ -7,7 +7,6 @@ import shutil
 import subprocess
 import threading
 import time
-from datetime import datetime
 
 from app.alerts import _now_hm_in_admin_tz
 from pathlib import Path

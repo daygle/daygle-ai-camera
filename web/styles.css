@@ -142,10 +142,10 @@
 :root.light .activity-filter-group { background: rgba(0,0,0,.04); border-color: rgba(0,0,0,.08); }
 :root.light .activity-filter-pill:hover { background: rgba(0,0,0,.08); color: var(--text); }
 :root.light .activity-filter-pill.active { background: linear-gradient(135deg, #0284c7, #059669); color: #fff; box-shadow: 0 2px 8px rgba(2,132,199,.25); }
-:root.light .activity-item-type { background: rgba(0,0,0,.08); color: var(--muted); font-weight: 700; }
+:root.light .activity-item-type { background: rgba(71,214,255,.12); color: var(--accent); font-weight: 700; border: 1px solid rgba(71,214,255,.3); }
 :root.light .activity-item-sound .activity-item-type { background: rgba(124,58,237,.15); color: #6d28d9; border: 1px solid rgba(124,58,237,.25); }
 :root.light .activity-item-motion .activity-item-type { background: rgba(5,150,105,.12); color: #047857; border: 1px solid rgba(5,150,105,.2); }
-:root.light .activity-item-alert .activity-item-type { background: rgba(220,38,38,.1); color: #b91c1c; border: 1px solid rgba(220,38,38,.2); }
+:root.light .activity-item-alert .activity-item-type { background: rgba(71,214,255,.12); color: var(--accent); border: 1px solid rgba(71,214,255,.3); }
 :root.light .zone-object-rule { background: rgba(0,0,0,.025); }
 :root.light .live-status,
 :root.light .live-status-pill,
@@ -571,8 +571,6 @@ textarea {
 .detection.detection-motion { background: rgba(45, 212, 191, 0.12); color: #2dd4bf; border: 1px solid rgba(45, 212, 191, 0.4); }
 .empty { color: var(--muted); padding: 12px; }
 
-.auth-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
-.auth-card { width: min(460px, 100%); }
 .form-stack { display: grid; gap: 14px; margin-top: 18px; }
 .form-stack label { display: grid; gap: 8px; color: var(--muted); font-weight: 800; }
 .form-grid {
@@ -2372,7 +2370,6 @@ tr.drag-over {
 @media (max-width: 360px) {
   .ptz-dpad { grid-template-columns: repeat(3, 32px); grid-template-rows: repeat(3, 32px); }
   .ptz-btn { width: 32px; height: 32px; }
-  .auth-shell { padding: 12px; }
 }
 
 /* ─── Video Panel (side drawer / bottom sheet) ──────────────────────────── */
@@ -2717,10 +2714,15 @@ tr.drag-over {
   flex-shrink: 0;
 }
 .activity-item-alert .activity-item-type {
-  background: rgba(139, 92, 246, 0.14);
-  color: #c9b8ff;
-  border-color: rgba(139, 92, 246, 0.35);
+  background: rgba(71, 214, 255, 0.12);
+  color: var(--accent);
+  border-color: rgba(71, 214, 255, 0.3);
 }
+
+
+
+
+
 .activity-item-sound .activity-item-type {
   background: rgba(168, 85, 247, 0.14);
   color: #a855f7;
@@ -4649,4 +4651,196 @@ a.activity-item-action {
   .model-card-size { text-align: left; min-width: 0; }
   .model-card-actions { flex-direction: column; align-items: stretch; }
   .model-action-btn { width: 100%; justify-content: center; }
+}
+
+/* =====================================================================
+   Unified Button System - Color-coded by action type
+   ===================================================================== */
+
+/* --- Base button sizing (ensures consistent touch targets) --- */
+button, .button-link, a.secondary, a.button-link {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border: 0;
+  border-radius: 14px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 0.12s ease, filter 0.12s ease, box-shadow 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+}
+button svg, a.secondary svg, a.button-link svg {
+  display: block;
+  flex-shrink: 0;
+}
+button:disabled, button[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* --- Primary (default) - cyan→green gradient --- */
+button, .button-link {
+  color: #04111c;
+  background: linear-gradient(135deg, var(--accent), var(--success));
+}
+button:active:not(:disabled) {
+  transform: scale(0.97);
+  filter: brightness(0.92);
+}
+
+/* --- Secondary - panel background --- */
+button.secondary, a.secondary, a.button-link.secondary-link {
+  background: var(--panel-strong);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+button.secondary:active:not(:disabled), a.secondary:active {
+  background: rgba(255,255,255,.10);
+  transform: scale(0.97);
+}
+
+/* --- Danger - red gradient for destructive actions --- */
+button.btn-danger {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: #fff;
+}
+button.btn-danger:active:not(:disabled) {
+  filter: brightness(0.88);
+  transform: scale(0.97);
+}
+/* Light mode danger */
+:root.light button.btn-danger {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  color: #fff;
+}
+
+/* --- Warning - amber/orange for caution actions --- */
+button.btn-warning {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #451a03;
+}
+button.btn-warning:active:not(:disabled) {
+  filter: brightness(0.92);
+  transform: scale(0.97);
+}
+/* Light mode warning */
+:root.light button.btn-warning {
+  background: linear-gradient(135deg, #d97706, #b45309);
+  color: #fff;
+}
+
+/* --- Success - green gradient for confirm/approve actions --- */
+button.btn-success {
+  background: linear-gradient(135deg, var(--success), #059669);
+  color: #022c22;
+}
+button.btn-success:active:not(:disabled) {
+  filter: brightness(0.92);
+  transform: scale(0.97);
+}
+/* Light mode success */
+:root.light button.btn-success {
+  background: linear-gradient(135deg, #059669, #047857);
+  color: #fff;
+}
+
+/* --- Info - accent blue for informational actions --- */
+button.btn-info {
+  background: linear-gradient(135deg, var(--accent), #0284c7);
+  color: #0c4a6e;
+}
+button.btn-info:active:not(:disabled) {
+  filter: brightness(0.92);
+  transform: scale(0.97);
+}
+/* Light mode info */
+:root.light button.btn-info {
+  background: linear-gradient(135deg, #0284c7, #0369a1);
+  color: #fff;
+}
+
+/* --- Legacy delete-btn compat (backwards-compatible) --- */
+button.delete-btn {
+  color: #fca5a5;
+  border: 1px solid rgba(248,113,113,.35);
+  background: transparent;
+}
+button.delete-btn:hover:not(:disabled) {
+  background: rgba(248,113,113,.12);
+  border-color: #f87171;
+}
+:root.light button.delete-btn {
+  color: #dc2626;
+  border-color: rgba(220,38,38,.3);
+  background: transparent;
+}
+:root.light button.delete-btn:hover:not(:disabled) {
+  background: rgba(220,38,38,.08);
+  border-color: #dc2626;
+}
+
+/* --- Button size variants --- */
+button.btn-sm, a.secondary.btn-sm {
+  min-height: 36px;
+  padding: 8px 14px;
+  font-size: 13px;
+  border-radius: 10px;
+}
+button.btn-xs, a.secondary.btn-xs {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 8px;
+}
+button.btn-icon-only {
+  min-width: 44px;
+  padding: 12px;
+}
+button.btn-sm.btn-icon-only {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 8px;
+}
+
+/* --- Touch feedback for link-style buttons --- */
+a.button-link:active, a.secondary:active, a.button-link.secondary-link:active {
+  transform: scale(0.97);
+  transition-duration: 0.08s;
+}
+
+/* --- Disabled secondary buttons --- */
+button.secondary:disabled, a.secondary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* =====================================================================
+   Mobile responsive button adjustments
+   ===================================================================== */
+@media (max-width: 600px) {
+  button, .button-link, a.secondary, a.button-link {
+    padding: 14px 18px;
+    font-size: 15px;
+    min-height: 48px;
+  }
+  button.btn-sm, a.secondary.btn-sm {
+    min-height: 42px;
+    padding: 10px 14px;
+  }
+  /* Ensure button rows wrap properly on small screens */
+  .button-row {
+    gap: 10px;
+  }
+  .button-row button {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
 }
