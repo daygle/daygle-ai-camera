@@ -1410,6 +1410,20 @@ tr.drag-over {
   .clip-overlay-controls { flex-direction: column; align-items: stretch; gap: 8px; }
   /* Stat cards: 2×2 grid holds better than a single column on small phones */
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  /* Text-valued stat cards (Detection "Enabled", Camera name) ellipsis-clip
+     to one line, which chops short values like "Enabled" -> "Enab..." in the
+     narrow 2-up phone grid. Let them wrap and shrink so the value stays
+     readable. The selector is scoped to `.stats-grid .stat-card ...` (0,3,0)
+     so it outranks the global `.stats-grid .card strong` (0,2,1) that
+     otherwise forces the 32px single-line value. */
+  .stats-grid .stat-card .stat-card-value-text {
+    font-size: 20px;
+    line-height: 1.2;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
   /* Activity filter pills: drop the full-pill capsule shape when they wrap */
   .activity-filter-group { border-radius: 14px; }
   /* Settings section headers: wrap hero action below title */
@@ -1475,6 +1489,17 @@ tr.drag-over {
     width: 100%;
     min-width: 680px;
   }
+  /* The rule table sets a 680px min-width so its columns stay legible, and
+     scrolls horizontally inside its own `overflow-x: auto` box. But grid
+     items default to `min-width: auto`, so without the resets below that
+     680px min-content leaks up through the single-column `.sounds-layout`
+     and page grids, stretching the whole page (header included) wide enough
+     to scroll horizontally. Letting these containers shrink below their
+     content keeps the overflow confined to the table's own scroll box. */
+  .sounds-layout,
+  .sound-settings-card,
+  .sound-rules-card { min-width: 0; }
+  #soundRulesWrap { min-width: 0; }
 }
 
 /* ─── Zone frame toolbar ────────────────────────────────────────────────────── */
