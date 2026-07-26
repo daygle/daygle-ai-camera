@@ -4162,6 +4162,16 @@ a.activity-item-action {
 }
 
 /* ─── YAMNet TFLite page: camera sound-detector table ─────────────────────── */
+@media (max-width: 760px) {
+  /* The camera-status table is a 9-column `.rule-table`, which carries a
+     680px min-width (see the rule-table mobile rules) and scrolls inside its
+     inline `overflow-x: auto` wrapper. But the card is a page-stack grid
+     item defaulting to `min-width: auto`, so that 680px min-content leaked up
+     and stretched the whole page (header included) into a horizontal scroll.
+     Let the card and wrapper shrink so the overflow stays confined. */
+  .yamnet-cameras-card { min-width: 0; }
+  .yamnet-cameras-card #soundCameraStatusList > div { min-width: 0; }
+}
 @media (max-width: 600px) {
   /* Hide less-critical columns (Configured, Rules, Last Sound, Recent Scores, Detail)
      so the essential Camera / Backend / Running / Status columns remain readable. */
@@ -4175,6 +4185,25 @@ a.activity-item-action {
   #soundCameraStatusList .rule-table td:nth-child(8),
   #soundCameraStatusList .rule-table th:nth-child(9),
   #soundCameraStatusList .rule-table td:nth-child(9) { display: none; }
+  /* With only 4 columns left, drop the 680px min-width floor the general
+     rule-table mobile rule applies so they fit the phone width instead of
+     forcing a horizontal scroll, and let the camera label wrap rather than
+     push the row wide. */
+  #soundCameraStatusList .rule-table,
+  #soundCameraStatusList .rule-table thead,
+  #soundCameraStatusList .rule-table tbody,
+  #soundCameraStatusList .rule-table tr { min-width: 0; }
+  #soundCameraStatusList .rule-table .cell-label { white-space: normal; }
+  /* The Backend Status grid keeps 4 columns via the `.status-ok/.warning/
+     .error` variants (specificity 0,3,0), which the general `.status-panel`
+     1fr reset can't override, so on phones the values wrap mid-word
+     ("YAM Net TFLi te"). Drop it to 2 columns here at matching specificity. */
+  .yamnet-status-grid.status-panel,
+  .yamnet-status-grid.status-panel.status-ok,
+  .yamnet-status-grid.status-panel.status-warning,
+  .yamnet-status-grid.status-panel.status-error {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* ─── Custom tooltip ──────────────────────────────────────────────────────── */
