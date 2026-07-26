@@ -37,7 +37,7 @@ def recordings(
     request: Request,
     label: str | None = None,
     camera_id: str | None = None,
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(10000, ge=1, le=10000),
     alerted_only: bool = False,
     started_after: str | None = Query(None, description='ISO timestamp; include recordings started at or after this time.'),
     started_before: str | None = Query(None, description='ISO timestamp; include recordings started at or before this time.'),
