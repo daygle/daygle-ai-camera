@@ -16,7 +16,7 @@ import logging
 
 from html import escape
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.auth import CSRF_COOKIE, CSRF_HEADER, AuthError, SESSION_COOKIE, utc_now
@@ -137,18 +137,18 @@ async def setup(request: Request, auth=Depends(get_auth), auth_enabled=Depends(g
         try:
             from app.request_helpers import write_audit_log
             from app.database import EventDatabase
+            # EventDatabase opens/commits/closes a fresh connection per call
+            # (see ``EventDatabase.connect``); there is no ``.close()`` on the
+            # instance and none is needed.
             db_for_audit = EventDatabase(str(auth.database_path))
-            try:
-                write_audit_log(
-                    request=request,
-                    database=db_for_audit,
-                    action='setup_rate_limited',
-                    resource='setup',
-                    status='failure',
-                    details={'ip': setup_ip},
-                )
-            finally:
-                db_for_audit.close()
+            write_audit_log(
+                request=request,
+                database=db_for_audit,
+                action='setup_rate_limited',
+                resource='setup',
+                status='failure',
+                details={'ip': setup_ip},
+            )
         except Exception as exc:
             # R9 H3: telemetrize the failure so admins can detect a
             # degraded audit pipeline; keep best-effort so a logger
