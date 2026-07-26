@@ -129,95 +129,119 @@ function renderModelList(models) {
     const updateInfo = modelUpdateMap[m.id] || {};
     const hasUpdate = updateInfo.update_available === true;
     const sizeMb = m.size_bytes ? `${(m.size_bytes / 1048576).toFixed(0)} MB` : `~${m.approx_mb} MB`;
-    const statusBadge = m.active
-      ? '<span class="badge badge-active">Active</span>'
-      : m.installed ? '<span class="badge badge-installed">Installed</span>' : '';
-    const updateBadge = hasUpdate ? '<span class="badge badge-update">Update Available</span>' : '';
-    const versionLabel = m.installed_version ? `<span class="muted" style="font-size:11px">v${escapeHtml(m.installed_version)}</span>` : '';
-    let action;
-    if (!m.installed) {
-      action = `<button class="model-download-btn" data-model-id="${escapeHtml(m.id)}">Download &amp; Install</button>`;
-    } else if (hasUpdate) {
-      const useBtn = m.active ? '' : `<button class="secondary model-use-btn" data-model-id="${escapeHtml(m.id)}" data-model-path="${escapeHtml(m.path)}">Use</button>`;
-      action = `${useBtn}<button class="model-update-btn" data-model-id="${escapeHtml(m.id)}">Update</button>`;
-    } else if (m.active) {
-      action = '<button class="secondary" disabled>In Use</button>';
-    } else {
-      action = `<button class="secondary model-use-btn" data-model-id="${escapeHtml(m.id)}" data-model-path="${escapeHtml(m.path)}">Use</button>`;
+    const isInstalled = m.installed;
+    const isActive = m.active;
+    const versionLabel = m.installed_version ? `v${escapeHtml(m.installed_version)}` : '';
+
+    // Determine card state class
+    let cardClass = 'model-card';
+    if (isActive) cardClass += ' model-card-active';
+    else if (isInstalled) cardClass += ' model-card-installed';
+    else cardClass += ' model-card-available';
+
+    // Status indicator
+    let statusHtml = '';
+    if (isActive) {
+      statusHtml = '<span class="model-status model-status-active">\u25CF Active</span>';
+    } else if (isInstalled) {
+      statusHtml = '<span class="model-status model-status-installed">\u25CB Installed</span>';
     }
+
+    // Update badge
+    let updateBadge = '';
+    if (hasUpdate) {
+      updateBadge = '<span class="model-badge model-badge-update">Update Available</span>';
+    }
+
+    // Size bar (visual weight indicator)
+    const maxMb = 131;
+    const barWidth = Math.min(100, Math.round((m.approx_mb / maxMb) * 100));
+
+    // Action buttons
+    let actionsHtml = '';
+    if (isActive) {
+      actionsHtml = '<button class="model-action-btn model-action-active" disabled>\u2713 In Use</button>';
+    } else if (!isInstalled) {
+      actionsHtml = `<button class="model-action-btn model-action-download" data-action="download" data-model-id="${escapeHtml(m.id)}">\u2B07 Download</button>`;
+    } else {
+      const updateBtn = hasUpdate
+        ? `<button class="model-action-btn model-action-update" data-action="update" data-model-id="${escapeHtml(m.id)}">\u21BB Update</button>`
+        : '';
+      actionsHtml = `
+        <button class="model-action-btn model-action-use" data-action="use" data-model-id="${escapeHtml(m.id)}" data-model-path="${escapeHtml(m.path)}">\u25B6 Use</button>
+        ${updateBtn}
+        <button class="model-action-btn model-action-delete" data-action="delete" data-model-id="${escapeHtml(m.id)}">\u2715 Delete</button>`;
+    }
+
     return `
-      <div class="model-row" id="model-row-${escapeHtml(m.id)}">
-        <div class="model-row-info">
-          <strong>${escapeHtml(m.label)}</strong>${statusBadge}${updateBadge}${versionLabel}
-          <span class="muted">${escapeHtml(m.description)}</span>
+      <div class="${cardClass}" id="model-card-${escapeHtml(m.id)}">
+        <div class="model-card-header">
+          <div class="model-card-title">
+            <h3>${escapeHtml(m.label)}</h3>
+            <div class="model-card-meta">
+              ${statusHtml}${updateBadge}${versionLabel ? `<span class="model-version">${versionLabel}</span>` : ''}
+            </div>
+          </div>
+          <div class="model-card-size">
+            <span class="model-size-value">${sizeMb}</span>
+            <div class="model-size-bar"><div class="model-size-fill" style="width:${barWidth}%"></div></div>
+          </div>
         </div>
-        <div class="model-row-meta"><span class="muted">${sizeMb}</span></div>
-        <div class="model-row-action">${action}</div>
+        <p class="model-card-desc">${escapeHtml(m.description)}</p>
+        <div class="model-card-actions">${actionsHtml}</div>
       </div>`;
   }).join('');
 
-  modelList.querySelectorAll('.model-download-btn').forEach((btn) => {
+  // Unified action handler for all model card buttons
+  modelList.querySelectorAll('.model-action-btn[data-action]').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      const modelId = btn.dataset.modelId;
-      btn.disabled = true;
-      btn.textContent = 'Downloading…';
-      setMessage(`Downloading ${modelId}… this may take several minutes.`);
-      try {
-        const result = await api('/api/settings/ai/download-model', { method: 'POST', body: JSON.stringify({ model: modelId }) });
-        renderAi(result.status || result);
-        setMessage(result.message || `${modelId} installed.`);
-        await loadModels();
-      } catch (error) {
-        // Skip UI updates if api() triggered a 401 redirect
-        if (window.daygleAuth?.redirecting) return;
-        setMessage(error.message, true);
-        btn.disabled = false;
-        btn.textContent = 'Download & Install';
-      }
-    });
-  });
-
-  modelList.querySelectorAll('.model-use-btn').forEach((btn) => {
-    btn.addEventListener('click', async () => {
+      const action = btn.dataset.action;
       const modelId = btn.dataset.modelId;
       const modelPath = btn.dataset.modelPath;
-      btn.disabled = true;
-      btn.textContent = 'Switching…';
-      setMessage(`Switching to ${modelId}…`);
-      try {
-        const current = await api('/api/settings/ai');
-        const result = await api('/api/settings/ai', { method: 'PUT', body: JSON.stringify({ ...current, model_path: modelPath }) });
-        renderAi(result);
-        setMessage(`Switched to ${modelId}.`);
-        await loadModels();
-      } catch (error) {
-        // Skip UI updates if api() triggered a 401 redirect
-        if (window.daygleAuth?.redirecting) return;
-        setMessage(error.message, true);
-        btn.disabled = false;
-        btn.textContent = 'Use';
-      }
-    });
-  });
+      const originalText = btn.textContent;
 
-  modelList.querySelectorAll('.model-update-btn').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const modelId = btn.dataset.modelId;
+      if (action === 'delete') {
+        if (!confirm(`Delete ${modelId}? This cannot be undone.`)) return;
+      }
+
       btn.disabled = true;
-      btn.textContent = 'Updating…';
-      setMessage(`Updating ${modelId}… this may take several minutes.`);
+      btn.classList.add('model-action-loading');
+
       try {
-        const result = await api('/api/settings/ai/update-model', { method: 'POST', body: JSON.stringify({ model: modelId }) });
-        renderAi(result.status || result);
-        setMessage(result.message || `${modelId} updated.`);
-        delete modelUpdateMap[modelId];
+        let result;
+        if (action === 'download') {
+          btn.textContent = 'Downloading…';
+          setMessage(`Downloading ${modelId}… this may take several minutes.`);
+          result = await api('/api/settings/ai/download-model', { method: 'POST', body: JSON.stringify({ model: modelId }) });
+        } else if (action === 'use') {
+          btn.textContent = 'Switching…';
+          setMessage(`Switching to ${modelId}…`);
+          const current = await api('/api/settings/ai');
+          result = await api('/api/settings/ai', { method: 'PUT', body: JSON.stringify({ ...current, model_path: modelPath }) });
+        } else if (action === 'update') {
+          btn.textContent = 'Updating…';
+          setMessage(`Updating ${modelId}… this may take several minutes.`);
+          result = await api('/api/settings/ai/update-model', { method: 'POST', body: JSON.stringify({ model: modelId }) });
+          delete modelUpdateMap[modelId];
+        } else if (action === 'delete') {
+          btn.textContent = 'Deleting…';
+          setMessage(`Deleting ${modelId}…`);
+          result = await api(`/api/settings/ai/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' });
+        }
+
+        if (action === 'use') {
+          renderAi(result);
+        } else {
+          renderAi(result.status || result);
+        }
+        setMessage(result.message || `${modelId} ${action === 'delete' ? 'deleted' : action === 'download' ? 'installed' : action === 'update' ? 'updated' : 'activated'}.`);
         await loadModels();
       } catch (error) {
-        // Skip UI updates if api() triggered a 401 redirect
         if (window.daygleAuth?.redirecting) return;
         setMessage(error.message, true);
         btn.disabled = false;
-        btn.textContent = 'Update';
+        btn.classList.remove('model-action-loading');
+        btn.textContent = originalText;
       }
     });
   });

@@ -25,6 +25,7 @@ from app.model_management import (
     _fetch_models_manifest,
     _parse_semver,
     _read_installed_models,
+    delete_model,
 )
 from app.request_helpers import write_audit_log
 from app.media_utils import ONE_PIXEL_PNG
@@ -219,6 +220,38 @@ async def update_ai_model(request: Request, db=Depends(get_database)):
     write_audit_log(request, db, 'update', 'settings.ai.model',
                     details={'model_id': model_name, 'switch_active': False})
     return await run_in_threadpool(_do_download_model, model_name, False)
+
+
+@router.delete('/api/settings/ai/models/{model_id}')
+def delete_ai_model(model_id: str, request: Request, db=Depends(get_database)):
+    require_admin(request)
+    model_name = model_id.strip().lower()
+    result = delete_model(model_name)
+    write_audit_log(request, db, 'delete', 'settings.ai.model',
+                    details={'model_id': model_name})
+    # Return updated model list
+    models_dir = BASE_DIR / 'models'
+    active_path = str(effective_ai_config().get('model_path') or '')
+    installed_meta = _read_installed_models()
+    models = []
+    for mid, info in YOLO_MODELS.items():
+        onnx_path = models_dir / info['onnx']
+        rel_path = str((models_dir / info['onnx']).relative_to(BASE_DIR))
+        installed = onnx_path.exists()
+        meta = installed_meta.get(mid, {})
+        models.append({
+            'id': mid,
+            'label': info['label'],
+            'description': info['description'],
+            'approx_mb': info['approx_mb'],
+            'path': rel_path,
+            'installed': installed,
+            'active': active_path == rel_path,
+            'size_bytes': onnx_path.stat().st_size if installed else None,
+            'installed_version': meta.get('version') if installed else None,
+        })
+    result['models'] = models
+    return result
 
 
 @router.post('/api/settings/ai/test-detector')

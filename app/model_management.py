@@ -189,6 +189,53 @@ def export_yolo_onnx(model_name: str, destination: Path) -> int:
     return destination.stat().st_size
 
 
+def delete_model(model_name: str) -> dict[str, Any]:
+    """Delete an installed ONNX model file and its metadata.
+
+    Safety checks:
+    - Model must be in YOLO_MODELS whitelist
+    - Model must be currently installed (ONNX file exists)
+    - Model must NOT be the active model (in use by detector)
+
+    Returns a dict with deletion status and updated model list.
+    Raises HTTPException on validation errors.
+    """
+    if model_name not in YOLO_MODELS:
+        raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'.")
+
+    info = YOLO_MODELS[model_name]
+    onnx_path = _safe_within_models_dir(info['onnx'])
+
+    if not onnx_path.exists():
+        raise HTTPException(status_code=404, detail=f"Model '{model_name}' is not installed.")
+
+    # Check if this model is currently active
+    ai_settings = effective_ai_config()
+    active_path = str(ai_settings.get('model_path') or '')
+    rel_path = str(onnx_path.relative_to(BASE_DIR))
+    if active_path == rel_path:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete '{model_name}' because it is the active model. Switch to another model first."
+        )
+
+    # Delete the ONNX file
+    onnx_path.unlink(missing_ok=True)
+
+    # Remove from installed.json metadata
+    with _installed_models_lock:
+        installed_meta = _read_installed_models()
+        if model_name in installed_meta:
+            del installed_meta[model_name]
+            _write_installed_models(installed_meta)
+
+    return {
+        'ok': True,
+        'message': f"Deleted {info['label']} model.",
+        'deleted': model_name,
+    }
+
+
 def _do_download_model(model_name: str, switch_active: bool = True) -> dict[str, Any]:
     if model_name not in YOLO_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
