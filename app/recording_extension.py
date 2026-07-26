@@ -637,7 +637,16 @@ def start_rtsp_recording_capture(
             actual_end_ts = min(max(time.time(), final_deadline_ts), max_deadline_ts)
             final_duration_seconds = max(1.0, actual_end_ts - start_capture_ts)
             dynamic_post_seconds = max(0, int(round(actual_end_ts - triggered_at.timestamp())))
-            if camera_id and pre_seconds > 0:
+            # Every RTSP camera event renders from the rolling prebuffer, which
+            # runs continuously for the camera and therefore holds footage
+            # spanning the trigger -- even when ``pre_event_seconds`` is 0.
+            # ``write_rtsp_clip_with_prebuffer`` floors the pre-roll
+            # (``RTSP_EVENT_MIN_PRE_SECONDS``) so the trigger moment lands inside
+            # the clip, and falls back to a live capture only when the buffer has
+            # no usable segments. The bare ``write_rtsp_clip`` path remains only
+            # for the (RTSP-camera-less) case with no per-camera ingest to draw
+            # from.
+            if camera_id:
                 content_start_ts, content_seconds = (
                     _state.recording_service.write_rtsp_clip_with_prebuffer(
                         stream_url=stream_url, camera_id=camera_id, file_path=file_path,
