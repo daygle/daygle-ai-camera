@@ -56,18 +56,14 @@
           <input name="username" placeholder="Username" required autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore />
         </label>
         <label>
-          <span>Role</span>
+          <span>Role <span class="info-tip" data-tip="Viewers can view live feeds and recordings. Admins have full access. Default: Viewer" title="Viewers can view live feeds and recordings. Admins have full access. Default: Viewer" tabindex="0" aria-label="Help: Viewers can view live feeds and recordings. Admins have full access. Default: Vi..."></span></span>
           <select name="role">
             <option value="viewer">Viewer</option>
             <option value="admin">Admin</option>
-          </select>
-          <span class="field-help">Viewers can view live feeds and recordings. Admins have full access. Default: Viewer</span>
-        </label>
+          </select></label>
         <label>
-          <span>Temporary Password</span>
-          <input name="password" type="password" placeholder="Temporary password" required />
-          <span class="field-help">The user should change this password after their first login.</span>
-        </label>
+          <span>Temporary Password <span class="info-tip" data-tip="The user should change this password after their first login." title="The user should change this password after their first login." tabindex="0" aria-label="Help: The user should change this password after their first login."></span></span>
+          <input name="password" type="password" placeholder="Temporary password" required /></label>
       </form>
       <div class="button-row">
         <button type="submit" form="createUserForm">Create User</button>

@@ -16,6 +16,12 @@
         <h1>Cameras</h1>
         <p class="muted">Manage RTSP and ONVIF camera connections. Configure motion detection and object alerts for your cameras.</p>
       </div>
+      <div class="hero-action">
+        <button id="addCameraBtn" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add Camera
+        </button>
+      </div>
     </header>
 
     <section class="grid stats-grid cameras-stats">
@@ -78,33 +84,24 @@
           <h2>Connected Cameras</h2>
           <p class="settings-section-subtitle">Browse, edit, and remove camera connections. Add zones from the Zones page to define monitored areas.</p>
         </div>
-        <div class="button-row cameras-toolbar-actions">
-          <button id="addCameraBtn" type="button">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add Camera
-          </button>
-        </div>
+
       </div>
 
       <form id="camerasFilterForm" class="form-grid cameras-filter-grid" onsubmit="return false;">
         <label>
-          <span>Search</span>
-          <input id="cameraFilter" placeholder="Filter by name or ID" aria-label="Filter cameras" />
-          <span class="field-help">Type to filter by camera name or ID. Default: show all</span>
-        </label>
+          <span>Search <span class="info-tip" data-tip="Type to filter by camera name or ID. Default: show all" title="Type to filter by camera name or ID. Default: show all" tabindex="0" aria-label="Help: Type to filter by camera name or ID. Default: show all"></span></span>
+          <input id="cameraFilter" placeholder="Filter by name or ID" aria-label="Filter cameras" /></label>
         <label>
-          <span>Backend</span>
+          <span>Backend <span class="info-tip" data-tip="Limit by connection type. Default: every backend" title="Limit by connection type. Default: every backend" tabindex="0" aria-label="Help: Limit by connection type. Default: every backend"></span></span>
           <select id="cameraBackendFilter" aria-label="Filter by backend">
             <option value="">All Backends</option>
             <option value="onvif">ONVIF / RTSP Auto</option>
             <option value="rtsp">RTSP Manual</option>
-          </select>
-          <span class="field-help">Limit by connection type. Default: every backend</span>
-        </label>
+          </select></label>
         <label class="cameras-filter-actions">
           <span>&nbsp;</span>
           <div class="button-row">
-            <button id="cameraFilterResetBtn" class="secondary" type="reset"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg>Reset Filters</button>
+            <button id="cameraFilterResetBtn" class="secondary" type="reset"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg><span>Reset Filters</span></button>
           </div>
         </label>
       </form>
@@ -201,18 +198,16 @@
                 <option value="true">Enabled</option>
               </select>
             </label>
-            <label class="full-width"><span>Protocol</span>
+            <label class="full-width"><span>Protocol <span class="info-tip" data-tip="ONVIF uses standard PTZ over the camera's HTTP port. TCP PelcoD sends raw binary commands to the Command Port." title="ONVIF uses standard PTZ over the camera's HTTP port. TCP PelcoD sends raw binary commands to the Command Port." tabindex="0" aria-label="Help: ONVIF uses standard PTZ over the camera's HTTP port. TCP PelcoD sends raw binary..."></span></span>
               <select id="editPtzProtocol" name="ptz_protocol">
                 <option value="onvif">ONVIF (Recommended)</option>
                 <option value="tcp_pelcod">TCP PelcoD (Legacy Cameras)</option>
-              </select>
-              <span class="field-help">ONVIF uses standard PTZ over the camera's HTTP port. TCP PelcoD sends raw binary commands to the Command Port.</span>
-            </label>
-            <label><span>HTTP Port</span><input id="editPtzHttpPort" name="ptz_http_port" type="number" min="1" max="65535" placeholder="80" /><span class="field-help">Camera web port used by HTTP CGI (default 80).</span></label>
-            <label><span>Command Port</span><input id="editPtzPort" name="ptz_port" type="number" min="1" max="65535" placeholder="6060" /><span class="field-help">Port for TCP PelcoD only (default 6060).</span></label>
-            <label><span>PTZ Address</span><input id="editPtzAddress" name="ptz_address" type="number" min="1" max="255" placeholder="1" /><span class="field-help">PelcoD device address (default 1, TCP PelcoD only).</span></label>
-            <label><span>Speed</span><input id="editPtzSpeed" name="ptz_speed" type="number" min="1" max="8" placeholder="5" /><span class="field-help">Movement speed (1-8, default 5).</span></label>
-            <label><span>Step Duration (s)</span><input id="editPtzStepDuration" name="ptz_step_duration" type="number" min="0.1" max="5" step="0.1" placeholder="0.4" /><span class="field-help">How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4).</span></label>
+              </select></label>
+            <label><span>HTTP Port <span class="info-tip" data-tip="Camera web port used by HTTP CGI (default 80)." title="Camera web port used by HTTP CGI (default 80)." tabindex="0" aria-label="Help: Camera web port used by HTTP CGI (default 80)."></span></span><input id="editPtzHttpPort" name="ptz_http_port" type="number" min="1" max="65535" placeholder="80" /></label>
+            <label><span>Command Port <span class="info-tip" data-tip="Port for TCP PelcoD only (default 6060)." title="Port for TCP PelcoD only (default 6060)." tabindex="0" aria-label="Help: Port for TCP PelcoD only (default 6060)."></span></span><input id="editPtzPort" name="ptz_port" type="number" min="1" max="65535" placeholder="6060" /></label>
+            <label><span>PTZ Address <span class="info-tip" data-tip="PelcoD device address (default 1, TCP PelcoD only)." title="PelcoD device address (default 1, TCP PelcoD only)." tabindex="0" aria-label="Help: PelcoD device address (default 1, TCP PelcoD only)."></span></span><input id="editPtzAddress" name="ptz_address" type="number" min="1" max="255" placeholder="1" /></label>
+            <label><span>Speed <span class="info-tip" data-tip="Movement speed (1-8, default 5)." title="Movement speed (1-8, default 5)." tabindex="0" aria-label="Help: Movement speed (1-8, default 5)."></span></span><input id="editPtzSpeed" name="ptz_speed" type="number" min="1" max="8" placeholder="5" /></label>
+            <label><span>Step Duration (s) <span class="info-tip" data-tip="How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)." title="How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)." tabindex="0" aria-label="Help: How long each press keeps the camera moving. Hold longer for continuous pan; sho..."></span></span><input id="editPtzStepDuration" name="ptz_step_duration" type="number" min="0.1" max="5" step="0.1" placeholder="0.4" /></label>
           </div>
           <p class="form-help muted">Enable PTZ and save to show the control pad on the Live page. The camera's username and password from the Connection tab are used for HTTP CGI authentication.</p>
         </div>
@@ -223,7 +218,7 @@
             <label><span>Width (px)</span><input id="editWidth" name="width" type="number" min="160" max="7680" placeholder="1280" /></label>
             <label><span>Height (px)</span><input id="editHeight" name="height" type="number" min="90" max="4320" placeholder="720" /></label>
             <label><span>FPS</span><input id="editFps" name="fps" type="number" min="1" max="120" placeholder="15" /></label>
-            <label><span>Frame Buffer Drains</span><input id="editStaleFrameGrabs" name="stale_frame_grabs" type="number" min="0" max="20" placeholder="Auto" /><span class="field-help">Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4).</span></label>
+            <label><span>Frame Buffer Drains <span class="info-tip" data-tip="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." title="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." tabindex="0" aria-label="Help: Stale frames to discard before reading the latest. Lower = faster response, high..."></span></span><input id="editStaleFrameGrabs" name="stale_frame_grabs" type="number" min="0" max="20" placeholder="Auto" /></label>
           </div>
           <p class="form-help muted">These values are hints passed to the stream decoder. Leave at defaults unless your camera requires specific dimensions.</p>
 
@@ -231,10 +226,10 @@
             <p class="form-group-label">Motion Detection Overrides</p>
             <p class="form-help muted">Override the global motion settings for this camera only. Leave blank to use the global defaults from Live Detection settings.</p>
             <div class="form-grid">
-              <label><span>Pixel Threshold</span><input id="editMotionPixelThreshold" name="motion_pixel_threshold" type="number" min="1" max="255" step="1" placeholder="Global default (30)" /><span class="field-help">Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras.</span></label>
-              <label><span>Gate Fraction</span><input id="editMotionGateFraction" name="motion_gate_fraction" type="number" min="0.0001" max="0.5" step="0.0001" placeholder="Global default (0.003)" /><span class="field-help">Minimum fraction of pixels that must change before motion is declared.</span></label>
-              <label><span>Scale Fraction</span><input id="editMotionScaleFraction" name="motion_scale_fraction" type="number" min="0.001" max="1.0" step="0.001" placeholder="Global default (0.03)" /><span class="field-help">Pixel change fraction that maps to 100% motion confidence.</span></label>
-              <label><span>Background Alpha</span><input id="editMotionBackgroundAlpha" name="motion_background_alpha" type="number" min="0.001" max="0.5" step="0.001" placeholder="Global default (0.05)" /><span class="field-help">How fast the background model adapts when no motion is detected.</span></label>
+              <label><span>Pixel Threshold <span class="info-tip" data-tip="Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras." title="Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras." tabindex="0" aria-label="Help: Pixel intensity change required to count as motion (1-255). Raise for noisy IR c..."></span></span><input id="editMotionPixelThreshold" name="motion_pixel_threshold" type="number" min="1" max="255" step="1" placeholder="Global default (30)" /></label>
+              <label><span>Gate Fraction <span class="info-tip" data-tip="Minimum fraction of pixels that must change before motion is declared." title="Minimum fraction of pixels that must change before motion is declared." tabindex="0" aria-label="Help: Minimum fraction of pixels that must change before motion is declared."></span></span><input id="editMotionGateFraction" name="motion_gate_fraction" type="number" min="0.0001" max="0.5" step="0.0001" placeholder="Global default (0.003)" /></label>
+              <label><span>Scale Fraction <span class="info-tip" data-tip="Pixel change fraction that maps to 100% motion confidence." title="Pixel change fraction that maps to 100% motion confidence." tabindex="0" aria-label="Help: Pixel change fraction that maps to 100% motion confidence."></span></span><input id="editMotionScaleFraction" name="motion_scale_fraction" type="number" min="0.001" max="1.0" step="0.001" placeholder="Global default (0.03)" /></label>
+              <label><span>Background Alpha <span class="info-tip" data-tip="How fast the background model adapts when no motion is detected." title="How fast the background model adapts when no motion is detected." tabindex="0" aria-label="Help: How fast the background model adapts when no motion is detected."></span></span><input id="editMotionBackgroundAlpha" name="motion_background_alpha" type="number" min="0.001" max="0.5" step="0.001" placeholder="Global default (0.05)" /></label>
             </div>
           </div>
         </div>

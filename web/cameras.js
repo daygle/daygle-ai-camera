@@ -78,16 +78,18 @@ function renderCameraRow(camera, index) {
   return `
     <tr draggable="true" data-drag-camera="${index}" data-camera-index="${index}">
       <td class="cell-drag"><span class="drag-handle" title="Drag to reorder">${ICONS.grip}</span></td>
-      <td class="cell-camera"><span class="cam-name">${name}</span>${id ? `<span class="cam-id">${id}</span>` : ''}</td>
+      <td class="cell-camera">
+        <div class="cam-info"><span class="cam-name">${name}</span>${id ? `<span class="cam-id">${id}</span>` : ''}</div>
+        <div class="cell-actions">
+          <button class="secondary cam-edit-btn" data-index="${index}" type="button" title="Edit camera">${ICONS.edit}<span class="action-label">Edit</span></button>
+          <button class="secondary delete-btn cam-remove-btn" data-index="${index}" type="button" title="Remove camera">${ICONS.remove}<span class="action-label">Remove</span></button>
+        </div>
+      </td>
       <td><span class="chip">${backend}</span></td>
       <td class="cell-zones">${zonesHtml}</td>
       <td class="cell-center">${soundHtml}</td>
       <td>${recordingHtml}</td>
       <td class="cell-health">${healthHtml}</td>
-      <td class="cell-actions">
-        <button class="secondary cam-edit-btn" data-index="${index}" type="button" title="Edit camera">${ICONS.edit}<span class="action-label">Edit</span></button>
-        <button class="secondary delete-btn cam-remove-btn" data-index="${index}" type="button" title="Remove camera">${ICONS.remove}<span class="action-label">Remove</span></button>
-      </td>
     </tr>
   `;
 }
@@ -150,7 +152,7 @@ function renderGrid() {
             <th class="cell-center">Sound</th>
             <th>Record</th>
             <th>Health</th>
-            <th class="cell-actions"></th>
+
           </tr>
         </thead>
         <tbody>

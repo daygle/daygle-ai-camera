@@ -664,7 +664,7 @@ function bindZoneDrawing() {
   });
 }
 
-liveEls.addZoneBtn?.addEventListener('click', () => {
+function toggleDrawingMode() {
   if (drawingMode && draftPolygon?.points.length >= 3) {
     finishDraftPolygon();
     return;
@@ -674,7 +674,10 @@ liveEls.addZoneBtn?.addEventListener('click', () => {
   zoneDrag = null;
   setAddZoneLabel(drawingMode ? 'Cancel drawing' : 'Draw area');
   renderZones();
-});
+}
+
+liveEls.addZoneBtn?.addEventListener('click', toggleDrawingMode);
+document.getElementById('addZoneBtnHeader')?.addEventListener('click', toggleDrawingMode);
 
 liveEls.fullFrameZoneBtn?.addEventListener('click', () => {
   addFullFrameZone();

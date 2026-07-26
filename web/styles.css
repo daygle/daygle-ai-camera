@@ -561,6 +561,75 @@ textarea {
   min-height: 2.8em;
 }
 .field-help[title] { cursor: help; }
+
+/* ─── Info-tip icon + hover tooltip ──────────────────────────────────── */
+.info-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.08);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  font-style: normal;
+  line-height: 1;
+  cursor: help;
+  vertical-align: middle;
+  margin-left: 4px;
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+}
+.info-tip::before {
+  content: 'i';
+}
+.info-tip:hover {
+  color: var(--accent);
+  background: rgba(71, 214, 255, 0.12);
+}
+.info-tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 280px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--panel-strong);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  white-space: normal;
+  text-align: left;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s, visibility 0.15s;
+  z-index: 200;
+}
+.info-tip:hover::after,
+.info-tip:focus::after {
+  opacity: 1;
+  visibility: visible;
+}
+.info-tip:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+:root.light .info-tip {
+  background: rgba(0,0,0,.05);
+}
+:root.light .info-tip:hover {
+  background: rgba(2, 132, 199, 0.1);
+}
 .form-grid button { justify-self: start; min-height: 44px; }
 .error { color: var(--danger); font-weight: 800; }
 .button-link { display: inline-flex; align-items: center; text-decoration: none; border-radius: 14px; padding: 12px 16px; color: #04111c; background: linear-gradient(135deg, var(--accent), var(--success)); font-family: inherit; font-size: 14px; font-weight: 800; }
@@ -920,14 +989,7 @@ input[type="file"] { padding: 10px; }
 @media (max-width: 899px) {
   .zones-layout { grid-template-columns: 1fr; }
 }
-.zones-layout .live-detection-status {
-  grid-column: 2;
-}
-@media (max-width: 899px) {
-  .zones-layout .live-detection-status {
-    grid-column: 1 / -1;
-  }
-}
+
 .zones-layout .zone-rules-card {
   grid-column: 1 / -1;
 }
@@ -942,6 +1004,17 @@ input[type="file"] { padding: 10px; }
 .zone-row.disabled { opacity: .62; }
 .zone-row label,
 .zone-object-rule label { display: grid; gap: 6px; color: var(--muted); font-weight: 800; text-align: left; }
+.zone-row-main label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-weight: 800;
+  text-align: left;
+}
+.zone-row-main label > span {
+  flex-shrink: 0;
+}
 .zone-name-field {
   display: flex;
   align-items: center;
@@ -1080,21 +1153,7 @@ tr.drag-over {
   flex-shrink: 0;
 }
 
-button-row.cameras-toolbar-actions {
-  flex-shrink: 0;
-  margin: 0 0 0 auto;
-  padding: 0;
-  border-top: 0;
-  justify-content: flex-end;
-}
-.cameras-toolbar-actions button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  line-height: 1;
-}
-.cameras-toolbar-actions button svg {
-  display: block;
+.hero-action {
   flex-shrink: 0;
 }
 .recordings-list-status {
@@ -1107,8 +1166,8 @@ button-row.cameras-toolbar-actions {
   align-items: end;
 }
 .recordings-filter-actions {
-  display: grid;
-  gap: 8px;
+  display: flex;
+  align-items: end;
 }
 .recordings-filter-actions .button-row {
   margin: 0;
@@ -1117,14 +1176,10 @@ button-row.cameras-toolbar-actions {
   justify-content: flex-start;
 }
 .recordings-filter-actions > span:first-child {
-  display: block;
-  min-height: 1.4em;
-  visibility: hidden;
+  display: none;
 }
 .recordings-filter-actions::after {
-  content: "";
-  display: block;
-  min-height: 2.8em;
+  display: none;
 }
 .recordings-list {
   gap: 10px;
@@ -1343,6 +1398,19 @@ button-row.cameras-toolbar-actions {
 }
 .cameras-table .cell-camera {
   min-width: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cameras-table .cell-camera .cam-info {
+  flex: 1;
+  min-width: 0;
+}
+.cameras-table .cell-camera .cam-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .cameras-table .cell-camera .cam-name {
   font-weight: 800;
@@ -1359,8 +1427,10 @@ button-row.cameras-toolbar-actions {
   text-align: center;
 }
 .cameras-table .cell-actions {
-  text-align: right;
-  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 .cameras-table .cell-actions button,
 .cameras-table .cell-actions a {
@@ -1410,20 +1480,7 @@ button-row.cameras-toolbar-actions {
 .cameras-table .cell-health {
   white-space: nowrap;
 }
-.cameras-table .action-link {
-  color: var(--accent);
-  text-decoration: none;
-  font-weight: 700;
-  font-size: 12px;
-  padding: 5px 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border-radius: 8px;
-}
-.cameras-table .action-link:hover {
-  text-decoration: underline;
-}
+
 .cameras-table tbody tr.dragging {
   opacity: 0.4;
 }
@@ -1442,9 +1499,6 @@ button-row.cameras-toolbar-actions {
     display: none;
   }
   .cameras-table .action-label {
-    display: none;
-  }
-  .cameras-table .action-link {
     display: none;
   }
   .cameras-table .cell-actions button {
@@ -2317,11 +2371,17 @@ button-row.cameras-toolbar-actions {
 
 /* Activity feed card + filter pills */
 .activity-card { display: grid; gap: 16px; }
+.page-stack .button-row.activity-toolbar-actions,
+.page-stack .button-row.timeline-controls-actions,
+.page-stack .button-row.timeline-card-status,
+.page-stack .button-row.video-panel-actions {
+  border-top: 0;
+  padding-top: 0;
+}
 .activity-toolbar-actions {
   flex-shrink: 0;
   margin: 0 0 0 auto;
   padding: 0;
-  border-top: 0;
   justify-content: flex-end;
 }
 .activity-toolbar-actions button {
@@ -3173,8 +3233,8 @@ a.activity-item-action {
   align-items: end;
 }
 .cameras-filter-actions {
-  display: grid;
-  gap: 8px;
+  display: flex;
+  align-items: end;
 }
 .cameras-filter-actions .button-row {
   margin: 0;
@@ -3189,14 +3249,10 @@ a.activity-item-action {
   line-height: 1;
 }
 .cameras-filter-actions > span:first-child {
-  display: block;
-  min-height: 1.4em;
-  visibility: hidden;
+  display: none;
 }
 .cameras-filter-actions::after {
-  content: "";
-  display: block;
-  min-height: 2.8em;
+  display: none;
 }
 
 .stat-card-value-text {

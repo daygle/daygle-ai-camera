@@ -82,30 +82,20 @@
       </div>
       <form id="timelineFilterForm" class="form-grid timeline-filter-grid" onsubmit="return false;">
         <label>
-          <span>Camera</span>
-          <select id="timelineCameraSelect" aria-label="Select camera"></select>
-          <span class="field-help">All timeline data is scoped to the selected camera. Default: first camera</span>
-        </label>
+          <span>Camera <span class="info-tip" data-tip="All timeline data is scoped to the selected camera. Default: first camera" title="All timeline data is scoped to the selected camera. Default: first camera" tabindex="0" aria-label="Help: All timeline data is scoped to the selected camera. Default: first camera"></span></span>
+          <select id="timelineCameraSelect" aria-label="Select camera"></select></label>
         <label>
-          <span>Filter</span>
-          <select id="timelineFilterSelect" aria-label="Filter by trigger type"></select>
-          <span class="field-help">Limit clips to a specific trigger or detected object. Default: all recordings</span>
-        </label>
+          <span>Filter <span class="info-tip" data-tip="Limit clips to a specific trigger or detected object. Default: all recordings" title="Limit clips to a specific trigger or detected object. Default: all recordings" tabindex="0" aria-label="Help: Limit clips to a specific trigger or detected object. Default: all recordings"></span></span>
+          <select id="timelineFilterSelect" aria-label="Filter by trigger type"></select></label>
         <label>
-          <span>Day</span>
-          <input id="timelineDate" type="date" aria-label="Timeline day" />
-          <span class="field-help">Pick the date to visualise. Default: today</span>
-        </label>
+          <span>Day <span class="info-tip" data-tip="Pick the date to visualise. Default: today" title="Pick the date to visualise. Default: today" tabindex="0" aria-label="Help: Pick the date to visualise. Default: today"></span></span>
+          <input id="timelineDate" type="date" aria-label="Timeline day" /></label>
         <label>
-          <span>From</span>
-          <span id="timelineFromTimeMount" aria-label="Start time" data-time-role="from"></span>
-          <span class="field-help">Earliest time of day to include (5-minute steps). Default: 00:00</span>
-        </label>
+          <span>From <span class="info-tip" data-tip="Earliest time of day to include (5-minute steps). Default: 00:00" title="Earliest time of day to include (5-minute steps). Default: 00:00" tabindex="0" aria-label="Help: Earliest time of day to include (5-minute steps). Default: 00:00"></span></span>
+          <span id="timelineFromTimeMount" aria-label="Start time" data-time-role="from"></span></label>
         <label>
-          <span>To</span>
-          <span id="timelineToTimeMount" aria-label="End time" data-time-role="to"></span>
-          <span class="field-help">Latest time of day to include (5-minute steps). Default: 23:55</span>
-        </label>
+          <span>To <span class="info-tip" data-tip="Latest time of day to include (5-minute steps). Default: 23:55" title="Latest time of day to include (5-minute steps). Default: 23:55" tabindex="0" aria-label="Help: Latest time of day to include (5-minute steps). Default: 23:55"></span></span>
+          <span id="timelineToTimeMount" aria-label="End time" data-time-role="to"></span></label>
       </form>
     </section>
 

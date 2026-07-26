@@ -50,7 +50,6 @@
         </div>
         <div class="button-row recordings-toolbar-actions">
           <button id="deleteAllRecordingsBtn" class="secondary delete-btn" type="button" hidden><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>Delete All Recordings</button>
-          <button id="recordingClearBtn" class="secondary" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg>Reset Filters</button>
         </div>
       </div>
 
@@ -58,50 +57,37 @@
 
       <form id="recordingsFilterForm" class="form-grid recordings-filter-grid" onsubmit="return false;">
         <label>
-          <span>Camera</span>
+          <span>Camera <span class="info-tip" data-tip="Limit results to a specific camera. Default: every camera" title="Limit results to a specific camera. Default: every camera" tabindex="0" aria-label="Help: Limit results to a specific camera. Default: every camera"></span></span>
           <select id="cameraFilter" aria-label="Filter by camera">
             <option value="">All Cameras</option>
-          </select>
-          <span class="field-help">Limit results to a specific camera. Default: every camera</span>
-        </label>
+          </select></label>
         <label>
-          <span>Label</span>
+          <span>Label <span class="info-tip" data-tip="Limit to a specific detected object or sound. Default: all recordings" title="Limit to a specific detected object or sound. Default: all recordings" tabindex="0" aria-label="Help: Limit to a specific detected object or sound. Default: all recordings"></span></span>
           <select id="labelFilter" aria-label="Filter by label">
             <option value="">All Labels</option>
-          </select>
-          <span class="field-help">Limit to a specific detected object or sound. Default: all recordings</span>
-        </label>
+          </select></label>
         <label>
-          <span>From Date</span>
-          <input id="recordingDateFrom" type="date" aria-label="Filter by start date" />
-          <span class="field-help">Earliest capture date (inclusive). Default: any date</span>
-        </label>
+          <span>From Date <span class="info-tip" data-tip="Earliest capture date (inclusive). Default: any date" title="Earliest capture date (inclusive). Default: any date" tabindex="0" aria-label="Help: Earliest capture date (inclusive). Default: any date"></span></span>
+          <input id="recordingDateFrom" type="date" aria-label="Filter by start date" /></label>
         <label>
-          <span>From Time</span>
-          <span id="recordingTimeFromMount" aria-label="Filter by start time" data-time-role="from"></span>
-          <span class="field-help">Earliest time on the from date (5-minute steps). Default: 00:00</span>
-        </label>
+          <span>From Time <span class="info-tip" data-tip="Earliest time on the from date (5-minute steps). Default: 00:00" title="Earliest time on the from date (5-minute steps). Default: 00:00" tabindex="0" aria-label="Help: Earliest time on the from date (5-minute steps). Default: 00:00"></span></span>
+          <span id="recordingTimeFromMount" aria-label="Filter by start time" data-time-role="from"></span></label>
         <label>
-          <span>To Date</span>
-          <input id="recordingDateTo" type="date" aria-label="Filter by end date" />
-          <span class="field-help">Latest capture date (inclusive). Default: any date</span>
-        </label>
+          <span>To Date <span class="info-tip" data-tip="Latest capture date (inclusive). Default: any date" title="Latest capture date (inclusive). Default: any date" tabindex="0" aria-label="Help: Latest capture date (inclusive). Default: any date"></span></span>
+          <input id="recordingDateTo" type="date" aria-label="Filter by end date" /></label>
         <label>
-          <span>To Time</span>
-          <span id="recordingTimeToMount" aria-label="Filter by end time" data-time-role="to"></span>
-          <span class="field-help">Latest time on the to date (5-minute steps). Default: 23:55</span>
-        </label>
+          <span>To Time <span class="info-tip" data-tip="Latest time on the to date (5-minute steps). Default: 23:55" title="Latest time on the to date (5-minute steps). Default: 23:55" tabindex="0" aria-label="Help: Latest time on the to date (5-minute steps). Default: 23:55"></span></span>
+          <span id="recordingTimeToMount" aria-label="Filter by end time" data-time-role="to"></span></label>
         <label>
-          <span>Sort By</span>
+          <span>Sort By <span class="info-tip" data-tip="Order of the list. Default: Newest" title="Order of the list. Default: Newest" tabindex="0" aria-label="Help: Order of the list. Default: Newest"></span></span>
           <select id="recordingSort" aria-label="Sort order">
             <option value="newest">Newest</option>
             <option value="oldest">Oldest</option>
-          </select>
-          <span class="field-help">Order of the list. Default: Newest</span>
-        </label>
+          </select></label>
         <label class="recordings-filter-actions">
           <span>&nbsp;</span>
           <div class="button-row">
+            <button id="recordingClearBtn" class="secondary" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg><span>Reset Filters</span></button>
             <button id="recordingSearchBtn" type="submit">Apply Filters</button>
           </div>
         </label>

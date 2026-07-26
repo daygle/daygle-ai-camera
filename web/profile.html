@@ -46,37 +46,29 @@
           <input name="email" type="email" placeholder="Email address" />
         </label>
         <label>
-          <span>Timezone</span>
-          <input name="timezone" placeholder="e.g. Australia/Sydney" required />
-          <span class="field-help">Used for all timestamps in the app. Default: Australia/Sydney</span>
-        </label>
+          <span>Timezone <span class="info-tip" data-tip="Used for all timestamps in the app. Default: Australia/Sydney" title="Used for all timestamps in the app. Default: Australia/Sydney" tabindex="0" aria-label="Help: Used for all timestamps in the app. Default: Australia/Sydney"></span></span>
+          <input name="timezone" placeholder="e.g. Australia/Sydney" required /></label>
         <label>
-          <span>Date Format</span>
+          <span>Date Format <span class="info-tip" data-tip="How dates are displayed throughout the app. Default: Browser Locale" title="How dates are displayed throughout the app. Default: Browser Locale" tabindex="0" aria-label="Help: How dates are displayed throughout the app. Default: Browser Locale"></span></span>
           <select name="date_format">
             <option value="locale">Browser Locale</option>
             <option value="iso">YYYY-MM-DD</option>
             <option value="au">DD/MM/YYYY</option>
             <option value="us">MM/DD/YYYY</option>
-          </select>
-          <span class="field-help">How dates are displayed throughout the app. Default: Browser Locale</span>
-        </label>
+          </select></label>
         <label>
-          <span>Time Format</span>
+          <span>Time Format <span class="info-tip" data-tip="12-hour shows AM/PM, 24-hour uses military time. Default: 24 Hour" title="12-hour shows AM/PM, 24-hour uses military time. Default: 24 Hour" tabindex="0" aria-label="Help: 12-hour shows AM/PM, 24-hour uses military time. Default: 24 Hour"></span></span>
           <select name="time_format">
             <option value="24h">24 Hour</option>
             <option value="12h">12 Hour</option>
-          </select>
-          <span class="field-help">12-hour shows AM/PM, 24-hour uses military time. Default: 24 Hour</span>
-        </label>
+          </select></label>
         <label>
-          <span>Theme</span>
+          <span>Theme <span class="info-tip" data-tip="Choose your preferred appearance. System follows your device setting. Default: System" title="Choose your preferred appearance. System follows your device setting. Default: System" tabindex="0" aria-label="Help: Choose your preferred appearance. System follows your device setting. Default: S..."></span></span>
           <select name="theme">
             <option value="system">System</option>
             <option value="light">Light</option>
             <option value="dark">Dark</option>
-          </select>
-          <span class="field-help">Choose your preferred appearance. System follows your device setting. Default: System</span>
-        </label>
+          </select></label>
       </form>
       <div class="button-row">
         <button type="submit" form="profileForm">Save Profile</button>
@@ -97,10 +89,8 @@
           <input name="current_password" type="password" placeholder="Current password" autocomplete="current-password" required />
         </label>
         <label>
-          <span>New Password</span>
-          <input name="new_password" type="password" placeholder="New password" autocomplete="new-password" required />
-          <span class="field-help">Use at least 8 characters with a mix of letters, numbers, and symbols.</span>
-        </label>
+          <span>New Password <span class="info-tip" data-tip="Use at least 8 characters with a mix of letters, numbers, and symbols." title="Use at least 8 characters with a mix of letters, numbers, and symbols." tabindex="0" aria-label="Help: Use at least 8 characters with a mix of letters, numbers, and symbols."></span></span>
+          <input name="new_password" type="password" placeholder="New password" autocomplete="new-password" required /></label>
         <label>
           <span>Confirm Password</span>
           <input name="confirm_password" type="password" placeholder="Confirm password" autocomplete="new-password" required />
