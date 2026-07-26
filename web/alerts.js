@@ -1,4 +1,4 @@
-// alerts.js — Dedicated alerts page.
+// alerts.js - Dedicated alerts page.
 // Loaded by alerts.html only. Shows notifications fired by zone and sound rules,
 // with filtering by type (object / motion / sound) and per-alert dismissal.
 
@@ -11,7 +11,7 @@ const els = {
   statObjectAlerts: document.getElementById('statObjectAlerts'),
   statMotionAlerts: document.getElementById('statMotionAlerts'),
   statSoundAlerts: document.getElementById('statSoundAlerts'),
-  rangeSelect: document.getElementById('rangeSelect'),
+  rangeBtns: document.querySelectorAll('[data-range]'),
 };
 
 // SOUND_CLASS_IDS, isSoundLabel, isMotionOnlyAlertGroup, isMotionOnlyAlertItem,
@@ -32,10 +32,10 @@ function getSinceParam() {
   if (activeRange === 'today') return new Date().toISOString().split('T')[0];
   if (activeRange === '7d') return dateDaysAgo(7);
   if (activeRange === '30d') return dateDaysAgo(30);
-  return ''; // 'all' — no since filter
+  return ''; // 'all' - no since filter
 }
 
-// api() is provided by web/utils.js — shared CSRF, 401 redirect, JSON.
+// api() is provided by web/utils.js - shared CSRF, 401 redirect, JSON.
 
 // ─── Alert grouping (consolidates multiple alerts for the same event) ──────
 function groupAlertsByEvent(alerts) {
@@ -236,7 +236,7 @@ function updateListStatus(count) {
   if (!els.listStatus) return;
   const labels = { all: 'alerts', 'object-alerts': 'Object', 'motion-alerts': 'Motion', 'sound-alerts': 'Sound' };
   const label = labels[activeFilter] || 'alerts';
-  els.listStatus.textContent = count > 0 ? `Showing ${count} ${label}` : '';
+  els.listStatus.textContent = count > 0 ? `${count} ${label}` : '';
 }
 
 function bindActions() {
@@ -271,10 +271,17 @@ els.filterPills.forEach((pill) => {
   });
 });
 
-// ─── Time-range selector ────────────────────────────────────────────────────
-els.rangeSelect?.addEventListener('change', () => {
-  activeRange = els.rangeSelect.value;
-  loadAlerts().then(() => { renderFeed(); updateDismissBtn(); }).catch(() => {});
+// ─── Time-range selector (segmented buttons) ───────────────────────────────
+els.rangeBtns.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    activeRange = btn.dataset.range;
+    els.rangeBtns.forEach((other) => {
+      const active = other === btn;
+      other.classList.toggle('active', active);
+      other.setAttribute('aria-selected', String(active));
+    });
+    loadAlerts().then(() => { renderFeed(); updateDismissBtn(); }).catch(() => {});
+  });
 });
 
 // ─── Data loading ──────────────────────────────────────────────────────────

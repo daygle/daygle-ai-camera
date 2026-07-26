@@ -7,7 +7,7 @@ const els = {
   listStatus: document.getElementById('listStatus'),
   dismissAllEventsBtn: document.getElementById('dismissAllEventsBtn'),
   filterPills: document.querySelectorAll('.activity-filter-pill'),
-  rangeSelect: document.getElementById('rangeSelect'),
+  rangeBtns: document.querySelectorAll('[data-range]'),
 };
 
 // ─── State ──────────────────────────────────────────────────────────────────
@@ -39,7 +39,7 @@ function getSinceParam() {
   if (activeRange === 'today') return new Date().toISOString().split('T')[0];
   if (activeRange === '7d') return dateDaysAgo(7);
   if (activeRange === '30d') return dateDaysAgo(30);
-  return ''; // 'all' — no since filter
+  return ''; // 'all' - no since filter
 }
 
 // ─── Small utilities (kept local to avoid touching utils.js) ────────────────
@@ -247,7 +247,7 @@ function updateListStatus(count) {
   if (count === 0) {
     els.listStatus.textContent = '';
   } else {
-    els.listStatus.textContent = `Showing ${count} ${label}`;
+    els.listStatus.textContent = `${count} ${label}`;
   }
 }
 
@@ -361,10 +361,17 @@ els.filterPills.forEach((pill) => {
   });
 });
 
-// ─── Time-range selector ────────────────────────────────────────────────────
-els.rangeSelect?.addEventListener('change', () => {
-  activeRange = els.rangeSelect.value;
-  loadEvents().then(renderActivityFeed).catch(() => {});
+// ─── Time-range selector (segmented buttons) ───────────────────────────────
+els.rangeBtns.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    activeRange = btn.dataset.range;
+    els.rangeBtns.forEach((other) => {
+      const active = other === btn;
+      other.classList.toggle('active', active);
+      other.setAttribute('aria-selected', String(active));
+    });
+    loadEvents().then(renderActivityFeed).catch(() => {});
+  });
 });
 
 // ─── Refresh orchestration ──────────────────────────────────────────────────

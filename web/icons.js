@@ -1,16 +1,16 @@
-// icons.js — Shared SVG icon constants (lucide-style).
+// icons.js - Shared SVG icon constants (lucide-style).
 // Loaded by zones.html, sounds.html, and cameras.html before the page script
 // so every page resolves bare `ICONS.remove / chevronDown / etc.` globally.
 // Every icon is marked ``aria-hidden="true"`` because each is decorative
-// (paired with text inside a button or link — the text conveys the meaning).
+// (paired with text inside a button or link - the text conveys the meaning).
 //
 // Naming convention: lowerCamelCase key that describes the icon purpose.
-//   remove – trash / delete
-//   chevronDown / chevronUp – expand / collapse indicator (12 px)
-//   moveUp / moveDown – reorder buttons (14 px)
-//   grip – drag handle (14 px)
-//   edit – pencil
-//   viewLive – play-button icon used in inline CTA links
+//   remove - trash / delete
+//   chevronDown / chevronUp - expand / collapse indicator (12 px)
+//   moveUp / moveDown - reorder buttons (14 px)
+//   grip - drag handle (14 px)
+//   edit - pencil
+//   viewLive - play-button icon used in inline CTA links
 
 window.ICONS = {
   remove: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>',

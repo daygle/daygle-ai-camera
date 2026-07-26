@@ -917,7 +917,7 @@ input[type="file"] { padding: 10px; }
 .zone-editor-card .form-grid + .list { margin-top: 18px; }
 .zones-list { max-height: none; }
 .zone-row { display: grid; gap: 14px; align-items: stretch; }
-.zone-row-main { display: grid; grid-template-columns: minmax(0, 1fr) 102px 102px 102px 102px auto; gap: 10px; align-items: end; }
+.zone-row-main { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; }
 .zone-row.selected { border-color: rgba(73,230,163,.7); background: rgba(73,230,163,.08); }
 .zone-row.disabled { opacity: .62; }
 .zone-row label,
@@ -2172,27 +2172,45 @@ tr.drag-over {
   background: linear-gradient(135deg, var(--accent), var(--success));
   color: #04111c;
 }
-.activity-status {
-  margin: 0;
-  font-size: 12px;
+.result-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11px;
   font-weight: 700;
-  min-height: 1em;
-}
-
-/* Time-range selector next to the pill filter row */
-.activity-filter-row .range-select {
-  min-width: 130px;
-  font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
+  white-space: nowrap;
+  color: var(--muted);
   background: var(--surface);
-  color: var(--text);
-  cursor: pointer;
+  min-height: 1em;
+  letter-spacing: 0.01em;
 }
-.activity-filter-row .range-select:focus {
-  outline: none;
+.activity-range-group {
+  display: flex;
+  gap: 0;
+}
+.activity-range-group .activity-filter-pill {
+  border-radius: 0;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-right-width: 0;
+  font-size: 11px;
+  padding: 5px 12px;
+  font-weight: 700;
+}
+.activity-range-group .activity-filter-pill:first-child {
+  border-radius: 6px 0 0 6px;
+}
+.activity-range-group .activity-filter-pill:last-child {
+  border-radius: 0 6px 6px 0;
+  border-right-width: 1px;
+}
+.activity-range-group .activity-filter-pill.active {
+  background: var(--accent);
+  color: #fff;
   border-color: var(--accent);
+  z-index: 1;
 }
 
 /* Activity list (overrides the global `.list` max-height so the feed
@@ -2580,6 +2598,12 @@ a.activity-item-action {
   grid-template-columns: 1fr auto;
   gap: 18px;
   align-items: start;
+}
+/* When PTZ card is hidden (all-cameras mode or camera without PTZ), let the
+   live frame card span the full width instead of leaving an empty auto column. */
+.live-frame-ptz-layout:has(.live-ptz-card[hidden]) {
+  grid-template-columns: 1fr;
+  gap: 0;
 }
 @media (max-width: 900px) {
   .live-frame-ptz-layout {

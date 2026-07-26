@@ -1,4 +1,4 @@
-"""H2 XSS sweep — structural + behavioural guard for showUpdateStatus.
+"""H2 XSS sweep - structural + behavioural guard for showUpdateStatus.
 
 The ``showUpdateStatus(message, type)`` function in ``web/settings.js``
 uses ``innerHTML`` to render update-status messages that include semantic

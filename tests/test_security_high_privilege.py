@@ -1,4 +1,4 @@
-"""Tests for the four HIGH-severity fixes (H1–H4).
+"""Tests for the four HIGH-severity fixes (H1-H4).
 
 Covers:
 
