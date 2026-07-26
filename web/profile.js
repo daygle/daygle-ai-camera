@@ -21,6 +21,7 @@ function renderProfile(user) {
   profileForm.elements.timezone.value = user.timezone || 'Australia/Sydney';
   profileForm.elements.date_format.value = user.date_format || 'locale';
   profileForm.elements.time_format.value = user.time_format || '24h';
+  profileForm.elements.theme.value = user.theme || 'system';
   const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ');
   // Each row is built via ``safeHtml`` (web/utils.js) so server-supplied
   // fields (username, role, timezone, etc.) can't smuggle HTML into the
@@ -67,6 +68,10 @@ profileForm.addEventListener('submit', async (event) => {
       dateFormat: updated.date_format,
       timeFormat: updated.time_format,
     });
+    // Apply theme preference immediately and broadcast to other tabs.
+    if (updated.theme && typeof window.setDaygleThemePref === 'function') {
+      window.setDaygleThemePref(updated.theme);
+    }
     setMessage('Profile saved.');
   } catch (error) {
     // Skip UI updates if api() triggered a 401 redirect

@@ -187,6 +187,7 @@ class AuthService:
                     timezone TEXT NOT NULL DEFAULT 'Australia/Sydney',
                     date_format TEXT NOT NULL DEFAULT 'locale',
                     time_format TEXT NOT NULL DEFAULT '24h',
+                    theme TEXT NOT NULL DEFAULT 'system',
                     failed_attempts INTEGER NOT NULL DEFAULT 0,
                     locked_until TEXT,
                     created_at TEXT NOT NULL,
@@ -394,6 +395,7 @@ class AuthService:
         timezone_name: str | None = None,
         date_format: str | None = None,
         time_format: str | None = None,
+        theme: str | None = None,
         current_password: str | None = None,
     ) -> dict[str, Any]:
         # H4 fix: require ``current_password`` when the request would
@@ -464,6 +466,11 @@ class AuthService:
                 raise AuthError("Time format must be 12h or 24h.")
             updates.append("time_format = ?")
             params.append(time_format)
+        if theme is not None:
+            if theme not in {"system", "light", "dark"}:
+                raise AuthError("Theme must be system, light, or dark.")
+            updates.append("theme = ?")
+            params.append(theme)
         if not updates:
             # ``existing`` was already loaded at the top of the method
             # for the H4 current-password gate; reuse it here so we
@@ -652,7 +659,7 @@ class AuthService:
             row = db.execute(
                 """
                 SELECT s.session_token, s.csrf_token, s.expires_at, s.absolute_expires_at, u.id, u.username, u.role, u.is_active,
-                       u.first_name, u.last_name, u.email, u.timezone, u.date_format, u.time_format
+                       u.first_name, u.last_name, u.email, u.timezone, u.date_format, u.time_format, u.theme
                 FROM user_sessions s
                 JOIN users u ON u.id = s.user_id
                 WHERE s.session_token = ?
@@ -770,6 +777,7 @@ class AuthService:
             "timezone": row["timezone"],
             "date_format": row["date_format"],
             "time_format": row["time_format"],
+            "theme": row["theme"],
         }
 
 

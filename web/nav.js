@@ -321,6 +321,10 @@ window.daygleAuthReady = (async () => {
           </button>
           <div class="nav-dropdown-menu">
             <a href="/profile" class="nav-dropdown-item">Profile</a>
+            <div style="border-top:1px solid var(--border);margin:4px 0;padding:6px 12px;font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Theme</div>
+            <button id="navThemeSystem" class="nav-dropdown-item" type="button">System</button>
+            <button id="navThemeLight" class="nav-dropdown-item" type="button">Light</button>
+            <button id="navThemeDark" class="nav-dropdown-item" type="button">Dark</button>
             <div id="sessionCountdown" class="nav-countdown" hidden></div>
             <button id="navLogoutBtn" class="nav-dropdown-item" type="button">Logout</button>
           </div>
@@ -423,6 +427,36 @@ window.daygleAuthReady = (async () => {
   if (window.daygleUi?.renderNavAccount) {
     window.daygleUi.renderNavAccount(window.daygleAuth?.user || null);
   }
+
+  // ── Apply theme from user profile ──────────────────────────────
+  const userTheme = window.daygleAuth?.user?.theme || 'system';
+  if (typeof window.setDaygleThemePref === 'function') {
+    window.setDaygleThemePref(userTheme);
+  }
+  // If utils.js hasn't loaded yet (load order), poll briefly for setDaygleThemePref.
+  // This handles the edge case where nav.js runs before utils.js on slow connections.
+  setActiveThemeButton(userTheme);
+
+  // ── Theme buttons ─────────────────────────────────────────────────
+  function setActiveThemeButton(theme) {
+    ['system', 'light', 'dark'].forEach((t) => {
+      const btn = document.getElementById('navTheme' + t.charAt(0).toUpperCase() + t.slice(1));
+      if (btn) btn.classList.toggle('active', t === theme);
+    });
+  }
+
+  document.getElementById('navThemeSystem')?.addEventListener('click', () => {
+    setActiveThemeButton('system');
+    if (typeof window.setDaygleThemePref === 'function') window.setDaygleThemePref('system');
+  });
+  document.getElementById('navThemeLight')?.addEventListener('click', () => {
+    setActiveThemeButton('light');
+    if (typeof window.setDaygleThemePref === 'function') window.setDaygleThemePref('light');
+  });
+  document.getElementById('navThemeDark')?.addEventListener('click', () => {
+    setActiveThemeButton('dark');
+    if (typeof window.setDaygleThemePref === 'function') window.setDaygleThemePref('dark');
+  });
 
   const logoutBtn = document.getElementById('navLogoutBtn');
   if (logoutBtn) {

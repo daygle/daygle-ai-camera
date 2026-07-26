@@ -10,7 +10,149 @@
   --danger: #ff5c8a;
   --success: #49e6a3;
   --border: rgba(255,255,255,0.09);
+  --accent-rgb: 71, 214, 255;
+  --success-rgb: 73, 230, 163;
+  --danger-rgb: 255, 92, 138;
 }
+
+/* ─── Light mode ──────────────────────────────────────────────────────── */
+:root.light {
+  color-scheme: light;
+  --bg: #f2f5fa;
+  --panel: rgba(255, 255, 255, 0.92);
+  --panel-strong: rgba(255, 255, 255, 0.98);
+  --text: #1a2332;
+  --muted: #66748e;
+  --accent: #0284c7;
+  --accent-2: #7c3aed;
+  --danger: #dc2626;
+  --success: #059669;
+  --border: rgba(0, 0, 0, 0.10);
+  --accent-rgb: 2, 132, 199;
+  --success-rgb: 5, 150, 105;
+  --danger-rgb: 220, 38, 38;
+}
+:root.light body {
+  background: var(--bg);
+}
+:root.light .card {
+  background: var(--panel);
+  box-shadow: 0 4px 24px rgba(0,0,0,.06);
+}
+:root.light .card:hover {
+  border-color: rgba(2, 132, 199, 0.18);
+  box-shadow: 0 8px 32px rgba(0,0,0,.10);
+}
+:root.light .app-nav-toggle { background: rgba(0,0,0,.04); }
+:root.light .app-nav-toggle:hover { color: var(--text); border-color: rgba(0,0,0,.18); }
+:root.light .app-nav-body .nav-item:hover,
+:root.light .app-nav-body .nav-dropdown-trigger:hover {
+  background: rgba(0,0,0,.04);
+}
+:root.light .nav-dropdown-menu {
+  background: var(--panel-strong);
+  box-shadow: 0 12px 40px rgba(0,0,0,.12);
+}
+:root.light .nav-dropdown-item:hover {
+  background: rgba(0,0,0,.04);
+}
+:root.light input,
+:root.light select,
+:root.light textarea {
+  background: #fff;
+  border-color: rgba(0,0,0,.14);
+}
+:root.light input:focus,
+:root.light select:focus,
+:root.light textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.12);
+}
+:root.light button.secondary,
+:root.light a.secondary {
+  background: #fff;
+}
+:root.light .chip {
+  background: rgba(2, 132, 199, 0.08);
+}
+:root.light .item {
+  background: rgba(255,255,255,.7);
+}
+:root.light .item:hover {
+  border-color: rgba(2, 132, 199, 0.18);
+  background: rgba(2, 132, 199, 0.04);
+}
+:root.light .detection.detection-object { background: rgba(2,132,199,.08); color: #0284c7; border-color: rgba(2,132,199,.25); }
+:root.light .detection.detection-sound { background: rgba(124,58,237,.12); color: #7c3aed; border-color: rgba(124,58,237,.3); }
+:root.light .detection.detection-motion { background: rgba(5,150,105,.1); color: #059669; border-color: rgba(5,150,105,.3); }
+:root.light .status-panel div { background: rgba(255,255,255,.6); }
+:root.light .danger-zone-card {
+  border-color: rgba(220,38,38,.4);
+  background: linear-gradient(180deg, rgba(254,226,226,0.5), rgba(255,255,255,0.9));
+}
+:root.light .danger-zone-badge { color: #991b1b; border-color: rgba(220,38,38,.4); background: rgba(220,38,38,.1); }
+:root.light .danger-zone-warning,
+:root.light .danger-zone-confirm-hint { color: #991b1b; }
+:root.light .nav-countdown { background: rgba(0,0,0,.02); }
+:root.light .nav-countdown.warn { background: rgba(248,197,93,.12); }
+:root.light .nav-countdown.critical { background: rgba(220,38,38,.08); }
+:root.light .cam-card {
+  background: var(--panel);
+  box-shadow: 0 4px 24px rgba(0,0,0,.06);
+}
+:root.light .cam-card:hover {
+  border-color: rgba(2, 132, 199, 0.20);
+  box-shadow: 0 8px 32px rgba(0,0,0,.10);
+}
+:root.light .cam-card-footer { background: rgba(0,0,0,.02); }
+:root.light .cam-meta-row { border-color: rgba(0,0,0,.04); }
+:root.light .cam-icon { background: rgba(2,132,199,.08); }
+:root.light .cam-badge-idle { background: rgba(2,132,199,.08); border-color: rgba(2,132,199,.25); }
+:root.light .cam-badge-warn { background: rgba(248,197,93,.12); border-color: rgba(248,197,93,.3); color: #b45309; }
+:root.light .chip-info { background: rgba(2,132,199,.08); border-color: rgba(2,132,199,.25); }
+:root.light .chip-warn { background: rgba(248,197,93,.12); border-color: rgba(248,197,93,.3); color: #b45309; }
+:root.light .chip-sound { background: rgba(124,58,237,.1); border-color: rgba(124,58,237,.25); }
+:root.light .chip-green { background: rgba(5,150,105,.1); border-color: rgba(5,150,105,.25); }
+:root.light .chip-dim { background: rgba(0,0,0,.03); }
+:root.light .modal-backdrop { background: rgba(0,0,0,.45); }
+:root.light .modal-panel {
+  background: #fff;
+  box-shadow: 0 24px 64px rgba(0,0,0,.18);
+}
+:root.light .modal-close { background: rgba(0,0,0,.04); }
+:root.light .modal-close:hover { background: rgba(0,0,0,.08); color: var(--text); }
+:root.light .modal-tab.active {
+  background: #fff;
+  border-color: rgba(0,0,0,.1);
+  border-bottom-color: #fff;
+}
+:root.light .modal-footer { background: linear-gradient(180deg, transparent, rgba(255,255,255,0.99) 30%); }
+:root.light .camera-empty-state { background: rgba(0,0,0,.02); }
+:root.light .recordings-empty-state { background: rgba(0,0,0,.02); }
+:root.light .timeline-track {
+  background: linear-gradient(180deg, rgba(0,0,0,.03), rgba(242,245,250,.85));
+}
+:root.light .timeline-grid-line { background: rgba(0,0,0,.08); }
+:root.light .timeline-grid-line:first-child,
+:root.light .timeline-grid-line:last-child { background: rgba(2,132,199,.2); }
+:root.light .timeline-legend-chip { background: rgba(0,0,0,.03); }
+:root.light .toggle-control { background: rgba(0,0,0,.04); }
+:root.light .update-output { background: rgba(255,255,255,.6); color: var(--muted); }
+:root.light .zone-label { background: rgba(255,255,255,.85); }
+:root.light .zone-name-card { background: rgba(2,132,199,.06); }
+:root.light .zone-row.selected { border-color: rgba(5,150,105,.6); background: rgba(5,150,105,.06); }
+:root.light .monitor-zone-polygon polygon,
+:root.light .monitor-zone-polygon polyline { fill: rgba(2,132,199,.08); }
+:root.light .labels-list .label-tag { background: rgba(0,0,0,.03); }
+:root.light .toast { background: #fff; box-shadow: 0 8px 32px rgba(0,0,0,.12); }
+:root.light .activity-filter-group { background: rgba(0,0,0,.03); }
+:root.light .activity-filter-pill:hover { background: rgba(0,0,0,.06); }
+:root.light .activity-filter-pill.active { background: var(--accent); color: #fff; }
+:root.light .activity-item-type { background: rgba(0,0,0,.06); color: var(--muted); }
+:root.light .activity-item-sound .activity-item-type { background: rgba(124,58,237,.12); color: #7c3aed; }
+:root.light .activity-item-motion .activity-item-type { background: rgba(5,150,105,.1); color: #059669; }
+:root.light .activity-item-alert .activity-item-type { background: rgba(220,38,38,.1); color: #dc2626; }
+:root.light .zone-object-rule { background: rgba(0,0,0,.025); }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }

@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en">
+<script>(function(){var t=localStorage.getItem("daygle.theme");if(t)document.documentElement.classList.add(t);})()</script>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -66,6 +67,15 @@
             <option value="12h">12 Hour</option>
           </select>
           <span class="field-help">12-hour shows AM/PM, 24-hour uses military time. Default: 24 Hour</span>
+        </label>
+        <label>
+          <span>Theme</span>
+          <select name="theme">
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+          <span class="field-help">Choose your preferred appearance. System follows your device setting. Default: System</span>
         </label>
       </form>
       <div class="button-row">

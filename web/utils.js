@@ -828,6 +828,124 @@ function formatUserClock(seconds) {
 // ambient type would declare: `window.daygleUi.api / showToast / ...`. The
 // bare-name call sites keep working as free aliases - they're now backed by
 // the same functions you see here.
+// ─── Theme management (light / dark / system) ─────────────────────────────
+// Manages the ``light`` class on ``<html>`` based on the user's saved
+// preference from the Profile page. Three modes:
+//   'light'  → always ``class="light"``
+//   'dark'   → no class (default dark mode)
+//   'system' → watches ``matchMedia('(prefers-color-scheme: light)')``
+//              and adds/removes ``light`` class reactively.
+// The resolved class is cached in localStorage["daygle.theme"] so the
+// inline script in each HTML <head> can apply it before paint.
+
+function applyDaygleTheme(themePref) {
+  // themePref is one of 'system', 'light', 'dark'. Resolve to a boolean:
+  // true = add "light" class, false = remove it.
+  let isLight = false;
+  if (themePref === 'light') {
+    isLight = true;
+  } else if (themePref === 'system') {
+    isLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+  }
+  // else 'dark' → isLight stays false
+
+  document.documentElement.classList.toggle('light', isLight);
+
+  // Cache the resolved class name for the inline flash-prevention script.
+  const cache = isLight ? 'light' : '';
+  try { localStorage.setItem('daygle.theme', cache); } catch (_err) { /* ignore */ }
+}
+
+// Listen for OS-level theme changes when in 'system' mode. Cleaned up
+// when the user picks an explicit theme.
+let _daygleThemeMediaListener = null;
+
+function watchDaygleSystemTheme() {
+  unwatchDaygleSystemTheme();
+  const mq = window.matchMedia('(prefers-color-scheme: light)');
+  _daygleThemeMediaListener = () => {
+    // Only re-apply if the effective preference is 'system'
+    const pref = window.daygleThemePref || 'system';
+    if (pref === 'system') {
+      document.documentElement.classList.toggle('light', mq.matches);
+      const cache = mq.matches ? 'light' : '';
+      try { localStorage.setItem('daygle.theme', cache); } catch (_err) { /* ignore */ }
+    }
+  };
+  mq.addEventListener('change', _daygleThemeMediaListener);
+}
+
+function unwatchDaygleSystemTheme() {
+  if (_daygleThemeMediaListener) {
+    try {
+      window.matchMedia('(prefers-color-scheme: light)').removeEventListener('change', _daygleThemeMediaListener);
+    } catch (_err) { /* ignore */ }
+    _daygleThemeMediaListener = null;
+  }
+}
+
+// Apply the user's saved theme preference. Called on page load after auth
+// resolves, and on profile save when the preference changes.
+window.daygleThemePref = 'system'; // default until auth resolves
+
+function setDaygleThemePref(theme) {
+  window.daygleThemePref = theme || 'system';
+  applyDaygleTheme(window.daygleThemePref);
+  if (window.daygleThemePref === 'system') {
+    watchDaygleSystemTheme();
+  } else {
+    unwatchDaygleSystemTheme();
+  }
+  // Broadcast to other tabs so they pick up the change instantly.
+  broadcastDaygleThemePref(theme);
+}
+
+function getDaygleThemePref() {
+  return window.daygleThemePref;
+}
+
+// ─── Cross-tab theme broadcast ───────────────────────────────────────────
+const DAYGLE_THEME_STORAGE_KEY = 'daygle.themePref';
+const DAYGLE_THEME_CHANNEL = 'daygle-theme';
+const DAYGLE_THEME_MESSAGE_TYPE = 'daygle-theme-prefs';
+
+function broadcastDaygleThemePref(theme) {
+  const payload = JSON.stringify({
+    type: DAYGLE_THEME_MESSAGE_TYPE,
+    theme: theme || 'system',
+  });
+  if (typeof BroadcastChannel === 'function') {
+    try {
+      const channel = new BroadcastChannel(DAYGLE_THEME_CHANNEL);
+      channel.postMessage(payload);
+      channel.close();
+    } catch (_err) { /* ignore */ }
+  }
+  try { localStorage.setItem(DAYGLE_THEME_STORAGE_KEY, payload); } catch (_err) { /* ignore */ }
+}
+
+function subscribeDaygleThemePref() {
+  function handleMessage(raw) {
+    let data = raw;
+    if (typeof raw === 'string') {
+      try { data = JSON.parse(raw); } catch (_err) { return; }
+    }
+    if (!data || data.type !== DAYGLE_THEME_MESSAGE_TYPE) return;
+    setDaygleThemePref(data.theme);
+  }
+  if (typeof BroadcastChannel === 'function') {
+    try {
+      const channel = new BroadcastChannel(DAYGLE_THEME_CHANNEL);
+      channel.addEventListener('message', (event) => handleMessage(event.data));
+    } catch (_err) { /* ignore */ }
+  }
+  window.addEventListener('storage', (event) => {
+    if (event.key === DAYGLE_THEME_STORAGE_KEY) handleMessage(event.newValue);
+  });
+}
+
+subscribeDaygleThemePref();
+
 function getDaygleDatePrefs() {
   return window.daygleDatePrefs;
 }
@@ -852,6 +970,9 @@ window.daygleUi = {
   // User-facing date/time renderers (honour daygleDatePrefs)
   formatUserDate, formatUserTime, formatDate, formatDateTime, formatUserClock,
   setDaygleDatePrefs, getDaygleDatePrefs,
+  // Theme management
+  setDaygleThemePref, getDaygleThemePref, applyDaygleTheme,
+  watchDaygleSystemTheme, unwatchDaygleSystemTheme,
   // Cross-tab preferences broadcast
   broadcastDaygleDatePrefs, subscribeDaygleDatePrefs,
   // Page-preference storage keys. Page scripts reference the bare
