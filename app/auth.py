@@ -243,6 +243,13 @@ class AuthService:
             except sqlite3.OperationalError as exc:
                 if 'duplicate column name' not in str(exc).lower():
                     raise
+            # Migration: add the theme column to existing databases.
+            # The CREATE TABLE above already includes it for fresh installs.
+            try:
+                db.execute("ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'system'")
+            except sqlite3.OperationalError as exc:
+                if 'duplicate column name' not in str(exc).lower():
+                    raise
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_user_sessions_absolute_expires "
                 "ON user_sessions(absolute_expires_at)"
