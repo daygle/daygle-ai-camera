@@ -213,7 +213,8 @@ def test_normalize_camera_recording_settings_passes_continuous_through_normalize
 
 def test_normalize_camera_ptz_settings_defaults_when_input_not_dict(rs):
     """Non-dict input collapses to the canonical PTZ defaults:
-    enabled=False, protocol=onvif, http_port=80, port=6060, address=1, speed=5."""
+    enabled=False, protocol=onvif, http_port=80, port=6060, address=1, speed=5,
+    step_duration=0.4."""
     assert rs.normalize_camera_ptz_settings(None) == {
         'enabled': False,
         'protocol': 'onvif',
@@ -221,6 +222,7 @@ def test_normalize_camera_ptz_settings_defaults_when_input_not_dict(rs):
         'port': 6060,
         'address': 1,
         'speed': 5,
+        'step_duration': 0.4,
     }
 
 

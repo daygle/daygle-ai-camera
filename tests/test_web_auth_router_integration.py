@@ -126,18 +126,19 @@ def app_modules():
 
 
 def test_web_router_registers_expected_page_paths(app_modules):
-    """web_router should expose exactly 22 unique page-handler paths.
+    """web_router should expose exactly 23 unique page-handler paths.
 
-    Path count comes from 19 functions × 1 decorator each + 1 function
-    (``dashboard_aliases``) × 3 decorators (``/alerts``, ``/events``,
-    ``/search``). Total = 22 routes + 22 unique paths (every path is
-    distinct).
+    Path count comes from 21 functions × 1 decorator each + 1 function
+    (``dashboard_aliases``) × 2 decorators (``/events``, ``/search``).
+    Total = 23 routes + 23 unique paths (every path is distinct). ``/alerts``
+    is served by its own ``alerts_page`` function.
 
-    The 22 paths are: ``/``, ``/favicon.ico``, ``/login``, ``/setup``,
+    The 23 paths are: ``/``, ``/favicon.ico``, ``/login``, ``/setup``,
     ``/live``, ``/zones``, ``/sounds``, ``/cameras``, ``/alerts``,
     ``/events``, ``/search``, ``/recordings``, ``/recordings/timeline``,
     ``/onnx``, ``/ai``, ``/yamnet-tflite``, ``/yamnet``, ``/profile``,
-    ``/settings``, ``/users``, ``/audit``, ``/camera-log``.
+    ``/settings``, ``/users``, ``/audit``, ``/camera-log``,
+    ``/application-log``.
     """
     expected_paths = {
         "/",
@@ -162,6 +163,7 @@ def test_web_router_registers_expected_page_paths(app_modules):
         "/users",
         "/audit",
         "/camera-log",
+        "/application-log",
     }
     actual_paths = {
         route.path for route in app_modules.web_router.router.routes
@@ -173,17 +175,20 @@ def test_web_router_registers_expected_page_paths(app_modules):
     )
 
 
-def test_web_router_dashboard_aliases_function_serves_three_paths(app_modules):
+def test_web_router_dashboard_aliases_function_serves_two_paths(app_modules):
     """``dashboard_aliases`` must be the route function for exactly
-    ``/alerts`` + ``/events`` + ``/search``.
+    ``/events`` + ``/search``.
 
-    3 decorators, 1 function, 3 handler entries. FastAPI is happy with
+    2 decorators, 1 function, 2 handler entries. FastAPI is happy with
     this and dispatches each URL to the same function. The body
     returns ``root()`` (the dashboard shell) -- this is the contract
     the HTTP-level delegation test below verifies end-to-end.
+    ``/alerts`` is served by its own ``alerts_page`` function (it renders
+    the dedicated ``alerts.html`` page), so it is intentionally NOT part
+    of the alias set.
 
     This test catches the regression mode where a future refactor
-    splits ``dashboard_aliases`` into 3 distinct functions (each with
+    splits ``dashboard_aliases`` into distinct functions (each with
     its own body) or renames the function in a way that breaks the
     alias contract.
     """
@@ -194,8 +199,8 @@ def test_web_router_dashboard_aliases_function_serves_three_paths(app_modules):
         if getattr(route, "endpoint", None) is web_router.dashboard_aliases
     ]
     served_paths = {route.path for route in alias_handlers}
-    assert served_paths == {"/alerts", "/events", "/search"}, (
-        f"dashboard_aliases expected to serve {{'/alerts', '/events', '/search'}} "
+    assert served_paths == {"/events", "/search"}, (
+        f"dashboard_aliases expected to serve {{'/events', '/search'}} "
         f"but actually serves {served_paths}"
     )
 
@@ -250,24 +255,26 @@ def test_auth_router_registers_expected_auth_endpoints(app_modules):
 def test_dashboard_aliases_dispatch_to_dashboard_shell_over_http(
     tmp_path, monkeypatch
 ):
-    """GET /alerts + /events + /search all serve the SAME response as GET /.
+    """GET /events + /search both serve the SAME response as GET /.
 
     Bootstrap: ``_setup_admin`` + ``_login``. After that, ``GET /``
     returns the dashboard shell (200 + Content-Type + body).
 
-    The 3 dashboard_aliases routes (/alerts, /events, /search) all
-    share one decorator-mounted function (``dashboard_aliases``)
-    which returns ``root()`` -- so the same dashboard shell. We
-    assert status, Content-Type, and body all match ``GET /``
-    exactly.
+    The 2 dashboard_aliases routes (/events, /search) share one
+    decorator-mounted function (``dashboard_aliases``) which returns
+    ``root()`` -- so the same dashboard shell. We assert status,
+    Content-Type, and body all match ``GET /`` exactly. ``/alerts`` is
+    served by its own ``alerts_page`` function (the dedicated alerts
+    page), so it is checked separately for a distinct 200 response
+    rather than byte-equality with the shell.
 
-    This is the marquee proof: the 3-decorator pattern on
+    This is the marquee proof: the 2-decorator pattern on
     ``dashboard_aliases`` truly routes through FastAPI to the same
     handler as ``GET /`` (no chance copy/paste drift introduced
-    hidden differences in the 3 paths).
+    hidden differences in the paths).
 
     Why a body-bytes equality check rather than just status code?
-    Because a refactor that accidentally moves /alerts to a separate
+    Because a refactor that accidentally moves an alias to a separate
     function body returning a different component still produces
     status == 200. The byte-equality is the only way to prove the
     delegation works at the response-body level.
@@ -288,7 +295,7 @@ def test_dashboard_aliases_dispatch_to_dashboard_shell_over_http(
         root_content_type = LocalClient.header(root_headers, "Content-Type")
 
         # Each dashboard_aliases path -- should be BYTE-IDENTICAL to /.
-        for path in ("/alerts", "/events", "/search"):
+        for path in ("/events", "/search"):
             status, headers, body = client.request(path)
             assert status == 200, (
                 f"GET {path} should return 200 after login but got {status}"
@@ -301,9 +308,16 @@ def test_dashboard_aliases_dispatch_to_dashboard_shell_over_http(
             )
             assert body == root_body, (
                 f"GET {path} body differs from GET /; "
-                f"dashboard_aliases delegation drift -- the three "
+                f"dashboard_aliases delegation drift -- the alias "
                 f"decorator paths must serve identical content"
             )
+
+        # /alerts is served by its own alerts_page function (dedicated
+        # page), so it should be a distinct 200 response, NOT the shell.
+        alerts_status, _alerts_headers, _alerts_body = client.request("/alerts")
+        assert alerts_status == 200, (
+            f"GET /alerts should return 200 after login but got {alerts_status}"
+        )
     finally:
         _server_obj.should_exit = True
         _thread.join(timeout=5)

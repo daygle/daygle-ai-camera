@@ -63,6 +63,10 @@ class LocalClient:
         if json_body is not None:
             request_data = json.dumps(json_body).encode("utf-8")
             request_headers["Content-Type"] = "application/json"
+        # Simulate a real browser: send a same-origin ``Origin`` header so the
+        # middleware's same-origin CSRF defence (which rejects mutating /api
+        # requests that carry no Origin/Referer) sees a matching origin.
+        request_headers.setdefault("Origin", self.base_url)
         opener = self.opener if follow_redirects else build_opener(HTTPCookieProcessor(self.cookies), NoRedirect)
         request = Request(f"{self.base_url}{path}", data=request_data, method=method, headers=request_headers)
         try:
@@ -1188,13 +1192,15 @@ def test_user_account_name_email_fields(tmp_path, monkeypatch):
         assert user2["last_name"] == ""
         assert user2["email"] == ""
 
-        # Update profile name/email and verify /api/auth/me returns them (not blank)
+        # Update profile name/email and verify /api/auth/me returns them (not blank).
+        # Changing the email is a sensitive field change, so the H4 guard requires
+        # the current password as proof of possession.
         named_client = LocalClient(base_url)
         named_csrf = _login(named_client, "named", "Named123!")
         status, _headers, updated = named_client.request(
             "/api/profile",
             method="PUT",
-            json_body={"username": "named", "first_name": "Janet", "last_name": "Smith", "email": "janet@example.com", "timezone": "UTC", "date_format": "iso", "time_format": "24h"},
+            json_body={"username": "named", "first_name": "Janet", "last_name": "Smith", "email": "janet@example.com", "timezone": "UTC", "date_format": "iso", "time_format": "24h", "current_password": "Named123!"},
             headers={"X-CSRF-Token": named_csrf},
         )
         assert status == 200
@@ -1480,10 +1486,20 @@ def test_runtime_data_reset_clears_operational_data_but_keeps_settings(tmp_path,
             message='Alert triggered: dog detected',
         )
 
-        status, _headers, reset_payload = client.request(
-            '/api/system/runtime-data',
-            method='DELETE',
+        # Runtime-data wipe is a two-step confirm flow (M2): POST /preview to
+        # obtain a single-use confirm token, then DELETE with ?confirm=true and
+        # the token echoed back in the X-Runtime-Data-Confirm header.
+        status, _headers, preview_payload = client.request(
+            '/api/system/runtime-data/preview',
+            method='POST',
             headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200, (status, preview_payload)
+        confirm_token = preview_payload['confirm_token']
+        status, _headers, reset_payload = client.request(
+            '/api/system/runtime-data?confirm=true',
+            method='DELETE',
+            headers={'X-CSRF-Token': csrf, 'X-Runtime-Data-Confirm': confirm_token},
         )
         assert status == 200
         assert reset_payload['deleted']['events'] >= 1
@@ -4057,14 +4073,18 @@ def test_check_model_updates_endpoints(tmp_path, monkeypatch):
         n_row = next(m for m in payload["models"] if m["id"] == "yolov8n")
         assert n_row["update_available"] is True
 
-        # Manifest fetch failure - returns 200 with readable error field, not 502
+        # Manifest fetch failure - returns 200 with a sanitized error field, not
+        # a 5xx. Per the R9 H4 fix, the raw exception message stays server-side
+        # and only the exception TYPE name is exposed to the admin client, so we
+        # raise a realistic network error (ConnectionRefusedError is an OSError,
+        # which the endpoint catches) and assert on the type name.
         def _raise():
-            raise RuntimeError("Connection refused")
+            raise ConnectionRefusedError("Connection refused")
         monkeypatch.setattr('app.api.settings_ai_router._fetch_models_manifest', _raise)
         status, _, payload = client.request("/api/settings/ai/check-model-updates")
         assert status == 200
         assert "error" in payload
-        assert "Connection refused" in payload["error"]
+        assert "ConnectionRefusedError" in payload["error"]
         assert payload["any_updates"] is False
         assert payload["models"] == []
     finally:

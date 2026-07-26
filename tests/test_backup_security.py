@@ -183,6 +183,74 @@ def test_overwrite_database_from_file_rejects_trigger(tmp_path, monkeypatch, liv
         conn.close()
 
 
+def _add_app_audit_triggers(path: Path) -> None:
+    """Add the application's OWN immutable audit-log triggers, exactly as
+    ``EventDatabase.init`` creates them (every real backup carries these)."""
+    from app.database import AUDIT_LOG_IMMUTABLE_TRIGGERS
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS audit_log("
+            "id INTEGER PRIMARY KEY, immutable INTEGER NOT NULL DEFAULT 1)"
+        )
+        conn.executescript('\n'.join(AUDIT_LOG_IMMUTABLE_TRIGGERS.values()))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_overwrite_database_from_file_accepts_own_audit_triggers(
+    tmp_path, monkeypatch, live_db_path,
+):
+    """A legitimate backup carries the application's own immutable audit-log
+    triggers; the restore validator must ALLOWLIST them (otherwise no backup
+    this app produces could ever be restored)."""
+    monkeypatch.setattr(_state, 'database', SimpleNamespace(database_path=live_db_path))
+    source = tmp_path / 'source_own_triggers.sqlite3'
+    _make_app_shaped_db(source)
+    _add_app_audit_triggers(source)
+
+    # Must NOT raise -- the own triggers are allowlisted.
+    backup_module.overwrite_database_from_file(source)
+    conn = sqlite3.connect(str(live_db_path))
+    try:
+        assert conn.execute('SELECT COUNT(*) FROM users').fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_overwrite_database_from_file_rejects_name_spoofed_audit_trigger(
+    tmp_path, monkeypatch, live_db_path,
+):
+    """An attacker cannot smuggle a payload under a trusted trigger NAME:
+    a trigger named like an allowlisted one but with a different (malicious)
+    body must still be rejected, since the allowlist matches on body."""
+    monkeypatch.setattr(_state, 'database', SimpleNamespace(database_path=live_db_path))
+    source = tmp_path / 'source_spoofed.sqlite3'
+    _make_app_shaped_db(source)
+    conn = sqlite3.connect(str(source))
+    try:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS audit_log("
+            "id INTEGER PRIMARY KEY, immutable INTEGER NOT NULL DEFAULT 1)"
+        )
+        # Trusted NAME, hostile BODY (would autoload native code on restore).
+        conn.execute(
+            "CREATE TRIGGER trg_audit_log_immutable_delete "
+            "AFTER INSERT ON audit_log "
+            "BEGIN SELECT load_extension('/tmp/evil.so'); END"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc_info:
+        backup_module.overwrite_database_from_file(source)
+    assert exc_info.value.status_code == 400
+    assert 'trigger' in exc_info.value.detail.lower(), exc_info.value.detail
+
+
 def test_overwrite_database_from_file_calls_enable_load_extension_false(
     tmp_path, monkeypatch, live_db_path,
 ):
@@ -196,16 +264,26 @@ def test_overwrite_database_from_file_calls_enable_load_extension_false(
     source = tmp_path / 'source.sqlite3'
     _make_app_shaped_db(source)
 
-    captured: list[tuple[int, bool]] = []
+    captured: list[bool] = []
 
-    real_enable = sqlite3.Connection.enable_load_extension
+    # ``sqlite3.Connection`` is an immutable C type on modern CPython, so its
+    # ``enable_load_extension`` method cannot be monkeypatched in place. Spy via
+    # a Connection SUBCLASS injected through ``sqlite3.connect(factory=...)``
+    # instead -- this works across Python versions and still records every
+    # disable call made on the source connection.
+    class _SpyConnection(sqlite3.Connection):
+        def enable_load_extension(self, value):  # noqa: ANN001
+            if value is False:  # only record the disable call (it must always be present)
+                captured.append(value)
+            return super().enable_load_extension(value)
 
-    def _spy_enable(self, value):
-        if value is False:  # only record the disable call (it must always be present)
-            captured.append((id(self), value))
-        return real_enable(self, value)
+    real_connect = sqlite3.connect
 
-    monkeypatch.setattr(sqlite3.Connection, 'enable_load_extension', _spy_enable)
+    def _spy_connect(database, *args, **kwargs):  # noqa: ANN001
+        kwargs.setdefault('factory', _SpyConnection)
+        return real_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(backup_module.sqlite3, 'connect', _spy_connect)
     backup_module.overwrite_database_from_file(source)
 
     assert captured, (
@@ -213,5 +291,4 @@ def test_overwrite_database_from_file_calls_enable_load_extension_false(
         'sqlite3.Connection.enable_load_extension(False) on the source '
         'connection before the schema scan / backup write'
     )
-    _, value = captured[0]
-    assert value is False
+    assert captured[0] is False

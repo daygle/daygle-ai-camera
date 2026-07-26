@@ -302,15 +302,16 @@ def test_mutating_api_with_correct_csrf_passes_middleware(tmp_path, monkeypatch)
         thread.join(timeout=5)
 
 
-def test_logout_post_without_csrf_returns_403(tmp_path, monkeypatch):
-    """POST /logout is explicitly CSRF-protected even though it isn't a
-    ``/api/*`` path -- cross-check that branch-6 doesn't gate on the
-    ``/api/`` prefix alone.
+def test_logout_post_without_csrf_still_succeeds(tmp_path, monkeypatch):
+    """POST /logout is intentionally CSRF-*resilient*: a missing or stale CSRF
+    token must NOT prevent logout.
 
-    The positive case (POST /logout WITH csrf -> 200 "ok") is already
-    exercised end-to-end by ``test_logout_user_creation_and_password_reset``
-    in tests/test_api.py -- the middleware logic is what we're covering here,
-    so the negative case is sufficient.
+    ``/logout`` is not an ``/api/*`` path, so the middleware's CSRF gate does
+    not apply to it; the ``logout_post`` handler then honours the user's intent
+    to log out even without a valid CSRF token (auditing the mismatch). This
+    matches the "stale-CSRF logout resilience" contract exercised in
+    ``tests/test_auth_edge_cases.py``. The token-present path (also 200) is
+    covered end-to-end by ``test_logout_user_creation_and_password_reset``.
     """
     app, _database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
@@ -319,8 +320,14 @@ def test_logout_post_without_csrf_returns_403(tmp_path, monkeypatch):
         _setup_admin(client)
         _login(client)
         status, _headers, body = client.request("/logout", method="POST")
-        assert status == 403, f"POST /logout (no csrf) expected 403, got {status}"
-        assert body == {"detail": "CSRF token missing or invalid"}
+        assert status == 200, f"POST /logout (no csrf) expected resilient 200, got {status}"
+        assert body == {"ok": True}
+        # Session must actually be gone: a follow-up authenticated call redirects to login.
+        follow_status, follow_headers, _body = client.request("/cameras", follow_redirects=False)
+        assert follow_status in (302, 303), (
+            f"after logout, /cameras should redirect to login, got {follow_status}"
+        )
+        assert LocalClient.header(follow_headers, "Location") == "/login"
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -374,8 +381,14 @@ def test_non_admin_session_denied_admin_api_path(tmp_path, monkeypatch):
 
 
 def test_non_admin_session_denied_admin_html_path(tmp_path, monkeypatch):
-    """HTML admin paths (e.g. ``/cameras``) also fall under branch-5 and
-    return 403 ``Admin access required`` (JSON body, NOT an HTML redirect)."""
+    """HTML admin paths (e.g. ``/cameras``) are admin-gated and return a styled
+    403 HTML page (not raw JSON, and not a redirect) for a non-admin session.
+
+    API admin paths still return JSON ``{"detail": "Admin access required"}``
+    (covered by ``test_non_admin_session_denied_admin_api_path``); page routes
+    render the user-facing "Access Denied" page instead so a browser shows a
+    proper page rather than a JSON blob.
+    """
     app, _database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
     try:
@@ -390,10 +403,14 @@ def test_non_admin_session_denied_admin_html_path(tmp_path, monkeypatch):
         )
         viewer_client = LocalClient(base_url)
         _login(viewer_client, "viewer", "Viewer123!")
-        status, _headers, body = viewer_client.request("/cameras", follow_redirects=False)
+        status, headers, body = viewer_client.request("/cameras", follow_redirects=False)
         assert status == 403, f"viewer GET /cameras expected 403, got {status}"
-        assert isinstance(body, dict) and body["detail"] == "Admin access required", (
-            f"GET /cameras by viewer should return JSON 403, got {body!r}"
+        assert "text/html" in (LocalClient.header(headers, "Content-Type") or ""), (
+            f"GET /cameras by viewer should return an HTML 403 page, got "
+            f"Content-Type={LocalClient.header(headers, 'Content-Type')!r}"
+        )
+        assert isinstance(body, str) and "administrator access" in body.lower(), (
+            f"GET /cameras by viewer should return the Access Denied page, got {body!r}"
         )
     finally:
         server.should_exit = True

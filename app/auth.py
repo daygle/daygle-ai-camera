@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import importlib
 import importlib.util
+import logging
 import secrets
 import sqlite3
 from contextlib import contextmanager
@@ -623,7 +624,7 @@ class AuthService:
                     # locked, permission denied). We intentionally do NOT
                     # raised-and-propagate: that would convert a 5-minute
                     # disk hiccup into a full login outage.
-                    _logging.getLogger('daygle.ai').warning(
+                    logging.getLogger('daygle.ai').warning(
                         'login_attempts audit-write failed for %s/%s: %s',
                         username, ip_address, audit_write_exc,
                     )
@@ -725,7 +726,6 @@ class AuthService:
         # accumulate (or vice versa).  The camera_diagnostics purger
         # lives in a separate module (``app.backup``) with its own
         # database connection, so it stays outside the transaction.
-        import logging as _logging
         try:
             with self.connect() as db:
                 now_str = utc_now()
@@ -750,7 +750,7 @@ class AuthService:
             # locked, schema mismatch) must never break the caller's
             # maintenance tick. Logged at warning level so retention
             # bugs are diagnosable rather than silent.
-            _logging.getLogger('daygle.ai').warning(
+            logging.getLogger('daygle.ai').warning(
                 'cleanup_expired_sessions: session/login_attempts purge failed: %s', exc
             )
         # Camera_diagnostics purger: separate module, separate connection.
@@ -760,7 +760,7 @@ class AuthService:
             from app.backup import purge_camera_diagnostics_by_policy
             purge_camera_diagnostics_by_policy()
         except Exception as diag_purge_exc:
-            _logging.getLogger('daygle.ai').warning(
+            logging.getLogger('daygle.ai').warning(
                 'cleanup_expired_sessions: camera_diagnostics purge failed: %s',
                 diag_purge_exc,
             )

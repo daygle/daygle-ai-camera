@@ -8,6 +8,7 @@ M1: middleware._is_same_origin identifies cross-origin / null / missing-origin r
 
 from __future__ import annotations
 
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -23,7 +24,23 @@ from app.middleware import _is_same_origin
 from app.recording_extension import clear_runtime_media_directory
 
 
-REPO_DIR = '/home/daytona/codebase'
+REPO_DIR = str(Path(__file__).resolve().parents[1])
+
+
+def _hermetic_git_env():
+    """Run git/update.sh isolated from the developer's ambient git config.
+
+    A dev/CI machine may carry global ``url.<x>.insteadOf`` rewrite rules
+    (e.g. an agent proxy that rewrites ``https://github.com/`` to a local
+    mirror). ``git remote get-url`` applies those rewrites, which would make
+    update.sh see a rewritten origin and spuriously fail its allowlist check.
+    Neutralising the global/system config keeps this test deterministic and
+    exercises update.sh against the true stored remote URL.
+    """
+    env = dict(os.environ)
+    env['GIT_CONFIG_GLOBAL'] = os.devnull
+    env['GIT_CONFIG_SYSTEM'] = os.devnull
+    return env
 
 
 # H1 ---------------------------------------------------------------------
@@ -57,6 +74,7 @@ class UpdateScriptOriginGuardTests(unittest.TestCase):
         result = subprocess.run(
             ['bash', REPO_DIR + '/scripts/update.sh'],
             cwd=bad_repo, capture_output=True, text=True, check=False,
+            env=_hermetic_git_env(),
         )
         self.assertNotEqual(result.returncode, 0)
         combined = ((result.stdout or '') + (result.stderr or '')).lower()
@@ -67,6 +85,7 @@ class UpdateScriptOriginGuardTests(unittest.TestCase):
         result = subprocess.run(
             ['bash', REPO_DIR + '/scripts/update.sh'],
             cwd=good_repo, capture_output=True, text=True, check=False,
+            env=_hermetic_git_env(),
         )
         combined = ((result.stdout or '') + (result.stderr or '')).lower()
         self.assertNotIn('non-allowlisted origin remote', combined)

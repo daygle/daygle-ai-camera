@@ -35,6 +35,7 @@ from app.config_facades import (
     effective_recording_config,
     effective_storage_config,
 )
+from app.database import AUDIT_LOG_IMMUTABLE_TRIGGERS
 from app.recording_extension import delete_recording_files
 from app.utils import normalize_bool_setting
 
@@ -42,6 +43,28 @@ logger = logging.getLogger('daygle.ai')
 
 DATABASE_RESTORE_REQUIRED_TABLES: set[str] = {'events', 'detections', 'app_settings', 'users'}
 DATABASE_RESTORE_LOCK: threading.Lock = threading.Lock()
+
+
+def _normalize_ddl(sql: str | None) -> str:
+    """Normalise a CREATE statement for allowlist comparison.
+
+    Collapses runs of whitespace, drops the ``IF NOT EXISTS`` clause and the
+    trailing statement terminator (both of which ``sqlite_master.sql`` strips)
+    so a trigger stored in an uploaded backup compares equal to the canonical
+    DDL regardless of formatting. Comparison is case-insensitive.
+    """
+    collapsed = ' '.join((sql or '').split())
+    collapsed = collapsed.replace('CREATE TRIGGER IF NOT EXISTS', 'CREATE TRIGGER')
+    return collapsed.rstrip(' ;').lower()
+
+
+# Allowlist of the application's own triggers, keyed by name -> normalised
+# body. A trigger in an uploaded backup is accepted only if BOTH its name and
+# its normalised body match an entry here; every other trigger and all views
+# are rejected by ``overwrite_database_from_file``.
+_ALLOWED_TRIGGER_DDL: dict[str, str] = {
+    name: _normalize_ddl(sql) for name, sql in AUDIT_LOG_IMMUTABLE_TRIGGERS.items()
+}
 
 
 def backup_directory() -> Path:
@@ -139,12 +162,16 @@ def overwrite_database_from_file(restore_source: Path) -> None:
     #    attacker code on the first connection-using query after restore.
     #
     # 2. ``sqlite_master`` is queried for VIEWs and TRIGGERs. The application
-    #    uses neither (verified across ``app/``); if either is present in
-    #    the uploaded backup, the restore is rejected with HTTP 400 before
-    #    any row-level SQL is run. This blocks the readfile / writefile /
-    #    load_extension wrapper vectors that can ride inside a view or
-    #    trigger body even when the live application never queries them
-    #    explicitly.
+    #    ships exactly TWO triggers of its own -- the immutable audit-log
+    #    guards (``app.database.AUDIT_LOG_IMMUTABLE_TRIGGERS``) -- and no
+    #    views. Those two triggers are allowlisted by their exact (normalised)
+    #    body, so an attacker cannot smuggle a ``load_extension`` / ``readfile``
+    #    / ``writefile`` payload under a trusted trigger NAME. Any other
+    #    trigger, and ANY view, is rejected with HTTP 400 before any row-level
+    #    SQL is run. This blocks the wrapper vectors that can ride inside a
+    #    view or trigger body even when the live application never queries
+    #    them explicitly, while still permitting a legitimate backup produced
+    #    by this application (which always carries the audit-log triggers).
     #
     # Both defences are evaluated on the OPEN ``source`` connection; the
     # subsequent ``source.backup(...)`` reuses the same connection after the
@@ -158,19 +185,28 @@ def overwrite_database_from_file(restore_source: Path) -> None:
             # enable_load_extension; those builds default to False already,
             # so the no-op is safe.
             pass
-        offending = source.execute(
-            "SELECT type, name FROM sqlite_master "
+        rows = source.execute(
+            "SELECT type, name, sql FROM sqlite_master "
             "WHERE type IN ('view', 'trigger') "
             "AND sql IS NOT NULL AND sql <> ''"
         ).fetchall()
+        offending = [
+            (row[0], row[1])
+            for row in rows
+            if not (
+                row[0] == 'trigger'
+                and _ALLOWED_TRIGGER_DDL.get(row[1]) == _normalize_ddl(row[2])
+            )
+        ]
         if offending:
-            sample = ', '.join(f'{row[0]}:{row[1]}' for row in offending[:5])
+            sample = ', '.join(f'{typ}:{name}' for typ, name in offending[:5])
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"Restored database contains views or triggers ({sample}"
+                    f"Restored database contains unexpected views or triggers ({sample}"
                     f"{'...' if len(offending) > 5 else ''}); restore rejected. "
-                    f"Only plain-table backups without views or triggers are accepted."
+                    f"Only plain-table backups (plus this application's own "
+                    f"immutable audit-log triggers) are accepted."
                 ),
             )
         destination = sqlite3.connect(str(_state.database.database_path))
