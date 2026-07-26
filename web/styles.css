@@ -289,17 +289,19 @@ body {
   display: none;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   background: rgba(255,255,255,.05);
   color: var(--muted);
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  -webkit-tap-highlight-color: transparent;
 }
 .app-nav-toggle:hover { color: var(--text); border-color: rgba(255,255,255,.18); }
+.app-nav-toggle:active { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.25); }
 
 /* ── Nav body (links + account) ── */
 .app-nav-body {
@@ -323,8 +325,8 @@ body {
 .nav-dropdown-trigger {
   display: inline-flex;
   align-items: center;
-  min-height: 36px;
-  padding: 8px 12px;
+  min-height: 44px;
+  padding: 10px 12px;
   border: 1px solid transparent;
   border-radius: 10px;
   color: var(--muted);
@@ -334,6 +336,7 @@ body {
   cursor: pointer;
   background: none;
   transition: border-color 0.15s, color 0.15s, background 0.15s;
+  -webkit-tap-highlight-color: transparent;
 }
 .nav-item.active,
 .nav-dropdown-trigger.active,
@@ -342,6 +345,12 @@ body {
   border-color: var(--border);
   color: var(--text);
   background: rgba(255,255,255,.06);
+}
+.nav-item:active,
+.nav-dropdown-trigger:active {
+  background: rgba(255,255,255,.10);
+  border-color: rgba(255,255,255,.18);
+  transition-duration: 0.05s;
 }
 
 /* ── Dropdown ── */
@@ -387,7 +396,8 @@ body {
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 9px 12px;
+  padding: 10px 12px;
+  min-height: 44px;
   border: 1px solid transparent;
   border-radius: 9px;
   color: var(--muted);
@@ -396,6 +406,7 @@ body {
   white-space: nowrap;
   background: none;
   transition: border-color 0.12s, color 0.12s, background 0.12s;
+  -webkit-tap-highlight-color: transparent;
 }
 .nav-dropdown-item:hover {
   border-color: var(--border);
@@ -406,6 +417,10 @@ body {
   border-color: var(--border);
   color: var(--text);
   background: rgba(255,255,255,.06);
+}
+.nav-dropdown-item:active {
+  background: rgba(255,255,255,.10);
+  transition-duration: 0.05s;
 }
 
 /* Account dropdown: align menu to the right so it doesn't overflow off-screen */
@@ -487,6 +502,33 @@ a.secondary { display: inline-flex; align-items: center; border-radius: 14px; pa
 }
 button.delete-btn { color: #f87171; border-color: rgba(248,113,113,.35); }
 button.delete-btn:hover { background: rgba(248,113,113,.12); border-color: #f87171; }
+
+/* ─── Touch feedback (active states) ─────────────────────────────────── */
+button:active,
+a.button-link:active,
+a.secondary:active,
+a.button-link.secondary-link:active {
+  transform: scale(0.97);
+  transition-duration: 0.08s;
+}
+button.primary:active {
+  filter: brightness(0.9);
+  transition-duration: 0.08s;
+}
+button.secondary:active,
+a.secondary:active {
+  background: rgba(255,255,255,.10);
+  transition-duration: 0.08s;
+}
+.item:active {
+  border-color: rgba(71, 214, 255, 0.28);
+  background: rgba(71, 214, 255, 0.06);
+  transition-duration: 0.08s;
+}
+.toggle-control:active {
+  background: rgba(255,255,255,.10);
+  transition-duration: 0.08s;
+}
 input,
 select,
 textarea {
@@ -671,7 +713,8 @@ input[type="file"] { padding: 10px; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 10px 12px;
   margin-bottom: 10px;
 }
 
@@ -702,7 +745,7 @@ input[type="file"] { padding: 10px; }
 @media (max-width: 900px) {
   .app-nav-toggle { display: flex; }
   .app-nav-body {
-    display: none;
+    display: flex;
     position: absolute;
     top: 100%;
     left: 0;
@@ -710,12 +753,26 @@ input[type="file"] { padding: 10px; }
     flex-direction: column;
     align-items: stretch;
     gap: 8px;
-    padding: 12px 0;
+    padding: 12px 16px;
     border-bottom: 1px solid var(--border);
-    background: var(--bg);
+    background: rgba(7, 11, 19, 0.96);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
     z-index: 55;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-8px);
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+    pointer-events: none;
+    max-height: calc(100vh - 64px);
+    overflow-y: auto;
   }
-  .app-nav.nav-open .app-nav-body { display: flex; }
+  .app-nav.nav-open .app-nav-body {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
   .app-nav-links {
     flex-direction: column;
     align-items: stretch;
@@ -746,15 +803,16 @@ input[type="file"] { padding: 10px; }
     visibility: visible;
     max-height: 0;
     overflow: hidden;
-    transition: max-height 0.2s ease, padding 0.2s ease;
+    transition: max-height 0.25s ease, padding 0.25s ease;
     padding-top: 0;
     padding-bottom: 0;
+    backdrop-filter: none;
   }
   .nav-dropdown.open .nav-dropdown-menu {
-    max-height: 300px;
+    max-height: 400px;
     padding: 4px 0 4px 16px;
   }
-  .nav-dropdown-item { padding: 8px 12px; }
+  .nav-dropdown-item { padding: 11px 12px; min-height: 44px; }
   .hero { flex-direction: column; align-items: stretch; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .recording-timeline-layout { grid-template-columns: 1fr; }
@@ -1352,6 +1410,98 @@ tr.drag-over {
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   /* Activity filter pills: drop the full-pill capsule shape when they wrap */
   .activity-filter-group { border-radius: 14px; }
+  /* Settings section headers: wrap hero action below title */
+  .settings-section-header { flex-wrap: wrap; gap: 10px; }
+  .settings-section-header .hero-action { width: 100%; }
+  /* Zone editor footer: full-width button on phones */
+  .zone-editor-footer { display: flex; justify-content: stretch; }
+  .zone-editor-footer button { flex: 1; justify-content: center; }
+  /* Sound editor footer: full-width stacked buttons */
+  .sound-editor-footer { display: flex; flex-wrap: wrap; gap: 10px; justify-content: stretch; }
+  .sound-editor-footer button { flex: 1; justify-content: center; }
+  /* Sound rule select: full width */
+  .rule-select-wrapper { width: 100%; }
+  .rule-select-wrapper select { width: 100%; }
+}
+
+/* ─── Sounds page layout ──────────────────────────────────────────────────── */
+.sounds-layout {
+  display: grid;
+  gap: 28px;
+  align-items: start;
+}
+@media (max-width: 899px) {
+  .sounds-layout { grid-template-columns: 1fr; }
+}
+
+/* ─── Rule tables (zones + sounds) ────────────────────────────────────────── */
+.rule-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.rule-table th {
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+}
+.rule-table td {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.rule-table .cell-center {
+  text-align: center;
+}
+@media (max-width: 760px) {
+  .rule-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .rule-table thead,
+  .rule-table tbody,
+  .rule-table tr {
+    display: table;
+    table-layout: fixed;
+    width: 100%;
+    min-width: 680px;
+  }
+}
+
+/* ─── Zone frame toolbar ────────────────────────────────────────────────────── */
+.zone-frame-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+@media (max-width: 600px) {
+  .zone-frame-toolbar {
+    justify-content: center;
+  }
+  .zone-frame-toolbar button {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+/* ─── Sound editor footer ────────────────────────────────────────────────────── */
+.sound-editor-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
 }
 
 /* ─── Cameras page ─────────────────────────────────────────────────────────── */

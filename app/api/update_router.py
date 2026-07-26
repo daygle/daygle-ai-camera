@@ -84,13 +84,20 @@ def apply_update(request: Request, logger=Depends(get_logger)):
     try:
         result = subprocess.run(['bash', str(update_script)], capture_output=True, text=True, timeout=300, cwd=str(BASE_DIR))
     except subprocess.TimeoutExpired:
-        with _state._update_lock:
-            _state._update_in_progress = False
         raise HTTPException(status_code=504, detail='Update timed out after 5 minutes.')
     except Exception as exc:
+        raise HTTPException(status_code=500, detail=f'Update failed: {exc}') from exc
+    finally:
+        # Defence-in-depth: the flag MUST be cleared on every exit path
+        # (success with restart, success without restart, timeout, or
+        # unexpected exception).  Using ``finally`` prevents the flag
+        # from getting permanently stuck if a ``BaseException`` subclass
+        # (e.g. ``KeyboardInterrupt``) or an ``Exception`` subclass
+        # NOT caught by the ``except Exception`` above slips through.
+        # On the restart path the daemon thread sleeps 3 s then also
+        # clears the flag; the redundant clear here is harmless.
         with _state._update_lock:
             _state._update_in_progress = False
-        raise HTTPException(status_code=500, detail=f'Update failed: {exc}') from exc
     output = ((result.stdout or '') + ('\n' + result.stderr if result.stderr else '')).strip()
     service_restart_scheduled = False
     if result.returncode == 0:

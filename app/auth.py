@@ -387,7 +387,10 @@ class AuthService:
             # elevates to admin on the next request when an admin promotes the
             # user. ``is_active is False`` already invalidates sessions and is
             # combined here so the single DELETE statement covers both cases.
-            if is_active is False or role_will_change:
+            # Invalidate existing sessions on any security-sensitive change:
+            # role change (privilege escalation guard), account deactivation,
+            # OR password change (stolen-credential mitigation).
+            if is_active is False or role_will_change or password:
                 db.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
             return self.get_user(user_id)  # type: ignore[return-value]
 
@@ -490,6 +493,13 @@ class AuthService:
                 cursor = db.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", params)
                 if cursor.rowcount == 0:
                     raise AuthError("User not found.")
+                # Invalidate existing sessions when the username changes.
+                # Without this, a stolen session cookie for the old username
+                # remains valid after the rename.  Only the username change
+                # triggers invalidation — email changes are less security-
+                # sensitive since the username is the primary identifier.
+                if username_changed:
+                    db.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
         except sqlite3.IntegrityError as exc:
             raise AuthError("Username already exists.") from exc
         return self.get_user(user_id)  # type: ignore[return-value]
@@ -708,11 +718,14 @@ class AuthService:
             db.execute("DELETE FROM user_sessions WHERE session_token = ?", (session_token,))
 
     def cleanup_expired_sessions(self) -> None:
-        # M2 (round-7): the whole method is best-effort. Any per-phase failure
-        # (expired-session sweep, login_attempts purge, camera_diagnostics
-        # purge) is logged at warning level and swallowed so a transient
-        # backend hiccup never breaks the caller's maintenance tick. This is
-        # the contract ``test_purge_is_best_effort_on_exception`` exercises.
+        # Best-effort: the session sweep + login_attempts purge run in a
+        # SINGLE connection/transaction so they are atomic. If either
+        # operation fails, both are rolled back, preventing a split state
+        # where expired sessions are cleaned but old login_attempts
+        # accumulate (or vice versa).  The camera_diagnostics purger
+        # lives in a separate module (``app.backup``) with its own
+        # database connection, so it stays outside the transaction.
+        import logging as _logging
         try:
             with self.connect() as db:
                 now_str = utc_now()
@@ -724,49 +737,29 @@ class AuthService:
                     "OR (absolute_expires_at IS NOT NULL AND absolute_expires_at <= ?)",
                     (now_str, now_str),
                 )
-        except Exception as exc:
-            import logging as _logging
-            _logging.getLogger('daygle.ai').warning(
-                'cleanup_expired_sessions: session sweep failed: %s', exc
-            )
-        # M2 (round-7): purge ``login_attempts`` rows older than a fixed
-        # 90-day window. Cheap DELETE (low-volume table) without VACUUM /
-        # WAL-checkpoint per the M2 design verdict. Idempotent.
-        try:
-            from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-            cutoff_iso = (_dt.now(_tz.utc) - _td(days=90)).isoformat()
-            with self.connect() as db:
+                # Purge login_attempts rows older than 90 days. Combined into
+                # the same transaction as the session sweep for atomicity.
+                from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+                cutoff_iso = (_dt.now(_tz.utc) - _td(days=90)).isoformat()
                 db.execute(
                     'DELETE FROM login_attempts WHERE created_at < ?',
                     (cutoff_iso,),
                 )
-        except Exception as login_purge_exc:
-            # Best-effort; never let audit-log-adjacent cleanup crash
-            # session cleanup. Admin can re-run manually if needed.
-            # Logged at warning level so a long-running retention bug
-            # (disk full, schema mismatch, corrupted row) is visible
-            # rather than silently failing forever.
-            import logging as _logging
+        except Exception as exc:
+            # Best-effort: a transient backend hiccup (disk full, SQLite
+            # locked, schema mismatch) must never break the caller's
+            # maintenance tick. Logged at warning level so retention
+            # bugs are diagnosable rather than silent.
             _logging.getLogger('daygle.ai').warning(
-                'cleanup_expired_sessions: login_attempts purge failed: %s',
-                login_purge_exc,
+                'cleanup_expired_sessions: session/login_attempts purge failed: %s', exc
             )
-        # M3 wiring (round-7): the camera_diagnostics purger already lives
-        # at ``app.backup.purge_camera_diagnostics_by_policy``; we just
-        # invoke it from this same regularly-scheduled maintenance point
-        # so it actually fires without operator intervention. Audit-log
-        # purger is intentionally NOT wired here -- the immutability
-        # trigger in ``app.db.audit`` MUST NOT be bypassed (round-7 M3 NO-GO).
+        # Camera_diagnostics purger: separate module, separate connection.
+        # Intentionally outside the transaction so a diagnostics-schema
+        # issue cannot roll back the session/login_attempts cleanup.
         try:
             from app.backup import purge_camera_diagnostics_by_policy
             purge_camera_diagnostics_by_policy()
         except Exception as diag_purge_exc:
-            # Same best-effort policy as the login_attempts sweep above:
-            # a failed diagnostics purge should NOT collapse the
-            # surrounding session-sweep cleanup, but a recurrence MUST
-            # show up in the operator log so disk-/schema-related
-            # retention bugs are diagnosable rather than silent.
-            import logging as _logging
             _logging.getLogger('daygle.ai').warning(
                 'cleanup_expired_sessions: camera_diagnostics purge failed: %s',
                 diag_purge_exc,

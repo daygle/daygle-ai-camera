@@ -219,9 +219,14 @@ def stream_recording(recording_id: int, request: Request, db=Depends(get_databas
     if not match:
         return Response(status_code=416, headers={'Content-Range': f'bytes */{file_size}'})
     start_text, end_text = match.groups()
-    start = int(start_text) if start_text else 0
-    end = int(end_text) if end_text else file_size - 1
-    if start >= file_size or end < start:
+    try:
+        start = int(start_text) if start_text else 0
+        end = int(end_text) if end_text else file_size - 1
+    except (ValueError, OverflowError):
+        return Response(status_code=416, headers={'Content-Range': f'bytes */{file_size}'})
+    # Defence-in-depth: reject negative values, start beyond file, and end before start.
+    # Overflow from maliciously large integers is caught by the try/except above.
+    if start < 0 or end < 0 or start >= file_size or end < start:
         return Response(status_code=416, headers={'Content-Range': f'bytes */{file_size}'})
     end = min(end, file_size - 1)
     chunk_size = end - start + 1

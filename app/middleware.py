@@ -273,7 +273,33 @@ async def authentication_middleware(request: Request, call_next):
 async def app_navigation_middleware(request: Request, call_next):
     response = await call_next(request)
     content_type = response.headers.get('content-type', '')
-    if request.url.path in PUBLIC_PATHS or not content_type.startswith('text/html'):
+    path = request.url.path
+
+    # ── Security response headers ────────────────────────────────────────
+    # Defence-in-depth: set recommended security headers on every
+    # response. These protect against clickjacking (X-Frame-Options),
+    # MIME-type sniffing (X-Content-Type-Options), referrer leakage
+    # (Referrer-Policy), and legacy browser features (Permissions-Policy).
+    # CSP is omitted here because the application dynamically injects
+    # inline styles and scripts that would require a per-route policy;
+    # it can be added incrementally.
+    security_headers: dict[str, str] = {
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+    }
+    # Strict-Transport-Security should only be set over HTTPS.
+    if request.url.scheme == 'https':
+        security_headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+
+    if path in PUBLIC_PATHS or not content_type.startswith('text/html'):
+        # Apply security headers even on non-HTML / public responses.
+        # We mutate the response headers in-place rather than creating a new
+        # Response, which would consume body_iterator and break streaming
+        # endpoints (e.g. recording/video streams).
+        for key, value in security_headers.items():
+            response.headers.setdefault(key, value)
         return response
     body = b''
     async for chunk in response.body_iterator:
@@ -284,6 +310,8 @@ async def app_navigation_middleware(request: Request, call_next):
         body = body.replace(marker, script + marker)
     headers = dict(response.headers)
     headers.pop('content-length', None)
+    for key, value in security_headers.items():
+        headers.setdefault(key, value)
     return Response(
         content=body,
         status_code=response.status_code,
