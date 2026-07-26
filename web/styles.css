@@ -2391,6 +2391,19 @@ tr.drag-over {
   gap: 4px;
   margin-top: 3px;
 }
+/* The confidence badges here are rendered by detectionPill() (web/utils.js),
+   so they carry the base `.detection` chip styling - which ships an 8px top
+   margin plus roomy padding/font meant for the larger recordings-list rows.
+   Left unscoped, that stray margin stacks on top of this row's own margin-top
+   and the .timeline-recording-main grid gap, bloating each recording item and
+   crowding the list. Scope the pills down (mirroring the #events /
+   .recordings-list overrides) and drop the margin so this row's `gap` owns the
+   spacing. */
+.timeline-recording-confidence-row .detection {
+  margin: 0;
+  padding: 3px 8px;
+  font-size: 11px;
+}
 .timeline-recording-confidence {
   display: inline-flex;
   align-items: center;
