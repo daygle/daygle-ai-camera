@@ -3803,7 +3803,7 @@ a.activity-item-action {
            gap: 10px;
            max-height: 400px;
            overflow-y: auto;
-           padding-right: 4px;
+           padding: 4px 12px 8px;
 }
 .live-motion-multi-row::-webkit-scrollbar {
            width: 4px;

@@ -295,6 +295,7 @@ async function loadAlerts() {
 async function refreshAll() {
   await loadAlerts();
   renderFeed();
+  updateDismissBtn();
 }
 
 // ─── Dismiss all ────────────────────────────────────────────────────────────
