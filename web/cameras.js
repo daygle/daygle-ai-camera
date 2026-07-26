@@ -87,7 +87,6 @@ function renderCameraRow(camera, index) {
       <td class="cell-actions">
         <button class="secondary cam-edit-btn" data-index="${index}" type="button" title="Edit camera">${ICONS.edit}<span class="action-label">Edit</span></button>
         <button class="secondary delete-btn cam-remove-btn" data-index="${index}" type="button" title="Remove camera">${ICONS.remove}<span class="action-label">Remove</span></button>
-        <a href="/live?camera=${encodeURIComponent(camera.id || '')}" title="View live" class="action-link">Live</a>
       </td>
     </tr>
   `;

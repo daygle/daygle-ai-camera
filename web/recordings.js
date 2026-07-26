@@ -311,8 +311,11 @@ function renderRecordings(recordings) {
               <span class="activity-item-name">Recording #${recording.id}</span>
             </div>
             <div class="activity-item-when">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-              <span>${escapeHtml(formatDateTime(recording.started_at))}</span>
+              <div class="activity-item-when-relative">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                <span>${escapeHtml(timeAgo(recording.started_at))}</span>
+              </div>
+              <span class="activity-item-when-absolute">${escapeHtml(formatDateTime(recording.started_at))}</span>
             </div>
           </div>
           <p class="muted activity-item-meta">${metaParts.join(' · ')}</p>
