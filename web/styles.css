@@ -3762,6 +3762,16 @@ a.activity-item-action {
   height: 28px;
   padding: 4px 8px 2px;
 }
+.live-motion-strip--multi {
+  height: auto;
+  display: block;
+  gap: initial;
+  align-items: initial;
+  padding: 0;
+  min-height: 60px;
+  background: none;
+  box-shadow: none;
+}
 .live-motion-bar {
   flex: 1 1 0;
   min-width: 2px;

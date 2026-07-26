@@ -220,7 +220,7 @@ function renderLiveMotionSingle() {
     const pctNum = Math.round(s.confidence * 100);
     return `<div class="${classes.join(' ')}" style="height:${h.toFixed(1)}%" title="${escapeHtml(time)} - ${pctNum}%"></div>`;
   }).join('');
-  liveEls.motionStrip.classList.remove('all-cameras');
+  liveEls.motionStrip.classList.remove('all-cameras', 'live-motion-strip--multi');
   liveEls.motionStrip.innerHTML = html;
   if (liveEls.motionSubtitle) {
     const cam = selectedCamera?.name || selectedCamera?.id || 'this camera';
@@ -260,6 +260,7 @@ function renderLiveMotionAllCameras() {
     `;
   }).join('');
   liveEls.motionStrip.classList.remove('all-cameras');
+  liveEls.motionStrip.classList.add('live-motion-strip--multi');
   // R9 H2 XSS defang: build the wrapper via createElement so the
   // .innerHTML = site carries no template-literal interpolation. ``rows``
   // is itself already-escaped HTML (every dynamic bit inside cameras.map
