@@ -6,13 +6,9 @@
   --text: #edf3ff;
   --muted: #91a1ba;
   --accent: #47d6ff;
-  --accent-2: #8b5cf6;
   --danger: #ff5c8a;
   --success: #49e6a3;
   --border: rgba(255,255,255,0.09);
-  --accent-rgb: 71, 214, 255;
-  --success-rgb: 73, 230, 163;
-  --danger-rgb: 255, 92, 138;
 }
 
 /* ─── Light mode ──────────────────────────────────────────────────────── */
@@ -24,13 +20,9 @@
   --text: #1a2332;
   --muted: #66748e;
   --accent: #0284c7;
-  --accent-2: #7c3aed;
   --danger: #dc2626;
   --success: #059669;
   --border: rgba(0, 0, 0, 0.10);
-  --accent-rgb: 2, 132, 199;
-  --success-rgb: 5, 150, 105;
-  --danger-rgb: 220, 38, 38;
 }
 :root.light body {
   background: var(--bg);
@@ -82,17 +74,19 @@
   border-color: rgba(2, 132, 199, 0.18);
   background: rgba(2, 132, 199, 0.04);
 }
-:root.light .detection.detection-object { background: rgba(2,132,199,.08); color: #0284c7; border-color: rgba(2,132,199,.25); }
-:root.light .detection.detection-sound { background: rgba(124,58,237,.12); color: #7c3aed; border-color: rgba(124,58,237,.3); }
-:root.light .detection.detection-motion { background: rgba(5,150,105,.1); color: #059669; border-color: rgba(5,150,105,.3); }
+:root.light .item strong { color: var(--text); }
+:root.light .detection.detection-object { background: rgba(2,132,199,.12); color: #0369a1; border-color: rgba(2,132,199,.35); font-weight: 800; }
+:root.light .detection.detection-sound { background: rgba(124,58,237,.16); color: #6d28d9; border-color: rgba(124,58,237,.35); font-weight: 800; }
+:root.light .detection.detection-motion { background: rgba(5,150,105,.14); color: #047857; border-color: rgba(5,150,105,.35); font-weight: 800; }
 :root.light .status-panel div { background: rgba(255,255,255,.6); }
 :root.light .danger-zone-card {
-  border-color: rgba(220,38,38,.4);
-  background: linear-gradient(180deg, rgba(254,226,226,0.5), rgba(255,255,255,0.9));
+  border-color: rgba(220,38,38,.5);
+  background: linear-gradient(180deg, rgba(254,202,202,0.55), rgba(255,255,255,0.92));
+  box-shadow: 0 4px 24px rgba(220,38,38,.08);
 }
-:root.light .danger-zone-badge { color: #991b1b; border-color: rgba(220,38,38,.4); background: rgba(220,38,38,.1); }
-:root.light .danger-zone-warning,
-:root.light .danger-zone-confirm-hint { color: #991b1b; }
+:root.light .danger-zone-badge { color: #991b1b; border-color: rgba(220,38,38,.5); background: rgba(220,38,38,.12); font-weight: 800; }
+:root.light .danger-zone-warning { color: #7f1d1d; font-weight: 800; }
+:root.light .danger-zone-confirm-hint { color: #991b1b; background: rgba(220,38,38,.06); padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(220,38,38,.15); }
 :root.light .nav-countdown { background: rgba(0,0,0,.02); }
 :root.light .nav-countdown.warn { background: rgba(248,197,93,.12); }
 :root.light .nav-countdown.critical { background: rgba(220,38,38,.08); }
@@ -145,14 +139,57 @@
 :root.light .monitor-zone-polygon polyline { fill: rgba(2,132,199,.08); }
 :root.light .labels-list .label-tag { background: rgba(0,0,0,.03); }
 :root.light .toast { background: #fff; box-shadow: 0 8px 32px rgba(0,0,0,.12); }
-:root.light .activity-filter-group { background: rgba(0,0,0,.03); }
-:root.light .activity-filter-pill:hover { background: rgba(0,0,0,.06); }
-:root.light .activity-filter-pill.active { background: var(--accent); color: #fff; }
-:root.light .activity-item-type { background: rgba(0,0,0,.06); color: var(--muted); }
-:root.light .activity-item-sound .activity-item-type { background: rgba(124,58,237,.12); color: #7c3aed; }
-:root.light .activity-item-motion .activity-item-type { background: rgba(5,150,105,.1); color: #059669; }
-:root.light .activity-item-alert .activity-item-type { background: rgba(220,38,38,.1); color: #dc2626; }
+:root.light .activity-filter-group { background: rgba(0,0,0,.04); border-color: rgba(0,0,0,.08); }
+:root.light .activity-filter-pill:hover { background: rgba(0,0,0,.08); color: var(--text); }
+:root.light .activity-filter-pill.active { background: linear-gradient(135deg, #0284c7, #059669); color: #fff; box-shadow: 0 2px 8px rgba(2,132,199,.25); }
+:root.light .activity-item-type { background: rgba(0,0,0,.08); color: var(--muted); font-weight: 700; }
+:root.light .activity-item-sound .activity-item-type { background: rgba(124,58,237,.15); color: #6d28d9; border: 1px solid rgba(124,58,237,.25); }
+:root.light .activity-item-motion .activity-item-type { background: rgba(5,150,105,.12); color: #047857; border: 1px solid rgba(5,150,105,.2); }
+:root.light .activity-item-alert .activity-item-type { background: rgba(220,38,38,.1); color: #b91c1c; border: 1px solid rgba(220,38,38,.2); }
 :root.light .zone-object-rule { background: rgba(0,0,0,.025); }
+
+/* ─── Admin page elements (camera-log, audit, users) ──────────────────── */
+:root.light .badge-installed {
+  background: rgba(0,0,0,.06);
+  color: var(--muted);
+  border-color: rgba(0,0,0,.12);
+}
+:root.light .badge-update {
+  background: rgba(180,120,20,.12);
+  color: #92400e;
+  border-color: rgba(180,120,20,.3);
+}
+:root.light .status-badge {
+  background: rgba(0,0,0,.06);
+  color: var(--muted);
+  border: 1px solid rgba(0,0,0,.1);
+}
+:root.light .pagination {
+  color: var(--muted);
+}
+:root.light .pagination button {
+  background: #fff;
+  color: var(--text);
+}
+:root.light .pagination button:hover {
+  background: rgba(0,0,0,.06);
+}
+:root.light .pagination #pageInfo {
+  color: var(--muted);
+}
+:root.light .audit-table th {
+  color: var(--muted);
+  border-bottom: 2px solid rgba(0,0,0,.12);
+}
+:root.light .audit-table td {
+  border-bottom: 1px solid rgba(0,0,0,.06);
+}
+:root.light .audit-table tr:hover td {
+  background: rgba(2,132,199,.04);
+}
+:root.light .user-row .item-title {
+  color: var(--text);
+}
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -1556,7 +1593,7 @@ tr.drag-over {
   letter-spacing: 0.03em;
 }
 .badge-active { background: var(--accent); color: #000; }
-.badge-installed { background: var(--panel-strong); color: var(--text-muted); border: 1px solid var(--border); }
+.badge-installed { background: var(--panel-strong); color: var(--muted); border: 1px solid var(--border); }
 .badge-update { background: rgba(248, 197, 93, 0.15); color: rgb(248, 197, 93); border: 1px solid rgba(248, 197, 93, 0.4); }
 
 /* ─── Labels list ───────────────────────────────────────────────────────────── */
