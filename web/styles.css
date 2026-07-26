@@ -147,6 +147,14 @@
 :root.light .activity-item-motion .activity-item-type { background: rgba(5,150,105,.12); color: #047857; border: 1px solid rgba(5,150,105,.2); }
 :root.light .activity-item-alert .activity-item-type { background: rgba(220,38,38,.1); color: #b91c1c; border: 1px solid rgba(220,38,38,.2); }
 :root.light .zone-object-rule { background: rgba(0,0,0,.025); }
+:root.light .live-status,
+:root.light .live-status-pill,
+:root.light .live-camera-tile-image .live-status {
+  background: rgba(255, 255, 255, 0.85);
+  color: #1a2332;
+  border-color: rgba(0,0,0,.12);
+  backdrop-filter: blur(8px);
+}
 
 /* ─── Admin page elements (camera-log, audit, users) ──────────────────── */
 :root.light .badge-installed {
@@ -2568,7 +2576,7 @@ a.activity-item-action {
 /* ─── Frame + PTZ side-by-side layout ─────────────────────────────────── */
 .live-frame-ptz-layout {
   display: grid;
-  grid-template-columns: 1fr 280px;
+  grid-template-columns: 1fr auto;
   gap: 18px;
   align-items: start;
 }
@@ -3783,7 +3791,7 @@ a.activity-item-action {
 .live-motion-multi-row {
            display: grid;
            gap: 10px;
-           max-height: 300px;
+           max-height: 400px;
            overflow-y: auto;
            padding-right: 4px;
 }
