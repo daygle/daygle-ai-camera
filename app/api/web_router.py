@@ -190,6 +190,14 @@ def cameras_page(request: Request, web_dir: Path = Depends(get_web_dir)):
 
 
 @router.get('/alerts')
+def alerts_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
+    alerts_path = web_dir / 'alerts.html'
+    if alerts_path.exists():
+        return FileResponse(alerts_path)
+    return root(web_dir=web_dir)
+
+
 @router.get('/events')
 @router.get('/search')
 def dashboard_aliases(web_dir: Path = Depends(get_web_dir)):

@@ -3,13 +3,9 @@ const els = {
   totalEvents: document.getElementById('totalEvents'),
   soundEvents: document.getElementById('soundEvents'),
   motionEvents: document.getElementById('motionEvents'),
-  objectAlerts: document.getElementById('objectAlerts'),
-  motionAlerts: document.getElementById('motionAlerts'),
-  soundAlerts: document.getElementById('soundAlerts'),
   activityFeed: document.getElementById('activityFeed'),
   listStatus: document.getElementById('listStatus'),
   dismissAllEventsBtn: document.getElementById('dismissAllEventsBtn'),
-  dismissAllAlertsBtn: document.getElementById('dismissAllAlertsBtn'),
   filterPills: document.querySelectorAll('.activity-filter-pill'),
 };
 
@@ -24,7 +20,6 @@ let configuredLabels = null;
 // motionPill() are provided by web/utils.js (loaded before this script).
 
 let events = [];
-let alertGroups = [];
 let activeFilter = 'all';
 
 // api() is provided by web/utils.js (loaded before this script) - it reads
@@ -91,78 +86,19 @@ function detectionBadges(detections = [], { isSound = false } = {}) {
     .join('');
 }
 
-// ─── Alert grouping (consolidates multiple alerts for the same event) ──────
-function groupAlertsByEvent(alerts) {
-  const order = [];
-  const groups = new Map();
-  for (const alert of alerts) {
-    const key = alert.event_id !== null && alert.event_id !== undefined ? `event-${alert.event_id}` : `alert-${alert.id}`;
-    if (!groups.has(key)) {
-      order.push(key);
-      groups.set(key, {
-        key,
-        eventId: alert.event_id ?? null,
-        camera: cameraLabel(alert.camera_name, alert.camera_id),
-        ruleNames: [],
-        zones: new Set(),
-        labels: new Set(),
-        detections: [],
-        latestAt: alert.created_at,
-        earliestAt: alert.created_at,
-        recordingId: alert.recording_id ?? null,
-        message: alert.message,
-      });
-    }
-    const group = groups.get(key);
-    if (alert.rule_name && !group.ruleNames.includes(alert.rule_name)) {
-      group.ruleNames.push(alert.rule_name);
-      const parts = String(alert.rule_name).split(' / ');
-      if (parts.length >= 3) group.zones.add(parts[1]);
-    }
-    const label = String(alert.label || '').trim().toLowerCase();
-    if (label) group.labels.add(label);
-    const confidence = Number(alert.confidence);
-    group.detections.push({
-      label: label || String(alert.label || ''),
-      confidence: Number.isFinite(confidence) ? confidence : null,
-    });
-    if (alert.created_at && (!group.latestAt || String(alert.created_at) > String(group.latestAt))) {
-      group.latestAt = alert.created_at;
-    }
-    if (alert.created_at && (!group.earliestAt || String(alert.created_at) < String(group.earliestAt))) {
-      group.earliestAt = alert.created_at;
-    }
-    if (alert.recording_id && !group.recordingId) group.recordingId = alert.recording_id;
-  }
-  return order.map((key) => {
-    const group = groups.get(key);
-    return { ...group, labels: Array.from(group.labels), zones: Array.from(group.zones) };
-  });
-}
-
-// ─── Unified activity feed rendering ───────────────────────────────────────
+// ─── Detection feed rendering ─────────────────────────────────────────────
+// Each item represents one event (detection). Items are sorted newest-first,
+// filtered by `activeFilter`, and rendered as `.activity-item` rows.
 //
-// Each item is one of:
-//   { type: 'event',  id, createdAt, camera, detections, recordingId, source }
-//   { type: 'alert',  id, latestAt,  eventId, camera, ruleNames, labels, detections, recordingId, message }
-//
-// Items are merged, sorted newest-first, filtered by `activeFilter`, and
-// rendered as `.activity-item` rows. The single template keeps the visual
-// language consistent between detections and alerts (one icon + main + actions
-// column) without duplicating structure across two renderers.
-
-// isMotionOnlyEvent / isMotionOnlyEventItem / isMotionOnlyAlertGroup /
-// isMotionOnlyAlertItem live in web/utils.js (loaded before this script) and
-// are also exposed on window.daygleUi for callers that prefer the explicit
-// namespace. Keep these references as bare-name globals so app.js can still
-// call updateMotionStats() without touching the daygleUi object.
+// isMotionOnlyEvent / isMotionOnlyEventItem live in web/utils.js (loaded
+// before this script) and are also exposed on window.daygleUi for callers
+// that prefer the explicit namespace.
 
 function updateMotionStats() {
   if (els.motionEvents) els.motionEvents.textContent = events.filter(isMotionOnlyEvent).length;
-  if (els.motionAlerts) els.motionAlerts.textContent = alertGroups.filter(isMotionOnlyAlertGroup).length;
 }
 
-function buildActivityItems() {
+function buildEventItems() {
   const eventItems = events.map((event) => {
     const isSound = event.source === 'sound';
     let detections = event.detections || [];
@@ -172,7 +108,7 @@ function buildActivityItems() {
       detections = [{ label, confidence: Number.isFinite(confidence) ? confidence : null }];
     }
     const zoneNames = isSound ? [] : [...new Set(detections.map((d) => d.zone_name).filter(Boolean))];
-    return {
+    const item = {
       type: 'event',
       id: event.id,
       createdAt: event.created_at,
@@ -183,74 +119,33 @@ function buildActivityItems() {
       soundMeta: isSound ? event.metadata : null,
       zoneNames,
     };
-  });
-  const alertItems = alertGroups.map((group) => {
-    const isSound = group.labels.some((l) => SOUND_CLASS_IDS.has(l)) || group.detections.some((d) => SOUND_CLASS_IDS.has(String(d.label || '').toLowerCase()));
-    return {
-      type: 'alert',
-      id: group.key,
-      createdAt: group.latestAt,
-      eventId: group.eventId,
-      camera: group.camera, // populated below
-      ruleNames: group.ruleNames,
-      labels: group.labels,
-      detections: group.detections,
-      recordingId: group.recordingId,
-      message: group.message,
-      isSound,
-      zoneNames: isSound ? [] : (group.zones || []),
-    };
-  });
-  // Alerts don't carry a camera name in the grouping step; try to surface it
-  // from the event's `metadata.camera_name` if we can match by event id.
-  const eventsById = new Map(events.map((e) => [e.id, e]));
-  for (const item of alertItems) {
-    if (item.camera) continue;
-    const ev = item.eventId !== null ? eventsById.get(item.eventId) : null;
-    item.camera = ev ? eventSourceLabel(ev) : '';
-  }
-  // Annotate motion-only items so the renderer can swap the icon, type pill
-  // and badge for the teal motion treatment without recomputing it.
-  for (const item of eventItems) {
     if (isMotionOnlyEventItem(item)) item.isMotionOnly = true;
-  }
-  for (const item of alertItems) {
-    if (isMotionOnlyAlertItem(item)) item.isMotionOnly = true;
-  }
+    return item;
+  });
   // Deduplicate sound events by recordingId: multiple sound detections during
   // the same recording share a recordingId (via extend_active_rtsp_recording),
-  // so collapse them into one entry - matching how object detections appear
-  // once per recording.  Merge detections from all grouped events so every
-  // detected sound class shows as a badge on the single entry.
+  // so collapse them into one entry. Merge detections from all grouped events
+  // so every detected sound class shows as a badge on the single entry.
   const seenSoundRecording = new Map();
-  const dedupedEventItems = eventItems.filter((item) => {
+  return eventItems.filter((item) => {
     if (!item.isSound) return true;
     const recId = item.recordingId;
-    if (!recId) return true; // no recording - keep as-is
+    if (!recId) return true;
     const prev = seenSoundRecording.get(recId);
     if (prev) {
-      // Merge detections into the first (most recent) entry for this recording.
-      for (const d of item.detections) {
-        prev.detections.push(d);
-      }
+      for (const d of item.detections) prev.detections.push(d);
       return false;
     }
     seenSoundRecording.set(recId, item);
     return true;
-  });
-
-  return [...dedupedEventItems, ...alertItems]
-    .filter((item) => item.createdAt)
+  }).filter((item) => item.createdAt)
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 }
 
 function applyFilter(items) {
-  if (activeFilter === 'object-detections') return items.filter((i) => i.type === 'event' && !i.isSound && !i.isMotionOnly);
-  if (activeFilter === 'motion-detections') return items.filter((i) => i.type === 'event' && i.isMotionOnly);
-  if (activeFilter === 'sound-detections') return items.filter((i) => i.type === 'event' && i.isSound);
-  if (activeFilter === 'object-alerts') return items.filter((i) => i.type === 'alert' && !i.isSound && !i.isMotionOnly);
-  if (activeFilter === 'motion-alerts') return items.filter((i) => i.type === 'alert' && i.isMotionOnly);
-  if (activeFilter === 'sound-alerts') return items.filter((i) => i.type === 'alert' && i.isSound);
+  if (activeFilter === 'object-detections') return items.filter((i) => !i.isSound && !i.isMotionOnly);
+  if (activeFilter === 'motion-detections') return items.filter((i) => i.isMotionOnly);
+  if (activeFilter === 'sound-detections') return items.filter((i) => i.isSound);
   return items;
 }
 
@@ -260,10 +155,6 @@ function eventIcon() {
 
 function motionActivityIcon() {
   return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="m4 19.5 4-4.5 1.5 4 5.5-3-2-7 4-3"/></svg>';
-}
-
-function alertIcon() {
-  return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
 }
 
 function soundIcon() {
@@ -277,44 +168,31 @@ function recordingLink(recordingId, label) {
 }
 
 function renderActivityItem(item) {
-  const isEvent = item.type === 'event';
   const isSound = Boolean(item.isSound);
   const isMotionOnly = Boolean(item.isMotionOnly);
-  const icon = isSound ? soundIcon() : isMotionOnly ? motionActivityIcon() : isEvent ? eventIcon() : alertIcon();
-  const typeClass = isSound ? 'activity-item-sound' : isMotionOnly ? 'activity-item-motion' : isEvent ? 'activity-item-event' : 'activity-item-alert';
-  const typeLabel = isSound ? (isEvent ? 'Sound Detection' : 'Sound Alert') : isMotionOnly ? (isEvent ? 'Motion Detection' : 'Motion Alert') : isEvent ? 'Object Detection' : 'Object Alert';
-  const title = item.recordingId
-    ? `Recording #${item.recordingId}`
-    : isEvent
-      ? `Event #${item.id}`
-      : 'Alert';
-  const titleSuffix = '';
+  const icon = isSound ? soundIcon() : isMotionOnly ? motionActivityIcon() : eventIcon();
+  const typeClass = isSound ? 'activity-item-sound' : isMotionOnly ? 'activity-item-motion' : 'activity-item-event';
+  const typeLabel = isSound ? 'Sound Detection' : isMotionOnly ? 'Motion Detection' : 'Object Detection';
+  const title = item.recordingId ? `Recording #${item.recordingId}` : `Event #${item.id}`;
   const cameraLine = item.camera ? `Camera: ${escapeHtml(item.camera)}` : 'Camera: unknown';
   const zonePart = !isSound && item.zoneNames?.length
     ? ` · Zone: ${item.zoneNames.map(escapeHtml).join(', ')}`
     : '';
   const metaLine = `${cameraLine}${zonePart}`;
   const actions = [];
-  if (isEvent && item.recordingId) {
-    actions.push(recordingLink(item.recordingId, 'Recording'));
-  } else if (!isEvent && item.recordingId) {
-    actions.push(recordingLink(item.recordingId, 'Footage'));
-  }
+  if (item.recordingId) actions.push(recordingLink(item.recordingId, 'Recording'));
   if (window.daygleAuth?.user?.role === 'admin') {
-    const dismissAttr = isEvent
-      ? `data-dismiss-event="${escapeHtml(String(item.id))}"`
-      : `data-dismiss-alert="${escapeHtml(String(item.id))}"`;
     const dismissIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-    actions.push(`<button class="secondary delete-btn activity-item-action" ${dismissAttr} type="button">${dismissIcon} Dismiss</button>`);
+    actions.push(`<button class="secondary delete-btn activity-item-action" data-dismiss-event="${escapeHtml(String(item.id))}" type="button">${dismissIcon} Dismiss</button>`);
   }
   return `
-    <article class="item activity-item ${typeClass}" data-activity-id="${escapeHtml(String(item.id))}" data-activity-type="${escapeHtml(String(item.type || ''))}">
+    <article class="item activity-item ${typeClass}" data-activity-id="${escapeHtml(String(item.id))}">
       <div class="activity-item-icon">${icon}</div>
       <div class="activity-item-main">
         <div class="activity-item-header">
           <div class="activity-item-title">
             <span class="activity-item-type">${typeLabel}</span>
-            <span class="activity-item-name">${title}${titleSuffix}</span>
+            <span class="activity-item-name">${title}</span>
           </div>
           <div class="activity-item-when">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -331,19 +209,16 @@ function renderActivityItem(item) {
 
 function renderEmptyState() {
   const messages = {
-    all: { title: 'No activity yet', subtitle: 'Detections and alerts will appear here as your cameras report them.' },
+    all: { title: 'No detections yet', subtitle: 'Detections from your cameras will appear here once the AI starts seeing events.' },
     'object-detections': { title: 'No object detections yet', subtitle: 'Detected objects will show up here once the AI starts seeing events.' },
     'motion-detections': { title: 'No motion detections yet', subtitle: 'Motion-only events will appear here once a camera reports frame motion without a recognised object.' },
     'sound-detections': { title: 'No sound detections yet', subtitle: 'Detected sounds will show up here once the AI starts hearing events.' },
-    'object-alerts': { title: 'No object alerts yet', subtitle: 'Object alerts from your zone rules will appear here when they fire.' },
-    'motion-alerts': { title: 'No motion alerts yet', subtitle: 'Motion alerts from your zone rules will appear here when they fire.' },
-    'sound-alerts': { title: 'No sound alerts yet', subtitle: 'Sound alerts from your zone rules will appear here when they fire.' },
   };
   const { title, subtitle } = messages[activeFilter] || messages.all;
   return `
     <div class="activity-empty-state">
       <div class="activity-empty-icon" aria-hidden="true">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg>
       </div>
       <h2>${title}</h2>
       <p class="muted">${subtitle}</p>
@@ -352,7 +227,7 @@ function renderEmptyState() {
 }
 
 function renderActivityFeed() {
-  const items = applyFilter(buildActivityItems());
+  const items = applyFilter(buildEventItems());
   if (!items.length) {
     els.activityFeed.innerHTML = renderEmptyState();
     updateListStatus(0);
@@ -367,8 +242,8 @@ function renderActivityFeed() {
 
 function updateListStatus(count) {
   if (!els.listStatus) return;
-  const labels = { all: 'activity items', 'object-detections': 'object detections', 'motion-detections': 'motion detections', 'sound-detections': 'sound detections', 'object-alerts': 'object alerts', 'motion-alerts': 'motion alerts', 'sound-alerts': 'sound alerts' };
-  const label = labels[activeFilter] || 'items';
+  const labels = { all: 'detections', 'object-detections': 'object detections', 'motion-detections': 'motion detections', 'sound-detections': 'sound detections' };
+  const label = labels[activeFilter] || 'detections';
   if (count === 0) {
     els.listStatus.textContent = '';
   } else {
@@ -393,28 +268,11 @@ function bindActivityActions() {
       }
     });
   });
-  els.activityFeed.querySelectorAll('[data-dismiss-alert]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const key = btn.dataset.dismissAlert;
-      btn.disabled = true;
-      try {
-        await api(`/api/alerts/${encodeURIComponent(key)}/dismiss`, { method: 'POST' });
-        alertGroups = alertGroups.filter((g) => String(g.key) !== String(key));
-        renderActivityFeed();
-      } catch (error) {
-        // Skip UI updates if api() triggered a 401 redirect
-        if (window.daygleAuth?.redirecting) return;
-        window.showToast?.(error.message, true);
-        btn.disabled = false;
-      }
-    });
-  });
 }
 
 function updateDismissButtons() {
   const isAdmin = window.daygleAuth?.user?.role === 'admin';
   if (els.dismissAllEventsBtn) els.dismissAllEventsBtn.hidden = !isAdmin || events.length === 0;
-  if (els.dismissAllAlertsBtn) els.dismissAllAlertsBtn.hidden = !isAdmin || alertGroups.length === 0;
 }
 
 // ─── Stats + activity data loaders ──────────────────────────────────────────
@@ -423,8 +281,6 @@ async function loadStats() {
     const stats = await api('/api/stats');
     els.totalEvents.textContent = stats.matched_object_events ?? stats.total_events ?? 0;
     if (els.soundEvents) els.soundEvents.textContent = stats.sound_detection_events ?? 0;
-    if (els.objectAlerts) els.objectAlerts.textContent = stats.object_alerts ?? stats.total_alerts ?? 0;
-    if (els.soundAlerts) els.soundAlerts.textContent = stats.sound_alerts ?? 0;
   } catch (error) {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
@@ -439,18 +295,6 @@ async function loadEvents() {
   } catch (error) {
     if (window.daygleAuth?.redirecting) return;
     events = [];
-    window.showToast?.(error.message, true);
-  }
-}
-
-async function loadAlerts() {
-  try {
-    const alerts = await api('/api/alerts');
-    alertGroups = groupAlertsByEvent(alerts);
-    updateMotionStats();
-  } catch (error) {
-    if (window.daygleAuth?.redirecting) return;
-    alertGroups = [];
     window.showToast?.(error.message, true);
   }
 }
@@ -502,21 +346,6 @@ els.dismissAllEventsBtn?.addEventListener('click', async () => {
   }
 });
 
-els.dismissAllAlertsBtn?.addEventListener('click', async () => {
-  els.dismissAllAlertsBtn.disabled = true;
-  try {
-    await api('/api/alerts/dismiss-all', { method: 'POST' });
-    alertGroups = [];
-    renderActivityFeed();
-  } catch (error) {
-    // Skip UI updates if api() triggered a 401 redirect
-    if (window.daygleAuth?.redirecting) return;
-    window.showToast?.(error.message, true);
-  } finally {
-    els.dismissAllAlertsBtn.disabled = false;
-  }
-});
-
 // ─── Filter pills ───────────────────────────────────────────────────────────
 els.filterPills.forEach((pill) => {
   pill.addEventListener('click', () => {
@@ -532,12 +361,12 @@ els.filterPills.forEach((pill) => {
 
 // ─── Refresh orchestration ──────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([loadStats(), loadEvents(), loadAlerts()]);
+  await Promise.all([loadStats(), loadEvents()]);
   renderActivityFeed();
 }
 
 // Re-render when the user's date_format / time_format changes in another tab
-// (driven by utils.js daygleDatePrefsChanged hook). 5s status / 30s activity
+// (driven by utils.js daygleDatePrefsChanged hook). 5s stats / 30s events
 // polls keep things fresh in the meantime.
 window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
   renderActivityFeed();
@@ -556,5 +385,5 @@ loadAuth()
 
 setInterval(() => { loadStats().catch(() => {}); }, 10000);
 setInterval(() => {
-  Promise.all([loadEvents(), loadAlerts()]).then(renderActivityFeed).catch(() => {});
+  loadEvents().then(renderActivityFeed).catch(() => {});
 }, 30000);
