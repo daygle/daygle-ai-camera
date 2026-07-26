@@ -573,6 +573,37 @@ textarea {
 
 .form-stack { display: grid; gap: 14px; margin-top: 18px; }
 .form-stack label { display: grid; gap: 8px; color: var(--muted); font-weight: 800; }
+
+/* ─── Auth pages (login / setup) ──────────────────────────────────────────
+   Standalone login/setup pages have no top nav or .shell wrapper, so the
+   card would otherwise stretch edge-to-edge and read as a mobile-only form.
+   Center it and cap its width on larger viewports while keeping it a
+   comfortable full-width sheet on small screens. */
+.auth-shell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  width: 100%;
+  padding: 24px 16px;
+}
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 32px;
+}
+.auth-card h1 { font-size: clamp(28px, 4vw, 38px); margin-top: 12px; }
+.auth-card .eyebrow { margin-bottom: 4px; }
+.auth-card .form-stack button { margin-top: 6px; }
+@media (min-width: 600px) {
+  .auth-card { padding: 40px; }
+}
+@media (max-width: 400px) {
+  .auth-shell { padding: 16px 12px; }
+  .auth-card { padding: 24px; }
+}
 .form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
