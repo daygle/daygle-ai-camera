@@ -229,7 +229,7 @@ window.daygleAuthReady = (async () => {
     },
     {
       id: 'navData',
-      label: 'Data',
+      label: 'Clips',
       admin: false,
       links: [
         { href: '/recordings', match: '/recordings', label: 'Recordings' },
