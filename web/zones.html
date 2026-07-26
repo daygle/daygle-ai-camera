@@ -100,30 +100,30 @@
         </div>
         <div id="liveDetectionStatus" class="live-detection-status">Live AI status waiting for frames.</div>
       </div>
-      <section class="card zone-editor-card">
+      <section class="card zone-settings-card">
         <div class="settings-section-header">
           <div class="settings-section-icon" aria-hidden="true">🗺️</div>
           <div>
-          <h2>Zone Areas</h2>
-          <p class="settings-section-subtitle">Pick a camera, then place corner dots on the footage to define zone areas.</p>
-        </div>
-      </div>
-      <label class="zones-editor-camera">
-        <span>Camera</span>
-        <select id="cameraSelect" aria-label="Select camera"></select>
-      </label>
-      <div id="zoneList" class="list zones-list"></div>
-
-        <div class="camera-object-detection-settings">
-          <div class="settings-section-header">
-            <div class="settings-section-icon" aria-hidden="true">👁️</div>
-            <div>
-              <h2>Object Detection Rules</h2>
-              <p class="settings-section-subtitle">Configure which objects and motion trigger recordings and alerts per zone area.</p>
-            </div>
+            <h2>Zone Areas</h2>
+            <p class="settings-section-subtitle">Pick a camera, then place corner dots on the footage to define zone areas.</p>
           </div>
-          <div id="objectDetectionRules"></div>
         </div>
+        <label class="zones-editor-camera">
+          <span>Camera</span>
+          <select id="cameraSelect" aria-label="Select camera"></select>
+        </label>
+        <div id="zoneList" class="list zones-list"></div>
+      </section>
+
+      <section class="card zone-rules-card">
+        <div class="settings-section-header">
+          <div class="settings-section-icon" aria-hidden="true">👁️</div>
+          <div>
+            <h2>Object Detection Rules</h2>
+            <p class="settings-section-subtitle">Configure which objects and motion trigger recordings and alerts per zone area.</p>
+          </div>
+        </div>
+        <div id="objectDetectionRules"></div>
 
         <div class="zone-editor-footer">
           <button id="saveZonesBtn" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>Save Area</button>
