@@ -31,7 +31,7 @@ from app.rate_limiter import (
 )
 
 
-REPO_DIR = '/home/daytona/codebase'
+REPO_DIR = str(Path(__file__).resolve().parents[1])
 
 
 # N1 ---------------------------------------------------------------------

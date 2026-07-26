@@ -729,14 +729,23 @@ def test_validate_storage_settings_rejects_ancestor_above_envelope(monkeypatch, 
     assert exc_info.value.status_code == 400
 
 
-def test_validate_storage_settings_accepts_data_dir_descendant(monkeypatch, pv):
+def test_validate_storage_settings_accepts_data_dir_descendant(monkeypatch, pv, tmp_path):
     """C1 fix: paths INSIDE the captured data envelope are accepted; the
     returned value is the absolute resolved path (so downstream callers
     get a stable string regardless of the input was relative or had
     ``..`` segments in a non-traversing direction).
+
+    ``_STARTUP_DATA_DIR`` is frozen at module import from the CWD at that
+    moment, so a bare relative input would resolve against whatever CWD an
+    earlier test left set. Pin the envelope to a tmp dir and feed an absolute
+    descendant so the assertion is deterministic regardless of test ordering.
     """
     _install_validator_dependencies(monkeypatch)
-    out = pv.validate_storage_settings({'snapshots_dir': 'data/snapshots'})
+    envelope = (tmp_path / 'data').resolve()
+    envelope.mkdir()
+    monkeypatch.setattr(pv, '_STARTUP_DATA_DIR', envelope)
+    monkeypatch.setattr(pv, '_STARTUP_DATA_PARENT', envelope.parent)
+    out = pv.validate_storage_settings({'snapshots_dir': str(envelope / 'snapshots')})
     # Resolved to an absolute path ending in 'snapshots'.
     assert out['snapshots_dir'].endswith('snapshots')
     assert '/' in out['snapshots_dir']  # absolute, not relative
@@ -784,10 +793,14 @@ def test_validate_auth_settings_rejects_max_login_attempts_out_of_range(monkeypa
         pv.validate_auth_settings({'max_login_attempts': 200})  # above max 100
 
 
-def test_validate_auth_settings_returns_three_fields(monkeypatch, pv):
+def test_validate_auth_settings_returns_expected_fields(monkeypatch, pv):
     _install_validator_dependencies(monkeypatch)
     out = pv.validate_auth_settings({})
-    assert set(out.keys()) == {'session_timeout_hours', 'max_login_attempts', 'lockout_minutes'}
+    assert set(out.keys()) == {
+        'session_timeout_hours', 'max_login_attempts', 'lockout_minutes',
+        'rate_limit_max_attempts', 'rate_limit_window_seconds',
+        'rate_limit_base_delay', 'rate_limit_max_delay',
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -845,7 +858,7 @@ def test_validate_live_settings_rejects_non_numeric_history_minutes(monkeypatch,
     assert 'detection_history_minutes must be a whole number' in exc_info.value.detail
 
 
-def test_validate_live_settings_returns_all_twelve_fields(monkeypatch, pv):
+def test_validate_live_settings_returns_all_expected_fields(monkeypatch, pv):
     _install_validator_dependencies(monkeypatch)
     out = pv.validate_live_settings({})
     assert set(out.keys()) == {
@@ -854,5 +867,6 @@ def test_validate_live_settings_returns_all_twelve_fields(monkeypatch, pv):
         'background_detection_enabled', 'detection_history_minutes',
         'motion_pixel_threshold', 'motion_gate_fraction',
         'motion_scale_fraction', 'motion_background_alpha',
+        'motion_frame_width', 'motion_frame_height', 'ingest_frame_fps',
         'periodic_scan_interval_seconds',
     }

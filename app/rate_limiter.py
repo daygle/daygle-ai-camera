@@ -113,7 +113,6 @@ class IPRateLimiter:
         Returns a dict mapping each tracked IP to ``{'attempts': count,
         'oldest': iso_timestamp, 'newest': iso_timestamp}``.
         """
-        now = time.time()
         with self._lock:
             self._evict_stale(None)
             snapshot: dict[str, Any] = {}
@@ -240,9 +239,9 @@ class SlidingWindowRateLimiter:
             self._hits.pop(key, None)
 
 
-# Round-5 / M1: admin endpoint throttling, default 60 requests / 60 sec
-# per-IP. Tunable via auth.admin_rate_limit_* config keys (see
-# ``apply_config`` below).
+# Round-5 / M1: admin endpoint throttling, fixed at 60 requests / 60 sec
+# per-IP. ``SlidingWindowRateLimiter`` has no runtime ``apply_config`` (unlike
+# the login ``IPRateLimiter``); adjust the constructor arguments here to retune.
 admin_limiter = SlidingWindowRateLimiter(
     max_requests=60, window_seconds=60, name='admin',
 )

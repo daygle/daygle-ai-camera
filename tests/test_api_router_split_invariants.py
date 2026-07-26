@@ -55,7 +55,7 @@ TEST_API_PY = PROJECT_ROOT / 'tests' / 'test_api.py'
 APP_MAIN_PY = PROJECT_ROOT / 'app' / 'main.py'
 APP_API_INIT = PROJECT_ROOT / 'app' / 'api' / '__init__.py'
 APP_API_MODULES = sorted((PROJECT_ROOT / 'app' / 'api').glob('*.py'))
-EXPECTED_SETTINGS_AI_REMOVE_COUNT = 10
+EXPECTED_SETTINGS_AI_REMOVE_COUNT = 11
 
 
 def _discover_main_attr_references(*, source_text: str, source_path: Path) -> list[str]:
@@ -385,14 +385,15 @@ def test_every_request_path_has_a_registered_route(tmp_path, monkeypatch, caplog
         )
 
 
-def test_settings_ai_router_includes_exactly_ten_endpoints():
+def test_settings_ai_router_includes_exactly_expected_endpoints():
     """Lightweight structural check on the Phase-2 router.
 
     Independent of pytest's app loading (no DAYGLE_CONFIG, no sys.modules
     dance). Reads the new router file directly and counts @router.X(...)
     decorators whose first positional arg is a string starting with
-    '/api/settings/ai'. The router MUST contribute exactly 10 endpoints -
-    fewer and something's missing; more and the splice over-extracted.
+    '/api/settings/ai'. The router MUST contribute exactly
+    ``EXPECTED_SETTINGS_AI_REMOVE_COUNT`` endpoints - fewer and something's
+    missing; more and the splice over-extracted.
     """
     router_path = PROJECT_ROOT / 'app' / 'api' / 'settings_ai_router.py'
     text = router_path.read_text(encoding='utf-8')

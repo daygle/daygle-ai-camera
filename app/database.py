@@ -13,6 +13,36 @@ from app.db.recordings import RecordingsMixin
 from app.db.settings_repo import SettingsRepoMixin
 
 
+# Immutable audit-log triggers, defined once so BOTH schema creation
+# (``EventDatabase.init``) and the backup-restore validator
+# (``app.backup.overwrite_database_from_file``) share a single source of
+# truth. The restore validator allowlists these -- by exact (normalised)
+# body, so a malicious backup cannot smuggle a payload under a trusted
+# trigger name -- while still rejecting every other view/trigger. Keep the
+# text here byte-for-byte identical to what ships in existing databases so
+# the allowlist matches backups produced by any prior release.
+AUDIT_LOG_IMMUTABLE_TRIGGERS: dict[str, str] = {
+    'trg_audit_log_immutable_delete': """
+                CREATE TRIGGER IF NOT EXISTS trg_audit_log_immutable_delete
+                BEFORE DELETE ON audit_log
+                WHEN OLD.immutable = 1
+                BEGIN
+                    SELECT RAISE(ABORT, 'Audit log is append-only - entries cannot be deleted.');
+                END;
+""",
+    'trg_audit_log_immutable_update': """
+                CREATE TRIGGER IF NOT EXISTS trg_audit_log_immutable_update
+                BEFORE UPDATE OF created_at, user_id, username, action, resource,
+                                       resource_id, details, ip_address, status
+                ON audit_log
+                WHEN OLD.immutable = 1
+                BEGIN
+                    SELECT RAISE(ABORT, 'Audit log is append-only - entries cannot be modified.');
+                END;
+""",
+}
+
+
 class EventDatabase(
     EventsMixin,
     RecordingsMixin,
@@ -227,20 +257,4 @@ class EventDatabase(
             # immutable to 0 for a narrow exception (e.g. court-ordered
             # expungement) if ever needed. Without this carve-out, the only way
             # to ever delete a row would be to drop the trigger first.
-            db.executescript("""
-                CREATE TRIGGER IF NOT EXISTS trg_audit_log_immutable_delete
-                BEFORE DELETE ON audit_log
-                WHEN OLD.immutable = 1
-                BEGIN
-                    SELECT RAISE(ABORT, 'Audit log is append-only - entries cannot be deleted.');
-                END;
-
-                CREATE TRIGGER IF NOT EXISTS trg_audit_log_immutable_update
-                BEFORE UPDATE OF created_at, user_id, username, action, resource,
-                                       resource_id, details, ip_address, status
-                ON audit_log
-                WHEN OLD.immutable = 1
-                BEGIN
-                    SELECT RAISE(ABORT, 'Audit log is append-only - entries cannot be modified.');
-                END;
-            """)
+            db.executescript('\n'.join(AUDIT_LOG_IMMUTABLE_TRIGGERS.values()))

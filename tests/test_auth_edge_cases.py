@@ -73,6 +73,10 @@ class LocalClient:
         if json_body is not None:
             request_data = json.dumps(json_body).encode("utf-8")
             request_headers["Content-Type"] = "application/json"
+        # Simulate a real browser: send a same-origin ``Origin`` header so the
+        # middleware's same-origin CSRF defence (which rejects mutating /api
+        # requests carrying no Origin/Referer) sees a matching origin.
+        request_headers.setdefault("Origin", self.base_url)
         if follow_redirects:
             opener = self.opener
         else:

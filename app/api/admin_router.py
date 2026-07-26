@@ -186,7 +186,10 @@ def preview_delete_runtime_data(request: Request, db=Depends(get_database)):
     token = _state.issue_runtime_delete_token(user_id)
     write_audit_log(
         request, db, 'preview_delete_all', 'runtime_data',
-        details={**counts, 'confirm_token_issued': True},
+        # NB: use a key WITHOUT the substring "token" so the audit-log
+        # redactor (which safely over-matches any *token*/secret key name)
+        # does not blank this non-sensitive boolean flag to '***'.
+        details={**counts, 'confirm_challenge_issued': True},
     )
     return {
         'ok': True,

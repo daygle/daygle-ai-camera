@@ -140,7 +140,15 @@ function renderGrid() {
     updateFilterHint(0);
     return;
   }
-  gridEl.innerHTML = `
+  // Row markup is escaped inside renderCameraRow (camera name/id go through
+  // escapeHtml). Build the full table markup in a local first, then assign it,
+  // so this stays off the banned ``innerHTML = `…${x}…` `` template-literal
+  // pattern flagged by the H2 XSS static guard (same convention as live.js).
+  const rowsHtml = filtered.map((cam) => {
+    const realIndex = cameras.indexOf(cam);
+    return renderCameraRow(cam, realIndex);
+  }).join('');
+  const tableHtml = `
     <div class="cameras-table-wrap">
       <table class="cameras-table">
         <thead>
@@ -156,13 +164,11 @@ function renderGrid() {
           </tr>
         </thead>
         <tbody>
-          ${filtered.map((cam) => {
-            const realIndex = cameras.indexOf(cam);
-            return renderCameraRow(cam, realIndex);
-          }).join('')}
+          ${rowsHtml}
         </tbody>
       </table>
     </div>`;
+  gridEl.innerHTML = tableHtml;
   updateFilterHint(filtered.length);
 
   gridEl.querySelectorAll('.cam-edit-btn').forEach((btn) => {

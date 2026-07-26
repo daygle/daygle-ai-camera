@@ -99,9 +99,7 @@ def test_setup_rate_limited_raises_http_429(monkeypatch, tmp_path):
     request = Request(scope)
 
     with pytest.raises(HTTPException) as excinfo:
-        asyncio.get_event_loop().run_until_complete(
-            auth_router.setup(request, auth=auth, auth_enabled=True)
-        )
+        asyncio.run(auth_router.setup(request, auth=auth, auth_enabled=True))
     assert excinfo.value.status_code == 429
 
 
@@ -142,9 +140,7 @@ def test_setup_rate_limited_writes_audit_row_without_spurious_warning(
 
     with caplog.at_level(logging.WARNING):
         with pytest.raises(HTTPException):
-            asyncio.get_event_loop().run_until_complete(
-                auth_router.setup(request, auth=auth, auth_enabled=True)
-            )
+            asyncio.run(auth_router.setup(request, auth=auth, auth_enabled=True))
 
     assert "Setup audit-log write failed" not in caplog.text
     rows = EventDatabase(db_path).list_audit_logs(limit=10)

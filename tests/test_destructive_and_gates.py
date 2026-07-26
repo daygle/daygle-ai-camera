@@ -77,6 +77,10 @@ class LocalClient:
         if json_body is not None:
             request_data = json.dumps(json_body).encode('utf-8')
             request_headers['Content-Type'] = 'application/json'
+        # Simulate a real browser: send a same-origin ``Origin`` header so the
+        # middleware's same-origin CSRF defence (which rejects mutating /api
+        # requests carrying no Origin/Referer) sees a matching origin.
+        request_headers.setdefault('Origin', self.base_url)
         opener = self.opener if follow_redirects else build_opener(
             HTTPCookieProcessor(self.cookies), _NoRedirect(),
         )
@@ -332,7 +336,7 @@ class TestM2RuntimeDataTwoStepDelete:
                 # ``details`` is JSON text in this DB; just confirm it
                 # contains the flag we wrote.
                 details = json.loads(row[2]) if row[2] else {}
-                assert details.get('confirm_token_issued') is True
+                assert details.get('confirm_challenge_issued') is True
         finally:
             server.should_exit = True
             thread.join(timeout=5)
