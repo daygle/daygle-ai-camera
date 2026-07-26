@@ -11,13 +11,6 @@ let draftPolygon = null;
 let zoneDrag = null;
 let expandedZoneRules = new Set();
 
-const ZONE_ICON_REMOVE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
-const ZONE_ICON_CHEVRON_DOWN = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>';
-const ZONE_ICON_CHEVRON_UP = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15"/></svg>';
-const ZONE_ICON_MOVE_UP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>';
-const ZONE_ICON_MOVE_DOWN = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/></svg>';
-const ZONE_ICON_GRIP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>';
-
 // Update only the label text on the Draw Area button so its icon (a sibling
 // <svg>) survives. Setting button.textContent would replace all child nodes,
 // wiping the icon.
@@ -219,7 +212,7 @@ function renderObjectRules(zone, zoneIndex) {
       const label = escapeHtml(titleCase(rule.label));
       const expanded = expandedZoneRules.has(key);
       return `          <tr draggable="true" data-drag-zone-rule="${key}">
-            <td class="cell-drag"><span class="drag-handle" title="Drag to reorder">${ZONE_ICON_GRIP}</span></td>
+            <td class="cell-drag"><span class="drag-handle" title="Drag to reorder">${ICONS.grip}</span></td>
             <td class="cell-label">${label}</td>
           <td class="cell-center"><input type="checkbox" data-zone-rule-enabled="${key}" ${rule.enabled !== false ? 'checked' : ''} /></td>
           <td class="cell-center"><input type="checkbox" data-zone-rule-record="${key}" ${rule.record_on_detect !== false ? 'checked' : ''} /></td>
@@ -228,10 +221,10 @@ function renderObjectRules(zone, zoneIndex) {
           <td><input type="number" data-zone-rule-confidence="${key}" value="${escapeHtml(rule.min_confidence)}" min="0" max="1" step="0.05" /></td>
           <td><input type="number" data-zone-rule-cooldown="${key}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" /></td>
           <td><div class="cell-actions">
-            <button class="secondary zone-action-btn zone-rule-move-btn" type="button" data-move-zone-rule="${key}:up" title="Move up"${ruleIndex === 0 ? ' disabled' : ''}>${ZONE_ICON_MOVE_UP}</button>
-            <button class="secondary zone-action-btn zone-rule-move-btn" type="button" data-move-zone-rule="${key}:down" title="Move down"${ruleIndex === zone.object_rules.length - 1 ? ' disabled' : ''}>${ZONE_ICON_MOVE_DOWN}</button>
-            <button class="rule-expand-btn secondary" type="button" data-expand-zone-rule="${key}" title="Time windows &amp; email">${expanded ? ZONE_ICON_CHEVRON_UP : ZONE_ICON_CHEVRON_DOWN}</button>
-            <button class="secondary delete-btn zone-action-btn" type="button" data-delete-zone-rule="${key}">${ZONE_ICON_REMOVE}</button>
+            <button class="secondary zone-action-btn zone-rule-move-btn" type="button" data-move-zone-rule="${key}:up" title="Move up"${ruleIndex === 0 ? ' disabled' : ''}>${ICONS.moveUp}</button>
+            <button class="secondary zone-action-btn zone-rule-move-btn" type="button" data-move-zone-rule="${key}:down" title="Move down"${ruleIndex === zone.object_rules.length - 1 ? ' disabled' : ''}>${ICONS.moveDown}</button>
+            <button class="rule-expand-btn secondary" type="button" data-expand-zone-rule="${key}" title="Time windows &amp; email">${expanded ? ICONS.chevronUp : ICONS.chevronDown}</button>
+            <button class="secondary delete-btn zone-action-btn" type="button" data-delete-zone-rule="${key}">${ICONS.remove}</button>
           </div></td>
         </tr>
         <tr class="rule-expand-row" ${expanded ? '' : 'hidden'}>
@@ -281,7 +274,7 @@ function renderZones() {
       <div class="zone-row-main">
         <input data-zone-name="${index}" value="${escapeHtml(zone.name || `Zone ${index + 1}`)}" />
         <label><span>Zone</span><select data-zone-enabled="${index}"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Shown</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
-        <button class="secondary delete-btn zone-action-btn" type="button" data-delete-zone="${index}">${ZONE_ICON_REMOVE}Remove</button>
+        <button class="secondary delete-btn zone-action-btn" type="button" data-delete-zone="${index}">${ICONS.remove}Remove</button>
       </div>
     </div>
   `).join('');
