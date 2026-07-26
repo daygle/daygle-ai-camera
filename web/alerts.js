@@ -143,8 +143,11 @@ function renderAlertItem(group) {
             <span class="activity-item-name">${title}</span>
           </div>
           <div class="activity-item-when">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            <span title="${escapeHtml(formatDate(group.latestAt))}">${escapeHtml(timeAgo(group.latestAt))}</span>
+            <div class="activity-item-when-relative">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <span>${escapeHtml(timeAgo(group.latestAt))}</span>
+            </div>
+            <span class="activity-item-when-absolute">${escapeHtml(formatDate(group.latestAt))}</span>
           </div>
         </div>
         <p class="muted activity-item-meta">${metaLine}${rulePart}</p>

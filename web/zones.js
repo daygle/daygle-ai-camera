@@ -247,7 +247,10 @@ function renderZones() {
   liveEls.zoneList.innerHTML = zones.map((zone, index) => `
     <div class="item zone-row ${index === selectedZoneIndex ? 'selected' : ''}${zone.enabled === false ? ' disabled' : ''}" data-select-zone="${index}">
       <div class="zone-row-main">
-        <input data-zone-name="${index}" value="${escapeHtml(zone.name || `Zone ${index + 1}`)}" />
+        <div class="zone-name-field">
+          ${ICONS.edit}
+          <input data-zone-name="${index}" value="${escapeHtml(zone.name || `Zone ${index + 1}`)}" placeholder="Zone name…" />
+        </div>
         <label><span>Zone</span><select data-zone-enabled="${index}"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Shown</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
         <button class="secondary delete-btn zone-action-btn" type="button" data-delete-zone="${index}">${ICONS.remove}Remove</button>
       </div>

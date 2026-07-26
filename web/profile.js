@@ -36,7 +36,7 @@ function renderProfile(user) {
   rows.push(
     safeHtml`<div><span>Role</span><strong>${user.role}</strong></div>`,
     safeHtml`<div><span>Timezone</span><strong>${user.timezone || 'Australia/Sydney'}</strong></div>`,
-    safeHtml`<div><span>Date/time</span><strong>${titleCase(user.date_format || 'locale')} / ${user.time_format || '24h'}</strong></div>`,
+    safeHtml`<div><span>Date/Time</span><strong>${titleCase(user.date_format || 'locale')} / ${user.time_format || '24h'}</strong></div>`,
   );
   summaryEl.innerHTML = rows.join('');
 }

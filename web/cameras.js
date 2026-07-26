@@ -35,12 +35,6 @@ function setMessage(text, isError = false) {
 // The local duplicate + page-local csrfToken were removed so every page shares
 // the same fetch contract.
 
-function cameraStatusBadge(camera) {
-  const url = buildDisplayUrl(camera);
-  if (!url && !camera.host) return '<span class="cam-badge cam-badge-warn">Not configured</span>';
-  return '<span class="cam-badge cam-badge-idle"><span class="cam-badge-dot"></span>Configured</span>';
-}
-
 function buildDisplayUrl(camera) {
   if (camera.stream_url) return camera.stream_url;
   if (!camera.host) return '';
@@ -50,11 +44,10 @@ function buildDisplayUrl(camera) {
   return `rtsp://${auth}${camera.host}${port}${path}`;
 }
 
-function renderCameraCard(camera, index) {
+function renderCameraRow(camera, index) {
   const name = escapeHtml(camera.name || camera.id || `Camera ${index + 1}`);
+  const id = escapeHtml(camera.id || '');
   const backend = camera.backend === 'rtsp' ? 'RTSP' : 'ONVIF';
-  const url = escapeHtml(buildDisplayUrl(camera));
-  const res = `${camera.width || 1280}×${camera.height || 720} @ ${camera.fps || 15} fps`;
 
   const zones = camera.detection?.zones || [];
   const zoneCount = zones.length;
@@ -62,75 +55,41 @@ function renderCameraCard(camera, index) {
 
   const sound = camera.detection?.sound;
   const soundEnabled = sound?.enabled === true;
-  const soundRuleCount = (sound?.rules || []).filter((r) => r.enabled === true).length;
 
   const continuous = camera.recording?.continuous === true;
 
   const zonesHtml = zoneCount === 0
     ? '<span class="chip chip-warn">No zones</span>'
-    : `<span class="chip chip-green">${zoneCount} zone${zoneCount !== 1 ? 's' : ''}</span>${ruleCount > 0 ? ` <span class="chip">${ruleCount} rule${ruleCount !== 1 ? 's' : ''}</span>` : ''}`;
+    : `<span class="chip chip-green">${zoneCount} zone${zoneCount !== 1 ? 's' : ''}</span>${ruleCount > 0 ? ` <span class="chip chip-info">${ruleCount} rule${ruleCount !== 1 ? 's' : ''}</span>` : ''}`;
 
   const soundHtml = soundEnabled
-    ? `<span class="chip chip-green">Enabled</span>${soundRuleCount > 0 ? ` <span class="chip">${soundRuleCount} rule${soundRuleCount !== 1 ? 's' : ''}</span>` : ''}`
-    : '<span class="chip">Disabled</span>';
+    ? '<span class="chip chip-green">On</span>'
+    : '<span class="chip chip-dim">Off</span>';
 
   const recordingHtml = continuous
     ? '<span class="chip chip-green">Continuous</span>'
-    : '<span class="chip">On Alert</span>';
+    : '<span class="chip chip-info">On Alert</span>';
+
+  const hasStream = !!(camera.stream_url || camera.host);
+  const healthHtml = hasStream
+    ? '<span class="health-dot online"></span><span>Online</span>'
+    : '<span class="health-dot offline"></span><span>Offline</span>';
 
   return `
-    <article class="cam-card" data-camera-index="${index}">
-      <div class="cam-card-header">
-        <div class="cam-card-identity">
-          <div class="cam-icon">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-          </div>
-          <div>
-            <h3 class="cam-name">${name}</h3>
-            <span class="cam-id muted">${escapeHtml(camera.id || '')}</span>
-          </div>
-        </div>
-        <div class="cam-card-actions">
-          ${cameraStatusBadge(camera)}
-          <button class="secondary cam-edit-btn" data-index="${index}" type="button">${ICONS.edit}Edit</button>
-          <button class="secondary delete-btn cam-remove-btn" data-index="${index}" type="button">${ICONS.remove}Remove</button>
-        </div>
-      </div>
-
-      <div class="cam-card-body">
-        <div class="cam-meta-row cam-url-row">
-          <span class="cam-meta-label">Stream</span>
-          <span class="cam-meta-value">
-            <span class="chip">${backend}</span>
-            ${url ? `<span class="cam-url">${url}</span>` : ''}
-          </span>
-        </div>
-        <div class="cam-meta-row">
-          <span class="cam-meta-label">Resolution</span>
-          <span class="cam-meta-value">${escapeHtml(res)}</span>
-        </div>
-        <div class="cam-meta-row">
-          <span class="cam-meta-label">Zones</span>
-          <span class="cam-meta-value">${zonesHtml}</span>
-        </div>
-        <div class="cam-meta-row">
-          <span class="cam-meta-label">Sound</span>
-          <span class="cam-meta-value">${soundHtml}</span>
-        </div>
-        <div class="cam-meta-row">
-          <span class="cam-meta-label">Recording</span>
-          <span class="cam-meta-value">${recordingHtml}</span>
-        </div>
-      </div>
-
-      <div class="cam-card-footer">
-        <a class="button-link secondary-link cam-live-link" href="/live?camera=${encodeURIComponent(camera.id || '')}">${ICONS.viewLive}View Live</a>
-        <div class="cam-footer-links">
-          <a class="cam-footer-hint muted" href="/zones?camera=${encodeURIComponent(camera.id || '')}">Zones &amp; Alerts</a>
-          <a class="cam-footer-hint muted" href="/sounds?camera=${encodeURIComponent(camera.id || '')}">Sound</a>
-        </div>
-      </div>
-    </article>
+    <tr draggable="true" data-drag-camera="${index}" data-camera-index="${index}">
+      <td class="cell-drag"><span class="drag-handle" title="Drag to reorder">${ICONS.grip}</span></td>
+      <td class="cell-camera"><span class="cam-name">${name}</span>${id ? `<span class="cam-id">${id}</span>` : ''}</td>
+      <td><span class="chip">${backend}</span></td>
+      <td class="cell-zones">${zonesHtml}</td>
+      <td class="cell-center">${soundHtml}</td>
+      <td>${recordingHtml}</td>
+      <td class="cell-health">${healthHtml}</td>
+      <td class="cell-actions">
+        <button class="secondary cam-edit-btn" data-index="${index}" type="button" title="Edit camera">${ICONS.edit}<span class="action-label">Edit</span></button>
+        <button class="secondary delete-btn cam-remove-btn" data-index="${index}" type="button" title="Remove camera">${ICONS.remove}<span class="action-label">Remove</span></button>
+        <a href="/live?camera=${encodeURIComponent(camera.id || '')}" title="View live" class="action-link">Live</a>
+      </td>
+    </tr>
   `;
 }
 
@@ -180,10 +139,29 @@ function renderGrid() {
     updateFilterHint(0);
     return;
   }
-  gridEl.innerHTML = filtered.map((cam) => {
-    const realIndex = cameras.indexOf(cam);
-    return renderCameraCard(cam, realIndex);
-  }).join('');
+  gridEl.innerHTML = `
+    <div class="cameras-table-wrap">
+      <table class="cameras-table">
+        <thead>
+          <tr>
+            <th class="cell-drag"></th>
+            <th>Camera</th>
+            <th>Backend</th>
+            <th>Zones</th>
+            <th class="cell-center">Sound</th>
+            <th>Record</th>
+            <th>Health</th>
+            <th class="cell-actions"></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filtered.map((cam) => {
+            const realIndex = cameras.indexOf(cam);
+            return renderCameraRow(cam, realIndex);
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
   updateFilterHint(filtered.length);
 
   gridEl.querySelectorAll('.cam-edit-btn').forEach((btn) => {
@@ -191,6 +169,49 @@ function renderGrid() {
   });
   gridEl.querySelectorAll('.cam-remove-btn').forEach((btn) => {
     btn.addEventListener('click', () => openDeleteModal(Number(btn.dataset.index)));
+  });
+
+  // Drag-and-drop reorder handlers for camera rows
+  const table = gridEl.querySelector('table');
+  gridEl.querySelectorAll('[data-drag-camera]').forEach((row) => {
+    row.addEventListener('dragstart', (event) => {
+      row.classList.add('dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(row.dataset.dragCamera));
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      if (table) table.querySelectorAll('tr').forEach((r) => r.classList.remove('drag-over'));
+    });
+    row.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      if (table) table.querySelectorAll('tr[data-drag-camera]').forEach((r) => r.classList.remove('drag-over'));
+      row.classList.add('drag-over');
+    });
+    row.addEventListener('drop', async (event) => {
+      event.preventDefault();
+      row.classList.remove('drag-over');
+      const draggedIndex = Number(event.dataTransfer.getData('text/plain'));
+      const targetIndex = Number(row.dataset.dragCamera);
+      if (!Number.isFinite(draggedIndex) || !Number.isFinite(targetIndex) || draggedIndex === targetIndex) return;
+      // Snapshot before mutating so we can restore on API failure
+      const camerasBefore = cameras.slice();
+      const [draggedCamera] = cameras.splice(draggedIndex, 1);
+      const adjustedTarget = targetIndex > draggedIndex ? targetIndex - 1 : targetIndex;
+      cameras.splice(adjustedTarget, 0, draggedCamera);
+      try {
+        const result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras }) });
+        cameras = result.cameras || cameras;
+        renderGrid();
+        setMessage('Camera order updated.');
+      } catch (err) {
+        // Restore the previous order on failure
+        cameras.splice(0, cameras.length, ...camerasBefore);
+        if (window.daygleAuth?.redirecting) return;
+        setMessage(err.message, true);
+      }
+    });
   });
 }
 
