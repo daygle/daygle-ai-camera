@@ -1681,6 +1681,17 @@ tr.drag-over {
   .cameras-table .cell-actions button {
     padding: 5px;
   }
+  /* The cameras table's ~7 columns give it a ~700px min-content width, and
+     `.cameras-table-wrap` already scrolls it horizontally via overflow-x.
+     But grid items default to `min-width: auto`, so without the resets below
+     that min-content leaks up through the page grid and stretches the whole
+     page (header, stats, filters) wide enough to scroll horizontally instead
+     of just the table. Letting the card and wrapper shrink keeps the overflow
+     confined to the table's own scroll box, and the explicit table min-width
+     keeps its columns legible while it scrolls. */
+  .cameras-list-card { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+  .cameras-table-wrap { min-width: 0; }
+  .cameras-table { min-width: 680px; }
 }
 
 .cam-card {
