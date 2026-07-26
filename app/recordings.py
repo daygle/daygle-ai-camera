@@ -46,6 +46,16 @@ class RecordingService:
     # the full prebuffer window (pre + max_clip) so long event clips get audio
     # for their whole length; this is just the minimum when that window is tiny.
     AUDIO_SEGMENT_RETENTION_SECONDS = 20
+    # Minimum effective pre-roll for RTSP *event* rendering. The per-camera
+    # rolling prebuffer runs continuously for every RTSP camera (see
+    # ``app.live_monitor.run_live_alert_monitor_once`` -> ``prime_rtsp_prebuffer``),
+    # so the trigger moment is always buffered. A configured ``pre_event_seconds``
+    # of 0 would otherwise bypass that buffer and capture live *after* the event
+    # window has elapsed -- recording the aftermath rather than the event. Flooring
+    # the pre-roll to a couple of seconds keeps the trigger inside the rendered
+    # window and absorbs detection + RTSP-connect latency; live capture remains
+    # the fallback (below) when the buffer genuinely holds no usable segments.
+    RTSP_EVENT_MIN_PRE_SECONDS = 2
     # Worst-case ceiling for ``_stop_worker``'s ``thread.join`` when the worker
     # that's being joined is the per-camera ingest / prebuffer ffmpeg (1s loop
     # sleep + up to 2s ``process.wait(timeout=2)`` for SIGTERM grace + SIGKILL
@@ -667,8 +677,14 @@ class RecordingService:
         post_seconds = max(0, int(post_seconds))
         max_duration_seconds = max(1.0, float(max_duration_seconds))
 
+        # A configured pre-roll of 0 must NOT skip the (always-running) rolling
+        # prebuffer: doing so rendered the clip live from the trigger forward,
+        # missing the event and capturing the aftermath. Floor the pre-roll so
+        # the buffered footage spanning the trigger is rendered instead. The
+        # no-segments / ffmpeg-missing / degenerate-render branches below still
+        # hand off to ``_live_capture`` when the buffer has nothing usable.
         if pre_seconds <= 0:
-            return self._live_capture(stream_url, file_path, max_duration_seconds)
+            pre_seconds = self.RTSP_EVENT_MIN_PRE_SECONDS
 
         # Use the same window the priming path computed, so re-ensuring the worker
         # here never restarts it mid-capture over a mismatched buffer size.
