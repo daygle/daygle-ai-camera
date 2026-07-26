@@ -224,7 +224,7 @@ function renderFeed() {
 
 function updateListStatus(count) {
   if (!els.listStatus) return;
-  const labels = { all: 'alerts', 'object-alerts': 'object alerts', 'motion-alerts': 'motion alerts', 'sound-alerts': 'sound alerts' };
+  const labels = { all: 'alerts', 'object-alerts': 'Object', 'motion-alerts': 'Motion', 'sound-alerts': 'Sound' };
   const label = labels[activeFilter] || 'alerts';
   els.listStatus.textContent = count > 0 ? `Showing ${count} ${label}` : '';
 }
@@ -264,7 +264,8 @@ els.filterPills.forEach((pill) => {
 // ─── Data loading ──────────────────────────────────────────────────────────
 async function loadAlerts() {
   try {
-    const alerts = await api('/api/alerts');
+    const today = new Date().toISOString().split('T')[0];
+    const alerts = await api(`/api/alerts?since=${today}`);
     alertGroups = groupAlertsByEvent(alerts);
     updateStats();
   } catch (error) {

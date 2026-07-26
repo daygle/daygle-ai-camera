@@ -80,7 +80,7 @@ class EventsMixin:
             db.execute("DELETE FROM events")
             return int(count)
 
-    def search_events(self, label: str | None = None, limit: int = 50, alerted_only: bool = False, with_recording: bool = False) -> list[dict[str, Any]]:
+    def search_events(self, label: str | None = None, limit: int = 50, alerted_only: bool = False, with_recording: bool = False, since: str | None = None) -> list[dict[str, Any]]:
         with self.connect() as db:
             alert_filter = """
                 AND EXISTS (
@@ -101,25 +101,30 @@ class EventsMixin:
                 )
             """
             recording_filter = f"AND {recording_condition}"
+            since_clause = "AND e.created_at >= ?" if since else ""
             if label:
+                params: tuple[Any, ...] = (label,) + ((since,) if since else ()) + (limit,)
                 rows = db.execute(
                     f"""
                     SELECT DISTINCT e.* FROM events e
                     JOIN detections d ON d.event_id = e.id
                     WHERE d.label = ?
                     AND e.dismissed = 0
+                    {since_clause}
                     {alert_filter if alerted_only else ''}
                     {recording_filter if with_recording else ''}
                     ORDER BY e.created_at DESC
                     LIMIT ?
                     """,
-                    (label, limit),
+                    params,
                 ).fetchall()
             elif alerted_only:
+                params = ((since,) if since else ()) + (limit,)
                 rows = db.execute(
                     f"""
                     SELECT e.* FROM events e
                     WHERE e.dismissed = 0
+                    {since_clause}
                     AND EXISTS (
                         SELECT 1
                         FROM alert_history ah
@@ -129,21 +134,27 @@ class EventsMixin:
                     ORDER BY e.created_at DESC
                     LIMIT ?
                     """,
-                    (limit,),
+                    params,
                 ).fetchall()
             elif with_recording:
+                params = ((since,) if since else ()) + (limit,)
                 rows = db.execute(
                     f"""
                     SELECT e.* FROM events e
                     WHERE e.dismissed = 0
+                    {since_clause}
                     AND {recording_condition}
                     ORDER BY e.created_at DESC
                     LIMIT ?
                     """,
-                    (limit,),
+                    params,
                 ).fetchall()
             else:
-                rows = db.execute("SELECT * FROM events WHERE dismissed = 0 ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+                params = ((since,) if since else ()) + (limit,)
+                rows = db.execute(
+                    f"SELECT * FROM events WHERE dismissed = 0 {since_clause} ORDER BY created_at DESC LIMIT ?",
+                    params,
+                ).fetchall()
 
             return [self._event_with_detections(db, row) for row in rows]
 

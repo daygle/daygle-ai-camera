@@ -15,8 +15,8 @@ router = APIRouter()
 
 
 @router.get('/api/alerts')
-def alert_history(limit: int = Query(25, ge=1, le=200), db=Depends(get_database)):
-    return db.alerts(limit=limit)
+def alert_history(limit: int = Query(25, ge=1, le=10000), since: str | None = Query(None), db=Depends(get_database)):
+    return db.alerts(limit=limit, since=since)
 
 
 @router.delete('/api/alerts')

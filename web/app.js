@@ -242,8 +242,8 @@ function renderActivityFeed() {
 
 function updateListStatus(count) {
   if (!els.listStatus) return;
-  const labels = { all: 'detections', 'object-detections': 'object detections', 'motion-detections': 'motion detections', 'sound-detections': 'sound detections' };
-  const label = labels[activeFilter] || 'detections';
+  const labels = { all: 'items', 'object-detections': 'Object', 'motion-detections': 'Motion', 'sound-detections': 'Sound' };
+  const label = labels[activeFilter] || 'items';
   if (count === 0) {
     els.listStatus.textContent = '';
   } else {
@@ -290,7 +290,8 @@ async function loadStats() {
 
 async function loadEvents() {
   try {
-    events = await api('/api/events?with_recording=true');
+    const today = new Date().toISOString().split('T')[0];
+events = await api(`/api/events?with_recording=true&since=${today}`);
     updateMotionStats();
   } catch (error) {
     if (window.daygleAuth?.redirecting) return;

@@ -20,10 +20,12 @@ class AlertsMixin:
                 (created_at, rule_name, event_id, label, confidence, message, recording_id),
             )
 
-    def alerts(self, limit: int = 25) -> list[dict[str, Any]]:
+    def alerts(self, limit: int = 25, since: str | None = None) -> list[dict[str, Any]]:
         with self.connect() as db:
+            since_clause = "AND ah.created_at >= ?" if since else ""
+            params: tuple[Any, ...] = (since, limit) if since else (limit,)
             rows = db.execute(
-                """
+                f"""
                 SELECT ah.*,
                        r.id AS recording_id,
                        json_extract(e.metadata, '$.camera_name') AS camera_name,
@@ -32,10 +34,11 @@ class AlertsMixin:
                 LEFT JOIN events e ON e.id = ah.event_id
                 LEFT JOIN recordings r ON r.id = ah.recording_id
                 WHERE ah.dismissed = 0
+                {since_clause}
                 ORDER BY ah.created_at DESC
                 LIMIT ?
                 """,
-                (limit,),
+                params,
             ).fetchall()
             return [dict(row) for row in rows]
 

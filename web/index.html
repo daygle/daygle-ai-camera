@@ -59,16 +59,6 @@
         <strong id="motionEvents" class="stat-card-value">0</strong>
         <small class="muted stat-card-sub">Motion-only events</small>
       </article>
-      <article class="card stat-card">
-        <div class="stat-card-head">
-          <span class="stat-card-label">Motion Detections</span>
-          <span class="stat-card-icon stat-card-icon-motion" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="4" r="2"/><path d="m4 19.5 4-4.5 1.5 4 5.5-3-2-7 4-3"/></svg>
-          </span>
-        </div>
-        <strong id="motionEvents" class="stat-card-value">0</strong>
-        <small class="muted stat-card-sub">Motion-only events</small>
-      </article>
     </section>
 
     <section class="card activity-card">
@@ -90,9 +80,9 @@
       <div class="activity-filter-row">
         <div class="activity-filter-group" role="tablist" aria-label="Filter detections">
           <button class="activity-filter-pill active" data-filter="all" type="button" role="tab" aria-selected="true"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg> All</button>
-          <button class="activity-filter-pill" data-filter="object-detections" type="button" role="tab" aria-selected="false"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg> Object Detections</button>
-          <button class="activity-filter-pill" data-filter="motion-detections" type="button" role="tab" aria-selected="false"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="m4 19.5 4-4.5 1.5 4 5.5-3-2-7 4-3"/></svg> Motion Detections</button>
-          <button class="activity-filter-pill" data-filter="sound-detections" type="button" role="tab" aria-selected="false"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg> Sound Detections</button>
+          <button class="activity-filter-pill" data-filter="object-detections" type="button" role="tab" aria-selected="false"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg> Object</button>
+          <button class="activity-filter-pill" data-filter="motion-detections" type="button" role="tab" aria-selected="false"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="m4 19.5 4-4.5 1.5 4 5.5-3-2-7 4-3"/></svg> Motion</button>
+          <button class="activity-filter-pill" data-filter="sound-detections" type="button" role="tab" aria-selected="false"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg> Sound</button>
         </div>
         <p id="listStatus" class="muted activity-status" aria-live="polite"></p>
       </div>
