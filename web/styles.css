@@ -4823,6 +4823,45 @@ button.secondary:disabled, a.secondary:disabled {
 }
 
 /* =====================================================================
+   Unified hover feedback (pointer devices only)
+   Touch devices keep the :active feedback defined above so buttons
+   never get "stuck" in a hover state after a tap.
+   ===================================================================== */
+@media (hover: hover) {
+  /* Filled / gradient buttons (primary, info, success, warning, danger) */
+  button:hover:not(:disabled),
+  .button-link:hover {
+    filter: brightness(1.08);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
+  }
+
+  /* Secondary / panel buttons — lift + accent border instead of brightness */
+  button.secondary:hover:not(:disabled),
+  a.secondary:hover,
+  a.button-link.secondary-link:hover {
+    filter: none;
+    background: rgba(255, 255, 255, 0.12);
+    border-color: var(--accent);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.20);
+  }
+  :root.light button.secondary:hover:not(:disabled),
+  :root.light a.secondary:hover,
+  :root.light a.button-link.secondary-link:hover {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: var(--accent);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  }
+
+  /* Legacy outline delete button keeps its tinted-fill hover (defined
+     above) and additionally shares the subtle lift for consistency */
+  button.delete-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: none;
+  }
+}
+
+/* =====================================================================
    Mobile responsive button adjustments
    ===================================================================== */
 @media (max-width: 600px) {
