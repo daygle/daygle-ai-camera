@@ -447,14 +447,12 @@ function initSoftwareUpdateSection() {
   function showUpdateStatus(message, type = '') {
     if (!statusEl) return;
     statusEl.style.display = '';
-    // R9 H2: callers pass plain text (e.g. 'Checking for updates...',
-    // 'Could not reach GitHub: ${result.error}', 'You are running the
-    // latest version (v${current}).'). Using textContent instead of
-    // innerHTML removes the XSS surface entirely - no escapeHtml call
-    // needed, no double-escape risk for the few callers that already
-    // pre-escaped. Every status string is rendered as-is and any HTML
-    // markup characters in a future caller's string become inert text.
-    statusEl.textContent = String(message ?? '');
+    // Callers pass HTML-formatted messages (e.g. `<strong>Update
+    // available:</strong>`) with every dynamic value routed through
+    // escapeHtml() before interpolation, so innerHTML is safe here.
+    // Using innerHTML rather than textContent lets semantic markup
+    // (bold, links, arrows) render properly for end users.
+    statusEl.innerHTML = String(message ?? '');
     statusEl.className = 'status-panel' + (type ? ` status-${type}` : '');
   }
 
