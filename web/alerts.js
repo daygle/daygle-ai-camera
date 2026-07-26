@@ -11,7 +11,7 @@ const els = {
   statObjectAlerts: document.getElementById('statObjectAlerts'),
   statMotionAlerts: document.getElementById('statMotionAlerts'),
   statSoundAlerts: document.getElementById('statSoundAlerts'),
-  statCamera: document.getElementById('statCamera'),
+  rangeSelect: document.getElementById('rangeSelect'),
 };
 
 // SOUND_CLASS_IDS, isSoundLabel, isMotionOnlyAlertGroup, isMotionOnlyAlertItem,
@@ -20,6 +20,20 @@ const els = {
 
 let alertGroups = [];
 let activeFilter = 'all';
+let activeRange = 'today';
+
+function dateDaysAgo(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().split('T')[0];
+}
+
+function getSinceParam() {
+  if (activeRange === 'today') return new Date().toISOString().split('T')[0];
+  if (activeRange === '7d') return dateDaysAgo(7);
+  if (activeRange === '30d') return dateDaysAgo(30);
+  return ''; // 'all' — no since filter
+}
 
 // api() is provided by web/utils.js — shared CSRF, 401 redirect, JSON.
 
@@ -205,10 +219,6 @@ function updateStats() {
   if (els.statObjectAlerts) els.statObjectAlerts.textContent = String(objectAlerts);
   if (els.statMotionAlerts) els.statMotionAlerts.textContent = String(motionAlerts);
   if (els.statSoundAlerts) els.statSoundAlerts.textContent = String(soundAlerts);
-  if (els.statCamera) {
-    const latest = alertGroups[0];
-    els.statCamera.textContent = latest?.camera || '-';
-  }
 }
 
 function renderFeed() {
@@ -261,11 +271,18 @@ els.filterPills.forEach((pill) => {
   });
 });
 
+// ─── Time-range selector ────────────────────────────────────────────────────
+els.rangeSelect?.addEventListener('change', () => {
+  activeRange = els.rangeSelect.value;
+  loadAlerts().then(() => { renderFeed(); updateDismissBtn(); }).catch(() => {});
+});
+
 // ─── Data loading ──────────────────────────────────────────────────────────
 async function loadAlerts() {
   try {
-    const today = new Date().toISOString().split('T')[0];
-    const alerts = await api(`/api/alerts?since=${today}`);
+    const since = getSinceParam();
+    const url = since ? `/api/alerts?since=${since}` : '/api/alerts';
+    const alerts = await api(url);
     alertGroups = groupAlertsByEvent(alerts);
     updateStats();
   } catch (error) {

@@ -2166,6 +2166,22 @@ tr.drag-over {
   min-height: 1em;
 }
 
+/* Time-range selector next to the pill filter row */
+.activity-filter-row .range-select {
+  min-width: 130px;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.activity-filter-row .range-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 /* Activity list (overrides the global `.list` max-height so the feed
    can grow with the viewport) */
 .activity-list {

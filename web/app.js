@@ -7,6 +7,7 @@ const els = {
   listStatus: document.getElementById('listStatus'),
   dismissAllEventsBtn: document.getElementById('dismissAllEventsBtn'),
   filterPills: document.querySelectorAll('.activity-filter-pill'),
+  rangeSelect: document.getElementById('rangeSelect'),
 };
 
 // ─── State ──────────────────────────────────────────────────────────────────
@@ -25,6 +26,21 @@ let activeFilter = 'all';
 // api() is provided by web/utils.js (loaded before this script) - it reads
 // the CSRF token from window.daygleAuth.csrfToken and handles 401 redirects
 // so every page shares identical auth and error semantics.
+
+let activeRange = 'today';
+
+function dateDaysAgo(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().split('T')[0];
+}
+
+function getSinceParam() {
+  if (activeRange === 'today') return new Date().toISOString().split('T')[0];
+  if (activeRange === '7d') return dateDaysAgo(7);
+  if (activeRange === '30d') return dateDaysAgo(30);
+  return ''; // 'all' — no since filter
+}
 
 // ─── Small utilities (kept local to avoid touching utils.js) ────────────────
 function cameraLabel(cameraName, cameraId) {
@@ -274,8 +290,9 @@ async function loadStats() {
 
 async function loadEvents() {
   try {
-    const today = new Date().toISOString().split('T')[0];
-events = await api(`/api/events?with_recording=true&since=${today}`);
+    const since = getSinceParam();
+    const url = since ? `/api/events?with_recording=true&since=${since}` : '/api/events?with_recording=true';
+events = await api(url);
     updateMotionStats();
   } catch (error) {
     if (window.daygleAuth?.redirecting) return;
@@ -342,6 +359,12 @@ els.filterPills.forEach((pill) => {
     });
     renderActivityFeed();
   });
+});
+
+// ─── Time-range selector ────────────────────────────────────────────────────
+els.rangeSelect?.addEventListener('change', () => {
+  activeRange = els.rangeSelect.value;
+  loadEvents().then(renderActivityFeed).catch(() => {});
 });
 
 // ─── Refresh orchestration ──────────────────────────────────────────────────

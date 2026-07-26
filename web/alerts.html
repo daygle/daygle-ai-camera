@@ -59,16 +59,7 @@
         <strong id="statSoundAlerts" class="stat-card-value">0</strong>
         <small class="muted stat-card-sub">Sound rule notifications</small>
       </article>
-      <article class="card stat-card">
-        <div class="stat-card-head">
-          <span class="stat-card-label">Camera</span>
-          <span class="stat-card-icon" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-          </span>
-        </div>
-        <strong id="statCamera" class="stat-card-value stat-card-value-text">-</strong>
-        <small class="muted stat-card-sub">Latest alert source</small>
-      </article>
+
     </section>
 
     <section class="card activity-card">
@@ -99,6 +90,14 @@
           <button class="activity-filter-pill" data-filter="sound-alerts" type="button" role="tab" aria-selected="false">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg> Sound
           </button>
+        </div>
+        <div class="activity-range-wrap">
+          <select id="rangeSelect" class="range-select" aria-label="Time range">
+            <option value="today">Today</option>
+            <option value="7d">Last 7 Days</option>
+            <option value="30d">Last 30 Days</option>
+            <option value="all">All Time</option>
+          </select>
         </div>
         <p id="listStatus" class="muted activity-status" aria-live="polite"></p>
       </div>

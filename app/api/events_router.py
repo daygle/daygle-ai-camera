@@ -19,7 +19,7 @@ router = APIRouter()
 @router.get('/api/events')
 def events(
     label: str | None = None,
-    limit: int = Query(50, ge=1, le=10000),
+    limit: int = Query(10000, ge=1, le=10000),
     alerted_only: bool = False,
     with_recording: bool = False,
     since: str | None = Query(None),
