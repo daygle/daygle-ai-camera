@@ -75,6 +75,21 @@ YAMNET_PATCHED_SITES: tuple[tuple[str, str], ...] = (
     ),
     # The rows.map ``Running`` cell uses the same wrapped substring as the
     # statusPanel site. Covered by the first entry above.
+    # loadYamnetModelInfo (model-details row) - 3 helper-output sites wrapped
+    # for defense-in-depth so the model_size / sha256 / installed_at values
+    # baked into ``innerHTML`` route through escapeHtml like every other site.
+    (
+        '${escapeHtml(formatBytes(info.model_size))}',
+        'model-details ``size`` interpolation',
+    ),
+    (
+        '${escapeHtml(formatSha(info.sha256))}',
+        'model-details ``SHA-256`` interpolation',
+    ),
+    (
+        'escapeHtml(new Date(info.installed_at).toLocaleDateString())',
+        'model-details ``installed_at`` interpolation',
+    ),
 )
 
 
@@ -144,6 +159,34 @@ class _YamnetTfliteFileGuard(unittest.TestCase):
                 'interpolations lost their escapeHtml wrapper: '
                 + repr([label for _, label in missing])
             ),
+        )
+
+
+class _UtilsRuleExpandRowGuard(unittest.TestCase):
+    """``renderRuleExpandRow`` in utils.js interpolates the row ``key`` into
+    a ``data-*-email-recipients`` attribute. The sibling time-select fields
+    already route ``key`` through ``escapeHtml`` (via ``renderTimeSelect``'s
+    ``escapeHtml(dataAttrValue)``); this guard keeps the email-recipients
+    attribute consistent so a future caller passing a non-numeric key can't
+    break out of the attribute."""
+
+    path = REPO_ROOT / 'web' / 'utils.js'
+
+    def test_email_recipients_key_is_escaped(self) -> None:
+        source = _read(self.path)
+        self.assertIn(
+            'data-${prefix}-email-recipients="${escapeHtml(key)}"',
+            source,
+            msg=(
+                'renderRuleExpandRow no longer escapes the row key in the '
+                'email-recipients data-attribute - restore escapeHtml(key) '
+                'so it matches the escaped time-select fields'
+            ),
+        )
+        self.assertNotIn(
+            'data-${prefix}-email-recipients="${key}"',
+            source,
+            msg='renderRuleExpandRow regressed to raw ${key} interpolation',
         )
 
 

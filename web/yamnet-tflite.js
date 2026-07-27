@@ -229,9 +229,9 @@ async function loadYamnetModelInfo() {
       yamnetModelInfo.innerHTML = '<p class="muted">YAMNet model not yet downloaded. It will be downloaded automatically when sound detection is first enabled.</p>';
       return;
     }
-    const sizeInfo = info.model_size ? ` · ${formatBytes(info.model_size)}` : '';
-    const shaInfo = info.sha256 ? `SHA-256: ${formatSha(info.sha256)}` : '';
-    const installedAt = info.installed_at ? new Date(info.installed_at).toLocaleDateString() : '';
+    const sizeInfo = info.model_size ? ` · ${escapeHtml(formatBytes(info.model_size))}` : '';
+    const shaInfo = info.sha256 ? `SHA-256: ${escapeHtml(formatSha(info.sha256))}` : '';
+    const installedAt = info.installed_at ? escapeHtml(new Date(info.installed_at).toLocaleDateString()) : '';
     yamnetModelInfo.innerHTML = `<div class="yamnet-model-details"><span class="yamnet-model-status ${info.available ? 'status-ok' : 'status-warning'}">${info.available ? 'Model loaded' : 'Model not loaded'}</span>${sizeInfo}${shaInfo ? ` · ${shaInfo}` : ''}${installedAt ? ` · Installed ${installedAt}` : ''}</div>`;
   } catch (err) {
     if (window.daygleAuth?.redirecting) return;

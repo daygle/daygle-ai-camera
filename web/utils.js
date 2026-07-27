@@ -797,7 +797,7 @@ function renderRuleExpandRow(prefix, key, rule, expanded) {
         <div class="rule-expand-body">
           <label class="sound-rule-field sound-rule-email-field">
             <span>Email recipients</span>
-            <input type="email" data-${prefix}-email-recipients="${key}" value="${escapeHtml(normalizeEmailList(rule.email_recipients).join(', '))}" placeholder="alerts@example.com" multiple autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore />
+            <input type="email" data-${prefix}-email-recipients="${escapeHtml(key)}" value="${escapeHtml(normalizeEmailList(rule.email_recipients).join(', '))}" placeholder="alerts@example.com" multiple autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore />
           </label>
           <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
             <span>Active from</span>
