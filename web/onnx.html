@@ -82,11 +82,11 @@
           <span>GPU Memory Limit (GiB) <span class="info-tip" data-tip="Maximum GPU memory ONNX Runtime may use. Leaving headroom prevents cuBLAS allocation errors. 0 = unlimited (default)." title="Maximum GPU memory ONNX Runtime may use. Leaving headroom prevents cuBLAS allocation errors. 0 = unlimited (default)." tabindex="0" aria-label="Help: Maximum GPU memory ONNX Runtime may use. Leaving headroom prevents cuBLAS alloca..."></span></span>
           <input name="gpu_mem_limit_gb" type="number" min="0" max="128" step="0.5" placeholder="0" /></label>
         <label>
-          <span>Precision <span class="info-tip" data-tip="Inference precision. fp32 = full precision (default). int8 = CPU-only dynamic quantization — ~4x smaller model, ~1-2 mAP cost, biggest CPU performance win. fp16 = CUDA only; silently falls back to fp32 on CPU hosts." title="Inference precision. fp32 = full precision (default). int8 = CPU-only dynamic quantization — ~4x smaller model, ~1-2 mAP cost, biggest CPU performance win. fp16 = CUDA only; silently falls back to fp32 on CPU hosts." tabindex="0" aria-label="Help: Inference precision. fp32 = full precision (default). int8 = CPU-only dynamic quantization about 4x smaller model and about 1-2 mAP cost, biggest CPU performance win. fp16 = CUDA only silently falls back to fp32 on CPU hosts."></span></span>
+          <span>Precision <span class="info-tip" data-tip="Inference precision. fp32 = full precision (default). int8 = CPU-only dynamic quantization - ~4x smaller model, ~1-2 mAP cost, biggest CPU performance win. fp16 = CUDA only; silently falls back to fp32 on CPU hosts." title="Inference precision. fp32 = full precision (default). int8 = CPU-only dynamic quantization - ~4x smaller model, ~1-2 mAP cost, biggest CPU performance win. fp16 = CUDA only; silently falls back to fp32 on CPU hosts." tabindex="0" aria-label="Help: Inference precision. fp32 = full precision (default). int8 = CPU-only dynamic quantization about 4x smaller model and about 1-2 mAP cost, biggest CPU performance win. fp16 = CUDA only silently falls back to fp32 on CPU hosts."></span></span>
           <select name="precision">
-            <option value="fp32">FP32 — full precision</option>
-            <option value="fp16" disabled>FP16 — CUDA only</option>
-            <option value="int8">INT8 — quantized (CPU)</option>
+            <option value="fp32">FP32 - Full Precision</option>
+            <option value="fp16" disabled>FP16 - CUDA Only</option>
+            <option value="int8">INT8 - Quantized (CPU)</option>
           </select></label>
         <label>
           <span>IoU Threshold <span class="info-tip" data-tip="Intersection-over-union threshold for merging overlapping detections. Default: 0.45" title="Intersection-over-union threshold for merging overlapping detections. Default: 0.45" tabindex="0" aria-label="Help: Intersection-over-union threshold for merging overlapping detections. Default: 0..."></span></span>
