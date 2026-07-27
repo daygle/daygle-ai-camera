@@ -223,6 +223,8 @@ def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
         'active_config_source': ai_status['active_config_source'],
         'error': ai_status['error'],
         'last_detector_error': ai_status['last_detector_error'],
+        'model_input_size': ai_status.get('model_input_size'),
+        'model_name': ai_status.get('model_name'),
         'categories': categories,
         'available_labels': labels,
     }
