@@ -375,6 +375,22 @@ class RecordingsMixin:
             )
             return cursor.rowcount > 0
 
+    @staticmethod
+    def _purge_recording_children(db: sqlite3.Connection, recording_ids: list[int]) -> None:
+        """Remove rows that reference the given recordings, mirroring the schema's
+        declared ``ON DELETE CASCADE`` (recording_labels) and ``ON DELETE SET
+        NULL`` (alert_history.recording_id). SQLite does not enforce those
+        referential actions because ``PRAGMA foreign_keys`` is off per
+        connection, so without this the labels would orphan and alert rows would
+        keep a dangling recording_id. Call inside the same transaction, BEFORE
+        deleting the ``recordings`` rows themselves."""
+        if not recording_ids:
+            return
+        placeholders = ','.join('?' * len(recording_ids))
+        params = [int(rid) for rid in recording_ids]
+        db.execute(f"DELETE FROM recording_labels WHERE recording_id IN ({placeholders})", params)
+        db.execute(f"UPDATE alert_history SET recording_id = NULL WHERE recording_id IN ({placeholders})", params)
+
     def cleanup_incomplete_recordings(self) -> list[dict[str, Any]]:
         """Delete recordings whose files were never written (e.g. service restarted mid-capture)."""
         with self.connect() as db:
@@ -390,12 +406,17 @@ class RecordingsMixin:
                     incomplete.append(dict(row))
             if incomplete:
                 ids = [int(r["id"]) for r in incomplete]
+                self._purge_recording_children(db, ids)
                 db.execute(f"DELETE FROM recordings WHERE id IN ({','.join('?' * len(ids))})", ids)
             return incomplete
 
     def delete_all_recordings(self) -> list[dict[str, Any]]:
         with self.connect() as db:
             rows = db.execute("SELECT * FROM recordings").fetchall()
+            # Mirror the declared CASCADE / SET NULL (foreign_keys is off): clear
+            # the label join table and detach any alert_history rows first.
+            db.execute("DELETE FROM recording_labels")
+            db.execute("UPDATE alert_history SET recording_id = NULL")
             db.execute("DELETE FROM recordings")
             return [dict(row) for row in rows]
 
@@ -404,6 +425,7 @@ class RecordingsMixin:
             row = db.execute("SELECT * FROM recordings WHERE id = ?", (recording_id,)).fetchone()
             if row is None:
                 return None
+            self._purge_recording_children(db, [int(recording_id)])
             db.execute("DELETE FROM recordings WHERE id = ?", (recording_id,))
             return dict(row)
 
@@ -457,6 +479,7 @@ class RecordingsMixin:
             if not purge_ids:
                 return []
             rows = [row for row in candidates if int(row["id"]) in purge_ids]
+            self._purge_recording_children(db, [int(row["id"]) for row in rows])
             db.executemany("DELETE FROM recordings WHERE id = ?", [(row["id"],) for row in rows])
             return rows
 

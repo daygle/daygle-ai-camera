@@ -244,9 +244,16 @@ def delete_runtime_data(
         raise HTTPException(status_code=400, detail=err)
     recordings = db.delete_all_recordings()
     delete_recording_files(recordings)
-    deleted_events = db.delete_all_events()
+    # Order matters for accurate per-category counts: ``delete_all_events`` now
+    # mirrors the schema's ON DELETE CASCADE and clears alert_history +
+    # detections along with the events, so count/clear alerts and objects FIRST
+    # -- otherwise those calls would report 0 (already consumed by the events
+    # wipe). The final ``delete_all_events`` then wipes the (now empty) child
+    # tables as a no-op. The end state is identical either way; only the
+    # reported counts depend on the order.
     deleted_alerts = db.delete_all_alerts()
     deleted_objects = db.delete_all_objects()
+    deleted_events = db.delete_all_events()
     deleted_diagnostics = db.delete_all_camera_diagnostics()
     storage_config = effective_storage_config()
     deleted_snapshots = clear_runtime_media_directory(storage_config.get('snapshots_dir'))
