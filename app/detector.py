@@ -33,20 +33,6 @@ class DetectorUnavailableError(RuntimeError):
     """Raised when a configured detector backend cannot run inference."""
 
 
-def parse_input_size(value: Any) -> tuple[int, int]:
-    if isinstance(value, int):
-        return value, value
-    if isinstance(value, str):
-        if "x" in value.lower():
-            width, height = value.lower().split("x", 1)
-            return int(width), int(height)
-        size = int(value)
-        return size, size
-    if isinstance(value, (list, tuple)) and len(value) == 2:
-        return int(value[0]), int(value[1])
-    raise ValueError("ai.input_size must be an integer, WIDTHxHEIGHT string, or two-item list")
-
-
 def load_labels(labels_path: str | Path | None, fallback: list[str] | None = None) -> list[str]:
     if labels_path:
         path = Path(labels_path)
@@ -111,7 +97,6 @@ class OnnxYoloDetector:
         self,
         model_path: str | Path,
         labels_path: str | Path | None = None,
-        input_size: int | str | list[int] | tuple[int, int] = 640,
         confidence: float = 0.45,
         iou_threshold: float = 0.45,
         categories: list[str] | None = None,
@@ -123,7 +108,8 @@ class OnnxYoloDetector:
     ) -> None:
         self.model_path = Path(model_path)
         self.labels = load_labels(labels_path, categories)
-        self.input_width, self.input_height = parse_input_size(input_size)
+        self.input_width = 640
+        self.input_height = 640
         self.confidence = float(confidence)
         self.iou_threshold = float(iou_threshold)
         self.session: Any | None = None
@@ -513,7 +499,6 @@ def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
     return OnnxYoloDetector(
         model_path=model_path,
         labels_path=ai_config.get("labels_path", "models/coco.names"),
-        input_size=ai_config.get("input_size", 640),
         confidence=float(ai_config.get("confidence", 0.45)),
         iou_threshold=float(ai_config.get("iou_threshold", 0.45)),
         categories=ai_config.get("categories", []),

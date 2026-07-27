@@ -2,7 +2,7 @@
 
 The 3 helpers shipped here cluster around the **AI model subsystem**:
 validating incoming AI settings payloads, computing the AI subsystem's
-status payload (model loaded / available / onnx-runtime / mode / errors),
+status payload (model loaded / available / onnx-runtime / mode / errors / model_input_size),
 and shaping the per-request detector status response that the
 ``/api/status/ai`` endpoint and the admin dashboard surface.
 
@@ -39,8 +39,8 @@ Cluster membership:
 - ``validate_ai_settings`` -- the settings-router payload validator.
   Enforces the allowed-keys allow-list, coerces types (str -> bool
   for ``enabled``; float-range 0-1 for ``confidence`` /
-  ``iou_threshold``; int 32-2048 for ``input_size``; allowed ``device``
-  values; non-negative int for ``gpu_mem_limit``), raises
+  ``iou_threshold``; allowed ``device`` values; non-negative int for
+  ``gpu_mem_limit``), raises
   ``fastapi.HTTPException(400, ...)`` for any out-of-range input. Used
   by ``/api/settings/ai`` (POST) and ``/api/settings/ai/download``
   preflight (via the internal ``_do_download_model`` helper in main.py).
@@ -237,7 +237,6 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'backend',
         'confidence',
         'iou_threshold',
-        'input_size',
         'model_path',
         'labels_path',
         'device',
@@ -266,12 +265,6 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(status_code=400, detail=f'{field} must be a number.') from exc
         if not 0 <= updated[field] <= 1:
             raise HTTPException(status_code=400, detail=f'{field} must be between 0 and 1.')
-    try:
-        updated['input_size'] = int(updated.get('input_size', 640))
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail='input_size must be an integer.') from exc
-    if updated['input_size'] < 32 or updated['input_size'] > 2048:
-        raise HTTPException(status_code=400, detail='input_size must be between 32 and 2048.')
     device = str(updated.get('device', 'auto')).lower()
     if device not in ('auto', 'cpu', 'cuda'):
         raise HTTPException(status_code=400, detail="device must be 'auto', 'cpu', or 'cuda'.")

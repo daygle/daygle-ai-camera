@@ -441,7 +441,7 @@ def test_validate_ai_settings_keeps_only_allowed_keys(monkeypatch, ais):
         monkeypatch,
         effective_ai_config_value={
             'enabled': True, 'backend': 'onnx', 'confidence': 0.45,
-            'iou_threshold': 0.5, 'input_size': 640, 'model_path': 'models/yolov8n.onnx',
+            'iou_threshold': 0.5, 'model_path': 'models/yolov8n.onnx',
             'labels_path': 'models/coco.names', 'device': 'auto',
             'gpu_mem_limit': 0, 'inference_threads': 4, 'max_concurrent_inferences': 2,
         },
@@ -500,19 +500,6 @@ def test_validate_ai_settings_rejects_confidence_above_one(monkeypatch, ais):
     )
     with pytest.raises(HTTPException) as exc_info:
         ais.validate_ai_settings({'confidence': 1.5})
-    assert exc_info.value.status_code == 400
-
-
-def test_validate_ai_settings_rejects_input_size_below_32(monkeypatch, ais):
-    """``input_size`` must be in [32, 2048]."""
-    from fastapi import HTTPException
-
-    _install_ai_dependencies(
-        monkeypatch,
-        effective_ai_config_value={'input_size': 640},
-    )
-    with pytest.raises(HTTPException) as exc_info:
-        ais.validate_ai_settings({'input_size': 16})
     assert exc_info.value.status_code == 400
 
 
