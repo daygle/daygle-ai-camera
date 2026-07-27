@@ -206,3 +206,32 @@ def test_preprocess_defaults_to_float32_when_dtype_unresolved():
     frame = np.zeros((OH, OW, 3), dtype=np.uint8)
     tensor, *_ = det._preprocess(frame)
     assert tensor.dtype == np.float32
+
+
+# -- active_precision reflects the running precision after fallback ---------
+
+def test_active_precision_reports_int8_when_quantized():
+    det = _detector(nms_free=False)
+    det._precision = 'int8'  # __init__ only keeps 'int8' when quantization worked
+    assert det.active_precision == 'int8'
+
+
+def test_active_precision_reports_fp16_from_model_input_dtype():
+    det = _detector(nms_free=False)
+    det._precision = 'fp16'
+    det._input_dtype = np.float16
+    assert det.active_precision == 'fp16'
+
+
+def test_active_precision_fp16_request_but_fp32_model_reads_fp32():
+    """FP16 requested but the loaded model has a float32 input (a CPU export
+    that dropped half=True) reports fp32 -- the truth, not the request."""
+    det = _detector(nms_free=False)
+    det._precision = 'fp16'
+    det._input_dtype = np.float32
+    assert det.active_precision == 'fp32'
+
+
+def test_active_precision_defaults_fp32():
+    det = _detector(nms_free=False)
+    assert det.active_precision == 'fp32'

@@ -117,10 +117,12 @@ class _DetectorStub:
         backend: str = 'unknown',
         available: bool = False,
         unavailable_reason: object = None,
+        active_precision: str = 'fp32',
     ) -> None:
         self.backend = backend
         self.available = available
         self.unavailable_reason = unavailable_reason
+        self.active_precision = active_precision
 
 
 def _install_ai_dependencies(
@@ -245,6 +247,35 @@ def test_ai_status_payload_returns_onnx_active_when_configured_and_loaded(monkey
     assert out['configured_backend'] == 'onnx'
     # error mirrors detector.unavailable_reason (no last_detector_error to override it)
     assert out['error'] == 'would-be-error'
+
+
+def test_ai_status_payload_surfaces_active_precision_when_loaded(monkeypatch, ais):
+    """When the model is loaded, ai_status_payload reports the detector's
+    actual running precision (so the Status panel can flag int8/fp16 that
+    silently fell back to fp32). When not loaded it stays None."""
+    _install_ai_dependencies(
+        monkeypatch,
+        detector=_DetectorStub(backend='onnx', available=True, active_precision='int8'),
+        detector_loaded_for=True,
+        onnx_runtime_installed=True,
+        model_exists=True,
+    )
+    out = ais.ai_status_payload({'backend': 'onnx', 'model_path': 'models/yolov8n.onnx'})
+    assert out['model_loaded'] is True
+    assert out['active_precision'] == 'int8'
+
+
+def test_ai_status_payload_active_precision_none_when_not_loaded(monkeypatch, ais):
+    _install_ai_dependencies(
+        monkeypatch,
+        detector=_DetectorStub(backend='unknown', available=False, active_precision='int8'),
+        detector_loaded_for=False,
+        onnx_runtime_installed=True,
+        model_exists=False,
+    )
+    out = ais.ai_status_payload({'backend': 'onnx', 'model_path': 'models/missing.onnx'})
+    assert out['model_loaded'] is False
+    assert out['active_precision'] is None
 
 
 def test_ai_status_payload_returns_model_missing_when_onnx_configured_but_file_absent(monkeypatch, ais):

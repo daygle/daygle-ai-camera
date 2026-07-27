@@ -210,6 +210,9 @@ def ai_status_payload(
     model_input_size = None
     if model_loaded and detector_input_w and detector_input_h:
         model_input_size = f'{detector_input_w}\u00d7{detector_input_h}'
+    # The precision actually running (after any INT8/FP16 fallback), so the
+    # Status panel can show when a requested int8/fp16 silently ran as fp32.
+    active_precision = getattr(_state.detector, 'active_precision', None) if model_loaded else None
     return {
         'active_backend': active_backend,
         'configured_backend': configured_backend,
@@ -226,6 +229,7 @@ def ai_status_payload(
         'last_detector_error': error,
         'active_config_source': active_ai_config_source(),
         'model_input_size': model_input_size,
+        'active_precision': active_precision,
     }
 
 
@@ -252,6 +256,7 @@ def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
         'error': ai_status['error'],
         'last_detector_error': ai_status['last_detector_error'],
         'model_input_size': ai_status.get('model_input_size'),
+        'active_precision': ai_status.get('active_precision'),
         'model_name': ai_status.get('model_name'),
         # Surface the normalised tri-state so the settings form's NMS-dedupe
         # select reflects the persisted value (defaulting to 'auto') rather
