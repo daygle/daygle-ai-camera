@@ -113,6 +113,19 @@ function renderStatus(status) {
   const modelRow = status.model_name
     ? safeHtml`<div><span>Model</span><strong>${status.model_name} <span class="muted" style="font-weight:400;font-size:12px">${status.model_path || ''}</span></strong></div>`
     : safeHtml`<div><span>Model</span><strong>${status.model_path || 'Not Set'}</strong></div>`;
+  // Precision: show what's ACTUALLY running (after any int8/fp16 fallback),
+  // and flag when it differs from what was requested so a silent fallback to
+  // fp32 is visible rather than buried in the log.
+  const activePrec = status.active_precision;
+  const requestedPrec = String(status.precision || 'fp32').toLowerCase();
+  let precisionText;
+  if (!activePrec) {
+    precisionText = 'N/A';
+  } else if (activePrec !== requestedPrec) {
+    precisionText = `${activePrec.toUpperCase()} (requested ${requestedPrec.toUpperCase()})`;
+  } else {
+    precisionText = activePrec.toUpperCase();
+  }
   const rows = [
     safeHtml`<div><span>Current Backend</span><strong>${displayValue(status.current_backend || status.configured_backend, 'Not Set')}</strong></div>`,
     modelRow,
@@ -123,6 +136,7 @@ function renderStatus(status) {
     safeHtml`<div><span>Active Config Source</span><strong>${displayValue(status.active_config_source, 'None')}</strong></div>`,
     safeHtml`<div><span>Mode</span><strong class="ai-mode ${String(status.mode || '').toLowerCase().replace(/\s+/g, '-')}">${displayValue(status.mode, 'None')}</strong></div>`,
     safeHtml`<div><span>Model Resolution</span><strong>${status.model_input_size || 'N/A'}</strong></div>`,
+    safeHtml`<div><span>Precision</span><strong>${precisionText}</strong></div>`,
     safeHtml`<div class="wide"><span>Last Detector Error</span><strong>${displayValue(status.last_detector_error, 'None')}</strong></div>`,
   ];
   statusPanel.innerHTML = rows.join('');

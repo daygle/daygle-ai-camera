@@ -320,6 +320,24 @@ class OnnxYoloDetector:
     def available(self) -> bool:
         return self.session is not None and self.input_name is not None
 
+    @property
+    def active_precision(self) -> str:
+        """The precision the detector is *actually* running, not the request.
+
+        Reflects the runtime reality after any fallback:
+        - INT8 stays ``'int8'`` only when quantization succeeded (``__init__``
+          rewrites ``self._precision`` to ``'fp32'`` when it can't quantize).
+        - FP16 is reported only when the loaded model genuinely declares a
+          ``float16`` input; an FP16 request that produced an FP32 export (a
+          CPU host that dropped ``half=True``) correctly reads back as fp32.
+        - Everything else is fp32.
+        """
+        if self._precision == 'int8':
+            return 'int8'
+        if self._input_dtype is not None and np is not None and np.dtype(self._input_dtype) == np.float16:
+            return 'fp16'
+        return 'fp32'
+
     def detect_frame(self, image: Any, confidence: float | None = None) -> list[dict[str, Any]]:
         """Run inference on a pre-decoded numpy BGR frame (H×W×3 uint8).
 
