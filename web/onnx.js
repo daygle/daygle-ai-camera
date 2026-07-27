@@ -90,7 +90,6 @@ function formPayload(form) {
   const data = Object.fromEntries(new FormData(form).entries());
   data.enabled = data.enabled === 'true';
   for (const key of ['iou_threshold']) if (data[key] !== '') data[key] = Number(data[key]);
-  if (data.input_size !== '') data.input_size = Number.parseInt(data.input_size, 10);
   for (const key of ['inference_threads', 'max_concurrent_inferences']) {
     if (data[key] !== '') data[key] = Number.parseInt(data[key], 10);
     else delete data[key];
@@ -202,7 +201,7 @@ function renderModelList(models) {
     if (!isInstalled) {
       actionsHtml = `
         <div class="model-download-row">
-          <select class="model-res-select" data-model-id="${escapeHtml(m.id)}" title="Export resolution">
+          <select class="model-res-select" data-model-id="${escapeHtml(m.id)}" title="Model export resolution — this determines the input size the model accepts. Higher = more accurate on small objects, slower inference.">
             <option value="320">320 (Fast)</option>
             <option value="416">416</option>
             <option value="480">480</option>
