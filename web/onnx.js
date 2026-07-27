@@ -159,10 +159,15 @@ function renderModelList(models) {
 
     // Action buttons
     let actionsHtml = '';
-    if (isActive) {
-      actionsHtml = '<button class="btn-success model-action-btn" disabled>\u2713 In Use</button>';
-    } else if (!isInstalled) {
+    if (!isInstalled) {
       actionsHtml = `<button class="btn-info model-action-btn" data-action="download" data-model-id="${escapeHtml(m.id)}">\u2B07 Download</button>`;
+    } else if (isActive && hasUpdate) {
+      // Active model with update: allow re-export in place
+      actionsHtml = `
+        <span class="model-active-label">\u25CF In Use</span>
+        <button class="btn-warning model-action-btn" data-action="update" data-model-id="${escapeHtml(m.id)}">\u21BB Update</button>`;
+    } else if (isActive) {
+      actionsHtml = '<button class="btn-success model-action-btn" disabled>\u2713 In Use</button>';
     } else {
       const updateBtn = hasUpdate
         ? `<button class="btn-warning model-action-btn" data-action="update" data-model-id="${escapeHtml(m.id)}">\u21BB Update</button>`

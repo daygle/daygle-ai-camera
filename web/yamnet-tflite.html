@@ -33,6 +33,21 @@
       </div>
     </section>
 
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">📦</div>
+        <div>
+          <h2>Model</h2>
+          <p class="settings-section-subtitle">YAMNet TFLite model file information and update management.</p>
+        </div>
+      </div>
+      <div id="yamnetModelInfo" class="yamnet-model-info" aria-live="polite"></div>
+      <div class="button-row" style="margin-top:0.75rem">
+        <button id="checkYamnetUpdateBtn" class="btn-info" type="button">Check for Update</button>
+        <button id="reloadYamnetModelBtn" type="button" style="display:none">Update Model</button>
+      </div>
+    </section>
+
     <section class="card yamnet-cameras-card">
       <div class="settings-section-header">
         <div class="settings-section-icon">📡</div>

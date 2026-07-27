@@ -6,9 +6,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 import app.state as _state
+from app.auth_gates import require_admin
 from app.sound_monitor import _sound_status_reason
 
 router = APIRouter()
@@ -88,3 +89,28 @@ def get_sound_status(camera_id: str | None = Query(None)) -> dict[str, Any]:
         result['backend_reason'] = representative.backend_reason
     result['last_confidences'] = {}
     return result
+
+
+@router.get('/api/sound/model/info')
+def get_sound_model_info(request: Request):
+    """Return information about the installed YAMNet model."""
+    require_admin(request)
+    from app.sound_detector import _yamnet
+    return _yamnet.installed_info()
+
+
+@router.post('/api/sound/model/check')
+def check_sound_model_update(request: Request):
+    """Check if a newer YAMNet model is available."""
+    require_admin(request)
+    from app.sound_detector import _yamnet
+    return _yamnet.check_for_update()
+
+
+@router.post('/api/sound/model/reload')
+def reload_sound_model(request: Request):
+    """Re-download and reload the YAMNet model."""
+    require_admin(request)
+    from app.sound_detector import _yamnet
+    ok = _yamnet.reload()
+    return {'ok': ok, 'info': _yamnet.installed_info()}

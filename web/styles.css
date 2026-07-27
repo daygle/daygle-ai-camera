@@ -4628,6 +4628,12 @@ a.activity-item-action {
   color: var(--success);
   border: 1px solid rgba(73,230,163,.35);
 }
+.model-active-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--success);
+  margin-right: 8px;
+}
 .model-status-installed {
   background: rgba(255,255,255,.06);
   color: var(--muted);

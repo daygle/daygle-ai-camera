@@ -2,6 +2,9 @@ const messageEl = document.getElementById('yamnetMessage');
 const statusPanel = document.getElementById('soundStatusPanel');
 const cameraList = document.getElementById('soundCameraStatusList');
 const refreshBtn = document.getElementById('refreshSoundStatusBtn');
+const yamnetModelInfo = document.getElementById('yamnetModelInfo');
+const checkYamnetUpdateBtn = document.getElementById('checkYamnetUpdateBtn');
+const reloadYamnetModelBtn = document.getElementById('reloadYamnetModelBtn');
 
 // api() is provided by web/utils.js (loaded before this script). yamnet-tflite
 // is a read-only status page (no POST/PUT/DELETE), so the CSRF/Content-Type
@@ -201,5 +204,102 @@ async function loadSoundStatus() {
   }
 }
 
-refreshBtn.addEventListener('click', loadSoundStatus);
+// ─── YAMNet model management ──────────────────────────────────────────────
+function formatBytes(bytes) {
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  let size = bytes;
+  while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
+  return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+function formatSha(sha) {
+  if (!sha) return 'unknown';
+  return sha.substring(0, 12) + '…';
+}
+
+let pendingUpdate = null;
+
+async function loadYamnetModelInfo() {
+  try {
+    const info = await api('/api/sound/model/info');
+    if (!yamnetModelInfo) return;
+    if (!info.available && !info.sha256) {
+      yamnetModelInfo.innerHTML = '<p class="muted">YAMNet model not yet downloaded. It will be downloaded automatically when sound detection is first enabled.</p>';
+      return;
+    }
+    const sizeInfo = info.model_size ? ` · ${formatBytes(info.model_size)}` : '';
+    const shaInfo = info.sha256 ? `SHA-256: ${formatSha(info.sha256)}` : '';
+    const installedAt = info.installed_at ? new Date(info.installed_at).toLocaleDateString() : '';
+    yamnetModelInfo.innerHTML = `<div class="yamnet-model-details"><span class="yamnet-model-status ${info.available ? 'status-ok' : 'status-warning'}">${info.available ? 'Model loaded' : 'Model not loaded'}</span>${sizeInfo}${shaInfo ? ` · ${shaInfo}` : ''}${installedAt ? ` · Installed ${installedAt}` : ''}</div>`;
+  } catch (err) {
+    if (window.daygleAuth?.redirecting) return;
+    if (yamnetModelInfo) yamnetModelInfo.innerHTML = `<p class="muted">Could not load model info: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function checkYamnetUpdate() {
+  if (!checkYamnetUpdateBtn) return;
+  checkYamnetUpdateBtn.disabled = true;
+  checkYamnetUpdateBtn.textContent = 'Checking…';
+  try {
+    const result = await api('/api/sound/model/check', { method: 'POST' });
+    if (result.error) {
+      window.showToast?.(`Update check failed: ${result.error}`, true);
+    } else if (result.update_available) {
+      pendingUpdate = result;
+      if (reloadYamnetModelBtn) {
+        reloadYamnetModelBtn.style.display = '';
+        reloadYamnetModelBtn.textContent = `Update Model (${formatBytes(result.latest_size)})`;
+      }
+      window.showToast?.('A newer YAMNet model is available!');
+    } else {
+      pendingUpdate = null;
+      if (reloadYamnetModelBtn) reloadYamnetModelBtn.style.display = 'none';
+      window.showToast?.('YAMNet model is up to date.');
+    }
+  } catch (err) {
+    if (window.daygleAuth?.redirecting) return;
+    window.showToast?.(`Update check failed: ${err.message}`, true);
+  } finally {
+    checkYamnetUpdateBtn.disabled = false;
+    checkYamnetUpdateBtn.textContent = 'Check for Update';
+  }
+}
+
+async function reloadYamnetModel() {
+  if (!reloadYamnetModelBtn || !pendingUpdate) return;
+  reloadYamnetModelBtn.disabled = true;
+  reloadYamnetModelBtn.textContent = 'Updating…';
+  checkYamnetUpdateBtn.disabled = true;
+  try {
+    const result = await api('/api/sound/model/reload', { method: 'POST' });
+    if (result.ok) {
+      pendingUpdate = null;
+      reloadYamnetModelBtn.style.display = 'none';
+      window.showToast?.('YAMNet model updated successfully!');
+      await loadYamnetModelInfo();
+      await loadSoundStatus();
+    } else {
+      window.showToast?.('Failed to update YAMNet model.', true);
+    }
+  } catch (err) {
+    if (window.daygleAuth?.redirecting) return;
+    window.showToast?.(`Update failed: ${err.message}`, true);
+  } finally {
+    reloadYamnetModelBtn.disabled = false;
+    reloadYamnetModelBtn.textContent = 'Update Model';
+    checkYamnetUpdateBtn.disabled = false;
+  }
+}
+
+checkYamnetUpdateBtn?.addEventListener('click', checkYamnetUpdate);
+reloadYamnetModelBtn?.addEventListener('click', reloadYamnetModel);
+
+refreshBtn.addEventListener('click', () => {
+  loadSoundStatus();
+  loadYamnetModelInfo();
+});
 loadSoundStatus();
+loadYamnetModelInfo();

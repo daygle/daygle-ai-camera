@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 import logging
 import re
 import shutil
@@ -160,6 +162,9 @@ DEFAULT_RULES: list[dict[str, Any]] = [
 class _YamnetBackend:
     """Lazy-loaded CPU-only YAMNet TensorFlow Lite backend."""
 
+    _METADATA_PATH = _MODELS_DIR / 'yamnet-metadata.json'
+    _MANIFEST_URL = 'https://raw.githubusercontent.com/daygle/daygle-ai-camera/main/models/yamnet-manifest.json'
+
     def __init__(self) -> None:
         self._model: Any = None
         self._input_details: list[dict[str, Any]] = []
@@ -169,6 +174,8 @@ class _YamnetBackend:
         self._available: bool | None = None  # None = not yet attempted
         self._unavailable_reason: str | None = None
         self._dynamic_target_len: int | None = None
+        self._installed_version: str | None = None
+        self._installed_sha256: str | None = None
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -197,6 +204,119 @@ class _YamnetBackend:
         logger.info('Downloading %s to %s', label, path)
         urlretrieve(url, tmp_path)  # noqa: S310 - trusted model/class-map URLs controlled by the app
         tmp_path.replace(path)
+
+    @staticmethod
+    def _sha256_file(path: Path) -> str:
+        h = hashlib.sha256()
+        with open(path, 'rb') as f:
+            for chunk in iter(lambda: f.read(65536), b''):
+                h.update(chunk)
+        return h.hexdigest()
+
+    @staticmethod
+    def _read_metadata() -> dict[str, Any]:
+        p = _YamnetBackend._METADATA_PATH
+        if p.exists():
+            try:
+                return json.loads(p.read_text(encoding='utf-8'))
+            except Exception:
+                pass
+        return {}
+
+    @staticmethod
+    def _write_metadata(data: dict[str, Any]) -> None:
+        _YamnetBackend._METADATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _YamnetBackend._METADATA_PATH.write_text(json.dumps(data, indent=2), encoding='utf-8')
+
+    def _save_installed_version(self) -> None:
+        """Record the installed model version and SHA-256 after a successful load."""
+        if not _YAMNET_TFLITE_PATH.exists():
+            return
+        sha = self._sha256_file(_YAMNET_TFLITE_PATH)
+        meta = self._read_metadata()
+        meta['installed_sha256'] = sha
+        meta['installed_at'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+        self._write_metadata(meta)
+        self._installed_sha256 = sha
+
+    def installed_info(self) -> dict[str, Any]:
+        """Return information about the currently installed YAMNet model."""
+        meta = self._read_metadata()
+        sha = meta.get('installed_sha256', self._installed_sha256)
+        if not sha and _YAMNET_TFLITE_PATH.exists():
+            sha = self._sha256_file(_YAMNET_TFLITE_PATH)
+        return {
+            'available': bool(self._available),
+            'sha256': sha,
+            'installed_at': meta.get('installed_at'),
+            'model_size': _YAMNET_TFLITE_PATH.stat().st_size if _YAMNET_TFLITE_PATH.exists() else 0,
+            'class_map_size': _YAMNET_CLASS_MAP_PATH.stat().st_size if _YAMNET_CLASS_MAP_PATH.exists() else 0,
+        }
+
+    def check_for_update(self) -> dict[str, Any]:
+        """Check if a newer YAMNet model is available by re-downloading and comparing SHA-256."""
+        current_sha = self._read_metadata().get('installed_sha256', '')
+        if not current_sha and _YAMNET_TFLITE_PATH.exists():
+            current_sha = self._sha256_file(_YAMNET_TFLITE_PATH)
+        try:
+            tmp_path = _YAMNET_TFLITE_PATH.with_suffix('.tflite.check')
+            urlretrieve(_YAMNET_TFLITE_URL, tmp_path)  # noqa: S310
+            new_sha = self._sha256_file(tmp_path)
+            new_size = tmp_path.stat().st_size
+            tmp_path.unlink(missing_ok=True)
+        except Exception as exc:
+            return {'update_available': False, 'error': str(exc)}
+        update_available = bool(current_sha and new_sha and current_sha != new_sha)
+        return {
+            'update_available': update_available,
+            'current_sha256': current_sha,
+            'latest_sha256': new_sha,
+            'latest_size': new_size,
+        }
+
+    def reload(self) -> bool:
+        """Thread-safe model reload. Downloads fresh assets and reinitialises the interpreter.
+
+        Downloads to temp files first, then swaps atomically so a failed
+        download never leaves the model unavailable.
+        """
+        with self._lock:
+            try:
+                Interpreter = self._interpreter_class()
+                # Download to temp files first
+                tmp_tflite = _YAMNET_TFLITE_PATH.with_suffix('.tflite.update')
+                tmp_csv = _YAMNET_CLASS_MAP_PATH.with_suffix('.csv.update')
+                try:
+                    self._ensure_asset(tmp_tflite, _YAMNET_TFLITE_URL, 'YAMNet TFLite model (update)')
+                    self._ensure_asset(tmp_csv, _YAMNET_CLASS_MAP_URL, 'YAMNet class map (update)')
+                    class_names = self._load_class_names(tmp_csv)
+                    interpreter = Interpreter(model_path=str(tmp_tflite), num_threads=1)
+                    interpreter.allocate_tensors()
+                    # Swap: delete old files and rename new ones atomically
+                    _YAMNET_TFLITE_PATH.unlink(missing_ok=True)
+                    _YAMNET_CLASS_MAP_PATH.unlink(missing_ok=True)
+                    tmp_tflite.replace(_YAMNET_TFLITE_PATH)
+                    tmp_csv.replace(_YAMNET_CLASS_MAP_PATH)
+                except Exception:
+                    # Clean up temp files on failure
+                    tmp_tflite.unlink(missing_ok=True)
+                    tmp_csv.unlink(missing_ok=True)
+                    raise
+                self._model = interpreter
+                self._input_details = interpreter.get_input_details()
+                self._output_details = interpreter.get_output_details()
+                self._class_indices = self._build_class_indices(class_names)
+                self._available = True
+                self._unavailable_reason = None
+                self._dynamic_target_len = None
+                self._save_installed_version()
+                logger.info('YAMNet TFLite reloaded successfully')
+                return True
+            except Exception as exc:
+                self._unavailable_reason = f'YAMNet TFLite reload failed: {exc}'
+                logger.warning('YAMNet TFLite reload failed: %s', exc)
+                self._available = False
+                return False
 
     @staticmethod
     def _load_class_names(path: Path) -> list[str]:
@@ -240,6 +360,7 @@ class _YamnetBackend:
                 self._class_indices = self._build_class_indices(class_names)
                 self._available = True
                 self._unavailable_reason = None
+                self._save_installed_version()
                 logger.info('YAMNet TFLite ready - classifying against %d AudioSet classes', len(class_names))
             except Exception as exc:
                 self._unavailable_reason = f'YAMNet TFLite unavailable: {exc}'
