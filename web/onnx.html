@@ -103,9 +103,11 @@
         <label>
           <span>Labels Path <span class="info-tip" data-tip="Path to the text file containing one object label per line. Default: models/coco.names" title="Path to the text file containing one object label per line. Default: models/coco.names" tabindex="0" aria-label="Help: Path to the text file containing one object label per line. Default: models/coco..."></span></span>
           <input name="labels_path" /></label>
-        <hr class="settings-subsection-divider full-width" />
-        <h3 class="settings-subsection-heading full-width">Advanced</h3>
-        <p class="settings-subsection-help muted full-width">Optional inference tuning. Change one at a time so you can attribute any per-frame impact.</p>
+        <div class="settings-subsection full-width">
+          <hr class="settings-subsection-divider" />
+          <h3 class="settings-subsection-heading">Advanced</h3>
+          <p class="settings-subsection-help muted">Optional inference tuning. Change one at a time so you can attribute any per-frame impact.</p>
+        </div>
         <label>
           <span>Execution Mode <span class="info-tip" data-tip="ONNX Runtime executor mode (CPU path only). Parallel is the default and matches prior behavior. Sequential may be faster on small graphs because ORT already parallelizes within each op. A/B test on your hardware. Default: parallel" title="ONNX Runtime executor mode (CPU path only). Parallel is the default and matches prior behavior. Sequential may be faster on small graphs because ORT already parallelizes within each op. A/B test on your hardware. Default: parallel" tabindex="0" aria-label="Help: ONNX Runtime executor mode CPU path only. Parallel is the default and matches prior behavior. Sequential may be faster on small graphs because ORT already parallelizes within each op. A/B test on your hardware. Default: parallel"></span></span>
           <select name="execution_mode">

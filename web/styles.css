@@ -2072,6 +2072,11 @@ tr.drag-over {
 
 /* Subsection headings/dividers inside a .form-grid need to span every
    column so they don't get dropped into an individual grid cell. */
+.form-grid .settings-subsection {
+  grid-column: 1 / -1;
+  display: block;
+  width: 100%;
+}
 .form-grid .settings-subsection-divider {
   width: 100%;
   margin: 8px 0;
@@ -2350,9 +2355,12 @@ tr.drag-over {
   box-shadow: 0 0 8px var(--segment-color), 0 10px 24px rgba(0,0,0,.22);
 }
 .timeline-recordings {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  max-height: min(400px, 45vh);
+  max-height: min(420px, 50vh);
   overflow-y: auto;
+  padding: 4px 0;
 }
 .timeline-recording-item {
   width: 100%;
@@ -2360,36 +2368,32 @@ tr.drag-over {
   border-radius: 16px;
   background: rgba(255,255,255,.04);
   color: var(--text);
-  padding: 10px 14px;
-  display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto;
-  align-items: center;
+  padding: 12px 14px;
+  display: flex;
+  align-items: stretch;
   gap: 12px;
   text-align: left;
+  transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
 }
 .timeline-recording-item:hover,
 .timeline-recording-item.active {
   border-color: rgba(71,214,255,.35);
-  background: rgba(71,214,255,.1);
+  background: rgba(71,214,255,.08);
+  box-shadow: 0 4px 16px rgba(71,214,255,.08);
 }
 .timeline-recording-color {
-  width: 10px;
-  height: 36px;
+  width: 6px;
+  min-height: 44px;
   border-radius: 999px;
+  flex-shrink: 0;
+  align-self: stretch;
 }
 .timeline-recording-main {
-  display: grid;
-  gap: 4px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   min-width: 0;
-  overflow: hidden;
-}
-.timeline-recording-main strong {
-  font-size: 13px;
-  color: var(--text);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: 1;
 }
 .timeline-recording-title-row {
   display: flex;
@@ -2397,7 +2401,6 @@ tr.drag-over {
   gap: 8px;
   flex-wrap: nowrap;
   min-width: 0;
-  overflow: hidden;
 }
 .timeline-recording-title-row .activity-item-type {
   font-size: 11px;
@@ -2412,6 +2415,23 @@ tr.drag-over {
   white-space: nowrap;
   min-width: 0;
   flex: 1;
+  font-size: 13px;
+  color: var(--text);
+}
+.timeline-recording-duration {
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.timeline-recording-meta-line {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
 }
 /* Confidence badges live on their own row below the title. Keep them
    compact and separated so the recording item expands cleanly. */
@@ -2419,24 +2439,12 @@ tr.drag-over {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: 2px;
+  align-items: center;
 }
 .timeline-recording-confidence-row .detection {
   margin: 0;
   padding: 3px 8px;
   font-size: 11px;
-}
-.timeline-recording-main > span,
-.timeline-recording-meta {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-}
-.timeline-recording-meta {
-  display: grid;
-  gap: 2px;
-  text-align: right;
-  white-space: nowrap;
 }
 .timeline-recording-link {
   color: var(--accent, #47d6ff);
@@ -2446,27 +2454,10 @@ tr.drag-over {
 .timeline-recording-link:hover {
   text-decoration: underline;
 }
-.timeline-recording-confidence {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: rgba(139,92,246,.16);
-  color: #c9b8ff;
-  font-size: 11px;
-  font-weight: 700;
-}
-.timeline-recording-confidence strong {
-  color: #b4a0f5;
-}
 
 @media (max-width: 900px) {
   .timeline-controls {
     grid-template-columns: 1fr 1fr;
-  }
-  .timeline-recording-item {
-    grid-template-columns: 10px minmax(0, 1fr) auto;
   }
 }
 
