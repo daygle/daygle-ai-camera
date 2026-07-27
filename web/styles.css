@@ -1384,6 +1384,10 @@ tr.drag-over {
   padding-bottom: 14px;
   border-bottom: 1px solid var(--border);
 }
+.settings-section-header > div:not(.settings-section-icon):not(.button-row):not(.hero-action) {
+  min-width: 0;
+  flex: 1;
+}
 .settings-section-header h2 { margin: 0; font-size: 18px; }
 .settings-section-header-danger h2 { margin: 0; }
 .settings-section-subtitle {
@@ -1469,6 +1473,10 @@ tr.drag-over {
   /* Sound rule select: full width */
   .rule-select-wrapper { width: 100%; }
   .rule-select-wrapper select { width: 100%; }
+}
+/* Tiny phones (≤400px): single-column stat cards */
+@media (max-width: 400px) {
+  .stats-grid { grid-template-columns: 1fr; }
 }
 
 /* ─── Sounds page layout ──────────────────────────────────────────────────── */
@@ -2220,6 +2228,10 @@ tr.drag-over {
   border-radius: 999px;
   box-shadow: 0 0 0 3px rgba(255,255,255,.06);
 }
+@media (max-width: 600px) {
+  .timeline-legend { gap: 8px; }
+  .timeline-legend-chip { padding: 6px 10px; font-size: 11px; }
+}
 .timeline-scroll {
   overflow-x: auto;
   padding-bottom: 6px;
@@ -2319,7 +2331,7 @@ tr.drag-over {
 }
 .timeline-recordings {
   gap: 8px;
-  max-height: 400px;
+  max-height: min(400px, 45vh);
   overflow-y: auto;
 }
 .timeline-recording-item {
@@ -2353,17 +2365,24 @@ tr.drag-over {
 .timeline-recording-main strong {
   font-size: 13px;
   color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .timeline-recording-title-row {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 .timeline-recording-title-row .activity-item-type {
   font-size: 12px;
   padding: 6px 9px;
   letter-spacing: 0;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .timeline-recording-main > span,
 .timeline-recording-meta {
