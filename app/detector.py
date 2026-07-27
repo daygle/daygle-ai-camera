@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger('daygle.ai')
 
 try:
     import numpy as np
@@ -189,6 +192,24 @@ class OnnxYoloDetector:
             self.input_name = self.session.get_inputs()[0].name
             self.output_names = [output.name for output in self.session.get_outputs()]
             self.active_providers = self.session.get_providers()
+            # Read the model's actual input shape and override configured
+            # input_size if it doesn't match.  This prevents the user from
+            # accidentally setting a size that mismatches the exported model
+            # (e.g. 768 when the model expects 640x640).
+            model_input = self.session.get_inputs()[0]
+            model_shape = model_input.shape  # e.g. [1, 3, 640, 640]
+            if len(model_shape) == 4:
+                model_h = model_shape[2]
+                model_w = model_shape[3]
+                if isinstance(model_h, int) and isinstance(model_w, int):
+                    if (model_h, model_w) != (self.input_height, self.input_width):
+                        logger.warning(
+                            'ONNX model input shape (%dx%d) differs from configured input_size (%dx%d). '
+                            'Using model shape.',
+                            model_w, model_h, self.input_width, self.input_height,
+                        )
+                        self.input_width = model_w
+                        self.input_height = model_h
         except Exception as exc:  # pragma: no cover - depends on runtime/model internals
             self.unavailable_reason = f"Failed to load ONNX model {self.model_path}: {exc}"
 
