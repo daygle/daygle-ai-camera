@@ -21,6 +21,7 @@ Cluster membership:
 """
 from __future__ import annotations
 
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -29,9 +30,41 @@ from urllib.parse import quote, urlsplit, urlunsplit
 BASE_DIR: Path = Path(__file__).resolve().parent.parent
 
 
+_cached_version: str | None = None
+
+
 def _current_version() -> str:
+    """Return the current version from the latest git tag.
+
+    Falls back to the legacy VERSION file if git is unavailable
+    (e.g. in a release tarball without a .git directory).
+    The result is cached after the first successful lookup.
+    """
+    global _cached_version
+    if _cached_version is not None:
+        return _cached_version
+    try:
+        tag = subprocess.run(
+            ['git', 'describe', '--tags', '--abbrev=0'],
+            cwd=str(BASE_DIR),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+        if tag:
+            _cached_version = tag.lstrip('v')
+            return _cached_version
+    except Exception:
+        pass
+    # Fallback: legacy VERSION file (for tarball installs without .git)
     version_file = BASE_DIR / 'VERSION'
-    return version_file.read_text(encoding='utf-8').strip() if version_file.exists() else 'unknown'
+    if version_file.exists():
+        version = version_file.read_text(encoding='utf-8').strip()
+        if version:
+            _cached_version = version
+            return _cached_version
+    # Don't cache 'unknown' so a retry is possible if git becomes available
+    return 'unknown'
 
 
 def _non_empty_setting(settings: dict[str, Any], key: str) -> str:

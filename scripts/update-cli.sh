@@ -31,9 +31,13 @@ done
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-# Read current version from VERSION file
+# Read current version from git tag (or fallback to VERSION file)
 current_version() {
-  if [[ -f "${APP_DIR}/VERSION" ]]; then
+  local tag
+  tag=$(git -C "${APP_DIR}" describe --tags --abbrev=0 2>/dev/null || true)
+  if [[ -n "${tag}" ]]; then
+    echo "${tag#v}"
+  elif [[ -f "${APP_DIR}/VERSION" ]]; then
     cat "${APP_DIR}/VERSION" | tr -d '[:space:]'
   else
     echo "unknown"
@@ -162,13 +166,6 @@ if [[ "${CURRENT_COMMIT_BEFORE}" == "${NEW_COMMIT}" ]]; then
 fi
 
 echo -e "Updated: ${DIM}${CURRENT_COMMIT_BEFORE}${RESET} → ${GREEN}${NEW_COMMIT}${RESET}"
-
-# Update VERSION from the latest git tag
-LATEST_TAG=$(git -C "${APP_DIR}" describe --tags --abbrev=0 2>/dev/null || true)
-if [[ -n "${LATEST_TAG}" ]]; then
-  echo "${LATEST_TAG#v}" > "${APP_DIR}/VERSION"
-  info "Updated VERSION to ${LATEST_TAG#v}"
-fi
 
 # ── Update Python dependencies ──────────────────────────────────────────────
 

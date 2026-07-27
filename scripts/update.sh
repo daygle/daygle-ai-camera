@@ -79,14 +79,6 @@ git pull origin "${CURRENT_BRANCH}"
 
 NEW_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 echo "Now at commit: ${NEW_COMMIT}"
-
-# Update VERSION from the latest git tag so the web UI reflects the new version
-LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
-if [[ -n "${LATEST_TAG}" ]]; then
-  echo "${LATEST_TAG#v}" > "${APP_DIR}/VERSION"
-  echo "Updated VERSION to ${LATEST_TAG#v}"
-fi
-
 echo ""
 echo "Updating Python dependencies..."
 if [[ -f "${APP_DIR}/.venv/bin/pip" ]]; then
