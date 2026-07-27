@@ -90,8 +90,15 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
             _state.live_detection_last_checked[camera_id] = now
             _state.active_live_detection_cameras.add(camera_id)
 
-        def _detect_bg(cid: str=camera_id, cfg: dict[str, Any] | None=None) -> None:
-            camera_cfg = cfg if cfg is not None else dict(selected_config)
+        # Bind BOTH the camera id and its config as default args (evaluated
+        # now, per loop iteration). ``selected_config`` was previously read as
+        # a free variable, which late-binds: the daemon thread runs after the
+        # loop has advanced, so in a multi-camera setup every detection thread
+        # saw a LATER camera's config -- evaluating this camera's frame against
+        # the wrong camera's zones/rules. Snapshotting it as a default arg (like
+        # ``cid``) captures the correct per-iteration value.
+        def _detect_bg(cid: str=camera_id, cfg: dict[str, Any]=selected_config) -> None:
+            camera_cfg = dict(cfg)
             try:
                 sample = read_ingest_frame(cid)
                 if sample is None:

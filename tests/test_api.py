@@ -416,8 +416,12 @@ def test_export_yolo_onnx_uses_ultralytics_export(tmp_path, monkeypatch):
     def fake_run(command, cwd, capture_output, text, timeout, check):  # noqa: ANN001
         assert command[0] == sys.executable
         assert "from ultralytics import YOLO" in command[2]
-        assert "yolov8n.pt" in command[2]
         assert "export(format='onnx')" in command[2]
+        # Hardening: the weights name is passed as argv (command[3]), NOT
+        # interpolated into the ``-c`` source, so a quote/newline in the name
+        # can no longer break out of the string literal into arbitrary code.
+        assert "yolov8n.pt" not in command[2]
+        assert command[3] == "yolov8n.pt"
         assert cwd == destination.parent
         assert capture_output is True
         assert text is True

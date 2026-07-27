@@ -179,7 +179,15 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
             current = np.array(img, dtype=np.float32)
         with _state._frame_motion_lock:
             background = _state._frame_motion_prev.get(camera_id)
-            if background is None:
+            # Reset on a first frame OR a shape mismatch. ``_MOTION_FRAME_W/H``
+            # are global and read outside this lock, so a concurrent live-settings
+            # frame-size change (which clears all backgrounds) can race with a
+            # store here and leave a background sized to the OLD dimensions. Without
+            # the shape check the subsequent ``current - background`` would raise on
+            # every frame and the ``except`` (which never resets the background)
+            # would pin the camera to fail-open motion=True forever. Treating a
+            # mismatch like a first frame self-heals it in one cycle.
+            if background is None or background.shape != current.shape:
                 _state._frame_motion_prev[camera_id] = current
                 _state._frame_motion_error_cameras.discard(camera_id)
                 return (False, 0.0, None, 0.0)
