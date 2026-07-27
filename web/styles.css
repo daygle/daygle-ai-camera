@@ -2420,7 +2420,8 @@ tr.drag-over {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  align-items: center;
+  align-items: flex-start;
+  width: 100%;
 }
 .timeline-recording-confidence-row .detection {
   margin: 0;

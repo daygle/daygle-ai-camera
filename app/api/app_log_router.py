@@ -51,11 +51,16 @@ _NOISE_MESSAGE = 'Invalid HTTP request received'
 # ``main._DropSuccessfulAccessLogNoise``); this also hides any already recorded
 # in the journal. 4xx/5xx access lines don't match, so errors stay visible.
 _ACCESS_OK_RE = re.compile(r'"\w+ .+ HTTP/[\d.]+" (?:2\d\d|3\d\d)\b')
+_SOUND_DETECTION_NOISE_RE = re.compile(r'^Sound detected on ')
 
 
 def _is_noise(entry: dict) -> bool:
     message = str(entry.get('message', ''))
-    return _NOISE_MESSAGE in message or bool(_ACCESS_OK_RE.search(message))
+    return (
+        _NOISE_MESSAGE in message
+        or bool(_ACCESS_OK_RE.search(message))
+        or bool(_SOUND_DETECTION_NOISE_RE.search(message))
+    )
 
 
 # Strip the syslog-style level prefix from a raw log message.

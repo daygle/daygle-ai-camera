@@ -83,6 +83,7 @@ def test_app_log_router_is_noise():
     assert alr._is_noise({'message': '192.168.30.2:47614 - "GET /api/x HTTP/1.1" 500 Internal Server Error'}) is False
     # App events are never treated as noise.
     assert alr._is_noise({'message': 'Sound monitor started for camera front'}) is False
+    assert alr._is_noise({'message': 'Sound detected on front: Bark'}) is True
     assert alr._is_noise({'message': ''}) is False
     assert alr._is_noise({}) is False
 

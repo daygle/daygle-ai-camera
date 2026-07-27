@@ -23,6 +23,22 @@ Filter by camera ID, event type, or severity when investigating a specific strea
 
 Open **Settings** (`/settings`) to configure camera offline alert behavior. Offline alerts are useful when cameras are deployed remotely or when recordings are expected to be continuous.
 
+## Application log
+
+Open **Application Log** (`/application-log`) to follow the service journal in the browser. The viewer filters benign noise such as successful access requests and repeated sound detection notifications so the displayed entries stay focused on warnings, errors, and administrative events.
+
+## Audit log
+
+Open **Audit Log** (`/audit`) to review admin actions, including user creation, settings changes, login events, and system updates. The audit log is append-only and preserves a tamper-evident record of administrative activity.
+
+## Recordings timeline
+
+Use **Recordings Timeline** (`/recordings/timeline`) to view clip segments in a day-style timeline. Click a segment to play the associated recording directly from the dashboard.
+
+## YAMNet TFLite status
+
+Open **YAMNet TFLite** (`/yamnet-tflite`) to confirm whether the sound detection backend is available and the YAMNet assets have been downloaded. If the TensorFlow Lite runtime or model files are missing, the page reports the issue.
+
 ## Logs and backups
 
 - Application logs are written to `data/logs/app.log` with rotation.

@@ -81,10 +81,10 @@ NEW_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 echo "Now at commit: ${NEW_COMMIT}"
 echo ""
 echo "Updating Python dependencies..."
-if [[ -f "${APP_DIR}/.venv/bin/pip" ]]; then
-  "${APP_DIR}/.venv/bin/pip" install --no-cache-dir -r "${APP_DIR}/requirements.txt"
-elif [[ -f "${APP_DIR}/.venv/Scripts/pip.exe" ]]; then
-  "${APP_DIR}/.venv/Scripts/pip.exe" install --no-cache-dir -r "${APP_DIR}/requirements.txt"
+if [[ -f "${APP_DIR}/.venv/bin/python" ]]; then
+  "${APP_DIR}/scripts/install_python_deps.sh" "${APP_DIR}/.venv/bin/python" "${APP_DIR}/requirements.txt"
+elif [[ -f "${APP_DIR}/.venv/Scripts/python.exe" ]]; then
+  "${APP_DIR}/scripts/install_python_deps.sh" "${APP_DIR}/.venv/Scripts/python.exe" "${APP_DIR}/requirements.txt"
 else
   echo "Error: Virtual environment not found at ${APP_DIR}/.venv. Run the installer first." >&2
   exit 1
