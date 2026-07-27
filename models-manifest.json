@@ -1,6 +1,0 @@
-{
-  "schema_version": "1",
-  "deprecated": true,
-  "note": "Model update checks now use the remote ultralytics package version from PyPI instead of Daygle-maintained model versions.",
-  "models": {}
-}
