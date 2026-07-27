@@ -4,6 +4,8 @@ const statusPanel = document.getElementById('aiStatusPanel');
 const modelList = document.getElementById('modelList');
 const modelUpdatesMessage = document.getElementById('modelUpdatesMessage');
 let modelUpdateMap = {};
+// Track per-card message timeouts so rapid actions don't clear new messages
+const modelMessageTimeouts = {};
 
 // api() is provided by web/utils.js (loaded before this script). 401 still
 // throws (after redirecting to /login); reload failures on PUT
@@ -50,6 +52,38 @@ function yesNo(value) { return value ? 'Yes' : 'No'; }
 function setMessage(text, isError = false) {
   messageEl.textContent = text;
   if (text) window.showToast(text, isError);
+}
+
+/**
+ * Show a status message inside a specific model card.
+ * @param {string} modelId - The model ID (e.g. 'yolo26n')
+ * @param {string} text - Message to display
+ * @param {string} type - 'loading' | 'success' | 'error' | 'info'
+ */
+function setModelMessage(modelId, text, type = 'info') {
+  // Clear any pending timeout so rapid actions don't clear new messages
+  if (modelMessageTimeouts[modelId]) {
+    clearTimeout(modelMessageTimeouts[modelId]);
+    delete modelMessageTimeouts[modelId];
+  }
+  const card = document.getElementById(`model-card-${modelId}`);
+  if (!card) return;
+  let msgEl = card.querySelector('.model-card-message');
+  if (!msgEl) {
+    msgEl = document.createElement('div');
+    msgEl.className = 'model-card-message';
+    const actionsEl = card.querySelector('.model-card-actions');
+    if (actionsEl) {
+      actionsEl.parentNode.insertBefore(msgEl, actionsEl);
+    } else {
+      card.appendChild(msgEl);
+    }
+  }
+  msgEl.textContent = text;
+  msgEl.className = `model-card-message model-card-message-${type}`;
+  if (!text) {
+    msgEl.classList.add('model-card-message-hidden');
+  }
 }
 
 function formPayload(form) {
@@ -193,6 +227,7 @@ function renderModelList(models) {
           </div>
         </div>
         <p class="model-card-desc">${escapeHtml(m.description)}</p>
+        <div class="model-card-message model-card-message-hidden"></div>
         <div class="model-card-actions">${actionsHtml}</div>
       </div>`;
   }).join('');
@@ -212,25 +247,30 @@ function renderModelList(models) {
       btn.disabled = true;
       btn.classList.add('model-action-loading');
 
+      // Show progress message inside the model card
+      const loadingMessages = {
+        download: `Downloading ${modelId}\u2026 this may take several minutes.`,
+        use: `Switching to ${modelId}\u2026`,
+        update: `Updating ${modelId}\u2026 this may take several minutes.`,
+        delete: `Deleting ${modelId}\u2026`,
+      };
+      setModelMessage(modelId, loadingMessages[action] || '', 'loading');
+
       try {
         let result;
         if (action === 'download') {
-          btn.textContent = 'Downloading…';
-          setMessage(`Downloading ${modelId}… this may take several minutes.`);
+          btn.textContent = 'Downloading\u2026';
           result = await api('/api/settings/ai/download-model', { method: 'POST', body: JSON.stringify({ model: modelId }) });
         } else if (action === 'use') {
-          btn.textContent = 'Switching…';
-          setMessage(`Switching to ${modelId}…`);
+          btn.textContent = 'Switching\u2026';
           const current = await api('/api/settings/ai');
           result = await api('/api/settings/ai', { method: 'PUT', body: JSON.stringify({ ...current, model_path: modelPath }) });
         } else if (action === 'update') {
-          btn.textContent = 'Updating…';
-          setMessage(`Updating ${modelId}… this may take several minutes.`);
+          btn.textContent = 'Updating\u2026';
           result = await api('/api/settings/ai/update-model', { method: 'POST', body: JSON.stringify({ model: modelId }) });
           delete modelUpdateMap[modelId];
         } else if (action === 'delete') {
-          btn.textContent = 'Deleting…';
-          setMessage(`Deleting ${modelId}…`);
+          btn.textContent = 'Deleting\u2026';
           result = await api(`/api/settings/ai/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' });
         }
 
@@ -239,11 +279,20 @@ function renderModelList(models) {
         } else {
           renderAi(result.status || result);
         }
-        setMessage(result.message || `${modelId} ${action === 'delete' ? 'deleted' : action === 'download' ? 'installed' : action === 'update' ? 'updated' : 'activated'}.`);
+        // Show success inside the model card (no toast — feedback is local)
+        const successMessages = {
+          download: `${modelId} installed successfully.`,
+          use: `Switched to ${modelId}.`,
+          update: `${modelId} updated successfully.`,
+          delete: `${modelId} deleted.`,
+        };
+        setModelMessage(modelId, result.message || successMessages[action] || `${modelId} ${action}d.`, 'success');
+        // Clear message after 5 seconds
+        setTimeout(() => setModelMessage(modelId, '', 'info'), 5000);
         await loadModels();
       } catch (error) {
         if (window.daygleAuth?.redirecting) return;
-        setMessage(error.message, true);
+        setModelMessage(modelId, error.message, 'error');
         btn.disabled = false;
         btn.classList.remove('model-action-loading');
         btn.textContent = originalText;
@@ -263,7 +312,7 @@ async function loadModels() {
 async function checkForModelUpdates() {
   const btn = document.getElementById('checkModelUpdatesBtn');
   btn.disabled = true;
-  btn.textContent = 'Checking…';
+  btn.textContent = 'Checking\u2026';
   modelUpdatesMessage.textContent = '';
   try {
     const result = await api('/api/settings/ai/check-model-updates');

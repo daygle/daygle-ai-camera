@@ -1,0 +1,67 @@
+/* ─── Model card message styles ─────────────────────────────────────────── */
+/* Per-model feedback messages that appear inside model cards during
+   download/update/delete/use operations, replacing the old approach
+   of showing all messages in the ONNX Status section at the top. */
+.model-card-message {
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  margin-bottom: 10px;
+  transition: opacity 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+}
+.model-card-message-hidden {
+  display: none;
+}
+.model-card-message-loading {
+  background: rgba(71, 214, 255, 0.08);
+  border: 1px solid rgba(71, 214, 255, 0.2);
+  color: var(--accent);
+  animation: model-pulse 1.5s ease-in-out infinite;
+}
+.model-card-message-success {
+  background: rgba(73, 230, 163, 0.08);
+  border: 1px solid rgba(73, 230, 163, 0.25);
+  color: var(--success);
+}
+.model-card-message-error {
+  background: rgba(255, 92, 138, 0.08);
+  border: 1px solid rgba(255, 92, 138, 0.25);
+  color: var(--danger);
+}
+.model-card-message-info {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+@keyframes model-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .model-card-message-loading { animation: none; }
+}
+
+/* Loading state for model action buttons */
+.model-action-loading {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+/* Light mode overrides for model card messages */
+:root.light .model-card-message-loading {
+  background: rgba(2, 132, 199, 0.06);
+  border-color: rgba(2, 132, 199, 0.2);
+  color: #0284c7;
+}
+:root.light .model-card-message-success {
+  background: rgba(5, 150, 105, 0.06);
+  border-color: rgba(5, 150, 105, 0.2);
+  color: #059669;
+}
+:root.light .model-card-message-error {
+  background: rgba(220, 38, 38, 0.06);
+  border-color: rgba(220, 38, 38, 0.2);
+  color: #dc2626;
+}
