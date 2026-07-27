@@ -732,56 +732,68 @@ def test_validate_ai_settings_persists_execution_mode_across_saves(monkeypatch, 
     assert out['confidence'] == pytest.approx(0.7)
 
 
-# -- confidence_only_nms (YOLO26 NMS-after-conf-filter toggle) ------------
+# -- confidence_only_nms (tri-state 'auto' | 'on' | 'off') ---------------
 
 
-def test_validate_ai_settings_accepts_confidence_only_nms_bool(monkeypatch, ais):
-    """The toggle accepts a JSON bool directly -- the API path."""
+def test_validate_ai_settings_normalizes_confidence_only_nms_auto(monkeypatch, ais):
+    """'auto' persists as 'auto' so the detector applies its model-aware
+    default (skip the redundant NMS for NMS-free YOLO26 heads)."""
     _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
-    out = ais.validate_ai_settings({'confidence_only_nms': True})
-    assert out['confidence_only_nms'] is True
+    out = ais.validate_ai_settings({'confidence_only_nms': 'auto'})
+    assert out['confidence_only_nms'] == 'auto'
 
 
-def test_validate_ai_settings_coerces_confidence_only_nms_string(monkeypatch, ais):
-    """The ``'yes' / 'on' / 'true' / '1'`` string set coerces True (matches
-    the ``enabled`` pattern); makes the HTML form path Just Work."""
+def test_validate_ai_settings_normalizes_confidence_only_nms_on(monkeypatch, ais):
+    """Truthy forms ('on'/'true'/'yes'/'1'/bool True) all normalise to 'on'."""
     _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
-    out = ais.validate_ai_settings({'confidence_only_nms': 'YES'})
-    assert out['confidence_only_nms'] is True
+    assert ais.validate_ai_settings({'confidence_only_nms': 'on'})['confidence_only_nms'] == 'on'
+    assert ais.validate_ai_settings({'confidence_only_nms': True})['confidence_only_nms'] == 'on'
+    assert ais.validate_ai_settings({'confidence_only_nms': 'YES'})['confidence_only_nms'] == 'on'
 
 
-def test_validate_ai_settings_coerces_confidence_only_nms_string_false(monkeypatch, ais):
-    """A non-truthy string coerces False rather than failing -- mirrors
-    ``enabled`` and avoids spurious 400s on the settings form's unchecked
-    checkbox submitting ``''`` or ``'off'``."""
+def test_validate_ai_settings_normalizes_confidence_only_nms_off(monkeypatch, ais):
+    """Falsy forms ('off'/'false'/bool False) all normalise to 'off'."""
     _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
-    out = ais.validate_ai_settings({'confidence_only_nms': 'off'})
-    assert out['confidence_only_nms'] is False
+    assert ais.validate_ai_settings({'confidence_only_nms': 'off'})['confidence_only_nms'] == 'off'
+    assert ais.validate_ai_settings({'confidence_only_nms': False})['confidence_only_nms'] == 'off'
+
+
+def test_validate_ai_settings_confidence_only_nms_unknown_falls_back_auto(monkeypatch, ais):
+    """An unrecognised value normalises to 'auto' rather than raising, so a
+    stale/garbage config can't break the settings save."""
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    out = ais.validate_ai_settings({'confidence_only_nms': 'garbage'})
+    assert out['confidence_only_nms'] == 'auto'
 
 
 def test_validate_ai_settings_omits_confidence_only_nms_when_absent(monkeypatch, ais):
-    """Pin the default-False contract: when neither ``current`` nor
-    ``payload`` carry ``confidence_only_nms``, the key is OMITTED from the
-    output dict so the detector's own default-False wins. A future edit
-    that auto-populates defaults would turn the toggle on for every
-    deployment, so we explicitly pin this against regression."""
+    """When neither ``current`` nor ``payload`` carry the key, it stays OMITTED
+    from validate's output (the detector then treats it as 'auto'). Pinned so a
+    future edit doesn't auto-populate a value for every deployment."""
     _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
     out = ais.validate_ai_settings({})
     assert 'confidence_only_nms' not in out
 
 
-def test_validate_ai_settings_explicit_false_turns_off_persisted_true(monkeypatch, ais):
-    """An explicit ``False`` must switch OFF a previously-persisted
-    ``confidence_only_nms=True``. When the key is *absent* the validator
-    inherits the persisted value (correct for partial API updates), so the
-    settings form always sends an explicit boolean; this pins that an
-    explicit False is honoured and the toggle can actually be turned off."""
+def test_validate_ai_settings_explicit_off_turns_off_persisted_on(monkeypatch, ais):
+    """An explicit 'off' switches OFF a previously-persisted 'on'. Because the
+    control is now a tri-state select (not a checkbox), the form always sends
+    an explicit value, so the override is reliably honoured either direction."""
     _install_ai_dependencies(
         monkeypatch,
-        effective_ai_config_value={'confidence_only_nms': True},
+        effective_ai_config_value={'confidence_only_nms': 'on'},
     )
-    out = ais.validate_ai_settings({'confidence_only_nms': False})
-    assert out['confidence_only_nms'] is False
+    out = ais.validate_ai_settings({'confidence_only_nms': 'off'})
+    assert out['confidence_only_nms'] == 'off'
+
+
+def test_detector_status_surfaces_confidence_only_nms_default_auto(monkeypatch, ais):
+    """detector_status normalises the value for the settings form; a config
+    without the key surfaces 'auto' so the select shows the default."""
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    monkeypatch.setattr(ais, 'load_labels', lambda labels_path, categories: [])
+    out = ais.detector_status({'backend': 'onnx', 'model_path': 'models/yolo26n.onnx'})
+    assert out['confidence_only_nms'] == 'auto'
 
 
 # -- precision (export-time fp16 + runtime int8) -----------------------

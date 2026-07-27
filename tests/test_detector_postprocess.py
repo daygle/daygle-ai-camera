@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from app.detector import OnnxYoloDetector
+from app.detector import OnnxYoloDetector, _resolve_confidence_only_nms
 
 # Frame + letterbox geometry shared by the tests: a 1280x720 frame scaled
 # into a 640x640 square input. scale = min(640/1280, 640/720) = 0.5;
@@ -147,3 +147,62 @@ def test_dispatch_handles_nms_free_when_flag_false():
     assert len(res) == 1
     assert res[0]["label"] == "person"
     assert res[0]["box"]["y"] == pytest.approx(80 / OH, abs=0.01)
+
+
+# -- confidence_only_nms tri-state resolution ------------------------------
+
+@pytest.mark.parametrize("value,nms_free,expected", [
+    (None, True, True),        # auto + NMS-free model -> skip NMS
+    (None, False, False),      # auto + grid model    -> run NMS
+    ("auto", True, True),
+    ("auto", False, False),
+    ("on", False, True),       # explicit on overrides regardless of model
+    ("off", True, False),      # explicit off overrides regardless of model
+    (True, False, True),       # legacy persisted bool
+    (False, True, False),      # legacy persisted bool
+    ("garbage", True, True),   # unknown -> follow the model (auto)
+])
+def test_resolve_confidence_only_nms(value, nms_free, expected):
+    assert _resolve_confidence_only_nms(value, nms_free) is expected
+
+
+# -- confidence_only_nms actually gates the NMS-free dedupe ----------------
+
+def _nms_free_overlapping_output():
+    """Two heavily-overlapping same-class boxes (IoU ~0.68)."""
+    out = np.zeros((1, 300, 6), dtype=np.float32)
+    out[0, 0] = [270, 180, 370, 280, 0.9, 0]
+    out[0, 1] = [280, 190, 380, 290, 0.8, 0]
+    return out
+
+
+def test_nms_free_runs_dedupe_when_disabled():
+    """confidence_only_nms=False -> the class-aware NMS collapses the pair."""
+    det = OnnxYoloDetector(model_path="/does-not-exist.onnx", categories=LABELS,
+                           iou_threshold=0.45, nms_free=True, confidence_only_nms=False)
+    det.input_width = det.input_height = 640
+    res = det._postprocess_nms_free(_nms_free_overlapping_output()[0], SCALE, PAD_X, PAD_Y, OW, OH, 0.45)
+    assert len(res) == 1
+
+
+def test_nms_free_skips_dedupe_when_enabled():
+    """confidence_only_nms=True -> both overlapping detections are kept
+    (the modern NMS-free path trusts the head's assignment)."""
+    det = OnnxYoloDetector(model_path="/does-not-exist.onnx", categories=LABELS,
+                           iou_threshold=0.45, nms_free=True, confidence_only_nms=True)
+    det.input_width = det.input_height = 640
+    res = det._postprocess_nms_free(_nms_free_overlapping_output()[0], SCALE, PAD_X, PAD_Y, OW, OH, 0.45)
+    assert len(res) == 2
+
+
+# -- input dtype default ---------------------------------------------------
+
+def test_preprocess_defaults_to_float32_when_dtype_unresolved():
+    """With no loaded session the input dtype is unresolved (None); the
+    preprocess step must still produce a float32 tensor."""
+    pytest.importorskip("cv2")  # _preprocess needs opencv; skip on minimal installs
+    det = _detector(nms_free=False)  # unavailable (no model) -> _input_dtype None
+    assert det._input_dtype is None
+    frame = np.zeros((OH, OW, 3), dtype=np.uint8)
+    tensor, *_ = det._preprocess(frame)
+    assert tensor.dtype == np.float32
