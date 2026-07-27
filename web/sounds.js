@@ -205,18 +205,6 @@ function renderRules() {
       renderRules();
     });
   });
-  rulesWrap.querySelectorAll('[data-move-rule]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const [classId, direction] = button.dataset.moveRule.split(':');
-      const rules = editingSound.rules || [];
-      const ruleIndex = rules.findIndex((r) => r.class === classId);
-      if (ruleIndex < 0) return;
-      const targetIndex = direction === 'up' ? ruleIndex - 1 : ruleIndex + 1;
-      if (targetIndex < 0 || targetIndex >= rules.length) return;
-      [rules[ruleIndex], rules[targetIndex]] = [rules[targetIndex], rules[ruleIndex]];
-      renderRules();
-    });
-  });
   rulesWrap.querySelectorAll('[data-expand-rule]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const id = btn.dataset.expandRule;
@@ -293,8 +281,6 @@ function buildSoundRuleRow(rule, ruleIndex, rules) {
       <td><input type="number" data-rule-threshold="${id}" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" min="0.1" max="1.0" step="0.05" /></td>
       <td><input type="number" data-rule-cooldown="${id}" value="${escapeHtml(String(rule.cooldown_seconds ?? 30))}" min="5" max="3600" step="5" /></td>
       <td><div class="cell-actions">
-        <button class="secondary zone-action-btn zone-rule-move-btn" type="button" data-move-rule="${id}:up" title="Move up"${ruleIndex === 0 ? ' disabled' : ''}>${ICONS.moveUp}</button>
-        <button class="secondary zone-action-btn zone-rule-move-btn" type="button" data-move-rule="${id}:down" title="Move down"${ruleIndex === rules.length - 1 ? ' disabled' : ''}>${ICONS.moveDown}</button>
         <button class="rule-expand-btn secondary" type="button" data-expand-rule="${id}" title="Time windows &amp; email">${expanded ? ICONS.chevronUp : ICONS.chevronDown}</button>
         <button class="delete-btn secondary" type="button" data-remove-rule="${id}">${ICONS.remove}</button>
       </div></td>
