@@ -46,7 +46,57 @@ def _configure_file_logging() -> None:
     root.setLevel(logging.INFO)
 
 
+class _DropInvalidHttpRequestNoise(logging.Filter):
+    """Drop uvicorn's 'Invalid HTTP request received.' protocol warning.
+
+    Browsers speaking HTTPS-first (or a reverse-proxy health check) send a TLS
+    handshake to the plain-HTTP port; uvicorn logs one such WARNING per
+    connection via the ``uvicorn.error`` logger, flooding the admin log viewer
+    with benign noise. This filter drops that exact message at the source so it
+    never reaches stderr/journald, while leaving every other uvicorn log intact.
+    """
+
+    _NEEDLE = 'Invalid HTTP request received'
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            return self._NEEDLE not in record.getMessage()
+        except Exception:
+            return True
+
+
+class _DropSuccessfulAccessLogNoise(logging.Filter):
+    """Drop uvicorn access-log lines for successful (2xx/3xx) requests.
+
+    The dashboard polls several endpoints every 10-30s, so uvicorn's
+    per-request access logs (one INFO line each) dominate the admin log
+    viewer. Successful requests carry no diagnostic value there, so they are
+    dropped while 4xx/5xx are kept -- client and server errors stay visible.
+
+    Uvicorn logs access records as ``'%s - "%s %s HTTP/%s" %d'`` with
+    ``record.args = (client, method, path, http_version, status_code)``. If
+    that shape ever changes, the filter degrades safely to a no-op (keeps the
+    line) rather than hiding anything unexpected.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 5 and isinstance(args[4], int):
+            return not (200 <= args[4] < 400)
+        return True
+
+
+def _suppress_uvicorn_request_noise() -> None:
+    uvicorn_error = logging.getLogger('uvicorn.error')
+    if not any(isinstance(f, _DropInvalidHttpRequestNoise) for f in uvicorn_error.filters):
+        uvicorn_error.addFilter(_DropInvalidHttpRequestNoise())
+    uvicorn_access = logging.getLogger('uvicorn.access')
+    if not any(isinstance(f, _DropSuccessfulAccessLogNoise) for f in uvicorn_access.filters):
+        uvicorn_access.addFilter(_DropSuccessfulAccessLogNoise())
+
+
 _configure_file_logging()
+_suppress_uvicorn_request_noise()
 config = load_settings()
 _state.config = config
 auth_config = config.get('auth', {})

@@ -45,6 +45,7 @@ from app.backup import purge_camera_diagnostics_by_policy
 from app.utils import build_stream_url, normalize_bool_setting
 from app.zone_detection import (
     detection_has_matching_record_rule,
+    detection_matches_zone,
     filter_detections_for_camera,
     normalize_detection_boxes_for_frame,
     zone_alert_detections,
@@ -58,6 +59,33 @@ from app.zone_detection import (
 )
 
 logger = logging.getLogger('daygle.ai')
+
+
+def _no_object_match_reason(
+    detections: list[dict[str, Any]],
+    raw_labels: list[str],
+    monitored_zones: list[dict[str, Any]],
+) -> str:
+    """Explain why detections produced no zone-rule match, for the live status.
+
+    Distinguishes the two very different cases the old catch-all "outside
+    monitored zones" message conflated:
+    - a detection is geometrically *inside* a monitored zone but no enabled
+      object rule matched it (e.g. a full-frame zone with no enabled ``car``
+      rule) -> name the object and point at the zone's Object Rules;
+    - the detection is genuinely outside every zone area;
+    - nothing was detected at all.
+    """
+    inside_zone = bool(monitored_zones) and any(
+        detection_matches_zone(d, z) for d in detections for z in monitored_zones
+    )
+    if inside_zone:
+        labels = ', '.join(sorted({str(d.get('label')) for d in detections if d.get('label')})) or 'object'
+        return f'in a zone, but no enabled rule matched {labels} (check the zone Object Rules)'
+    if raw_labels:
+        return 'outside your zone areas'
+    return 'No detections matched this camera and its zone areas.'
+
 
 def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> int:
     if live_settings is None:
@@ -325,7 +353,12 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     for _mot in motion_detections:
         alert_detections.append({**_mot, 'label': 'motion', 'motion_event': True})
     if not alert_detections:
-        update_live_detection_status(camera_id, state='checked', reason='No detections matched this camera and its zone areas.', detected_labels=raw_labels, matched_labels=[], detections=list(detections))
+        _monitored_zones = [
+            z for z in (settings.get('detection') or {}).get('zones', [])
+            if z.get('enabled', True) and z.get('monitor_objects', True)
+        ]
+        reason = _no_object_match_reason(detections, raw_labels, _monitored_zones)
+        update_live_detection_status(camera_id, state='checked', reason=reason, detected_labels=raw_labels, matched_labels=[], detections=list(detections))
         return None
     triggered = _state.alerts.process(alert_detections, rules=zone_rules)
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}

@@ -37,6 +37,26 @@ _LEVEL_TO_PRIORITY: dict[str, str] = {
 
 _SERVICE = 'daygle-ai-camera'
 
+# Benign uvicorn protocol noise: a browser's HTTPS-first attempt (or a proxy
+# health check) sends a TLS handshake to the plain-HTTP port, which uvicorn
+# rejects one-per-connection. New occurrences are already dropped at the source
+# (see ``main._suppress_uvicorn_request_noise``); this also hides any already
+# recorded in the journal so the viewer stays clean.
+_NOISE_MESSAGE = 'Invalid HTTP request received'
+
+# Successful (2xx/3xx) uvicorn access lines: e.g.
+#   192.168.30.2:47614 - "GET /api/stats HTTP/1.1" 200 OK
+# The dashboard polls constantly, so these dominate the viewer while carrying
+# no diagnostic value. New ones are already dropped at the source (see
+# ``main._DropSuccessfulAccessLogNoise``); this also hides any already recorded
+# in the journal. 4xx/5xx access lines don't match, so errors stay visible.
+_ACCESS_OK_RE = re.compile(r'"\w+ .+ HTTP/[\d.]+" (?:2\d\d|3\d\d)\b')
+
+
+def _is_noise(entry: dict) -> bool:
+    message = str(entry.get('message', ''))
+    return _NOISE_MESSAGE in message or bool(_ACCESS_OK_RE.search(message))
+
 
 # Strip the syslog-style level prefix from a raw log message.
 # Journalctl MESSAGE fields typically start with "LEVEL:     " (uvicorn access
@@ -89,9 +109,12 @@ def get_app_log(
             if not line:
                 continue
             try:
-                entries.append(_parse_entry(json.loads(line)))
+                entry = _parse_entry(json.loads(line))
             except Exception:
                 continue
+            if _is_noise(entry):
+                continue
+            entries.append(entry)
         return {'entries': entries}
     except FileNotFoundError:
         return {'entries': [], 'unavailable': True}
@@ -130,9 +153,11 @@ async def stream_app_log(request: Request):
                     continue
                 try:
                     entry = _parse_entry(json.loads(line_str))
-                    yield f'data: {json.dumps(entry)}\n\n'
                 except Exception:
                     continue
+                if _is_noise(entry):
+                    continue
+                yield f'data: {json.dumps(entry)}\n\n'
         finally:
             try:
                 proc.terminate()
