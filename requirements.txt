@@ -18,7 +18,14 @@ onnxscript>=0.5,<1.0
 # concerns.
 # Bumped to 8.4.107 on 2026-07-27 after reviewing upstream release notes.
 ultralytics==8.4.107
-opencv-python-headless>=4.9,<5.0  # cap at 4.x; OpenCV 5.x has breaking API changes
+# Bumped to the 5.x line on 2026-07-27. Audited every cv2 symbol this repo
+# uses (imdecode/imencode, cvtColor, resize INTER_NEAREST/LINEAR, rectangle,
+# putText/getTextSize, VideoWriter[_fourcc], VideoCapture + CAP_PROP_BUFFERSIZE,
+# IMWRITE_JPEG_QUALITY, LINE_AA) against 5.0.0 -- all present and behavior-
+# compatible. The 5.x text-rendering / nearest-neighbor changes only alter
+# exact pixel values; no test here asserts pixel-exact output, so they are a
+# no-op for us. Cap below 6.0 so a future major bump gets the same review.
+opencv-python-headless>=5.0,<6.0
 python-multipart>=0.0.9,<1.0
 sounddevice>=0.4,<1.0
 # CPU-only YAMNet sound classifier runtime.
