@@ -38,13 +38,34 @@ def test_suppress_uvicorn_request_noise_is_idempotent():
     import app.main as main
 
     uvicorn_error = logging.getLogger('uvicorn.error')
-    before = [f for f in uvicorn_error.filters if isinstance(f, main._DropInvalidHttpRequestNoise)]
+    uvicorn_access = logging.getLogger('uvicorn.access')
     main._suppress_uvicorn_request_noise()
     main._suppress_uvicorn_request_noise()
-    after = [f for f in uvicorn_error.filters if isinstance(f, main._DropInvalidHttpRequestNoise)]
-    # Exactly one filter attached regardless of how many times it's called.
-    assert len(after) == 1
-    assert len(before) <= 1
+    err_filters = [f for f in uvicorn_error.filters if isinstance(f, main._DropInvalidHttpRequestNoise)]
+    acc_filters = [f for f in uvicorn_access.filters if isinstance(f, main._DropSuccessfulAccessLogNoise)]
+    # Exactly one of each filter attached regardless of how many times called.
+    assert len(err_filters) == 1
+    assert len(acc_filters) == 1
+
+
+def test_drop_successful_access_log_filter():
+    import app.main as main
+
+    filt = main._DropSuccessfulAccessLogNoise()
+
+    def _access_record(status):
+        rec = logging.LogRecord('uvicorn.access', logging.INFO, __file__, 1,
+                                '%s - "%s %s HTTP/%s" %d', ('1.2.3.4:5', 'GET', '/api/stats', '1.1', status), None)
+        return rec
+
+    # Successful requests are dropped; client/server errors are kept.
+    assert filt.filter(_access_record(200)) is False
+    assert filt.filter(_access_record(304)) is False
+    assert filt.filter(_access_record(404)) is True
+    assert filt.filter(_access_record(500)) is True
+    # A record without the expected access-log arg shape is kept (safe no-op).
+    plain = logging.LogRecord('uvicorn.access', logging.INFO, __file__, 1, 'startup complete', None, None)
+    assert filt.filter(plain) is True
 
 
 # -- 1b. viewer-side drop --------------------------------------------------
@@ -52,9 +73,16 @@ def test_suppress_uvicorn_request_noise_is_idempotent():
 def test_app_log_router_is_noise():
     from app.api import app_log_router as alr
 
+    # Invalid-HTTP protocol noise.
     assert alr._is_noise({'message': 'Invalid HTTP request received.'}) is True
     assert alr._is_noise({'message': 'Invalid HTTP request received'}) is True
-    assert alr._is_noise({'message': 'GET /api/stats HTTP/1.1 200 OK'}) is False
+    # Successful access lines are noise; error access lines are kept.
+    assert alr._is_noise({'message': '192.168.30.2:47614 - "GET /api/stats HTTP/1.1" 200 OK'}) is True
+    assert alr._is_noise({'message': '192.168.30.2:47614 - "POST /api/events HTTP/1.1" 302 Found'}) is True
+    assert alr._is_noise({'message': '192.168.30.2:47614 - "GET /api/missing HTTP/1.1" 404 Not Found'}) is False
+    assert alr._is_noise({'message': '192.168.30.2:47614 - "GET /api/x HTTP/1.1" 500 Internal Server Error'}) is False
+    # App events are never treated as noise.
+    assert alr._is_noise({'message': 'Sound monitor started for camera front'}) is False
     assert alr._is_noise({'message': ''}) is False
     assert alr._is_noise({}) is False
 

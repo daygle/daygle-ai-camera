@@ -44,9 +44,18 @@ _SERVICE = 'daygle-ai-camera'
 # recorded in the journal so the viewer stays clean.
 _NOISE_MESSAGE = 'Invalid HTTP request received'
 
+# Successful (2xx/3xx) uvicorn access lines: e.g.
+#   192.168.30.2:47614 - "GET /api/stats HTTP/1.1" 200 OK
+# The dashboard polls constantly, so these dominate the viewer while carrying
+# no diagnostic value. New ones are already dropped at the source (see
+# ``main._DropSuccessfulAccessLogNoise``); this also hides any already recorded
+# in the journal. 4xx/5xx access lines don't match, so errors stay visible.
+_ACCESS_OK_RE = re.compile(r'"\w+ .+ HTTP/[\d.]+" (?:2\d\d|3\d\d)\b')
+
 
 def _is_noise(entry: dict) -> bool:
-    return _NOISE_MESSAGE in str(entry.get('message', ''))
+    message = str(entry.get('message', ''))
+    return _NOISE_MESSAGE in message or bool(_ACCESS_OK_RE.search(message))
 
 
 # Strip the syslog-style level prefix from a raw log message.
