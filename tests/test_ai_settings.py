@@ -678,3 +678,170 @@ def test_validate_ai_settings_accepts_existing_installed_model_path(monkeypatch,
     # as a stand-in for an existing in-bounds file.
     out = ais.validate_ai_settings({'model_path': 'models/coco.names'})
     assert out['model_path'] == 'models/coco.names'
+
+
+# -- execution_mode (CPU-only ORT executor toggle, tier-1 perf lever) -----
+
+
+def test_validate_ai_settings_accepts_execution_mode_parallel(monkeypatch, ais):
+    """``execution_mode='parallel'`` is the ORT default and the prior
+    behavior; pinning that the whitelist round-trips it without coercion."""
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    out = ais.validate_ai_settings({'execution_mode': 'parallel'})
+    assert out['execution_mode'] == 'parallel'
+
+
+def test_validate_ai_settings_accepts_execution_mode_sequential(monkeypatch, ais):
+    """``execution_mode='sequential'`` is the A/B lever for CPU-only
+    ORT_SEQUENTIAL; whitelist accepts without rejecting the new key."""
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    out = ais.validate_ai_settings({'execution_mode': 'sequential'})
+    assert out['execution_mode'] == 'sequential'
+
+
+def test_validate_ai_settings_normalizes_execution_mode_case(monkeypatch, ais):
+    """Case-insensitive normalization matches the existing ``device`` /
+    ``backend`` lowering pattern."""
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    out = ais.validate_ai_settings({'execution_mode': 'SEQUENTIAL'})
+    assert out['execution_mode'] == 'sequential'
+
+
+def test_validate_ai_settings_rejects_invalid_execution_mode(monkeypatch, ais):
+    """Anything outside ``{'parallel', 'sequential'}`` is rejected with
+    HTTPException(400) so a typo can't silently fall back to a default."""
+    from fastapi import HTTPException
+
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    with pytest.raises(HTTPException) as exc_info:
+        ais.validate_ai_settings({'execution_mode': 'gpu-only'})
+    assert exc_info.value.status_code == 400
+    assert 'execution_mode' in exc_info.value.detail
+
+
+def test_validate_ai_settings_persists_execution_mode_across_saves(monkeypatch, ais):
+    """A previously-stored ``execution_mode`` survives a round-trip when
+    no new value is supplied -- the merged-current-then-overlay logic in
+    ``validate_ai_settings`` must not drop the key."""
+    _install_ai_dependencies(
+        monkeypatch,
+        effective_ai_config_value={'execution_mode': 'sequential'},
+    )
+    out = ais.validate_ai_settings({'confidence': 0.7})
+    assert out['execution_mode'] == 'sequential'
+    assert out['confidence'] == pytest.approx(0.7)
+
+
+# -- confidence_only_nms (YOLO26 NMS-after-conf-filter toggle) ------------
+
+
+def test_validate_ai_settings_accepts_confidence_only_nms_bool(monkeypatch, ais):
+    """The toggle accepts a JSON bool directly -- the API path."""
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    out = ais.validate_ai_settings({'confidence_only_nms': True})
+    assert out['confidence_only_nms'] is True
+
+
+def test_validate_ai_settings_coerces_confidence_only_nms_string(monkeypatch, ais):
+    """The ``'yes' / 'on' / 'true' / '1'`` string set coerces True (matches
+    the ``enabled`` pattern); makes the HTML form path Just Work."""
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    out = ais.validate_ai_settings({'confidence_only_nms': 'YES'})
+    assert out['confidence_only_nms'] is True
+
+
+def test_validate_ai_settings_coerces_confidence_only_nms_string_false(monkeypatch, ais):
+    """A non-truthy string coerces False rather than failing -- mirrors
+    ``enabled`` and avoids spurious 400s on the settings form's unchecked
+    checkbox submitting ``''`` or ``'off'``."""
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    out = ais.validate_ai_settings({'confidence_only_nms': 'off'})
+    assert out['confidence_only_nms'] is False
+
+
+def test_validate_ai_settings_omits_confidence_only_nms_when_absent(monkeypatch, ais):
+    """Pin the default-False contract: when neither ``current`` nor
+    ``payload`` carry ``confidence_only_nms``, the key is OMITTED from the
+    output dict so the detector's own default-False wins. A future edit
+    that auto-populates defaults would turn the toggle on for every
+    deployment, so we explicitly pin this against regression."""
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    out = ais.validate_ai_settings({})
+    assert 'confidence_only_nms' not in out
+
+
+# -- precision (export-time fp16 + runtime int8) -----------------------
+
+
+@pytest.mark.parametrize('value', ['fp32', 'fp16', 'int8'])
+def test_validate_ai_settings_accepts_each_precision(monkeypatch, ais, value):
+    """All three precision values are accepted through the whitelist;
+    each maps to its specific detector / export branch."""
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    out = ais.validate_ai_settings({'precision': value})
+    assert out['precision'] == value
+
+
+def test_validate_ai_settings_rejects_invalid_precision(monkeypatch, ais):
+    """Anything outside ``{'fp32', 'fp16', 'int8'}`` is rejected with
+    HTTPException(400); typos can't silently fall back to fp32 via the
+    API path (the detector still falls back at runtime, but the API
+    surface should fail loud)."""
+    from fastapi import HTTPException
+
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    with pytest.raises(HTTPException) as exc_info:
+        ais.validate_ai_settings({'precision': 'quant8'})
+    assert exc_info.value.status_code == 400
+    assert 'precision' in exc_info.value.detail
+
+
+def test_validate_ai_settings_normalizes_precision_case(monkeypatch, ais):
+    """Case-insensitive lowering matches the project-wide convention for
+    every enum-validated setting (``device``, ``backend``,
+    ``execution_mode``)."""
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    out = ais.validate_ai_settings({'precision': 'FP16'})
+    assert out['precision'] == 'fp16'
+
+
+def test_validate_ai_settings_persists_precision_across_saves(monkeypatch, ais):
+    """A previously-stored ``precision`` survives a round-trip when the
+    payload doesn't supply a new value -- the merged-current-then-overlay
+    logic must keep the key (matters when shipping a config from a CUDA
+    host to a CPU host -- the warning at load time is what surfaces the
+    mismatch, not the validator dropping the setting)."""
+    _install_ai_dependencies(
+        monkeypatch,
+        effective_ai_config_value={'precision': 'fp16'},
+    )
+    out = ais.validate_ai_settings({'confidence': 0.7})
+    assert out['precision'] == 'fp16'
+    assert out['confidence'] == pytest.approx(0.7)
+
+
+# -- use_io_binding (ORT direct CUDA memory transfer, opt-in A/B) --------
+
+
+def test_validate_ai_settings_accepts_use_io_binding_bool(monkeypatch, ais):
+    """The toggle accepts a JSON bool directly -- the API path."""
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    out = ais.validate_ai_settings({'use_io_binding': True})
+    assert out['use_io_binding'] is True
+
+
+def test_validate_ai_settings_coerces_use_io_binding_string(monkeypatch, ais):
+    """Same 'yes'/'on'/'true'/'1' string coercion as ``enabled`` /
+    ``confidence_only_nms`` so the HTML form path Just Works."""
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    out = ais.validate_ai_settings({'use_io_binding': 'ON'})
+    assert out['use_io_binding'] is True
+
+
+def test_validate_ai_settings_omits_use_io_binding_when_absent(monkeypatch, ais):
+    """Same omit-when-absent semantics as ``confidence_only_nms`` --
+    default-False must win so the io_binding code path doesn't activate
+    until the user explicitly asks for it."""
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    out = ais.validate_ai_settings({})
+    assert 'use_io_binding' not in out

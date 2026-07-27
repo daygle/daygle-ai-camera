@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.metadata
+import importlib.util
 import json
 import logging
 import subprocess
@@ -31,6 +32,55 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+
+
+def _onnxsim_available() -> bool:
+    """Return ``True`` iff the ``onnxsim`` package is importable.
+
+    Ultralytics' ``YOLO(...).export(simplify=True)`` requires ``onnxsim`` at
+    runtime; without it the export raises. We detect availability up front so
+    hosts that have not installed ``onnxsim`` (e.g. the export feature was
+    never their concern) still get a working ONNX file: we just skip the
+    constant-folding pass instead of failing the download with a 502.
+    """
+    return importlib.util.find_spec('onnxsim') is not None
+
+
+def _export_kwargs(nms_free: bool, precision: str = 'fp32', device: str = 'auto') -> str:
+    """Build the ``YOLO(...).export(...)`` kwargs string for the model variant.
+
+    Adds ``simplify=True`` when ``onnxsim`` is importable; otherwise omits it
+    silently so the export still succeeds on minimal installs. YOLO26 models
+    additionally need ``end2end=True`` to fold NMS into the graph and emit the
+    ``[N, 6]`` output ``_postprocess_nms_free`` decodes.
+
+    ``opset=13`` is always set so the newer ONNX graph-fusion passes in ORT
+    are usable on the exported model (the Ultralytics default opset often
+    lands below 13 and skips some CPU-friendly fusions).
+
+    ``precision='fp16'`` emits ``half=True`` only when ``device='cuda'`` AND
+    ``onnxruntime-gpu`` is registered on the host. On CPU-only hosts (the
+    default deployment) we deliberately drop ``half=True`` so the export
+    doesn't crash trying to use FP16 CUDA tensors that the local Ultralytics
+    install can't emit -- an FP32 export is still a valid ORT input.
+    ``precision='int8'`` is NOT honored at export time (Ultralytics would
+    require a calibration dataset which the download flow doesn't carry);
+    INT8 is a runtime concern handled by ``app.quantization.quantize_int8_dynamic``.
+    """
+    parts = ["format='onnx'", f"end2end={'True' if nms_free else 'False'}", 'opset=13']
+    if precision == 'fp16' and device.lower() == 'cuda':
+        from app.quantization import onnxruntime_gpu_available
+        if onnxruntime_gpu_available():
+            parts.append('half=True')
+        else:
+            import logging
+            logging.getLogger('daygle.ai').warning(
+                'precision=fp16 requested but onnxruntime-gpu is not installed; '
+                'exporting FP32. Install onnxruntime-gpu + CUDA drivers and re-export.',
+            )
+    if _onnxsim_available():
+        parts.append('simplify=True')
+    return ', '.join(parts)
 
 from fastapi import HTTPException
 
@@ -166,7 +216,7 @@ def _fetch_models_manifest() -> dict[str, Any]:
     return {'updated_at': None, 'source': 'pypi:ultralytics', 'models': {model_id: {'version': effective_version} for model_id in YOLO_MODELS}}
 
 
-def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640) -> int:
+def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, precision: str = 'fp32', device: str = 'auto') -> int:
     if model_name not in YOLO_MODELS:
         raise ValueError(f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
     info = YOLO_MODELS[model_name]
@@ -178,18 +228,21 @@ def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640) -> in
     #
     # YOLO26 models need end2end=True for NMS-free export;
     # YOLOv8/YOLO11 models use standard export (NMS handled at runtime).
-    if nms_free:
-        export_script = (
-            "import sys\n"
-            "from ultralytics import YOLO\n"
-            "YOLO(sys.argv[1]).export(format='onnx', end2end=True, imgsz=int(sys.argv[2]))\n"
-        )
-    else:
-        export_script = (
-            "import sys\n"
-            "from ultralytics import YOLO\n"
-            "YOLO(sys.argv[1]).export(format='onnx', imgsz=int(sys.argv[2]))\n"
-        )
+    # ``simplify=True`` is added when onnxsim is importable so the constant-
+    # folding pass runs without ever breaking the export on minimal installs.
+    # ``opset=13`` unlocks the newer ORT graph-fusion passes (the default
+    # Ultralytics picks is often ``opset=12`` which skips some fusions that
+    # matter on the per-camera hot path).
+    # ``precision='fp16'`` emits ``half=True`` only when the host has
+    # onnxruntime-gpu -- on CPU-only deployments it silently drops so the
+    # export still succeeds. INT8 is NOT honored here; it's a runtime
+    # concern handled by ``app.quantization.quantize_int8_dynamic``.
+    export_kwargs = _export_kwargs(nms_free, precision=precision, device=device)
+    export_script = (
+        "import sys\n"
+        "from ultralytics import YOLO\n"
+        f"YOLO(sys.argv[1]).export({export_kwargs}, imgsz=int(sys.argv[2]))\n"
+    )
     command = [sys.executable, '-c', export_script, pt_name, str(imgsz)]
     result = subprocess.run(command, cwd=destination.parent, capture_output=True, text=True, timeout=600, check=False)
     if result.returncode != 0:
@@ -266,8 +319,18 @@ def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int =
     # below by the same try/except already wrapping ``export_yolo_onnx``,
     # so no new error-path code is needed.
     destination = _safe_within_models_dir(info['onnx'])
+    # Honour the active ``precision`` / ``device`` so re-downloading a model
+    # reuses the user's chosen export knobs. INT8 is intentionally excluded
+    # from this path -- Ultralytics export can't satisfy it without
+    # calibration data; INT8 is handled at detector load time by
+    # ``app.quantization.quantize_int8_dynamic``.
+    ai_settings_for_export = effective_ai_config()
+    precision = str(ai_settings_for_export.get('precision', 'fp32') or 'fp32').strip().lower()
+    if precision not in ('fp32', 'fp16'):
+        precision = 'fp32'
+    device = str(ai_settings_for_export.get('device', 'auto') or 'auto').strip().lower()
     try:
-        exported_bytes = export_yolo_onnx(model_name, destination, imgsz=imgsz)
+        exported_bytes = export_yolo_onnx(model_name, destination, imgsz=imgsz, precision=precision, device=device)
     except ModuleNotFoundError as exc:
         # ``torch.onnx._internal.exporter._core`` imports ``onnxscript`` at
         # module-load time (and ``onnx`` itself does not pull it in), so a

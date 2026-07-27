@@ -105,6 +105,10 @@ class OnnxYoloDetector:
         device: str = "auto",
         gpu_mem_limit: int | None = None,
         nms_free: bool = False,
+        execution_mode: str = "parallel",
+        confidence_only_nms: bool = False,
+        precision: str = "fp32",
+        use_io_binding: bool = False,
     ) -> None:
         self.model_path = Path(model_path)
         self.labels = load_labels(labels_path, categories)
@@ -119,6 +123,32 @@ class OnnxYoloDetector:
         self.unavailable_reason: str | None = None
         self._device = device.lower() if device else "auto"
         self._nms_free = nms_free
+        # ``execution_mode`` selects ORT's ``ORT_SEQUENTIAL`` vs ``ORT_PARALLEL``
+        # model-level executor. ``parallel`` matches the ORT default and the
+        # prior behavior of this codebase; ``sequential`` is an A/B lever --
+        # for small per-inference hot paths the per-op thread pool already
+        # covers parallelism and the model-level parallel executor can add
+        # overhead. CPU-only (CUDA EP manages its own parallelism).
+        self._execution_mode = (execution_mode or "parallel").lower()
+        # ``confidence_only_nms`` lets a YOLO26 (NMS-free) deployment drop the
+        # class-aware NMS dedupe pass entirely and rely on the model head's
+        # one-to-one label assignment + the confidence threshold. Off by
+        # default so existing recordings keep their current dedupe behavior;
+        # flip on after validating on a labeled set.
+        self._confidence_only_nms = bool(confidence_only_nms)
+        # ``precision`` selects the on-disk / runtime model layout.
+        # ``fp32`` (default -- prior behavior) loads the source ONNX.
+        # ``fp16`` assumes the export already produced a half-precision
+        # ONNX (handled by ``model_management._export_kwargs``). ``int8``
+        # runs ``quantize_int8_dynamic`` once at constructor time and
+        # swaps in the cached quantized copy; on failure we silently
+        # fall back to FP32 with a warning.
+        self._precision = (precision or "fp32").strip().lower()
+        # ``use_io_binding`` activates ORT's direct CUDA memory path. A
+        # preflight check after session construction will flip this off
+        # when CUDA isn't actually available, so the per-inference
+        # branch only ever fires when the session is CUDA-bound.
+        self._use_io_binding = bool(use_io_binding)
 
         cpu_count = os.cpu_count() or 1
         # Let each inference use multiple cores so it finishes fast, then cap how
@@ -142,6 +172,45 @@ class OnnxYoloDetector:
         except ImportError:
             self.unavailable_reason = "onnxruntime is not installed. Install requirements.txt or run pip install onnxruntime."
             return
+
+        # Lazy import keeps ``quantization`` off the hot import path of
+        # callers that never use INT8 (most CPU deployments default to
+        # ``precision='fp32'`` and never touch this branch).
+        try:
+            from app.quantization import quantize_int8_dynamic
+        except ImportError:
+            quantize_int8_dynamic = None  # type: ignore[assignment]
+
+        # Resolve the runtime model path. INT8 dynamic quantization runs
+        # once at construct time and caches the result; FP16 just loads
+        # whatever the export produced (no runtime conversion).
+        session_model_path = self.model_path
+        if self._precision == 'int8':
+            quantized = quantize_int8_dynamic(self.model_path) if quantize_int8_dynamic else None
+            if quantized is not None:
+                session_model_path = Path(quantized)
+                logger.info(
+                    'INT8 dynamic quantization ready for %s -> %s',
+                    self.model_path, session_model_path,
+                )
+            else:
+                logger.warning(
+                    'precision=int8 requested but quantization is unavailable or failed; '
+                    'falling back to FP32 model %s.',
+                    self.model_path,
+                )
+                self._precision = 'fp32'
+        elif self._precision == 'fp16':
+            # The exported ONNX is already FP16 -- nothing to convert.
+            logger.info('precision=fp16: loading pre-exported half-precision model %s', self.model_path)
+        elif self._precision != 'fp32':
+            # Unknown precision silently normalises to fp32 so a stale
+            # config setting can't break the detector.
+            logger.warning(
+                'Unknown precision=%r; defaulting to fp32 for %s.',
+                self._precision, self.model_path,
+            )
+            self._precision = 'fp32'
 
         try:
             available_providers = ort.get_available_providers()
@@ -174,10 +243,31 @@ class OnnxYoloDetector:
                 # Thread tuning only relevant for CPU execution.
                 session_options.intra_op_num_threads = self._num_threads
                 session_options.inter_op_num_threads = 1
-            self.session = ort.InferenceSession(str(self.model_path), sess_options=session_options, providers=providers)
+                # ORT CUDA EP manages its own model-level parallelism, so the
+                # executor toggle is meaningful only on the CPU path. Defaults
+                # to ``ORT_PARALLEL`` (prior behavior); ``ORT_SEQUENTIAL`` is
+                # an opt-in A/B lever from the AI settings form.
+                session_options.execution_mode = (
+                    ort.ExecutionMode.ORT_SEQUENTIAL
+                    if self._execution_mode == "sequential"
+                    else ort.ExecutionMode.ORT_PARALLEL
+                )
+            self.session = ort.InferenceSession(str(session_model_path), sess_options=session_options, providers=providers)
             self.input_name = self.session.get_inputs()[0].name
             self.output_names = [output.name for output in self.session.get_outputs()]
             self.active_providers = self.session.get_providers()
+            # Preflight: ``io_binding`` is a CUDA-only ORT API. If the session
+            # ended up CPU-bound (e.g. user toggled the setting on a host
+            # without ``onnxruntime-gpu``, or the version ORT providers list
+            # didn't include CUDA), disable + log so the per-call branch
+            # never has to handle a runtime-binding explosion.
+            if self._use_io_binding and 'CUDAExecutionProvider' not in self.active_providers:
+                logger.warning(
+                    'use_io_binding=True requested but CUDAExecutionProvider is not '
+                    'active (active_providers=%s); falling back to session.run.',
+                    self.active_providers,
+                )
+                self._use_io_binding = False
             # Read the model's actual input shape and override configured
             # input_size if it doesn't match.  This prevents the user from
             # accidentally setting a size that mismatches the exported model
@@ -224,8 +314,45 @@ class OnnxYoloDetector:
         # Cap concurrent inferences so parallel callers (per-camera background
         # detection + live overlay) don't oversubscribe the CPU and slow each other.
         with self._inference_semaphore:
-            outputs = self.session.run(self.output_names, {self.input_name: input_tensor})  # type: ignore[union-attr,index]
+            # The preflight check in ``__init__`` guarantees this branch
+            # only fires when CUDAExecutionProvider is the active provider,
+            # so ``_run_inference_io_bound`` doesn't need to handle a
+            # CPU-bound fallback at call time.
+            if self._use_io_binding:
+                outputs = self._run_inference_io_bound(input_tensor)
+            else:
+                outputs = self.session.run(self.output_names, {self.input_name: input_tensor})  # type: ignore[union-attr,index]
         return self._postprocess(outputs[0], scale, pad_x, pad_y, original_width, original_height, effective_confidence)
+
+    def _run_inference_io_bound(self, input_tensor: np.ndarray) -> list[np.ndarray]:
+        """Run inference via ORT's ``io_binding`` API (CUDA-only path).
+
+        Avoids the host-side input copy + output round-trip that the
+        default ``session.run`` performs when the inputs/outputs live on
+        a CUDA EP. The API requires a fresh ``io_binding`` per call
+        because it owns its bound-tensor lifetime and the per-camera
+        detection threads share this singleton detector -- sharing a
+        binding would lead to a cross-thread write race on the bound
+        ``OrtValue`` objects.
+        """
+        from onnxruntime import OrtValue  # type: ignore[import-untyped]
+        # ``io_binding()`` allocates a fresh binding; bound tensors are
+        # released when ``io`` is garbage-collected (no explicit close).
+        io = self.session.io_binding()  # type: ignore[union-attr]
+        # Input: numpy on host -> OrtValue on CUDA, device_id 0.
+        io.bind_ortvalue_input(
+            self.input_name,  # type: ignore[arg-type]
+            OrtValue.ortvalue_from_numpy(input_tensor, 'cuda', 0),
+        )
+        # Output: bind CUDA buffers in the order we declared on the
+        # constructor; ORT fills them in-place.
+        for name in self.output_names:
+            io.bind_ortvalue_output(name, 'cuda', 0)
+        self.session.run_with_iobinding(io)  # type: ignore[union-attr]
+        # ``io.get_outputs()`` returns a list in the order outputs were
+        # bound; we convert each OrtValue back to host numpy for the
+        # existing post-process pipeline (which only knows numpy).
+        return [ort_value.numpy() for ort_value in io.get_outputs()]     
 
     def _decode_image(self, image_bytes: bytes) -> np.ndarray:
         np = _require_numpy()
@@ -251,16 +378,26 @@ class OnnxYoloDetector:
         resized_height = int(round(original_height * scale))
         resized = cv2.resize(image, (resized_width, resized_height), interpolation=cv2.INTER_LINEAR)
 
-        canvas = np.full((self.input_height, self.input_width, 3), 114, dtype=np.uint8)
+        # np.empty() + fill(114) avoids the constant-broadcast pass that np.full()
+        # does; functionally identical output. Each frame allocates a fresh local
+        # buffer because live_monitor.py's per-camera daemon threads all call
+        # detect_frame() on the SAME detector singleton - sharing the canvas on
+        # `self` would create a cross-thread write race on the resize slice.
+        canvas = np.empty((self.input_height, self.input_width, 3), dtype=np.uint8)
+        canvas.fill(114)
         pad_x = (self.input_width - resized_width) / 2
         pad_y = (self.input_height - resized_height) / 2
         left = int(round(pad_x - 0.1))
         top = int(round(pad_y - 0.1))
         canvas[top : top + resized_height, left : left + resized_width] = resized
 
-        rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
-        tensor = rgb.astype(np.float32) / 255.0
-        tensor = np.transpose(tensor, (2, 0, 1))[None, ...]
+        # Transpose the uint8 (3 bytes per pixel permuted) BEFORE casting to float32
+        # so we move the smaller dtype through NumPy's permutation loop. The
+        # downstream /255.0 and astype(float32) operate on the same per-pixel
+        # values either way - bit-equivalent output, ~4x less memory bandwidth on
+        # the transpose pass.
+        chw = np.transpose(canvas, (2, 0, 1))
+        tensor = (chw.astype(np.float32) / 255.0)[None, ...]
         return np.ascontiguousarray(tensor), scale, float(left), float(top), original_width, original_height
 
     @staticmethod
@@ -359,78 +496,91 @@ class OnnxYoloDetector:
         if predictions.shape[1] != 6:
             raise ValueError(
                 f"Unexpected NMS-free output shape: {tuple(np.asarray(output).shape)}. Expected [1, N, 6]."
-            )
-
-        # Extract components
+            )        # Slice into structured arrays. ``class_ids`` is cast to int32 once so
+        # the per-box label lookup below doesn't repeatedly coerce floats.
         boxes = predictions[:, :4]  # [x1, y1, x2, y2] in input-space
         scores = predictions[:, 4]  # confidence
         class_ids = predictions[:, 5].astype(np.int32)  # class_id
-        
-        # Filter by confidence
+
+        # Vectorised conf-threshold filter replaces the old Python loop over
+        # all 300 detections; ``np.any`` short-circuits cleanly on empty masks.
         conf_mask = scores >= confidence
         if not np.any(conf_mask):
             return []
-        
+
         filtered_boxes = boxes[conf_mask]
         filtered_scores = scores[conf_mask]
-        filtered_class_ids = class_ids[conf_mask]
-        
-        # Apply IoU-based NMS to remove overlapping detections
-        # Even though YOLO26 is "NMS-free", it can still produce
-        # duplicate detections for the same object
-        if len(filtered_boxes) > 0:
-            keep = non_max_suppression(filtered_boxes, filtered_scores, filtered_class_ids, self.iou_threshold)
+        filtered_class_ids = class_ids[conf_mask]        # YOLO26 is NMS-free at train time, so when ``confidence_only_nms``
+        # is set the model head's one-to-one label assignment plus the
+        # confidence threshold already give us a clean detection list --
+        # skipping the class-aware NMS saves the per-frame Python sort +
+        # IoU matrix cost. Off by default so existing recordings keep
+        # their dedupe behavior; flip on after A/B on a labeled set.
+        if filtered_boxes.shape[0] > 0 and not self._confidence_only_nms:
+            keep = non_max_suppression(
+                filtered_boxes, filtered_scores, filtered_class_ids, self.iou_threshold
+            )
             filtered_boxes = filtered_boxes[keep]
             filtered_scores = filtered_scores[keep]
-            filtered_class_ids = filtered_class_ids[keep]
-        
-        # Build detections with coordinate transformation from input-space to original image
-        detections: list[Detection] = []
-        for i in range(len(filtered_boxes)):
-            x1, y1, x2, y2 = filtered_boxes[i]
-            class_id = int(filtered_class_ids[i])
-            label = self.labels[class_id] if 0 <= class_id < len(self.labels) else f"class_{class_id}"
-            
-            # Transform from input-space to original image coordinates:
-            # 1. Remove padding (subtract pad_x, pad_y)
-            # 2. Divide by scale to get original coordinates
-            orig_x1 = float((x1 - pad_x) / scale)
-            orig_y1 = float((y1 - pad_y) / scale)
-            orig_x2 = float((x2 - pad_x) / scale)
-            orig_y2 = float((y2 - pad_y) / scale)
-            
-            # Clip to image bounds
-            orig_x1 = max(0.0, min(float(original_width), orig_x1))
-            orig_y1 = max(0.0, min(float(original_height), orig_y1))
-            orig_x2 = max(0.0, min(float(original_width), orig_x2))
-            orig_y2 = max(0.0, min(float(original_height), orig_y2))
-            
-            # Skip invalid boxes
-            if orig_x2 <= orig_x1 or orig_y2 <= orig_y1:
-                continue
-            
-            # Convert to normalized coordinates (x, y, width, height)
-            box_x = round(orig_x1 / original_width, 4)
-            box_y = round(orig_y1 / original_height, 4)
-            box_w = round((orig_x2 - orig_x1) / original_width, 4)
-            box_h = round((orig_y2 - orig_y1) / original_height, 4)
-            
-            detections.append(
-                Detection(
-                    label=label,
-                    confidence=float(filtered_scores[i]),
-                    box={
-                        "x": box_x,
-                        "y": box_y,
-                        "width": box_w,
-                        "height": box_h,
-                    },
-                )
+            filtered_class_ids = filtered_class_ids[keep]     
+
+        if filtered_boxes.shape[0] == 0:
+            return []
+
+        # Vectorised coord transform: subtract letterbox padding, undo the
+        # scale factor, then clip to the original frame. Equivalent to
+        # ``(x - pad) / scale`` followed by scalar ``max(0, min(w, …))`` but
+        # runs entirely in NumPy and avoids Python-list construction per box
+        # - this is the per-frame bottleneck for the YOLO26 hot path.
+        ow = float(original_width)
+        oh = float(original_height)
+        orig_x1 = np.clip((filtered_boxes[:, 0] - pad_x) / scale, 0.0, ow)
+        orig_y1 = np.clip((filtered_boxes[:, 1] - pad_y) / scale, 0.0, oh)
+        orig_x2 = np.clip((filtered_boxes[:, 2] - pad_x) / scale, 0.0, ow)
+        orig_y2 = np.clip((filtered_boxes[:, 3] - pad_y) / scale, 0.0, oh)
+
+        valid = (orig_x2 > orig_x1) & (orig_y2 > orig_y1)
+        if not np.any(valid):
+            return []
+
+        # Round normalised coords in a single NumPy pass (``round`` and
+        # ``np.round`` both use round-half-to-even, so this matches the
+        # prior scalar ``round(..., 4)`` call bit-for-bit within the
+        # ``pytest.approx(abs=0.01)`` tolerance in test_detector_postprocess.py).
+        safe_ow = ow if ow > 0 else 1.0
+        safe_oh = oh if oh > 0 else 1.0
+        inv_ow = 1.0 / safe_ow
+        inv_oh = 1.0 / safe_oh
+        v_scores = filtered_scores[valid]
+        order = np.argsort(-v_scores, kind='stable')
+        s_x1 = orig_x1[valid][order]
+        s_y1 = orig_y1[valid][order]
+        s_x2 = orig_x2[valid][order]
+        s_y2 = orig_y2[valid][order]
+        s_classes = filtered_class_ids[valid][order]
+        s_scores = v_scores[order]
+        bx = np.round(s_x1 * inv_ow, 4)
+        by = np.round(s_y1 * inv_oh, 4)
+        bw = np.round((s_x2 - s_x1) * inv_ow, 4)
+        bh = np.round((s_y2 - s_y1) * inv_oh, 4)
+
+        n = s_x1.shape[0]
+        labels = self.labels
+        n_labels = len(labels)
+        detections: list[Detection] = [
+            Detection(
+                label=labels[int(s_classes[i])] if 0 <= int(s_classes[i]) < n_labels else f"class_{int(s_classes[i])}",
+                confidence=float(s_scores[i]),
+                box={
+                    "x": float(bx[i]),
+                    "y": float(by[i]),
+                    "width": float(bw[i]),
+                    "height": float(bh[i]),
+                },
             )
-        
-        # Sort by confidence descending
-        detections.sort(key=lambda d: d.confidence, reverse=True)
-        return [detection.to_dict() for detection in detections]
+            for i in range(n)
+        ]
+        return [detection.to_dict() for detection in detections]     
 
     def _postprocess_nms(
         self,
@@ -562,4 +712,22 @@ def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
         device=str(ai_config.get("device", "auto")),
         gpu_mem_limit=_optional_int("gpu_mem_limit"),
         nms_free=bool(nms_free),
+        execution_mode=str(ai_config.get("execution_mode", "parallel") or "parallel").lower(),
+        confidence_only_nms=_coerce_bool(ai_config.get("confidence_only_nms", False)),
+        precision=str(ai_config.get("precision", "fp32") or "fp32").strip().lower(),
+        use_io_binding=_coerce_bool(ai_config.get("use_io_binding", False)),
     )
+
+
+def _coerce_bool(value: Any) -> bool:
+    """Tri-state tolerant bool coercion for settings form values.
+
+    Mirrors the str -> bool pattern used for ``enabled`` in
+    ``validate_ai_settings`` so callers can pass ``'yes'`` / ``'on'`` /
+    ``'true'`` from HTML forms AND ``True`` / ``False`` from the API.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+    return bool(value)

@@ -271,6 +271,10 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'gpu_mem_limit',
         'inference_threads',
         'max_concurrent_inferences',
+        'execution_mode',
+        'confidence_only_nms',
+        'precision',
+        'use_io_binding',
     }
     updated = {key: current.get(key) for key in allowed if key in current}
     for key, value in payload.items():
@@ -296,6 +300,50 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if device not in ('auto', 'cpu', 'cuda'):
         raise HTTPException(status_code=400, detail="device must be 'auto', 'cpu', or 'cuda'.")
     updated['device'] = device
+    # ORT executor toggle (CPU path only -- CUDA EP manages its own parallelism).
+    # ``parallel`` is the ORT default and matches prior behavior; ``sequential``
+    # is an opt-in A/B lever that some YOLO graphs run faster under.
+    execution_mode = str(updated.get('execution_mode', 'parallel')).lower()
+    if execution_mode not in ('parallel', 'sequential'):
+        raise HTTPException(
+            status_code=400,
+            detail="execution_mode must be 'parallel' or 'sequential'.",
+        )
+    updated['execution_mode'] = execution_mode
+    # ``precision`` selects the inference path the detector will run.
+    # Validator normalises case but does NOT enforce the precision/device
+    # cross-product (e.g. ``precision='fp16' + device='cpu'``) -- that's
+    # the detector's responsibility: it logs a warning and falls back to
+    # fp32 so a config moved between hosts (CUDA -> CPU) still loads.
+    precision = str(updated.get('precision', 'fp32')).strip().lower()
+    if precision not in ('fp32', 'fp16', 'int8'):
+        raise HTTPException(
+            status_code=400,
+            detail="precision must be 'fp32', 'fp16', or 'int8'.",
+        )
+    updated['precision'] = precision
+    # ``use_io_binding`` toggles ORT's direct CUDA memory path. Same
+    # permissive coercion as ``confidence_only_nms`` -- absent or empty
+    # string leaves the key out of the output so the detector default
+    # (False) wins.
+    if 'use_io_binding' in updated:
+        val = updated['use_io_binding']
+        if isinstance(val, str):
+            updated['use_io_binding'] = val.strip().lower() in {'1', 'true', 'yes', 'on'}
+        else:
+            updated['use_io_binding'] = bool(val)
+    # ``confidence_only_nms``: when True AND the model is NMS-free (YOLO26),
+    # ``OnnxYoloDetector._postprocess_nms_free`` skips the class-aware NMS
+    # dedupe and trusts the head's one-to-one label assignment. Coil the
+    # ``enabled``-style str truthy coercion so HTML form posts and JSON bools
+    # both work. Only coerce if present in ``updated`` so an absent key
+    # leaves the detector free to default-False (no auto-population).
+    if 'confidence_only_nms' in updated:
+        val = updated['confidence_only_nms']
+        if isinstance(val, str):
+            updated['confidence_only_nms'] = val.strip().lower() in {'1', 'true', 'yes', 'on'}
+        else:
+            updated['confidence_only_nms'] = bool(val)
     if 'gpu_mem_limit' in payload:
         gpu_mem_limit = payload['gpu_mem_limit']
         if gpu_mem_limit is not None and gpu_mem_limit != '':

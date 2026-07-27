@@ -98,6 +98,12 @@ function formPayload(form) {
     ? Math.round(parseFloat(data.gpu_mem_limit_gb) * 1024 * 1024 * 1024)
     : 0;
   delete data.gpu_mem_limit_gb;
+  // Coerce confidence_only_nms: an unchecked checkbox yields no FormData entry
+  // so the omit-when-absent contract (validator default-False when key absent)
+  // is preserved naturally; a checked box posts ``value="true"`` as a string.
+  if (typeof data.confidence_only_nms === 'string') {
+    data.confidence_only_nms = data.confidence_only_nms === 'true';
+  }
   return data;
 }
 
@@ -140,7 +146,17 @@ function renderLabels(labels) {
 
 function renderAi(settings) {
   for (const [key, value] of Object.entries(settings)) {
-    if (aiForm.elements[key]) aiForm.elements[key].value = String(value ?? '');
+    const el = aiForm.elements[key];
+    if (!el) continue;
+    // ``value=`` doesn't reflect the state of a checkbox; reflect it via
+    // ``.checked`` so a saved ``confidence_only_nms: true`` round-trips back
+    // as a visibly checked box. Select opts without a matching value fall back
+    // to the first option, which is the documented default.
+    if (el.type === 'checkbox') {
+      el.checked = Boolean(value);
+    } else {
+      el.value = String(value ?? '');
+    }
   }
   if (aiForm.elements['gpu_mem_limit_gb']) {
     const limitBytes = settings.gpu_mem_limit;
