@@ -9,6 +9,8 @@ config.yaml
 .agents/
 models/*.onnx
 models/*.pt
+models/*.tflite
+models/*.csv
 data/*
 !data/
 .claude/
