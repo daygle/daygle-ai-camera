@@ -1703,9 +1703,6 @@ tr.drag-over {
   .cameras-table .cell-drag {
     display: none;
   }
-  .cameras-table .action-label {
-    display: none;
-  }
   .cameras-table .cell-actions button {
     padding: 5px;
   }
