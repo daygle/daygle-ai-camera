@@ -166,18 +166,15 @@ def _fetch_models_manifest() -> dict[str, Any]:
     return {'updated_at': None, 'source': 'pypi:ultralytics', 'models': {model_id: {'version': effective_version} for model_id in YOLO_MODELS}}
 
 
-def export_yolo_onnx(model_name: str, destination: Path) -> int:
+def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640) -> int:
     if model_name not in YOLO_MODELS:
         raise ValueError(f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
     info = YOLO_MODELS[model_name]
     pt_name = info['pt']
     nms_free = info.get('nms_free', False)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    # Pass the weights name as argv rather than interpolating it into the
-    # ``python -c`` source. ``pt_name`` is a trusted constant from YOLO_MODELS
-    # today, so this is defence-in-depth: a name containing a quote/newline can
-    # no longer break out of the string literal into arbitrary code, and the
-    # invariant survives any future change that makes YOLO_MODELS configurable.
+    # Pass the weights name and image size as argv rather than interpolating
+    # into the ``python -c`` source.  Defence-in-depth against injection.
     #
     # YOLO26 models need end2end=True for NMS-free export;
     # YOLOv8/YOLO11 models use standard export (NMS handled at runtime).
@@ -185,15 +182,15 @@ def export_yolo_onnx(model_name: str, destination: Path) -> int:
         export_script = (
             "import sys\n"
             "from ultralytics import YOLO\n"
-            "YOLO(sys.argv[1]).export(format='onnx', end2end=True)\n"
+            "YOLO(sys.argv[1]).export(format='onnx', end2end=True, imgsz=int(sys.argv[2]))\n"
         )
     else:
         export_script = (
             "import sys\n"
             "from ultralytics import YOLO\n"
-            "YOLO(sys.argv[1]).export(format='onnx')\n"
+            "YOLO(sys.argv[1]).export(format='onnx', imgsz=int(sys.argv[2]))\n"
         )
-    command = [sys.executable, '-c', export_script, pt_name]
+    command = [sys.executable, '-c', export_script, pt_name, str(imgsz)]
     result = subprocess.run(command, cwd=destination.parent, capture_output=True, text=True, timeout=600, check=False)
     if result.returncode != 0:
         details = (result.stderr or result.stdout or '').strip()
@@ -257,7 +254,7 @@ def delete_model(model_name: str) -> dict[str, Any]:
     }
 
 
-def _do_download_model(model_name: str, switch_active: bool = True) -> dict[str, Any]:
+def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int = 640) -> dict[str, Any]:
     if model_name not in YOLO_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
     info = YOLO_MODELS[model_name]
@@ -270,7 +267,7 @@ def _do_download_model(model_name: str, switch_active: bool = True) -> dict[str,
     # so no new error-path code is needed.
     destination = _safe_within_models_dir(info['onnx'])
     try:
-        exported_bytes = export_yolo_onnx(model_name, destination)
+        exported_bytes = export_yolo_onnx(model_name, destination, imgsz=imgsz)
     except ModuleNotFoundError as exc:
         # ``torch.onnx._internal.exporter._core`` imports ``onnxscript`` at
         # module-load time (and ``onnx`` itself does not pull it in), so a
@@ -300,7 +297,7 @@ def _do_download_model(model_name: str, switch_active: bool = True) -> dict[str,
     installed_version = _installed_package_version('ultralytics')
     with _installed_models_lock:
         installed_meta = _read_installed_models()
-        installed_meta[model_name] = {'version': installed_version, 'installed_at': utc_now(), 'sha256': _sha256_file(destination)}
+        installed_meta[model_name] = {'version': installed_version, 'installed_at': utc_now(), 'sha256': _sha256_file(destination), 'imgsz': imgsz}
         _write_installed_models(installed_meta)
     ai_settings = effective_ai_config()
     rel_path = str(destination.relative_to(BASE_DIR))

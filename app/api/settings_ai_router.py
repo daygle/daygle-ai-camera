@@ -102,6 +102,7 @@ def list_ai_models():
             'active': active_path == rel_path,
             'size_bytes': onnx_path.stat().st_size if installed else None,
             'installed_version': meta.get('version') if installed else None,
+            'exported_imgsz': meta.get('imgsz') if installed else None,
         })
     return result
 
@@ -111,6 +112,14 @@ async def download_ai_model(request: Request, db=Depends(get_database)):
     require_admin(request)
     body = await request.json()
     model_name = str(body.get('model') or '').strip().lower()
+    try:
+        imgsz = int(body.get('imgsz') or 640)
+    except (TypeError, ValueError):
+        imgsz = 640
+    # Clamp to reasonable range: Ultralytics supports 32-4096, we cap at 1280
+    imgsz = max(32, min(1280, imgsz))
+    # Round to nearest multiple of 32 for optimal Ultralytics export
+    imgsz = ((imgsz + 16) // 32) * 32
     # H1 fix: add the same YOLO_MODELS whitelist gate that
     # ``update_ai_model`` already enforces, so this handler cannot be
     # used to ask ``_do_download_model`` to fetch an arbitrary off-list
@@ -125,7 +134,7 @@ async def download_ai_model(request: Request, db=Depends(get_database)):
     # of the active ONNX model has no audit entry pointing back to
     # who kicked it off.
     write_audit_log(request, db, 'download', 'settings.ai.model',
-                    details={'model_id': model_name, 'switch_active': True})
+                    details={'model_id': model_name, 'switch_active': True, 'imgsz': imgsz})
     # Round-6 / N2 removal (drop N2 entirely (B3)): the previous SHA-256
     # pin-on-upstream gate has been removed because ``_do_download_model``
     # produces a locally-exported ONNX binary via the Ultralytics SDK
@@ -138,7 +147,7 @@ async def download_ai_model(request: Request, db=Depends(get_database)):
     # ``_do_download_model`` continues to capture byte-fingerprints for
     # local auditing. The whitelist above (``YOLO_MODELS`` membership
     # check) remains the active gate against off-list blob fetches.
-    return await run_in_threadpool(_do_download_model, model_name)
+    return await run_in_threadpool(_do_download_model, model_name, True, imgsz)
 
 
 @router.post('/api/settings/ai/download-yolov8n')
@@ -214,12 +223,22 @@ async def update_ai_model(request: Request, db=Depends(get_database)):
     model_name = str(body.get('model') or '').strip().lower()
     if model_name not in YOLO_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'.")
+    # Read stored export resolution from installed.json so the model
+    # is re-exported at the same resolution it was originally downloaded at.
+    # This prevents silently downgrading from e.g. 1024 to 640 on update.
+    installed_meta = _read_installed_models()
+    stored_imgsz = installed_meta.get(model_name, {}).get('imgsz', 640)
+    try:
+        imgsz = int(body.get('imgsz') or stored_imgsz)
+    except (TypeError, ValueError):
+        imgsz = stored_imgsz
+    imgsz = max(32, min(1280, imgsz))
     # Audit-log gate (audit-trail finding): same shape as
     # ``download_ai_model`` so the admin actions for the matching
     # model endpoint is traceable.
     write_audit_log(request, db, 'update', 'settings.ai.model',
-                    details={'model_id': model_name, 'switch_active': False})
-    return await run_in_threadpool(_do_download_model, model_name, False)
+                    details={'model_id': model_name, 'switch_active': False, 'imgsz': imgsz})
+    return await run_in_threadpool(_do_download_model, model_name, False, imgsz)
 
 
 @router.delete('/api/settings/ai/models/{model_id}')
@@ -249,6 +268,7 @@ def delete_ai_model(model_id: str, request: Request, db=Depends(get_database)):
             'active': active_path == rel_path,
             'size_bytes': onnx_path.stat().st_size if installed else None,
             'installed_version': meta.get('version') if installed else None,
+            'exported_imgsz': meta.get('imgsz') if installed else None,
         })
     result['models'] = models
     return result

@@ -187,6 +187,12 @@ function renderModelList(models) {
       updateBadge = '<span class="model-badge model-badge-update">Update Available</span>';
     }
 
+    // Resolution badge for installed models
+    let resBadge = '';
+    if (m.installed && m.exported_imgsz) {
+      resBadge = `<span class="model-badge model-badge-res">${m.exported_imgsz}\u00d7${m.exported_imgsz}</span>`;
+    }
+
     // Size bar (visual weight indicator)
     const maxMb = 131;
     const barWidth = Math.min(100, Math.round((m.approx_mb / maxMb) * 100));
@@ -194,7 +200,22 @@ function renderModelList(models) {
     // Action buttons
     let actionsHtml = '';
     if (!isInstalled) {
-      actionsHtml = `<button class="btn-info model-action-btn" data-action="download" data-model-id="${escapeHtml(m.id)}">\u2B07 Download</button>`;
+      actionsHtml = `
+        <div class="model-download-row">
+          <select class="model-res-select" data-model-id="${escapeHtml(m.id)}" title="Export resolution">
+            <option value="320">320 (Fast)</option>
+            <option value="416">416</option>
+            <option value="480">480</option>
+            <option value="512">512</option>
+            <option value="640" selected>640 (Default)</option>
+            <option value="768">768</option>
+            <option value="800">800</option>
+            <option value="896">896</option>
+            <option value="1024">1024 (Accurate)</option>
+            <option value="1280">1280 (Max)</option>
+          </select>
+          <button class="btn-info model-action-btn" data-action="download" data-model-id="${escapeHtml(m.id)}">\u2B07 Download</button>
+        </div>`;
     } else if (isActive && hasUpdate) {
       // Active model with update: allow re-export in place
       actionsHtml = `
@@ -218,7 +239,7 @@ function renderModelList(models) {
           <div class="model-card-title">
             <h3>${escapeHtml(m.label)}</h3>
             <div class="model-card-meta">
-              ${statusHtml}${updateBadge}${versionLabel ? `<span class="model-version">${versionLabel}</span>` : ''}
+              ${statusHtml}${updateBadge}${resBadge}${versionLabel ? `<span class="model-version">${versionLabel}</span>` : ''}
             </div>
           </div>
           <div class="model-card-size">
@@ -260,7 +281,10 @@ function renderModelList(models) {
         let result;
         if (action === 'download') {
           btn.textContent = 'Downloading\u2026';
-          result = await api('/api/settings/ai/download-model', { method: 'POST', body: JSON.stringify({ model: modelId }) });
+          // Read selected resolution from the dropdown next to the button
+          const resSelect = document.querySelector(`.model-res-select[data-model-id="${modelId}"]`);
+          const imgsz = resSelect ? parseInt(resSelect.value, 10) : 640;
+          result = await api('/api/settings/ai/download-model', { method: 'POST', body: JSON.stringify({ model: modelId, imgsz }) });
         } else if (action === 'use') {
           btn.textContent = 'Switching\u2026';
           const current = await api('/api/settings/ai');
