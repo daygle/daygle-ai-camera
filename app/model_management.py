@@ -293,6 +293,15 @@ def delete_model(model_name: str) -> dict[str, Any]:
     # Delete the ONNX file
     onnx_path.unlink(missing_ok=True)
 
+    # Also remove the sibling INT8 quantization cache (``*.int8.onnx``) if one
+    # was produced for this model, so precision=int8 deployments don't leave an
+    # orphaned quantized copy behind after the source model is deleted.
+    try:
+        from app.quantization import int8_cache_path
+        int8_cache_path(onnx_path).unlink(missing_ok=True)
+    except Exception as exc:  # pragma: no cover - cache cleanup is best-effort
+        logger.warning('Failed to remove INT8 cache for %s: %s', model_name, exc)
+
     # Remove from installed.json metadata
     with _installed_models_lock:
         installed_meta = _read_installed_models()

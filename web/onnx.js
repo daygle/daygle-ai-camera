@@ -98,12 +98,13 @@ function formPayload(form) {
     ? Math.round(parseFloat(data.gpu_mem_limit_gb) * 1024 * 1024 * 1024)
     : 0;
   delete data.gpu_mem_limit_gb;
-  // Coerce confidence_only_nms: an unchecked checkbox yields no FormData entry
-  // so the omit-when-absent contract (validator default-False when key absent)
-  // is preserved naturally; a checked box posts ``value="true"`` as a string.
-  if (typeof data.confidence_only_nms === 'string') {
-    data.confidence_only_nms = data.confidence_only_nms === 'true';
-  }
+  // Always send an explicit boolean for the checkbox. An unchecked checkbox
+  // produces no FormData entry, and validate_ai_settings inherits the
+  // previously persisted value when a key is absent - so omitting it would
+  // make the toggle impossible to turn OFF once it had been saved ON. Reading
+  // .checked directly makes the settings form authoritative for this field.
+  const nmsToggle = form.elements['confidence_only_nms'];
+  if (nmsToggle) data.confidence_only_nms = nmsToggle.checked === true;
   return data;
 }
 
