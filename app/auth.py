@@ -278,6 +278,9 @@ class AuthService:
         errors: list[str] = []
         if len(password) < 8:
             errors.append("Password must be at least 8 characters long.")
+        if len(password.encode("utf-8")) > 72:
+            # bcrypt 5.0+ raises ValueError for passwords > 72 bytes.
+            errors.append("Password must be at most 72 characters long.")
         if not any(c.isupper() for c in password):
             errors.append("Password must include an uppercase letter.")
         if not any(c.islower() for c in password):

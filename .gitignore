@@ -11,7 +11,9 @@ models/*.onnx
 models/*.pt
 models/*.tflite
 models/*.csv
+models/*.json  # runtime metadata (yamnet-metadata.json, installed.json)
 data/*
 !data/
 .claude/
 .freebuff/
+temp_*/

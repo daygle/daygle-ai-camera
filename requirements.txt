@@ -1,7 +1,7 @@
 fastapi>=0.115,<1.0
 uvicorn[standard]>=0.30,<1.0
 PyYAML>=6.0,<7.0
-bcrypt>=4.0,<5.0
+bcrypt>=4.0,<6.0  # 5.0+ raises ValueError for passwords > 72 bytes (guard in auth.py)
 numpy>=1.26,<3.0
 # For GPU/CUDA inference set DAYGLE_ONNXRUNTIME_VARIANT=gpu before running
 # install_python_deps.sh - that installs onnxruntime-gpu instead.
@@ -16,8 +16,9 @@ onnxscript>=0.5,<1.0
 # range would silently absorb future 8.x.y PyPI drops -- bump this pin
 # only after reviewing the upstream release notes for supply-chain
 # concerns.
-ultralytics==8.4.106
-opencv-python-headless>=4.9,<6.0
+# Bumped to 8.4.107 on 2026-07-27 after reviewing upstream release notes.
+ultralytics==8.4.107
+opencv-python-headless>=4.9,<5.0  # cap at 4.x; OpenCV 5.x has breaking API changes
 python-multipart>=0.0.9,<1.0
 sounddevice>=0.4,<1.0
 # CPU-only YAMNet sound classifier runtime.
