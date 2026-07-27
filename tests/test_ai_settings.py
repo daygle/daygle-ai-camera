@@ -770,6 +770,20 @@ def test_validate_ai_settings_omits_confidence_only_nms_when_absent(monkeypatch,
     assert 'confidence_only_nms' not in out
 
 
+def test_validate_ai_settings_explicit_false_turns_off_persisted_true(monkeypatch, ais):
+    """An explicit ``False`` must switch OFF a previously-persisted
+    ``confidence_only_nms=True``. When the key is *absent* the validator
+    inherits the persisted value (correct for partial API updates), so the
+    settings form always sends an explicit boolean; this pins that an
+    explicit False is honoured and the toggle can actually be turned off."""
+    _install_ai_dependencies(
+        monkeypatch,
+        effective_ai_config_value={'confidence_only_nms': True},
+    )
+    out = ais.validate_ai_settings({'confidence_only_nms': False})
+    assert out['confidence_only_nms'] is False
+
+
 # -- precision (export-time fp16 + runtime int8) -----------------------
 
 

@@ -200,3 +200,29 @@ def test_quantize_int8_dynamic_requantizes_when_cache_stale(tmp_path: Path, monk
     assert result == cache
     assert captured['called'] is True
     assert Path(captured['model_output']).read_bytes() == b'fresh-cache'
+
+
+# -- delete_model INT8 cache cleanup ---------------------------------------
+
+def test_delete_model_removes_int8_cache_sibling(tmp_path: Path, monkeypatch):
+    """Deleting a model must also unlink its ``*.int8.onnx`` quantization
+    cache so precision=int8 deployments don't leave orphaned files behind."""
+    import app.model_management as mm
+
+    models_dir = tmp_path / 'models'
+    models_dir.mkdir(parents=True, exist_ok=True)
+    onnx = models_dir / 'yolo26n.onnx'
+    onnx.write_bytes(b'fake onnx')
+    int8 = int8_cache_path(onnx)
+    int8.write_bytes(b'fake int8')
+
+    monkeypatch.setattr(mm, 'BASE_DIR', tmp_path)
+    monkeypatch.setattr(mm, 'MODELS_DIR', models_dir)
+    # A different active model, so the delete isn't blocked by the active guard.
+    monkeypatch.setattr(mm, 'effective_ai_config', lambda: {'model_path': 'models/yolo11n.onnx'})
+
+    result = mm.delete_model('yolo26n')
+
+    assert result['ok'] is True
+    assert not onnx.exists()
+    assert not int8.exists()
