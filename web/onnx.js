@@ -98,13 +98,8 @@ function formPayload(form) {
     ? Math.round(parseFloat(data.gpu_mem_limit_gb) * 1024 * 1024 * 1024)
     : 0;
   delete data.gpu_mem_limit_gb;
-  // Always send an explicit boolean for the checkbox. An unchecked checkbox
-  // produces no FormData entry, and validate_ai_settings inherits the
-  // previously persisted value when a key is absent - so omitting it would
-  // make the toggle impossible to turn OFF once it had been saved ON. Reading
-  // .checked directly makes the settings form authoritative for this field.
-  const nmsToggle = form.elements['confidence_only_nms'];
-  if (nmsToggle) data.confidence_only_nms = nmsToggle.checked === true;
+  // confidence_only_nms is a tri-state select ('auto' | 'on' | 'off'); its
+  // string value posts through as-is and validate_ai_settings normalises it.
   return data;
 }
 
@@ -149,10 +144,9 @@ function renderAi(settings) {
   for (const [key, value] of Object.entries(settings)) {
     const el = aiForm.elements[key];
     if (!el) continue;
-    // ``value=`` doesn't reflect the state of a checkbox; reflect it via
-    // ``.checked`` so a saved ``confidence_only_nms: true`` round-trips back
-    // as a visibly checked box. Select opts without a matching value fall back
-    // to the first option, which is the documented default.
+    // Checkboxes reflect via ``.checked`` (``value=`` doesn't reflect state);
+    // text/number/select controls use ``.value``. A select value with no
+    // matching option falls back to the first option, which is the default.
     if (el.type === 'checkbox') {
       el.checked = Boolean(value);
     } else {

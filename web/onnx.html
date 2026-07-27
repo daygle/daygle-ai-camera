@@ -112,10 +112,13 @@
             <option value="parallel">Parallel (default)</option>
             <option value="sequential">Sequential</option>
           </select></label>
-        <label class="checkbox-row">
-          <span>Skip class-aware NMS <span class="info-tip" data-tip="YOLO26 only. When checked, drops the post-confidence class-aware NMS dedupe pass and trusts the model's one-to-one label assignment. Can shave CPU time but may regress duplicate-detection behavior on overlapping subjects. Off by default." title="YOLO26 only. When checked, drops the post-confidence class-aware NMS dedupe pass and trusts the model's one-to-one label assignment. Can shave CPU time but may regress duplicate-detection behavior on overlapping subjects. Off by default." tabindex="0" aria-label="Help: YOLO26 only. When checked drops the post-confidence class-aware NMS dedupe pass and trusts the model one-to-one label assignment. Can shave CPU time but may regress duplicate-detection behavior on overlapping subjects. Off by default."></span></span>
-          <input name="confidence_only_nms" type="checkbox" value="true" />
-        </label>
+        <label>
+          <span>NMS Dedupe <span class="info-tip" data-tip="Class-aware NMS dedupe pass. Auto (recommended): skips it for NMS-free YOLO26 models (they dedupe in the model head) and keeps it for YOLOv8/YOLO11. Skip: confidence threshold only. Force: always run the dedupe. The IoU Threshold above only applies when this dedupe actually runs." title="Class-aware NMS dedupe pass. Auto (recommended): skips it for NMS-free YOLO26 models (they dedupe in the model head) and keeps it for YOLOv8/YOLO11. Skip: confidence threshold only. Force: always run the dedupe. The IoU Threshold above only applies when this dedupe actually runs." tabindex="0" aria-label="Help: Class-aware NMS dedupe pass. Auto recommended skips it for NMS-free YOLO26 models they dedupe in the model head and keeps it for YOLOv8/YOLO11. Skip confidence threshold only. Force always run the dedupe. The IoU Threshold above only applies when this dedupe actually runs."></span></span>
+          <select name="confidence_only_nms">
+            <option value="auto">Auto (recommended)</option>
+            <option value="on">Skip (confidence only)</option>
+            <option value="off">Force class-aware NMS</option>
+          </select></label>
       </form>
       <div class="button-row">
         <button type="submit" form="aiSettingsForm">Save ONNX Settings</button>

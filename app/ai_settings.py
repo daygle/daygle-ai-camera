@@ -253,9 +253,33 @@ def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
         'last_detector_error': ai_status['last_detector_error'],
         'model_input_size': ai_status.get('model_input_size'),
         'model_name': ai_status.get('model_name'),
+        # Surface the normalised tri-state so the settings form's NMS-dedupe
+        # select reflects the persisted value (defaulting to 'auto') rather
+        # than a raw legacy bool or a missing key.
+        'confidence_only_nms': _normalize_confidence_only_nms(
+            ai_settings.get('confidence_only_nms')
+        ),
         'categories': categories,
         'available_labels': labels,
     }
+
+
+def _normalize_confidence_only_nms(value: Any) -> str:
+    """Normalise the tri-state ``confidence_only_nms`` setting to a string.
+
+    Returns one of ``'auto'`` | ``'on'`` | ``'off'``. Legacy persisted bools
+    map to ``'on'`` / ``'off'``; anything unrecognised (including a missing
+    value) normalises to ``'auto'`` so the detector applies its model-aware
+    default (skip the redundant NMS for NMS-free YOLO26 heads).
+    """
+    if isinstance(value, bool):
+        return 'on' if value else 'off'
+    text = str(value or '').strip().lower()
+    if text in {'on', '1', 'true', 'yes'}:
+        return 'on'
+    if text in {'off', '0', 'false', 'no'}:
+        return 'off'
+    return 'auto'
 
 
 def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
@@ -332,18 +356,17 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
             updated['use_io_binding'] = val.strip().lower() in {'1', 'true', 'yes', 'on'}
         else:
             updated['use_io_binding'] = bool(val)
-    # ``confidence_only_nms``: when True AND the model is NMS-free (YOLO26),
-    # ``OnnxYoloDetector._postprocess_nms_free`` skips the class-aware NMS
-    # dedupe and trusts the head's one-to-one label assignment. Coil the
-    # ``enabled``-style str truthy coercion so HTML form posts and JSON bools
-    # both work. Only coerce if present in ``updated`` so an absent key
-    # leaves the detector free to default-False (no auto-population).
+    # ``confidence_only_nms`` is tri-state: 'auto' | 'on' | 'off'. 'auto'
+    # (the default when the key is absent) lets the detector apply its
+    # model-aware default -- skip the redundant class-aware NMS for NMS-free
+    # YOLO26 heads, keep it for grid heads. 'on'/'off' are explicit overrides.
+    # Persisting a tri-state (rather than a bare bool from a checkbox) is what
+    # lets the settings form save 'auto' without clobbering the smart default.
+    # Only normalise when present so an absent key stays absent -> 'auto'.
     if 'confidence_only_nms' in updated:
-        val = updated['confidence_only_nms']
-        if isinstance(val, str):
-            updated['confidence_only_nms'] = val.strip().lower() in {'1', 'true', 'yes', 'on'}
-        else:
-            updated['confidence_only_nms'] = bool(val)
+        updated['confidence_only_nms'] = _normalize_confidence_only_nms(
+            updated['confidence_only_nms']
+        )
     if 'gpu_mem_limit' in payload:
         gpu_mem_limit = payload['gpu_mem_limit']
         if gpu_mem_limit is not None and gpu_mem_limit != '':
