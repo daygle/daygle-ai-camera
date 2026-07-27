@@ -77,11 +77,24 @@ from app.detector import load_labels
 from app.settings import config_file_path
 
 YOLO_MODELS: dict[str, dict[str, Any]] = {
+    # YOLOv8 series - Traditional NMS-based detection
     'yolov8n': {'pt': 'yolov8n.pt', 'onnx': 'yolov8n.onnx', 'label': 'YOLOv8n · Nano', 'approx_mb': 6, 'description': 'Fastest inference, lowest accuracy. Best for low-power or embedded hardware.'},
     'yolov8s': {'pt': 'yolov8s.pt', 'onnx': 'yolov8s.onnx', 'label': 'YOLOv8s · Small', 'approx_mb': 22, 'description': 'Good balance of speed and accuracy for most systems.'},
     'yolov8m': {'pt': 'yolov8m.pt', 'onnx': 'yolov8m.onnx', 'label': 'YOLOv8m · Medium', 'approx_mb': 52, 'description': 'Significantly better accuracy. Recommended for IR or night-vision cameras.'},
     'yolov8l': {'pt': 'yolov8l.pt', 'onnx': 'yolov8l.onnx', 'label': 'YOLOv8l · Large', 'approx_mb': 87, 'description': 'High accuracy. Requires a capable CPU or GPU.'},
     'yolov8x': {'pt': 'yolov8x.pt', 'onnx': 'yolov8x.onnx', 'label': 'YOLOv8x · Extra Large', 'approx_mb': 131, 'description': 'Best possible accuracy. GPU strongly recommended.'},
+    # YOLO11 series - Refined backbone/neck, 22% fewer params than YOLOv8 with better accuracy
+    'yolo11n': {'pt': 'yolo11n.pt', 'onnx': 'yolo11n.onnx', 'label': 'YOLO11n · Nano', 'approx_mb': 5, 'description': 'Latest Ultralytics architecture. Faster than YOLOv8n with improved accuracy.'},
+    'yolo11s': {'pt': 'yolo11s.pt', 'onnx': 'yolo11s.onnx', 'label': 'YOLO11s · Small', 'approx_mb': 20, 'description': 'Enhanced small model with better accuracy-latency tradeoff than YOLOv8s.'},
+    'yolo11m': {'pt': 'yolo11m.pt', 'onnx': 'yolo11m.onnx', 'label': 'YOLO11m · Medium', 'approx_mb': 46, 'description': 'Best mid-range model. 22% fewer parameters than YOLOv8m with higher mAP.'},
+    'yolo11l': {'pt': 'yolo11l.pt', 'onnx': 'yolo11l.onnx', 'label': 'YOLO11l · Large', 'approx_mb': 78, 'description': 'High accuracy for demanding applications. Improved over YOLOv8l.'},
+    'yolo11x': {'pt': 'yolo11x.pt', 'onnx': 'yolo11x.onnx', 'label': 'YOLO11x · Extra Large', 'approx_mb': 119, 'description': 'Maximum accuracy YOLO11 variant. GPU recommended.'},
+    # YOLO26 series - NMS-free end-to-end detection, up to 43% faster CPU inference
+    'yolo26n': {'pt': 'yolo26n.pt', 'onnx': 'yolo26n.onnx', 'label': 'YOLO26n · Nano', 'approx_mb': 5, 'nms_free': True, 'description': 'End-to-end NMS-free detection. Fastest CPU inference with modern architecture.'},
+    'yolo26s': {'pt': 'yolo26s.pt', 'onnx': 'yolo26s.onnx', 'label': 'YOLO26s · Small', 'approx_mb': 18, 'nms_free': True, 'description': 'NMS-free small model. Great speed-accuracy balance for edge deployment.'},
+    'yolo26m': {'pt': 'yolo26m.pt', 'onnx': 'yolo26m.onnx', 'label': 'YOLO26m · Medium', 'approx_mb': 42, 'nms_free': True, 'description': 'Mid-range NMS-free model with excellent accuracy.'},
+    'yolo26l': {'pt': 'yolo26l.pt', 'onnx': 'yolo26l.onnx', 'label': 'YOLO26l · Large', 'approx_mb': 72, 'nms_free': True, 'description': 'High accuracy NMS-free detection. Advanced ProgLoss + STAL training.'},
+    'yolo26x': {'pt': 'yolo26x.pt', 'onnx': 'yolo26x.onnx', 'label': 'YOLO26x · Extra Large', 'approx_mb': 112, 'nms_free': True, 'description': 'Ultimate accuracy with NMS-free inference. MuSGD optimizer for best convergence.'},
 }
 
 logger = logging.getLogger('daygle.ai')
@@ -220,6 +233,7 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'gpu_mem_limit',
         'inference_threads',
         'max_concurrent_inferences',
+        'nms_free',
     }
     updated = {key: current.get(key) for key in allowed if key in current}
     for key, value in payload.items():
@@ -287,4 +301,11 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     updated['labels_path'] = str(
         updated.get('labels_path') or current.get('labels_path') or 'models/coco.names'
     )
+    # Coerce nms_free to boolean if present
+    if 'nms_free' in updated:
+        nms_free_val = updated['nms_free']
+        if isinstance(nms_free_val, str):
+            updated['nms_free'] = nms_free_val.lower() in {'1', 'true', 'yes', 'on'}
+        else:
+            updated['nms_free'] = bool(nms_free_val)
     return updated

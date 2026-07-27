@@ -95,7 +95,12 @@ def non_max_suppression(boxes: np.ndarray, scores: np.ndarray, classes: np.ndarr
 
 
 class OnnxYoloDetector:
-    """YOLOv8 ONNX detector backed by ONNX Runtime."""
+    """YOLO ONNX detector backed by ONNX Runtime.
+
+    Supports:
+    - YOLOv8/YOLO11: Traditional NMS-based detection (output shape: [1, 4+nc, 8400])
+    - YOLO26: NMS-free end-to-end detection (output shape: [1, 300, 6])
+    """
 
     backend = "onnx"
 
@@ -111,6 +116,7 @@ class OnnxYoloDetector:
         max_concurrency: int | None = None,
         device: str = "auto",
         gpu_mem_limit: int | None = None,
+        nms_free: bool = False,
     ) -> None:
         self.model_path = Path(model_path)
         self.labels = load_labels(labels_path, categories)
@@ -123,6 +129,7 @@ class OnnxYoloDetector:
         self._gpu_mem_limit = gpu_mem_limit
         self.unavailable_reason: str | None = None
         self._device = device.lower() if device else "auto"
+        self._nms_free = nms_free
 
         cpu_count = os.cpu_count() or 1
         # Let each inference use multiple cores so it finishes fast, then cap how
@@ -261,6 +268,121 @@ class OnnxYoloDetector:
     ) -> list[dict[str, Any]]:
         if confidence is None:
             confidence = self.confidence
+        
+        # YOLO26 NMS-free format: output shape [1, 300, 6] with [x1, y1, x2, y2, confidence, class_id]
+        if self._nms_free:
+            return self._postprocess_nms_free(output, scale, pad_x, pad_y, original_width, original_height, confidence)
+        
+        # Traditional YOLOv8/YOLO11 format: output shape [1, 4+nc, 8400]
+        return self._postprocess_nms(output, scale, pad_x, pad_y, original_width, original_height, confidence)
+
+    def _postprocess_nms_free(
+        self,
+        output: np.ndarray,
+        scale: float,
+        pad_x: float,
+        pad_y: float,
+        original_width: int,
+        original_height: int,
+        confidence: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Postprocess YOLO26 NMS-free output (shape: [1, 300, 6]).
+        
+        Output format: [x1, y1, x2, y2, confidence, class_id]
+        Coordinates are in input-space (relative to model input size, e.g. 640x640)
+        and need to be transformed to original image coordinates.
+        """
+        if confidence is None:
+            confidence = self.confidence
+            
+        predictions = np.squeeze(output)
+        if predictions.ndim != 2 or predictions.shape[1] != 6:
+            raise ValueError(f"Unexpected YOLO26 output shape: {output.shape}. Expected [1, 300, 6].")
+        
+        # Extract components
+        boxes = predictions[:, :4]  # [x1, y1, x2, y2] in input-space
+        scores = predictions[:, 4]  # confidence
+        class_ids = predictions[:, 5].astype(np.int32)  # class_id
+        
+        # Filter by confidence
+        conf_mask = scores >= confidence
+        if not np.any(conf_mask):
+            return []
+        
+        filtered_boxes = boxes[conf_mask]
+        filtered_scores = scores[conf_mask]
+        filtered_class_ids = class_ids[conf_mask]
+        
+        # Apply IoU-based NMS to remove overlapping detections
+        # Even though YOLO26 is "NMS-free", it can still produce
+        # duplicate detections for the same object
+        if len(filtered_boxes) > 0:
+            keep = non_max_suppression(filtered_boxes, filtered_scores, filtered_class_ids, self.iou_threshold)
+            filtered_boxes = filtered_boxes[keep]
+            filtered_scores = filtered_scores[keep]
+            filtered_class_ids = filtered_class_ids[keep]
+        
+        # Build detections with coordinate transformation from input-space to original image
+        detections: list[Detection] = []
+        for i in range(len(filtered_boxes)):
+            x1, y1, x2, y2 = filtered_boxes[i]
+            class_id = int(filtered_class_ids[i])
+            label = self.labels[class_id] if 0 <= class_id < len(self.labels) else f"class_{class_id}"
+            
+            # Transform from input-space to original image coordinates:
+            # 1. Remove padding (subtract pad_x, pad_y)
+            # 2. Divide by scale to get original coordinates
+            orig_x1 = float((x1 - pad_x) / scale)
+            orig_y1 = float((y1 - pad_y) / scale)
+            orig_x2 = float((x2 - pad_x) / scale)
+            orig_y2 = float((y2 - pad_y) / scale)
+            
+            # Clip to image bounds
+            orig_x1 = max(0.0, min(float(original_width), orig_x1))
+            orig_y1 = max(0.0, min(float(original_height), orig_y1))
+            orig_x2 = max(0.0, min(float(original_width), orig_x2))
+            orig_y2 = max(0.0, min(float(original_height), orig_y2))
+            
+            # Skip invalid boxes
+            if orig_x2 <= orig_x1 or orig_y2 <= orig_y1:
+                continue
+            
+            # Convert to normalized coordinates (x, y, width, height)
+            box_x = round(orig_x1 / original_width, 4)
+            box_y = round(orig_y1 / original_height, 4)
+            box_w = round((orig_x2 - orig_x1) / original_width, 4)
+            box_h = round((orig_y2 - orig_y1) / original_height, 4)
+            
+            detections.append(
+                Detection(
+                    label=label,
+                    confidence=float(filtered_scores[i]),
+                    box={
+                        "x": box_x,
+                        "y": box_y,
+                        "width": box_w,
+                        "height": box_h,
+                    },
+                )
+            )
+        
+        # Sort by confidence descending
+        detections.sort(key=lambda d: d.confidence, reverse=True)
+        return [detection.to_dict() for detection in detections]
+
+    def _postprocess_nms(
+        self,
+        output: np.ndarray,
+        scale: float,
+        pad_x: float,
+        pad_y: float,
+        original_width: int,
+        original_height: int,
+        confidence: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Postprocess YOLOv8/YOLO11 output (shape: [1, 4+nc, 8400]) with NMS."""
+        if confidence is None:
+            confidence = self.confidence
         predictions = np.squeeze(output)
         if predictions.ndim != 2:
             raise ValueError(f"Unsupported YOLO output shape: {output.shape}")
@@ -339,6 +461,16 @@ class OnnxYoloDetector:
         return [detection.to_dict() for detection in detections]
 
 
+def _detect_model_type(model_path: str) -> bool:
+    """Detect if a model uses NMS-free format based on filename.
+    
+    YOLO26 models use NMS-free end-to-end detection.
+    """
+    filename = Path(model_path).name.lower()
+    # YOLO26 models follow the pattern: yolo26{n,s,m,l,x}.onnx
+    return filename.startswith('yolo26')
+
+
 def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
     backend = str(ai_config.get("backend", "onnx")).lower()
     if backend != "onnx":
@@ -350,8 +482,15 @@ def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
         except (TypeError, ValueError):
             return None
 
+    model_path = ai_config.get("model_path", "models/model.onnx")
+    
+    # Auto-detect NMS-free mode for YOLO26 models
+    nms_free = ai_config.get("nms_free")
+    if nms_free is None:
+        nms_free = _detect_model_type(model_path)
+
     return OnnxYoloDetector(
-        model_path=ai_config.get("model_path", "models/model.onnx"),
+        model_path=model_path,
         labels_path=ai_config.get("labels_path", "models/coco.names"),
         input_size=ai_config.get("input_size", 640),
         confidence=float(ai_config.get("confidence", 0.45)),
@@ -361,4 +500,5 @@ def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
         max_concurrency=_optional_int("max_concurrent_inferences"),
         device=str(ai_config.get("device", "auto")),
         gpu_mem_limit=_optional_int("gpu_mem_limit"),
+        nms_free=bool(nms_free),
     )

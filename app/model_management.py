@@ -171,17 +171,28 @@ def export_yolo_onnx(model_name: str, destination: Path) -> int:
         raise ValueError(f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
     info = YOLO_MODELS[model_name]
     pt_name = info['pt']
+    nms_free = info.get('nms_free', False)
     destination.parent.mkdir(parents=True, exist_ok=True)
     # Pass the weights name as argv rather than interpolating it into the
     # ``python -c`` source. ``pt_name`` is a trusted constant from YOLO_MODELS
     # today, so this is defence-in-depth: a name containing a quote/newline can
     # no longer break out of the string literal into arbitrary code, and the
     # invariant survives any future change that makes YOLO_MODELS configurable.
-    export_script = (
-        "import sys\n"
-        "from ultralytics import YOLO\n"
-        "YOLO(sys.argv[1]).export(format='onnx')\n"
-    )
+    #
+    # YOLO26 models need end2end=True for NMS-free export;
+    # YOLOv8/YOLO11 models use standard export (NMS handled at runtime).
+    if nms_free:
+        export_script = (
+            "import sys\n"
+            "from ultralytics import YOLO\n"
+            "YOLO(sys.argv[1]).export(format='onnx', end2end=True)\n"
+        )
+    else:
+        export_script = (
+            "import sys\n"
+            "from ultralytics import YOLO\n"
+            "YOLO(sys.argv[1]).export(format='onnx')\n"
+        )
     command = [sys.executable, '-c', export_script, pt_name]
     result = subprocess.run(command, cwd=destination.parent, capture_output=True, text=True, timeout=600, check=False)
     if result.returncode != 0:
