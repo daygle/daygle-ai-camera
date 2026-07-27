@@ -149,6 +149,12 @@ class OnnxYoloDetector:
         # when CUDA isn't actually available, so the per-inference
         # branch only ever fires when the session is CUDA-bound.
         self._use_io_binding = bool(use_io_binding)
+        # The numpy dtype the model's input tensor expects. Resolved from the
+        # loaded session below; an FP16 (``half=True``) export declares a
+        # ``tensor(float16)`` input and rejects a float32 array, so the
+        # preprocess step casts to whatever the model actually wants. Stays
+        # None until the session loads; ``_preprocess`` falls back to float32.
+        self._input_dtype: Any = None
 
         cpu_count = os.cpu_count() or 1
         # Let each inference use multiple cores so it finishes fast, then cap how
@@ -286,6 +292,27 @@ class OnnxYoloDetector:
                         )
                         self.input_width = model_w
                         self.input_height = model_h
+            # Resolve the model's expected input dtype. An FP16 export declares
+            # a ``tensor(float16)`` input; feeding it the default float32 tensor
+            # raises an ORT type-mismatch, so ``_preprocess`` casts to match.
+            input_type = getattr(model_input, 'type', None)
+            self._input_dtype = np.float16 if input_type == 'tensor(float16)' else np.float32
+            # Warm-up: ORT lazily builds kernels + allocations on the first
+            # ``run``, spiking latency on the first live frame after every
+            # (re)load. Run one throwaway inference on a zero tensor so the hot
+            # path starts warm. Best-effort and self-contained: a warm-up
+            # failure must never mark an otherwise-loaded detector unavailable.
+            try:
+                warm = np.zeros(
+                    (1, 3, self.input_height, self.input_width),
+                    dtype=self._input_dtype,
+                )
+                if self._use_io_binding:
+                    self._run_inference_io_bound(np.ascontiguousarray(warm))
+                else:
+                    self.session.run(self.output_names, {self.input_name: warm})
+            except Exception as warm_exc:
+                logger.debug('Detector warm-up inference skipped: %s', warm_exc)
         except Exception as exc:  # pragma: no cover - depends on runtime/model internals
             self.unavailable_reason = f"Failed to load ONNX model {self.model_path}: {exc}"
 
@@ -398,6 +425,12 @@ class OnnxYoloDetector:
         # the transpose pass.
         chw = np.transpose(canvas, (2, 0, 1))
         tensor = (chw.astype(np.float32) / 255.0)[None, ...]
+        # Normalise in float32 (better precision than dividing in half) then
+        # cast to the model's declared input dtype so FP16 models get a
+        # tensor(float16) input instead of an ORT type-mismatch error.
+        model_dtype = self._input_dtype or np.float32
+        if model_dtype != np.float32:
+            tensor = tensor.astype(model_dtype)
         return np.ascontiguousarray(tensor), scale, float(left), float(top), original_width, original_height
 
     @staticmethod
@@ -713,7 +746,7 @@ def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
         gpu_mem_limit=_optional_int("gpu_mem_limit"),
         nms_free=bool(nms_free),
         execution_mode=str(ai_config.get("execution_mode", "parallel") or "parallel").lower(),
-        confidence_only_nms=_coerce_bool(ai_config.get("confidence_only_nms", False)),
+        confidence_only_nms=_resolve_confidence_only_nms(ai_config.get("confidence_only_nms"), nms_free),
         precision=str(ai_config.get("precision", "fp32") or "fp32").strip().lower(),
         use_io_binding=_coerce_bool(ai_config.get("use_io_binding", False)),
     )
@@ -731,3 +764,29 @@ def _coerce_bool(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {'1', 'true', 'yes', 'on'}
     return bool(value)
+
+
+def _resolve_confidence_only_nms(value: Any, nms_free: bool) -> bool:
+    """Resolve the tri-state ``confidence_only_nms`` setting to a bool.
+
+    NMS-free heads (YOLO26) already perform one-to-one label assignment in the
+    model, so the extra class-aware NMS pass is redundant work that can also
+    wrongly suppress genuinely overlapping objects. The setting is tri-state:
+
+    - ``'auto'`` / ``None`` (default): follow the model -- skip the NMS pass
+      for NMS-free heads, keep it for grid heads (YOLOv8/YOLO11).
+    - ``'on'`` / truthy: always skip the NMS pass (confidence threshold only).
+    - ``'off'`` / falsy: always run the class-aware NMS dedupe.
+
+    Legacy persisted bools are honoured (``True`` -> skip, ``False`` -> run).
+    """
+    if value is None:
+        return bool(nms_free)
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {'on', '1', 'true', 'yes'}:
+        return True
+    if text in {'off', '0', 'false', 'no'}:
+        return False
+    return bool(nms_free)  # 'auto' or any unknown value follows the model
