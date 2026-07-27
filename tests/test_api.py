@@ -5506,3 +5506,51 @@ def test_redact_password_for_viewer_on_alert_settings(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+def test_stats_with_since_filter_builds_valid_sql(tmp_path):
+    """Regression: /api/stats?since=... must not raise sqlite3.OperationalError.
+
+    Two bugs made ``stats(since=...)`` crash in production:
+      1. the ``total_alerts`` query had no WHERE, so the shared ``AND ...``
+         since-clause produced ``FROM alert_history ah AND ...`` -> "near
+         AND: syntax error";
+      2. ``since_clause_det`` referenced a non-existent alias ``e2``, so the
+         objects/labels query raised "no such column: e2.created_at".
+    Both only fire when ``since`` is provided. This locks down the fix.
+    """
+    from app.database import EventDatabase
+
+    database = EventDatabase(str(tmp_path / 'stats-since.sqlite3'))
+    event_id = database.add_event(
+        created_at='2026-07-27T00:00:00+00:00',
+        source='camera',
+        snapshot_path=None,
+        detections=[{'label': 'person', 'confidence': 0.9, 'box': {'x': 0, 'y': 0, 'width': 1, 'height': 1}}],
+        alert_triggered=True,
+    )
+    database.add_alert(
+        created_at='2026-07-27T00:00:01+00:00',
+        rule_name='Front Door / person',
+        event_id=event_id,
+        label='person',
+        confidence=0.9,
+        message='person matched',
+    )
+
+    # since set: exercises the previously-broken code paths.
+    result = database.stats(since='2026-07-27')
+    assert result['total_events'] == 1
+    assert result['total_alerts'] == 1
+    assert result['objects'] == [{'label': 'person', 'count': 1, 'max_confidence': 0.9}]
+
+    # A since that post-dates the rows must filter them all out (still valid SQL).
+    empty = database.stats(since='2026-07-28')
+    assert empty['total_events'] == 0
+    assert empty['total_alerts'] == 0
+    assert empty['objects'] == []
+
+    # No since: the clauses collapse to empty strings.
+    unfiltered = database.stats()
+    assert unfiltered['total_events'] == 1
+    assert unfiltered['total_alerts'] == 1

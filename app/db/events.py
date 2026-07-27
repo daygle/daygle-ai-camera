@@ -169,7 +169,7 @@ class EventsMixin:
         with self.connect() as db:
             since_clause = "AND e.created_at >= ?" if since else ""
             since_clause_ah = "AND ah.created_at >= ?" if since else ""
-            since_clause_det = "AND e2.created_at >= ?" if since else ""
+            since_clause_det = "AND e.created_at >= ?" if since else ""
 
             # Helper to build params tuple for a given since value
             def _params(base: tuple[Any, ...] = ()) -> tuple[Any, ...]:
@@ -179,8 +179,12 @@ class EventsMixin:
                 f"SELECT COUNT(*) AS count FROM events e WHERE e.dismissed = 0 {since_clause}",
                 _params(),
             ).fetchone()["count"]
+            # ``alert_history`` has no other predicate, so the shared
+            # ``AND ...`` since-clause needs a WHERE of its own here (every
+            # other query below already opens with WHERE).
+            alert_where = "WHERE ah.created_at >= ?" if since else ""
             total_alerts = db.execute(
-                f"SELECT COUNT(*) AS count FROM alert_history ah {since_clause_ah}",
+                f"SELECT COUNT(*) AS count FROM alert_history ah {alert_where}",
                 _params(),
             ).fetchone()["count"]
             sound_detection_events = db.execute(
