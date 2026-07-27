@@ -610,3 +610,71 @@ def test_validate_ai_settings_rejects_non_numeric_confidence(monkeypatch, ais):
         ais.validate_ai_settings({'confidence': 'abc'})
     assert exc_info.value.status_code == 400
     assert 'confidence must be a number' in exc_info.value.detail
+
+
+def test_validate_ai_settings_rejects_model_path_traversal(monkeypatch, ais):
+    """A ``model_path`` that escapes the models/ directory is rejected."""
+    from fastapi import HTTPException
+
+    _install_ai_dependencies(
+        monkeypatch,
+        effective_ai_config_value={'model_path': 'models/yolov8n.onnx'},
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        ais.validate_ai_settings({'model_path': '../etc/passwd'})
+    assert exc_info.value.status_code == 400
+    assert 'models/' in exc_info.value.detail
+
+
+def test_validate_ai_settings_rejects_absolute_model_path_outside_models(monkeypatch, ais):
+    """An absolute ``model_path`` outside models/ is rejected."""
+    from fastapi import HTTPException
+
+    _install_ai_dependencies(
+        monkeypatch,
+        effective_ai_config_value={'model_path': 'models/yolov8n.onnx'},
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        ais.validate_ai_settings({'model_path': '/etc/passwd'})
+    assert exc_info.value.status_code == 400
+
+
+def test_validate_ai_settings_rejects_new_nonexistent_model_path(monkeypatch, ais):
+    """Typing a new, in-bounds but non-existent model file is rejected with
+    a helpful message instead of being silently persisted."""
+    from fastapi import HTTPException
+
+    _install_ai_dependencies(
+        monkeypatch,
+        effective_ai_config_value={'model_path': 'models/coco.names'},
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        ais.validate_ai_settings({'model_path': 'models/definitely-not-here-xyz.onnx'})
+    assert exc_info.value.status_code == 400
+    assert 'not found' in exc_info.value.detail.lower()
+
+
+def test_validate_ai_settings_allows_unchanged_missing_model_path(monkeypatch, ais):
+    """Re-saving the current (not-yet-downloaded) model_path must succeed so
+    other fields can be edited before a model is installed."""
+    _install_ai_dependencies(
+        monkeypatch,
+        effective_ai_config_value={'model_path': 'models/ghost-model.onnx'},
+    )
+    # Same path as current + editing another field -> allowed (no existence error).
+    out = ais.validate_ai_settings({'model_path': 'models/ghost-model.onnx', 'confidence': 0.6})
+    assert out['model_path'] == 'models/ghost-model.onnx'
+    assert out['confidence'] == 0.6
+
+
+def test_validate_ai_settings_accepts_existing_installed_model_path(monkeypatch, ais):
+    """Switching to an installed (existing, in-bounds) model file is accepted
+    and canonicalised to a project-relative path."""
+    _install_ai_dependencies(
+        monkeypatch,
+        effective_ai_config_value={'model_path': 'models/yolov8n.onnx'},
+    )
+    # coco.names ships in models/ so it exists in the checkout; used here purely
+    # as a stand-in for an existing in-bounds file.
+    out = ais.validate_ai_settings({'model_path': 'models/coco.names'})
+    assert out['model_path'] == 'models/coco.names'

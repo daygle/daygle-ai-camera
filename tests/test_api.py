@@ -320,29 +320,46 @@ def test_status_ai_reports_model_missing_for_missing_onnx(tmp_path, monkeypatch)
 
 
 
-def test_ai_settings_save_onnx_missing_keeps_previous_detector_and_errors_on_upload(tmp_path, monkeypatch):
+def test_ai_settings_save_missing_model_path_is_rejected_and_preserves_previous(tmp_path, monkeypatch):
     app, database_path = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
     client = LocalClient(base_url)
     try:
         _setup_admin(client)
         csrf = _login(client)
-        missing_model = tmp_path / 'missing-from-ui.onnx'
-        status, _headers, settings = client.request(
+
+        # An absolute path outside models/ is rejected by the containment guard
+        # instead of being silently persisted and disabling detection.
+        outside_model = tmp_path / 'missing-from-ui.onnx'
+        status, _headers, body = client.request(
             '/api/settings/ai',
             method='PUT',
-            json_body={'backend': 'onnx', 'model_path': str(missing_model), 'labels_path': 'models/coco.names'},
+            json_body={'backend': 'onnx', 'model_path': str(outside_model), 'labels_path': 'models/coco.names'},
             headers={'X-CSRF-Token': csrf},
         )
-        assert status == 200
-        assert settings['configured_backend'] == 'onnx'
-        assert settings['mode'] == 'MODEL MISSING'
-        assert settings['reload_succeeded'] is False
-        assert 'ONNX model not found' in settings['reload_error'] or 'numpy is not installed' in settings['reload_error']
-        with sqlite3.connect(database_path) as db:
-            value = db.execute("SELECT value FROM app_settings WHERE key = 'ai'").fetchone()[0]
-        assert json.loads(value)['backend'] == 'onnx'
+        assert status == 400
+        assert 'models/' in body.get('detail', '')
 
+        # A new, in-bounds but non-existent model file is rejected with a
+        # helpful "not found" message (typo protection on the settings form).
+        status, _headers, body = client.request(
+            '/api/settings/ai',
+            method='PUT',
+            json_body={'backend': 'onnx', 'model_path': 'models/missing-from-ui.onnx', 'labels_path': 'models/coco.names'},
+            headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 400
+        assert 'not found' in body.get('detail', '').lower()
+
+        # Neither rejected save may have persisted the bad path.
+        with sqlite3.connect(database_path) as db:
+            row = db.execute("SELECT value FROM app_settings WHERE key = 'ai'").fetchone()
+        if row is not None:
+            saved_model_path = json.loads(row[0]).get('model_path')
+            assert saved_model_path != str(outside_model)
+            assert saved_model_path != 'models/missing-from-ui.onnx'
+
+        # The detector never became valid, so inference still reports an ai_error.
         status, _headers, body = client.request(
             '/api/detect/frame',
             method='POST',
