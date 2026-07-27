@@ -2072,11 +2072,6 @@ tr.drag-over {
 
 /* Subsection headings/dividers inside a .form-grid need to span every
    column so they don't get dropped into an individual grid cell. */
-.form-grid .settings-subsection {
-  grid-column: 1 / -1;
-  display: block;
-  width: 100%;
-}
 .form-grid .settings-subsection-divider {
   width: 100%;
   margin: 8px 0;
