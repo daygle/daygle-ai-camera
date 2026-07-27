@@ -37,6 +37,17 @@ _LEVEL_TO_PRIORITY: dict[str, str] = {
 
 _SERVICE = 'daygle-ai-camera'
 
+# Benign uvicorn protocol noise: a browser's HTTPS-first attempt (or a proxy
+# health check) sends a TLS handshake to the plain-HTTP port, which uvicorn
+# rejects one-per-connection. New occurrences are already dropped at the source
+# (see ``main._suppress_uvicorn_request_noise``); this also hides any already
+# recorded in the journal so the viewer stays clean.
+_NOISE_MESSAGE = 'Invalid HTTP request received'
+
+
+def _is_noise(entry: dict) -> bool:
+    return _NOISE_MESSAGE in str(entry.get('message', ''))
+
 
 # Strip the syslog-style level prefix from a raw log message.
 # Journalctl MESSAGE fields typically start with "LEVEL:     " (uvicorn access
@@ -89,9 +100,12 @@ def get_app_log(
             if not line:
                 continue
             try:
-                entries.append(_parse_entry(json.loads(line)))
+                entry = _parse_entry(json.loads(line))
             except Exception:
                 continue
+            if _is_noise(entry):
+                continue
+            entries.append(entry)
         return {'entries': entries}
     except FileNotFoundError:
         return {'entries': [], 'unavailable': True}
@@ -130,9 +144,11 @@ async def stream_app_log(request: Request):
                     continue
                 try:
                     entry = _parse_entry(json.loads(line_str))
-                    yield f'data: {json.dumps(entry)}\n\n'
                 except Exception:
                     continue
+                if _is_noise(entry):
+                    continue
+                yield f'data: {json.dumps(entry)}\n\n'
         finally:
             try:
                 proc.terminate()

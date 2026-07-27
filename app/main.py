@@ -46,7 +46,33 @@ def _configure_file_logging() -> None:
     root.setLevel(logging.INFO)
 
 
+class _DropInvalidHttpRequestNoise(logging.Filter):
+    """Drop uvicorn's 'Invalid HTTP request received.' protocol warning.
+
+    Browsers speaking HTTPS-first (or a reverse-proxy health check) send a TLS
+    handshake to the plain-HTTP port; uvicorn logs one such WARNING per
+    connection via the ``uvicorn.error`` logger, flooding the admin log viewer
+    with benign noise. This filter drops that exact message at the source so it
+    never reaches stderr/journald, while leaving every other uvicorn log intact.
+    """
+
+    _NEEDLE = 'Invalid HTTP request received'
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            return self._NEEDLE not in record.getMessage()
+        except Exception:
+            return True
+
+
+def _suppress_uvicorn_request_noise() -> None:
+    uvicorn_error = logging.getLogger('uvicorn.error')
+    if not any(isinstance(f, _DropInvalidHttpRequestNoise) for f in uvicorn_error.filters):
+        uvicorn_error.addFilter(_DropInvalidHttpRequestNoise())
+
+
 _configure_file_logging()
+_suppress_uvicorn_request_noise()
 config = load_settings()
 _state.config = config
 auth_config = config.get('auth', {})

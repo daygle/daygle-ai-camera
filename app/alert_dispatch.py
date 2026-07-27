@@ -307,8 +307,9 @@ def deliver_email_alerts(
         if not rule or not rule.get('email_enabled'):
             continue
         if not _rule_notify_active_now(rule):
-            logger.debug(
-                'Email skipped for event %s rule %r: outside email/push window %s-%s',
+            logger.info(
+                'Email skipped for event %s rule %r: outside notify window %s-%s '
+                '(the detection still recorded; widen the rule notify window to email it)',
                 event_id,
                 alert.get('rule_name'),
                 rule.get('notify_start'),
@@ -375,8 +376,9 @@ def deliver_push_notifications(
             )
             continue
         if not _rule_notify_active_now(rule):
-            logger.debug(
-                'Push skipped for event %s rule %r: outside email/push window %s-%s',
+            logger.info(
+                'Push skipped for event %s rule %r: outside notify window %s-%s '
+                '(the detection still recorded; widen the rule notify window to push it)',
                 event_id,
                 rule_name,
                 rule.get('notify_start'),
