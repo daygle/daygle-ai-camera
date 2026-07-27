@@ -6,7 +6,12 @@ const els = {
   activityFeed: document.getElementById('activityFeed'),
   listStatus: document.getElementById('listStatus'),
   dismissAllEventsBtn: document.getElementById('dismissAllEventsBtn'),
-  filterPills: document.querySelectorAll('.activity-filter-pill'),
+  // Scope to [data-filter] so the category group and the range group stay
+  // independent: both share the .activity-filter-pill class, so selecting by
+  // class swept the range buttons into the category handler, which reset the
+  // category filter to undefined on every range click (Object + 7d wouldn't
+  // hold). Category buttons carry data-filter; range buttons carry data-range.
+  filterPills: document.querySelectorAll('[data-filter]'),
   rangeBtns: document.querySelectorAll('[data-range]'),
 };
 
