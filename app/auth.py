@@ -350,6 +350,13 @@ class AuthService:
             ).fetchone()
             return dict(row) if row else None
 
+    def _active_admin_count(self) -> int:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND is_active = 1"
+            ).fetchone()
+            return int(row["count"])
+
     def update_user(self, user_id: int, *, role: str | None = None, is_active: bool | None = None, password: str | None = None) -> dict[str, Any]:
         # Fetch the existing row FIRST so we can (a) fail early on a bad user_id,
         # (b) diff incoming role against the stored role to detect a REAL change,
@@ -359,6 +366,19 @@ class AuthService:
         if not existing:
             raise AuthError("User not found.")
         role_will_change = role is not None and role != existing.get("role")
+        # Last-admin protection: refuse an update that would remove the only
+        # remaining ACTIVE administrator -- by demotion (role -> viewer) or
+        # deactivation (is_active -> False). Without this an admin can lock
+        # every admin-only function (user management, settings, updates) out of
+        # the whole deployment with no UI recovery path.
+        new_role = role if role is not None else str(existing.get("role") or "")
+        new_active = bool(is_active) if is_active is not None else bool(existing.get("is_active"))
+        was_active_admin = str(existing.get("role") or "") == "admin" and bool(existing.get("is_active"))
+        will_be_active_admin = new_role == "admin" and new_active
+        if was_active_admin and not will_be_active_admin and self._active_admin_count() <= 1:
+            raise AuthError(
+                "Cannot remove the last active administrator. Promote another user to admin first."
+            )
         updates: list[str] = []
         params: list[Any] = []
         if role is not None:
@@ -396,7 +416,11 @@ class AuthService:
             # OR password change (stolen-credential mitigation).
             if is_active is False or role_will_change or password:
                 db.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
-            return self.get_user(user_id)  # type: ignore[return-value]
+        # Read AFTER the ``with`` block so the write transaction has committed;
+        # ``get_user`` opens its own connection and (under WAL) would otherwise
+        # read the pre-update snapshot and return stale role/is_active values to
+        # the API response.
+        return self.get_user(user_id)  # type: ignore[return-value]
 
     def update_profile(
         self,
