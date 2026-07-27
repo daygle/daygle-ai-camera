@@ -165,20 +165,36 @@ class EventsMixin:
                 return None
             return self._event_with_detections(db, row)
 
-    def stats(self) -> dict[str, Any]:
+    def stats(self, since: str | None = None) -> dict[str, Any]:
         with self.connect() as db:
-            total_events = db.execute("SELECT COUNT(*) AS count FROM events").fetchone()["count"]
-            total_alerts = db.execute("SELECT COUNT(*) AS count FROM alert_history").fetchone()["count"]
+            since_clause = "AND e.created_at >= ?" if since else ""
+            since_clause_ah = "AND ah.created_at >= ?" if since else ""
+            since_clause_det = "AND e2.created_at >= ?" if since else ""
+
+            # Helper to build params tuple for a given since value
+            def _params(base: tuple[Any, ...] = ()) -> tuple[Any, ...]:
+                return base + ((since,) if since else ())
+
+            total_events = db.execute(
+                f"SELECT COUNT(*) AS count FROM events e WHERE e.dismissed = 0 {since_clause}",
+                _params(),
+            ).fetchone()["count"]
+            total_alerts = db.execute(
+                f"SELECT COUNT(*) AS count FROM alert_history ah {since_clause_ah}",
+                _params(),
+            ).fetchone()["count"]
             sound_detection_events = db.execute(
-                "SELECT COUNT(*) AS count FROM events WHERE source = 'sound'"
+                f"SELECT COUNT(*) AS count FROM events e WHERE e.source = 'sound' AND e.dismissed = 0 {since_clause}",
+                _params(),
             ).fetchone()["count"]
             matched_object_events = db.execute(
-                """
+                f"""
                 SELECT COUNT(DISTINCT e.id) AS count
                 FROM detections d
                 JOIN events e ON e.id = d.event_id
                 WHERE d.label != 'motion'
                   AND e.source != 'sound'
+                  AND e.dismissed = 0
                   AND (
                       EXISTS (SELECT 1 FROM recordings WHERE recordings.event_id = e.id)
                       OR EXISTS (
@@ -187,30 +203,40 @@ class EventsMixin:
                           WHERE ah.event_id = e.id
                       )
                   )
-                """
+                  {since_clause}
+                """,
+                _params(),
             ).fetchone()["count"]
             object_alerts = db.execute(
-                """
+                f"""
                 SELECT COUNT(*) AS count
-                FROM alert_history
-                WHERE event_id IS NULL
-                   OR event_id NOT IN (SELECT id FROM events WHERE source = 'sound')
-                """
+                FROM alert_history ah
+                WHERE ah.event_id IS NULL
+                   OR ah.event_id NOT IN (SELECT id FROM events WHERE source = 'sound')
+                {since_clause_ah}
+                """,
+                _params(),
             ).fetchone()["count"]
             sound_alerts = db.execute(
-                """
+                f"""
                 SELECT COUNT(*) AS count
-                FROM alert_history
-                WHERE event_id IN (SELECT id FROM events WHERE source = 'sound')
-                """
+                FROM alert_history ah
+                WHERE ah.event_id IN (SELECT id FROM events WHERE source = 'sound')
+                {since_clause_ah}
+                """,
+                _params(),
             ).fetchone()["count"]
             labels = db.execute(
-                """
-                SELECT label, COUNT(*) AS count, MAX(confidence) AS max_confidence
-                FROM detections
-                GROUP BY label
+                f"""
+                SELECT d.label, COUNT(*) AS count, MAX(d.confidence) AS max_confidence
+                FROM detections d
+                JOIN events e ON e.id = d.event_id
+                WHERE e.dismissed = 0
+                {since_clause_det}
+                GROUP BY d.label
                 ORDER BY count DESC
-                """
+                """,
+                _params(),
             ).fetchall()
             return {
                 "total_events": total_events,

@@ -281,7 +281,9 @@ function updateDismissButtons() {
 // ─── Stats + activity data loaders ──────────────────────────────────────────
 async function loadStats() {
   try {
-    const stats = await api('/api/stats');
+    const since = getSinceParam();
+    const url = since ? `/api/stats?since=${since}` : '/api/stats';
+    const stats = await api(url);
     els.totalEvents.textContent = stats.matched_object_events ?? stats.total_events ?? 0;
     if (els.soundEvents) els.soundEvents.textContent = stats.sound_detection_events ?? 0;
   } catch (error) {
@@ -373,7 +375,7 @@ els.rangeBtns.forEach((btn) => {
       other.classList.toggle('active', active);
       other.setAttribute('aria-selected', String(active));
     });
-    loadEvents().then(renderActivityFeed).catch(() => {});
+    loadStats().then(() => loadEvents().then(renderActivityFeed)).catch(() => {});
   });
 });
 

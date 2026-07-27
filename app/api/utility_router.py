@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 
 from app.auth_gates import require_admin
 from app.config_facades import effective_ai_config
@@ -18,9 +18,9 @@ router = APIRouter()
 
 
 @router.get('/api/stats')
-def stats(request: Request, cameras_config=Depends(get_cameras_config), db=Depends(get_database)):
+def stats(request: Request, since: str | None = Query(None), cameras_config=Depends(get_cameras_config), db=Depends(get_database)):
     require_admin(request)
-    result = db.stats()
+    result = db.stats(since=since)
     result['total_cameras'] = len(cameras_config)
     return result
 
