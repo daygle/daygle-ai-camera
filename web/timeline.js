@@ -774,9 +774,9 @@ function renderRecordingList(recordings) {
         <span class="timeline-recording-main">
           <span class="timeline-recording-title-row">
             <span class="activity-item-type">${typeLabel}</span>
-            ${confidenceBadges ? confidenceBadges : ''}
             <strong>Recording #${escapeHtml(String(recording.id))}</strong>
           </span>
+          ${confidenceBadges ? `<span class="timeline-recording-confidence-row">${confidenceBadges}</span>` : ''}
           <span>${escapeHtml(start)} - ${escapeHtml(end)} · ${camera}${zoneSuffix}</span>
         </span>
         <span class="timeline-recording-meta">

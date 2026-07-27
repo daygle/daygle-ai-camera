@@ -2070,6 +2070,26 @@ tr.drag-over {
 
 .form-grid .full-width { grid-column: 1 / -1; }
 
+/* Subsection headings/dividers inside a .form-grid need to span every
+   column so they don't get dropped into an individual grid cell. */
+.form-grid .settings-subsection-divider {
+  width: 100%;
+  margin: 8px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+.form-grid .settings-subsection-heading {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text);
+}
+.form-grid .settings-subsection-help {
+  margin: -8px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .form-help {
   margin: 14px 0 0;
   font-size: 13px;
@@ -2393,14 +2413,18 @@ tr.drag-over {
   min-width: 0;
   flex: 1;
 }
-/* Confidence badges share the title row with the activity pill and recording
-   title. Keep them on the same line and let the title shrink/truncate so
-   nothing can overlap. */
-.timeline-recording-title-row .detection {
+/* Confidence badges live on their own row below the title. Keep them
+   compact and separated so the recording item expands cleanly. */
+.timeline-recording-confidence-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+.timeline-recording-confidence-row .detection {
   margin: 0;
   padding: 3px 8px;
   font-size: 11px;
-  flex-shrink: 0;
 }
 .timeline-recording-main > span,
 .timeline-recording-meta {
@@ -2421,17 +2445,6 @@ tr.drag-over {
 }
 .timeline-recording-link:hover {
   text-decoration: underline;
-}
-.timeline-recording-confidence-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 2px;
-}
-.timeline-recording-confidence-row .detection {
-  margin: 0;
-  padding: 3px 8px;
-  font-size: 11px;
 }
 .timeline-recording-confidence {
   display: inline-flex;
