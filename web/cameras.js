@@ -35,15 +35,6 @@ function setMessage(text, isError = false) {
 // The local duplicate + page-local csrfToken were removed so every page shares
 // the same fetch contract.
 
-function buildDisplayUrl(camera) {
-  if (camera.stream_url) return camera.stream_url;
-  if (!camera.host) return '';
-  const auth = camera.username ? `${camera.username}:••••@` : '';
-  const port = camera.port && camera.port !== 554 ? `:${camera.port}` : '';
-  const path = camera.path ? `/${camera.path}` : '/stream1';
-  return `rtsp://${auth}${camera.host}${port}${path}`;
-}
-
 function renderCameraRow(camera, index) {
   const name = escapeHtml(camera.name || camera.id || `Camera ${index + 1}`);
   const id = escapeHtml(camera.id || '');
