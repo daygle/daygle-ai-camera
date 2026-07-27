@@ -263,6 +263,34 @@ class OnnxYoloDetector:
         tensor = np.transpose(tensor, (2, 0, 1))[None, ...]
         return np.ascontiguousarray(tensor), scale, float(left), float(top), original_width, original_height
 
+    @staticmethod
+    def _looks_nms_free(output: np.ndarray) -> bool | None:
+        """Infer the detection-head format from the raw output tensor shape.
+
+        Returns ``True`` for an end-to-end / NMS-free head (``[num_det, 6]``
+        with ``[x1, y1, x2, y2, conf, class]``), ``False`` for a grid head
+        (``[4+nc, num_anchors]``), or ``None`` when the shape is too
+        ambiguous to classify (caller falls back to the configured flag).
+
+        Deriving the format from the actual output makes inference correct
+        regardless of how the model was exported or named: for the shipped
+        COCO-80 model set the two layouts never collide (a grid head's
+        feature dim is 84, never 6; a grid head's anchor count is >=2100
+        even at the smallest supported input, never <=300), so the shape is
+        an authoritative discriminator that does not depend on the
+        filename heuristic in ``_detect_model_type`` being right.
+        """
+        dims = [int(d) for d in np.asarray(output).shape if d != 1]
+        if len(dims) == 1:
+            # A single end-to-end detection can squeeze down to [6].
+            return dims[0] == 6
+        if len(dims) != 2:
+            return None
+        lo, hi = min(dims), max(dims)
+        if lo == 6 and hi < 1000:
+            return True
+        return False
+
     def _postprocess(
         self,
         output: np.ndarray,
@@ -275,11 +303,29 @@ class OnnxYoloDetector:
     ) -> list[dict[str, Any]]:
         if confidence is None:
             confidence = self.confidence
-        
+
+        # Prefer the format implied by the real output shape over the
+        # configured/auto-detected ``nms_free`` flag. This keeps detection
+        # correct even if the flag (or the filename heuristic that seeds it)
+        # disagrees with what the exported model actually produces.
+        shape_nms_free = self._looks_nms_free(output)
+        if shape_nms_free is None:
+            use_nms_free = self._nms_free
+        else:
+            if shape_nms_free != self._nms_free:
+                logger.warning(
+                    'ONNX output shape %s indicates a %s head, but nms_free=%s was configured; '
+                    'using the format implied by the output shape.',
+                    tuple(int(d) for d in np.asarray(output).shape),
+                    'NMS-free' if shape_nms_free else 'grid/NMS',
+                    self._nms_free,
+                )
+            use_nms_free = shape_nms_free
+
         # YOLO26 NMS-free format: output shape [1, 300, 6] with [x1, y1, x2, y2, confidence, class_id]
-        if self._nms_free:
+        if use_nms_free:
             return self._postprocess_nms_free(output, scale, pad_x, pad_y, original_width, original_height, confidence)
-        
+
         # Traditional YOLOv8/YOLO11 format: output shape [1, 4+nc, 8400]
         return self._postprocess_nms(output, scale, pad_x, pad_y, original_width, original_height, confidence)
 
@@ -301,11 +347,20 @@ class OnnxYoloDetector:
         """
         if confidence is None:
             confidence = self.confidence
-            
-        predictions = np.squeeze(output)
-        if predictions.ndim != 2 or predictions.shape[1] != 6:
-            raise ValueError(f"Unexpected YOLO26 output shape: {output.shape}. Expected [1, 300, 6].")
-        
+
+        predictions = np.asarray(output)
+        # Collapse a leading batch axis of 1 (``[1, 300, 6] -> [300, 6]``)
+        # while tolerating the degenerate single-detection case
+        # (``[1, 1, 6] -> [1, 6]``) that a plain ``np.squeeze`` would flatten
+        # to 1-D and then reject.
+        if predictions.ndim == 3 and predictions.shape[0] == 1:
+            predictions = predictions[0]
+        predictions = predictions.reshape(-1, predictions.shape[-1])
+        if predictions.shape[1] != 6:
+            raise ValueError(
+                f"Unexpected NMS-free output shape: {tuple(np.asarray(output).shape)}. Expected [1, N, 6]."
+            )
+
         # Extract components
         boxes = predictions[:, :4]  # [x1, y1, x2, y2] in input-space
         scores = predictions[:, 4]  # confidence

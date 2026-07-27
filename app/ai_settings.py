@@ -99,6 +99,34 @@ YOLO_MODELS: dict[str, dict[str, Any]] = {
 
 logger = logging.getLogger('daygle.ai')
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+MODELS_DIR = BASE_DIR / 'models'
+
+
+def _canonical_models_path(raw: Any, field: str) -> str:
+    """Validate that a model / labels path stays inside ``models/``.
+
+    Accepts a project-relative (``models/yolov8n.onnx``) or absolute path,
+    rejects anything that escapes the models directory (``..`` traversal,
+    absolute paths pointing elsewhere, or the directory itself with no
+    filename), and returns the canonical project-relative string. Raises
+    ``HTTPException(400)`` on rejection so a typo or a malicious path in the
+    free-text Model Path / Labels Path field surfaces a clean error instead
+    of being persisted and silently disabling detection.
+    """
+    text = str(raw or '').strip()
+    if not text:
+        raise HTTPException(status_code=400, detail=f'{field} must not be empty.')
+    candidate = Path(text)
+    resolved = (candidate if candidate.is_absolute() else BASE_DIR / candidate).resolve()
+    models_root = MODELS_DIR.resolve()
+    if resolved == models_root or not resolved.is_relative_to(models_root):
+        raise HTTPException(
+            status_code=400,
+            detail=f'{field} must point to a file inside the models/ directory.',
+        )
+    return str(resolved.relative_to(BASE_DIR))
+
 
 def active_ai_config_source() -> str:
     if _state.database.has_setting('ai'):
@@ -243,7 +271,6 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'gpu_mem_limit',
         'inference_threads',
         'max_concurrent_inferences',
-        'nms_free',
     }
     updated = {key: current.get(key) for key in allowed if key in current}
     for key, value in payload.items():
@@ -299,17 +326,34 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
                 ) from exc
         else:
             updated.pop(field, None)
-    updated['model_path'] = str(
-        updated.get('model_path') or current.get('model_path') or 'models/yolov8n.onnx'
-    )
-    updated['labels_path'] = str(
-        updated.get('labels_path') or current.get('labels_path') or 'models/coco.names'
-    )
-    # Coerce nms_free to boolean if present
-    if 'nms_free' in updated:
-        nms_free_val = updated['nms_free']
-        if isinstance(nms_free_val, str):
-            updated['nms_free'] = nms_free_val.lower() in {'1', 'true', 'yes', 'on'}
-        else:
-            updated['nms_free'] = bool(nms_free_val)
+    raw_model_path = updated.get('model_path') or current.get('model_path') or 'models/yolo11n.onnx'
+    model_path = _canonical_models_path(raw_model_path, 'model_path')
+    # Existence guard, but only when the caller explicitly supplied a *new*
+    # non-empty model_path (typo protection on the settings form / API).
+    # Re-saving the current path, or leaving a not-yet-downloaded default in
+    # place while editing other fields, must still succeed so the UI can show
+    # the MODEL MISSING state rather than blocking the save.
+    if 'model_path' in payload and str(payload.get('model_path') or '').strip():
+        current_canon = ''
+        if current.get('model_path'):
+            try:
+                current_canon = _canonical_models_path(current['model_path'], 'model_path')
+            except HTTPException:
+                current_canon = ''
+        if model_path != current_canon and not (BASE_DIR / model_path).exists():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f'ONNX model file not found: {model_path}. '
+                    'Download the model first, or choose an installed model.'
+                ),
+            )
+    updated['model_path'] = model_path
+    raw_labels_path = updated.get('labels_path') or current.get('labels_path') or 'models/coco.names'
+    updated['labels_path'] = _canonical_models_path(raw_labels_path, 'labels_path')
+    # nms_free is intentionally NOT a persisted setting: the detector derives
+    # the head format at load time from the model filename and, decisively,
+    # from the actual ONNX output shape (see OnnxYoloDetector._postprocess).
+    # Persisting it here only risks a stale flag surviving a model switch, so
+    # it is dropped from the allow-list above.
     return updated

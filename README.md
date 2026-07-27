@@ -305,7 +305,7 @@ To enable ONNX inference:
 
 1. Sign in as an admin.
 2. Open `/onnx`.
-3. Select a model size, then click **Download** to export it locally. YOLOv8n is the default starting point; YOLOv8m or larger is recommended for IR or night-vision cameras.
+3. Select a model size, then click **Download** to export it locally. YOLO11n is the default starting point; YOLO11m/YOLOv8m or larger is recommended for IR or night-vision cameras.
 4. Save AI settings.
 5. Use **Check model**, **Reload detector**, and **Test detector**.
 

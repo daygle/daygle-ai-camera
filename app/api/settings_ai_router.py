@@ -233,6 +233,10 @@ async def update_ai_model(request: Request, db=Depends(get_database)):
     except (TypeError, ValueError):
         imgsz = stored_imgsz
     imgsz = max(32, min(1280, imgsz))
+    # Round to the nearest multiple of 32 (Ultralytics requirement) so the
+    # value we store in installed.json matches the model the export actually
+    # produces, mirroring ``download_ai_model``.
+    imgsz = ((imgsz + 16) // 32) * 32
     # Audit-log gate (audit-trail finding): same shape as
     # ``download_ai_model`` so the admin actions for the matching
     # model endpoint is traceable.
