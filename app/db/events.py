@@ -64,6 +64,23 @@ class EventsMixin:
                 )
             return event_id
 
+    @staticmethod
+    def _purge_event_children(db: sqlite3.Connection, event_ids: list[int]) -> None:
+        """Remove rows that reference the given events, mirroring the schema's
+        declared ``ON DELETE CASCADE`` (detections, alert_history) and
+        ``ON DELETE SET NULL`` (recordings.event_id). SQLite does not enforce
+        those actions because ``PRAGMA foreign_keys`` is off per connection, so
+        without this a deleted event orphans its detections and leaves its
+        alert_history rows -- which still surface in ``/api/alerts``. Call inside
+        the same transaction, BEFORE deleting the ``events`` rows."""
+        if not event_ids:
+            return
+        placeholders = ','.join('?' * len(event_ids))
+        params = [int(eid) for eid in event_ids]
+        db.execute(f"DELETE FROM detections WHERE event_id IN ({placeholders})", params)
+        db.execute(f"DELETE FROM alert_history WHERE event_id IN ({placeholders})", params)
+        db.execute(f"UPDATE recordings SET event_id = NULL WHERE event_id IN ({placeholders})", params)
+
     def delete_event(self, event_id: int) -> dict[str, Any] | None:
         with self.connect() as db:
             row = db.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
@@ -71,12 +88,19 @@ class EventsMixin:
                 return None
             event = dict(row)
             event["metadata"] = json.loads(event.get("metadata") or "{}")
+            self._purge_event_children(db, [int(event_id)])
             db.execute("DELETE FROM events WHERE id = ?", (event_id,))
             return event
 
     def delete_all_events(self) -> int:
         with self.connect() as db:
             count = db.execute("SELECT COUNT(*) AS count FROM events").fetchone()["count"]
+            # Mirror the declared CASCADE / SET NULL (foreign_keys is off): every
+            # detection and alert_history row references an event, so clear them,
+            # and detach any recordings that pointed at a now-deleted event.
+            db.execute("DELETE FROM detections")
+            db.execute("DELETE FROM alert_history")
+            db.execute("UPDATE recordings SET event_id = NULL")
             db.execute("DELETE FROM events")
             return int(count)
 

@@ -245,6 +245,32 @@ class EventDatabase(
             # the host class inherits.
             self.backfill_recording_labels(db)
 
+            # One-time cleanup of rows orphaned before the delete paths mirrored
+            # the schema's referential actions. SQLite never enforced the declared
+            # ON DELETE CASCADE / SET NULL (foreign_keys is off per connection),
+            # so historical deletes left behind recording_labels / detections /
+            # alert_history rows and dangling event/recording references. Each
+            # statement only touches rows whose parent no longer exists, so it is
+            # a safe no-op once the database is consistent (and on fresh installs).
+            # ``id`` columns are PRIMARY KEYs and never NULL, so the ``NOT IN``
+            # subqueries have no NULL-elimination pitfall.
+            db.executescript(
+                """
+                DELETE FROM recording_labels
+                    WHERE recording_id NOT IN (SELECT id FROM recordings);
+                DELETE FROM detections
+                    WHERE event_id NOT IN (SELECT id FROM events);
+                DELETE FROM alert_history
+                    WHERE event_id NOT IN (SELECT id FROM events);
+                UPDATE recordings SET event_id = NULL
+                    WHERE event_id IS NOT NULL
+                      AND event_id NOT IN (SELECT id FROM events);
+                UPDATE alert_history SET recording_id = NULL
+                    WHERE recording_id IS NOT NULL
+                      AND recording_id NOT IN (SELECT id FROM recordings);
+                """
+            )
+
             # ── Immutable audit log triggers ────────────────────────────────
             # These SQLite triggers are the last line of defense for the
             # append-only audit log. They must be created AFTER the tables
