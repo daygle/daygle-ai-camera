@@ -182,7 +182,7 @@ def test_continuous_kind_emit_diagnostic_on_hang(tmp_path):
 
 def test_diagnostic_callback_exception_is_swallowed(tmp_path):
     """Worker hung, but ``diagnostic_callback`` raises. ``_stop_worker``
-    debug-logs and continues \u2014 a misbehaving callback must not crash
+    debug-logs and continues - a misbehaving callback must not crash
     the shutdown path."""
     service = RecordingService(
         {"storage": {"recordings_dir": str(tmp_path / "rec")}, "recording": {}}
@@ -249,7 +249,7 @@ def test_missing_diagnostic_callback_falls_back_to_logger_warning(tmp_path, capl
 
 
 def test_clean_exit_does_not_emit_diagnostic(tmp_path):
-    """Worker honors ``stop_event`` and exits within ``join_timeout`` \u2014
+    """Worker honors ``stop_event`` and exits within ``join_timeout`` -
     no diagnostic should fire."""
     service = RecordingService(
         {"storage": {"recordings_dir": str(tmp_path / "rec")}, "recording": {}}
@@ -292,7 +292,7 @@ def test_prebuffer_worker_dict_carries_diagnostic_metadata_for_later_stop(tmp_pa
     """The ``_ensure_prebuffer_worker`` worker entry must include
     ``camera_id`` AND ``diagnostic_callback`` so a later stop (which
     routes through ``_stop_worker``) can emit a useful diagnostic on hang.
-    We don't actually stop here \u2014 just verify the dict shape so we know
+    We don't actually stop here - just verify the dict shape so we know
     ``_stop_worker`` will see the right context."""
     import app.recordings as recordings_module
     from app.recordings import RecordingService
