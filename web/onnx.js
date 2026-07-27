@@ -120,6 +120,7 @@ function renderStatus(status) {
     safeHtml`<div><span>Detector Loaded</span><strong>${yesNo(status.detector_loaded)}</strong></div>`,
     safeHtml`<div><span>Active Config Source</span><strong>${displayValue(status.active_config_source, 'None')}</strong></div>`,
     safeHtml`<div><span>Mode</span><strong class="ai-mode ${String(status.mode || '').toLowerCase().replace(/\s+/g, '-')}">${displayValue(status.mode, 'None')}</strong></div>`,
+    safeHtml`<div><span>Model Resolution</span><strong>${status.model_input_size || 'N/A'}</strong></div>`,
     safeHtml`<div class="wide"><span>Last Detector Error</span><strong>${displayValue(status.last_detector_error, 'None')}</strong></div>`,
   ];
   statusPanel.innerHTML = rows.join('');

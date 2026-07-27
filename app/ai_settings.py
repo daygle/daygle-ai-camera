@@ -174,6 +174,14 @@ def ai_status_payload(
         ),
         None,
     )
+    # Read the model's actual input dimensions from the detector.
+    # The detector overrides configured input_size with the model's
+    # real shape at load time, so this is the ground truth.
+    detector_input_w = getattr(_state.detector, 'input_width', None)
+    detector_input_h = getattr(_state.detector, 'input_height', None)
+    model_input_size = None
+    if model_loaded and detector_input_w and detector_input_h:
+        model_input_size = f'{detector_input_w}\u00d7{detector_input_h}'
     return {
         'active_backend': active_backend,
         'configured_backend': configured_backend,
@@ -189,6 +197,7 @@ def ai_status_payload(
         'error': error,
         'last_detector_error': error,
         'active_config_source': active_ai_config_source(),
+        'model_input_size': model_input_size,
     }
 
 
