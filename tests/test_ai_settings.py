@@ -544,7 +544,7 @@ def test_validate_ai_settings_picks_up_default_model_path_when_missing(monkeypat
         effective_ai_config_value={},
     )
     out = ais.validate_ai_settings({})
-    assert out['model_path'] == 'models/yolov8n.onnx'
+    assert out['model_path'] == 'models/yolo11n.onnx'
     assert out['labels_path'] == 'models/coco.names'
 
 

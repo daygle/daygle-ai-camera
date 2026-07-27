@@ -271,7 +271,6 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'gpu_mem_limit',
         'inference_threads',
         'max_concurrent_inferences',
-        'nms_free',
     }
     updated = {key: current.get(key) for key in allowed if key in current}
     for key, value in payload.items():
@@ -327,7 +326,7 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
                 ) from exc
         else:
             updated.pop(field, None)
-    raw_model_path = updated.get('model_path') or current.get('model_path') or 'models/yolov8n.onnx'
+    raw_model_path = updated.get('model_path') or current.get('model_path') or 'models/yolo11n.onnx'
     model_path = _canonical_models_path(raw_model_path, 'model_path')
     # Existence guard, but only when the caller explicitly supplied a *new*
     # non-empty model_path (typo protection on the settings form / API).
@@ -352,11 +351,9 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     updated['model_path'] = model_path
     raw_labels_path = updated.get('labels_path') or current.get('labels_path') or 'models/coco.names'
     updated['labels_path'] = _canonical_models_path(raw_labels_path, 'labels_path')
-    # Coerce nms_free to boolean if present
-    if 'nms_free' in updated:
-        nms_free_val = updated['nms_free']
-        if isinstance(nms_free_val, str):
-            updated['nms_free'] = nms_free_val.lower() in {'1', 'true', 'yes', 'on'}
-        else:
-            updated['nms_free'] = bool(nms_free_val)
+    # nms_free is intentionally NOT a persisted setting: the detector derives
+    # the head format at load time from the model filename and, decisively,
+    # from the actual ONNX output shape (see OnnxYoloDetector._postprocess).
+    # Persisting it here only risks a stale flag surviving a model switch, so
+    # it is dropped from the allow-list above.
     return updated
