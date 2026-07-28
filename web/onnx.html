@@ -67,25 +67,23 @@
             <option value="false">Disabled</option>
           </select></label>
         <label>
-          <span>Backend <span class="info-tip" data-tip="Inference backend. ONNX Runtime is the recommended option. Default: ONNX" title="Inference backend. ONNX Runtime is the recommended option. Default: ONNX" tabindex="0" aria-label="Help: Inference backend. ONNX Runtime is the recommended option. Default: ONNX"></span></span>
-          <select name="backend">
-            <option value="onnx">ONNX</option>
-          </select></label>
-        <label>
           <span>Device <span class="info-tip" data-tip="Inference device. Auto detects a CUDA GPU at startup and falls back to CPU. Default: Auto" title="Inference device. Auto detects a CUDA GPU at startup and falls back to CPU. Default: Auto" tabindex="0" aria-label="Help: Inference device. Auto detects a CUDA GPU at startup and falls back to CPU. Defa..."></span></span>
           <select name="device">
-            <option value="auto">Auto (use GPU if available)</option>
+            <option value="auto">Auto (Use GPU If Available)</option>
             <option value="cuda">CUDA (GPU)</option>
             <option value="cpu">CPU</option>
           </select></label>
         <label>
-          <span>GPU Memory Limit (GiB) <span class="info-tip" data-tip="Maximum GPU memory ONNX Runtime may use. Leaving headroom prevents cuBLAS allocation errors. 0 = unlimited (default)." title="Maximum GPU memory ONNX Runtime may use. Leaving headroom prevents cuBLAS allocation errors. 0 = unlimited (default)." tabindex="0" aria-label="Help: Maximum GPU memory ONNX Runtime may use. Leaving headroom prevents cuBLAS alloca..."></span></span>
-          <input name="gpu_mem_limit_gb" type="number" min="0" max="128" step="0.5" placeholder="0" /></label>
+          <span>Concurrent Cameras <span class="info-tip" data-tip="How many cameras can run ONNX inference at the same time. Default: 1 (serialised). Set to your camera count so each camera gets its own inference slot - prevents one slow camera blocking another." title="How many cameras can run ONNX inference at the same time. Default: 1 (serialised). Set to your camera count so each camera gets its own inference slot - prevents one slow camera blocking another." tabindex="0" aria-label="Help: How many cameras can run ONNX inference at the same time. Default: 1 (serialised..."></span></span>
+          <input name="max_concurrent_inferences" type="number" min="1" max="16" step="1" placeholder="1" /></label>
+        <hr class="settings-subsection-divider full-width" />
+        <h3 class="settings-subsection-heading full-width">Advanced</h3>
+        <p class="settings-subsection-help muted full-width">Optional inference tuning that works on its defaults - most setups never need to touch these. Change one at a time so you can attribute any per-frame impact. Model and labels paths are managed by the Model Library above.</p>
         <label>
           <span>Precision <span class="info-tip" data-tip="Inference precision. fp32 = full precision (default). int8 = CPU-only dynamic quantization - ~4x smaller model, ~1-2 mAP cost, biggest CPU performance win. fp16 = CUDA only; silently falls back to fp32 on CPU hosts." title="Inference precision. fp32 = full precision (default). int8 = CPU-only dynamic quantization - ~4x smaller model, ~1-2 mAP cost, biggest CPU performance win. fp16 = CUDA only; silently falls back to fp32 on CPU hosts." tabindex="0" aria-label="Help: Inference precision. fp32 = full precision (default). int8 = CPU-only dynamic quantization about 4x smaller model and about 1-2 mAP cost, biggest CPU performance win. fp16 = CUDA only silently falls back to fp32 on CPU hosts."></span></span>
           <select name="precision">
             <option value="fp32">FP32 - Full Precision</option>
-            <option value="fp16">FP16 - CUDA Only (falls back to FP32 on CPU)</option>
+            <option value="fp16">FP16 - CUDA Only (Falls Back To FP32 On CPU)</option>
             <option value="int8">INT8 - Quantized (CPU)</option>
           </select></label>
         <label>
@@ -95,30 +93,27 @@
           <span>Inference Threads <span class="info-tip" data-tip="CPU threads used per inference run. Leave blank to auto-detect (up to 4). Increasing this speeds up each inference but uses more CPU per camera." title="CPU threads used per inference run. Leave blank to auto-detect (up to 4). Increasing this speeds up each inference but uses more CPU per camera." tabindex="0" aria-label="Help: CPU threads used per inference run. Leave blank to auto-detect (up to 4). Increa..."></span></span>
           <input name="inference_threads" type="number" min="1" max="32" step="1" placeholder="Auto" /></label>
         <label>
-          <span>Concurrent Cameras <span class="info-tip" data-tip="How many cameras can run ONNX inference at the same time. Default: 1 (serialised). Set to your camera count so each camera gets its own inference slot - prevents one slow camera blocking another." title="How many cameras can run ONNX inference at the same time. Default: 1 (serialised). Set to your camera count so each camera gets its own inference slot - prevents one slow camera blocking another." tabindex="0" aria-label="Help: How many cameras can run ONNX inference at the same time. Default: 1 (serialised..."></span></span>
-          <input name="max_concurrent_inferences" type="number" min="1" max="16" step="1" placeholder="1" /></label>
-        <label>
-          <span>Model Path <span class="info-tip" data-tip="Path to the ONNX model file. Use Download &amp;amp; Install above, or set manually. Default: models/yolo11n.onnx" title="Path to the ONNX model file. Use Download &amp;amp; Install above, or set manually. Default: models/yolo11n.onnx" tabindex="0" aria-label="Help: Path to the ONNX model file. Use Download &amp; Install above, or set manually. ..."></span></span>
-          <input name="model_path" /></label>
-        <label>
-          <span>Labels Path <span class="info-tip" data-tip="Path to the text file containing one object label per line. Default: models/coco.names" title="Path to the text file containing one object label per line. Default: models/coco.names" tabindex="0" aria-label="Help: Path to the text file containing one object label per line. Default: models/coco..."></span></span>
-          <input name="labels_path" /></label>
-        <hr class="settings-subsection-divider full-width" />
-        <h3 class="settings-subsection-heading full-width">Advanced</h3>
-        <p class="settings-subsection-help muted full-width">Optional inference tuning. Change one at a time so you can attribute any per-frame impact.</p>
+          <span>GPU Memory Limit (GiB) <span class="info-tip" data-tip="Maximum GPU memory ONNX Runtime may use. Leaving headroom prevents cuBLAS allocation errors. 0 = unlimited (default)." title="Maximum GPU memory ONNX Runtime may use. Leaving headroom prevents cuBLAS allocation errors. 0 = unlimited (default)." tabindex="0" aria-label="Help: Maximum GPU memory ONNX Runtime may use. Leaving headroom prevents cuBLAS alloca..."></span></span>
+          <input name="gpu_mem_limit_gb" type="number" min="0" max="128" step="0.5" placeholder="0" /></label>
         <label>
           <span>Execution Mode <span class="info-tip" data-tip="ONNX Runtime executor mode (CPU path only). Parallel is the default and matches prior behavior. Sequential may be faster on small graphs because ORT already parallelizes within each op. A/B test on your hardware. Default: parallel" title="ONNX Runtime executor mode (CPU path only). Parallel is the default and matches prior behavior. Sequential may be faster on small graphs because ORT already parallelizes within each op. A/B test on your hardware. Default: parallel" tabindex="0" aria-label="Help: ONNX Runtime executor mode CPU path only. Parallel is the default and matches prior behavior. Sequential may be faster on small graphs because ORT already parallelizes within each op. A/B test on your hardware. Default: parallel"></span></span>
           <select name="execution_mode">
-            <option value="parallel">Parallel (default)</option>
+            <option value="parallel">Parallel (Default)</option>
             <option value="sequential">Sequential</option>
           </select></label>
         <label>
           <span>NMS Dedupe <span class="info-tip" data-tip="Class-aware NMS dedupe pass. Auto (recommended): skips it for NMS-free YOLO26 models (they dedupe in the model head) and keeps it for YOLOv8/YOLO11. Skip: confidence threshold only. Force: always run the dedupe. The IoU Threshold above only applies when this dedupe actually runs." title="Class-aware NMS dedupe pass. Auto (recommended): skips it for NMS-free YOLO26 models (they dedupe in the model head) and keeps it for YOLOv8/YOLO11. Skip: confidence threshold only. Force: always run the dedupe. The IoU Threshold above only applies when this dedupe actually runs." tabindex="0" aria-label="Help: Class-aware NMS dedupe pass. Auto recommended skips it for NMS-free YOLO26 models they dedupe in the model head and keeps it for YOLOv8/YOLO11. Skip confidence threshold only. Force always run the dedupe. The IoU Threshold above only applies when this dedupe actually runs."></span></span>
           <select name="confidence_only_nms">
-            <option value="auto">Auto (recommended)</option>
-            <option value="on">Skip (confidence only)</option>
-            <option value="off">Force class-aware NMS</option>
+            <option value="auto">Auto (Recommended)</option>
+            <option value="on">Skip (Confidence Only)</option>
+            <option value="off">Force Class-Aware NMS</option>
           </select></label>
+        <label>
+          <span>Model Path <span class="info-tip" data-tip="Path to the active ONNX model file. Managed by the Model Library above - use Download &amp;amp; Install or the Use button to change it. Default: models/yolo11n.onnx" title="Path to the active ONNX model file. Managed by the Model Library above - use Download &amp;amp; Install or the Use button to change it. Default: models/yolo11n.onnx" tabindex="0" aria-label="Help: Path to the active ONNX model file. Managed by the Model Library above. Default: models/yolo11n.onnx"></span></span>
+          <input name="model_path" readonly /></label>
+        <label>
+          <span>Labels Path <span class="info-tip" data-tip="Path to the text file containing one object label per line. Managed alongside the model. Default: models/coco.names" title="Path to the text file containing one object label per line. Managed alongside the model. Default: models/coco.names" tabindex="0" aria-label="Help: Path to the text file containing one object label per line. Managed alongside the model. Default: models/coco.names"></span></span>
+          <input name="labels_path" readonly /></label>
       </form>
       <div class="button-row">
         <button type="submit" form="aiSettingsForm">Save ONNX Settings</button>

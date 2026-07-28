@@ -2155,6 +2155,13 @@ tr.drag-over {
   line-height: 1.55;
 }
 
+/* Read-only fields (e.g. Model/Labels Path managed by the Model Library)
+   still submit their value but should read as display-only, not editable. */
+.form-grid input[readonly] {
+  opacity: 0.7;
+  cursor: default;
+}
+
 .modal-tab-panel .form-grid {
   margin-top: 0;
 }
