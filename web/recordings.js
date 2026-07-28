@@ -325,11 +325,9 @@ function renderRecordings(recordings) {
           <div class="activity-item-badges">${badges}</div>
         </div>
         <div class="recording-row-actions">
-          <button class="secondary" data-play-recording="${recording.id}" ${mediaReady ? '' : 'disabled'}>
-            ${mediaReady
-              ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg> Play'
-              : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Preparing...'}
-          </button>
+          ${mediaReady
+            ? `<a class="secondary" href="/recordings/${recording.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg> Play</a>`
+            : '<button class="secondary" disabled><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Preparing...</button>'}
           <button class="secondary delete-btn" data-delete-recording="${recording.id}" aria-label="Delete recording #${recording.id}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
             Delete
@@ -697,11 +695,15 @@ function nudgeClipTime(deltaSeconds) {
 // ── End clip segment timeline ───────────────────────────────────────────────
 
 function openVideoModal() {
+  // On the dedicated /recordings/{id} page there is no modal — the player is
+  // rendered inline and always visible — so this is a no-op there.
+  if (!els.videoModal) return;
   els.videoModal.hidden = false;
-  els.videoModalClose.focus();
+  els.videoModalClose?.focus();
 }
 
 function closeVideoModal() {
+  if (!els.videoModal) return;
   els.videoModal.hidden = true;
   els.clipPlayer.pause();
   stopOverlayRaf();
@@ -760,9 +762,8 @@ async function playRecording(id) {
 }
 
 function bindRecordingButtons() {
-  document.querySelectorAll('[data-play-recording]').forEach((button) => {
-    button.addEventListener('click', () => playRecording(button.dataset.playRecording));
-  });
+  // "Play" is now an anchor to /recordings/{id} (deep-linkable), so no click
+  // handler is wired for it here — only the delete action needs JS.
   document.querySelectorAll('[data-delete-recording]').forEach((button) => {
     button.addEventListener('click', async () => {
       const id = button.dataset.deleteRecording;
@@ -786,7 +787,9 @@ async function loadAuth() {
   // shared daygleAuthReady promise here means this page never issues its
   // own duplicate /api/auth/me on bootstrap.
   await window.daygleAuthReady;
-  if (window.daygleAuth.user?.role === 'admin') {
+  // The "Delete all" button only exists on the list page, not the dedicated
+  // playback page, so guard its presence before wiring it up.
+  if (window.daygleAuth.user?.role === 'admin' && els.deleteAllRecordingsBtn) {
     els.deleteAllRecordingsBtn.hidden = false;
     els.deleteAllRecordingsBtn.addEventListener('click', async () => {
       if (!confirm('Delete ALL recordings and media files? Settings, users, and rules will not be changed.')) return;
@@ -882,6 +885,10 @@ async function loadRecordings(filters = {}) {
   return recordings;
 }
 
+// Player/overlay/timeline wiring only applies where the video element exists:
+// the playback page and (legacy) the list modal. The list page without a modal
+// skips all of it.
+if (els.clipPlayer) {
 els.clipPlayer.addEventListener('error', () => {
   const error = els.clipPlayer.error;
   const messages = {
@@ -954,6 +961,7 @@ if (els.clipOverlayToggle) {
     drawClipOverlay();
   });
 }
+} // end if (els.clipPlayer)
 
 els.cameraFilter?.addEventListener('change', () => {
   loadRecordings().catch((error) => {
@@ -974,7 +982,7 @@ els.filterForm?.addEventListener('submit', (event) => {
     if (els.listStatus) els.listStatus.textContent = error.message;
   });
 });
-els.recordingClearBtn.addEventListener('click', () => {
+els.recordingClearBtn?.addEventListener('click', () => {
   if (els.labelFilter) els.labelFilter.value = '';
   if (els.cameraFilter) els.cameraFilter.value = '';
   if (els.recordingDateFrom) els.recordingDateFrom.value = '';
@@ -1039,11 +1047,11 @@ function populateLabelFilterOptions(recordings) {
   els.labelFilter.value = availableValues.has(currentFilter) ? currentFilter : '';
 }
 
-els.videoModalClose.addEventListener('click', () => closeVideoModal());
+els.videoModalClose?.addEventListener('click', () => closeVideoModal());
 
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !els.videoModal.hidden) closeVideoModal();
+  if (event.key === 'Escape' && els.videoModal && !els.videoModal.hidden) closeVideoModal();
 });
 
 // Re-render the recordings list (and any open modal's "Started" line) when
@@ -1062,13 +1070,31 @@ window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
   loadRecordings().catch((error) => { els.listStatus.textContent = error.message; });
 };
 
-loadAuth().then(async () => {
-  await Promise.all([loadCameras(), loadLiveSettings()]);
-  await populateLabelFilterOptionsFromApi();
-  await loadRecordings();
-  const selected = new URLSearchParams(window.location.search).get('recording_id');
-  if (selected) playRecording(encodeURIComponent(selected)).catch((error) => { els.listStatus.textContent = error.message; });
-}).catch((error) => {
-  if (els.listStatus) els.listStatus.textContent = error.message;
-  window.showToast?.(error.message, true);
-});
+const playbackPageMatch = window.location.pathname.match(/^\/recordings\/(\d+)$/);
+if (playbackPageMatch) {
+  // Dedicated playback page (/recordings/{id}): load the single recording and
+  // render it inline. loadLiveSettings feeds the overlay's configured-label
+  // filter exactly as it does on the list page.
+  loadAuth().then(async () => {
+    await loadLiveSettings();
+    await playRecording(playbackPageMatch[1]);
+  }).catch((error) => {
+    if (els.clipPlayerStatus) els.clipPlayerStatus.textContent = error.message;
+    window.showToast?.(error.message, true);
+  });
+} else {
+  // Recordings list page.
+  loadAuth().then(async () => {
+    await Promise.all([loadCameras(), loadLiveSettings()]);
+    await populateLabelFilterOptionsFromApi();
+    await loadRecordings();
+    // Preserve legacy ?recording_id= deep links by forwarding to the page.
+    const selected = new URLSearchParams(window.location.search).get('recording_id');
+    if (selected && /^\d+$/.test(String(selected))) {
+      window.location.assign(`/recordings/${encodeURIComponent(selected)}`);
+    }
+  }).catch((error) => {
+    if (els.listStatus) els.listStatus.textContent = error.message;
+    window.showToast?.(error.message, true);
+  });
+}

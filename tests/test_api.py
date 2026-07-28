@@ -1046,6 +1046,34 @@ def _setup_admin(client: LocalClient, username: str = "admin", password: str = "
     assert LocalClient.header(headers, "Location") == "/login"
 
 
+def test_recording_playback_page_route(tmp_path, monkeypatch):
+    """/recordings/{id} serves the dedicated playback page, without shadowing the
+    literal /recordings/timeline route or matching non-numeric ids."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        _login(client)
+        # A numeric id serves the dedicated playback page.
+        status, _headers, body = client.request('/recordings/482')
+        assert status == 200
+        assert 'id="clipPlayer"' in body
+        assert '<title>Playback - Daygle AI Camera</title>' in body
+        # The literal /recordings/timeline route still wins (int converter +
+        # declaration order), serving the timeline page rather than the player.
+        status, _headers, timeline_body = client.request('/recordings/timeline')
+        assert status == 200
+        assert '<title>Timeline - Daygle AI Camera</title>' in timeline_body
+        assert '<title>Playback - Daygle AI Camera</title>' not in timeline_body
+        # A non-numeric id must not match the playback route.
+        status, _headers, _ = client.request('/recordings/not-a-number', follow_redirects=False)
+        assert status == 404
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def _login(client: LocalClient, username: str = "admin", password: str = "Admin123!") -> str:
     status, _headers, _body_text = client.request("/login")
     assert status == 200
