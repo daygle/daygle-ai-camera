@@ -15,7 +15,7 @@ Use **Camera Log** (`/camera-log`) to investigate operational issues. The log in
 - `camera_offline` and `camera_online` transitions.
 - `detection_backoff` and `detection_recovered` events.
 - `capture_failed` events.
-- `prebuffer_fallback`, `prebuffer_degenerate`, and `prebuffer_restart` recording events.
+- `prebuffer_fallback`, `prebuffer_short_preroll`, `prebuffer_degenerate`, and `prebuffer_restart` recording events. A `prebuffer_short_preroll` warning means an event clip captured less pre-event footage than configured because the rolling buffer had not filled yet (common right after saving recording settings, a camera reconnect, or the camera first coming online); it recovers on its own once the buffer refills.
 
 Filter by camera ID, event type, or severity when investigating a specific stream. The newest diagnostic events are listed first.
 
