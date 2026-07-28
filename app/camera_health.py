@@ -106,7 +106,7 @@ from typing import Any
 import app.state as _state
 from app.config_facades import effective_email_alert_settings, effective_push_notification_settings
 from app.diagnostics import log_camera_diagnostic
-from app.email_alerts import EmailAlertService, _encode_subject
+from app.email_alerts import EmailAlertService, _encode_subject, _stamp_originator_headers
 from app.push_notifications import PushNotificationService
 
 logger = logging.getLogger('daygle.ai')
@@ -258,6 +258,7 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
                                 msg['Subject'] = _encode_subject(title)
                                 msg['From'] = str(email_settings_obj.get('from_address'))
                                 msg['To'] = recipient
+                                _stamp_originator_headers(msg, str(email_settings_obj.get('from_address') or ''))
                                 try:
                                     # ``mailer._deliver`` returns the smtp
                                     # it ended up using; swap

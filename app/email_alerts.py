@@ -8,6 +8,7 @@ from email.message import Message
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formatdate, make_msgid
 from html import escape
 from typing import Any, Iterator
 
@@ -42,6 +43,29 @@ def _encode_subject(subject: str) -> str:
     if any(ord(c) > 127 for c in subject):
         return Header(subject, 'utf-8').encode()
     return subject
+
+
+def _stamp_originator_headers(message: Message, from_address: str) -> None:
+    """Add the RFC 5322 originator headers ``smtplib.send_message`` omits.
+
+    ``send_message`` never adds a ``Date`` header, yet RFC 5322 §3.6 makes
+    the origination date a MUST -- a message without one is non-conformant
+    and is a well-known spam-filter signal (Gmail / Outlook down-rank it).
+    ``Message-ID`` is a SHOULD and additionally helps deliverability,
+    threading, and receiver-side de-duplication.
+
+    The ``Message-ID`` domain is derived from the sender address so it
+    aligns with the ``From:`` domain (better for DKIM/SPF alignment and
+    it avoids leaking the local host FQDN); it falls back to
+    ``make_msgid``'s default only when the sender has no usable domain.
+    Both headers are added only when absent so callers that set their own
+    are never overwritten.
+    """
+    if 'Date' not in message:
+        message['Date'] = formatdate(localtime=True)
+    if 'Message-ID' not in message:
+        domain = from_address.rsplit('@', 1)[-1].strip() if '@' in from_address else ''
+        message['Message-ID'] = make_msgid(domain=domain or None)
 
 
 class EmailAlertService:
@@ -107,14 +131,14 @@ class EmailAlertService:
             str(alert.get("message") or "Alert triggered."),
             "",
             f"Camera: {camera_line}",
-            f"Rule: {alert.get('rule_name')}",
+            f"Rule: {alert.get('rule_name') or ''}",
         ]
         if detected_at_display:
             plain_lines.append(f"Detected at: {detected_at_display}")
         if all_triggers_line:
             plain_lines.append(all_triggers_line)
         plain_lines.extend([
-            f"Trigger: {alert.get('label')}",
+            f"Trigger: {alert.get('label') or ''}",
             f"Confidence: {float(alert.get('confidence') or 0):.2%}",
             f"Event ID: {event_id}",
         ])
@@ -212,6 +236,7 @@ class EmailAlertService:
                         message['Subject'] = _encode_subject(subject)
                         message['From'] = str(self.settings.get('from_address'))
                         message['To'] = recipient
+                        _stamp_originator_headers(message, str(self.settings.get('from_address') or ''))
                         try:
                             # ``_deliver`` returns the smtp it ended up using;
                             # swap ``active_smtp`` to the returned handle so
@@ -267,6 +292,7 @@ class EmailAlertService:
         message['Subject'] = _encode_subject("Daygle AI Camera test email")
         message['From'] = str(self.settings.get('from_address'))
         message['To'] = recipient
+        _stamp_originator_headers(message, str(self.settings.get('from_address') or ''))
         self._deliver(message)
 
     def _deliver(
