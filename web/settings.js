@@ -160,41 +160,70 @@ function setMessage(text, isError = false) {
   if (text) window.showToast?.(text, isError);
 }
 
+// Wraps an async handler so the "if api() is doing a 401 redirect, bail;
+// otherwise surface the error" tail lives in one place instead of being
+// repeated in every submit/click handler on the page.
+function guard(fn) {
+  return async (...args) => {
+    try {
+      await fn(...args);
+    } catch (error) {
+      if (window.daygleAuth?.redirecting) return;
+      setMessage(error.message, true);
+    }
+  };
+}
+
 function fillForm(form, values) {
   for (const [key, value] of Object.entries(values || {})) {
     if (form.elements[key]) form.elements[key].value = String(value ?? '');
   }
 }
 
-function payloadFor(form) {
-  const data = Object.fromEntries(new FormData(form).entries());
-  for (const key of ['enabled', 'continuous', 'auto_purge_enabled', 'background_detection_enabled']) if (key in data) data[key] = data[key] === 'true';
-  for (const key of ['width', 'height', 'fps', 'port', 'pre_event_seconds', 'post_event_seconds', 'extension_step_seconds', 'max_clip_seconds', 'retention_days', 'max_storage_gb', 'max_login_attempts', 'lockout_minutes']) {
-    if (key in data && data[key] !== '') data[key] = Number.parseInt(data[key], 10);
+// Declarative field types. A form's payload is derived by looking each field
+// up here instead of maintaining a parallel list of keys per coercion kind.
+// To add a setting, add its name to the matching set once.
+const FIELD_TYPES = {
+  boolean: new Set([
+    'enabled', 'continuous', 'auto_purge_enabled', 'background_detection_enabled',
+    'use_tls', 'use_ssl',
+  ]),
+  integer: new Set([
+    'width', 'height', 'fps', 'port', 'pre_event_seconds', 'post_event_seconds',
+    'extension_step_seconds', 'max_clip_seconds', 'retention_days', 'max_storage_gb',
+    'max_login_attempts', 'lockout_minutes', 'snapshot_refresh_ms',
+    'detection_status_refresh_ms', 'motion_pixel_threshold',
+    'periodic_scan_interval_seconds', 'motion_frame_width', 'motion_frame_height',
+    'ingest_frame_fps', 'offline_delay_minutes',
+  ]),
+  number: new Set([
+    'detection_interval_seconds', 'event_debounce_seconds', 'detection_history_minutes',
+    'motion_gate_fraction', 'motion_scale_fraction', 'motion_background_alpha',
+    'min_confidence', 'session_timeout_hours',
+  ]),
+  csv: new Set(['vehicle_labels']),
+};
+
+// Coerce a raw FormData object into the typed payload the API expects.
+// Booleans and CSV lists always convert; numbers are left untouched when blank
+// so an empty field is not sent as 0.
+function coercePayload(data) {
+  for (const [key, value] of Object.entries(data)) {
+    if (FIELD_TYPES.boolean.has(key)) data[key] = value === 'true';
+    else if (FIELD_TYPES.csv.has(key)) data[key] = String(value).split(',').map((item) => item.trim()).filter(Boolean);
+    else if (value === '') continue;
+    else if (FIELD_TYPES.integer.has(key)) data[key] = Number.parseInt(value, 10);
+    else if (FIELD_TYPES.number.has(key)) data[key] = Number(value);
   }
-  for (const key of ['snapshot_refresh_ms', 'detection_status_refresh_ms']) {
-    if (key in data && data[key] !== '') data[key] = Number.parseInt(data[key], 10);
-  }
-  if ('detection_interval_seconds' in data && data.detection_interval_seconds !== '') data.detection_interval_seconds = Number(data.detection_interval_seconds);
-  if ('event_debounce_seconds' in data && data.event_debounce_seconds !== '') data.event_debounce_seconds = Number(data.event_debounce_seconds);
-  if ('detection_history_minutes' in data && data.detection_history_minutes !== '') data.detection_history_minutes = Number(data.detection_history_minutes);
-  for (const key of ['motion_pixel_threshold', 'periodic_scan_interval_seconds', 'motion_frame_width', 'motion_frame_height', 'ingest_frame_fps']) {
-    if (key in data && data[key] !== '') data[key] = Number.parseInt(data[key], 10);
-  }
-  for (const key of ['motion_gate_fraction', 'motion_scale_fraction', 'motion_background_alpha']) {
-    if (key in data && data[key] !== '') data[key] = Number(data[key]);
-  }
-  if ('vehicle_labels' in data) data.vehicle_labels = data.vehicle_labels.split(',').map((label) => label.trim()).filter(Boolean);
-  if ('min_confidence' in data && data.min_confidence !== '') data.min_confidence = Number(data.min_confidence);
-  if ('session_timeout_hours' in data && data.session_timeout_hours !== '') data.session_timeout_hours = Number(data.session_timeout_hours);
   return data;
 }
 
+function payloadFor(form) {
+  return coercePayload(Object.fromEntries(new FormData(form).entries()));
+}
+
 function emailPayload(form) {
-  const data = Object.fromEntries(new FormData(form).entries());
-  for (const key of ['enabled', 'use_tls', 'use_ssl']) if (key in data) data[key] = data[key] === 'true';
-  if (data.port !== '') data.port = Number.parseInt(data.port, 10);
-  return data;
+  return payloadFor(form);
 }
 
 function renderEmail(settings) {
@@ -207,9 +236,7 @@ function renderEmail(settings) {
 }
 
 function pushPayload(form) {
-  const data = Object.fromEntries(new FormData(form).entries());
-  if ('enabled' in data) data.enabled = data.enabled === 'true';
-  return data;
+  return payloadFor(form);
 }
 
 function renderPush(settings) {
@@ -256,7 +283,7 @@ async function loadSettings() {
 }
 
 function bindForm(name, label, endpointName = name) {
-  forms[name].addEventListener('submit', async (event) => {
+  forms[name].addEventListener('submit', guard(async (event) => {
     event.preventDefault();
     const btn = forms[name].querySelector('[type="submit"]');
     if (btn) btn.disabled = true;
@@ -264,14 +291,10 @@ function bindForm(name, label, endpointName = name) {
       const updated = await api(`/api/settings/system/${endpointName}`, { method: 'PUT', body: JSON.stringify(payloadFor(forms[name])) });
       fillForm(forms[name], updated);
       setMessage(`${label} settings saved.`);
-    } catch (error) {
-      // Skip UI updates if api() triggered a 401 redirect
-      if (window.daygleAuth?.redirecting) return;
-      setMessage(error.message, true);
     } finally {
       if (btn) btn.disabled = false;
     }
-  });
+  }));
 }
 
 bindForm('live', 'Live');
@@ -280,48 +303,29 @@ bindForm('retention', 'Retention', 'recording');
 bindForm('storage', 'Storage');
 bindForm('auth', 'Login security');
 
-emailForm?.addEventListener('submit', async (event) => {
+emailForm?.addEventListener('submit', guard(async (event) => {
   event.preventDefault();
-  try {
-    renderEmail(await api('/api/settings/alert-email', { method: 'PUT', body: JSON.stringify(emailPayload(emailForm)) }));
-    setMessage('Mail server settings saved.');
-  } catch (error) {
-    // Skip UI updates if api() triggered a 401 redirect
-    if (window.daygleAuth?.redirecting) return;
-    setMessage(error.message, true);
-  }
-});
+  renderEmail(await api('/api/settings/alert-email', { method: 'PUT', body: JSON.stringify(emailPayload(emailForm)) }));
+  setMessage('Mail server settings saved.');
+}));
 
-pushForm?.addEventListener('submit', async (event) => {
+pushForm?.addEventListener('submit', guard(async (event) => {
   event.preventDefault();
-  try {
-    renderPush(await api('/api/settings/alert-push', { method: 'PUT', body: JSON.stringify(pushPayload(pushForm)) }));
-    setMessage('Push notification settings saved.');
-  } catch (error) {
-    // Skip UI updates if api() triggered a 401 redirect
-    if (window.daygleAuth?.redirecting) return;
-    setMessage(error.message, true);
-  }
-});
+  renderPush(await api('/api/settings/alert-push', { method: 'PUT', body: JSON.stringify(pushPayload(pushForm)) }));
+  setMessage('Push notification settings saved.');
+}));
 
-document.getElementById('cameraOfflineForm')?.addEventListener('submit', async (event) => {
+document.getElementById('cameraOfflineForm')?.addEventListener('submit', guard(async (event) => {
   event.preventDefault();
   const form = document.getElementById('cameraOfflineForm');
-  try {
-    const data = {
-      enabled: form.elements.enabled.value === 'true',
-      offline_delay_minutes: Number.parseInt(form.elements.offline_delay_minutes.value, 10) || 1,
-    };
-    await api('/api/settings/camera-offline', { method: 'PUT', body: JSON.stringify(data) });
-    setMessage('Camera offline alert settings saved.');
-  } catch (error) {
-    // Skip UI updates if api() triggered a 401 redirect
-    if (window.daygleAuth?.redirecting) return;
-    setMessage(error.message, true);
-  }
-});
+  const data = payloadFor(form);
+  // Offline delay must be a positive integer; fall back to 1 when left blank.
+  if (!Number.isFinite(data.offline_delay_minutes)) data.offline_delay_minutes = 1;
+  await api('/api/settings/camera-offline', { method: 'PUT', body: JSON.stringify(data) });
+  setMessage('Camera offline alert settings saved.');
+}));
 
-testPushBtn?.addEventListener('click', async () => {
+testPushBtn?.addEventListener('click', guard(async () => {
   testPushBtn.disabled = true;
   setMessage('Sending test notification...');
   try {
@@ -330,16 +334,12 @@ testPushBtn?.addEventListener('click', async () => {
       body: JSON.stringify({ settings: pushPayload(pushForm) }),
     });
     setMessage('Test notification sent.');
-  } catch (error) {
-    // Skip UI updates if api() triggered a 401 redirect
-    if (window.daygleAuth?.redirecting) return;
-    setMessage(error.message, true);
   } finally {
     testPushBtn.disabled = false;
   }
-});
+}));
 
-testEmailBtn?.addEventListener('click', async () => {
+testEmailBtn?.addEventListener('click', guard(async () => {
   const recipient = testEmailRecipient.value.trim() || emailForm.elements.from_address.value.trim();
   if (!recipient) {
     setMessage('Enter a test recipient email address.');
@@ -353,42 +353,26 @@ testEmailBtn?.addEventListener('click', async () => {
       body: JSON.stringify({ settings: emailPayload(emailForm), recipient }),
     });
     setMessage(`Test email sent to ${recipient}.`);
-  } catch (error) {
-    // Skip UI updates if api() triggered a 401 redirect
-    if (window.daygleAuth?.redirecting) return;
-    setMessage(error.message, true);
   } finally {
     testEmailBtn.disabled = false;
   }
-});
+}));
 
-document.getElementById('purgeRecordingsBtn').addEventListener('click', async () => {
-  try {
-    const result = await api('/api/recordings/purge', { method: 'POST' });
-    setMessage(`Purged ${result.purged} recording(s), deleted ${result.files_deleted} file(s).`);
-  } catch (error) {
-    // Skip UI updates if api() triggered a 401 redirect
-    if (window.daygleAuth?.redirecting) return;
-    setMessage(error.message, true);
-  }
-});
+document.getElementById('purgeRecordingsBtn').addEventListener('click', guard(async () => {
+  const result = await api('/api/recordings/purge', { method: 'POST' });
+  setMessage(`Purged ${result.purged} recording(s), deleted ${result.files_deleted} file(s).`);
+}));
 
 
-forms.databaseRestore.addEventListener('submit', async (event) => {
+forms.databaseRestore.addEventListener('submit', guard(async (event) => {
   event.preventDefault();
   if (!window.confirm('Restore this database backup? This will replace current events, users, settings, alert rules, and sessions.')) return;
-  try {
-    const formData = new FormData(forms.databaseRestore);
-    const result = await api('/api/settings/system/database/restore', { method: 'POST', body: formData });
-    forms.databaseRestore.reset();
-    await loadSettings();
-    setMessage(`${result.message} Safety backup: ${result.safety_backup}`);
-  } catch (error) {
-    // Skip UI updates if api() triggered a 401 redirect
-    if (window.daygleAuth?.redirecting) return;
-    setMessage(error.message, true);
-  }
-});
+  const formData = new FormData(forms.databaseRestore);
+  const result = await api('/api/settings/system/database/restore', { method: 'POST', body: formData });
+  forms.databaseRestore.reset();
+  await loadSettings();
+  setMessage(`${result.message} Safety backup: ${result.safety_backup}`);
+}));
 
 
 loadSettings().catch((error) => {
@@ -492,7 +476,7 @@ function initSoftwareUpdateSection() {
 
 initSoftwareUpdateSection();
 
-startCleanBtn?.addEventListener('click', async () => {
+startCleanBtn?.addEventListener('click', guard(async () => {
   const confirmed = confirm('Start clean now? This permanently deletes events, recordings, and alerts, while keeping settings and users.');
   if (!confirmed) return;
 
@@ -510,11 +494,48 @@ startCleanBtn?.addEventListener('click', async () => {
     setMessage(
       `Clean start complete. Deleted ${Number(deleted.recordings || 0)} recordings, ${Number(deleted.events || 0)} events, and ${Number(deleted.alerts || 0)} alerts. Settings were preserved.`,
     );
-  } catch (error) {
-    // Skip UI updates if api() triggered a 401 redirect
-    if (window.daygleAuth?.redirecting) return;
-    setMessage(error.message, true);
   } finally {
     startCleanBtn.disabled = false;
   }
-});
+}));
+
+// ---- Tab navigation ----------------------------------------------------
+// Groups the settings cards into panels switched by the tab bar. Implements
+// the ARIA tabs pattern (roving tabindex + arrow keys) and mirrors the active
+// tab into the URL hash so a section can be linked to or survives a refresh.
+function initSettingsTabs() {
+  const tabs = Array.from(document.querySelectorAll('.settings-tab'));
+  if (!tabs.length) return;
+  const panels = new Map(
+    Array.from(document.querySelectorAll('.settings-panel')).map((panel) => [panel.dataset.panel, panel]),
+  );
+
+  function activate(name, { focus = false, updateHash = true } = {}) {
+    if (!panels.has(name)) name = tabs[0].dataset.tab;
+    tabs.forEach((tab) => {
+      const selected = tab.dataset.tab === name;
+      tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+      tab.tabIndex = selected ? 0 : -1;
+      if (selected && focus) tab.focus();
+    });
+    panels.forEach((panel, key) => { panel.hidden = key !== name; });
+    if (updateHash) {
+      try { history.replaceState(null, '', `#${name}`); } catch { window.location.hash = name; }
+    }
+  }
+
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => activate(tab.dataset.tab));
+    tab.addEventListener('keydown', (event) => {
+      const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+      if (!step) return;
+      event.preventDefault();
+      activate(tabs[(index + step + tabs.length) % tabs.length].dataset.tab, { focus: true });
+    });
+  });
+
+  const initial = (window.location.hash || '').replace('#', '');
+  activate(panels.has(initial) ? initial : tabs[0].dataset.tab, { updateHash: false });
+}
+
+initSettingsTabs();

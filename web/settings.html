@@ -20,21 +20,14 @@
 
     <div id="systemMessage" class="muted" aria-live="polite"></div>
 
-    <section class="card" id="updateSection">
-      <div class="settings-section-header">
-        <div class="settings-section-icon" aria-hidden="true">🔄</div>
-        <div>
-          <h2>Software Updates</h2>
-          <p class="settings-section-subtitle">Current version: <strong id="currentVersion">Loading…</strong>. Check for and apply updates from GitHub.</p>
-        </div>
-      </div>
-      <div id="updateStatus" class="status-panel" style="display:none"></div>
-      <div class="button-row">
-        <button id="checkUpdateBtn" class="btn-info" type="button">Check for Updates</button>
-        <button id="applyUpdateBtn" class="btn-warning" type="button" style="display:none">Apply Update</button>
-      </div>
-      <pre id="updateOutput" class="update-output" style="display:none"></pre>
-    </section>
+    <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+      <button class="settings-tab" type="button" role="tab" id="tab-detection" aria-controls="panel-detection" data-tab="detection" aria-selected="true"><span class="settings-tab-icon" aria-hidden="true">⚡</span><span class="settings-tab-label">Detection &amp; Live</span></button>
+      <button class="settings-tab" type="button" role="tab" id="tab-recording" aria-controls="panel-recording" data-tab="recording" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">🎬</span><span class="settings-tab-label">Recording</span></button>
+      <button class="settings-tab" type="button" role="tab" id="tab-notifications" aria-controls="panel-notifications" data-tab="notifications" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">🔔</span><span class="settings-tab-label">Notifications</span></button>
+      <button class="settings-tab" type="button" role="tab" id="tab-system" aria-controls="panel-system" data-tab="system" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">⚙️</span><span class="settings-tab-label">System</span></button>
+    </div>
+
+    <div class="settings-panel" id="panel-detection" role="tabpanel" aria-labelledby="tab-detection" data-panel="detection">
 
     <section class="card">
       <div class="settings-section-header">
@@ -96,6 +89,10 @@
         <button type="submit" form="liveSettingsForm">Save Live Settings</button>
       </div>
     </section>
+
+    </div><!-- /panel-detection -->
+
+    <div class="settings-panel" id="panel-recording" role="tabpanel" aria-labelledby="tab-recording" data-panel="recording" hidden>
 
     <section class="card">
       <div class="settings-section-header">
@@ -182,24 +179,9 @@
       </div>
     </section>
 
-    <section class="card">
-      <div class="settings-section-header">
-        <div class="settings-section-icon" aria-hidden="true">💾</div>
-        <div>
-          <h2>Database Backup &amp; Restore</h2>
-          <p class="settings-section-subtitle">Download a snapshot of your database or restore from a previous backup. A safety backup is automatically created before every restore.</p>
-        </div>
-      </div>
-      <form id="databaseRestoreForm" class="form-grid">
-        <label>
-          <span>Restore backup file <span class="info-tip" data-tip="Select a previously downloaded .sqlite backup file to restore. Restores replace events, users, settings, alert rules, and sessions with the backup contents." title="Select a previously downloaded .sqlite backup file to restore. Restores replace events, users, settings, alert rules, and sessions with the backup contents." tabindex="0" aria-label="Help: Select a previously downloaded .sqlite backup file to restore. Restores replace ..."></span></span>
-          <input name="file" type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3,application/x-sqlite3" required /></label>
-      </form>
-      <div class="button-row">
-        <button class="btn-info daygle-icon-button" type="submit" form="databaseRestoreForm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg>Restore Database</button>
-        <a class="button-link daygle-icon-button" href="/api/settings/system/database/backup"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>Download Database Backup</a>
-      </div>
-    </section>
+    </div><!-- /panel-recording -->
+
+    <div class="settings-panel" id="panel-notifications" role="tabpanel" aria-labelledby="tab-notifications" data-panel="notifications" hidden>
 
     <section class="card">
       <div class="settings-section-header">
@@ -320,6 +302,45 @@
       </div>
     </section>
 
+    </div><!-- /panel-notifications -->
+
+    <div class="settings-panel" id="panel-system" role="tabpanel" aria-labelledby="tab-system" data-panel="system" hidden>
+
+    <section class="card" id="updateSection">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🔄</div>
+        <div>
+          <h2>Software Updates</h2>
+          <p class="settings-section-subtitle">Current version: <strong id="currentVersion">Loading…</strong>. Check for and apply updates from GitHub.</p>
+        </div>
+      </div>
+      <div id="updateStatus" class="status-panel" style="display:none"></div>
+      <div class="button-row">
+        <button id="checkUpdateBtn" class="btn-info" type="button">Check for Updates</button>
+        <button id="applyUpdateBtn" class="btn-warning" type="button" style="display:none">Apply Update</button>
+      </div>
+      <pre id="updateOutput" class="update-output" style="display:none"></pre>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">💾</div>
+        <div>
+          <h2>Database Backup &amp; Restore</h2>
+          <p class="settings-section-subtitle">Download a snapshot of your database or restore from a previous backup. A safety backup is automatically created before every restore.</p>
+        </div>
+      </div>
+      <form id="databaseRestoreForm" class="form-grid">
+        <label>
+          <span>Restore backup file <span class="info-tip" data-tip="Select a previously downloaded .sqlite backup file to restore. Restores replace events, users, settings, alert rules, and sessions with the backup contents." title="Select a previously downloaded .sqlite backup file to restore. Restores replace events, users, settings, alert rules, and sessions with the backup contents." tabindex="0" aria-label="Help: Select a previously downloaded .sqlite backup file to restore. Restores replace ..."></span></span>
+          <input name="file" type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3,application/x-sqlite3" required /></label>
+      </form>
+      <div class="button-row">
+        <button class="btn-info daygle-icon-button" type="submit" form="databaseRestoreForm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg>Restore Database</button>
+        <a class="button-link daygle-icon-button" href="/api/settings/system/database/backup"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>Download Database Backup</a>
+      </div>
+    </section>
+
     <section class="card">
       <div class="settings-section-header">
         <div class="settings-section-icon" aria-hidden="true">🔒</div>
@@ -362,6 +383,8 @@
         <button id="startCleanBtn" class="btn-danger" type="button">Start Clean</button>
       </div>
     </section>
+
+    </div><!-- /panel-system -->
 
   </main>
   <script src="/static/nav.js"></script>
