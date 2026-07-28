@@ -12,7 +12,6 @@ const els = {
   timelineHours: document.getElementById('timelineHours'),
   timelineGrid: document.getElementById('timelineGrid'),
   timelineRows: document.getElementById('timelineRows'),
-  timelineRecordings: document.getElementById('timelineRecordings'),
   clipPlayer: document.getElementById('clipPlayer'),
   clipPlayerStatus: document.getElementById('clipPlayerStatus'),
   clipOverlay: document.getElementById('clipOverlay'),
@@ -715,76 +714,6 @@ function renderTimeline(payload) {
   }).join('');
 }
 
-function renderRecordingList(recordings) {
-  if (!recordings.length) {
-    els.timelineRecordings.innerHTML = '';
-    return;
-  }
-  els.timelineRecordings.innerHTML = recordings.map((recording) => {
-    const activeClass = Number(recording.id) === Number(state.activeRecordingId) ? ' active' : '';
-    const color = colorForKey(recordingColorKey(recording));
-    const start = formatClock(recording.timeline_start_seconds || 0);
-    const end = formatClock(recording.timeline_end_seconds || 0);
-    const duration = formatDuration(recording.duration_seconds);
-    const camera = escapeHtml(cameraLabel(recording));
-    const detections = recordingDetectionSummary(recording);
-    const isSound = isSoundRecording(recording);
-    const isMotionOnly = isMotionOnlyRecording(recording);
-    // Show a pill per detected object (e.g. Person and Dog) for object
-    // recordings; for sound + sound label, for motion-only the teal
-    // motion pill (with motion intensity %). Detection pills omit the
-    // percentage when there is no confidence rather than render a
-    // misleading 0%.
-    let confidenceBadges;
-    if (isMotionOnly) {
-      confidenceBadges = motionPill(motionConfidenceFor(recording));
-    } else if (isSound) {
-      confidenceBadges = detections
-        .map((d) => detectionPill(d.label, d.confidence, true))
-        .join('');
-    } else {
-      confidenceBadges = detections
-        .map((d) => detectionPill(d.label, d.confidence))
-        .join('');
-    }
-    const motionConfidence = motionConfidenceFor(recording);
-    const tooltipLines = [];
-    if (isMotionOnly) {
-      tooltipLines.push(motionConfidence == null
-        ? 'Motion'
-        : `Motion · ${Math.round(motionConfidence * 100)}%`);
-    }
-    detections.forEach((d) => {
-      tooltipLines.push(d.confidence == null
-        ? titleCase(d.label)
-        : `${titleCase(d.label)} · ${Math.round(d.confidence * 100)}%`);
-    });
-    const tooltip = tooltipLines.join('\n');
-    // Mirror the recordings list: type pill says "Motion" (teal), "Sound",
-    // or "Object"; the activity-item-* class on the row drives the inner
-    // .activity-item-type colour via shared CSS rules.
-    const typeLabel = isMotionOnly ? 'Motion' : isSound ? 'Sound' : 'Object';
-    const typeClass = isMotionOnly ? 'activity-item-motion' : isSound ? 'activity-item-sound' : 'activity-item-event';
-    const motionTooltip = motionConfidence == null ? '' : `Motion · ${Math.round(motionConfidence * 100)}%\n`;
-    const zones = recordingZoneNames(recording);
-    const zoneSuffix = zones.length ? ` · ${zones.map(escapeHtml).join(', ')}` : '';
-    return `
-      <button class="timeline-recording-item${activeClass} ${typeClass}" type="button" data-recording-id="${escapeHtml(String(recording.id))}" data-tooltip="${escapeHtml(motionTooltip + tooltip)}">
-        <span class="timeline-recording-color" style="background:${color}"></span>
-        <div class="timeline-recording-main">
-          <div class="timeline-recording-title-row">
-            <span class="activity-item-type">${typeLabel}</span>
-            <strong>Recording #${escapeHtml(String(recording.id))}</strong>
-            <span class="timeline-recording-duration">${escapeHtml(duration)}</span>
-          </div>
-          <div class="timeline-recording-meta-line">${escapeHtml(start)} - ${escapeHtml(end)} · ${camera}${zoneSuffix}</div>
-          ${confidenceBadges ? `<div class="timeline-recording-confidence-row">${confidenceBadges}</div>` : ''}
-        </div>
-      </button>
-    `;
-  }).join('');
-}
-
 function renderRecordingDetails(recording) {
   const isSound = isSoundRecording(recording);
   const isMotionOnly = isMotionOnlyRecording(recording);
@@ -902,7 +831,6 @@ async function renderFilteredTimeline({ preserveSelection = true } = {}) {
   renderSummary(viewPayload, allRecordings.length);
   renderLegend(recordings);
   renderTimeline(viewPayload);
-  renderRecordingList(recordings);
 
   if (!recordings.length) {
     const formattedDay = formatUserDate(state.payload.day);
@@ -1086,16 +1014,6 @@ document.getElementById('timelineFromTimeMount').addEventListener('change', sche
 document.getElementById('timelineToTimeMount').addEventListener('change', scheduleTimelineTimeRefresh);
 
 els.timelineRows.addEventListener('click', (event) => {
-  const button = event.target.closest('[data-recording-id]');
-  if (!button) return;
-  playRecording(button.dataset.recordingId).catch((error) => {
-    // Skip UI updates if api() triggered a 401 redirect
-    if (window.daygleAuth?.redirecting) return;
-    els.clipPlayerStatus.textContent = error.message;
-  });
-});
-
-els.timelineRecordings.addEventListener('click', (event) => {
   const button = event.target.closest('[data-recording-id]');
   if (!button) return;
   playRecording(button.dataset.recordingId).catch((error) => {
