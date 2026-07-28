@@ -1513,6 +1513,37 @@ tr.drag-over {
 .settings-panel { display: grid; gap: 18px; }
 .settings-panel[hidden] { display: none; }
 
+/* Collapsible "Advanced" disclosure inside a settings card */
+.settings-advanced {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  margin-top: 4px;
+}
+:root.light .settings-advanced { background: rgba(0, 0, 0, 0.02); }
+.settings-advanced > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--muted);
+}
+.settings-advanced > summary::-webkit-details-marker { display: none; }
+.settings-advanced > summary::before {
+  content: "▸";
+  font-size: 11px;
+  transition: transform .15s ease;
+}
+.settings-advanced[open] > summary::before { transform: rotate(90deg); }
+.settings-advanced > summary:hover { color: var(--text); }
+.settings-advanced > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+.settings-advanced-hint { margin: 0 14px 12px; font-size: 12px; line-height: 1.45; color: var(--muted); }
+.settings-advanced .form-grid { padding: 0 14px 14px; }
+
 @media (max-width: 600px) {
   .settings-tab { flex-basis: calc(50% - 6px); padding: 10px 12px; font-size: 13px; }
   .settings-tab-label { min-width: 0; }

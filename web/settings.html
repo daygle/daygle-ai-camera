@@ -38,52 +38,60 @@
           <p class="field-help" style="margin: 2px 0 0;">The live object overlay may appear slightly behind the video feed. This is normal on CPU hardware - AI inference takes time, and there is no further optimisation possible beyond the extrapolation already applied.</p>
         </div>
       </div>
-      <form id="liveSettingsForm" class="form-grid">
-        <label>
-          <span>Snapshot Refresh <span class="info-tip" data-tip="How often the live camera image updates. Lower = more responsive, higher = less bandwidth. Default: 500ms" title="How often the live camera image updates. Lower = more responsive, higher = less bandwidth. Default: 500ms" tabindex="0" aria-label="Help: How often the live camera image updates. Lower = more responsive, higher = less ..."></span></span>
-          <input name="snapshot_refresh_ms" type="number" min="150" max="5000" step="10" placeholder="500" /></label>
-        <label>
-          <span>Detection Status Refresh <span class="info-tip" data-tip="How often the detection status and live overlay update with new detections. Lower = more responsive overlay, higher = less CPU. Default: 2000ms" title="How often the detection status and live overlay update with new detections. Lower = more responsive overlay, higher = less CPU. Default: 2000ms" tabindex="0" aria-label="Help: How often the detection status and live overlay update with new detections. Lowe..."></span></span>
-          <input name="detection_status_refresh_ms" type="number" min="100" max="15000" step="100" placeholder="2000" /></label>
-        <label>
-          <span>Detection Interval <span class="info-tip" data-tip="How often AI checks each camera for motion and objects. Lower = faster alerts, higher CPU. Default: 0.5s" title="How often AI checks each camera for motion and objects. Lower = faster alerts, higher CPU. Default: 0.5s" tabindex="0" aria-label="Help: How often AI checks each camera for motion and objects. Lower = faster alerts, h..."></span></span>
-          <input name="detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="0.25" /></label>
-        <label>
-          <span>Fallback Event Merge (s) <span class="info-tip" data-tip="Merges detections within this window into one event. Per-object cooldowns on the Zones page override this. Default: 10s" title="Merges detections within this window into one event. Per-object cooldowns on the Zones page override this. Default: 10s" tabindex="0" aria-label="Help: Merges detections within this window into one event. Per-object cooldowns on the..."></span></span>
-          <input name="event_debounce_seconds" type="number" min="0" max="300" step="1" placeholder="10" /></label>
-        <label>
-          <span>Background Alerts <span class="info-tip" data-tip="Keep checking cameras even when no Live Cameras page is open. Default: Enabled" title="Keep checking cameras even when no Live Cameras page is open. Default: Enabled" tabindex="0" aria-label="Help: Keep checking cameras even when no Live Cameras page is open. Default: Enabled"></span></span>
-          <select name="background_detection_enabled">
-            <option value="true">Enabled</option>
-            <option value="false">Disabled</option>
-          </select></label>
-        <label>
-          <span>Detection History (min) <span class="info-tip" data-tip="How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min" title="How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min" tabindex="0" aria-label="Help: How many minutes of detection data to keep per camera for recording playback ove..."></span></span>
-          <input name="detection_history_minutes" type="number" min="1" max="120" step="1" placeholder="10" /></label>
-        <label>
-          <span>Periodic Scan Interval (s) <span class="info-tip" data-tip="Run a full YOLO scan this often even when no pixel motion is detected. Catches stationary subjects that have settled into the background. 0 = disabled. Default: 0" title="Run a full YOLO scan this often even when no pixel motion is detected. Catches stationary subjects that have settled into the background. 0 = disabled. Default: 0" tabindex="0" aria-label="Help: Run a full YOLO scan this often even when no pixel motion is detected. Catches s..."></span></span>
-          <input name="periodic_scan_interval_seconds" type="number" min="0" max="3600" step="1" placeholder="0" /></label>
-        <label>
-          <span>Motion Pixel Threshold <span class="info-tip" data-tip="How much a pixel must change (0-255) to count as motion. Raise on noisy IR/night-vision cameras. Default: 30" title="How much a pixel must change (0-255) to count as motion. Raise on noisy IR/night-vision cameras. Default: 30" tabindex="0" aria-label="Help: How much a pixel must change (0-255) to count as motion. Raise on noisy IR/night..."></span></span>
-          <input name="motion_pixel_threshold" type="number" min="1" max="255" step="1" placeholder="30" /></label>
-        <label>
-          <span>Motion Gate Fraction <span class="info-tip" data-tip="Fraction of pixels that must change before motion fires (0.003 = 0.3%). Raise to ignore small disturbances. Default: 0.003" title="Fraction of pixels that must change before motion fires (0.003 = 0.3%). Raise to ignore small disturbances. Default: 0.003" tabindex="0" aria-label="Help: Fraction of pixels that must change before motion fires (0.003 = 0.3%). Raise to..."></span></span>
-          <input name="motion_gate_fraction" type="number" min="0.0001" max="0.5" step="0.0001" placeholder="0.003" /></label>
-        <label>
-          <span>Motion Scale Fraction <span class="info-tip" data-tip="Pixel change fraction that maps to 100% motion confidence (0.03 = 3%). Lower = more sensitive confidence scoring. Default: 0.03" title="Pixel change fraction that maps to 100% motion confidence (0.03 = 3%). Lower = more sensitive confidence scoring. Default: 0.03" tabindex="0" aria-label="Help: Pixel change fraction that maps to 100% motion confidence (0.03 = 3%). Lower = m..."></span></span>
-          <input name="motion_scale_fraction" type="number" min="0.001" max="1.0" step="0.001" placeholder="0.03" /></label>
-        <label>
-          <span>Motion Background Alpha <span class="info-tip" data-tip="How fast the background adapts to scene changes when no motion is detected (0.05 = 5% per frame). Higher = adapts faster. Default: 0.05" title="How fast the background adapts to scene changes when no motion is detected (0.05 = 5% per frame). Higher = adapts faster. Default: 0.05" tabindex="0" aria-label="Help: How fast the background adapts to scene changes when no motion is detected (0.05..."></span></span>
-          <input name="motion_background_alpha" type="number" min="0.001" max="0.5" step="0.001" placeholder="0.05" /></label>
-        <label>
-          <span>Motion Frame Width <span class="info-tip" data-tip="Width in pixels of the thumbnail used for motion detection (default 160). Larger = finer zone precision but more CPU. Changing this resets all camera background models. Default: 160" title="Width in pixels of the thumbnail used for motion detection (default 160). Larger = finer zone precision but more CPU. Changing this resets all camera background models. Default: 160" tabindex="0" aria-label="Help: Width in pixels of the thumbnail used for motion detection (default 160). Larger..."></span></span>
-          <input name="motion_frame_width" type="number" min="40" max="640" step="1" placeholder="160" /></label>
-        <label>
-          <span>Motion Frame Height <span class="info-tip" data-tip="Height in pixels of the thumbnail used for motion detection (default 120). Larger = finer zone precision but more CPU. Changing this resets all camera background models. Default: 120" title="Height in pixels of the thumbnail used for motion detection (default 120). Larger = finer zone precision but more CPU. Changing this resets all camera background models. Default: 120" tabindex="0" aria-label="Help: Height in pixels of the thumbnail used for motion detection (default 120). Large..."></span></span>
-          <input name="motion_frame_height" type="number" min="30" max="480" step="1" placeholder="120" /></label>
-        <label>
-          <span>Detection Frame Rate (fps) <span class="info-tip" data-tip="Frames per second decoded from the camera stream for AI detection. Lower = less CPU; higher = catches faster movements. Takes effect on next camera reconnect. Default: 4" title="Frames per second decoded from the camera stream for AI detection. Lower = less CPU; higher = catches faster movements. Takes effect on next camera reconnect. Default: 4" tabindex="0" aria-label="Help: Frames per second decoded from the camera stream for AI detection. Lower = less ..."></span></span>
-          <input name="ingest_frame_fps" type="number" min="1" max="30" step="1" placeholder="4" /></label>
+      <form id="liveSettingsForm">
+        <div class="form-grid">
+          <label>
+            <span>Snapshot Refresh <span class="info-tip" data-tip="How often the live camera image updates. Lower = more responsive, higher = less bandwidth. Default: 500ms" title="How often the live camera image updates. Lower = more responsive, higher = less bandwidth. Default: 500ms" tabindex="0" aria-label="Help: How often the live camera image updates. Lower = more responsive, higher = less ..."></span></span>
+            <input name="snapshot_refresh_ms" type="number" min="150" max="5000" step="10" placeholder="500" /></label>
+          <label>
+            <span>Detection Status Refresh <span class="info-tip" data-tip="How often the detection status and live overlay update with new detections. Lower = more responsive overlay, higher = less CPU. Default: 2000ms" title="How often the detection status and live overlay update with new detections. Lower = more responsive overlay, higher = less CPU. Default: 2000ms" tabindex="0" aria-label="Help: How often the detection status and live overlay update with new detections. Lowe..."></span></span>
+            <input name="detection_status_refresh_ms" type="number" min="100" max="15000" step="100" placeholder="2000" /></label>
+          <label>
+            <span>Detection Interval <span class="info-tip" data-tip="How often AI checks each camera for motion and objects. Lower = faster alerts, higher CPU. Default: 0.5s" title="How often AI checks each camera for motion and objects. Lower = faster alerts, higher CPU. Default: 0.5s" tabindex="0" aria-label="Help: How often AI checks each camera for motion and objects. Lower = faster alerts, h..."></span></span>
+            <input name="detection_interval_seconds" type="number" min="0.1" max="10" step="0.05" placeholder="0.5" /></label>
+          <label>
+            <span>Fallback Event Merge (s) <span class="info-tip" data-tip="Merges detections within this window into one event. Per-object cooldowns on the Zones page override this. Default: 10s" title="Merges detections within this window into one event. Per-object cooldowns on the Zones page override this. Default: 10s" tabindex="0" aria-label="Help: Merges detections within this window into one event. Per-object cooldowns on the..."></span></span>
+            <input name="event_debounce_seconds" type="number" min="0" max="300" step="1" placeholder="10" /></label>
+          <label>
+            <span>Background Alerts <span class="info-tip" data-tip="Keep checking cameras even when no Live Cameras page is open. Default: Enabled" title="Keep checking cameras even when no Live Cameras page is open. Default: Enabled" tabindex="0" aria-label="Help: Keep checking cameras even when no Live Cameras page is open. Default: Enabled"></span></span>
+            <select name="background_detection_enabled">
+              <option value="true">Enabled</option>
+              <option value="false">Disabled</option>
+            </select></label>
+          <label>
+            <span>Detection History (min) <span class="info-tip" data-tip="How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min" title="How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min" tabindex="0" aria-label="Help: How many minutes of detection data to keep per camera for recording playback ove..."></span></span>
+            <input name="detection_history_minutes" type="number" min="1" max="120" step="1" placeholder="10" /></label>
+          <label>
+            <span>Detection Frame Rate (fps) <span class="info-tip" data-tip="Frames per second decoded from the camera stream for AI detection. Lower = less CPU; higher = catches faster movements. Takes effect on next camera reconnect. Default: 4" title="Frames per second decoded from the camera stream for AI detection. Lower = less CPU; higher = catches faster movements. Takes effect on next camera reconnect. Default: 4" tabindex="0" aria-label="Help: Frames per second decoded from the camera stream for AI detection. Lower = less ..."></span></span>
+            <input name="ingest_frame_fps" type="number" min="1" max="30" step="1" placeholder="4" /></label>
+        </div>
+        <details class="settings-advanced">
+          <summary>Advanced motion tuning</summary>
+          <p class="settings-advanced-hint">Low-level motion-detector internals — the defaults suit most cameras. Changing Motion Frame Width or Height resets every camera's background model.</p>
+          <div class="form-grid">
+            <label>
+              <span>Periodic Scan Interval (s) <span class="info-tip" data-tip="Run a full YOLO scan this often even when no pixel motion is detected. Catches stationary subjects that have settled into the background. 0 = disabled. Default: 0" title="Run a full YOLO scan this often even when no pixel motion is detected. Catches stationary subjects that have settled into the background. 0 = disabled. Default: 0" tabindex="0" aria-label="Help: Run a full YOLO scan this often even when no pixel motion is detected. Catches s..."></span></span>
+              <input name="periodic_scan_interval_seconds" type="number" min="0" max="3600" step="1" placeholder="0" /></label>
+            <label>
+              <span>Motion Pixel Threshold <span class="info-tip" data-tip="How much a pixel must change (0-255) to count as motion. Raise on noisy IR/night-vision cameras. Default: 30" title="How much a pixel must change (0-255) to count as motion. Raise on noisy IR/night-vision cameras. Default: 30" tabindex="0" aria-label="Help: How much a pixel must change (0-255) to count as motion. Raise on noisy IR/night..."></span></span>
+              <input name="motion_pixel_threshold" type="number" min="1" max="255" step="1" placeholder="30" /></label>
+            <label>
+              <span>Motion Gate Fraction <span class="info-tip" data-tip="Fraction of pixels that must change before motion fires (0.003 = 0.3%). Raise to ignore small disturbances. Default: 0.003" title="Fraction of pixels that must change before motion fires (0.003 = 0.3%). Raise to ignore small disturbances. Default: 0.003" tabindex="0" aria-label="Help: Fraction of pixels that must change before motion fires (0.003 = 0.3%). Raise to..."></span></span>
+              <input name="motion_gate_fraction" type="number" min="0.0001" max="0.5" step="0.0001" placeholder="0.003" /></label>
+            <label>
+              <span>Motion Scale Fraction <span class="info-tip" data-tip="Pixel change fraction that maps to 100% motion confidence (0.03 = 3%). Lower = more sensitive confidence scoring. Default: 0.03" title="Pixel change fraction that maps to 100% motion confidence (0.03 = 3%). Lower = more sensitive confidence scoring. Default: 0.03" tabindex="0" aria-label="Help: Pixel change fraction that maps to 100% motion confidence (0.03 = 3%). Lower = m..."></span></span>
+              <input name="motion_scale_fraction" type="number" min="0.001" max="1.0" step="0.001" placeholder="0.03" /></label>
+            <label>
+              <span>Motion Background Alpha <span class="info-tip" data-tip="How fast the background adapts to scene changes when no motion is detected (0.05 = 5% per frame). Higher = adapts faster. Default: 0.05" title="How fast the background adapts to scene changes when no motion is detected (0.05 = 5% per frame). Higher = adapts faster. Default: 0.05" tabindex="0" aria-label="Help: How fast the background adapts to scene changes when no motion is detected (0.05..."></span></span>
+              <input name="motion_background_alpha" type="number" min="0.001" max="0.5" step="0.001" placeholder="0.05" /></label>
+            <label>
+              <span>Motion Frame Width <span class="info-tip" data-tip="Width in pixels of the thumbnail used for motion detection (default 160). Larger = finer zone precision but more CPU. Changing this resets all camera background models. Default: 160" title="Width in pixels of the thumbnail used for motion detection (default 160). Larger = finer zone precision but more CPU. Changing this resets all camera background models. Default: 160" tabindex="0" aria-label="Help: Width in pixels of the thumbnail used for motion detection (default 160). Larger..."></span></span>
+              <input name="motion_frame_width" type="number" min="40" max="640" step="1" placeholder="160" /></label>
+            <label>
+              <span>Motion Frame Height <span class="info-tip" data-tip="Height in pixels of the thumbnail used for motion detection (default 120). Larger = finer zone precision but more CPU. Changing this resets all camera background models. Default: 120" title="Height in pixels of the thumbnail used for motion detection (default 120). Larger = finer zone precision but more CPU. Changing this resets all camera background models. Default: 120" tabindex="0" aria-label="Help: Height in pixels of the thumbnail used for motion detection (default 120). Large..."></span></span>
+              <input name="motion_frame_height" type="number" min="30" max="480" step="1" placeholder="120" /></label>
+          </div>
+        </details>
       </form>
       <div class="button-row">
         <button type="submit" form="liveSettingsForm">Save Live Settings</button>
@@ -115,9 +123,6 @@
         <label>
           <span>Max Clip Duration (s) <span class="info-tip" data-tip="Hard cap on total clip length. A longer event is split into a new clip once it hits this. Default: 300s" title="Hard cap on total clip length. A longer event is split into a new clip once it hits this. Default: 300s" tabindex="0" aria-label="Help: Hard cap on total clip length. A longer event is split into a new clip once it hits this. Default: 300s"></span></span>
           <input name="max_clip_seconds" type="number" min="1" max="3600" placeholder="300" /></label>
-        <label>
-          <span>Format <span class="info-tip" data-tip="Video container format. mp4 is recommended for best compatibility. Default: mp4" title="Video container format. mp4 is recommended for best compatibility. Default: mp4" tabindex="0" aria-label="Help: Video container format. mp4 is recommended for best compatibility. Default: mp4"></span></span>
-          <input name="format" placeholder="mp4" /></label>
       </form>
       <div class="button-row">
         <button type="submit" form="recordingSettingsForm">Save Clip Settings</button>
@@ -160,19 +165,25 @@
           <p class="settings-section-subtitle">Configure where Daygle stores data on disk. Changes take effect after saving.</p>
         </div>
       </div>
-      <form id="storageSettingsForm" class="form-grid">
-        <label>
-          <span>Data Directory <span class="info-tip" data-tip="Root directory for all application data. Default: data" title="Root directory for all application data. Default: data" tabindex="0" aria-label="Help: Root directory for all application data. Default: data"></span></span>
-          <input name="data_dir" placeholder="/opt/daygle/data" /></label>
-        <label>
-          <span>Snapshots Directory <span class="info-tip" data-tip="Where event snapshot images are saved. Default: data/snapshots" title="Where event snapshot images are saved. Default: data/snapshots" tabindex="0" aria-label="Help: Where event snapshot images are saved. Default: data/snapshots"></span></span>
-          <input name="snapshots_dir" placeholder="/opt/daygle/data/snapshots" /></label>
-        <label>
-          <span>Events Directory <span class="info-tip" data-tip="Where event clip videos are saved. Default: data/events" title="Where event clip videos are saved. Default: data/events" tabindex="0" aria-label="Help: Where event clip videos are saved. Default: data/events"></span></span>
-          <input name="events_dir" placeholder="/opt/daygle/data/events" /></label>
-        <label>
-          <span>Recordings Directory <span class="info-tip" data-tip="Where continuous recordings are saved. Default: data/recordings" title="Where continuous recordings are saved. Default: data/recordings" tabindex="0" aria-label="Help: Where continuous recordings are saved. Default: data/recordings"></span></span>
-          <input name="recordings_dir" placeholder="/opt/daygle/data/recordings" /></label>
+      <form id="storageSettingsForm">
+        <details class="settings-advanced">
+          <summary>Advanced: on-disk data directories</summary>
+          <p class="settings-advanced-hint">Set at install time and rarely changed. Paths are restricted to the application data directory and take effect after saving.</p>
+          <div class="form-grid">
+            <label>
+              <span>Data Directory <span class="info-tip" data-tip="Root directory for all application data. Default: data" title="Root directory for all application data. Default: data" tabindex="0" aria-label="Help: Root directory for all application data. Default: data"></span></span>
+              <input name="data_dir" placeholder="/opt/daygle/data" /></label>
+            <label>
+              <span>Snapshots Directory <span class="info-tip" data-tip="Where event snapshot images are saved. Default: data/snapshots" title="Where event snapshot images are saved. Default: data/snapshots" tabindex="0" aria-label="Help: Where event snapshot images are saved. Default: data/snapshots"></span></span>
+              <input name="snapshots_dir" placeholder="/opt/daygle/data/snapshots" /></label>
+            <label>
+              <span>Events Directory <span class="info-tip" data-tip="Where event clip videos are saved. Default: data/events" title="Where event clip videos are saved. Default: data/events" tabindex="0" aria-label="Help: Where event clip videos are saved. Default: data/events"></span></span>
+              <input name="events_dir" placeholder="/opt/daygle/data/events" /></label>
+            <label>
+              <span>Recordings Directory <span class="info-tip" data-tip="Where continuous recordings are saved. Default: data/recordings" title="Where continuous recordings are saved. Default: data/recordings" tabindex="0" aria-label="Help: Where continuous recordings are saved. Default: data/recordings"></span></span>
+              <input name="recordings_dir" placeholder="/opt/daygle/data/recordings" /></label>
+          </div>
+        </details>
       </form>
       <div class="button-row">
         <button type="submit" form="storageSettingsForm">Save Storage</button>

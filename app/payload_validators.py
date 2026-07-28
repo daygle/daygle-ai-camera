@@ -437,7 +437,7 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
     detection_status_refresh_ms = _int_field(merged, 'detection_status_refresh_ms', 2000, 100, 15000)
     background_detection_enabled = normalize_bool_setting(merged.get('background_detection_enabled'), True)
     try:
-        detection_interval_seconds = float(merged.get('detection_interval_seconds', 0.25))
+        detection_interval_seconds = float(merged.get('detection_interval_seconds', 0.5))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail='detection_interval_seconds must be a number.') from exc
     if detection_interval_seconds < 0.1 or detection_interval_seconds > 10:
@@ -462,7 +462,7 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if not 0.0001 <= motion_gate_fraction <= 0.5:
         raise HTTPException(status_code=400, detail='motion_gate_fraction must be between 0.0001 and 0.5.')
     try:
-        motion_scale_fraction = float(merged.get('motion_scale_fraction', 0.1))
+        motion_scale_fraction = float(merged.get('motion_scale_fraction', 0.03))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail='motion_scale_fraction must be a number.') from exc
     if not 0.001 <= motion_scale_fraction <= 1.0:
