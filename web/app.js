@@ -6,6 +6,12 @@ const els = {
   activityFeed: document.getElementById('activityFeed'),
   listStatus: document.getElementById('listStatus'),
   dismissAllEventsBtn: document.getElementById('dismissAllEventsBtn'),
+  cpuValue: document.getElementById('cpuValue'),
+  cpuSub: document.getElementById('cpuSub'),
+  loadValue: document.getElementById('loadValue'),
+  loadSub: document.getElementById('loadSub'),
+  ramValue: document.getElementById('ramValue'),
+  ramSub: document.getElementById('ramSub'),
   // Scope to [data-filter] so the category group and the range group stay
   // independent: both share the .activity-filter-pill class, so selecting by
   // class swept the range buttons into the category handler, which reset the
@@ -298,6 +304,50 @@ async function loadStats() {
   }
 }
 
+// ─── System resource cards (CPU / Load / RAM) ───────────────────────────────
+function formatGiB(bytes) {
+  const gib = Number(bytes) / (1024 ** 3);
+  if (!Number.isFinite(gib)) return '—';
+  return `${gib.toFixed(gib >= 10 ? 0 : 1)} GB`;
+}
+
+function renderSystemResources(res) {
+  const cpu = res?.cpu_percent;
+  if (els.cpuValue) els.cpuValue.textContent = Number.isFinite(cpu) ? `${cpu}%` : '—';
+  if (els.cpuSub) {
+    const cores = res?.cpu_count;
+    els.cpuSub.textContent = Number.isFinite(cores) ? `${cores} core${cores === 1 ? '' : 's'}` : 'Processor usage';
+  }
+
+  const load = res?.load_average;
+  if (els.loadValue) els.loadValue.textContent = Array.isArray(load) && load.length ? load[0].toFixed(2) : '—';
+  if (els.loadSub) {
+    els.loadSub.textContent = Array.isArray(load) && load.length === 3
+      ? `${load[0].toFixed(2)} / ${load[1].toFixed(2)} / ${load[2].toFixed(2)} · 1/5/15 min`
+      : '1 / 5 / 15 min average';
+  }
+
+  const mem = res?.memory;
+  const pct = mem?.percent;
+  if (els.ramValue) els.ramValue.textContent = Number.isFinite(pct) ? `${pct}%` : '—';
+  if (els.ramSub) {
+    els.ramSub.textContent = mem && Number.isFinite(mem.used) && Number.isFinite(mem.total)
+      ? `${formatGiB(mem.used)} / ${formatGiB(mem.total)} used`
+      : 'Memory usage';
+  }
+}
+
+async function loadSystemResources() {
+  try {
+    const res = await api('/api/system/resources');
+    renderSystemResources(res);
+  } catch (error) {
+    // Non-admins get 403 on this admin-gated endpoint; leave the placeholder
+    // dashes in place and stay quiet rather than flashing an error toast.
+    if (window.daygleAuth?.redirecting) return;
+  }
+}
+
 async function loadEvents() {
   try {
     const since = getSinceParam();
@@ -386,7 +436,7 @@ els.rangeBtns.forEach((btn) => {
 
 // ─── Refresh orchestration ──────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([loadStats(), loadEvents()]);
+  await Promise.all([loadStats(), loadEvents(), loadSystemResources()]);
   renderActivityFeed();
 }
 
@@ -409,6 +459,7 @@ loadAuth()
   });
 
 setInterval(() => { loadStats().catch(() => {}); }, 10000);
+setInterval(() => { loadSystemResources().catch(() => {}); }, 5000);
 setInterval(() => {
   loadEvents().then(renderActivityFeed).catch(() => {});
 }, 30000);
