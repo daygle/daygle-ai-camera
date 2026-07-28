@@ -220,8 +220,23 @@ def stream_recording(recording_id: int, request: Request, db=Depends(get_databas
         return Response(status_code=416, headers={'Content-Range': f'bytes */{file_size}'})
     start_text, end_text = match.groups()
     try:
-        start = int(start_text) if start_text else 0
-        end = int(end_text) if end_text else file_size - 1
+        if start_text:
+            # ``bytes=start-`` (open-ended) or ``bytes=start-end`` (explicit).
+            start = int(start_text)
+            end = int(end_text) if end_text else file_size - 1
+        elif end_text:
+            # Suffix range ``bytes=-N``: the LAST N bytes of the file (RFC 7233
+            # §2.1). The previous code parsed this as ``0-N`` and served the
+            # first N bytes instead, corrupting playback for clients (e.g.
+            # Safari) that request the tail of the media with a suffix range.
+            suffix_length = int(end_text)
+            if suffix_length <= 0:
+                return Response(status_code=416, headers={'Content-Range': f'bytes */{file_size}'})
+            start = max(0, file_size - suffix_length)
+            end = file_size - 1
+        else:
+            # ``bytes=-`` with neither bound is unsatisfiable.
+            return Response(status_code=416, headers={'Content-Range': f'bytes */{file_size}'})
     except (ValueError, OverflowError):
         return Response(status_code=416, headers={'Content-Range': f'bytes */{file_size}'})
     # Defence-in-depth: reject negative values, start beyond file, and end before start.
