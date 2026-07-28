@@ -85,7 +85,7 @@ def _export_kwargs(nms_free: bool, precision: str = 'fp32', device: str = 'auto'
 from fastapi import HTTPException
 
 import app.state as _state
-from app.ai_settings import YOLO_MODELS, ai_status_payload, detector_status, validate_ai_settings
+from app.ai_settings import YOLO_MODELS, detector_status, validate_ai_settings
 from app.auth import utc_now
 from app.config_facades import effective_ai_config
 
