@@ -40,7 +40,7 @@ esac
 # on a reference platform) this is the strict-install path.
 if [[ -f "${LOCK_FILE}" ]]; then
   echo "Installing from hash-locked ${LOCK_FILE} (variants pre-pinned by developer)."
-  "${VENV_BIN}/pip" install --no-cache-dir --require-hashes -r "${LOCK_FILE}"
+  "${VENV_BIN}" -m pip install --no-cache-dir --require-hashes -r "${LOCK_FILE}"
   exit 0
 fi
 
@@ -59,4 +59,4 @@ awk -v pat="${STRIP_PATTERN}" '
   { print }
 ' "${REQUIREMENTS_FILE}" > "${REQUIREMENTS_WITHOUT_TORCH}"
 
-"${VENV_BIN}/pip" install --no-cache-dir -r "${REQUIREMENTS_WITHOUT_TORCH}"
+"${VENV_BIN}" -m pip install --no-cache-dir -r "${REQUIREMENTS_WITHOUT_TORCH}"
