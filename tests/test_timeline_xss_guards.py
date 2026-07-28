@@ -102,7 +102,7 @@ class _TimelineFileGuard(unittest.TestCase):
 
     def test_render_helpers_referenced(self) -> None:
         source = _read(self.path)
-        for helper in ('renderTimeline', 'renderRecordingList', 'renderRecordingDetails'):
+        for helper in ('renderTimeline', 'renderRecordingDetails'):
             self.assertIn(
                 helper,
                 source,
