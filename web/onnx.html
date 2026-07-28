@@ -74,7 +74,7 @@
         <label>
           <span>Device <span class="info-tip" data-tip="Inference device. Auto detects a CUDA GPU at startup and falls back to CPU. Default: Auto" title="Inference device. Auto detects a CUDA GPU at startup and falls back to CPU. Default: Auto" tabindex="0" aria-label="Help: Inference device. Auto detects a CUDA GPU at startup and falls back to CPU. Defa..."></span></span>
           <select name="device">
-            <option value="auto">Auto (use GPU if available)</option>
+            <option value="auto">Auto (Use GPU If Available)</option>
             <option value="cuda">CUDA (GPU)</option>
             <option value="cpu">CPU</option>
           </select></label>
@@ -85,7 +85,7 @@
           <span>Precision <span class="info-tip" data-tip="Inference precision. fp32 = full precision (default). int8 = CPU-only dynamic quantization - ~4x smaller model, ~1-2 mAP cost, biggest CPU performance win. fp16 = CUDA only; silently falls back to fp32 on CPU hosts." title="Inference precision. fp32 = full precision (default). int8 = CPU-only dynamic quantization - ~4x smaller model, ~1-2 mAP cost, biggest CPU performance win. fp16 = CUDA only; silently falls back to fp32 on CPU hosts." tabindex="0" aria-label="Help: Inference precision. fp32 = full precision (default). int8 = CPU-only dynamic quantization about 4x smaller model and about 1-2 mAP cost, biggest CPU performance win. fp16 = CUDA only silently falls back to fp32 on CPU hosts."></span></span>
           <select name="precision">
             <option value="fp32">FP32 - Full Precision</option>
-            <option value="fp16">FP16 - CUDA Only (falls back to FP32 on CPU)</option>
+            <option value="fp16">FP16 - CUDA Only (Falls Back To FP32 On CPU)</option>
             <option value="int8">INT8 - Quantized (CPU)</option>
           </select></label>
         <label>
@@ -109,15 +109,15 @@
         <label>
           <span>Execution Mode <span class="info-tip" data-tip="ONNX Runtime executor mode (CPU path only). Parallel is the default and matches prior behavior. Sequential may be faster on small graphs because ORT already parallelizes within each op. A/B test on your hardware. Default: parallel" title="ONNX Runtime executor mode (CPU path only). Parallel is the default and matches prior behavior. Sequential may be faster on small graphs because ORT already parallelizes within each op. A/B test on your hardware. Default: parallel" tabindex="0" aria-label="Help: ONNX Runtime executor mode CPU path only. Parallel is the default and matches prior behavior. Sequential may be faster on small graphs because ORT already parallelizes within each op. A/B test on your hardware. Default: parallel"></span></span>
           <select name="execution_mode">
-            <option value="parallel">Parallel (default)</option>
+            <option value="parallel">Parallel (Default)</option>
             <option value="sequential">Sequential</option>
           </select></label>
         <label>
           <span>NMS Dedupe <span class="info-tip" data-tip="Class-aware NMS dedupe pass. Auto (recommended): skips it for NMS-free YOLO26 models (they dedupe in the model head) and keeps it for YOLOv8/YOLO11. Skip: confidence threshold only. Force: always run the dedupe. The IoU Threshold above only applies when this dedupe actually runs." title="Class-aware NMS dedupe pass. Auto (recommended): skips it for NMS-free YOLO26 models (they dedupe in the model head) and keeps it for YOLOv8/YOLO11. Skip: confidence threshold only. Force: always run the dedupe. The IoU Threshold above only applies when this dedupe actually runs." tabindex="0" aria-label="Help: Class-aware NMS dedupe pass. Auto recommended skips it for NMS-free YOLO26 models they dedupe in the model head and keeps it for YOLOv8/YOLO11. Skip confidence threshold only. Force always run the dedupe. The IoU Threshold above only applies when this dedupe actually runs."></span></span>
           <select name="confidence_only_nms">
-            <option value="auto">Auto (recommended)</option>
-            <option value="on">Skip (confidence only)</option>
-            <option value="off">Force class-aware NMS</option>
+            <option value="auto">Auto (Recommended)</option>
+            <option value="on">Skip (Confidence Only)</option>
+            <option value="off">Force Class-Aware NMS</option>
           </select></label>
       </form>
       <div class="button-row">
