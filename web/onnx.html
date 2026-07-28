@@ -19,6 +19,14 @@
       </div>
     </header>
 
+    <div class="settings-tabs" role="tablist" aria-label="ONNX sections">
+      <button class="settings-tab" type="button" role="tab" id="tab-status" aria-controls="panel-status" data-tab="status" aria-selected="true"><span class="settings-tab-icon" aria-hidden="true">🔍</span><span class="settings-tab-label">Status</span></button>
+      <button class="settings-tab" type="button" role="tab" id="tab-models" aria-controls="panel-models" data-tab="models" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">📦</span><span class="settings-tab-label">Models</span></button>
+      <button class="settings-tab" type="button" role="tab" id="tab-settings" aria-controls="panel-settings" data-tab="settings" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">⚙️</span><span class="settings-tab-label">Settings</span></button>
+    </div>
+
+    <div class="settings-panel" id="panel-status" role="tabpanel" aria-labelledby="tab-status" data-panel="status">
+
     <section class="card">
       <div class="settings-section-header">
         <div class="settings-section-icon">🔍</div>
@@ -35,6 +43,10 @@
         <button id="testDetectorBtn" class="btn-success" type="button">Test Detector</button>
       </div>
     </section>
+
+    </div><!-- /panel-status -->
+
+    <div class="settings-panel" id="panel-models" role="tabpanel" aria-labelledby="tab-models" data-panel="models" hidden>
 
     <section class="card">
       <div class="settings-section-header">
@@ -53,13 +65,29 @@
 
     <section class="card">
       <div class="settings-section-header">
+        <div class="settings-section-icon">🏷️</div>
+        <div>
+          <h2>Loaded Labels</h2>
+          <p class="settings-section-subtitle">Object classes the current detector can identify, loaded from <code>models/coco.names</code>. These are the 80 standard COCO categories.</p>
+        </div>
+      </div>
+      <div id="labelsList" class="labels-list"></div>
+    </section>
+
+    </div><!-- /panel-models -->
+
+    <div class="settings-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" data-panel="settings" hidden>
+
+    <section class="card">
+      <div class="settings-section-header">
         <div class="settings-section-icon">⚙️</div>
         <div>
           <h2>Detection Settings</h2>
           <p class="settings-section-subtitle">Configure the AI detection engine, model path, and inference parameters.</p>
         </div>
       </div>
-      <form id="aiSettingsForm" class="form-grid">
+      <form id="aiSettingsForm">
+        <div class="form-grid">
         <label>
           <span>AI Enabled <span class="info-tip" data-tip="Master toggle for AI object detection. Default: Enabled" title="Master toggle for AI object detection. Default: Enabled" tabindex="0" aria-label="Help: Master toggle for AI object detection. Default: Enabled"></span></span>
           <select name="enabled">
@@ -76,9 +104,11 @@
         <label>
           <span>Concurrent Cameras <span class="info-tip" data-tip="How many cameras can run ONNX inference at the same time. Default: 1 (serialised). Set to your camera count so each camera gets its own inference slot - prevents one slow camera blocking another." title="How many cameras can run ONNX inference at the same time. Default: 1 (serialised). Set to your camera count so each camera gets its own inference slot - prevents one slow camera blocking another." tabindex="0" aria-label="Help: How many cameras can run ONNX inference at the same time. Default: 1 (serialised..."></span></span>
           <input name="max_concurrent_inferences" type="number" min="1" max="16" step="1" placeholder="1" /></label>
-        <hr class="settings-subsection-divider full-width" />
-        <h3 class="settings-subsection-heading full-width">Advanced</h3>
-        <p class="settings-subsection-help muted full-width">Optional inference tuning that works on its defaults - most setups never need to touch these. Change one at a time so you can attribute any per-frame impact. Model and labels paths are managed by the Model Library above.</p>
+        </div>
+        <details class="settings-advanced">
+          <summary>Advanced</summary>
+          <p class="settings-advanced-hint">Optional inference tuning that works on its defaults — most setups never need to touch these. Change one at a time so you can attribute any per-frame impact. Model and labels paths are managed by the Model Library above.</p>
+          <div class="form-grid">
         <label>
           <span>Precision <span class="info-tip" data-tip="Inference precision. fp32 = full precision (default). int8 = CPU-only dynamic quantization - ~4x smaller model, ~1-2 mAP cost, biggest CPU performance win. fp16 = CUDA only; silently falls back to fp32 on CPU hosts." title="Inference precision. fp32 = full precision (default). int8 = CPU-only dynamic quantization - ~4x smaller model, ~1-2 mAP cost, biggest CPU performance win. fp16 = CUDA only; silently falls back to fp32 on CPU hosts." tabindex="0" aria-label="Help: Inference precision. fp32 = full precision (default). int8 = CPU-only dynamic quantization about 4x smaller model and about 1-2 mAP cost, biggest CPU performance win. fp16 = CUDA only silently falls back to fp32 on CPU hosts."></span></span>
           <select name="precision">
@@ -114,22 +144,15 @@
         <label>
           <span>Labels Path <span class="info-tip" data-tip="Path to the text file containing one object label per line. Managed alongside the model. Default: models/coco.names" title="Path to the text file containing one object label per line. Managed alongside the model. Default: models/coco.names" tabindex="0" aria-label="Help: Path to the text file containing one object label per line. Managed alongside the model. Default: models/coco.names"></span></span>
           <input name="labels_path" readonly /></label>
+          </div>
+        </details>
       </form>
       <div class="button-row">
         <button type="submit" form="aiSettingsForm">Save ONNX Settings</button>
       </div>
     </section>
 
-    <section class="card">
-      <div class="settings-section-header">
-        <div class="settings-section-icon">🏷️</div>
-        <div>
-          <h2>Loaded Labels</h2>
-          <p class="settings-section-subtitle">Object classes the current detector can identify, loaded from <code>models/coco.names</code>. These are the 80 standard COCO categories.</p>
-        </div>
-      </div>
-      <div id="labelsList" class="labels-list"></div>
-    </section>
+    </div><!-- /panel-settings -->
   </main>
   <script src="/static/nav.js"></script>
   <script src="/static/utils.js"></script>

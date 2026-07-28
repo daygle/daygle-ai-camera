@@ -500,42 +500,7 @@ startCleanBtn?.addEventListener('click', guard(async () => {
 }));
 
 // ---- Tab navigation ----------------------------------------------------
-// Groups the settings cards into panels switched by the tab bar. Implements
-// the ARIA tabs pattern (roving tabindex + arrow keys) and mirrors the active
-// tab into the URL hash so a section can be linked to or survives a refresh.
-function initSettingsTabs() {
-  const tabs = Array.from(document.querySelectorAll('.settings-tab'));
-  if (!tabs.length) return;
-  const panels = new Map(
-    Array.from(document.querySelectorAll('.settings-panel')).map((panel) => [panel.dataset.panel, panel]),
-  );
-
-  function activate(name, { focus = false, updateHash = true } = {}) {
-    if (!panels.has(name)) name = tabs[0].dataset.tab;
-    tabs.forEach((tab) => {
-      const selected = tab.dataset.tab === name;
-      tab.setAttribute('aria-selected', selected ? 'true' : 'false');
-      tab.tabIndex = selected ? 0 : -1;
-      if (selected && focus) tab.focus();
-    });
-    panels.forEach((panel, key) => { panel.hidden = key !== name; });
-    if (updateHash) {
-      try { history.replaceState(null, '', `#${name}`); } catch { window.location.hash = name; }
-    }
-  }
-
-  tabs.forEach((tab, index) => {
-    tab.addEventListener('click', () => activate(tab.dataset.tab));
-    tab.addEventListener('keydown', (event) => {
-      const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
-      if (!step) return;
-      event.preventDefault();
-      activate(tabs[(index + step + tabs.length) % tabs.length].dataset.tab, { focus: true });
-    });
-  });
-
-  const initial = (window.location.hash || '').replace('#', '');
-  activate(panels.has(initial) ? initial : tabs[0].dataset.tab, { updateHash: false });
-}
-
-initSettingsTabs();
+// Groups the settings cards into panels switched by the tab bar. The shared
+// implementation (ARIA tabs pattern + URL-hash deep-linking) lives in
+// utils.js as initDaygleTabs() so the onnx page can reuse it.
+initDaygleTabs();
