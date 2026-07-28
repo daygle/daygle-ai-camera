@@ -133,6 +133,12 @@ _motion_history_lock: threading.Lock = threading.Lock()
 
 active_rtsp_recordings_lock: threading.Lock = threading.Lock()
 active_rtsp_recordings: dict = {}
+# Wall-clock end timestamp of the last completed RTSP event capture per camera,
+# guarded by ``active_rtsp_recordings_lock``. Used to clamp a new clip's pre-roll
+# so it does not re-capture footage the previous clip already holds (see
+# ``recording_extension.start_rtsp_recording_capture``). In-memory only: after a
+# restart the rolling prebuffer is empty too, so there is nothing to overlap.
+last_rtsp_capture_end: dict = {}
 
 # ---------------------------------------------------------------------------
 # Camera health shared state

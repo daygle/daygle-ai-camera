@@ -15,6 +15,9 @@ const els = {
   deleteAllRecordingsBtn: document.getElementById('deleteAllRecordingsBtn'),
   clipOverlay: document.getElementById('clipOverlay'),
   clipOverlayToggle: document.getElementById('clipOverlayToggle'),
+  clipTimeline: document.getElementById('clipTimeline'),
+  clipTimelineBar: document.getElementById('clipTimelineBar'),
+  clipTimelineLegend: document.getElementById('clipTimelineLegend'),
   videoModal: document.getElementById('videoModal'),
   videoModalClose: document.getElementById('videoModalClose'),
   videoModalDownload: document.getElementById('videoModalDownload'),
@@ -322,11 +325,9 @@ function renderRecordings(recordings) {
           <div class="activity-item-badges">${badges}</div>
         </div>
         <div class="recording-row-actions">
-          <button class="secondary" data-play-recording="${recording.id}" ${mediaReady ? '' : 'disabled'}>
-            ${mediaReady
-              ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg> Play'
-              : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Preparing...'}
-          </button>
+          ${mediaReady
+            ? `<a class="secondary" href="/recordings/${recording.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg> Play</a>`
+            : '<button class="secondary" disabled><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Preparing...</button>'}
           <button class="secondary delete-btn" data-delete-recording="${recording.id}" aria-label="Delete recording #${recording.id}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
             Delete
@@ -548,12 +549,161 @@ function drawClipOverlay(vfcMediaTime) {
   drawDetectionBoxesOnCanvas(els.clipOverlay, eventDetections, els.clipPlayer);
 }
 
+// ── Clip segment timeline ───────────────────────────────────────────────────
+// A compact bar under the player that shows the clip's pre-roll, the event span,
+// and the post-motion tail — the recording settings "in action" on real footage.
+// Boundaries come from the detection track (real detection times), not the
+// configured pre/post values, so the bar reflects what this clip actually
+// captured (including a truncated pre-roll).
+
+function clipAuthoritativeDuration() {
+  const videoDuration = Number(els.clipPlayer?.duration);
+  if (Number.isFinite(videoDuration) && videoDuration > 0) return videoDuration;
+  const metaDuration = Number(activeRecording?.duration_seconds);
+  return Number.isFinite(metaDuration) && metaDuration > 0 ? metaDuration : 0;
+}
+
+// First and last playback times (seconds) where the track localized a detection.
+function clipEventBounds(track) {
+  if (!Array.isArray(track) || !track.length) return null;
+  let first = null;
+  let last = null;
+  for (const sample of track) {
+    if (!sample || !Array.isArray(sample.detections) || !sample.detections.length) continue;
+    const t = Number(sample.t);
+    if (!Number.isFinite(t) || t < 0) continue;
+    if (first === null) first = t;
+    last = t;
+  }
+  return first === null ? null : { first, last };
+}
+
+function fmtClipSeconds(seconds) {
+  const s = Math.max(0, Number(seconds) || 0);
+  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
+  return `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+}
+
+function resetClipTimeline() {
+  if (!els.clipTimeline) return;
+  els.clipTimeline.hidden = true;
+  if (els.clipTimelineBar) els.clipTimelineBar.innerHTML = '';
+  if (els.clipTimelineLegend) els.clipTimelineLegend.innerHTML = '';
+}
+
+function renderClipTimeline() {
+  if (!els.clipTimeline || !els.clipTimelineBar) return;
+  const duration = clipAuthoritativeDuration();
+  const track = Array.isArray(activeRecording?.track) ? activeRecording.track : null;
+  const bounds = clipEventBounds(track);
+  // Only annotate event clips whose track actually located the event. Continuous
+  // recordings and clips with no localized detections get no segmentation.
+  if (!duration || !bounds) {
+    resetClipTimeline();
+    return;
+  }
+  const first = Math.max(0, Math.min(bounds.first, duration));
+  const last = Math.min(Math.max(bounds.last, first), duration);
+  const pct = (value) => `${Math.max(0, Math.min(100, (value / duration) * 100))}%`;
+
+  const segments = [
+    { cls: 'pre', label: 'Pre-roll', start: 0, end: first },
+    { cls: 'event', label: 'Event', start: first, end: last },
+    { cls: 'tail', label: 'Tail', start: last, end: duration },
+  ];
+  els.clipTimelineBar.innerHTML = '';
+  for (const seg of segments) {
+    const span = seg.end - seg.start;
+    if (span <= 0.05) continue;
+    const div = document.createElement('div');
+    div.className = `clip-seg clip-seg-${seg.cls}`;
+    div.style.left = pct(seg.start);
+    div.style.width = pct(span);
+    div.title = `${seg.label}: ${fmtClipSeconds(span)}`;
+    els.clipTimelineBar.appendChild(div);
+  }
+  const marker = document.createElement('div');
+  marker.className = 'clip-trigger-marker';
+  marker.style.left = pct(first);
+  marker.title = `Event trigger at ${fmtClipSeconds(first)}`;
+  els.clipTimelineBar.appendChild(marker);
+
+  const playhead = document.createElement('div');
+  playhead.className = 'clip-playhead';
+  playhead.id = 'clipPlayhead';
+  els.clipTimelineBar.appendChild(playhead);
+
+  // Legend shows the actual measured seconds of each region for this clip.
+  const legendItems = [
+    { cls: 'pre', label: 'Pre-roll', secs: first },
+    { cls: 'event', label: 'Event', secs: last - first },
+    { cls: 'tail', label: 'Tail', secs: duration - last },
+  ];
+  els.clipTimelineLegend.innerHTML = '';
+  for (const item of legendItems) {
+    const wrap = document.createElement('span');
+    wrap.className = 'clip-legend-item';
+    const swatch = document.createElement('i');
+    swatch.className = `clip-legend-swatch clip-seg-${item.cls}`;
+    wrap.appendChild(swatch);
+    wrap.appendChild(document.createTextNode(`${item.label} ${fmtClipSeconds(Math.max(0, item.secs))}`));
+    els.clipTimelineLegend.appendChild(wrap);
+  }
+  els.clipTimeline.hidden = false;
+  els.clipTimelineBar.setAttribute('aria-valuemax', duration.toFixed(1));
+  updateClipTimelinePlayhead();
+}
+
+function updateClipTimelinePlayhead() {
+  if (!els.clipTimeline || els.clipTimeline.hidden) return;
+  const duration = clipAuthoritativeDuration();
+  if (!duration) return;
+  const playhead = document.getElementById('clipPlayhead');
+  if (!playhead) return;
+  const current = Number(els.clipPlayer?.currentTime) || 0;
+  playhead.style.left = `${Math.max(0, Math.min(100, (current / duration) * 100))}%`;
+  els.clipTimelineBar?.setAttribute('aria-valuenow', current.toFixed(1));
+}
+
+function seekClipFromClientX(clientX) {
+  if (!els.clipTimelineBar || !els.clipPlayer) return;
+  const duration = clipAuthoritativeDuration();
+  if (!duration) return;
+  const rect = els.clipTimelineBar.getBoundingClientRect();
+  if (rect.width <= 0) return;
+  const fraction = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  try {
+    els.clipPlayer.currentTime = fraction * duration;
+  } catch (_error) {
+    /* not seekable yet */
+  }
+  updateClipTimelinePlayhead();
+}
+
+function nudgeClipTime(deltaSeconds) {
+  if (!els.clipPlayer) return;
+  const duration = clipAuthoritativeDuration();
+  if (!duration) return;
+  const next = Math.max(0, Math.min(duration, (Number(els.clipPlayer.currentTime) || 0) + deltaSeconds));
+  try {
+    els.clipPlayer.currentTime = next;
+  } catch (_error) {
+    /* not seekable yet */
+  }
+  updateClipTimelinePlayhead();
+}
+// ── End clip segment timeline ───────────────────────────────────────────────
+
 function openVideoModal() {
+  // On the dedicated /recordings/{id} page there is no modal — the player is
+  // rendered inline and always visible — so this is a no-op there.
+  if (!els.videoModal) return;
   els.videoModal.hidden = false;
-  els.videoModalClose.focus();
+  els.videoModalClose?.focus();
 }
 
 function closeVideoModal() {
+  if (!els.videoModal) return;
   els.videoModal.hidden = true;
   els.clipPlayer.pause();
   stopOverlayRaf();
@@ -562,6 +712,7 @@ function closeVideoModal() {
   els.videoModalDownload.hidden = true;
   els.videoModalDownload.removeAttribute('href');
   clearClipOverlay();
+  resetClipTimeline();
   activeRecording = null;
   els.clipPlayerStatus.textContent = '';
   els.recordingDetails.innerHTML = '';
@@ -581,6 +732,7 @@ async function playRecording(id) {
       ? `Recording from ${camera} captured ${started}.`
       : `Recording from ${camera}.`;
   }
+  resetClipTimeline();
   openVideoModal();
   if (recording.media_ready === false) {
     clearClipOverlay();
@@ -610,9 +762,8 @@ async function playRecording(id) {
 }
 
 function bindRecordingButtons() {
-  document.querySelectorAll('[data-play-recording]').forEach((button) => {
-    button.addEventListener('click', () => playRecording(button.dataset.playRecording));
-  });
+  // "Play" is now an anchor to /recordings/{id} (deep-linkable), so no click
+  // handler is wired for it here — only the delete action needs JS.
   document.querySelectorAll('[data-delete-recording]').forEach((button) => {
     button.addEventListener('click', async () => {
       const id = button.dataset.deleteRecording;
@@ -636,7 +787,9 @@ async function loadAuth() {
   // shared daygleAuthReady promise here means this page never issues its
   // own duplicate /api/auth/me on bootstrap.
   await window.daygleAuthReady;
-  if (window.daygleAuth.user?.role === 'admin') {
+  // The "Delete all" button only exists on the list page, not the dedicated
+  // playback page, so guard its presence before wiring it up.
+  if (window.daygleAuth.user?.role === 'admin' && els.deleteAllRecordingsBtn) {
     els.deleteAllRecordingsBtn.hidden = false;
     els.deleteAllRecordingsBtn.addEventListener('click', async () => {
       if (!confirm('Delete ALL recordings and media files? Settings, users, and rules will not be changed.')) return;
@@ -732,6 +885,10 @@ async function loadRecordings(filters = {}) {
   return recordings;
 }
 
+// Player/overlay/timeline wiring only applies where the video element exists:
+// the playback page and (legacy) the list modal. The list page without a modal
+// skips all of it.
+if (els.clipPlayer) {
 els.clipPlayer.addEventListener('error', () => {
   const error = els.clipPlayer.error;
   const messages = {
@@ -751,6 +908,25 @@ els.clipPlayer.addEventListener('error', () => {
     drawClipOverlay();
   });
 });
+
+// Build the segment bar once the duration is known; keep its playhead synced.
+els.clipPlayer.addEventListener('loadedmetadata', renderClipTimeline);
+['timeupdate', 'seeked', 'play'].forEach((eventName) => {
+  els.clipPlayer.addEventListener(eventName, updateClipTimelinePlayhead);
+});
+if (els.clipTimelineBar) {
+  els.clipTimelineBar.addEventListener('click', (event) => seekClipFromClientX(event.clientX));
+  els.clipTimelineBar.addEventListener('keydown', (event) => {
+    const step = event.shiftKey ? 5 : 1;
+    if (event.key === 'ArrowRight') {
+      nudgeClipTime(step);
+      event.preventDefault();
+    } else if (event.key === 'ArrowLeft') {
+      nudgeClipTime(-step);
+      event.preventDefault();
+    }
+  });
+}
 
 els.clipPlayer.addEventListener('play', () => {
   if (overlayShouldAnimate()) startOverlayRaf();
@@ -785,6 +961,7 @@ if (els.clipOverlayToggle) {
     drawClipOverlay();
   });
 }
+} // end if (els.clipPlayer)
 
 els.cameraFilter?.addEventListener('change', () => {
   loadRecordings().catch((error) => {
@@ -805,7 +982,7 @@ els.filterForm?.addEventListener('submit', (event) => {
     if (els.listStatus) els.listStatus.textContent = error.message;
   });
 });
-els.recordingClearBtn.addEventListener('click', () => {
+els.recordingClearBtn?.addEventListener('click', () => {
   if (els.labelFilter) els.labelFilter.value = '';
   if (els.cameraFilter) els.cameraFilter.value = '';
   if (els.recordingDateFrom) els.recordingDateFrom.value = '';
@@ -870,11 +1047,11 @@ function populateLabelFilterOptions(recordings) {
   els.labelFilter.value = availableValues.has(currentFilter) ? currentFilter : '';
 }
 
-els.videoModalClose.addEventListener('click', () => closeVideoModal());
+els.videoModalClose?.addEventListener('click', () => closeVideoModal());
 
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !els.videoModal.hidden) closeVideoModal();
+  if (event.key === 'Escape' && els.videoModal && !els.videoModal.hidden) closeVideoModal();
 });
 
 // Re-render the recordings list (and any open modal's "Started" line) when
@@ -893,13 +1070,31 @@ window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
   loadRecordings().catch((error) => { els.listStatus.textContent = error.message; });
 };
 
-loadAuth().then(async () => {
-  await Promise.all([loadCameras(), loadLiveSettings()]);
-  await populateLabelFilterOptionsFromApi();
-  await loadRecordings();
-  const selected = new URLSearchParams(window.location.search).get('recording_id');
-  if (selected) playRecording(encodeURIComponent(selected)).catch((error) => { els.listStatus.textContent = error.message; });
-}).catch((error) => {
-  if (els.listStatus) els.listStatus.textContent = error.message;
-  window.showToast?.(error.message, true);
-});
+const playbackPageMatch = window.location.pathname.match(/^\/recordings\/(\d+)$/);
+if (playbackPageMatch) {
+  // Dedicated playback page (/recordings/{id}): load the single recording and
+  // render it inline. loadLiveSettings feeds the overlay's configured-label
+  // filter exactly as it does on the list page.
+  loadAuth().then(async () => {
+    await loadLiveSettings();
+    await playRecording(playbackPageMatch[1]);
+  }).catch((error) => {
+    if (els.clipPlayerStatus) els.clipPlayerStatus.textContent = error.message;
+    window.showToast?.(error.message, true);
+  });
+} else {
+  // Recordings list page.
+  loadAuth().then(async () => {
+    await Promise.all([loadCameras(), loadLiveSettings()]);
+    await populateLabelFilterOptionsFromApi();
+    await loadRecordings();
+    // Preserve legacy ?recording_id= deep links by forwarding to the page.
+    const selected = new URLSearchParams(window.location.search).get('recording_id');
+    if (selected && /^\d+$/.test(String(selected))) {
+      window.location.assign(`/recordings/${encodeURIComponent(selected)}`);
+    }
+  }).catch((error) => {
+    if (els.listStatus) els.listStatus.textContent = error.message;
+    window.showToast?.(error.message, true);
+  });
+}

@@ -220,6 +220,18 @@ def recordings_timeline_page(web_dir: Path = Depends(get_web_dir)):
     return root(web_dir=web_dir)
 
 
+@router.get('/recordings/{recording_id:int}')
+def recording_playback_page(recording_id: int, web_dir: Path = Depends(get_web_dir)):
+    # Dedicated, deep-linkable playback page for a single clip. The ``:int``
+    # converter keeps the literal ``/recordings/timeline`` route above matching
+    # first and rejects non-numeric ids. Same access level as the list (no
+    # require_admin) so viewers can watch. The client reads the id from the URL.
+    playback_path = web_dir / 'playback.html'
+    if playback_path.exists():
+        return FileResponse(playback_path)
+    return root(web_dir=web_dir)
+
+
 @router.get('/onnx')
 def onnx_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)

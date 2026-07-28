@@ -56,6 +56,15 @@ class RecordingService:
     # window and absorbs detection + RTSP-connect latency; live capture remains
     # the fallback (below) when the buffer genuinely holds no usable segments.
     RTSP_EVENT_MIN_PRE_SECONDS = 2
+    # How much requested pre-roll can go unrendered before it is worth a
+    # diagnostic. The rendered clip starts at the oldest buffered segment
+    # overlapping the window; keyframe alignment normally makes that start AT or
+    # BEFORE the requested point (extra lead-in, never a shortfall). A start
+    # materially LATER than requested means the rolling buffer had not filled
+    # back to ``triggered_at - pre_seconds`` yet - a genuinely short clip. A
+    # couple of seconds of slack absorbs segment-boundary jitter so only real
+    # shortfalls (buffer not yet full after a restart / reconnect) are surfaced.
+    PREBUFFER_SHORT_PREROLL_TOLERANCE_SECONDS = 2.0
     # Worst-case ceiling for ``_stop_worker``'s ``thread.join`` when the worker
     # that's being joined is the per-camera ingest / prebuffer ffmpeg (1s loop
     # sleep + up to 2s ``process.wait(timeout=2)`` for SIGTERM grace + SIGKILL
@@ -746,6 +755,33 @@ class RecordingService:
 
         if content_start_ts is None:
             content_start_ts = start_ts
+        # Surface a partial pre-roll. A total buffer miss already emits a
+        # ``prebuffer_fallback`` above, but a buffer that holds SOME footage just
+        # not reaching all the way back to the requested start renders fine and
+        # was previously silent - producing a mysteriously short clip (e.g. 5s of
+        # pre-roll instead of 10s). Flag it so operators can tell a short clip
+        # apart from a real problem. Only fires when the shortfall exceeds the
+        # jitter tolerance; keyframe lead-in (content_start_ts <= start_ts) never
+        # trips it.
+        preroll_shortfall = content_start_ts - start_ts
+        if preroll_shortfall > self.PREBUFFER_SHORT_PREROLL_TOLERANCE_SECONDS:
+            actual_pre_seconds = max(0.0, triggered_at.timestamp() - content_start_ts)
+            self._emit_diagnostic(
+                camera_id,
+                'prebuffer_short_preroll',
+                f'Only ~{actual_pre_seconds:.0f}s of the requested {pre_seconds}s pre-event buffer was '
+                f'available, so this clip is about {preroll_shortfall:.0f}s shorter at the start. The '
+                'rolling buffer had not filled yet - this is normal right after saving recording settings, '
+                'a camera reconnect, or the camera first coming online, and recovers once the buffer refills.',
+                severity='warning',
+                details={
+                    'reason': 'buffer_not_full',
+                    'requested_pre_seconds': pre_seconds,
+                    'actual_pre_seconds': round(actual_pre_seconds, 1),
+                    'shortfall_seconds': round(preroll_shortfall, 1),
+                    'segment_count': len(segments),
+                },
+            )
         # Render exactly the footage between where the first selected segment
         # starts and the capture deadline. The keyframe-aligned lead before
         # start_ts is kept (and reported via content_start_ts) rather than
