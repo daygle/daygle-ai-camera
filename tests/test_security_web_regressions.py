@@ -82,10 +82,28 @@ class UpdateScriptOriginGuardTests(unittest.TestCase):
 
     def test_update_sh_accepts_canonical_origin(self):
         good_repo = self._make_git_repo('https://github.com/daygle/daygle-ai-camera.git')
+        # Run a *copy* of update.sh from inside the controlled repo so its
+        # APP_DIR (derived from the script's own location) resolves to
+        # good_repo -- which sits on a real ``main`` branch -- rather than the
+        # surrounding checkout. On pull_request builds actions/checkout leaves
+        # the real repo in a detached HEAD, which would trip update.sh's
+        # detached-HEAD guard and abort before it ever reaches the origin
+        # allowlist this test is asserting. GIT_ALLOW_PROTOCOL=file makes the
+        # post-verification ``git fetch origin`` fail instantly offline; every
+        # assertion below is already satisfied by the "Origin remote verified"
+        # line printed beforehand, so no network is required.
+        scripts_dir = Path(good_repo) / 'scripts'
+        scripts_dir.mkdir()
+        shutil.copy2(
+            Path(REPO_DIR) / 'scripts' / 'update.sh',
+            scripts_dir / 'update.sh',
+        )
+        env = _hermetic_git_env()
+        env['GIT_ALLOW_PROTOCOL'] = 'file'
         result = subprocess.run(
-            ['bash', REPO_DIR + '/scripts/update.sh'],
+            ['bash', str(scripts_dir / 'update.sh')],
             cwd=good_repo, capture_output=True, text=True, check=False,
-            env=_hermetic_git_env(),
+            env=env,
         )
         combined = ((result.stdout or '') + (result.stderr or '')).lower()
         self.assertNotIn('non-allowlisted origin remote', combined)
