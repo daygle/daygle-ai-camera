@@ -154,6 +154,7 @@ def test_web_router_registers_expected_page_paths(app_modules):
         "/search",
         "/recordings",
         "/recordings/timeline",
+        "/recordings/{recording_id}",
         "/onnx",
         "/ai",
         "/yamnet-tflite",

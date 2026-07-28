@@ -220,12 +220,19 @@ def recordings_timeline_page(web_dir: Path = Depends(get_web_dir)):
     return root(web_dir=web_dir)
 
 
-@router.get('/recordings/{recording_id:int}')
-def recording_playback_page(recording_id: int, web_dir: Path = Depends(get_web_dir)):
-    # Dedicated, deep-linkable playback page for a single clip. The ``:int``
-    # converter keeps the literal ``/recordings/timeline`` route above matching
-    # first and rejects non-numeric ids. Same access level as the list (no
+@router.get('/recordings/{recording_id}')
+def recording_playback_page(recording_id: str, web_dir: Path = Depends(get_web_dir)):
+    # Dedicated, deep-linkable playback page for a single clip. Declared AFTER
+    # ``/recordings/timeline`` so that literal route matches first. A plain
+    # ``str`` path param (not an ``:int`` converter) is used deliberately: the
+    # route-coverage invariant in tests/test_api_router_split_invariants.py
+    # matches a decorator's template string against the compiled route regex,
+    # and a converter regex (``[0-9]+``) does not match the literal
+    # ``{recording_id:int}`` text. Non-numeric ids are rejected here with a 404
+    # so only real clip ids reach the page. Same access level as the list (no
     # require_admin) so viewers can watch. The client reads the id from the URL.
+    if not recording_id.isdigit():
+        raise HTTPException(status_code=404, detail='Not found')
     playback_path = web_dir / 'playback.html'
     if playback_path.exists():
         return FileResponse(playback_path)
