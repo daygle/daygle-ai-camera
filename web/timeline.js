@@ -536,13 +536,19 @@ function renderSummary(payload, totalRecordingCount) {
     }
   });
 
-  els.timelineSummary.innerHTML = `
-    <div><span>Camera</span><strong>${escapeHtml(payload.camera?.name || payload.camera?.id || 'Unknown')}</strong></div>
-    <div><span>Day</span><strong>${escapeHtml(formatUserDate(payload.day || ''))}</strong></div>
-    <div><span>Clips</span><strong>${escapeHtml(clipLabel)}</strong></div>
-    <div><span>Coverage</span><strong>${escapeHtml(formatDuration(totalSeconds))}</strong></div>
-    <div class="wide"><span>Triggers</span><strong>${recordings.length ? `${objectTriggers.size} objects / ${soundTriggers.size} sounds` : 'none'}</strong></div>
-  `;
+  // The top stats grid (Clips / Coverage / Triggers / Camera) is the single
+  // source of truth for these numbers; the inline summary panel that used to
+  // repeat them here was removed to cut the duplication. Kept optional so any
+  // future markup that re-adds #timelineSummary still renders.
+  if (els.timelineSummary) {
+    els.timelineSummary.innerHTML = `
+      <div><span>Camera</span><strong>${escapeHtml(payload.camera?.name || payload.camera?.id || 'Unknown')}</strong></div>
+      <div><span>Day</span><strong>${escapeHtml(formatUserDate(payload.day || ''))}</strong></div>
+      <div><span>Clips</span><strong>${escapeHtml(clipLabel)}</strong></div>
+      <div><span>Coverage</span><strong>${escapeHtml(formatDuration(totalSeconds))}</strong></div>
+      <div class="wide"><span>Triggers</span><strong>${recordings.length ? `${objectTriggers.size} objects / ${soundTriggers.size} sounds` : 'none'}</strong></div>
+    `;
+  }
   // Also feed the top stats grid.
   if (els.statClips) {
     els.statClips.textContent = String(recordings.length);

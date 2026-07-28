@@ -53,7 +53,7 @@ function groupAlertsByEvent(alerts) {
       groups.set(key, {
         key,
         eventId: alert.event_id ?? null,
-        camera: [alert.camera_name, alert.camera_id].filter(Boolean).join(' ('),
+        camera: cameraLabel(alert.camera_name, alert.camera_id),
         ruleNames: [],
         zones: new Set(),
         labels: new Set(),
@@ -87,8 +87,7 @@ function groupAlertsByEvent(alerts) {
   }
   return order.map((key) => {
     const group = groups.get(key);
-    const cam = group.camera.replace(/\(\s*$/, '').trim();
-    return { ...group, labels: Array.from(group.labels), zones: Array.from(group.zones), camera: cam || 'unknown' };
+    return { ...group, labels: Array.from(group.labels), zones: Array.from(group.zones), camera: group.camera || 'unknown' };
   });
 }
 
@@ -233,6 +232,7 @@ function renderFeed() {
   const filtered = applyFilter(alertGroups);
   if (!filtered.length) {
     els.alertFeed.innerHTML = renderEmptyState();
+    updateListStatus(0);
     return;
   }
   els.alertFeed.innerHTML = filtered.map(renderAlertItem).join('');
