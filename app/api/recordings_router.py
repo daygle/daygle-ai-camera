@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from app.auth_gates import require_admin, require_user
 from app.camera_config import normalize_camera_id
 from app.config_facades import effective_cameras_config, effective_recording_config
-from app.deps import get_database, get_recording_service
+from app.deps import get_database
 from app.media_utils import mp4_has_video_stream, recording_stream_path
 from app.recording_extension import load_recording_detection_track, recording_track_sidecar_path
 from app.request_helpers import write_audit_log
