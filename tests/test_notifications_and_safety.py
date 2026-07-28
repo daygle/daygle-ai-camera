@@ -244,5 +244,65 @@ class ActivityTypeEscapeTests(unittest.TestCase):
         self.assertEqual(rendered, '')
 
 
+# ─── Alert confidence None-safety (email + push send_alert) ──────
+
+
+class AlertConfidenceNoneSafetyTests(unittest.TestCase):
+    """``send_alert`` tolerates a ``confidence`` key present but ``None``.
+
+    ``alert.get('confidence', 0)`` only falls back to ``0`` for a MISSING
+    key; a present-but-``None`` value would reach ``float(None)`` and raise
+    ``TypeError``. The ``float(alert.get('confidence') or 0)`` form used in
+    both services coerces ``None`` (and a missing key) to ``0`` the same way
+    the surrounding fields defend ``message`` / ``label`` with ``or``.
+    """
+
+    def test_email_send_alert_handles_none_confidence(self) -> None:
+        from app.email_alerts import EmailAlertService
+
+        captured: list = []
+        svc = EmailAlertService({
+            'enabled': True,
+            'host': 'smtp.example.invalid',
+            'from_address': 'daygle@example.invalid',
+        })
+        # Capture the outbound message instead of hitting the network.
+        svc._deliver = lambda message, **kwargs: captured.append(message) or None  # type: ignore[assignment]
+        with patch('app.email_alerts.EmailAlertService._create_smtp_session') as make_session:
+            make_session.return_value.__enter__.return_value = MagicMock()
+            make_session.return_value.__exit__.return_value = False
+            svc.send_alert(
+                {'label': 'person', 'rule_name': 'r', 'message': 'm', 'confidence': None},
+                event_id=1,
+                recipients=['a@example.invalid'],
+            )
+        self.assertTrue(captured, 'expected one message to be delivered')
+        # Walk the MIME parts and decode the transfer encoding so the
+        # assertion is robust to base64/quoted-printable bodies.
+        decoded = ''.join(
+            part.get_payload(decode=True).decode('utf-8', 'replace')
+            for part in captured[0].walk()
+            if part.get_content_maintype() == 'text'
+        )
+        self.assertIn('0.00%', decoded)
+
+    def test_push_send_alert_handles_none_confidence(self) -> None:
+        from app.push_notifications import PushNotificationService
+
+        captured: list = []
+        svc = PushNotificationService({
+            'enabled': True,
+            'server_url': 'https://ntfy.example.invalid',
+            'topic': 'daygle-test',
+        })
+        svc._deliver = lambda title, body: captured.append((title, body))  # type: ignore[assignment]
+        svc.send_alert(
+            {'label': 'person', 'rule_name': 'r', 'message': 'm', 'confidence': None},
+            event_id=1,
+        )
+        self.assertTrue(captured, 'expected one push to be delivered')
+        self.assertIn('0.00%', captured[0][1])
+
+
 if __name__ == '__main__':
     unittest.main()

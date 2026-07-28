@@ -115,7 +115,7 @@ class EmailAlertService:
             plain_lines.append(all_triggers_line)
         plain_lines.extend([
             f"Trigger: {alert.get('label')}",
-            f"Confidence: {float(alert.get('confidence', 0)):.2%}",
+            f"Confidence: {float(alert.get('confidence') or 0):.2%}",
             f"Event ID: {event_id}",
         ])
         plain_text = "\n".join(plain_lines)
@@ -143,7 +143,7 @@ class EmailAlertService:
             f'{detected_at_row}'
             f'{all_triggers_row}'
             f'<tr><td style="padding:4px 0;color:#888">Trigger</td><td style="padding:4px 0">{escape(str(alert.get("label") or ""))}</td></tr>'
-            f'<tr><td style="padding:4px 0;color:#888">Confidence</td><td style="padding:4px 0">{float(alert.get("confidence", 0)):.2%}</td></tr>'
+            f'<tr><td style="padding:4px 0;color:#888">Confidence</td><td style="padding:4px 0">{float(alert.get("confidence") or 0):.2%}</td></tr>'
             f'<tr><td style="padding:4px 0;color:#888">Event ID</td><td style="padding:4px 0">{event_id}</td></tr>'
             f'</table>{img_tag}'
             '</body></html>'

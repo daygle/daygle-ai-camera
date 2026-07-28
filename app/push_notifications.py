@@ -91,7 +91,7 @@ class PushNotificationService:
             body_lines.append(f"Detected at: {detected_at_display}")
         if display_labels and len(display_labels) > 1:
             body_lines.append(f"All triggers: {subject_label}")
-        body_lines.append(f"Confidence: {float(alert.get('confidence', 0)):.2%}")
+        body_lines.append(f"Confidence: {float(alert.get('confidence') or 0):.2%}")
         body = "\n".join(body_lines)
         self._deliver(title, body)
 
