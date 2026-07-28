@@ -596,6 +596,22 @@ def start_rtsp_recording_capture(
         triggered_at = datetime.now(timezone.utc)
     if triggered_at.tzinfo is None:
         triggered_at = triggered_at.replace(tzinfo=timezone.utc)
+    # Clamp the pre-roll so this clip does not reproduce footage the previous
+    # clip for this camera already captured. Each event grabs pre_event_seconds
+    # of buffered lead-in independently, so two clips close together (e.g. a long
+    # event split at Max Clip Duration, or distinct object types back-to-back)
+    # would otherwise overlap by up to pre_event_seconds. Trimming the pre-roll to
+    # the previous clip's end butts the clips up against each other with no
+    # duplicated footage and no lost coverage. Only trims when the requested
+    # pre-roll actually reaches back before that end; well-separated events keep
+    # their full pre-roll untouched.
+    if camera_id and pre_seconds > 0:
+        with _state.active_rtsp_recordings_lock:
+            previous_capture_end_ts = _state.last_rtsp_capture_end.get(camera_id)
+        if previous_capture_end_ts is not None:
+            available_pre_seconds = triggered_at.timestamp() - float(previous_capture_end_ts)
+            if available_pre_seconds < pre_seconds:
+                pre_seconds = max(0, int(available_pre_seconds))
     start_capture_ts = triggered_at.timestamp() - pre_seconds
     initial_deadline_ts = triggered_at.timestamp() + post_seconds
     max_clip_seconds = max(
@@ -616,6 +632,12 @@ def start_rtsp_recording_capture(
             file_path, event_id, detections, duration_seconds,
             trigger_type, str(trigger_label) if trigger_label else None,
         )
+
+    # Holds the wall-clock end of the footage this capture actually wrote, so the
+    # next clip for this camera can clamp its pre-roll against it (see the pre-roll
+    # clamp above). Set in whichever branch runs; published to shared state in the
+    # ``finally`` under the recordings lock.
+    captured_end_ts_holder: dict[str, float] = {}
 
     def capture() -> None:
         try:
@@ -674,6 +696,7 @@ def start_rtsp_recording_capture(
                 recording_id, file_path, camera_id,
                 content_start_ts, content_start_ts + content_seconds,
             )
+            captured_end_ts_holder['ts'] = content_start_ts + content_seconds
         except Exception as exc:
             logger.warning(
                 'RTSP recording capture failed for event %s, writing generated fallback: %s',
@@ -689,10 +712,14 @@ def start_rtsp_recording_capture(
                 recording_id, file_path, camera_id,
                 start_capture_ts, start_capture_ts + duration_seconds,
             )
+            captured_end_ts_holder['ts'] = start_capture_ts + duration_seconds
         finally:
             if camera_id:
                 with _state.active_rtsp_recordings_lock:
                     session = _state.active_rtsp_recordings.get(camera_id)
                     if session and int(session.get('recording_id', -1)) == int(recording_id):
                         _state.active_rtsp_recordings.pop(camera_id, None)
+                    captured_end_ts = captured_end_ts_holder.get('ts')
+                    if captured_end_ts is not None:
+                        _state.last_rtsp_capture_end[camera_id] = captured_end_ts
     threading.Thread(target=capture, name=f'rtsp-recording-{event_id}', daemon=True).start()

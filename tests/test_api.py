@@ -2269,6 +2269,82 @@ def test_rtsp_recording_capture_falls_back_on_stream_error(tmp_path, monkeypatch
     main._state.active_rtsp_recordings.clear()
 
 
+class _PreRollCaptureService:
+    """Fake recording service that records the ``pre_seconds`` the capture thread
+    hands to the prebuffer render, so tests can assert on the clamped pre-roll."""
+
+    def __init__(self):
+        self.captured = {}
+
+    def prebuffer_window_seconds(self, recording_config=None):
+        return 120
+
+    def write_rtsp_clip_with_prebuffer(self, *, stream_url, camera_id, file_path,
+                                       triggered_at, pre_seconds, post_seconds,
+                                       max_duration_seconds, buffer_seconds=None):
+        self.captured['pre_seconds'] = pre_seconds
+        Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(file_path).write_text('clip', encoding='utf-8')
+        content_start_ts = triggered_at.timestamp() - pre_seconds
+        return content_start_ts, float(pre_seconds + post_seconds)
+
+
+def _run_capture_with_previous_end(tmp_path, monkeypatch, *, camera_id, previous_gap_seconds,
+                                   pre_event_seconds):
+    """Drive ``start_rtsp_recording_capture`` for a camera whose previous clip ended
+    ``previous_gap_seconds`` before the new trigger; return the pre-roll the render
+    was asked to use."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    mods = _m()
+
+    service = _PreRollCaptureService()
+    monkeypatch.setattr(main._state, 'recording_service', service)
+    main._state.active_rtsp_recordings.clear()
+    main._state.last_rtsp_capture_end.clear()
+
+    # Trigger in the past so the post-event wait resolves immediately.
+    triggered_at = datetime.now(timezone.utc) - timedelta(seconds=100)
+    main._state.last_rtsp_capture_end[camera_id] = triggered_at.timestamp() - previous_gap_seconds
+
+    file_path = tmp_path / 'recordings' / f'event_{camera_id}.mp4'
+    mods.recording_extension.start_rtsp_recording_capture(
+        'rtsp://cam/stream',
+        {'file_path': str(file_path), 'duration_seconds': 10, 'trigger_type': 'motion'},
+        1,
+        [{'label': 'person'}],
+        recording_id=1,
+        camera_id=camera_id,
+        event_time=triggered_at.isoformat(),
+        recording_config={'pre_event_seconds': pre_event_seconds, 'post_event_seconds': 5, 'max_clip_seconds': 60},
+    )
+
+    deadline = time.time() + 3
+    while 'pre_seconds' not in service.captured and time.time() < deadline:
+        time.sleep(0.02)
+    main._state.active_rtsp_recordings.clear()
+    main._state.last_rtsp_capture_end.clear()
+    return service.captured.get('pre_seconds')
+
+
+def test_pre_roll_clamped_to_previous_clip_end(tmp_path, monkeypatch):
+    """When the requested pre-roll would reach back into the previous clip for the
+    same camera, it is trimmed to the gap so the clips do not overlap."""
+    pre_seconds = _run_capture_with_previous_end(
+        tmp_path, monkeypatch, camera_id='cam-clamp', previous_gap_seconds=4, pre_event_seconds=10,
+    )
+    assert pre_seconds == 4, f'pre-roll should clamp to the 4s gap, got {pre_seconds}'
+
+
+def test_pre_roll_not_clamped_when_events_well_separated(tmp_path, monkeypatch):
+    """When the previous clip ended well before the pre-roll window, the full
+    configured pre-roll is kept untouched."""
+    pre_seconds = _run_capture_with_previous_end(
+        tmp_path, monkeypatch, camera_id='cam-free', previous_gap_seconds=30, pre_event_seconds=10,
+    )
+    assert pre_seconds == 10, f'well-separated event should keep full pre-roll, got {pre_seconds}'
+
+
 def test_collect_prebuffer_segments_selects_by_content_overlap(tmp_path):
     """A prebuffer segment's mtime marks when its content ENDS; selection must
     keep only segments whose footage overlaps the capture window and report
