@@ -351,7 +351,12 @@ function recordingColorKey(recording) {
   // SEGMENT_COLORS palette (which would generate one random color per
   // distinct recording and split same-category clips across hues).
   if (isMotionOnlyRecording(recording)) return '__motion__';
-  return recordingTypeLabel(recording).toLowerCase();
+  // A recording whose primary label is a sound class (e.g. a Dog Bark clip
+  // that isn't sound-detection sourced) shares the reserved sound colour so
+  // its segment matches the purple sound chip the legend now renders for it.
+  const typeLabel = recordingTypeLabel(recording).toLowerCase();
+  if (isSoundLabel(typeLabel)) return '__sound__';
+  return typeLabel;
 }
 
 function recordingTriggerSummary(recording) {
@@ -605,7 +610,12 @@ function renderLegend(recordings) {
     labels.forEach((rawLabel) => {
       const label = String(rawLabel || '').toLowerCase();
       if (!label) return;
-      if (isSound) {
+      // Classify each label independently: a sound-class label (e.g. Dog Bark,
+      // Car Alarm) is always a sound chip even when it rides on an object
+      // recording, matching detectionPill()'s per-label icon rule. Keying the
+      // whole chip off isSoundRecording() alone let a sound label leak in as a
+      // second "object" chip - the recurring Dog Bark legend duplicate.
+      if (isSound || isSoundLabel(label)) {
         addChip(`__sound__:${label}`, label, colorForKey('__sound__'), 'sound');
       } else {
         addChip(label, label, colorForKey(label), 'object');
