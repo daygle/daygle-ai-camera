@@ -305,10 +305,13 @@ async function loadStats() {
 }
 
 // ─── System resource cards (CPU / Load / RAM) ───────────────────────────────
-function formatGiB(bytes) {
-  const gib = Number(bytes) / (1024 ** 3);
-  if (!Number.isFinite(gib)) return '—';
-  return `${gib.toFixed(gib >= 10 ? 0 : 1)} GB`;
+// RAM is conventionally reported in binary units (1 GB = 1024^3 bytes),
+// matching how operating systems and users talk about installed memory, so
+// the "GB" label here is binary by design - name and unit label now agree.
+function formatGB(bytes) {
+  const gb = Number(bytes) / (1024 ** 3);
+  if (!Number.isFinite(gb)) return '—';
+  return `${gb.toFixed(gb >= 10 ? 0 : 1)} GB`;
 }
 
 function renderSystemResources(res) {
@@ -332,7 +335,7 @@ function renderSystemResources(res) {
   if (els.ramValue) els.ramValue.textContent = Number.isFinite(pct) ? `${pct}%` : '—';
   if (els.ramSub) {
     els.ramSub.textContent = mem && Number.isFinite(mem.used) && Number.isFinite(mem.total)
-      ? `${formatGiB(mem.used)} / ${formatGiB(mem.total)} used`
+      ? `${formatGB(mem.used)} / ${formatGB(mem.total)} used`
       : 'Memory usage';
   }
 }

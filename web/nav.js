@@ -203,12 +203,21 @@ window.daygleAuthReady = (async () => {
   const nav = document.createElement('nav');
   nav.className = 'app-nav';
 
-  /* ── Helper: detect if any link inside a dropdown matches the current path ── */
+  /* ── Active-target matching ──────────────────────────────────────────────
+   * A nav target matches the current path on an exact hit or when the path
+   * continues past a "/" boundary (so "/recordings" matches "/recordings/42"
+   * but never "/recordings-archive"); "/" only matches the dashboard root.
+   * The ACTIVE target is the single longest such match, so
+   * "/recordings/timeline" lights up Timeline alone rather than Recordings
+   * and Timeline together, while "/recordings/{id}" still lights up
+   * Recordings. ``activeNavMatch`` is computed once below, after the nav
+   * structure is defined; ``dropdownIsActive`` (invoked later) reads it. */
+  function pathMatchesNav(path, match) {
+    if (match === '/') return path === '/';
+    return path === match || path.startsWith(`${match}/`);
+  }
   function dropdownIsActive(links) {
-    return links.some((l) => {
-      const m = l.match || '';
-      return (m === '/' && currentPath === '/') || (m !== '/' && currentPath.startsWith(m));
-    });
+    return links.some((l) => (l.match || '') === activeNavMatch);
   }
 
   /* ── Define nav structure ── */
@@ -259,6 +268,21 @@ window.daygleAuthReady = (async () => {
     },
   ];
 
+  // Longest matching target across every nav link (primary + dropdown).
+  const activeNavMatch = (() => {
+    const allMatches = [
+      ...primaryLinks.map((l) => l.match),
+      ...dropdowns.flatMap((dd) => dd.links.map((l) => l.match)),
+    ];
+    let best = null;
+    for (const match of allMatches) {
+      if (pathMatchesNav(currentPath, match) && (best === null || match.length > best.length)) {
+        best = match;
+      }
+    }
+    return best;
+  })();
+
   /* ── Determine active dropdown ── */
   function findActiveDropdown() {
     for (const dd of dropdowns) {
@@ -282,9 +306,7 @@ window.daygleAuthReady = (async () => {
 
   /* Primary links */
   for (const link of primaryLinks) {
-    const isActive =
-      (link.match === '/' && currentPath === '/') ||
-      (link.match !== '/' && currentPath.startsWith(link.match));
+    const isActive = link.match === activeNavMatch;
     html += `<a href="${link.href}" class="nav-item${isActive ? ' active' : ''}">${link.label}</a>`;
   }
 
@@ -300,9 +322,7 @@ window.daygleAuthReady = (async () => {
           </button>
           <div class="nav-dropdown-menu">`;
     for (const link of dd.links) {
-      const linkActive =
-        (link.match === '/' && currentPath === '/') ||
-        (link.match !== '/' && currentPath.startsWith(link.match));
+      const linkActive = link.match === activeNavMatch;
       html += `<a href="${link.href}" class="nav-dropdown-item${linkActive ? ' active' : ''}">${link.label}</a>`;
     }
     html += `
