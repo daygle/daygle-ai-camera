@@ -1006,6 +1006,79 @@ input[type="file"] { padding: 10px; }
   margin-top: 10px;
   flex-wrap: wrap;
 }
+.clip-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.clip-timeline-bar {
+  position: relative;
+  width: 100%;
+  height: 18px;
+  border-radius: 6px;
+  background: var(--border);
+  overflow: hidden;
+  cursor: pointer;
+  outline-offset: 3px;
+}
+.clip-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+.clip-seg-pre { background: var(--muted); opacity: 0.4; }
+.clip-seg-event { background: var(--success); opacity: 0.85; }
+.clip-seg-tail { background: var(--accent); opacity: 0.55; }
+.clip-trigger-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--text);
+  transform: translateX(-1px);
+  pointer-events: none;
+}
+.clip-trigger-marker::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text);
+  transform: translate(-50%, -1px);
+}
+.clip-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--danger);
+  transform: translateX(-1px);
+  pointer-events: none;
+  transition: left 0.08s linear;
+}
+.clip-timeline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.clip-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.clip-legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: inline-block;
+  border: 1px solid var(--border);
+}
 .zone-overlay { position: absolute; pointer-events: auto; z-index: 2; touch-action: none; }
 .monitor-zone-polygon { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .monitor-zone-polygon polygon,
