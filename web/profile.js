@@ -52,9 +52,17 @@ profileForm.addEventListener('submit', async (event) => {
   const btn = profileForm.querySelector('[type="submit"]');
   if (btn) btn.disabled = true;
   const payload = Object.fromEntries(new FormData(profileForm).entries());
+  // ``current_password`` is only needed when the username or email actually
+  // changes (enforced server-side). Drop it when blank so ordinary edits
+  // (timezone, theme, name) don't carry an empty string the backend would
+  // otherwise treat as "password not supplied".
+  if (!payload.current_password) delete payload.current_password;
   try {
     const updated = await api('/api/profile', { method: 'PUT', body: JSON.stringify(payload) });
     renderProfile(updated);
+    // Clear the current-password field on success so the typed secret does
+    // not linger in the form (renderProfile does not touch this field).
+    if (profileForm.elements.current_password) profileForm.elements.current_password.value = '';
     // Apply the new display preferences locally so this tab's timestamps
     // refresh immediately, then broadcast so every other open Daygle tab
     // re-renders without a manual refresh.
