@@ -13,6 +13,7 @@ from app.auth_gates import require_admin
 from app.config_facades import effective_ai_config
 from app.deps import get_cameras_config, get_database
 from app.sound_detector import SOUND_CLASSES
+from app.system_metrics import system_resources
 
 router = APIRouter()
 
@@ -23,6 +24,13 @@ def stats(request: Request, since: str | None = Query(None), cameras_config=Depe
     result = db.stats(since=since)
     result['total_cameras'] = len(cameras_config)
     return result
+
+
+@router.get('/api/system/resources')
+def system_resources_status(request: Request):
+    """Host CPU / load-average / RAM snapshot for the dashboard cards."""
+    require_admin(request)
+    return system_resources()
 
 
 @router.get('/api/labels')

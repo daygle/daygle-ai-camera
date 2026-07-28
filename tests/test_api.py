@@ -5533,6 +5533,45 @@ def test_redact_password_for_viewer_on_alert_settings(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+def test_system_resources_endpoint(tmp_path, monkeypatch):
+    """/api/system/resources returns CPU/load/RAM and is admin-gated."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        status, _headers, payload = client.request("/api/system/resources")
+        assert status == 200
+        assert set(payload) == {"cpu_percent", "cpu_count", "load_average", "memory"}
+        # On the Linux CI host these are populated; values are best-effort so
+        # only assert the shape, not exact numbers.
+        assert payload["cpu_count"] is None or payload["cpu_count"] >= 1
+        mem = payload["memory"]
+        if mem is not None:
+            assert mem["used"] <= mem["total"]
+            assert 0 <= mem["percent"] <= 100
+
+        # Anonymous callers are rejected before reaching the handler.
+        anon = LocalClient(base_url)
+        assert anon.request("/api/system/resources")[0] == 401
+
+        # Viewers (non-admin) are forbidden from the host-metrics endpoint.
+        client.request(
+            "/api/users",
+            method="POST",
+            json_body={"username": "viewer", "password": "Viewer123!", "role": "viewer"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        viewer_client = LocalClient(base_url)
+        _login(viewer_client, "viewer", "Viewer123!")
+        assert viewer_client.request("/api/system/resources")[0] == 403
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_stats_with_since_filter_builds_valid_sql(tmp_path):
     """Regression: /api/stats?since=... must not raise sqlite3.OperationalError.
 
