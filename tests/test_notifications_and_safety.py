@@ -244,5 +244,142 @@ class ActivityTypeEscapeTests(unittest.TestCase):
         self.assertEqual(rendered, '')
 
 
+# ─── Alert confidence None-safety (email + push send_alert) ──────
+
+
+class AlertConfidenceNoneSafetyTests(unittest.TestCase):
+    """``send_alert`` tolerates a ``confidence`` key present but ``None``.
+
+    ``alert.get('confidence', 0)`` only falls back to ``0`` for a MISSING
+    key; a present-but-``None`` value would reach ``float(None)`` and raise
+    ``TypeError``. The ``float(alert.get('confidence') or 0)`` form used in
+    both services coerces ``None`` (and a missing key) to ``0`` the same way
+    the surrounding fields defend ``message`` / ``label`` with ``or``.
+    """
+
+    def test_email_send_alert_handles_none_confidence(self) -> None:
+        from app.email_alerts import EmailAlertService
+
+        captured: list = []
+        svc = EmailAlertService({
+            'enabled': True,
+            'host': 'smtp.example.invalid',
+            'from_address': 'daygle@example.invalid',
+        })
+        # Capture the outbound message instead of hitting the network.
+        svc._deliver = lambda message, **kwargs: captured.append(message) or None  # type: ignore[assignment]
+        with patch('app.email_alerts.EmailAlertService._create_smtp_session') as make_session:
+            make_session.return_value.__enter__.return_value = MagicMock()
+            make_session.return_value.__exit__.return_value = False
+            svc.send_alert(
+                {'label': 'person', 'rule_name': 'r', 'message': 'm', 'confidence': None},
+                event_id=1,
+                recipients=['a@example.invalid'],
+            )
+        self.assertTrue(captured, 'expected one message to be delivered')
+        # Walk the MIME parts and decode the transfer encoding so the
+        # assertion is robust to base64/quoted-printable bodies.
+        decoded = ''.join(
+            part.get_payload(decode=True).decode('utf-8', 'replace')
+            for part in captured[0].walk()
+            if part.get_content_maintype() == 'text'
+        )
+        self.assertIn('0.00%', decoded)
+
+    def test_push_send_alert_handles_none_confidence(self) -> None:
+        from app.push_notifications import PushNotificationService
+
+        captured: list = []
+        svc = PushNotificationService({
+            'enabled': True,
+            'server_url': 'https://ntfy.example.invalid',
+            'topic': 'daygle-test',
+        })
+        svc._deliver = lambda title, body: captured.append((title, body))  # type: ignore[assignment]
+        svc.send_alert(
+            {'label': 'person', 'rule_name': 'r', 'message': 'm', 'confidence': None},
+            event_id=1,
+        )
+        self.assertTrue(captured, 'expected one push to be delivered')
+        self.assertIn('0.00%', captured[0][1])
+
+
+# ─── Email originator headers (Date + Message-ID) ────────────────
+
+
+class EmailOriginatorHeaderTests(unittest.TestCase):
+    """``send_alert`` / ``send_test`` stamp RFC 5322 originator headers.
+
+    ``smtplib.send_message`` never adds a ``Date`` header, yet RFC 5322
+    §3.6 makes it mandatory; a missing Date is a spam-filter signal.
+    ``_stamp_originator_headers`` adds ``Date`` and a ``Message-ID`` whose
+    domain aligns with the sender's From: domain.
+    """
+
+    def _capturing_service(self, captured):
+        from app.email_alerts import EmailAlertService
+        svc = EmailAlertService({
+            'enabled': True,
+            'host': 'smtp.example.invalid',
+            'from_address': 'daygle@mail.example.com',
+        })
+        svc._deliver = lambda message, **kwargs: captured.append(message) or None  # type: ignore[assignment]
+        return svc
+
+    def test_send_alert_stamps_date_and_message_id(self) -> None:
+        captured: list = []
+        svc = self._capturing_service(captured)
+        with patch('app.email_alerts.EmailAlertService._create_smtp_session') as make_session:
+            make_session.return_value.__enter__.return_value = MagicMock()
+            make_session.return_value.__exit__.return_value = False
+            svc.send_alert(
+                {'label': 'person', 'rule_name': 'r', 'message': 'm', 'confidence': 0.9},
+                event_id=7,
+                recipients=['a@example.invalid'],
+            )
+        self.assertTrue(captured)
+        msg = captured[0]
+        self.assertIn('Date', msg)
+        self.assertTrue(msg['Date'].strip(), 'Date header must be non-empty')
+        self.assertIn('Message-ID', msg)
+        # Message-ID domain should align with the sender's From: domain.
+        self.assertIn('@mail.example.com>', msg['Message-ID'])
+
+    def test_send_test_stamps_date_and_message_id(self) -> None:
+        from app.email_alerts import EmailAlertService
+        captured: list = []
+        svc = EmailAlertService({
+            'enabled': True,
+            'host': 'smtp.example.invalid',
+            'from_address': 'daygle@mail.example.com',
+        })
+        svc._deliver = lambda message, **kwargs: captured.append(message) or None  # type: ignore[assignment]
+        svc.send_test('a@example.invalid')
+        self.assertTrue(captured)
+        msg = captured[0]
+        self.assertIn('Date', msg)
+        self.assertIn('Message-ID', msg)
+
+    def test_message_id_falls_back_when_sender_has_no_domain(self) -> None:
+        from app.email_alerts import _stamp_originator_headers
+        from email.mime.text import MIMEText
+        msg = MIMEText('body', 'plain', 'utf-8')
+        msg['From'] = 'operator'  # no @domain
+        _stamp_originator_headers(msg, 'operator')
+        self.assertIn('Date', msg)
+        # A Message-ID is still produced (make_msgid default domain).
+        self.assertTrue(msg['Message-ID'].startswith('<'))
+
+    def test_stamp_does_not_overwrite_existing_headers(self) -> None:
+        from app.email_alerts import _stamp_originator_headers
+        from email.mime.text import MIMEText
+        msg = MIMEText('body', 'plain', 'utf-8')
+        msg['Date'] = 'Mon, 01 Jan 2024 00:00:00 +0000'
+        msg['Message-ID'] = '<preset@example.com>'
+        _stamp_originator_headers(msg, 'daygle@example.com')
+        self.assertEqual(msg['Date'], 'Mon, 01 Jan 2024 00:00:00 +0000')
+        self.assertEqual(msg['Message-ID'], '<preset@example.com>')
+
+
 if __name__ == '__main__':
     unittest.main()
