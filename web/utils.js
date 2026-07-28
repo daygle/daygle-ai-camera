@@ -50,6 +50,48 @@ function requireElements(ids) {
   throw new Error('This page is missing required DOM elements; check the HTML for matching ids.');
 }
 
+// ─── Tabbed section navigation (settings + onnx pages) ─────────────────────
+// Groups a page's cards into `.settings-panel` blocks switched by a
+// `.settings-tab` bar. Implements the ARIA tabs pattern (roving tabindex +
+// arrow keys) and mirrors the active tab into the URL hash so a section can
+// be deep-linked and survives a refresh. No-ops on pages without a tab bar,
+// so it is safe to call unconditionally. Tabs are matched to panels by their
+// shared `data-tab` / `data-panel` value.
+function initDaygleTabs() {
+  const tabs = Array.from(document.querySelectorAll('.settings-tab'));
+  if (!tabs.length) return;
+  const panels = new Map(
+    Array.from(document.querySelectorAll('.settings-panel')).map((panel) => [panel.dataset.panel, panel]),
+  );
+
+  function activate(name, { focus = false, updateHash = true } = {}) {
+    if (!panels.has(name)) name = tabs[0].dataset.tab;
+    tabs.forEach((tab) => {
+      const selected = tab.dataset.tab === name;
+      tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+      tab.tabIndex = selected ? 0 : -1;
+      if (selected && focus) tab.focus();
+    });
+    panels.forEach((panel, key) => { panel.hidden = key !== name; });
+    if (updateHash) {
+      try { history.replaceState(null, '', `#${name}`); } catch { window.location.hash = name; }
+    }
+  }
+
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => activate(tab.dataset.tab));
+    tab.addEventListener('keydown', (event) => {
+      const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+      if (!step) return;
+      event.preventDefault();
+      activate(tabs[(index + step + tabs.length) % tabs.length].dataset.tab, { focus: true });
+    });
+  });
+
+  const initial = (window.location.hash || '').replace('#', '');
+  activate(panels.has(initial) ? initial : tabs[0].dataset.tab, { updateHash: false });
+}
+
 // ─── Toast notification (shared by every page that fires user feedback) ────
 // Moved here from nav.js so pages can fire toasts on their own. The toast
 // container is lazily created and the toast self-removes after a short delay.
@@ -976,7 +1018,7 @@ window.daygleUi = {
   api, setApiAuth, getApiAuth, refreshDaygleAuth, scheduleNextAuthRefresh,
   handleSessionLoss, defaultReturnTo,
   // UI helpers
-  showToast, escapeHtml, safeHtml, titleCase, normalizeEmailList, requireElements,
+  showToast, escapeHtml, safeHtml, titleCase, normalizeEmailList, requireElements, initDaygleTabs,
   detectionPill, motionPill, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, MOTION_RUNNING_ROW_ICON,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,
   isMotionOnlyRecording, motionConfidenceFor,

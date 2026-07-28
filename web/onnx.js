@@ -447,6 +447,10 @@ document.getElementById('reloadDetectorBtn').addEventListener('click', () => run
 document.getElementById('testDetectorBtn').addEventListener('click', () => runAction('testDetectorBtn', '/api/settings/ai/test-detector', 'Testing detector'));
 document.getElementById('checkModelUpdatesBtn').addEventListener('click', checkForModelUpdates);
 
+// Group the ONNX cards into Status / Models / Settings tabs. Shared
+// implementation (ARIA tabs + URL-hash deep-linking) lives in utils.js.
+initDaygleTabs();
+
 loadAll().catch((error) => {
   // Skip UI updates if api() triggered a 401 redirect
   if (window.daygleAuth?.redirecting) return;
