@@ -2344,6 +2344,13 @@ tr.drag-over {
   padding: 4px 0;
 }
 .timeline-recording-item {
+  /* Reset the native button rendering. iOS Safari does not honour
+     `display: flex` on a <button> while the UA button appearance is
+     active, so the nested column (title row / meta / confidence row)
+     collapses and overlaps. Clearing appearance makes Safari lay the
+     children out as a normal flex container. */
+  -webkit-appearance: none;
+  appearance: none;
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 16px;
