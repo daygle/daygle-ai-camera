@@ -125,7 +125,7 @@ def _canonical_models_path(raw: Any, field: str) -> str:
             status_code=400,
             detail=f'{field} must point to a file inside the models/ directory.',
         )
-    return str(resolved.relative_to(BASE_DIR))
+    return resolved.relative_to(BASE_DIR).as_posix()
 
 
 def active_ai_config_source() -> str:
