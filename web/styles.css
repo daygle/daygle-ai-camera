@@ -1321,6 +1321,7 @@ tr.drag-over {
 .recordings-filter-actions {
   display: flex;
   align-items: end;
+  grid-column: 1 / -1;
 }
 .recordings-filter-actions .button-row {
   margin: 0;
