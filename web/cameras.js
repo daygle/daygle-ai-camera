@@ -1,5 +1,6 @@
 let cameras = [];
 let pendingDeleteIndex = null;
+const cameraResolutions = {};
 
 const messageEl = document.getElementById('cameraMessage');
 const gridEl = document.getElementById('cameraGrid');
@@ -120,12 +121,10 @@ function buildEditFormHtml(camera, index) {
       // Advanced tab
       '<div class="modal-tab-panel" data-panel="advanced" hidden>' +
         '<div class="form-grid">' +
-          '<label><span>Width (px)</span><input name="width" type="number" min="160" max="7680" placeholder="1280" value="' + (camera.width || 1280) + '" /></label>' +
-          '<label><span>Height (px)</span><input name="height" type="number" min="90" max="4320" placeholder="720" value="' + (camera.height || 720) + '" /></label>' +
           '<label><span>FPS</span><input name="fps" type="number" min="1" max="120" placeholder="15" value="' + (camera.fps || 15) + '" /></label>' +
           '<label><span>Frame Buffer Drains <span class="info-tip" data-tip="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." title="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." tabindex="0" aria-label="Help: Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)."></span></span><input name="stale_frame_grabs" type="number" min="0" max="20" placeholder="Auto" value="' + (camera.stale_frame_grabs != null ? camera.stale_frame_grabs : '') + '" /></label>' +
         '</div>' +
-        '<p class="form-help muted">These values are hints passed to the stream decoder. Leave at defaults unless your camera requires specific dimensions.</p>' +
+        '<p class="form-help muted">FPS and frame-buffer drains are hints passed to the stream decoder. Leave at defaults unless your camera requires specific values.</p>' +
         '<div class="form-group">' +
           '<p class="form-group-label">Motion Detection Overrides</p>' +
           '<p class="form-help muted">Override the global motion settings for this camera only. Leave blank to use the global defaults from Live Detection settings.</p>' +
@@ -305,8 +304,6 @@ function collectFormData(form, index) {
     path: backend !== 'rtsp' ? getName('path') : '',
     username: getName('username'),
     password: getVal('password'),
-    width: getInt('width', 1280),
-    height: getInt('height', 720),
     fps: getInt('fps', 15),
     stale_frame_grabs: (function() { var v = getName('stale_frame_grabs'); return v !== '' ? parseInt(v, 10) : null; })(),
     recording: {
@@ -365,8 +362,18 @@ function renderCameraRow(camera, index) {
   var rowHtml = '';
   rowHtml += '<tr draggable="true" data-drag-camera="' + index + '" data-camera-index="' + index + '">';
   rowHtml += '<td class="cell-drag"><span class="drag-handle" title="Drag to reorder">' + ICONS.grip + '</span></td>';
+  var resolution = cameraResolutions[camera.id];
+  var resolutionHtml = '';
+  if (resolution && resolution.width > 0 && resolution.height > 0) {
+    resolutionHtml = '<span class="cam-resolution">' + resolution.width + ' x ' + resolution.height + '</span>';
+  } else if (resolution === null) {
+    resolutionHtml = '<span class="cam-resolution muted">No signal</span>';
+  } else {
+    resolutionHtml = '<span class="cam-resolution muted">-</span>';
+  }
+
   rowHtml += '<td class="cell-camera">';
-  rowHtml += '<div class="cam-info"><span class="cam-name">' + name + '</span>' + (id ? '<span class="cam-id">' + id + '</span>' : '') + '</div>';
+  rowHtml += '<div class="cam-info"><span class="cam-name">' + name + '</span>' + (id ? '<span class="cam-id">' + id + '</span>' : '') + resolutionHtml + '</div>';
   rowHtml += '<div class="cell-actions">';
   rowHtml += '<button class="secondary cam-edit-btn" data-index="' + index + '" type="button" title="Edit camera">' + ICONS.edit + '</button>';
   rowHtml += '<button class="delete-btn secondary cam-remove-btn" data-index="' + index + '" type="button" title="Remove camera">' + ICONS.remove + '</button>';
@@ -548,10 +555,29 @@ document.getElementById('deleteConfirmBtn').addEventListener('click', async func
 // ─── Add camera ───────────────────────────────────────────────────────────────
 
 function addNewCamera() {
-  var newCam = { id: ('camera-' + (cameras.length + 1)), name: ('Camera ' + (cameras.length + 1)), backend: 'onvif', port: 554, path: 'stream1', width: 1280, height: 720, fps: 15, recording: { continuous: false }, detection: {}, ptz: { enabled: false, protocol: 'onvif', http_port: 80, port: 6060, address: 1, speed: 5, step_duration: 0.4 } };
+  var newCam = { id: ('camera-' + (cameras.length + 1)), name: ('Camera ' + (cameras.length + 1)), backend: 'onvif', port: 554, path: 'stream1', fps: 15, recording: { continuous: false }, detection: {}, ptz: { enabled: false, protocol: 'onvif', http_port: 80, port: 6060, address: 1, speed: 5, step_duration: 0.4 } };
   cameras.push(newCam);
   renderGrid();
   toggleEditForm(newCam, cameras.length - 1);
+}
+
+// ─── Detected resolution ─────────────────────────────────────────────────────
+
+async function fetchCameraResolutions() {
+  await Promise.all(cameras.map(async function(camera) {
+    if (!camera.id) return;
+    try {
+      var status = await api('/api/status?camera_id=' + encodeURIComponent(camera.id));
+      if (status && status.resolution && status.resolution.width > 0 && status.resolution.height > 0) {
+        cameraResolutions[camera.id] = status.resolution;
+      } else {
+        cameraResolutions[camera.id] = null;
+      }
+    } catch (err) {
+      delete cameraResolutions[camera.id];
+    }
+  }));
+  renderGrid();
 }
 
 document.getElementById('addCameraBtn').addEventListener('click', addNewCamera);
@@ -587,8 +613,11 @@ async function loadCameras() {
   await window.daygleAuthReady;
   var settings = await api('/api/settings/system');
   cameras = settings.cameras || (settings.camera ? [settings.camera] : []);
+  // Clear stale resolution entries so removed cameras don't linger.
+  Object.keys(cameraResolutions).forEach(function(key) { delete cameraResolutions[key]; });
   updateStats();
   renderGrid();
+  fetchCameraResolutions().catch(function() {});
 }
 
 async function updateHealthStats() {
@@ -615,4 +644,5 @@ loadCameras().catch(function(err) {
   setMessage(err.message, true);
 });
 setInterval(updateHealthStats, 10000);
+setInterval(function() { fetchCameraResolutions().catch(function() {}); }, 10000);
 updateHealthStats();

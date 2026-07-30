@@ -1808,6 +1808,13 @@ tr.drag-over {
   margin-top: 1px;
   display: block;
 }
+.cameras-table .cell-camera .cam-resolution {
+  font-size: 11px;
+  color: var(--accent);
+  margin-top: 2px;
+  display: block;
+  font-weight: 700;
+}
 .cameras-table .cell-center {
   text-align: center;
 }
