@@ -345,15 +345,6 @@ function renderRecordings(recordings) {
   bindRecordingButtons();
 }
 
-function triggerBadgeClass(trigger, recording) {
-  if (recording && isSoundRecording(recording)) return 'chip-sound';
-  const t = String(trigger || '').toLowerCase();
-  if (t.startsWith('alert') || t.startsWith('human')) return 'chip-warn';
-  if (t.startsWith('motion')) return 'chip-info';
-  if (t === 'continuous' || t === 'none' || t === 'off') return 'chip-dim';
-  return 'chip-info';
-}
-
 function renderRecordingDetails(recording) {
   const detections = recordingDetectionSummary(recording);
   const isSound = isSoundRecording(recording);

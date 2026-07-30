@@ -322,7 +322,6 @@ def deliver_email_alerts(
                 event_id=event_id,
                 recipients=rule.get('email_recipients', []),
                 camera_name=camera_name,
-                camera_id=camera_id,
                 snapshot_bytes=snapshot_bytes,
                 triggered_labels=all_triggered_labels,
                 detected_at=detected_at,

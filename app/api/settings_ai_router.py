@@ -150,20 +150,6 @@ async def download_ai_model(request: Request, db=Depends(get_database)):
     return await run_in_threadpool(_do_download_model, model_name, True, imgsz)
 
 
-@router.post('/api/settings/ai/download-yolov8n')
-def download_yolov8n_model(request: Request, db=Depends(get_database)):
-    require_admin(request)
-    # Audit-log gate (audit-trail finding): mirror
-    # ``download_ai_model`` so the legacy convenience route also
-    # leaves a trail. ``switch_active`` mirrors the default of
-    # ``_do_download_model(model_name, switch_active=True)`` so the
-    # logged ``switch_active`` value reflects the actual effect on
-    # the active model.
-    write_audit_log(request, db, 'download', 'settings.ai.model',
-                    details={'model_id': 'yolov8n', 'switch_active': True})
-    return _do_download_model('yolov8n')
-
-
 @router.get('/api/settings/ai/check-model-updates')
 def check_model_updates(request: Request):
     require_admin(request)

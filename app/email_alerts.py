@@ -82,7 +82,6 @@ class EmailAlertService:
         event_id: int,
         recipients: list[str],
         camera_name: str | None = None,
-        camera_id: str | None = None,
         snapshot_bytes: bytes | None = None,
         triggered_labels: list[str] | None = None,
         detected_at: str | None = None,
