@@ -82,9 +82,8 @@
         <div class="settings-section-icon" aria-hidden="true">🎥</div>
         <div>
           <h2>Connected Cameras</h2>
-          <p class="settings-section-subtitle">Browse, edit, and remove camera connections. Add zones from the Zones page to define monitored areas.</p>
+          <p class="settings-section-subtitle">Browse, edit, and remove camera connections. Click Edit to expand the settings form inline.</p>
         </div>
-
       </div>
 
       <form id="camerasFilterForm" class="form-grid cameras-filter-grid" onsubmit="return false;">
@@ -119,129 +118,6 @@
       </div>
     </section>
   </main>
-
-  <!-- Edit / Add Camera Modal -->
-  <div id="cameraModal" class="modal-backdrop" hidden aria-modal="true" role="dialog" aria-labelledby="modalTitle">
-    <div class="modal-panel">
-      <div class="modal-header">
-        <h2 id="modalTitle">Add Camera</h2>
-        <button class="modal-close" id="modalCloseBtn" type="button" aria-label="Close">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
-
-      <div class="modal-tabs" role="tablist">
-        <button class="modal-tab active" data-tab="connection" role="tab" aria-selected="true">Connection</button>
-        <button class="modal-tab" data-tab="recording" role="tab" aria-selected="false">Recording</button>
-        <button class="modal-tab" data-tab="ptz" role="tab" aria-selected="false">PTZ</button>
-        <button class="modal-tab" data-tab="advanced" role="tab" aria-selected="false">Advanced</button>
-      </div>
-
-      <form id="cameraEditForm" class="modal-body" novalidate>
-        <input type="hidden" id="editCameraIndex" value="" />
-
-        <!-- Connection Tab -->
-        <div class="modal-tab-panel" data-panel="connection">
-          <div class="form-grid">
-            <label><span>Camera Name</span><input id="editName" name="name" placeholder="e.g. Front Door" required /></label>
-            <label><span>Camera ID</span><input id="editId" name="id" placeholder="e.g. front-door" /></label>
-            <label class="full-width"><span>Backend</span>
-              <select id="editBackend" name="backend">
-                <option value="onvif">ONVIF / RTSP (Auto-Build URL)</option>
-                <option value="rtsp">RTSP (Manual URL)</option>
-              </select>
-            </label>
-          </div>
-
-          <div id="rtspManualFields" class="form-group" hidden>
-            <p class="form-group-label">RTSP URL</p>
-            <div class="form-grid">
-              <label class="full-width"><span>Stream URL</span><input id="editStreamUrl" name="stream_url" placeholder="rtsp://user:pass@192.168.1.100:554/stream1" /></label>
-            </div>
-          </div>
-
-          <div id="onvifFields" class="form-group">
-            <p class="form-group-label">Connection details</p>
-            <div class="form-grid">
-              <label><span>Host / IP</span><input id="editHost" name="host" placeholder="192.168.1.100" /></label>
-              <label><span>Port</span><input id="editPort" name="port" type="number" min="1" max="65535" placeholder="554" /></label>
-              <label><span>Stream Path</span><input id="editPath" name="path" placeholder="stream1" /></label>
-              <label><span>Username</span><input id="editUsername" name="username" placeholder="admin" autocomplete="off" /></label>
-              <label class="full-width"><span>Password</span><input id="editPassword" name="password" type="password" autocomplete="new-password" /></label>
-            </div>
-          </div>
-          <div class="button-row" style="margin-top:8px">
-            <button class="btn-info" id="testConnectionBtn" type="button">Test Connection</button>
-            <span id="testConnectionResult" class="muted" style="font-size:13px;align-self:center"></span>
-          </div>
-        </div>
-
-        <!-- Recording Tab -->
-        <div class="modal-tab-panel" data-panel="recording" hidden>
-          <div class="form-grid">
-            <label><span>Continuous Recording</span>
-              <select id="editContinuous" name="continuous">
-                <option value="false">Disabled</option>
-                <option value="true">Enabled</option>
-              </select>
-            </label>
-            <label class="full-width"><span>Recording Stream Path <span class="info-tip" data-tip="Optional: the path for the high-res recording stream (e.g. stream2). Uses the same host, port, and login details as the primary stream. Leave empty to use the primary stream for recording." title="Optional: the path for the high-res recording stream (e.g. stream2). Uses the same host, port, and login details as the primary stream. Leave empty to use the primary stream for recording." tabindex="0" aria-label="Help: Optional path for the high-res recording stream. Uses the same host, port, and login details."></span></span><input id="editRecordingStreamPath" name="recording_stream_path" placeholder="e.g. stream2" /></label>
-          </div>
-          <p class="form-help muted">When enabled, the camera writes an uninterrupted stream regardless of events. Otherwise, clips are recorded per detection rule (configured on the Zones page per object). The Recording Stream Path is optional - if set, event clips are recorded from the high-res stream instead of the primary detection stream. Uses the same host, port, and login details as the primary stream.</p>
-        </div>
-
-        <!-- PTZ Tab -->
-        <div class="modal-tab-panel" data-panel="ptz" hidden>
-          <div class="form-grid">
-            <label><span>PTZ Control</span>
-              <select id="editPtzEnabled" name="ptz_enabled">
-                <option value="false">Disabled</option>
-                <option value="true">Enabled</option>
-              </select>
-            </label>
-            <label class="full-width"><span>Protocol <span class="info-tip" data-tip="ONVIF uses standard PTZ over the camera's HTTP port. TCP PelcoD sends raw binary commands to the Command Port." title="ONVIF uses standard PTZ over the camera's HTTP port. TCP PelcoD sends raw binary commands to the Command Port." tabindex="0" aria-label="Help: ONVIF uses standard PTZ over the camera's HTTP port. TCP PelcoD sends raw binary..."></span></span>
-              <select id="editPtzProtocol" name="ptz_protocol">
-                <option value="onvif">ONVIF (Recommended)</option>
-                <option value="tcp_pelcod">TCP PelcoD (Legacy Cameras)</option>
-              </select></label>
-            <label><span>HTTP Port <span class="info-tip" data-tip="Camera web port used by HTTP CGI (default 80)." title="Camera web port used by HTTP CGI (default 80)." tabindex="0" aria-label="Help: Camera web port used by HTTP CGI (default 80)."></span></span><input id="editPtzHttpPort" name="ptz_http_port" type="number" min="1" max="65535" placeholder="80" /></label>
-            <label><span>Command Port <span class="info-tip" data-tip="Port for TCP PelcoD only (default 6060)." title="Port for TCP PelcoD only (default 6060)." tabindex="0" aria-label="Help: Port for TCP PelcoD only (default 6060)."></span></span><input id="editPtzPort" name="ptz_port" type="number" min="1" max="65535" placeholder="6060" /></label>
-            <label><span>PTZ Address <span class="info-tip" data-tip="PelcoD device address (default 1, TCP PelcoD only)." title="PelcoD device address (default 1, TCP PelcoD only)." tabindex="0" aria-label="Help: PelcoD device address (default 1, TCP PelcoD only)."></span></span><input id="editPtzAddress" name="ptz_address" type="number" min="1" max="255" placeholder="1" /></label>
-            <label><span>Speed <span class="info-tip" data-tip="Movement speed (1-8, default 5)." title="Movement speed (1-8, default 5)." tabindex="0" aria-label="Help: Movement speed (1-8, default 5)."></span></span><input id="editPtzSpeed" name="ptz_speed" type="number" min="1" max="8" placeholder="5" /></label>
-            <label><span>Step Duration (s) <span class="info-tip" data-tip="How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)." title="How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)." tabindex="0" aria-label="Help: How long each press keeps the camera moving. Hold longer for continuous pan; sho..."></span></span><input id="editPtzStepDuration" name="ptz_step_duration" type="number" min="0.1" max="5" step="0.1" placeholder="0.4" /></label>
-          </div>
-          <p class="form-help muted">Enable PTZ and save to show the control pad on the Live page. The camera's username and password from the Connection tab are used for HTTP CGI authentication.</p>
-        </div>
-
-        <!-- Advanced Tab -->
-        <div class="modal-tab-panel" data-panel="advanced" hidden>
-          <div class="form-grid">
-            <label><span>Width (px)</span><input id="editWidth" name="width" type="number" min="160" max="7680" placeholder="1280" /></label>
-            <label><span>Height (px)</span><input id="editHeight" name="height" type="number" min="90" max="4320" placeholder="720" /></label>
-            <label><span>FPS</span><input id="editFps" name="fps" type="number" min="1" max="120" placeholder="15" /></label>
-            <label><span>Frame Buffer Drains <span class="info-tip" data-tip="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." title="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." tabindex="0" aria-label="Help: Stale frames to discard before reading the latest. Lower = faster response, high..."></span></span><input id="editStaleFrameGrabs" name="stale_frame_grabs" type="number" min="0" max="20" placeholder="Auto" /></label>
-          </div>
-          <p class="form-help muted">These values are hints passed to the stream decoder. Leave at defaults unless your camera requires specific dimensions.</p>
-
-          <div class="form-group">
-            <p class="form-group-label">Motion Detection Overrides</p>
-            <p class="form-help muted">Override the global motion settings for this camera only. Leave blank to use the global defaults from Live Detection settings.</p>
-            <div class="form-grid">
-              <label><span>Pixel Threshold <span class="info-tip" data-tip="Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras." title="Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras." tabindex="0" aria-label="Help: Pixel intensity change required to count as motion (1-255). Raise for noisy IR c..."></span></span><input id="editMotionPixelThreshold" name="motion_pixel_threshold" type="number" min="1" max="255" step="1" placeholder="Global default (30)" /></label>
-              <label><span>Gate Fraction <span class="info-tip" data-tip="Minimum fraction of pixels that must change before motion is declared." title="Minimum fraction of pixels that must change before motion is declared." tabindex="0" aria-label="Help: Minimum fraction of pixels that must change before motion is declared."></span></span><input id="editMotionGateFraction" name="motion_gate_fraction" type="number" min="0.0001" max="0.5" step="0.0001" placeholder="Global default (0.003)" /></label>
-              <label><span>Scale Fraction <span class="info-tip" data-tip="Pixel change fraction that maps to 100% motion confidence." title="Pixel change fraction that maps to 100% motion confidence." tabindex="0" aria-label="Help: Pixel change fraction that maps to 100% motion confidence."></span></span><input id="editMotionScaleFraction" name="motion_scale_fraction" type="number" min="0.001" max="1.0" step="0.001" placeholder="Global default (0.03)" /></label>
-              <label><span>Background Alpha <span class="info-tip" data-tip="How fast the background model adapts when no motion is detected." title="How fast the background model adapts when no motion is detected." tabindex="0" aria-label="Help: How fast the background model adapts when no motion is detected."></span></span><input id="editMotionBackgroundAlpha" name="motion_background_alpha" type="number" min="0.001" max="0.5" step="0.001" placeholder="Global default (0.05)" /></label>
-            </div>
-          </div>
-        </div>
-
-        <div class="modal-footer">
-          <button class="secondary" id="modalCancelBtn" type="button">Cancel</button>
-          <button type="submit" id="modalSaveBtn">Save Camera</button>
-        </div>
-      </form>
-    </div>
-  </div>
 
   <!-- Delete confirmation modal -->
   <div id="deleteModal" class="modal-backdrop" hidden aria-modal="true" role="dialog">

@@ -4,9 +4,7 @@ let pendingDeleteIndex = null;
 const messageEl = document.getElementById('cameraMessage');
 const gridEl = document.getElementById('cameraGrid');
 const emptyEl = document.getElementById('cameraEmpty');
-const modal = document.getElementById('cameraModal');
 const deleteModal = document.getElementById('deleteModal');
-const editForm = document.getElementById('cameraEditForm');
 
 // Stats + filter state
 const stats = {
@@ -29,61 +27,359 @@ function setMessage(text, isError = false) {
   if (text) window.showToast?.(text, isError);
 }
 
-// api() is provided by web/utils.js (loaded before this script). It throws on
-// 401 (after redirecting to /login) - callers that previously hit the silent
-// 'return;' branch on 401 still navigate away before any throw is observed.
-// The local duplicate + page-local csrfToken were removed so every page shares
-// the same fetch contract.
+// ─── Inline edit form builder ─────────────────────────────────────────────────
+
+function buildEditFormHtml(camera, index) {
+  const backend = camera.backend || 'onvif';
+  const isRtsp = backend === 'rtsp';
+  const rowId = 'edit-row-' + index;
+  const formId = 'edit-form-' + index;
+  const escapeAttr = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  return '<tr class="camera-edit-row" id="' + rowId + '"><td colspan="7"><div class="camera-edit-panel">' +
+    '<div class="modal-tabs" role="tablist">' +
+      '<button class="modal-tab active" data-tab="connection" data-form="' + formId + '" type="button" role="tab" aria-selected="true">Connection</button>' +
+      '<button class="modal-tab" data-tab="recording" data-form="' + formId + '" type="button" role="tab" aria-selected="false" tabindex="-1">Recording</button>' +
+      '<button class="modal-tab" data-tab="ptz" data-form="' + formId + '" type="button" role="tab" aria-selected="false" tabindex="-1">PTZ</button>' +
+      '<button class="modal-tab" data-tab="advanced" data-form="' + formId + '" type="button" role="tab" aria-selected="false" tabindex="-1">Advanced</button>' +
+    '</div>' +
+    '<form class="camera-edit-form modal-body" data-camera-index="' + index + '" id="' + formId + '" novalidate autocomplete="off">' +
+      '<input type="hidden" name="camera_index" value="' + index + '" />' +
+
+      // Connection tab
+      '<div class="modal-tab-panel" data-panel="connection">' +
+        '<div class="form-grid">' +
+          '<label><span>Camera Name</span><input name="name" placeholder="e.g. Front Door" required value="' + escapeAttr(camera.name || '') + '" /></label>' +
+          '<label><span>Camera ID</span><input name="id" placeholder="e.g. front-door" value="' + escapeAttr(camera.id || '') + '" /></label>' +
+          '<label class="full-width"><span>Backend</span>' +
+            '<select name="backend" class="cam-edit-backend">' +
+              '<option value="onvif"' + (backend === 'onvif' ? ' selected' : '') + '>ONVIF / RTSP (Auto-Build URL)</option>' +
+              '<option value="rtsp"' + (backend === 'rtsp' ? ' selected' : '') + '>RTSP (Manual URL)</option>' +
+            '</select>' +
+          '</label>' +
+        '</div>' +
+        '<div class="form-group cam-rtsp-fields"' + (isRtsp ? '' : ' hidden') + '>' +
+          '<p class="form-group-label">RTSP URL</p>' +
+          '<div class="form-grid">' +
+            '<label class="full-width"><span>Stream URL</span><input name="stream_url" placeholder="rtsp://user:pass@192.168.1.100:554/stream1" value="' + escapeAttr(camera.stream_url || '') + '" /></label>' +
+          '</div>' +
+        '</div>' +
+        '<div class="form-group cam-onvif-fields"' + (isRtsp ? ' hidden' : '') + '>' +
+          '<p class="form-group-label">Connection details</p>' +
+          '<div class="form-grid">' +
+            '<label><span>Host / IP</span><input name="host" placeholder="192.168.1.100" value="' + escapeAttr(camera.host || '') + '" /></label>' +
+            '<label><span>Port</span><input name="port" type="number" min="1" max="65535" placeholder="554" value="' + (camera.port || 554) + '" /></label>' +
+            '<label><span>Stream Path</span><input name="path" placeholder="stream1" value="' + escapeAttr(camera.path || 'stream1') + '" /></label>' +
+            '<label><span>Username</span><input name="username" placeholder="admin" autocomplete="off" value="' + escapeAttr(camera.username || '') + '" /></label>' +
+            '<label class="full-width"><span>Password</span><input name="password" type="password" autocomplete="new-password" placeholder="' + (camera.has_password ? '(saved - type to change)' : '(No Password)') + '" /></label>' +
+          '</div>' +
+        '</div>' +
+        '<div class="button-row" style="margin-top:8px">' +
+          '<button class="btn-info cam-test-conn-btn" data-form="' + formId + '" type="button">Test Connection</button>' +
+          '<span class="muted cam-test-conn-result" data-form="' + formId + '" style="font-size:13px;align-self:center"></span>' +
+        '</div>' +
+      '</div>' +
+
+      // Recording tab
+      '<div class="modal-tab-panel" data-panel="recording" hidden>' +
+        '<div class="form-grid">' +
+          '<label><span>Continuous Recording</span>' +
+            '<select name="continuous">' +
+              '<option value="false"' + (camera.recording?.continuous ? '' : ' selected') + '>Disabled</option>' +
+              '<option value="true"' + (camera.recording?.continuous ? ' selected' : '') + '>Enabled</option>' +
+            '</select>' +
+          '</label>' +
+          '<label class="full-width"><span>Recording Stream Path <span class="info-tip" data-tip="Optional: the path for the high-res recording stream (e.g. stream2). Uses the same host, port, and login details as the primary stream. Leave empty to use the primary stream for recording." title="Optional: the path for the high-res recording stream (e.g. stream2). Uses the same host, port, and login details as the primary stream. Leave empty to use the primary stream for recording." tabindex="0" aria-label="Help: Optional path for the high-res recording stream. Uses the same host, port, and login details."></span></span><input name="recording_stream_path" placeholder="e.g. stream2" value="' + escapeAttr(camera.recording_stream_path || '') + '" /></label>' +
+        '</div>' +
+        '<p class="form-help muted">When enabled, the camera writes an uninterrupted stream regardless of events. Otherwise, clips are recorded per detection rule (configured on the Zones page per object). The Recording Stream Path is optional - if set, event clips are recorded from the high-res stream instead of the primary detection stream. Uses the same host, port, and login details as the primary stream.</p>' +
+      '</div>' +
+
+      // PTZ tab
+      '<div class="modal-tab-panel" data-panel="ptz" hidden>' +
+        '<div class="form-grid">' +
+          '<label><span>PTZ Control</span>' +
+            '<select name="ptz_enabled">' +
+              '<option value="false"' + (camera.ptz?.enabled ? '' : ' selected') + '>Disabled</option>' +
+              '<option value="true"' + (camera.ptz?.enabled ? ' selected' : '') + '>Enabled</option>' +
+            '</select>' +
+          '</label>' +
+          '<label class="full-width"><span>Protocol <span class="info-tip" data-tip="ONVIF uses standard PTZ over the camera&#39;s HTTP port. TCP PelcoD sends raw binary commands to the Command Port." title="ONVIF uses standard PTZ over the camera&#39;s HTTP port. TCP PelcoD sends raw binary commands to the Command Port." tabindex="0" aria-label="Help: ONVIF uses standard PTZ over the camera&#39;s HTTP port. TCP PelcoD sends raw binary commands to the Command Port."></span></span>' +
+            '<select name="ptz_protocol">' +
+              '<option value="onvif"' + ((camera.ptz?.protocol || 'onvif') === 'onvif' ? ' selected' : '') + '>ONVIF (Recommended)</option>' +
+              '<option value="tcp_pelcod"' + (camera.ptz?.protocol === 'tcp_pelcod' ? ' selected' : '') + '>TCP PelcoD (Legacy Cameras)</option>' +
+            '</select></label>' +
+          '<label><span>HTTP Port <span class="info-tip" data-tip="Camera web port used by HTTP CGI (default 80)." title="Camera web port used by HTTP CGI (default 80)." tabindex="0" aria-label="Help: Camera web port used by HTTP CGI (default 80)."></span></span><input name="ptz_http_port" type="number" min="1" max="65535" placeholder="80" value="' + (camera.ptz?.http_port || 80) + '" /></label>' +
+          '<label><span>Command Port <span class="info-tip" data-tip="Port for TCP PelcoD only (default 6060)." title="Port for TCP PelcoD only (default 6060)." tabindex="0" aria-label="Help: Port for TCP PelcoD only (default 6060)."></span></span><input name="ptz_port" type="number" min="1" max="65535" placeholder="6060" value="' + (camera.ptz?.port || 6060) + '" /></label>' +
+          '<label><span>PTZ Address <span class="info-tip" data-tip="PelcoD device address (default 1, TCP PelcoD only)." title="PelcoD device address (default 1, TCP PelcoD only)." tabindex="0" aria-label="Help: PelcoD device address (default 1, TCP PelcoD only)."></span></span><input name="ptz_address" type="number" min="1" max="255" placeholder="1" value="' + (camera.ptz?.address || 1) + '" /></label>' +
+          '<label><span>Speed <span class="info-tip" data-tip="Movement speed (1-8, default 5)." title="Movement speed (1-8, default 5)." tabindex="0" aria-label="Help: Movement speed (1-8, default 5)."></span></span><input name="ptz_speed" type="number" min="1" max="8" placeholder="5" value="' + (camera.ptz?.speed || 5) + '" /></label>' +
+          '<label><span>Step Duration (s) <span class="info-tip" data-tip="How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)." title="How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)." tabindex="0" aria-label="Help: How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)."></span></span><input name="ptz_step_duration" type="number" min="0.1" max="5" step="0.1" placeholder="0.4" value="' + (camera.ptz?.step_duration != null ? Number(camera.ptz.step_duration).toFixed(2) : '') + '" /></label>' +
+        '</div>' +
+        '<p class="form-help muted">Enable PTZ and save to show the control pad on the Live page. The camera&#39;s username and password from the Connection tab are used for HTTP CGI authentication.</p>' +
+      '</div>' +
+
+      // Advanced tab
+      '<div class="modal-tab-panel" data-panel="advanced" hidden>' +
+        '<div class="form-grid">' +
+          '<label><span>Width (px)</span><input name="width" type="number" min="160" max="7680" placeholder="1280" value="' + (camera.width || 1280) + '" /></label>' +
+          '<label><span>Height (px)</span><input name="height" type="number" min="90" max="4320" placeholder="720" value="' + (camera.height || 720) + '" /></label>' +
+          '<label><span>FPS</span><input name="fps" type="number" min="1" max="120" placeholder="15" value="' + (camera.fps || 15) + '" /></label>' +
+          '<label><span>Frame Buffer Drains <span class="info-tip" data-tip="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." title="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." tabindex="0" aria-label="Help: Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)."></span></span><input name="stale_frame_grabs" type="number" min="0" max="20" placeholder="Auto" value="' + (camera.stale_frame_grabs != null ? camera.stale_frame_grabs : '') + '" /></label>' +
+        '</div>' +
+        '<p class="form-help muted">These values are hints passed to the stream decoder. Leave at defaults unless your camera requires specific dimensions.</p>' +
+        '<div class="form-group">' +
+          '<p class="form-group-label">Motion Detection Overrides</p>' +
+          '<p class="form-help muted">Override the global motion settings for this camera only. Leave blank to use the global defaults from Live Detection settings.</p>' +
+          '<div class="form-grid">' +
+            '<label><span>Pixel Threshold <span class="info-tip" data-tip="Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras." title="Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras." tabindex="0" aria-label="Help: Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras."></span></span><input name="motion_pixel_threshold" type="number" min="1" max="255" step="1" placeholder="Global default (30)" value="' + (camera.motion_pixel_threshold != null ? camera.motion_pixel_threshold : '') + '" /></label>' +
+            '<label><span>Gate Fraction <span class="info-tip" data-tip="Minimum fraction of pixels that must change before motion is declared." title="Minimum fraction of pixels that must change before motion is declared." tabindex="0" aria-label="Help: Minimum fraction of pixels that must change before motion is declared."></span></span><input name="motion_gate_fraction" type="number" min="0.0001" max="0.5" step="0.0001" placeholder="Global default (0.003)" value="' + (camera.motion_gate_fraction != null ? camera.motion_gate_fraction : '') + '" /></label>' +
+            '<label><span>Scale Fraction <span class="info-tip" data-tip="Pixel change fraction that maps to 100% motion confidence." title="Pixel change fraction that maps to 100% motion confidence." tabindex="0" aria-label="Help: Pixel change fraction that maps to 100% motion confidence."></span></span><input name="motion_scale_fraction" type="number" min="0.001" max="1.0" step="0.001" placeholder="Global default (0.03)" value="' + (camera.motion_scale_fraction != null ? camera.motion_scale_fraction : '') + '" /></label>' +
+            '<label><span>Background Alpha <span class="info-tip" data-tip="How fast the background model adapts when no motion is detected." title="How fast the background model adapts when no motion is detected." tabindex="0" aria-label="Help: How fast the background model adapts when no motion is detected."></span></span><input name="motion_background_alpha" type="number" min="0.001" max="0.5" step="0.001" placeholder="Global default (0.05)" value="' + (camera.motion_background_alpha != null ? camera.motion_background_alpha : '') + '" /></label>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="modal-footer">' +
+        '<button class="secondary cam-edit-cancel-btn" data-index="' + index + '" type="button">Cancel</button>' +
+        '<button type="submit" class="cam-edit-save-btn">Save Camera</button>' +
+      '</div>' +
+    '</form>' +
+  '</div></td></tr>';
+}
+
+// ─── Inline edit management ───────────────────────────────────────────────────
+
+function closeAllEditForms() {
+  gridEl.querySelectorAll('.camera-edit-row').forEach(function(row) { row.remove(); });
+  gridEl.querySelectorAll('.camera-row-editing').forEach(function(row) { row.classList.remove('camera-row-editing'); });
+}
+
+function toggleEditForm(camera, index) {
+  closeAllEditForms();
+  var row = gridEl.querySelector('[data-camera-index="' + index + '"]');
+  if (!row) return;
+
+  var existing = row.nextElementSibling;
+  if (existing && existing.classList.contains('camera-edit-row')) {
+    // Already open - close it
+    existing.remove();
+    row.classList.remove('camera-row-editing');
+    return;
+  }
+
+  var formHtml = buildEditFormHtml(camera, index);
+  row.classList.add('camera-row-editing');
+  row.insertAdjacentHTML('afterend', formHtml);
+  wireEditFormHandlers(index);
+}
+
+function wireEditFormHandlers(index) {
+  var formId = 'edit-form-' + index;
+  var form = document.getElementById(formId);
+  if (!form) return;
+
+  // Tab switching
+  form.querySelectorAll('.modal-tab').forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      var tabName = tab.dataset.tab;
+      form.querySelectorAll('.modal-tab').forEach(function(t) {
+        var active = t.dataset.tab === tabName;
+        t.classList.toggle('active', active);
+        t.setAttribute('aria-selected', String(active));
+      });
+      form.querySelectorAll('.modal-tab-panel').forEach(function(panel) {
+        panel.hidden = panel.dataset.panel !== tabName;
+      });
+    });
+  });
+
+  // Backend toggle
+  var backendSelect = form.querySelector('[name="backend"]');
+  if (backendSelect) {
+    backendSelect.addEventListener('change', function() {
+      var manual = this.value === 'rtsp';
+      var rtspEl = form.querySelector('.cam-rtsp-fields');
+      var onvifEl = form.querySelector('.cam-onvif-fields');
+      if (rtspEl) rtspEl.hidden = !manual;
+      if (onvifEl) onvifEl.hidden = manual;
+    });
+  }
+
+  // Form submit
+  form.addEventListener('submit', async function(e) {
+    e.preventDefault();
+    var data = collectFormData(form, index);
+    var camerasBefore = cameras.slice();
+    var editTargetBefore = cameras[index];
+
+    if (index >= cameras.length) {
+      // New camera
+      cameras.push(data);
+    } else {
+      cameras[index] = {
+        ...cameras[index],
+        ...data,
+        detection: { ...(cameras[index].detection || {}), ...data.detection },
+      };
+    }
+
+    try {
+      var result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras: cameras }) });
+      cameras = result.cameras || cameras;
+      updateStats();
+      renderGrid();
+      setMessage(index >= camerasBefore.length ? 'Camera added.' : 'Camera updated.');
+    } catch (err) {
+      if (window.daygleAuth?.redirecting) return;
+      if (index >= camerasBefore.length) {
+        cameras.splice(0, cameras.length, ...camerasBefore);
+      } else {
+        cameras.splice(index, 1, editTargetBefore);
+      }
+      setMessage(err.message, true);
+    }
+  });
+
+  // Cancel button
+  var cancelBtn = form.querySelector('.cam-edit-cancel-btn');
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', function() { closeAllEditForms(); });
+  }
+
+  // Test connection
+  var testBtn = form.querySelector('.cam-test-conn-btn');
+  if (testBtn) {
+    testBtn.addEventListener('click', async function() {
+      var resultEl = form.querySelector('.cam-test-conn-result');
+      var backend = (form.querySelector('[name="backend"]')?.value || 'onvif');
+      var payload;
+      if (backend === 'rtsp') {
+        payload = { stream_url: (form.querySelector('[name="stream_url"]')?.value || '').trim() };
+      } else {
+        payload = {
+          host: (form.querySelector('[name="host"]')?.value || '').trim(),
+          port: parseInt((form.querySelector('[name="port"]')?.value || '554'), 10),
+          path: (form.querySelector('[name="path"]')?.value || '').trim(),
+          username: (form.querySelector('[name="username"]')?.value || '').trim(),
+          password: form.querySelector('[name="password"]')?.value || '',
+        };
+      }
+      testBtn.disabled = true;
+      testBtn.textContent = 'Testing…';
+      if (resultEl) { resultEl.textContent = ''; resultEl.style.color = ''; }
+      try {
+        var res = await api('/api/cameras/test-connection', { method: 'POST', body: JSON.stringify(payload) });
+        if (resultEl) {
+          resultEl.textContent = res.online ? 'Connected' : (res.message || 'Unreachable');
+          resultEl.style.color = res.online ? 'var(--color-success, #22c55e)' : 'var(--color-error, #ef4444)';
+        }
+      } catch (err) {
+        if (window.daygleAuth?.redirecting) return;
+        if (resultEl) {
+          resultEl.textContent = err.message || 'Test failed';
+          resultEl.style.color = 'var(--color-error, #ef4444)';
+        }
+      } finally {
+        testBtn.disabled = false;
+        testBtn.textContent = 'Test Connection';
+      }
+    });
+  }
+}
+
+function collectFormData(form, index) {
+  var getVal = function(name) { var el = form.querySelector('[name="' + name + '"]'); return el ? el.value : ''; };
+  var getName = function(name) { return getVal(name).trim(); };
+  var getInt = function(name, def) { var v = parseInt(getVal(name), 10); return isNaN(v) ? def : v; };
+  var backend = getName('backend') || 'onvif';
+
+  return {
+    id: getName('id') || ('camera-' + (cameras.length + 1)),
+    name: getName('name'),
+    backend: backend,
+    stream_url: backend === 'rtsp' ? getName('stream_url') : '',
+    recording_stream_path: getName('recording_stream_path'),
+    host: backend !== 'rtsp' ? getName('host') : '',
+    port: getInt('port', 554),
+    path: backend !== 'rtsp' ? getName('path') : '',
+    username: getName('username'),
+    password: getVal('password'),
+    width: getInt('width', 1280),
+    height: getInt('height', 720),
+    fps: getInt('fps', 15),
+    stale_frame_grabs: (function() { var v = getName('stale_frame_grabs'); return v !== '' ? parseInt(v, 10) : null; })(),
+    recording: {
+      continuous: getVal('continuous') === 'true',
+    },
+    ptz: {
+      enabled: getVal('ptz_enabled') === 'true',
+      protocol: getName('ptz_protocol') || 'onvif',
+      http_port: getInt('ptz_http_port', 80),
+      port: getInt('ptz_port', 6060),
+      address: getInt('ptz_address', 1),
+      speed: getInt('ptz_speed', 5),
+      step_duration: (function() { var raw = parseFloat(getVal('ptz_step_duration')); return isFinite(raw) ? raw : 0.4; })(),
+    },
+    detection: {},
+    motion_pixel_threshold: (function() { var v = getName('motion_pixel_threshold'); return v !== '' ? parseInt(v, 10) : null; })(),
+    motion_gate_fraction: (function() { var v = getName('motion_gate_fraction'); return v !== '' ? Number(v) : null; })(),
+    motion_scale_fraction: (function() { var v = getName('motion_scale_fraction'); return v !== '' ? Number(v) : null; })(),
+    motion_background_alpha: (function() { var v = getName('motion_background_alpha'); return v !== '' ? Number(v) : null; })(),
+  };
+}
+
+// ─── Camera row rendering ─────────────────────────────────────────────────────
 
 function renderCameraRow(camera, index) {
-  const name = escapeHtml(camera.name || camera.id || `Camera ${index + 1}`);
-  const id = escapeHtml(camera.id || '');
-  const backend = camera.backend === 'rtsp' ? 'RTSP' : 'ONVIF';
+  var name = escapeHtml(camera.name || camera.id || ('Camera ' + (index + 1)));
+  var id = escapeHtml(camera.id || '');
+  var backend = camera.backend === 'rtsp' ? 'RTSP' : 'ONVIF';
 
-  const zones = camera.detection?.zones || [];
-  const zoneCount = zones.length;
-  const ruleCount = zones.reduce((n, z) => n + (z.object_rules?.length || 0), 0);
+  var zones = camera.detection?.zones || [];
+  var zoneCount = zones.length;
+  var ruleCount = zones.reduce(function(n, z) { return n + (z.object_rules?.length || 0); }, 0);
 
-  const sound = camera.detection?.sound;
-  const soundEnabled = sound?.enabled === true;
+  var sound = camera.detection?.sound;
+  var soundEnabled = sound?.enabled === true;
 
-  const continuous = camera.recording?.continuous === true;
+  var continuous = camera.recording?.continuous === true;
 
-  const zonesHtml = zoneCount === 0
+  var zonesHtml = zoneCount === 0
     ? '<span class="chip chip-warn">No zones</span>'
-    : `<span class="chip chip-green">${zoneCount} zone${zoneCount !== 1 ? 's' : ''}</span>${ruleCount > 0 ? ` <span class="chip chip-info">${ruleCount} rule${ruleCount !== 1 ? 's' : ''}</span>` : ''}`;
+    : '<span class="chip chip-green">' + zoneCount + ' zone' + (zoneCount !== 1 ? 's' : '') + '</span>' + (ruleCount > 0 ? ' <span class="chip chip-info">' + ruleCount + ' rule' + (ruleCount !== 1 ? 's' : '') + '</span>' : '');
 
-  const soundHtml = soundEnabled
+  var soundHtml = soundEnabled
     ? '<span class="chip chip-green">On</span>'
     : '<span class="chip chip-dim">Off</span>';
 
-  const recordingHtml = continuous
+  var recordingHtml = continuous
     ? '<span class="chip chip-green">Continuous</span>'
     : '<span class="chip chip-info">On Alert</span>';
 
-  const hasStream = !!(camera.stream_url || camera.host);
-  const healthHtml = hasStream
+  var hasStream = !!(camera.stream_url || camera.host);
+  var healthHtml = hasStream
     ? '<span class="health-dot online"></span><span>Online</span>'
     : '<span class="health-dot offline"></span><span>Offline</span>';
 
-  return `
-    <tr draggable="true" data-drag-camera="${index}" data-camera-index="${index}">
-      <td class="cell-drag"><span class="drag-handle" title="Drag to reorder">${ICONS.grip}</span></td>
-      <td class="cell-camera">
-        <div class="cam-info"><span class="cam-name">${name}</span>${id ? `<span class="cam-id">${id}</span>` : ''}</div>
-        <div class="cell-actions">
-          <button class="secondary cam-edit-btn" data-index="${index}" type="button" title="Edit camera">${ICONS.edit}</button>
-          <button class="delete-btn secondary cam-remove-btn" data-index="${index}" type="button" title="Remove camera">${ICONS.remove}</button>
-        </div>
-      </td>
-      <td><span class="chip">${backend}</span></td>
-      <td class="cell-zones">${zonesHtml}</td>
-      <td class="cell-center">${soundHtml}</td>
-      <td>${recordingHtml}</td>
-      <td class="cell-health">${healthHtml}</td>
-    </tr>
-  `;
+  var rowHtml = '';
+  rowHtml += '<tr draggable="true" data-drag-camera="' + index + '" data-camera-index="' + index + '">';
+  rowHtml += '<td class="cell-drag"><span class="drag-handle" title="Drag to reorder">' + ICONS.grip + '</span></td>';
+  rowHtml += '<td class="cell-camera">';
+  rowHtml += '<div class="cam-info"><span class="cam-name">' + name + '</span>' + (id ? '<span class="cam-id">' + id + '</span>' : '') + '</div>';
+  rowHtml += '<div class="cell-actions">';
+  rowHtml += '<button class="secondary cam-edit-btn" data-index="' + index + '" type="button" title="Edit camera">' + ICONS.edit + '</button>';
+  rowHtml += '<button class="delete-btn secondary cam-remove-btn" data-index="' + index + '" type="button" title="Remove camera">' + ICONS.remove + '</button>';
+  rowHtml += '</div>';
+  rowHtml += '</td>';
+  rowHtml += '<td><span class="chip">' + backend + '</span></td>';
+  rowHtml += '<td class="cell-zones">' + zonesHtml + '</td>';
+  rowHtml += '<td class="cell-center">' + soundHtml + '</td>';
+  rowHtml += '<td>' + recordingHtml + '</td>';
+  rowHtml += '<td class="cell-health">' + healthHtml + '</td>';
+  rowHtml += '</tr>';
+  return rowHtml;
 }
+
+// ─── Filter + stats ───────────────────────────────────────────────────────────
 
 function currentFilterValues() {
   return {
@@ -93,32 +389,30 @@ function currentFilterValues() {
 }
 
 function applyFilter(list) {
-  const { text, backend } = currentFilterValues();
-  return list.filter((camera) => {
-    if (backend && (camera.backend || 'onvif') !== backend) return false;
-    if (!text) return true;
-    const haystack = `${camera.name || ''} ${camera.id || ''}`.toLowerCase();
-    return haystack.includes(text);
+  var vals = currentFilterValues();
+  return list.filter(function(camera) {
+    if (vals.backend && (camera.backend || 'onvif') !== vals.backend) return false;
+    if (!vals.text) return true;
+    var haystack = (camera.name || '').toLowerCase() + ' ' + (camera.id || '').toLowerCase();
+    return haystack.indexOf(vals.text) !== -1;
   });
 }
 
 function updateFilterHint(filteredCount) {
-  const { text, backend } = currentFilterValues();
-  const parts = [];
-  if (text) parts.push(`matching “${text}”`);
-  if (backend === 'onvif') parts.push('using ONVIF');
-  else if (backend === 'rtsp') parts.push('using RTSP');
+  var vals = currentFilterValues();
+  var parts = [];
+  if (vals.text) parts.push('matching \u201c' + vals.text + '\u201d');
+  if (vals.backend === 'onvif') parts.push('using ONVIF');
+  else if (vals.backend === 'rtsp') parts.push('using RTSP');
   if (!parts.length) {
-    messageEl.textContent = cameras.length
-      ? `Showing all ${cameras.length} cameras.`
-      : '';
+    messageEl.textContent = cameras.length ? ('Showing all ' + cameras.length + ' cameras.') : '';
     return;
   }
-  messageEl.textContent = `Showing ${filteredCount} of ${cameras.length} cameras ${parts.join(' and ')}.`;
+  messageEl.textContent = 'Showing ' + filteredCount + ' of ' + cameras.length + ' cameras ' + parts.join(' and ') + '.';
 }
 
 function renderGrid() {
-  const filtered = applyFilter(cameras);
+  var filtered = applyFilter(cameras);
   if (cameras.length === 0) {
     gridEl.innerHTML = '';
     emptyEl.hidden = false;
@@ -131,80 +425,59 @@ function renderGrid() {
     updateFilterHint(0);
     return;
   }
-  // Row markup is escaped inside renderCameraRow (camera name/id go through
-  // escapeHtml). Build the full table markup in a local first, then assign it,
-  // so this stays off the banned ``innerHTML = `…${x}…` `` template-literal
-  // pattern flagged by the H2 XSS static guard (same convention as live.js).
-  const rowsHtml = filtered.map((cam) => {
-    const realIndex = cameras.indexOf(cam);
+  var rowsHtml = filtered.map(function(cam) {
+    var realIndex = cameras.indexOf(cam);
     return renderCameraRow(cam, realIndex);
   }).join('');
-  const tableHtml = `
-    <div class="cameras-table-wrap">
-      <table class="cameras-table">
-        <thead>
-          <tr>
-            <th class="cell-drag"></th>
-            <th>Camera</th>
-            <th>Backend</th>
-            <th>Zones</th>
-            <th class="cell-center">Sound</th>
-            <th>Record</th>
-            <th>Health</th>
-
-          </tr>
-        </thead>
-        <tbody>
-          ${rowsHtml}
-        </tbody>
-      </table>
-    </div>`;
+  var tableHtml = '<div class="cameras-table-wrap"><table class="cameras-table"><thead><tr><th class="cell-drag"></th><th>Camera</th><th>Backend</th><th>Zones</th><th class="cell-center">Sound</th><th>Record</th><th>Health</th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
   gridEl.innerHTML = tableHtml;
   updateFilterHint(filtered.length);
 
-  gridEl.querySelectorAll('.cam-edit-btn').forEach((btn) => {
-    btn.addEventListener('click', () => openEditModal(Number(btn.dataset.index)));
+  gridEl.querySelectorAll('.cam-edit-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var idx = Number(btn.dataset.index);
+      toggleEditForm(cameras[idx], idx);
+    });
   });
-  gridEl.querySelectorAll('.cam-remove-btn').forEach((btn) => {
-    btn.addEventListener('click', () => openDeleteModal(Number(btn.dataset.index)));
+  gridEl.querySelectorAll('.cam-remove-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() { openDeleteModal(Number(btn.dataset.index)); });
   });
 
-  // Drag-and-drop reorder handlers for camera rows
-  const table = gridEl.querySelector('table');
-  gridEl.querySelectorAll('[data-drag-camera]').forEach((row) => {
-    row.addEventListener('dragstart', (event) => {
+  // Drag-and-drop reorder
+  var table = gridEl.querySelector('table');
+  gridEl.querySelectorAll('[data-drag-camera]').forEach(function(row) {
+    row.addEventListener('dragstart', function(event) {
+      closeAllEditForms();
       row.classList.add('dragging');
       event.dataTransfer.effectAllowed = 'move';
       event.dataTransfer.setData('text/plain', String(row.dataset.dragCamera));
     });
-    row.addEventListener('dragend', () => {
+    row.addEventListener('dragend', function() {
       row.classList.remove('dragging');
-      if (table) table.querySelectorAll('tr').forEach((r) => r.classList.remove('drag-over'));
+      if (table) table.querySelectorAll('tr').forEach(function(r) { r.classList.remove('drag-over'); });
     });
-    row.addEventListener('dragover', (event) => {
+    row.addEventListener('dragover', function(event) {
       event.preventDefault();
       event.dataTransfer.dropEffect = 'move';
-      if (table) table.querySelectorAll('tr[data-drag-camera]').forEach((r) => r.classList.remove('drag-over'));
+      if (table) table.querySelectorAll('tr[data-drag-camera]').forEach(function(r) { r.classList.remove('drag-over'); });
       row.classList.add('drag-over');
     });
-    row.addEventListener('drop', async (event) => {
+    row.addEventListener('drop', async function(event) {
       event.preventDefault();
       row.classList.remove('drag-over');
-      const draggedIndex = Number(event.dataTransfer.getData('text/plain'));
-      const targetIndex = Number(row.dataset.dragCamera);
+      var draggedIndex = Number(event.dataTransfer.getData('text/plain'));
+      var targetIndex = Number(row.dataset.dragCamera);
       if (!Number.isFinite(draggedIndex) || !Number.isFinite(targetIndex) || draggedIndex === targetIndex) return;
-      // Snapshot before mutating so we can restore on API failure
-      const camerasBefore = cameras.slice();
-      const [draggedCamera] = cameras.splice(draggedIndex, 1);
-      const adjustedTarget = targetIndex > draggedIndex ? targetIndex - 1 : targetIndex;
-      cameras.splice(adjustedTarget, 0, draggedCamera);
+      var camerasBefore = cameras.slice();
+      var arr = cameras.splice(draggedIndex, 1);
+      var adjustedTarget = targetIndex > draggedIndex ? targetIndex - 1 : targetIndex;
+      cameras.splice(adjustedTarget, 0, arr[0]);
       try {
-        const result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras }) });
+        var result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras: cameras }) });
         cameras = result.cameras || cameras;
         renderGrid();
         setMessage('Camera order updated.');
       } catch (err) {
-        // Restore the previous order on failure
         cameras.splice(0, cameras.length, ...camerasBefore);
         if (window.daygleAuth?.redirecting) return;
         setMessage(err.message, true);
@@ -216,22 +489,21 @@ function renderGrid() {
 function updateStats() {
   if (stats.total) stats.total.textContent = String(cameras.length);
   if (stats.recording) {
-    const continuous = cameras.filter((c) => c.recording?.continuous === true).length;
-    const alertBased = cameras.length - continuous;
-    stats.recording.textContent = `${alertBased} / ${continuous}`;
+    var continuous = cameras.filter(function(c) { return c.recording?.continuous === true; }).length;
+    stats.recording.textContent = (cameras.length - continuous) + ' / ' + continuous;
   }
   if (stats.zones) {
-    const withZones = cameras.filter((c) => (c.detection?.zones || []).length > 0).length;
+    var withZones = cameras.filter(function(c) { return (c.detection?.zones || []).length > 0; }).length;
     stats.zones.textContent = String(withZones);
   }
   if (stats.backends) {
-    const onvif = cameras.filter((c) => (c.backend || 'onvif') === 'onvif').length;
-    const rtsp = cameras.filter((c) => c.backend === 'rtsp').length;
-    stats.backends.textContent = `${onvif} / ${rtsp}`;
+    var onvif = cameras.filter(function(c) { return (c.backend || 'onvif') === 'onvif'; }).length;
+    var rtsp = cameras.filter(function(c) { return c.backend === 'rtsp'; }).length;
+    stats.backends.textContent = onvif + ' / ' + rtsp;
   }
 }
 
-// ─── Modal helpers ────────────────────────────────────────────────────────────
+// ─── Delete modal ─────────────────────────────────────────────────────────────
 
 function openModal(el) {
   el.hidden = false;
@@ -244,284 +516,74 @@ function closeModal(el) {
   document.body.classList.remove('modal-open');
 }
 
-function switchTab(tabName) {
-  modal.querySelectorAll('.modal-tab').forEach((tab) => {
-    const active = tab.dataset.tab === tabName;
-    tab.classList.toggle('active', active);
-    tab.setAttribute('aria-selected', String(active));
-  });
-  modal.querySelectorAll('.modal-tab-panel').forEach((panel) => {
-    panel.hidden = panel.dataset.panel !== tabName;
-  });
-}
-
-modal.querySelectorAll('.modal-tab').forEach((tab) => {
-  tab.addEventListener('click', () => switchTab(tab.dataset.tab));
-});
-
-// Toggle ONVIF vs manual RTSP fields
-document.getElementById('editBackend').addEventListener('change', function () {
-  const manual = this.value === 'rtsp';
-  document.getElementById('rtspManualFields').hidden = !manual;
-  document.getElementById('onvifFields').hidden = manual;
-});
-
-function fillModal(camera, index) {
-  document.getElementById('modalTitle').textContent = index === null ? 'Add Camera' : 'Edit Camera';
-  document.getElementById('editCameraIndex').value = index === null ? '' : String(index);
-  document.getElementById('editName').value = camera.name || '';
-  document.getElementById('editId').value = camera.id || '';
-  document.getElementById('editBackend').value = camera.backend || 'onvif';
-  document.getElementById('editStreamUrl').value = camera.stream_url || '';
-  document.getElementById('editHost').value = camera.host || '';
-  document.getElementById('editPort').value = camera.port || 554;
-  document.getElementById('editPath').value = camera.path || 'stream1';
-  document.getElementById('editUsername').value = camera.username || '';
-  const pwdField = document.getElementById('editPassword');
-  pwdField.value = '';
-  pwdField.placeholder = camera.has_password ? '(saved - type to change)' : '(No Password)';
-  document.getElementById('testConnectionResult').textContent = '';
-  document.getElementById('editWidth').value = camera.width || 1280;
-  document.getElementById('editHeight').value = camera.height || 720;
-  document.getElementById('editFps').value = camera.fps || 15;
-  const staleVal = camera.stale_frame_grabs;
-  document.getElementById('editStaleFrameGrabs').value = staleVal != null ? staleVal : '';
-  document.getElementById('editContinuous').value = String(camera.recording?.continuous === true);
-  document.getElementById('editRecordingStreamPath').value = camera.recording_stream_path || '';
-
-  document.getElementById('editMotionPixelThreshold').value = camera.motion_pixel_threshold != null ? camera.motion_pixel_threshold : '';
-  document.getElementById('editMotionGateFraction').value = camera.motion_gate_fraction != null ? camera.motion_gate_fraction : '';
-  document.getElementById('editMotionScaleFraction').value = camera.motion_scale_fraction != null ? camera.motion_scale_fraction : '';
-  document.getElementById('editMotionBackgroundAlpha').value = camera.motion_background_alpha != null ? camera.motion_background_alpha : '';
-
-  const ptz = camera.ptz || {};
-  document.getElementById('editPtzEnabled').value = String(ptz.enabled === true);
-  document.getElementById('editPtzProtocol').value = ptz.protocol || 'onvif';
-  document.getElementById('editPtzHttpPort').value = ptz.http_port || 80;
-  document.getElementById('editPtzPort').value = ptz.port || 6060;
-  document.getElementById('editPtzAddress').value = ptz.address || 1;
-  document.getElementById('editPtzSpeed').value = ptz.speed || 5;
-  // Step duration: ONVIF ContinuousMove ``<Timeout>`` value. Empty string
-  // means "use server default (0.4s)"; validate_camera_settings will clamp.
-  const stepEl = document.getElementById('editPtzStepDuration');
-  if (stepEl) stepEl.value = ptz.step_duration != null ? Number(ptz.step_duration).toFixed(2) : '';
-
-  const manual = camera.backend === 'rtsp';
-  document.getElementById('rtspManualFields').hidden = !manual;
-  document.getElementById('onvifFields').hidden = manual;
-
-  switchTab('connection');
-}
-
-function openEditModal(index) {
-  const camera = index === null
-    ? { id: `camera-${cameras.length + 1}`, name: `Camera ${cameras.length + 1}`, backend: 'onvif', port: 554, path: 'stream1', width: 1280, height: 720, fps: 15, recording: { continuous: false }, detection: {} }
-    : cameras[index];
-  fillModal(camera, index);
-  openModal(modal);
-}
-
-function collectModalData() {
-  const backend = document.getElementById('editBackend').value;
-  return {
-    id: document.getElementById('editId').value.trim() || `camera-${cameras.length + 1}`,
-    name: document.getElementById('editName').value.trim(),
-    backend,
-    stream_url: backend === 'rtsp' ? document.getElementById('editStreamUrl').value.trim() : '',
-    recording_stream_path: document.getElementById('editRecordingStreamPath').value.trim(),
-    host: backend !== 'rtsp' ? document.getElementById('editHost').value.trim() : '',
-    port: parseInt(document.getElementById('editPort').value || '554', 10),
-    path: backend !== 'rtsp' ? document.getElementById('editPath').value.trim() : '',
-    username: document.getElementById('editUsername').value.trim(),
-    password: document.getElementById('editPassword').value,
-    width: parseInt(document.getElementById('editWidth').value || '1280', 10),
-    height: parseInt(document.getElementById('editHeight').value || '720', 10),
-    fps: parseInt(document.getElementById('editFps').value || '15', 10),
-    stale_frame_grabs: document.getElementById('editStaleFrameGrabs').value.trim() !== ''
-      ? parseInt(document.getElementById('editStaleFrameGrabs').value, 10)
-      : null,
-    recording: {
-      continuous: document.getElementById('editContinuous').value === 'true',
-    },
-    ptz: {
-      enabled: document.getElementById('editPtzEnabled').value === 'true',
-      protocol: document.getElementById('editPtzProtocol').value,
-      http_port: parseInt(document.getElementById('editPtzHttpPort').value || '80', 10),
-      port: parseInt(document.getElementById('editPtzPort').value || '6060', 10),
-      address: parseInt(document.getElementById('editPtzAddress').value || '1', 10),
-      speed: parseInt(document.getElementById('editPtzSpeed').value || '5', 10),
-      // Empty input falls through to the server's 0.4 s default; the
-      // server-side normalizer clamps to [0.1, 5.0].
-      step_duration: (() => {
-        const raw = parseFloat(document.getElementById('editPtzStepDuration')?.value || '');
-        return Number.isFinite(raw) ? raw : 0.4;
-      })(),
-    },
-    detection: {},
-    motion_pixel_threshold: (() => { const v = document.getElementById('editMotionPixelThreshold').value.trim(); return v !== '' ? Number.parseInt(v, 10) : null; })(),
-    motion_gate_fraction: (() => { const v = document.getElementById('editMotionGateFraction').value.trim(); return v !== '' ? Number(v) : null; })(),
-    motion_scale_fraction: (() => { const v = document.getElementById('editMotionScaleFraction').value.trim(); return v !== '' ? Number(v) : null; })(),
-    motion_background_alpha: (() => { const v = document.getElementById('editMotionBackgroundAlpha').value.trim(); return v !== '' ? Number(v) : null; })(),
-  };
-}
-
-editForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const data = collectModalData();
-  const indexEl = document.getElementById('editCameraIndex').value;
-  const index = indexEl === '' ? null : Number(indexEl);
-  // Snapshot local state before any optimistic mutation so the catch block
-  // can restore exactly what was there. Using captured snapshots (rather
-  // than `cameras.slice(0, -1)` or no-op `cameras = cameras`) makes the
-  // restore idempotent if the catch were to fire twice (re-entry), which
-  // would otherwise drop two add-pushes or leave an edit at the wrong value.
-  const camerasBefore = cameras.slice();
-  const editTargetBefore = index === null ? null : cameras[index];
-
-  if (index === null) {
-    cameras.push(data);
-  } else {
-    cameras[index] = {
-      ...cameras[index],
-      ...data,
-      detection: { ...(cameras[index].detection || {}), ...data.detection },
-    };
-  }
-
-  try {
-    const result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras }) });
-    cameras = result.cameras || cameras;
-    updateStats();
-    renderGrid();
-    closeModal(modal);
-    setMessage(index === null ? 'Camera added.' : 'Camera updated.');
-  } catch (err) {
-    // splice-restore from the snapshot. Re-applying the same restore is a
-    // safe no-op, so the catch is safe under re-entry.
-    // Skip UI updates if api() triggered a 401 redirect
-    if (window.daygleAuth?.redirecting) return;
-    if (index === null) {
-      cameras.splice(0, cameras.length, ...camerasBefore);
-    } else {
-      cameras.splice(index, 1, editTargetBefore);
-    }
-    setMessage(err.message, true);
-  }
-});
-
-// ─── Delete modal ─────────────────────────────────────────────────────────────
-
 function openDeleteModal(index) {
   pendingDeleteIndex = index;
-  const camera = cameras[index];
-  const name = camera?.name || camera?.id || `Camera ${index + 1}`;
-  document.getElementById('deleteModalBody').textContent =
-    `Remove "${name}" from your configuration? Existing recordings are kept.`;
+  var camera = cameras[index];
+  var name = camera?.name || camera?.id || ('Camera ' + (index + 1));
+  document.getElementById('deleteModalBody').textContent = 'Remove "' + name + '" from your configuration? Existing recordings are kept.';
   openModal(deleteModal);
 }
 
-document.getElementById('deleteConfirmBtn').addEventListener('click', async () => {
+document.getElementById('deleteConfirmBtn').addEventListener('click', async function() {
   if (pendingDeleteIndex === null) return;
-  // Snapshot local state + build the post-delete payload WITHOUT pre-splicing
-  // cameras. The previous ordering spliced before await, then ran api(); any
-  // PUT failure (including the now-thrown 401 from utils.js's shared api())
-  // would leave local state mutated while the server kept the camera - i.e.
-  // local and remote would diverge silently. By only committing on success,
-  // local stays consistent with whatever the server actually accepted.
-  const originalIndex = pendingDeleteIndex;
-  const camerasBefore = cameras.slice();
-  const payloadCameras = camerasBefore.slice(0, originalIndex).concat(camerasBefore.slice(originalIndex + 1));
+  var originalIndex = pendingDeleteIndex;
+  var camerasBefore = cameras.slice();
+  var payloadCameras = camerasBefore.slice(0, originalIndex).concat(camerasBefore.slice(originalIndex + 1));
   try {
-    const result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras: payloadCameras }) });
+    var result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras: payloadCameras }) });
     cameras = result.cameras || payloadCameras;
     updateStats();
     renderGrid();
     setMessage('Camera removed.');
   } catch (err) {
-    // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
-    // Local state was not mutated, so no restore is required - just report.
     setMessage(err.message, true);
   }
   closeModal(deleteModal);
   pendingDeleteIndex = null;
 });
 
-// ─── Test connection ──────────────────────────────────────────────────────────
+// ─── Add camera ───────────────────────────────────────────────────────────────
 
-document.getElementById('testConnectionBtn').addEventListener('click', async () => {
-  const btn = document.getElementById('testConnectionBtn');
-  const resultEl = document.getElementById('testConnectionResult');
-  const backend = document.getElementById('editBackend').value;
-  const payload = backend === 'rtsp'
-    ? { stream_url: document.getElementById('editStreamUrl').value.trim() }
-    : {
-        host: document.getElementById('editHost').value.trim(),
-        port: parseInt(document.getElementById('editPort').value || '554', 10),
-        path: document.getElementById('editPath').value.trim(),
-        username: document.getElementById('editUsername').value.trim(),
-        password: document.getElementById('editPassword').value,
-      };
-  btn.disabled = true;
-  btn.textContent = 'Testing…';
-  resultEl.textContent = '';
-  resultEl.style.color = '';
-  try {
-    const result = await api('/api/cameras/test-connection', { method: 'POST', body: JSON.stringify(payload) });
-    resultEl.textContent = result.online ? 'Connected' : (result.message || 'Unreachable');
-    resultEl.style.color = result.online ? 'var(--color-success, #22c55e)' : 'var(--color-error, #ef4444)';
-  } catch (err) {
-    // Skip UI updates if api() triggered a 401 redirect
-    if (window.daygleAuth?.redirecting) return;
-    resultEl.textContent = err.message || 'Test failed';
-    resultEl.style.color = 'var(--color-error, #ef4444)';
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Test Connection';
-  }
-});
+function addNewCamera() {
+  var newCam = { id: ('camera-' + (cameras.length + 1)), name: ('Camera ' + (cameras.length + 1)), backend: 'onvif', port: 554, path: 'stream1', width: 1280, height: 720, fps: 15, recording: { continuous: false }, detection: {}, ptz: { enabled: false, protocol: 'onvif', http_port: 80, port: 6060, address: 1, speed: 5, step_duration: 0.4 } };
+  cameras.push(newCam);
+  renderGrid();
+  toggleEditForm(newCam, cameras.length - 1);
+}
 
-// ─── Close handlers ───────────────────────────────────────────────────────────
+document.getElementById('addCameraBtn').addEventListener('click', addNewCamera);
+document.getElementById('addCameraEmptyBtn').addEventListener('click', addNewCamera);
 
-document.getElementById('addCameraBtn').addEventListener('click', () => openEditModal(null));
-document.getElementById('addCameraEmptyBtn').addEventListener('click', () => openEditModal(null));
-document.getElementById('modalCloseBtn').addEventListener('click', () => closeModal(modal));
-document.getElementById('modalCancelBtn').addEventListener('click', () => closeModal(modal));
-document.getElementById('deleteModalCloseBtn').addEventListener('click', () => closeModal(deleteModal));
-document.getElementById('deleteCancelBtn').addEventListener('click', () => closeModal(deleteModal));
+// ─── Delete modal close ───────────────────────────────────────────────────────
 
-// Close on backdrop click
-[modal, deleteModal].forEach((m) => {
-  m.addEventListener('click', (e) => { if (e.target === m) closeModal(m); });
-});
+document.getElementById('deleteModalCloseBtn').addEventListener('click', function() { closeModal(deleteModal); });
+document.getElementById('deleteCancelBtn').addEventListener('click', function() { closeModal(deleteModal); });
 
-// Close on Escape
-document.addEventListener('keydown', (e) => {
+deleteModal.addEventListener('click', function(e) { if (e.target === deleteModal) closeModal(deleteModal); });
+
+document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') {
-    if (!modal.hidden) closeModal(modal);
-    else if (!deleteModal.hidden) closeModal(deleteModal);
+    var openEdits = gridEl.querySelector('.camera-edit-row');
+    if (openEdits) { closeAllEditForms(); return; }
+    if (!deleteModal.hidden) closeModal(deleteModal);
   }
 });
 
 // ─── Filter handlers ──────────────────────────────────────────────────────────
 
-filter.text?.addEventListener('input', () => renderGrid());
-filter.backend?.addEventListener('change', () => renderGrid());
-filter.reset?.addEventListener('click', () => {
-  setTimeout(() => renderGrid(), 0);
-});
-filter.form?.addEventListener('submit', (e) => e.preventDefault());
+filter.text?.addEventListener('input', function() { renderGrid(); });
+filter.backend?.addEventListener('change', function() { renderGrid(); });
+filter.reset?.addEventListener('click', function() { setTimeout(function() { renderGrid(); }, 0); });
+filter.form?.addEventListener('submit', function(e) { e.preventDefault(); });
 
-// Re-render when the user's date_format / time_format changes (no-op here,
-// but keeps the page consistent with the rest of the app).
 window.daygleDatePrefsChanged = function daygleDatePrefsChanged() { /* no-op */ };
 
 // ─── Load ─────────────────────────────────────────────────────────────────────
 
 async function loadCameras() {
-  // nav.js's daygleAuthReady IIFE has already populated window.daygleAuth.{user, csrfToken}.
   await window.daygleAuthReady;
-  const settings = await api('/api/settings/system');
+  var settings = await api('/api/settings/system');
   cameras = settings.cameras || (settings.camera ? [settings.camera] : []);
   updateStats();
   renderGrid();
@@ -529,26 +591,24 @@ async function loadCameras() {
 
 async function updateHealthStats() {
   try {
-    const data = await api('/api/cameras/health');
-    const s = data.summary;
+    var data = await api('/api/cameras/health');
+    var s = data.summary;
     if (stats.health) {
-      const online = s.online || 0;
-      const offline = s.offline || 0;
-      stats.health.textContent = `${online} / ${offline}`;
-      // Color the stat based on health
+      var online = s.online || 0;
+      var offline = s.offline || 0;
+      stats.health.textContent = online + ' / ' + offline;
       if (offline > 0) {
         stats.health.style.color = 'var(--danger-color, #e74c3c)';
       } else if (online > 0) {
         stats.health.style.color = 'var(--success-color, #2ecc71)';
       }
     }
-  } catch {
-    // silently ignore - health endpoint may not exist on older versions
+  } catch (e) {
+    // silently ignore
   }
 }
 
-loadCameras().catch((err) => {
-  // Skip UI updates if api() triggered a 401 redirect
+loadCameras().catch(function(err) {
   if (window.daygleAuth?.redirecting) return;
   setMessage(err.message, true);
 });

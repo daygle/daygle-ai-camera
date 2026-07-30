@@ -1743,6 +1743,36 @@ tr.drag-over {
 .cameras-table tbody tr:hover {
   background: rgba(71, 214, 255, 0.04);
 }
+.cameras-table tbody tr.camera-row-editing,
+.cameras-table tbody tr.camera-row-editing:hover {
+  background: rgba(71, 214, 255, 0.08);
+  border-color: var(--accent);
+}
+.camera-edit-row td {
+  background: var(--panel-strong);
+  padding: 0;
+  border-bottom: 2px solid var(--accent);
+}
+.camera-edit-panel {
+  padding: 14px 20px 18px;
+  border-left: 3px solid var(--accent);
+  margin: 0;
+}
+.camera-edit-panel .modal-tabs {
+  margin-bottom: 12px;
+}
+.camera-edit-panel .modal-body {
+  padding: 0;
+}
+.camera-edit-panel .modal-footer {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  background: none;
+}
+.camera-edit-panel .modal-footer button {
+  min-width: 120px;
+}
 .cameras-table .cell-drag {
   width: 32px;
   padding: 0 2px;
