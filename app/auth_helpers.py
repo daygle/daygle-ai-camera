@@ -43,9 +43,20 @@ def _get_cookie_domain() -> str | None:
 
 def auth_page(title: str, body: str) -> HTMLResponse:
     """Build an HTMLResponse for a standalone auth page (login / setup)."""
+    # Detect theme: honour an explicit localStorage choice first, then fall
+    # back to the browser/OS prefers-color-scheme so the login page matches
+    # the user's system theme on first visit.
+    theme_script = (
+        '<script>(function(){'
+        'var t=localStorage.getItem("daygle.theme");'
+        'if(t)document.documentElement.classList.add(t);'
+        'else if(window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches)'
+        'document.documentElement.classList.add("light");'
+        '})()</script>'
+    )
     return HTMLResponse(
         f'<!doctype html>\n'
-        f'<html lang="en"><head><meta charset="utf-8" />'
+        f'<html lang="en">{theme_script}<head><meta charset="utf-8" />'
         f'<meta name="viewport" content="width=device-width, initial-scale=1" />\n'
         f'<title>{escape(title)} · Daygle AI Camera</title>'
         f'<link rel="stylesheet" href="/static/styles.css" /></head>\n'
@@ -104,6 +115,6 @@ def set_session_cookie(
 
 
 def clear_auth_cookies(response: Response) -> None:
-    """Delete both the CSRF and session cookies from *response*."""
+    """Delete both the CSRF and session cookies on *response*."""
     response.delete_cookie(_session_cookie_name())
     response.delete_cookie(CSRF_COOKIE)
