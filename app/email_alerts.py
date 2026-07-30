@@ -91,11 +91,9 @@ class EmailAlertService:
         if not recipients or not self.configured():
             return
 
-        camera_name = str(camera_name or '').strip() or None
-        camera_id = str(camera_id or '').strip() or None
-        camera_bits = [bit for bit in (camera_name, camera_id) if bit]
-        camera_line = ' / '.join(camera_bits) if camera_bits else 'Unknown camera'
-        subject_suffix = f" ({camera_line})" if camera_bits else ""
+        camera_name = str(camera_name or '').strip() or 'Unknown camera'
+        camera_display = camera_name
+        subject_suffix = f" ({camera_display})"
 
         # Surface the full label set in the subject so a multi-object event
         # (e.g. cat + person in one clip) reads as "Cat, Person detected".
@@ -127,18 +125,48 @@ class EmailAlertService:
         )
         detected_at_display = str(detected_at).strip() if detected_at else None
 
+        # Parse zone name and label type from rule_name.
+        # Format: "CameraName / ZoneName / label" (object) or "Sound Rule Name" (sound).
+        rule_name = str(alert.get('rule_name') or '').strip()
+        zone_name = ''
+        label_type = 'Object'
+        rule_display = rule_name
+        if ' / ' in rule_name:
+            parts = rule_name.split(' / ')
+            if len(parts) >= 3:
+                zone_name = parts[1].strip()
+                label_raw = parts[-1].strip()
+                label_display = label_raw.title()
+                rule_display = f"Object - {label_display}"
+            elif len(parts) == 2:
+                zone_name = parts[1].strip()
+                rule_display = zone_name
+        else:
+            # Sound rule - detect from label value
+            label_val = str(alert.get('label') or '').strip()
+            label_lower = label_val.lower()
+            # Sound labels use snake_case (e.g. dog_bark) and contain underscores
+            if '_' in label_lower and not label_lower.startswith(('car', 'person', 'truck')):
+                label_type = 'Sound'
+                label_display = label_lower.replace('_', ' ').title()
+                rule_display = f"Sound - {label_display}"
+
+        # Title-case the alert message for cleaner display
+        raw_message = str(alert.get("message") or "Alert triggered.")
+        alert_message = raw_message.title()
         plain_lines = [
-            str(alert.get("message") or "Alert triggered."),
+            alert_message,
             "",
-            f"Camera: {camera_line}",
-            f"Rule: {alert.get('rule_name') or ''}",
+            f"Camera: {camera_display}",
         ]
+        if zone_name:
+            plain_lines.append(f"Zone: {zone_name}")
+        plain_lines.append(f"Rule: {rule_display}")
         if detected_at_display:
             plain_lines.append(f"Detected at: {detected_at_display}")
         if all_triggers_line:
             plain_lines.append(all_triggers_line)
         plain_lines.extend([
-            f"Trigger: {alert.get('label') or ''}",
             f"Confidence: {float(alert.get('confidence') or 0):.2%}",
             f"Event ID: {event_id}",
         ])
@@ -157,16 +185,20 @@ class EmailAlertService:
             f'<tr><td style="padding:4px 0;color:#888">Detected at</td><td style="padding:4px 0">{escape(detected_at_display)}</td></tr>'
             if detected_at_display else ''
         )
+        zone_row = (
+            f'<tr><td style="padding:4px 0;color:#888">Zone</td><td style="padding:4px 0">{escape(zone_name)}</td></tr>'
+            if zone_name else ''
+        )
         html_content = (
             '<!DOCTYPE html><html><body style="font-family:sans-serif;color:#333;max-width:600px;margin:0 auto;padding:16px">'
             f'<h2 style="margin-top:0">{escape(headline)}</h2>'
-            f'<p>{escape(str(alert.get("message") or "Alert triggered."))}</p>'
+            f'<p>{escape(alert_message)}</p>'
             '<table style="border-collapse:collapse;width:100%;margin:12px 0">'
-            f'<tr><td style="padding:4px 0;color:#888;width:120px">Camera</td><td style="padding:4px 0">{escape(camera_line)}</td></tr>'
-            f'<tr><td style="padding:4px 0;color:#888">Rule</td><td style="padding:4px 0">{escape(str(alert.get("rule_name") or ""))}</td></tr>'
+            f'<tr><td style="padding:4px 0;color:#888;width:120px">Camera</td><td style="padding:4px 0">{escape(camera_display)}</td></tr>'
+            f'{zone_row}'
+            f'<tr><td style="padding:4px 0;color:#888">Rule</td><td style="padding:4px 0">{escape(rule_display)}</td></tr>'
             f'{detected_at_row}'
             f'{all_triggers_row}'
-            f'<tr><td style="padding:4px 0;color:#888">Trigger</td><td style="padding:4px 0">{escape(str(alert.get("label") or ""))}</td></tr>'
             f'<tr><td style="padding:4px 0;color:#888">Confidence</td><td style="padding:4px 0">{float(alert.get("confidence") or 0):.2%}</td></tr>'
             f'<tr><td style="padding:4px 0;color:#888">Event ID</td><td style="padding:4px 0">{event_id}</td></tr>'
             f'</table>{img_tag}'
