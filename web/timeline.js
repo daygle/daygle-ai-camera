@@ -11,11 +11,10 @@ const els = {
   // call can fan out to both tracks without scattering element IDs
   // through this map. Segment clicks also stream through document-level
   // delegation so we don't keep a hand-bound listener per card.
-  // timelineLegend stays in els (returns null on the page since there's
-  // no #timelineLegend element any more) so tests/test_timeline_legend_js.test.js
-  // - which calls renderLegend() directly against an in-vm stub - can
-  // still write into the element it expects.
-  timelineLegend: document.getElementById('timelineLegend'),
+  // timelineLegend is intentionally NOT exposed here any more: after the
+  // two-card split the page dropped both the #timelineLegend element and
+  // the global renderLegend() call in favour of per-card renderCardKey()
+  // driven by the shared partitionRecordingsForKeys() helper.
   clipPlayer: document.getElementById('clipPlayer'),
   clipPlayerStatus: document.getElementById('clipPlayerStatus'),
   clipOverlay: document.getElementById('clipOverlay'),
@@ -73,8 +72,8 @@ renderTimelineTimeSelects();
 // attributes once at script load so renderTimelineForCard() can write into
 // one card without the other knowing about it.
 const TIMELINE_CARDS = [
-  { kind: 'object', root: null, hours: null, grid: null, rows: null, status: null, statusChip: null },
-  { kind: 'sound',  root: null, hours: null, grid: null, rows: null, status: null, statusChip: null },
+  { kind: 'object', root: null, hours: null, grid: null, rows: null, status: null, statusChip: null, key: null },
+  { kind: 'sound',  root: null, hours: null, grid: null, rows: null, status: null, statusChip: null, key: null },
 ];
 
 function initTimelineCards() {
@@ -87,6 +86,7 @@ function initTimelineCards() {
     card.rows = root.querySelector('[data-timeline-card-rows]');
     card.status = root.querySelector('[data-timeline-card-status]');
     card.statusChip = root.querySelector('[data-timeline-card-status-chip]');
+    card.key = root.querySelector('[data-timeline-card-key]');
   });
 }
 
@@ -377,18 +377,32 @@ function recordingTypeLabel(recording) {
 }
 
 function recordingColorKey(recording) {
-  if (isSoundRecording(recording)) return '__sound__';
-  // Motion-only clips get a single reserved color key so every segment,
-  // legend swatch and timeline-recording-item bar for motion uses the
-  // fixed teal accent instead of being hashed against the random
-  // SEGMENT_COLORS palette (which would generate one random color per
-  // distinct recording and split same-category clips across hues).
+  // Sound segments derive their colour from the actual sound class label
+  // (Dog Bark, Car Alarm, Siren, ...) rather than a single reserved token -
+  // this way the per-card Sound key and the day-track both show distinct
+  // hues per sound class instead of every sound clip flattening onto one
+  // purple. Falls back to the legacy reserved '__sound__' token (still
+  // rendered as purple by colorForKey) when the recording's metadata
+  // carries no class label - rare continuous-recording edge case.
+  if (isSoundRecording(recording)) {
+    const meta = recording.event?.metadata || {};
+    const label = String(meta.class_label || '').trim().toLowerCase();
+    return label || '__sound__';
+  }
+  // Motion-only clips keep the reserved teal accent regardless of palette
+  // hash - every motion segment + chip uses the same fixed hue so the
+  // motion chip in the per-card key instantly matches every motion
+  // segment on the track.
   if (isMotionOnlyRecording(recording)) return '__motion__';
-  // A recording whose primary label is a sound class (e.g. a Dog Bark clip
-  // that isn't sound-detection sourced) shares the reserved sound colour so
-  // its segment matches the purple sound chip the legend now renders for it.
+  // Object clips and sound-class carrying object recordings (e.g. an
+  // object source whose primary label is a sound class like Dog Bark)
+  // both return the lowercased label verbatim so colorForKey routes them
+  // through the SEGMENT_COLORS hash. The Dog-Bark-on-object-source
+  // refinement from the earlier regression still keeps the chip in the
+  // Sounds group via partitionRecordingsForKeys(); ONLY its colour key
+  // is per-class here.
   const typeLabel = recordingTypeLabel(recording).toLowerCase();
-  if (isSoundLabel(typeLabel)) return '__sound__';
+  if (isSoundLabel(typeLabel)) return typeLabel;
   return typeLabel;
 }
 
@@ -462,6 +476,42 @@ function colorForKey(key) {
     hash |= 0;
   }
   return SEGMENT_COLORS[Math.abs(hash) % SEGMENT_COLORS.length];
+}
+
+// Single source of truth for sound palette resolution - the day-track
+// segment writer (colorForRecording) and the per-card key chip writer
+// (partitionRecordingsForKeys) both go through this so any future
+// surface that wants the sound palette (recordings list, alerts
+// timeline, live overlay) only needs to remember one function and one
+// magic prefix. Salt the sound-class label with `snd:` so the hash
+// never collides with a same-root object label (e.g. detected "dog"
+// vs. sound "dog bark") - without the salt, both inputs would land
+// on the same SEGMENT_COLORS index and the two-family distinction
+// would visually disappear.
+function colorForSoundLabel(label) {
+  return colorForKey(`snd:${label}`);
+}
+
+// Segment + chip colour resolution for a single recording. Reserved
+// tokens ('__motion__', '__sound__') map to fixed palette anchors so
+// motion is always teal and the rare sound-without-class_label case
+// keeps the legacy purple; everything else hashes through colorForKey
+// with an `snd:` salt on sound-class labels so a detected "dog"
+// object clip and a "dog bark" sound-clip cannot hash to the same
+// SEGMENT_COLORS index just because their raw labels share a root
+// word. Used by renderTimelineForCard() (segment colour) and by
+// partitionRecordingsForKeys() (chip swatch colour) so a sound-class
+// key chip and its matching segment render in the same hue across
+// both surfaces.
+function colorForRecording(recording) {
+  const colorKey = recordingColorKey(recording);
+  if (colorKey === '__motion__' || colorKey === '__sound__') {
+    return colorForKey(colorKey);
+  }
+  if (isSoundRecording(recording) || isSoundLabel(colorKey)) {
+    return colorForSoundLabel(colorKey);
+  }
+  return colorForKey(colorKey);
 }
 
 function timelineParams(overrides = {}) {
@@ -636,95 +686,60 @@ function reportTimelineError(message) {
   });
 }
 
-function renderLegend(recordings) {
-  // The legend is a "what happened today" key, but it now splits into two
-  // side-by-side buckets that mirror the rest of the timeline surface: an
-  // Objects group (Motion + every distinct detected-object label) and a
-  // Sounds group (one chip per distinct sound class). Users can tell at a
-  // glance which kind of trigger dominated the day without parsing every
-  // chip, and the group titles line up with the same two-bucket vocabulary
-  // the stats grid (statTriggers "X/Y objects/sounds") and the Filter
-  // dropdown's "Sound" / "Object" options already speak. A multi-object
-  // recording still contributes a chip for every object it saw (e.g.
-  // Person AND Dog), and every sound class still gets its own chip
-  // rather than collapsing into one.
+// Single source of truth for the timeline colour-key partition. Both the
+// - now-test-only - global renderLegend() and the per-card renderCardKey()
+// consume the same { objectChips, soundChips } data so any future regression
+// fix (Dog Bark duplicates, motion vs object, sound-class labels on
+// object recordings) lands in one place. Each chip carries
+// { label, color, icon } so both renderers (grouped eyebrow + flat
+// strip) consume the same shape without re-deriving the icon from a tag.
+function partitionRecordingsForKeys(recordings) {
   const objectChips = [];
   const soundChips = [];
   const seen = new Set();
-  const addChip = (group, dedupKey, label, color, kind) => {
+  const add = (group, dedupKey, chip) => {
     if (seen.has(dedupKey)) return;
     seen.add(dedupKey);
-    group.push({ label, color, kind });
+    group.push(chip);
   };
   recordings.forEach((recording) => {
     if (isMotionOnlyRecording(recording)) {
-      addChip(objectChips, '__motion__', 'Motion', colorForKey('__motion__'), 'motion');
+      add(objectChips, '__motion__', { label: 'Motion', color: colorForKey('__motion__'), icon: DETECTION_MOTION_ICON });
       return;
     }
     const isSound = isSoundRecording(recording);
     // recordingDetectionSummary returns one entry per unique label already
     // (the sound class for sounds; every detected object for object clips),
-    // with generic trigger words filtered out. Fall back to the type label for
-    // the rare label-less clip (e.g. a continuous recording).
+    // with generic trigger words filtered out. Fall back to the type label
+    // for the rare label-less clip (e.g. a continuous recording).
     const summary = recordingDetectionSummary(recording);
     const labels = summary.length ? summary.map((entry) => entry.label) : [recordingTypeLabel(recording)];
     labels.forEach((rawLabel) => {
       const label = String(rawLabel || '').toLowerCase();
       if (!label) return;
-      // Classify each label independently: a sound-class label (e.g. Dog Bark,
-      // Car Alarm) is always a sound chip even when it rides on an object
-      // recording, matching detectionPill()'s per-label icon rule. Keying the
-      // whole chip off isSoundRecording() alone let a sound label leak in as a
-      // second "object" chip - the recurring Dog Bark legend duplicate.
+      // Classify each label independently: a sound-class label (e.g. Dog
+      // Bark, Car Alarm) is always a sound chip even when it rides on an
+      // object recording, matching detectionPill()'s per-label icon rule.
+      // Keying the whole chip off isSoundRecording() alone let a sound
+      // label leak in as a second "object" chip - the recurring Dog Bark
+      // legend duplicate.
       if (isSound || isSoundLabel(label)) {
-        addChip(soundChips, `__sound__:${label}`, label, colorForKey('__sound__'), 'sound');
+        // Per-class colour key: Dog Bark, Car Alarm, Siren each get
+        // their own hash-derived swatch colour instead of all sharing a
+        // single reserved purple, so a user scanning the sounds day track
+        // sees distinct hues per class. The `snd:` salt mirrors the
+        // segment-rendering helper colorForRecording() so a sound chip
+        // and its matching day-track segment render in the same hue -
+        // and so 'dog' (object) and 'dog bark' (sound) hash to different
+        // SEGMENT_COLORS index even though their raw labels share a root
+        // word.
+        add(soundChips, `__sound__:${label}`, { label: titleCase(label), color: colorForSoundLabel(label), icon: '🔊' });
       } else {
-        addChip(objectChips, label, label, colorForKey(label), 'object');
+        add(objectChips, label, { label: titleCase(label), color: colorForKey(label), icon: DETECTION_EYE_ICON });
       }
     });
   });
-  if (!objectChips.length && !soundChips.length) {
-    els.timelineLegend.innerHTML = '<p class="muted">No recordings match this filter for the selected day.</p>';
-    return;
-  }
-  const renderChip = (item) => {
-    // Reserve the dedicated icons so the legend reads the same as the
-    // row + pill treatments on the other surfaces: speaker for sound,
-    // running man for motion, eye for everything else.
-    const labelText = item.kind === 'motion' ? 'Motion' : titleCase(item.label);
-    const icon = item.kind === 'sound' ? '🔊' : item.kind === 'motion' ? DETECTION_MOTION_ICON : DETECTION_EYE_ICON;
-    return `
-      <span class="timeline-legend-chip">
-        <span class="timeline-legend-swatch" style="background:${item.color}"></span>
-        ${icon} <span>${escapeHtml(labelText)}</span>
-      </span>
-    `;
-  };
-  // Render each non-empty group with its own small uppercase title. The
-  // Objects eyebrow uses the motion icon when a motion chip is present
-  // (otherwise the eye icon) so the section header matches the most
-  // recognisable child icon for that day; the Sounds eyebrow keeps the
-  // speaker icon since every Sound chip already uses it. Each group gets a
-  // role + aria-label so screen readers announce the two-bucket split the
-  // sighted UI shows, plus a small numeric badge next to the title that
-  // mirrors the "X/Y" count on the stats grid's Triggers card. Empty
-  // groups are skipped wholesale (avoids dangling headers when a day is
-  // all motion or all sound).
-  const objectEyebrowIcon = objectChips.some((chip) => chip.kind === 'motion') ? DETECTION_MOTION_ICON : DETECTION_EYE_ICON;
-  const renderGroup = (title, icon, items, ariaLabel) => items.length
-    ? `<div class="timeline-legend-group" role="group" aria-label="${escapeHtml(ariaLabel)}">
-        <div class="timeline-legend-group-title">
-          ${icon}
-          <span class="timeline-legend-group-name">${escapeHtml(title)}</span>
-          <span class="timeline-legend-group-count" aria-hidden="true">${items.length}</span>
-        </div>
-        <div class="timeline-legend-chips">${items.map(renderChip).join('')}</div>
-      </div>`
-    : '';
-  els.timelineLegend.innerHTML = [
-    renderGroup('Objects', objectEyebrowIcon, objectChips, 'Objects legend'),
-    renderGroup('Sounds', '🔊', soundChips, 'Sounds legend'),
-  ].join('');
+  return { objectChips, soundChips };
 }
 
 function buildTimelineLayout(recordings, preEventSeconds = 0) {
@@ -743,7 +758,46 @@ function buildTimelineLayout(recordings, preEventSeconds = 0) {
   });
 }
 
+// Per-card "what exactly is on this track" key. Each card only carries
+// recordings of one kind, so the key is a flat row of chips for the
+// distinct categories that landed here today. The actual partitioning
+// + dedup + icon selection lives in partitionRecordingsForKeys() so
+// the per-card render and the (test-only) global renderLegend() agree
+// on Dog Bark / motion / sound-class classification - and a future
+// regression fix lands in one place rather than two parallel copies.
+function renderCardKey(card, cardRecordings) {
+  if (!card.key) return;
+  // card.key is a stable landmark - initTimelineCards() binds it once at
+  // load and subsequent renders only swap the chips inside via
+  // innerHTML reassignment. The aria-hidden attribute therefore
+  // persists across renders, so this function must flip it on every
+  // pass (not just the first) to keep a populated card unhidden after a
+  // brief filter-driven empty state.
+  const { objectChips, soundChips } = partitionRecordingsForKeys(cardRecordings);
+  const chips = card.kind === 'object' ? objectChips : soundChips;
+  if (!chips.length) {
+    // Empty in-card key: clear chips AND mark the landmark aria-hidden so
+    // screen readers don't announce "Objects colour key" on a filter that
+    // already explains itself via the empty-state blurb below.
+    card.key.innerHTML = '';
+    card.key.setAttribute('aria-hidden', 'true');
+    return;
+  }
+  card.key.removeAttribute('aria-hidden');
+  card.key.innerHTML = chips.map((chip) => `
+    <span class="timeline-legend-chip">
+      <span class="timeline-legend-swatch" style="background:${chip.color}"></span>
+      ${chip.icon} <span>${escapeHtml(chip.label)}</span>
+    </span>
+  `).join('');
+}
+
 function renderTimelineForCard(card, viewPayload, cardRecordings, totalRecordingCount) {
+  // Refresh the per-card colour key before drawing the track so the chips
+  // stay in sync with whatever subset of recordings the card is about to
+  // render. Always runs (even on empty cards) so the key never lingers
+  // out of date when a filter change wipes a kind.
+  renderCardKey(card, cardRecordings);
   const { fromSeconds, toSeconds, totalSeconds, tickIntervalSeconds } = getTimeRangeConfig();
 
   // Clip this card's recordings to the visible [fromSeconds, toSeconds]
@@ -849,7 +903,12 @@ function renderTimelineForCard(card, viewPayload, cardRecordings, totalRecording
     const duration = Math.max(1, Number(recording.timeline_duration_seconds || 1));
     const left = (visStart / totalSeconds) * 100;
     const width = Math.max((duration / totalSeconds) * 100, 0.1);
-    const color = colorForKey(recordingColorKey(recording));
+    // Resolve segment colour through colorForRecording() so a sound
+    // segment and its per-card key chip land on the same hash-derived
+    // hue (snd:label salt vs. plain label for objects), with reserved
+    // tokens kept as fixed palette anchors for motion and the rare
+    // sound-without-class_label fallback.
+    const color = colorForRecording(recording);
     const activeClass = Number(recording.id) === Number(state.activeRecordingId) ? ' active' : '';
     const tinyClass = width < 0.25 ? ' tiny' : '';
     return `

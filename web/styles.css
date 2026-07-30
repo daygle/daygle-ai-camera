@@ -2331,20 +2331,14 @@ tr.drag-over {
 
 /* ─── Timeline & video modal ─────────────────────────────────────────────── */
 .timeline-cards-layout {
-  /* Two parallel tracks - Objects left, Sounds right - so users can read
-     them at a glance, scan the same hour scale across both, and only the
-     card relevant to their filter stays focused. The single timeline that
-     used to live here was replaced because mixing every category on one
-     track forced colour-coding to do the work of a layout divider. */
+  /* Stacked one-per-row layout - each card spans the full page width so
+     the per-kind hour scale doesn't have to share horizontal real estate
+     with the other kind. Both cards still share the Camera / Day /
+     Filter / From / To controls above so they stay aligned even though
+     they're rendered sequentially. */
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
-}
-@media (max-width: 900px) {
-  /* Tablets / phones: stack the two cards so each track gets its own
-     960px-wide scroll viewport, matching how the rest of the page
-     collapses single-column layouts at this breakpoint. */
-  .timeline-cards-layout { grid-template-columns: minmax(0, 1fr); }
 }
 .timeline-card {
   display: grid;
@@ -2441,6 +2435,16 @@ tr.drag-over {
   flex-wrap: wrap;
   gap: 10px;
   min-height: 24px;
+}
+.timeline-card-key {
+  /* In-card copy of the colour key sits tighter than the old global
+     legend: 24px row minimum on .timeline-legend was meant to hold a
+     full-width eyebrow, but inside a card it's compact and shouldn't
+     claim vertical room when empty. Slightly tighter gap so the chips
+     read as a single strip rather than two grouped rows. */
+  gap: 6px 10px;
+  min-height: 0;
+  margin: 0;
 }
 .timeline-legend-chip {
   display: inline-flex;
