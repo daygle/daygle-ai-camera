@@ -1,0 +1,57 @@
+# Dependabot configuration for daygle-ai-camera.
+#
+# Keeps `requirements.txt` and `.github/workflows/*.yml` up to date with a
+# weekly scan. Tight version ranges in requirements.txt (e.g. ultralytics
+# exact-pinned, opencv-python-headless capped at <6.0) are respected by the
+# default "increase" versioning strategy, so Dependabot will only propose
+# updates that already fall inside those ranges -- anything outside them
+# (e.g. an ultralytics 8.x.y bump) stays a manual change.
+
+version: 2
+
+updates:
+  # --- Python runtime dependencies ----------------------------------------
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      # Monday is the common Dependabot default; staggered from github-actions
+      # to avoid two waves landing in the inbox at the same time.
+      day: "monday"
+    # ~12 direct deps at weekly cadence -- 5 keeps the review queue
+    # manageable when several ranges open up at once.
+    open-pull-requests-limit: 5
+    rebase-strategy: "auto"
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "deps(pip)"
+      include: "scope"
+    # Exact-pinned entries (ultralytics==8.4.107, etc.) are deliberately
+    # left for manual review per the supply-chain notes in requirements.txt
+    # -- no ignore rules needed; the pin already prevents Dependabot from
+    # touching them. Tight ranges such as bcrypt>=4.0,<6.0 likewise let
+    # Dependabot propose only safe interim bumps.
+
+  # --- GitHub Actions ------------------------------------------------------
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      # Tuesday keeps action bumps a day away from pip bumps.
+      day: "tuesday"
+    open-pull-requests-limit: 3
+    rebase-strategy: "auto"
+    groups:
+      # Collapse all action updates into a single PR per week so reviewers
+      # see one coherent CI refactor instead of three nearly-identical PRs.
+      github-actions:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "deps(ci)"
+      include: "scope"
