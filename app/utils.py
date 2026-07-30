@@ -71,18 +71,23 @@ def _non_empty_setting(settings: dict[str, Any], key: str) -> str:
     return str(settings.get(key) or '').strip()
 
 
+def _inject_credentials(url: str, settings: dict[str, Any]) -> str:
+    """Inject username/password credentials into an RTSP URL if present."""
+    username = _non_empty_setting(settings, 'username')
+    password = _non_empty_setting(settings, 'password')
+    parsed = urlsplit(url)
+    if username and parsed.scheme in {'rtsp', 'rtsps'} and parsed.netloc and ('@' not in parsed.netloc):
+        credentials = quote(username, safe='')
+        if password:
+            credentials += f":{quote(password, safe='')}"
+        return urlunsplit((parsed.scheme, f'{credentials}@{parsed.netloc}', parsed.path, parsed.query, parsed.fragment))
+    return url
+
+
 def build_stream_url(settings: dict[str, Any]) -> str:
     stream_url = _non_empty_setting(settings, 'stream_url')
     if stream_url:
-        username = _non_empty_setting(settings, 'username')
-        password = _non_empty_setting(settings, 'password')
-        parsed = urlsplit(stream_url)
-        if username and parsed.scheme in {'rtsp', 'rtsps'} and parsed.netloc and ('@' not in parsed.netloc):
-            credentials = quote(username, safe='')
-            if password:
-                credentials += f":{quote(password, safe='')}"
-            return urlunsplit((parsed.scheme, f'{credentials}@{parsed.netloc}', parsed.path, parsed.query, parsed.fragment))
-        return stream_url
+        return _inject_credentials(stream_url, settings)
     host = _non_empty_setting(settings, 'host')
     if not host:
         return ''
@@ -102,6 +107,19 @@ def build_stream_url(settings: dict[str, Any]) -> str:
         credentials += '@'
     return f'rtsp://{credentials}{host}:{port}/{path}'
 
+
+def build_recording_stream_url(settings: dict[str, Any]) -> str:
+    """Return the high-res recording stream URL, or empty string if not configured.
+
+    When a camera exposes dual streams (sub-stream for detection/live view,
+    main stream for recording), this returns the main-stream URL. Falls back
+    to empty string so callers can check truthiness to decide whether to use
+    the primary stream for recording.
+    """
+    recording_url = _non_empty_setting(settings, 'recording_stream_url')
+    if recording_url:
+        return _inject_credentials(recording_url, settings)
+    return ''
 
 def camera_default_name(settings: dict[str, Any], fallback: str = 'Primary Camera') -> str:
     return str(settings.get('name') or settings.get('device') or fallback).strip() or fallback

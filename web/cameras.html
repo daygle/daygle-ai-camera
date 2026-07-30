@@ -185,8 +185,9 @@
                 <option value="true">Enabled</option>
               </select>
             </label>
+            <label class="full-width"><span>Recording Stream URL <span class="info-tip" data-tip="Optional high-res stream URL for event clips. Leave empty to use the primary stream. Cameras with dual-stream support can use the sub-stream for detection (fast) and the main stream for recording (high quality)." title="Optional high-res stream URL for event clips. Leave empty to use the primary stream. Cameras with dual-stream support can use the sub-stream for detection (fast) and the main stream for recording (high quality)." tabindex="0" aria-label="Help: Optional high-res stream URL for event clips. Leave empty to use the primary stream."></span></span><input id="editRecordingStreamUrl" name="recording_stream_url" placeholder="rtsp://user:pass@192.168.1.100:554/stream2" /></label>
           </div>
-          <p class="form-help muted">When enabled, the camera writes an uninterrupted stream regardless of events. Otherwise, clips are recorded per detection rule (configured on the Zones page per object).</p>
+          <p class="form-help muted">When enabled, the camera writes an uninterrupted stream regardless of events. Otherwise, clips are recorded per detection rule (configured on the Zones page per object). The Recording Stream URL is optional - if set, event clips are recorded from this high-res stream instead of the primary detection stream.</p>
         </div>
 
         <!-- PTZ Tab -->

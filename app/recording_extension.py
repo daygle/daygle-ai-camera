@@ -529,11 +529,14 @@ def attach_event_recording(
     recording_config: dict[str, Any] | None = None,
 ) -> int | None:
     from app.backup import purge_recordings_by_policy
-    from app.utils import build_stream_url
+    from app.utils import build_stream_url, build_recording_stream_url
     from app.config_facades import get_camera_config
     stream_url = ''
+    recording_stream_url = ''
     if source == 'rtsp' and camera_id:
-        stream_url = build_stream_url(get_camera_config(camera_id))
+        cam_config = get_camera_config(camera_id)
+        recording_stream_url = build_recording_stream_url(cam_config)
+        stream_url = recording_stream_url or build_stream_url(cam_config)
         extended_recording_id = extend_active_rtsp_recording(
             camera_id=camera_id, event_time=event_time,
             recording_config=recording_config, detections=detections,
