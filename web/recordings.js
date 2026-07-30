@@ -552,7 +552,7 @@ function drawClipOverlay(vfcMediaTime) {
 
 // ── Clip segment timeline ───────────────────────────────────────────────────
 // A compact bar under the player that shows the clip's pre-roll, the event span,
-// and the post-motion tail — the recording settings "in action" on real footage.
+// and the post-motion tail  -  the recording settings "in action" on real footage.
 // Boundaries come from the detection track (real detection times), not the
 // configured pre/post values, so the bar reflects what this clip actually
 // captured (including a truncated pre-roll).

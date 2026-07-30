@@ -227,7 +227,7 @@ function renderModelList(models) {
     if (!isInstalled) {
       actionsHtml = `
         <div class="model-download-row">
-          <select class="model-res-select" data-model-id="${escapeHtml(m.id)}" title="Model export resolution — this determines the input size the model accepts. Higher = more accurate on small objects, slower inference.">
+          <select class="model-res-select" data-model-id="${escapeHtml(m.id)}" title="Model export resolution  -  this determines the input size the model accepts. Higher = more accurate on small objects, slower inference.">
             <option value="320">320 (Fast)</option>
             <option value="416">416</option>
             <option value="480">480</option>
@@ -328,7 +328,7 @@ function renderModelList(models) {
         } else {
           renderAi(result.status || result);
         }
-        // Show success inside the model card (no toast — feedback is local)
+        // Show success inside the model card (no toast  -  feedback is local)
         const successMessages = {
           download: `${modelId} installed successfully.`,
           use: `Switched to ${modelId}.`,

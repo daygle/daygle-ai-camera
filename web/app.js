@@ -340,20 +340,20 @@ async function loadStats() {
 // the "GB" label here is binary by design - name and unit label now agree.
 function formatGB(bytes) {
   const gb = Number(bytes) / (1024 ** 3);
-  if (!Number.isFinite(gb)) return '—';
+  if (!Number.isFinite(gb)) return '-';
   return `${gb.toFixed(gb >= 10 ? 0 : 1)} GB`;
 }
 
 function renderSystemResources(res) {
   const cpu = res?.cpu_percent;
-  if (els.cpuValue) els.cpuValue.textContent = Number.isFinite(cpu) ? `${cpu}%` : '—';
+  if (els.cpuValue) els.cpuValue.textContent = Number.isFinite(cpu) ? `${cpu}%` : ' - ';
   if (els.cpuSub) {
     const cores = res?.cpu_count;
     els.cpuSub.textContent = Number.isFinite(cores) ? `${cores} core${cores === 1 ? '' : 's'}` : 'Processor usage';
   }
 
   const load = res?.load_average;
-  if (els.loadValue) els.loadValue.textContent = Array.isArray(load) && load.length ? load[0].toFixed(2) : '—';
+  if (els.loadValue) els.loadValue.textContent = Array.isArray(load) && load.length ? load[0].toFixed(2) : ' - ';
   if (els.loadSub) {
     els.loadSub.textContent = Array.isArray(load) && load.length === 3
       ? `${load[0].toFixed(2)} / ${load[1].toFixed(2)} / ${load[2].toFixed(2)} · 1/5/15 min`
@@ -362,7 +362,7 @@ function renderSystemResources(res) {
 
   const mem = res?.memory;
   const pct = mem?.percent;
-  if (els.ramValue) els.ramValue.textContent = Number.isFinite(pct) ? `${pct}%` : '—';
+  if (els.ramValue) els.ramValue.textContent = Number.isFinite(pct) ? `${pct}%` : ' - ';
   if (els.ramSub) {
     els.ramSub.textContent = mem && Number.isFinite(mem.used) && Number.isFinite(mem.total)
       ? `${formatGB(mem.used)} / ${formatGB(mem.total)} used`

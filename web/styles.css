@@ -2573,7 +2573,7 @@ tr.drag-over {
 }
 /* The clickable recording link is still used by the playback detail panel
    (the "#123 ↗" link that opens the full recording). The standalone
-   timeline recording list below the chart was removed — clips are opened
+   timeline recording list below the chart was removed  -  clips are opened
    by clicking a coloured segment in the timeline track itself. */
 .timeline-recording-link {
   color: var(--accent, #47d6ff);
@@ -5117,7 +5117,7 @@ button.secondary:disabled, a.secondary:disabled {
     box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
   }
 
-  /* Secondary / panel buttons — lift + accent border instead of brightness */
+  /* Secondary / panel buttons  -  lift + accent border instead of brightness */
   button.secondary:hover:not(:disabled),
   a.secondary:hover,
   a.button-link.secondary-link:hover {
