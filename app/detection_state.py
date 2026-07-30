@@ -132,8 +132,8 @@ def detection_label_set(detections: list[dict[str, Any]]) -> set[str]:
     return {str(detection.get('label') or '').strip().lower() for detection in detections if str(detection.get('label') or '').strip()}
 
 
-def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | None=None, gate_fraction: float | None=None, scale_fraction: float | None=None, background_alpha: float | None=None) -> tuple[bool, float, Any, float]:
-    """Adaptive-background motion gate. Returns (has_motion, confidence 0-1, diff_mask, intensity 0-1).
+def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | None=None, gate_fraction: float | None=None, scale_fraction: float | None=None, background_alpha: float | None=None) -> tuple[bool, float, Any]:
+    """Adaptive-background motion gate. Returns (has_motion, confidence 0-1, diff_mask).
 
     ``image`` may be a BGR numpy array (from ``read_frame``) or JPEG bytes
     (legacy callers).  When a numpy array is provided the PIL decode is
@@ -157,15 +157,13 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
     ``app.main``. The ``None`` default is deliberate, matching
     :mod:`app.zone_detection`'s ``zone_motion_detections`` signature.
 
-    Returns ``(has_motion, frame_confidence, diff_mask, frame_intensity)`` where
+    Returns ``(has_motion, frame_confidence, diff_mask)`` where
     ``diff_mask`` is a boolean (H×W) numpy array indicating which thumbnail
     pixels changed by more than ``pixel_threshold``.  Callers can slice
     ``diff_mask`` to compute per-zone confidence scores instead of using the
     frame-wide value.  ``diff_mask`` is ``None`` on the first frame or when an
     error occurs.  ``frame_confidence`` is gated to ``0.0`` below
-    ``gate_fraction`` (so alert logic ignores noise), while ``frame_intensity``
-    is the same 0-1 scaled value WITHOUT the gate, so callers can still observe
-    sub-gate ambient activity.
+    ``gate_fraction`` (so alert logic ignores noise).
     """
     if pixel_threshold is None:
         pixel_threshold = _state._MOTION_PIXEL_THRESHOLD
@@ -199,7 +197,7 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
             if background is None or background.shape != current.shape:
                 _state._frame_motion_prev[camera_id] = current
                 _state._frame_motion_error_cameras.discard(camera_id)
-                return (False, 0.0, None, 0.0)
+                return (False, 0.0, None)
             diff_mask = np.abs(current - background) > pixel_threshold
             changed_fraction = float(np.mean(diff_mask))
             # Only adapt the background when no motion is detected. Freezing the
@@ -209,23 +207,21 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
                 updated_bg = (1.0 - background_alpha) * background + background_alpha * current
                 _state._frame_motion_prev[camera_id] = updated_bg
             _state._frame_motion_error_cameras.discard(camera_id)
-        # Raw frame-motion intensity, scaled the same way as the gated
-        # confidence but WITHOUT applying the alert gate, so callers can still
-        # observe sub-gate ambient activity; alert decisions keep using the
-        # gated confidence / per-zone diff_mask below.
-        intensity = round(min(1.0, changed_fraction / max(scale_fraction, 1e-9)), 3)
+        # Scaled 0-1 motion value. When the change is below the alert gate the
+        # returned confidence is forced to 0.0; otherwise it equals this value.
+        confidence = round(min(1.0, changed_fraction / max(scale_fraction, 1e-9)), 3)
         if changed_fraction < gate_fraction:
-            return (False, 0.0, diff_mask, intensity)
-        return (True, intensity, diff_mask, intensity)
+            return (False, 0.0, diff_mask)
+        return (True, confidence, diff_mask)
     except _EXPECTED_MOTION_ERRORS as exc:
         with _state._frame_motion_lock:
             if camera_id not in _state._frame_motion_error_cameras:
                 logger.warning('Motion gate unavailable for camera %s: %s; failing open', camera_id, exc)
                 _state._frame_motion_error_cameras.add(camera_id)
-        return (True, 0.4, None, 0.4)
+        return (True, 0.4, None)
     except Exception as exc:
         with _state._frame_motion_lock:
             if camera_id not in _state._frame_motion_error_cameras:
                 logger.exception('Unexpected motion gate failure for camera %s; failing open', camera_id)
                 _state._frame_motion_error_cameras.add(camera_id)
-        return (True, 0.4, None, 0.4)
+        return (True, 0.4, None)

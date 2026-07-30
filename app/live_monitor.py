@@ -310,7 +310,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     if periodic_scan_interval > 0 and now - _state._periodic_scan_last_ts.get(camera_id, 0) >= periodic_scan_interval:
         force_scan = True
         _state._periodic_scan_last_ts[camera_id] = now
-    frame_has_motion, frame_motion_confidence, diff_mask, _ = detect_frame_motion(camera_id, image, pixel_threshold=_pixel_threshold, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, background_alpha=_background_alpha)
+    frame_has_motion, frame_motion_confidence, diff_mask = detect_frame_motion(camera_id, image, pixel_threshold=_pixel_threshold, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, background_alpha=_background_alpha)
     if not frame_has_motion and (not force_scan):
         update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[])
         return None
