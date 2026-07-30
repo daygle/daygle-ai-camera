@@ -1,6 +1,4 @@
 """Email Alert Settings APIRouter.
-
-Direct imports replace the ``import app.main as main`` hybrid pattern.
 """
 
 from __future__ import annotations

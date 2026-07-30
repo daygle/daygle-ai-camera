@@ -1,8 +1,7 @@
 """Web-page APIRouter.
 
 Page-render routes for the Daygle AI Camera UI. All state is accessed via
-Depends() providers in ``app.deps`` rather than the hybrid
-``import app.main as main`` pattern.
+Depends() providers in ``app.deps``.
 
 Routes:
 - GET  /              -- root

@@ -1,7 +1,6 @@
 """Authentication-flow APIRouter.
 
-Handles auth state transitions (login, setup, logout). Direct imports replace
-the ``import app.main as main`` hybrid pattern.
+Handles auth state transitions (login, setup, logout).
 
 Routes:
 - POST /login      -- login
