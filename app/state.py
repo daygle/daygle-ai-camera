@@ -12,7 +12,6 @@ Rules:
 """
 from __future__ import annotations
 
-import collections
 import secrets
 import threading
 import time
@@ -110,22 +109,6 @@ _periodic_scan_last_ts: dict = {}
 _frame_motion_lock: threading.Lock = threading.Lock()
 _frame_motion_prev: dict = {}
 _frame_motion_error_cameras: set = set()
-
-# ---------------------------------------------------------------------------
-# Live motion-intensity history (frames per camera, capped ring buffer)
-# ---------------------------------------------------------------------------
-# Per-camera ring buffer of (timestamp_seconds, motion_confidence) tuples.
-# Appended from app.live_monitor.process_live_stream_alerts at the monitor's
-# native cadence (~4Hz default) and exposed via
-# GET /api/live/motion-history so the /live page can render a motion sparkline
-# without re-deriving the per-frame signal on the client. Cap is generous
-# (60s @ 6Hz with headroom) so a transient monitor hiccup or stalling camera
-# doesn't truncate the visible window.
-MOTION_HISTORY_CAP: int = 360
-_motion_history: collections.defaultdict = collections.defaultdict(
-    lambda: collections.deque(maxlen=MOTION_HISTORY_CAP)
-)
-_motion_history_lock: threading.Lock = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # Active RTSP recordings

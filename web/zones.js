@@ -221,7 +221,7 @@ function renderObjectRules(zone, zoneIndex) {
           <td><input type="number" data-zone-rule-confidence="${key}" value="${escapeHtml(rule.min_confidence)}" min="0" max="1" step="0.05" /></td>
           <td><input type="number" data-zone-rule-cooldown="${key}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" /></td>
           <td><div class="cell-actions">
-            <button class="rule-expand-btn secondary" type="button" data-expand-zone-rule="${key}" title="Time windows &amp; email">${expanded ? ICONS.chevronUp : ICONS.email}</button>
+            <button class="rule-expand-btn secondary" type="button" data-expand-zone-rule="${key}">${expanded ? ICONS.chevronUp : ICONS.email}</button>
             <button class="delete-btn secondary zone-action-btn" type="button" data-delete-zone-rule="${key}">${ICONS.remove}</button>
           </div></td>
         </tr>

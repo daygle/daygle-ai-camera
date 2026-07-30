@@ -237,7 +237,7 @@ class TestM1HandlerLevelGates:
 
     def test_live_router_handlers_have_handler_level_user_gate(self):
         import app.api.live_router as lr
-        for fn_name in ('live_detection_status_api', 'live_motion_history', 'live_snapshot'):
+        for fn_name in ('live_detection_status_api', 'live_snapshot'):
             fn = getattr(lr, fn_name)
             src = inspect.getsource(fn)
             assert 'Request' in src or 'request' in src, (

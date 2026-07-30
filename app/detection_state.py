@@ -164,8 +164,8 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
     frame-wide value.  ``diff_mask`` is ``None`` on the first frame or when an
     error occurs.  ``frame_confidence`` is gated to ``0.0`` below
     ``gate_fraction`` (so alert logic ignores noise), while ``frame_intensity``
-    is the same 0-1 scaled value WITHOUT the gate, so a motion-history
-    visualisation can still reflect sub-gate ambient activity.
+    is the same 0-1 scaled value WITHOUT the gate, so callers can still observe
+    sub-gate ambient activity.
     """
     if pixel_threshold is None:
         pixel_threshold = _state._MOTION_PIXEL_THRESHOLD
@@ -210,10 +210,9 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
                 _state._frame_motion_prev[camera_id] = updated_bg
             _state._frame_motion_error_cameras.discard(camera_id)
         # Raw frame-motion intensity, scaled the same way as the gated
-        # confidence but WITHOUT applying the alert gate. The /live "Live
-        # motion" sparkline records this so ambient, sub-gate activity still
-        # animates the chart instead of flatlining at zero; alert decisions
-        # keep using the gated confidence / per-zone diff_mask below.
+        # confidence but WITHOUT applying the alert gate, so callers can still
+        # observe sub-gate ambient activity; alert decisions keep using the
+        # gated confidence / per-zone diff_mask below.
         intensity = round(min(1.0, changed_fraction / max(scale_fraction, 1e-9)), 3)
         if changed_fraction < gate_fraction:
             return (False, 0.0, diff_mask, intensity)

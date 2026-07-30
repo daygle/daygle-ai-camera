@@ -310,25 +310,13 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     if periodic_scan_interval > 0 and now - _state._periodic_scan_last_ts.get(camera_id, 0) >= periodic_scan_interval:
         force_scan = True
         _state._periodic_scan_last_ts[camera_id] = now
-    frame_has_motion, frame_motion_confidence, diff_mask, frame_motion_intensity = detect_frame_motion(camera_id, image, pixel_threshold=_pixel_threshold, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, background_alpha=_background_alpha)
+    frame_has_motion, frame_motion_confidence, diff_mask, _ = detect_frame_motion(camera_id, image, pixel_threshold=_pixel_threshold, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, background_alpha=_background_alpha)
     if not frame_has_motion and (not force_scan):
-        # Append the raw (ungated) intensity BEFORE returning so the /live
-        # motion sparkline reflects sub-gate ambient activity instead of a
-        # flat line of zeros - the alert path still skipped inference because
-        # frame_has_motion is False.
-        with _state._motion_history_lock:
-            _state._motion_history[camera_id].append((now, float(frame_motion_intensity)))
         update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[])
         return None
     if not frame_has_motion:
         frame_motion_confidence = 0.0
         diff_mask = None
-    # Mirror the raw frame-motion intensity into the per-camera ring buffer so
-    # /api/live/motion-history can return a smooth 4Hz sparkline that reflects
-    # actual frame motion (not just above-alert-gate motion) without polluting
-    # /api/live/detection-status's polling cadence.
-    with _state._motion_history_lock:
-        _state._motion_history[camera_id].append((now, float(frame_motion_intensity)))
     min_conf = compute_minimum_rule_confidence()
     try:
         if frame_is_numpy and hasattr(_state.detector, 'detect_frame'):

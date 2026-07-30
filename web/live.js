@@ -33,12 +33,6 @@ const liveEls = {
   addZoneBtn: document.getElementById('addZoneBtn'),
   fullFrameZoneBtn: document.getElementById('fullFrameZoneBtn'),
   saveZonesBtn: document.getElementById('saveZonesBtn'),
-  // Live motion chart strip (added in the Live Motion section).
-  motionSubtitle: document.getElementById('liveMotionSubtitle'),
-  motionStrip: document.getElementById('liveMotionStrip'),
-  motionEmpty: document.getElementById('liveMotionEmpty'),
-  // Full-frame motion tint overlay (rendered on motion-only frames).
-  motionTint: document.getElementById('liveMotionTint'),
 };
 
 // View mode: 'single' (one camera at a time) or 'all' (grid of every camera).
@@ -89,196 +83,6 @@ const LIVE_AI_TRACK_MAX_LEAD_MS = 1500;
 // window is a few monitor cycles wide; an empty cycle clears boxes sooner.
 const LIVE_AI_TRACK_STALE_MS = 3000;
 
-// ─── Live motion chart strip ──────────────────────────────────────────────────
-// Rolling client-side buffer of (timestamp, confidence) pairs for the
-// currently selected camera so a frame-motion sparkline can render without
-// re-deriving per-frame signals on each tick. Cleared on camera switch so
-// one camera's motion doesn't bleed into another's view.
-const MOTION_HISTORY_WINDOW_SEC = 60;
-let liveMotionSamples = [];
-let liveMotionCameraId = null;
-let liveMotionAllMode = new Map(); // camera_id -> [{ts, confidence}]
-const MOTION_HISTORY_MAX_BARS = 60;
-
-// Threshold above which a single frame counts as "motion happening" for the
-// full-frame tint. Set between the chart's `.faint` floor (0.05) and `.peak`
-// mark (0.7) so trivial noise stays invisible but a real door/walker/curtain
-// shifts the frame's pulse. A small hold window smooths single dropped
-// samples so the tint doesn't strobe on every 250 ms cycle.
-const MOTION_TINT_ACTIVATION_THRESHOLD = 0.15;
-const MOTION_TINT_HOLD_MS = 250;
-const MOTION_TINT_FADE_MS = 800;
-const MOTION_TINT_MAX_OPACITY = 0.22;
-// Wall-clock ms (performance.now()) of the most recent sample that crossed
-// the activation threshold. Cleared on camera switch so a quiet camera
-// never picks up a stale timestamp from the previous feed.
-let liveMotionLastActiveAt = 0;
-
-function clearLiveMotionHistory() {
-  liveMotionSamples = [];
-  liveMotionCameraId = null;
-  liveMotionAllMode = new Map();
-  // Drop any stale motion timestamp so the full-frame tint begins fading
-  // from the moment we switched cameras (or refreshed) instead of holding
-  // the previous camera's "last active" through the transition.
-  liveMotionLastActiveAt = 0;
-  if (liveEls.motionStrip) liveEls.motionStrip.innerHTML = '';
-  if (liveEls.motionEmpty) liveEls.motionEmpty.hidden = true;
-  applyMotionTintOpacity(0);
-}
-
-async function refreshMotionHistory() {
-  if (!liveEls.motionStrip) return;
-  if (!cameras.length) {
-    clearLiveMotionHistory();
-    return;
-  }
-  try {
-    if (isAllCameraMode()) {
-      const per = new Map();
-      await Promise.all(cameras.map(async (cam) => {
-        try {
-          const data = await api(
-            `/api/live/motion-history?camera_id=${encodeURIComponent(cam.id)}&window_seconds=${MOTION_HISTORY_WINDOW_SEC}`,
-          );
-          per.set(cam.id, Array.isArray(data?.samples) ? data.samples : []);
-        } catch (_err) {
-          // Quietly skip cameras whose endpoint errors; the row stays empty
-          // until the next tick shows motion.
-          per.set(cam.id, []);
-        }
-      }));
-      liveMotionAllMode = per;
-      renderLiveMotion();
-      return;
-    }
-    if (!selectedCamera) {
-      clearLiveMotionHistory();
-      return;
-    }
-    const data = await api(
-      `/api/live/motion-history?camera_id=${encodeURIComponent(selectedCamera.id)}&window_seconds=${MOTION_HISTORY_WINDOW_SEC}`,
-    );
-    const samples = Array.isArray(data?.samples) ? data.samples : [];
-    // Replace the buffer wholesale on each fetch (server-side ring buffer
-    // already trims to the requested window) - cheaper than merge-by-ts and
-    // avoids ghosting when the user switches the window size later.
-    liveMotionSamples = samples
-      .map((s) => ({ ts: Number(s.ts), confidence: Number(s.confidence) }))
-      .filter((s) => Number.isFinite(s.ts) && Number.isFinite(s.confidence))
-      .sort((a, b) => a.ts - b.ts);
-    liveMotionCameraId = selectedCamera.id;
-    // A sample above the activation threshold counts as "motion happening
-    // right now" - stamp the timestamp so the per-frame opacity in
-    // drawLiveOverlay can fade the full-frame tint after it stops. Below
-    // the threshold the timestamp is left alone so an already-fading tint
-    // continues to fade out instead of being held up by a quieter sample.
-    const lastSample = liveMotionSamples[liveMotionSamples.length - 1];
-    if (lastSample && lastSample.confidence >= MOTION_TINT_ACTIVATION_THRESHOLD) {
-      liveMotionLastActiveAt = performance.now();
-    }
-    renderLiveMotion();
-  } catch (error) {
-    if (window.daygleAuth?.redirecting) return;
-    // Soft-fail: chart simply stays at its last render. Detection-status
-    // toast on top is already shown by refreshDetectionStatus separately.
-  }
-}
-
-function renderLiveMotion() {
-  if (!liveEls.motionStrip) return;
-  if (isAllCameraMode()) {
-    renderLiveMotionAllCameras();
-    return;
-  }
-  renderLiveMotionSingle();
-}
-
-function renderLiveMotionSingle() {
-  const samples = liveMotionSamples.slice(-MOTION_HISTORY_MAX_BARS);
-  if (!samples.length) {
-    if (liveEls.motionEmpty) liveEls.motionEmpty.hidden = false;
-    liveEls.motionStrip.innerHTML = '';
-    if (liveEls.motionSubtitle) {
-      const cam = selectedCamera?.name || selectedCamera?.id || 'this camera';
-      liveEls.motionSubtitle.textContent = `No motion on ${cam} in the last ${MOTION_HISTORY_WINDOW_SEC} seconds.`;
-    }
-    return;
-  }
-  if (liveEls.motionEmpty) liveEls.motionEmpty.hidden = true;
-  // `maxConf` carries a 0.05 floor so a quiet window's small bars stay visible
-  // (normalisation only). `trueMax` is the real peak used for the subtitle so
-  // it never implies 5% of motion when the window was effectively still.
-  const trueMax = samples.reduce((acc, s) => Math.max(acc, s.confidence), 0);
-  const maxConf = Math.max(0.05, trueMax);
-  const lastTs = samples[samples.length - 1].ts;
-  const spanSeconds = samples.length ? Math.max(1, Math.round(lastTs - samples[0].ts)) : 0;
-  const html = samples.map((s) => {
-    const pct = Math.max(0, Math.min(1, s.confidence / maxConf));
-    const h = Math.max(2, pct * 100);
-    const time = new Date(s.ts * 1000).toLocaleTimeString();
-    const classes = ['live-motion-bar'];
-    if (s.confidence >= 0.7) classes.push('peak');
-    else if (s.confidence <= 0.05) classes.push('faint');
-    const pctNum = Math.round(s.confidence * 100);
-    return `<div class="${classes.join(' ')}" style="height:${h.toFixed(1)}%" title="${escapeHtml(time)} - ${pctNum}%"></div>`;
-  }).join('');
-  liveEls.motionStrip.classList.remove('all-cameras', 'live-motion-strip--multi');
-  liveEls.motionStrip.innerHTML = html;
-  if (liveEls.motionSubtitle) {
-    const cam = selectedCamera?.name || selectedCamera?.id || 'this camera';
-    liveEls.motionSubtitle.textContent = `${cam} - ${samples.length} samples across ~${spanSeconds}s (max ${Math.round(trueMax * 100)}%).`;
-  }
-}
-
-function renderLiveMotionAllCameras() {
-  if (!cameras.length) {
-    liveEls.motionStrip.innerHTML = '';
-    if (liveEls.motionEmpty) liveEls.motionEmpty.hidden = false;
-    if (liveEls.motionSubtitle) liveEls.motionSubtitle.textContent = 'No cameras configured yet.';
-    return;
-  }
-  if (liveEls.motionEmpty) liveEls.motionEmpty.hidden = true;
-  const rows = cameras.map((cam) => {
-    const samples = (liveMotionAllMode.get(cam.id) || []).slice(-MOTION_HISTORY_MAX_BARS);
-    const maxConf = Math.max(0.05, ...samples.map((s) => s.confidence));
-    const bars = samples.length
-      ? samples.map((s) => {
-          const pct = Math.max(0, Math.min(1, s.confidence / maxConf));
-          const h = Math.max(2, pct * 100);
-          const peak = s.confidence >= 0.7 ? 'peak' : 'faint';
-          const time = new Date(s.ts * 1000).toLocaleTimeString();
-          const pctNum = Math.round(s.confidence * 100);
-          return `<div class="live-motion-bar ${peak}" style="height:${h.toFixed(1)}%" title="${escapeHtml(time)} - ${pctNum}%"></div>`;
-        }).join('')
-      : '<span class="muted" style="font-size:11px">No motion yet</span>';
-    return `
-      <div class="live-motion-row">
-        <div class="live-motion-row-head">
-          <span class="live-motion-row-name">${escapeHtml(cam.name || cam.id)}</span>
-          <span class="live-motion-row-meta">${samples.length} sample${samples.length === 1 ? '' : 's'}</span>
-        </div>
-        <div class="live-motion-strip all-cameras">${bars}</div>
-      </div>
-    `;
-  }).join('');
-  liveEls.motionStrip.classList.remove('all-cameras');
-  liveEls.motionStrip.classList.add('live-motion-strip--multi');
-  // R9 H2 XSS defang: build the wrapper via createElement so the
-  // .innerHTML = site carries no template-literal interpolation. ``rows``
-  // is itself already-escaped HTML (every dynamic bit inside cameras.map
-  // is wrapped in escapeHtml()), so injecting it into a child element
-  // via .innerHTML preserves the escaping without re-opening the XSS
-  // surface flagged by tests/test_round9_h2_xss_sweep.py.
-  const _motionWrapper = document.createElement('div');
-  _motionWrapper.className = 'live-motion-multi-row';
-  _motionWrapper.innerHTML = rows;
-  liveEls.motionStrip.replaceChildren(_motionWrapper);
-  if (liveEls.motionSubtitle) {
-    liveEls.motionSubtitle.textContent = `${cameras.length} camera${cameras.length === 1 ? '' : 's'} - last ${MOTION_HISTORY_WINDOW_SEC} seconds.`;
-  }
-}
-
 // api() is provided by web/utils.js (loaded before this script) - it reads
 // the CSRF token from window.daygleAuth.csrfToken, sets Content-Type
 // application/json on JSON-bodied requests, and handles 401 redirects so
@@ -316,54 +120,6 @@ function clearLiveOverlay() {
   if (!ctx) return;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, liveEls.liveAiTrackCanvas.width, liveEls.liveAiTrackCanvas.height);
-  // The motion tint uses CSS opacity (cheap), so resetting it here keeps
-  // clearLiveOverlay as the single "wipe everything off the frame" entry
-  // point - also called by setSelectedCamera and the All Cameras toggle.
-  applyMotionTintOpacity(0);
-}
-
-// Compute the full-frame tint opacity for the current frame based on how
-// long ago the most recent motion sample crossed the activation threshold
-// and write it via a CSS custom property so the painter doesn't need to
-// know any per-frame motion logic. Snapshots within the hold window are
-// treated as fully on; samples older than `HOLD_MS + FADE_MS` fade fully
-// out. Returns the resolved opacity so callers can early-bail if desired.
-function applyMotionTintOpacity(forceOpacity = null) {
-  const tint = liveEls.motionTint;
-  if (!tint) return 0;
-  // Initialise the custom property once so the cheap-equal guard below
-  // compares numbers on the very first call instead of NaN (which still
-  // works but is fragile if the write path ever changes).
-  if (!tint.style.getPropertyValue('--motion-tint-opacity')) {
-    tint.style.setProperty('--motion-tint-opacity', '0');
-  }
-  let opacity;
-  if (forceOpacity !== null && forceOpacity !== undefined) {
-    opacity = Math.max(0, Math.min(1, forceOpacity));
-  } else if (liveMotionLastActiveAt <= 0 || isAllCameraMode()) {
-    opacity = 0;
-  } else {
-    const elapsed = performance.now() - liveMotionLastActiveAt;
-    if (elapsed <= MOTION_TINT_HOLD_MS) {
-      opacity = MOTION_TINT_MAX_OPACITY;
-    } else if (elapsed < MOTION_TINT_HOLD_MS + MOTION_TINT_FADE_MS) {
-      const fadeFrac = (elapsed - MOTION_TINT_HOLD_MS) / MOTION_TINT_FADE_MS;
-      // True cubic ease-out: fast initial drop, gentle settle into zero.
-      // (An earlier draft used `1 - t**3`, which is actually ease-in for a
-      // decreasing curve; this form matches the "mood-shifts, then resolves"
-      // feel we want for a motion-only frame.)
-      const eased = 1 - Math.pow(1 - fadeFrac, 3);
-      opacity = MOTION_TINT_MAX_OPACITY * eased;
-    } else {
-      opacity = 0;
-    }
-  }
-  // Writing a style string is cheaper than assigning to style.opacity when
-  // the value is unchanged; cheap-equal expressed via rounding.
-  const prev = Number.parseFloat(tint.style.getPropertyValue('--motion-tint-opacity'));
-  if (Math.abs(prev - opacity) < 0.001) return opacity;
-  tint.style.setProperty('--motion-tint-opacity', opacity.toFixed(3));
-  return opacity;
 }
 
 function drawLiveOverlay() {
@@ -373,10 +129,6 @@ function drawLiveOverlay() {
   if (!ctx) return;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, liveEls.liveAiTrackCanvas.width, liveEls.liveAiTrackCanvas.height);
-  // Update the full-frame motion tint every RAF tick, before gating on
-  // AI-track availability - the tint is its own UI signal and shouldn't
-  // disappear when the user toggles bounding boxes off.
-  applyMotionTintOpacity();
   if (!liveAiTrackEnabled || !liveAiTrackDetections?.length) return;
 
   // Drop boxes whose source sample has gone stale (slow/stalled inference) so the
@@ -754,9 +506,6 @@ async function refreshDetectionStatus() {
       chips: [],
       message: 'Live AI: showing all cameras. Select one camera for detailed status.',
     });
-    // Keep the per-camera "Live motion" strips refreshing in all-cameras mode -
-    // the early return above otherwise skips the single-camera refresh below.
-    if (!window.daygleAuth?.redirecting) refreshMotionHistory();
     return;
   }
   if (!selectedCamera) return;
@@ -782,12 +531,6 @@ async function refreshDetectionStatus() {
       message: `Live AI status unavailable: ${error.message}`,
     });
   }
-  // Pull the per-camera motion sample buffer using the same tick so the
-  // 'Live Motion' chart strip stays in sync with detection state. Skipped
-  // when the page is unauthenticated-redirecting to avoid stacking toasts.
-  if (!window.daygleAuth?.redirecting) {
-    refreshMotionHistory();
-  }
 }
 
 function setSelectedCamera(cameraId) {
@@ -800,9 +543,6 @@ function setSelectedCamera(cameraId) {
   liveAiTrackPrevCaptureMs = 0;
   lastServerTrackUpdatedAt = null;
   clearLiveOverlay();
-  // Reset the motion-history buffer so a switched camera's sparkline stays
-  // attributed to that camera (avoids ghost bars from the previous feed).
-  clearLiveMotionHistory();
   if (liveEls.cameraSelect) liveEls.cameraSelect.value = selectedCamera.id;
   updateFrameHeader(selectedCamera);
   if (isZonesPage) {
