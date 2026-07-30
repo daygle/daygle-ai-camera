@@ -41,6 +41,7 @@ function buildEditFormHtml(camera, index) {
   return '<tr class="camera-edit-row" id="' + rowId + '"><td colspan="7"><div class="camera-edit-panel">' +
     '<div class="modal-tabs" role="tablist">' +
       '<button class="modal-tab active" data-tab="connection" data-form="' + formId + '" type="button" role="tab" aria-selected="true">Connection</button>' +
+      '<button class="modal-tab" data-tab="streams" data-form="' + formId + '" type="button" role="tab" aria-selected="false" tabindex="-1">Streams</button>' +
       '<button class="modal-tab" data-tab="recording" data-form="' + formId + '" type="button" role="tab" aria-selected="false" tabindex="-1">Recording</button>' +
       '<button class="modal-tab" data-tab="ptz" data-form="' + formId + '" type="button" role="tab" aria-selected="false" tabindex="-1">PTZ</button>' +
       '<button class="modal-tab" data-tab="advanced" data-form="' + formId + '" type="button" role="tab" aria-selected="false" tabindex="-1">Advanced</button>' +
@@ -71,7 +72,6 @@ function buildEditFormHtml(camera, index) {
           '<div class="form-grid">' +
             '<label><span>Host / IP</span><input name="host" placeholder="192.168.1.100" value="' + escapeAttr(camera.host || '') + '" /></label>' +
             '<label><span>Port</span><input name="port" type="number" min="1" max="65535" placeholder="554" value="' + (camera.port || 554) + '" /></label>' +
-            '<label><span>Stream Path</span><input name="path" placeholder="stream1" value="' + escapeAttr(camera.path || 'stream1') + '" /></label>' +
             '<label><span>Username</span><input name="username" placeholder="admin" autocomplete="off" value="' + escapeAttr(camera.username || '') + '" /></label>' +
             '<label class="full-width"><span>Password</span><input name="password" type="password" autocomplete="new-password" placeholder="' + (camera.has_password ? '(saved - type to change)' : '(No Password)') + '" /></label>' +
           '</div>' +
@@ -80,6 +80,17 @@ function buildEditFormHtml(camera, index) {
           '<button class="btn-info cam-test-conn-btn" data-form="' + formId + '" type="button">Test Connection</button>' +
           '<span class="muted cam-test-conn-result" data-form="' + formId + '" style="font-size:13px;align-self:center"></span>' +
         '</div>' +
+      '</div>' +
+
+      // Streams tab
+      '<div class="modal-tab-panel" data-panel="streams" hidden>' +
+        '<div class="form-grid">' +
+          '<label class="full-width cam-onvif-fields"' + (isRtsp ? ' hidden' : '') + '><span>Stream Path</span><input name="path" placeholder="stream1" value="' + escapeAttr(camera.path || 'stream1') + '" /></label>' +
+          '<label class="full-width"><span>Recording Stream Path <span class="info-tip" data-tip="Optional: the path for the high-res recording stream (e.g. stream2). Uses the same host, port, and login details as the primary stream. Leave empty to use the primary stream for recording." title="Optional: the path for the high-res recording stream (e.g. stream2). Uses the same host, port, and login details as the primary stream. Leave empty to use the primary stream for recording." tabindex="0" aria-label="Help: Optional path for the high-res recording stream. Uses the same host, port, and login details."></span></span><input name="recording_stream_path" placeholder="e.g. stream2" value="' + escapeAttr(camera.recording_stream_path || '') + '" /></label>' +
+        '</div>' +
+        (isRtsp
+          ? '<p class="form-help muted">Recording Stream Path is optional and points to a higher-resolution stream used for recordings.</p>'
+          : '<p class="form-help muted">Stream Path is the primary detection stream (e.g. stream1). Recording Stream Path is optional and points to a higher-resolution stream used for recordings.</p>') +
       '</div>' +
 
       // Recording tab
@@ -91,9 +102,8 @@ function buildEditFormHtml(camera, index) {
               '<option value="true"' + (camera.recording?.continuous ? ' selected' : '') + '>Enabled</option>' +
             '</select>' +
           '</label>' +
-          '<label class="full-width"><span>Recording Stream Path <span class="info-tip" data-tip="Optional: the path for the high-res recording stream (e.g. stream2). Uses the same host, port, and login details as the primary stream. Leave empty to use the primary stream for recording." title="Optional: the path for the high-res recording stream (e.g. stream2). Uses the same host, port, and login details as the primary stream. Leave empty to use the primary stream for recording." tabindex="0" aria-label="Help: Optional path for the high-res recording stream. Uses the same host, port, and login details."></span></span><input name="recording_stream_path" placeholder="e.g. stream2" value="' + escapeAttr(camera.recording_stream_path || '') + '" /></label>' +
         '</div>' +
-        '<p class="form-help muted">When enabled, the camera writes an uninterrupted stream regardless of events. Otherwise, clips are recorded per detection rule (configured on the Zones page per object). The Recording Stream Path is optional - if set, event clips are recorded from the high-res stream instead of the primary detection stream. Uses the same host, port, and login details as the primary stream.</p>' +
+        '<p class="form-help muted">When enabled, the camera writes an uninterrupted stream regardless of events. Otherwise, clips are recorded per detection rule (configured on the Zones page per object).</p>' +
       '</div>' +
 
       // PTZ tab
@@ -199,10 +209,8 @@ function wireEditFormHandlers(index) {
   if (backendSelect) {
     backendSelect.addEventListener('change', function() {
       var manual = this.value === 'rtsp';
-      var rtspEl = form.querySelector('.cam-rtsp-fields');
-      var onvifEl = form.querySelector('.cam-onvif-fields');
-      if (rtspEl) rtspEl.hidden = !manual;
-      if (onvifEl) onvifEl.hidden = manual;
+      form.querySelectorAll('.cam-rtsp-fields').forEach(function(el) { el.hidden = !manual; });
+      form.querySelectorAll('.cam-onvif-fields').forEach(function(el) { el.hidden = manual; });
     });
   }
 
@@ -598,6 +606,10 @@ async function fetchCameraResolutions() {
       delete cameraFps[camera.id];
     }
   }));
+
+  // Don't clobber an open inline edit form while the user is editing.
+  if (document.querySelector('.camera-edit-row')) return;
+
   renderGrid();
 }
 

@@ -281,7 +281,7 @@ function buildSoundRuleRow(rule, ruleIndex, rules) {
       <td><input type="number" data-rule-threshold="${id}" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" min="0.1" max="1.0" step="0.05" /></td>
       <td><input type="number" data-rule-cooldown="${id}" value="${escapeHtml(String(rule.cooldown_seconds ?? 30))}" min="5" max="3600" step="5" /></td>
       <td><div class="cell-actions">
-        <button class="rule-expand-btn secondary" type="button" data-expand-rule="${id}" title="Time windows &amp; email">${expanded ? ICONS.chevronUp : ICONS.chevronDown}</button>
+        <button class="rule-expand-btn secondary" type="button" data-expand-rule="${id}" title="Time windows &amp; email">${expanded ? ICONS.chevronUp : ICONS.email}</button>
         <button class="delete-btn secondary" type="button" data-remove-rule="${id}">${ICONS.remove}</button>
       </div></td>
     </tr>

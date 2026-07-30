@@ -300,6 +300,10 @@ async def app_navigation_middleware(request: Request, call_next):
         # endpoints (e.g. recording/video streams).
         for key, value in security_headers.items():
             response.headers.setdefault(key, value)
+        # Public HTML pages (login, setup) should also not be cached, so a
+        # stale copy isn't shown after the auth state changes.
+        if content_type.startswith('text/html'):
+            response.headers.setdefault('Cache-Control', 'no-store, must-revalidate')
         return response
     body = b''
     async for chunk in response.body_iterator:
@@ -312,6 +316,9 @@ async def app_navigation_middleware(request: Request, call_next):
     headers.pop('content-length', None)
     for key, value in security_headers.items():
         headers.setdefault(key, value)
+    # Don't let the browser serve a cached copy of a protected HTML page
+    # after the session has expired - otherwise the user sees stale UI.
+    headers.setdefault('Cache-Control', 'no-store, must-revalidate')
     return Response(
         content=body,
         status_code=response.status_code,

@@ -499,6 +499,13 @@ def test_zone_object_rule_matches_below_confidence_excluded():
     assert matches == []
 
 
+def test_zone_object_rule_matches_invalid_action_raises():
+    from app import zone_detection as zd
+    settings = {'id': 'cam-1', 'detection': {'zones': []}}
+    with pytest.raises(ValueError, match="action must be 'alert' or 'record'"):
+        zd.zone_object_rule_matches(settings, {}, action='invalid')
+
+
 def test_zone_object_rule_matches_action_alert_requires_notify():
     from app import zone_detection as zd
     settings = {

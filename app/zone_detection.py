@@ -176,6 +176,10 @@ import app.state as _state
 
 logger = logging.getLogger('daygle.ai')
 from app.config_facades import get_camera_config
+
+# Tracks zones that have already logged an unexpected pixel-motion error so we
+# don't flood logs on every frame. Cleared on success to allow self-healing.
+_zone_pixel_motion_errors: set[str] = set()
 from app.utils import normalize_email_recipients
 from app.zone_schema import _LABEL_ALIASES, normalize_label_list, zone_motion_min_confidence
 
@@ -275,6 +279,7 @@ def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
     ``main._MOTION_FRAME_H × main._MOTION_FRAME_W`` resolution.  Zone coordinates are
     normalised (0-1) and are converted to pixel indices before slicing.
     """
+    zone_id = str(zone.get('id') or zone.get('name') or id(zone))
     try:
         x = zone.get('x')
         y = zone.get('y')
@@ -297,8 +302,17 @@ def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
         py1 = max(0, int(y * _state._MOTION_FRAME_H))
         px2 = min(_state._MOTION_FRAME_W, max(px1 + 1, int(round((x + w) * _state._MOTION_FRAME_W))))
         py2 = min(_state._MOTION_FRAME_H, max(py1 + 1, int(round((y + h) * _state._MOTION_FRAME_H))))
-        return float(np.mean(diff_mask[py1:py2, px1:px2]))
-    except Exception:
+        result = float(np.mean(diff_mask[py1:py2, px1:px2]))
+        _zone_pixel_motion_errors.discard(zone_id)
+        return result
+    except (TypeError, ValueError, IndexError, AttributeError) as exc:
+        # Expected malformed zone/mask inputs; fail open with zero motion.
+        logger.debug('Expected error computing pixel motion for zone %r: %s', zone_id, exc)
+        return 0.0
+    except Exception as exc:
+        if zone_id not in _zone_pixel_motion_errors:
+            logger.warning('Unexpected error computing pixel motion for zone %r: %s', zone_id, exc)
+            _zone_pixel_motion_errors.add(zone_id)
         return 0.0
 
 
@@ -375,6 +389,11 @@ def filter_detections_for_camera_zones(
     if not zones:
         if zone_monitor_key == 'monitor_objects' and camera_labels and (not require_zones):
             return [detection for detection in detections if str(detection.get('label') or '').strip().lower() in camera_labels]
+        # No zones and no camera labels: keep legacy "accept all" behavior so a
+        # camera with object detection enabled but unconfigured still records
+        # and alerts. Log the fallback once per call to aid debugging.
+        if not camera_labels and not require_zones:
+            logger.debug('filter_detections_for_camera_zones: no zones or camera labels configured; returning %d detections unfiltered', len(detections))
         return [] if require_zones else detections
     return [
         detection
@@ -395,6 +414,8 @@ def filter_detections_for_camera(detections: list[dict[str, Any]], settings: dic
 
 
 def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any], *, action: str) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    if action not in ('alert', 'record'):
+        raise ValueError(f"action must be 'alert' or 'record', got {action!r}")
     detection_settings = settings.get('detection') or {}
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
     label = str(detection.get('label') or '').strip().lower()

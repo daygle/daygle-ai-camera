@@ -2981,7 +2981,7 @@ def test_alerted_only_event_and_recording_queries(tmp_path):
 
 def test_push_notification_title_lists_all_triggered_labels(monkeypatch):
     """A cat+person event must produce TWO push notifications (one per matching
-    rule), each with the title "Daygle AI Camera alert: Cat, Person detected" and a body
+    rule), each with the title "Daygle AI Camera alert: Cat, Person Detected" and a body
     that lists every triggered label."""
     from app.push_notifications import PushNotificationService
     import urllib.request
@@ -3021,9 +3021,13 @@ def test_push_notification_title_lists_all_triggered_labels(monkeypatch):
 
     assert len(captured) == 2, 'expected one push per matching rule'
     for entry in captured:
-        assert entry['title'] == 'Daygle AI Camera alert: Cat, Person detected'
+        assert entry['title'] == 'Daygle AI Camera alert: Cat, Person Detected'
         assert 'All triggers: Cat, Person' in entry['body']
         assert 'Camera: Front Door' in entry['body']
+        assert 'Detection Type: Object' in entry['body']
+        assert 'Rule:' in entry['body']
+        assert 'Object - ' not in entry['body']
+        assert 'Detected at:' not in entry['body']
 
 
 
@@ -3141,7 +3145,7 @@ def test_email_alert_subject_lists_all_triggered_labels():
 
         assert len(sent_messages) == 2, 'expected one email per matching rule'
         for message in sent_messages:
-            assert message['Subject'] == 'Daygle AI Camera Alert: Cat, Person detected (Front Door)'
+            assert message['Subject'] == 'Daygle AI Camera Alert: Cat, Person Detected (Front Door)'
             # Walk the multipart tree to find the html part. get_payload() may
             # return a flat list of parts (multipart/alternative) or a nested
             # Message with its own walk() (multipart/related).
@@ -3160,6 +3164,10 @@ def test_email_alert_subject_lists_all_triggered_labels():
             assert html_part is not None, 'expected an html part'
             assert 'Cat, Person' in html_part, 'html body must list every triggered label'
             assert 'All triggers' in html_part, 'html body must include an All triggers row'
+            assert 'Detection Type' in html_part, 'html body must include a Detection Type row'
+            assert 'Object' in html_part, 'html body must show Object detection type'
+            assert 'Rule' in html_part, 'html body must include a Rule row'
+            assert 'Object - ' not in html_part, 'Rule row must not include the old Object prefix'
     finally:
         smtplib.SMTP = _original_smtp
         smtplib.SMTP_SSL = _original_smtp_ssl

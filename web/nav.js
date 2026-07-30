@@ -153,7 +153,21 @@ if (document.readyState === 'loading') {
 window.daygleAuthReady = (async () => {
   try {
     const response = await fetch('/api/auth/me');
-    if (!response.ok) return null;
+    if (!response.ok) {
+      // If the session is gone and this is a protected page, send the user to
+      // the login screen instead of leaving a stale page with a "Sign in"
+      // avatar.  Public pages (login/setup/logout) skip the redirect so the
+      // server can serve them without an infinite loop.
+      if (response.status === 401 && typeof window.daygleUi?.handleSessionLoss === 'function') {
+        const path = window.location?.pathname || '/';
+        const publicPages = ['/login', '/setup', '/logout'];
+        if (!publicPages.includes(path)) {
+          window.daygleUi.handleSessionLoss('Session expired - please sign in again');
+          return null;
+        }
+      }
+      return null;
+    }
     const payload = await response.json();
     const user = payload.user || {};
     const csrfToken = payload.csrf_token || '';

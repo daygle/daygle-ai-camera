@@ -116,40 +116,39 @@ class EmailAlertService:
         display_labels = [label.title() for label in ordered_labels]
         display_primary = primary_label.title() if primary_label else 'Object'
         subject_label = ', '.join(display_labels) if display_labels else display_primary
-        subject = f"Daygle AI Camera Alert: {subject_label} detected{subject_suffix}"
+        subject = f"Daygle AI Camera Alert: {subject_label} Detected{subject_suffix}"
         headline = subject_label
         if ordered_labels and len(ordered_labels) > 1:
-            headline = f"{headline} detected"
+            headline = f"{headline} Detected"
         all_triggers_line = (
             f"All triggers: {subject_label}" if ordered_labels and len(ordered_labels) > 1 else None
         )
         detected_at_display = str(detected_at).strip() if detected_at else None
 
-        # Parse zone name and label type from rule_name.
-        # Format: "CameraName / ZoneName / label" (object) or "Sound Rule Name" (sound).
+        # Determine detection type and parse display fields from the alert.
         rule_name = str(alert.get('rule_name') or '').strip()
+        label_val = str(alert.get('label') or '').strip()
+        label_lower = label_val.lower()
+
         zone_name = ''
-        label_type = 'Object'
-        rule_display = rule_name
+        detection_type = 'Object'
+        if label_lower == 'motion':
+            detection_type = 'Motion'
+        elif '_' in label_lower and not label_lower.startswith(('car', 'person', 'truck')):
+            detection_type = 'Sound'
+
+        # Extract zone/label from the canonical "Camera / Zone / Label" rule name.
         if ' / ' in rule_name:
             parts = rule_name.split(' / ')
-            if len(parts) >= 3:
+            if len(parts) >= 2:
                 zone_name = parts[1].strip()
-                label_raw = parts[-1].strip()
-                label_display = label_raw.title()
-                rule_display = f"Object - {label_display}"
-            elif len(parts) == 2:
-                zone_name = parts[1].strip()
-                rule_display = zone_name
-        else:
-            # Sound rule - detect from label value
-            label_val = str(alert.get('label') or '').strip()
-            label_lower = label_val.lower()
-            # Sound labels use snake_case (e.g. dog_bark) and contain underscores
-            if '_' in label_lower and not label_lower.startswith(('car', 'person', 'truck')):
-                label_type = 'Sound'
-                label_display = label_lower.replace('_', ' ').title()
-                rule_display = f"Sound - {label_display}"
+            if len(parts) >= 3 and not label_val:
+                label_val = parts[-1].strip()
+
+        if not label_val:
+            label_val = detection_type
+
+        rule_display = label_val.replace('_', ' ').title()
 
         # Title-case the alert message for cleaner display
         raw_message = str(alert.get("message") or "Alert triggered.")
@@ -161,9 +160,10 @@ class EmailAlertService:
         ]
         if zone_name:
             plain_lines.append(f"Zone: {zone_name}")
+        plain_lines.append(f"Detection Type: {detection_type}")
         plain_lines.append(f"Rule: {rule_display}")
         if detected_at_display:
-            plain_lines.append(f"Detected at: {detected_at_display}")
+            plain_lines.append(f"Detected: {detected_at_display}")
         if all_triggers_line:
             plain_lines.append(all_triggers_line)
         plain_lines.extend([
@@ -182,7 +182,7 @@ class EmailAlertService:
             if all_triggers_line else ''
         )
         detected_at_row = (
-            f'<tr><td style="padding:4px 0;color:#888">Detected at</td><td style="padding:4px 0">{escape(detected_at_display)}</td></tr>'
+            f'<tr><td style="padding:4px 0;color:#888">Detected</td><td style="padding:4px 0">{escape(detected_at_display)}</td></tr>'
             if detected_at_display else ''
         )
         zone_row = (
@@ -196,6 +196,7 @@ class EmailAlertService:
             '<table style="border-collapse:collapse;width:100%;margin:12px 0">'
             f'<tr><td style="padding:4px 0;color:#888;width:120px">Camera</td><td style="padding:4px 0">{escape(camera_display)}</td></tr>'
             f'{zone_row}'
+            f'<tr><td style="padding:4px 0;color:#888">Detection Type</td><td style="padding:4px 0">{escape(detection_type)}</td></tr>'
             f'<tr><td style="padding:4px 0;color:#888">Rule</td><td style="padding:4px 0">{escape(rule_display)}</td></tr>'
             f'{detected_at_row}'
             f'{all_triggers_row}'

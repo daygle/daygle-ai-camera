@@ -13,8 +13,7 @@
     <header class="hero">
       <div>
         <p class="eyebrow">Monitoring</p>
-        <h1>Alerts</h1>
-        <p class="muted">Review notifications fired by your zone and sound rules across all cameras.</p>
+        <h1>Alerts</h1>          <p class="muted">Review alerts triggered by your zone and sound rules across all cameras.</p>
       </div>
 
     </header>
@@ -120,13 +119,13 @@
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg> Sound
           </button>
         </div>
+        <span id="listStatus" class="result-badge" aria-live="polite"></span>
         <div class="activity-range-group" role="tablist" aria-label="Time range">
           <button class="activity-filter-pill active" data-range="today" type="button" role="tab" aria-selected="true">Today</button>
           <button class="activity-filter-pill" data-range="7d" type="button" role="tab" aria-selected="false">7d</button>
           <button class="activity-filter-pill" data-range="30d" type="button" role="tab" aria-selected="false">30d</button>
           <button class="activity-filter-pill" data-range="all" type="button" role="tab" aria-selected="false">All</button>
         </div>
-        <span id="listStatus" class="result-badge" aria-live="polite"></span>
       </div>
 
       <div id="alertFeed" class="list activity-list" aria-live="polite"></div>

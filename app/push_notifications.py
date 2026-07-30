@@ -78,17 +78,28 @@ class PushNotificationService:
         display_labels = [label.title() for label in ordered_labels]
         display_primary = primary_label.title()
         subject_label = ', '.join(display_labels) if display_labels else display_primary
-        title = f"Daygle AI Camera alert: {subject_label} detected"
+        title = f"Daygle AI Camera alert: {subject_label} Detected"
 
         detected_at_display = str(detected_at).strip() if detected_at else None
+
+        label_val = str(alert.get('label') or '').strip()
+        label_lower = label_val.lower()
+        detection_type = 'Object'
+        if label_lower == 'motion':
+            detection_type = 'Motion'
+        elif '_' in label_lower and not label_lower.startswith(('car', 'person', 'truck')):
+            detection_type = 'Sound'
+
+        rule_display = label_val.replace('_', ' ').title() if label_val else detection_type
 
         body_lines = [
             str(alert.get("message") or "Alert triggered."),
             f"Camera: {camera_line}",
-            f"Rule: {alert.get('rule_name')}",
+            f"Detection Type: {detection_type}",
+            f"Rule: {rule_display}",
         ]
         if detected_at_display:
-            body_lines.append(f"Detected at: {detected_at_display}")
+            body_lines.append(f"Detected: {detected_at_display}")
         if display_labels and len(display_labels) > 1:
             body_lines.append(f"All triggers: {subject_label}")
         body_lines.append(f"Confidence: {float(alert.get('confidence') or 0):.2%}")
