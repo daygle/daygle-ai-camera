@@ -969,7 +969,7 @@ function renderRecordingDetails(recording) {
   }
   const zones = recordingZoneNames(recording);
   const zoneRow = zones.length ? `<div><span>Zone</span><strong>${zones.map(escapeHtml).join(', ')}</strong></div>` : '';
-  const triggerRow = detections.length ? '' : `<div><span>Trigger</span><strong>${escapeHtml(recordingTriggerSummary(recording))}</strong></div>`;
+  const triggerRow = `<div><span>Trigger</span><strong>${escapeHtml(recordingTriggerSummary(recording))}</strong></div>`;
   els.recordingDetails.innerHTML = `
     <div><span>Recording</span><strong><a href="/recordings?recording_id=${encodeURIComponent(recording.id)}" class="timeline-recording-link">#${escapeHtml(String(recording.id))} ↗</a></strong></div>
     <div><span>Camera</span><strong>${escapeHtml(cameraLabel(recording))}</strong></div>

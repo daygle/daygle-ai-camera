@@ -488,7 +488,7 @@ function renderRecordingDetails(recording) {
   const detailRows = [
     safeHtml`<div><span>Recording</span><strong>#${recording.id}</strong></div>`,
     safeHtml`<div><span>Event</span><strong>${recording.event_id || 'none'}</strong></div>`,
-    safeHtml`<div><span>Camera</span><strong>${cameraLabel(recording)}</strong></div>`,
+    safeHtml`<div><span>Camera</span><strong>${cameraLabel(recording.camera_name, recording.camera_id)}</strong></div>`,
     zoneRow,
     safeHtml`<div><span>Trigger</span><strong>${recordingDisplayTrigger(recording)}</strong></div>`,
     safeHtml`<div><span>Started</span><strong>${formatDateTime(recording.started_at)}</strong></div>`,
@@ -662,7 +662,7 @@ async function playRecording(id) {
   if (els.clipPlayerTitle) els.clipPlayerTitle.textContent = `Recording #${recording.id}`;
   if (els.videoModalSubtitle) {
     const started = formatDateTime(recording.started_at);
-    const camera = cameraLabel(recording);
+    const camera = cameraLabel(recording.camera_name, recording.camera_id);
     els.videoModalSubtitle.textContent = started
       ? `Recording from ${camera} captured ${started}.`
       : `Recording from ${camera}.`;
