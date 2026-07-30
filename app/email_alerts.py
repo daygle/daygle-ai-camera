@@ -116,7 +116,7 @@ class EmailAlertService:
         display_labels = [label.title() for label in ordered_labels]
         display_primary = primary_label.title() if primary_label else 'Object'
         subject_label = ', '.join(display_labels) if display_labels else display_primary
-        subject = f"Daygle AI Camera alert: {subject_label} detected{subject_suffix}"
+        subject = f"Daygle AI Camera Alert: {subject_label} detected{subject_suffix}"
         headline = subject_label
         if ordered_labels and len(ordered_labels) > 1:
             headline = f"{headline} detected"
