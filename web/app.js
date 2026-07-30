@@ -75,13 +75,7 @@ function getSinceParam() {
   return ''; // 'all' - no since filter
 }
 
-// ─── Small utilities (kept local to avoid touching utils.js) ────────────────
-function cameraLabel(cameraName, cameraId) {
-  const name = String(cameraName || '').trim();
-  const id = String(cameraId || '').trim();
-  if (name && id) return `${name} (${id})`;
-  return name || id || '';
-}
+// cameraLabel() is provided by web/utils.js (loaded before this script).
 
 function eventSourceLabel(event) {
   const metadata = event?.metadata || {};
@@ -550,7 +544,7 @@ function renderRecordingDetails(recording) {
   const detailRows = [
     safeHtml`<div><span>Recording</span><strong>#${recording.id}</strong></div>`,
     safeHtml`<div><span>Event</span><strong>${recording.event_id || 'none'}</strong></div>`,
-    safeHtml`<div><span>Camera</span><strong>${cameraLabel(recording)}</strong></div>`,
+    safeHtml`<div><span>Camera</span><strong>${recording.camera_name || recording.metadata?.camera_name || ''}</strong></div>`,
     zoneRow,
     safeHtml`<div><span>Trigger</span><strong>${recordingDisplayTrigger(recording)}</strong></div>`,
     safeHtml`<div><span>Started</span><strong>${formatDateTime(recording.started_at)}</strong></div>`,
@@ -569,10 +563,8 @@ function recordingDisplayTrigger(recording) {
     const classLabel = meta.class_label || meta.label || recording.trigger_label || 'sound';
     return `\u{1F50A} ${titleCase(classLabel)}`;
   }
-  const triggerType = recordingTriggerType(recording);
   const triggerLabel = recordingTriggerLabel(recording);
-  if (triggerLabel && triggerLabel !== triggerType) return `${triggerType} \u00b7 ${triggerLabel}`;
-  return triggerLabel || triggerType;
+  return titleCase(triggerLabel || 'motion');
 }
 
 // ── Clip segment timeline ───────────────────────────────────────────────────
@@ -725,7 +717,7 @@ async function playRecording(id) {
   if (els.clipPlayerTitle) els.clipPlayerTitle.textContent = `Recording #${recording.id}`;
   if (els.videoModalSubtitle) {
     const started = formatDateTime(recording.started_at);
-    const camera = cameraLabel(recording);
+    const camera = recording.camera_name || recording.metadata?.camera_name || '';
     els.videoModalSubtitle.textContent = started
       ? `Recording from ${camera} captured ${started}.`
       : `Recording from ${camera}.`;

@@ -876,6 +876,23 @@ function formatUserClock(seconds) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
+// ─── Unified camera label helper ─────────────────────────────────────────
+// Shared by the dashboard (app.js), recordings list (recordings.js), and
+// timeline (timeline.js). Handles both calling conventions:
+//   cameraLabel(recording)              — extract name from recording/event object
+//   cameraLabel(cameraName, cameraId)   — two-argument string form
+function cameraLabel(cameraNameOrRecording, cameraId) {
+  // Object-style: cameraLabel(recording) or cameraLabel(cameraConfig)
+  if (cameraNameOrRecording && typeof cameraNameOrRecording === 'object') {
+    const metadata = cameraNameOrRecording?.event?.metadata || {};
+    return metadata.camera_name || cameraNameOrRecording.camera_id || cameraNameOrRecording.source || 'unknown';
+  }
+  // String-style: cameraLabel(cameraName, cameraId)
+  const name = String(cameraNameOrRecording || '').trim();
+  const id = String(cameraId || '').trim();
+  return name || id || '';
+}
+
 // ─── Explicit public surface (window.daygleUi) ───────────────────────────-
 // All helpers above attach to window implicitly via top-level function / const
 // declarations. That's historically been good enough for these pages, but it
@@ -1023,10 +1040,8 @@ window.daygleUi = {
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,
   isMotionOnlyRecording, motionConfidenceFor,
   isMotionOnlyEvent, isMotionOnlyEventItem, isMotionOnlyAlertGroup, isMotionOnlyAlertItem,
-  // Shared recording readers (recordings list + timeline). cameraLabel is
-  // deliberately NOT shared here: app.js and yamnet-tflite.js define their own
-  // cameraLabel() with different signatures in the same global realm.
-  isSoundRecording, recordingTriggerType, recordingTriggerLabel, recordingZoneNames, recordingDetectionSummary,
+  // Shared recording readers (recordings list + timeline).
+  isSoundRecording, recordingTriggerType, recordingTriggerLabel, recordingZoneNames, recordingDetectionSummary, cameraLabel,
   renderTimeSelect, timeSelectValue, setTimeSelectValue,
   // Logs (audit + camera-log share these)
   formatLogTime, LOG_PAGE_SIZE,

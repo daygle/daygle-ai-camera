@@ -88,13 +88,11 @@ let configuredLabels = null; // null = no filter loaded yet
   // recordings list, the timeline page and
   // the dashboard activity feed all share the same boundary.
 
-// Kept page-local (not hoisted to utils.js): app.js and yamnet-tflite.js
-// define their own cameraLabel() with different signatures, and a shared
-// global would collide on the dashboard / yamnet pages.
-function cameraLabel(recording) {
-  const metadata = recording?.event?.metadata || {};
-  return metadata.camera_name || recording.camera_id || recording.source || 'unknown';
-}
+// cameraLabel() is provided by web/utils.js (loaded before this script).
+// The unified version handles both cameraLabel(recording) and
+// cameraLabel(cameraName, cameraId) calling conventions.
+// The yamnet-tflite page keeps its own local cameraLabel(camera) because
+// it receives camera config objects (not recordings) with a different shape.
 
 function recordingDetectionLabels(recording) {
   // Prefer the server-side `labels` array (one row per unique object detected
