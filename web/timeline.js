@@ -28,12 +28,6 @@ const els = {
   clipTimeline: document.getElementById('clipTimeline'),
   clipTimelineBar: document.getElementById('clipTimelineBar'),
   clipTimelineLegend: document.getElementById('clipTimelineLegend'),
-  clipTimeline: document.getElementById('clipTimeline'),
-  clipTimelineBar: document.getElementById('clipTimelineBar'),
-  clipTimelineLegend: document.getElementById('clipTimelineLegend'),
-  clipTimeline: document.getElementById('clipTimeline'),
-  clipTimelineBar: document.getElementById('clipTimelineBar'),
-  clipTimelineLegend: document.getElementById('clipTimelineLegend'),
   timelineNowBtn: document.getElementById('timelineNowBtn'),
   // Stats
   statClips: document.getElementById('statClips'),
