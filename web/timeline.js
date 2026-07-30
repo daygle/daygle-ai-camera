@@ -20,9 +20,20 @@ const els = {
   clipOverlay: document.getElementById('clipOverlay'),
   clipOverlayToggle: document.getElementById('clipOverlayToggle'),
   recordingDetails: document.getElementById('recordingDetails'),
-  videoModal: document.getElementById('videoModal'),
-  videoModalClose: document.getElementById('videoModalClose'),
+  clipPlayerCard: document.getElementById('clipPlayerCard'),
+  clipPlayerTitle: document.getElementById('clipPlayerTitle'),
+  clipPlayerClose: document.getElementById('clipPlayerClose'),
   videoModalDownload: document.getElementById('videoModalDownload'),
+  videoModalSubtitle: document.getElementById('videoModalSubtitle'),
+  clipTimeline: document.getElementById('clipTimeline'),
+  clipTimelineBar: document.getElementById('clipTimelineBar'),
+  clipTimelineLegend: document.getElementById('clipTimelineLegend'),
+  clipTimeline: document.getElementById('clipTimeline'),
+  clipTimelineBar: document.getElementById('clipTimelineBar'),
+  clipTimelineLegend: document.getElementById('clipTimelineLegend'),
+  clipTimeline: document.getElementById('clipTimeline'),
+  clipTimelineBar: document.getElementById('clipTimelineBar'),
+  clipTimelineLegend: document.getElementById('clipTimelineLegend'),
   timelineNowBtn: document.getElementById('timelineNowBtn'),
   // Stats
   statClips: document.getElementById('statClips'),
@@ -984,18 +995,24 @@ function highlightActiveRecording() {
 }
 
 function openVideoModal() {
-  els.videoModal.hidden = false;
-  els.videoModalClose.focus();
+  if (els.clipPlayerCard) {
+    els.clipPlayerCard.hidden = false;
+    els.clipPlayerCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 }
 
 function closeVideoModal() {
-  els.videoModal.hidden = true;
-  els.clipPlayer.pause();
-  stopOverlayRaf();
-  els.clipPlayer.removeAttribute('src');
-  els.clipPlayer.load();
-  els.videoModalDownload.hidden = true;
-  els.videoModalDownload.removeAttribute('href');
+  if (els.clipPlayerCard) els.clipPlayerCard.hidden = true;
+  if (els.clipPlayer) {
+    els.clipPlayer.pause();
+    stopOverlayRaf();
+    els.clipPlayer.removeAttribute('src');
+    els.clipPlayer.load();
+  }
+  if (els.videoModalDownload) {
+    els.videoModalDownload.hidden = true;
+    els.videoModalDownload.removeAttribute('href');
+  }
   clearClipOverlay();
   activeRecording = null;
 }
@@ -1007,6 +1024,12 @@ async function playRecording(recordingId, updateHistory = true) {
   renderRecordingDetails(recording);
   highlightActiveRecording();
   if (updateHistory) replaceUrl(state.activeRecordingId);
+
+  if (els.clipPlayerTitle) els.clipPlayerTitle.textContent = `Recording #${recording.id}`;
+  if (els.videoModalSubtitle) {
+    const started = recording.started_at ? recording.started_at.replace('T', ' ').slice(0, 19) : '';
+    els.videoModalSubtitle.textContent = started ? `Recording captured ${started}.` : 'Watch a recording and review its detection details.';
+  }
 
   openVideoModal();
 
@@ -1042,8 +1065,8 @@ async function playRecording(recordingId, updateHistory = true) {
 function clearPlayback(updateHistory = true) {
   state.activeRecordingId = null;
   closeVideoModal();
-  els.clipPlayerStatus.textContent = '';
-  els.recordingDetails.innerHTML = '';
+  if (els.clipPlayerStatus) els.clipPlayerStatus.textContent = '';
+  if (els.recordingDetails) els.recordingDetails.innerHTML = '';
   highlightActiveRecording();
   if (updateHistory) replaceUrl(null);
 }
@@ -1245,11 +1268,11 @@ TIMELINE_CARDS.forEach((card) => {
   });
 });
 
-els.videoModalClose.addEventListener('click', () => clearPlayback());
+els.clipPlayerClose?.addEventListener('click', () => clearPlayback());
 
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !els.videoModal.hidden) clearPlayback();
+  if (event.key === 'Escape' && !els.clipPlayerCard?.hidden) clearPlayback();
 });
 
 els.clipPlayer.addEventListener('error', () => {

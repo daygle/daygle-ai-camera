@@ -7,16 +7,25 @@ const els = {
   alertFeed: document.getElementById('alertFeed'),
   listStatus: document.getElementById('listStatus'),
   dismissAllBtn: document.getElementById('dismissAllAlertsBtn'),
-  // Scope to [data-filter] so the category group and the range group stay
-  // independent: both share the .activity-filter-pill class, so selecting by
-  // class swept the range buttons into the category handler, which reset the
-  // category filter to undefined on every range click (Object + 7d wouldn't
-  // hold). Category buttons carry data-filter; range buttons carry data-range.
   filterPills: document.querySelectorAll('[data-filter]'),
   statObjectAlerts: document.getElementById('statObjectAlerts'),
   statMotionAlerts: document.getElementById('statMotionAlerts'),
   statSoundAlerts: document.getElementById('statSoundAlerts'),
   rangeBtns: document.querySelectorAll('[data-range]'),
+  // Inline clip player elements.
+  clipPlayer: document.getElementById('clipPlayer'),
+  clipPlayerStatus: document.getElementById('clipPlayerStatus'),
+  recordingDetails: document.getElementById('recordingDetails'),
+  clipOverlay: document.getElementById('clipOverlay'),
+  clipOverlayToggle: document.getElementById('clipOverlayToggle'),
+  clipPlayerCard: document.getElementById('clipPlayerCard'),
+  clipPlayerTitle: document.getElementById('clipPlayerTitle'),
+  clipPlayerClose: document.getElementById('clipPlayerClose'),
+  clipTimeline: document.getElementById('clipTimeline'),
+  clipTimelineBar: document.getElementById('clipTimelineBar'),
+  clipTimelineLegend: document.getElementById('clipTimelineLegend'),
+  videoModalDownload: document.getElementById('videoModalDownload'),
+  videoModalSubtitle: document.getElementById('videoModalSubtitle'),
 };
 
 // SOUND_CLASS_IDS, isSoundLabel, isMotionOnlyAlertGroup, isMotionOnlyAlertItem,
@@ -26,6 +35,15 @@ const els = {
 let alertGroups = [];
 let activeFilter = 'all';
 let activeRange = 'today';
+
+// ─── Inline clip player state ─────────────────────────────────────────────
+let activeRecording = null;
+let overlayEnabled = true;
+let overlayRafId = null;
+let overlayVfcHandle = null;
+let overlayResizeObserver = null;
+let _frameDuration = 1 / 30;
+let configuredLabels = null;
 
 function dateDaysAgo(days) {
   const d = new Date();
@@ -108,7 +126,7 @@ function soundIcon() {
 function recordingLink(recordingId, label) {
   if (!recordingId) return '';
   const playIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg>';
-  return `<a class="secondary activity-item-action" href="/recordings?recording_id=${encodeURIComponent(recordingId)}">${playIcon} ${escapeHtml(label)}</a>`;
+  return `<button class="secondary activity-item-action" data-play-recording="${encodeURIComponent(recordingId)}" type="button">${playIcon} ${escapeHtml(label)}</button>`;
 }
 
 function cameraLabel(cameraName, cameraId) {
@@ -264,6 +282,14 @@ function bindActions() {
       }
     });
   });
+  // Inline play buttons: open the clip player above the feed card.
+  els.alertFeed.querySelectorAll('[data-play-recording]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      const id = button.dataset.playRecording;
+      if (id) playRecording(id);
+    });
+  });
 }
 
 // ─── Filter pills ───────────────────────────────────────────────────────────
@@ -329,6 +355,353 @@ els.dismissAllBtn?.addEventListener('click', async () => {
   }
 });
 
+// ─── Inline clip player ────────────────────────────────────────────────────
+
+function filterByConfiguredLabels(detections) {
+  if (!configuredLabels) return detections;
+  return detections.filter((d) => {
+    const label = String(d.label || '').trim().toLowerCase();
+    return configuredLabels.has(label) || (configuredLabels.has('motion') && label === 'motion');
+  });
+}
+
+function clearClipOverlay() {
+  if (!els.clipOverlay) return;
+  const context = els.clipOverlay.getContext('2d');
+  if (!context) return;
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.clearRect(0, 0, els.clipOverlay.width, els.clipOverlay.height);
+}
+
+function recordingTrack() {
+  return Array.isArray(activeRecording?.track) && activeRecording.track.length ? activeRecording.track : null;
+}
+
+function overlayShouldAnimate() {
+  return overlayEnabled;
+}
+
+function startOverlayRaf() {
+  const video = els.clipPlayer;
+  if (!video) return;
+  const useVfc = typeof video.requestVideoFrameCallback === 'function';
+  let prevVfcTime = 0;
+  function onVfcFrame(now, metadata) {
+    if (!els.clipPlayer || els.clipPlayer.paused || !overlayShouldAnimate()) {
+      overlayRafId = null;
+      overlayVfcHandle = null;
+      return;
+    }
+    const mediaTime = metadata && typeof metadata.mediaTime === 'number' ? metadata.mediaTime : null;
+    if (mediaTime !== null && prevVfcTime > 0) {
+      const dt = mediaTime - prevVfcTime;
+      if (dt >= 0.01 && dt <= 0.2) _frameDuration = dt;
+    }
+    if (mediaTime !== null) prevVfcTime = mediaTime;
+    drawClipOverlay(mediaTime);
+    overlayVfcHandle = video.requestVideoFrameCallback(onVfcFrame);
+  }
+  function onRafFrame() {
+    if (!els.clipPlayer || els.clipPlayer.paused || !overlayShouldAnimate()) {
+      overlayRafId = null;
+      return;
+    }
+    drawClipOverlay();
+    overlayRafId = requestAnimationFrame(onRafFrame);
+  }
+  if (useVfc) {
+    if (overlayVfcHandle !== null) return;
+    overlayVfcHandle = video.requestVideoFrameCallback(onVfcFrame);
+  } else {
+    if (overlayRafId !== null) return;
+    overlayRafId = requestAnimationFrame(onRafFrame);
+  }
+}
+
+function stopOverlayRaf() {
+  if (overlayVfcHandle !== null && els.clipPlayer && typeof els.clipPlayer.cancelVideoFrameCallback === 'function') {
+    els.clipPlayer.cancelVideoFrameCallback(overlayVfcHandle);
+    overlayVfcHandle = null;
+  }
+  if (overlayRafId !== null) {
+    cancelAnimationFrame(overlayRafId);
+    overlayRafId = null;
+  }
+}
+
+function drawClipOverlay(vfcMediaTime) {
+  if (!els.clipOverlay || !els.clipPlayer) return;
+  if (!overlayEnabled) {
+    clearClipOverlay();
+    return;
+  }
+  resizeOverlayCanvas(els.clipOverlay, els.clipPlayer);
+  const context = els.clipOverlay.getContext('2d');
+  if (!context) return;
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.clearRect(0, 0, els.clipOverlay.width, els.clipOverlay.height);
+  let playerTime;
+  if (typeof vfcMediaTime === 'number' && Number.isFinite(vfcMediaTime)) {
+    playerTime = vfcMediaTime + _frameDuration;
+  } else {
+    playerTime = Number(els.clipPlayer.currentTime || 0) + _frameDuration;
+  }
+  const track = recordingTrack();
+  if (track) {
+    const tracked = filterByConfiguredLabels(sampleTrackAtTime(track, playerTime));
+    if (tracked.length) drawDetectionBoxesOnCanvas(els.clipOverlay, tracked, els.clipPlayer);
+    return;
+  }
+  if (activeRecording && !activeRecording.detections?.length) return;
+  const allEventDetections = Array.isArray(activeRecording?.detections) ? activeRecording.detections : [];
+  if (!allEventDetections.length) return;
+  const eventDetections = filterByConfiguredLabels(allEventDetections);
+  if (!eventDetections.length) return;
+  drawDetectionBoxesOnCanvas(els.clipOverlay, eventDetections, els.clipPlayer);
+}
+
+function renderRecordingDetails(recording) {
+  const detections = (recording.detections || []);
+  const isSound = isSoundRecording(recording);
+  const isMotionOnly = isMotionOnlyRecording(recording);
+  let detectionBadges;
+  let detectionLabel;
+  if (isMotionOnly) {
+    detectionLabel = 'Motion';
+    detectionBadges = motionPill(motionConfidenceFor(recording));
+  } else if (isSound) {
+    detectionLabel = 'Sound';
+    detectionBadges = detections.length
+      ? detections.map((d) => detectionPill(d.label, d.confidence, true)).join(' ')
+      : 'none';
+  } else {
+    detectionLabel = 'Detections';
+    detectionBadges = detections.length
+      ? detections.map((d) => detectionPill(d.label, d.confidence)).join(' ')
+      : 'none';
+  }
+  const zones = recordingZoneNames(recording);
+  const zoneRow = zones.length
+    ? safeHtml`<div><span>Zone</span><strong>${zones.join(', ')}</strong></div>`
+    : '';
+  const detailRows = [
+    safeHtml`<div><span>Recording</span><strong>#${recording.id}</strong></div>`,
+    safeHtml`<div><span>Event</span><strong>${recording.event_id || 'none'}</strong></div>`,
+    safeHtml`<div><span>Camera</span><strong>${recordingCameraLabel(recording)}</strong></div>`,
+    zoneRow,
+    safeHtml`<div><span>Trigger</span><strong>${recordingDisplayTrigger(recording)}</strong></div>`,
+    safeHtml`<div><span>Started</span><strong>${formatDateTime(recording.started_at)}</strong></div>`,
+    safeHtml`<div><span>Duration</span><strong>${Number(recording.duration_seconds || 0).toFixed(1)}s</strong></div>`,
+  ].filter(Boolean);
+  els.recordingDetails.innerHTML = detailRows.join('');
+  els.recordingDetails.insertAdjacentHTML(
+    'beforeend',
+    `<div class="wide"><span>${escapeHtml(detectionLabel)}</span><strong class="recording-detail-detections">${detectionBadges}</strong></div>`,
+  );
+}
+
+function recordingCameraLabel(recording) {
+  const metadata = recording?.event?.metadata || {};
+  return metadata.camera_name || recording.camera_id || recording.source || 'unknown';
+}
+
+function recordingDisplayTrigger(recording) {
+  if (isSoundRecording(recording)) {
+    const meta = recording.event?.metadata || {};
+    const classLabel = meta.class_label || meta.label || recording.trigger_label || 'sound';
+    return `\u{1F50A} ${titleCase(classLabel)}`;
+  }
+  const triggerType = recordingTriggerType(recording);
+  const triggerLabel = recordingTriggerLabel(recording);
+  if (triggerLabel && triggerLabel !== triggerType) return `${triggerType} \u00b7 ${triggerLabel}`;
+  return triggerLabel || triggerType;
+}
+
+// ── Clip segment timeline ───────────────────────────────────────────────────
+
+function clipAuthoritativeDuration() {
+  const videoDuration = Number(els.clipPlayer?.duration);
+  if (Number.isFinite(videoDuration) && videoDuration > 0) return videoDuration;
+  const metaDuration = Number(activeRecording?.duration_seconds);
+  return Number.isFinite(metaDuration) && metaDuration > 0 ? metaDuration : 0;
+}
+
+function clipEventBounds(track) {
+  if (!Array.isArray(track) || !track.length) return null;
+  let first = null;
+  let last = null;
+  for (const sample of track) {
+    if (!sample || !Array.isArray(sample.detections) || !sample.detections.length) continue;
+    const t = Number(sample.t);
+    if (!Number.isFinite(t) || t < 0) continue;
+    if (first === null) first = t;
+    last = t;
+  }
+  return first === null ? null : { first, last };
+}
+
+function fmtClipSeconds(seconds) {
+  const s = Math.max(0, Number(seconds) || 0);
+  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
+  return `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+}
+
+function resetClipTimeline() {
+  if (!els.clipTimeline) return;
+  els.clipTimeline.hidden = true;
+  if (els.clipTimelineBar) els.clipTimelineBar.innerHTML = '';
+  if (els.clipTimelineLegend) els.clipTimelineLegend.innerHTML = '';
+}
+
+function renderClipTimeline() {
+  if (!els.clipTimeline || !els.clipTimelineBar) return;
+  const duration = clipAuthoritativeDuration();
+  const track = Array.isArray(activeRecording?.track) ? activeRecording.track : null;
+  const bounds = clipEventBounds(track);
+  if (!duration || !bounds) {
+    resetClipTimeline();
+    return;
+  }
+  const first = Math.max(0, Math.min(bounds.first, duration));
+  const last = Math.min(Math.max(bounds.last, first), duration);
+  const pct = (value) => `${Math.max(0, Math.min(100, (value / duration) * 100))}%`;
+  const segments = [
+    { cls: 'pre', label: 'Pre-roll', start: 0, end: first },
+    { cls: 'event', label: 'Event', start: first, end: last },
+    { cls: 'tail', label: 'Tail', start: last, end: duration },
+  ];
+  els.clipTimelineBar.innerHTML = '';
+  for (const seg of segments) {
+    const span = seg.end - seg.start;
+    if (span <= 0.05) continue;
+    const div = document.createElement('div');
+    div.className = `clip-seg clip-seg-${seg.cls}`;
+    div.style.left = pct(seg.start);
+    div.style.width = pct(span);
+    div.title = `${seg.label}: ${fmtClipSeconds(span)}`;
+    els.clipTimelineBar.appendChild(div);
+  }
+  const marker = document.createElement('div');
+  marker.className = 'clip-trigger-marker';
+  marker.style.left = pct(first);
+  marker.title = `Event trigger at ${fmtClipSeconds(first)}`;
+  els.clipTimelineBar.appendChild(marker);
+  const playhead = document.createElement('div');
+  playhead.className = 'clip-playhead';
+  playhead.id = 'clipPlayhead';
+  els.clipTimelineBar.appendChild(playhead);
+  const legendItems = [
+    { cls: 'pre', label: 'Pre-roll', secs: first },
+    { cls: 'event', label: 'Event', secs: last - first },
+    { cls: 'tail', label: 'Tail', secs: duration - last },
+  ];
+  els.clipTimelineLegend.innerHTML = '';
+  for (const item of legendItems) {
+    const wrap = document.createElement('span');
+    wrap.className = 'clip-legend-item';
+    const swatch = document.createElement('i');
+    swatch.className = `clip-legend-swatch clip-seg-${item.cls}`;
+    wrap.appendChild(swatch);
+    wrap.appendChild(document.createTextNode(`${item.label} ${fmtClipSeconds(Math.max(0, item.secs))}`));
+    els.clipTimelineLegend.appendChild(wrap);
+  }
+  els.clipTimeline.hidden = false;
+  els.clipTimelineBar.setAttribute('aria-valuemax', duration.toFixed(1));
+  updateClipTimelinePlayhead();
+}
+
+function updateClipTimelinePlayhead() {
+  if (!els.clipTimeline || els.clipTimeline.hidden) return;
+  const duration = clipAuthoritativeDuration();
+  if (!duration) return;
+  const playhead = document.getElementById('clipPlayhead');
+  if (!playhead) return;
+  const current = Number(els.clipPlayer?.currentTime) || 0;
+  playhead.style.left = `${Math.max(0, Math.min(100, (current / duration) * 100))}%`;
+  els.clipTimelineBar?.setAttribute('aria-valuenow', current.toFixed(1));
+}
+
+function seekClipFromClientX(clientX) {
+  if (!els.clipTimelineBar || !els.clipPlayer) return;
+  const duration = clipAuthoritativeDuration();
+  if (!duration) return;
+  const rect = els.clipTimelineBar.getBoundingClientRect();
+  if (rect.width <= 0) return;
+  const fraction = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  try {
+    els.clipPlayer.currentTime = fraction * duration;
+  } catch (_error) {
+    /* not seekable yet */
+  }
+  updateClipTimelinePlayhead();
+}
+
+function showInlinePlayer() {
+  if (els.clipPlayerCard) {
+    els.clipPlayerCard.hidden = false;
+    els.clipPlayerCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function hideInlinePlayer() {
+  if (els.clipPlayerCard) els.clipPlayerCard.hidden = true;
+  if (els.clipPlayer) {
+    els.clipPlayer.pause();
+    stopOverlayRaf();
+    els.clipPlayer.removeAttribute('src');
+    els.clipPlayer.load();
+  }
+  clearClipOverlay();
+  resetClipTimeline();
+  activeRecording = null;
+  if (els.clipPlayerStatus) els.clipPlayerStatus.textContent = '';
+  if (els.recordingDetails) els.recordingDetails.innerHTML = '';
+  if (els.clipPlayerTitle) els.clipPlayerTitle.textContent = 'Recording';
+  if (els.videoModalSubtitle) els.videoModalSubtitle.textContent = 'Watch a recording and review its detection details.';
+}
+
+async function playRecording(id) {
+  const recording = await api(`/api/recordings/${id}`);
+  activeRecording = recording;
+  renderRecordingDetails(recording);
+  if (els.clipPlayerTitle) els.clipPlayerTitle.textContent = `Recording #${recording.id}`;
+  if (els.videoModalSubtitle) {
+    const started = formatDateTime(recording.started_at);
+    const camera = recordingCameraLabel(recording);
+    els.videoModalSubtitle.textContent = started
+      ? `Recording from ${camera} captured ${started}.`
+      : `Recording from ${camera}.`;
+  }
+  resetClipTimeline();
+  showInlinePlayer();
+  if (recording.media_ready === false) {
+    clearClipOverlay();
+    els.clipPlayerStatus.textContent = `Recording #${id} is still being prepared.`;
+    return;
+  }
+  if (els.videoModalDownload) {
+    els.videoModalDownload.href = `/api/recordings/${id}/download`;
+    els.videoModalDownload.hidden = false;
+  }
+  els.clipPlayer.pause();
+  els.clipPlayer.removeAttribute('src');
+  els.clipPlayer.load();
+  els.clipPlayer.src = `/api/recordings/${id}/stream?t=${Date.now()}`;
+  drawClipOverlay();
+  els.clipPlayerStatus.textContent = `Loading recording #${id}...`;
+  try {
+    els.clipPlayer.load();
+    await els.clipPlayer.play();
+    els.clipPlayerStatus.textContent = `Playing recording #${id}.`;
+  } catch (error) {
+    if (['AbortError', 'NotAllowedError'].includes(error?.name)) {
+      els.clipPlayerStatus.textContent = `Recording #${id} loaded.`;
+      return;
+    }
+    els.clipPlayerStatus.textContent = `Unable to play recording #${id}: ${error?.message || 'media playback failed'}.`;
+  }
+}
+
 // ─── Auth ────────────────────────────────────────────────────────────────────
 async function loadAuth() {
   await window.daygleAuthReady;
@@ -343,6 +716,75 @@ function updateDismissBtn() {
 window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
   renderFeed();
 };
+
+// ─── Clip player event listeners ───────────────────────────────────────────
+els.clipPlayerClose?.addEventListener('click', () => hideInlinePlayer());
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !els.clipPlayerCard?.hidden) hideInlinePlayer();
+});
+
+if (els.clipPlayer) {
+  els.clipPlayer.addEventListener('error', () => {
+    const error = els.clipPlayer.error;
+    const messages = {
+      1: 'Playback was aborted.',
+      2: 'The recording could not be downloaded.',
+      3: 'The recording could not be decoded by this browser.',
+      4: 'The recording format is not supported by this browser.',
+    };
+    clearClipOverlay();
+    els.clipPlayerStatus.textContent = messages[error?.code] || 'Unable to play this recording.';
+  });
+
+  ['loadedmetadata', 'loadeddata', 'pause', 'seeked'].forEach((eventName) => {
+    els.clipPlayer.addEventListener(eventName, () => {
+      drawClipOverlay();
+    });
+  });
+
+  els.clipPlayer.addEventListener('loadedmetadata', renderClipTimeline);
+  ['timeupdate', 'seeked', 'play'].forEach((eventName) => {
+    els.clipPlayer.addEventListener(eventName, updateClipTimelinePlayhead);
+  });
+
+  if (els.clipTimelineBar) {
+    els.clipTimelineBar.addEventListener('click', (event) => seekClipFromClientX(event.clientX));
+  }
+
+  els.clipPlayer.addEventListener('play', () => {
+    if (overlayShouldAnimate()) startOverlayRaf();
+    drawClipOverlay();
+  });
+
+  els.clipPlayer.addEventListener('pause', () => {
+    stopOverlayRaf();
+    drawClipOverlay();
+  });
+
+  window.addEventListener('resize', drawClipOverlay);
+
+  if ('ResizeObserver' in window) {
+    overlayResizeObserver = new ResizeObserver(drawClipOverlay);
+    overlayResizeObserver.observe(els.clipPlayer);
+  }
+
+  if (els.clipOverlayToggle) {
+    const savedValue = localStorage.getItem(RECORDINGS_OVERLAY_TOGGLE_KEY);
+    overlayEnabled = savedValue !== '0';
+    els.clipOverlayToggle.checked = overlayEnabled;
+    els.clipOverlayToggle.addEventListener('change', () => {
+      overlayEnabled = Boolean(els.clipOverlayToggle.checked);
+      localStorage.setItem(RECORDINGS_OVERLAY_TOGGLE_KEY, overlayEnabled ? '1' : '0');
+      if (els.clipPlayer && !els.clipPlayer.paused && overlayShouldAnimate()) {
+        startOverlayRaf();
+      } else if (!overlayEnabled) {
+        stopOverlayRaf();
+      }
+      drawClipOverlay();
+    });
+  }
+}
 
 loadAuth()
   .then(async () => {
