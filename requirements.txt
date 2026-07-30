@@ -9,7 +9,7 @@ onnxruntime>=1.18,<2.0
 onnx>=1.16,<2.0
 # torch.onnx._internal.exporter (used by Ultralytics YOLO.export)
 # imports onnxscript at module load; not pulled in by ``onnx`` itself.
-onnxscript>=0.5,<1.0
+onnxscript>=0.7.1,<1.0
 # Round-9 H1a: exact-pin the in-house known-good SDK release. The B3
 # (R6) decision to rely on the Ultralytics SDK + pip TLS for ONNX
 # delivery integrity assumes a single verified release. A minor-version
