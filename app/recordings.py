@@ -1677,6 +1677,45 @@ class RecordingService:
         return True
 
     @staticmethod
+    def grab_frame_from_url(stream_url: str, timeout_seconds: float = 8.0) -> bytes | None:
+        """Grab a single JPEG frame from an RTSP stream URL using ffmpeg.
+
+        Used by the Live page to show a preview of the recording stream
+        so operators can verify the high-res stream is working. Captures
+        one frame via ffmpeg and returns the JPEG bytes, or None on failure.
+        """
+        ffmpeg = shutil.which('ffmpeg')
+        if not ffmpeg:
+            return None
+        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        try:
+            command = [
+                ffmpeg,
+                '-y',
+                '-rtsp_transport', 'tcp',
+                '-i', stream_url,
+                '-vframes', '1',
+                '-q:v', '2',
+                '-f', 'image2',
+                str(tmp_path),
+            ]
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                check=False,
+            )
+            if result.returncode == 0 and tmp_path.exists() and tmp_path.stat().st_size > 0:
+                return tmp_path.read_bytes()
+            return None
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    @staticmethod
     def redact_stream_credentials(message: str) -> str:
         return re.sub(r'(rtsps?://[^:\s/@]+):[^@]+@', r'\1:***@', message)
 

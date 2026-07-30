@@ -18,6 +18,7 @@ const liveEls = {
   statRuleCount: document.getElementById('statRuleCount'),
   statAlertRules: document.getElementById('statAlertRules'),
   statCameraName: document.getElementById('statCameraName'),
+  liveStreamSelect: document.getElementById('liveStreamSelect'),
   liveAiTrackToggle: document.getElementById('liveAiTrackToggle'),
   liveAiTrackGroup: document.getElementById('liveAiTrackGroup'),
   liveAiTrackCanvas: document.getElementById('liveAiTrackCanvas'),
@@ -61,9 +62,11 @@ let selectedCamera = null;
 
 let configuredLabels = null;
 
-// LIVE_AI_TRACK_KEY now lives in web/utils.js (exposed on window.daygleUi and
+// STREAM_SOURCE_KEY now lives in web/utils.js (exposed on window.daygleUi and
 // visible as a bare global constant). This page used to redeclare it locally,
 // which forced every consumer to look in three places for the same string.
+const LIVE_STREAM_KEY = 'daygle.live.stream';
+let liveStreamSource = 'detection';
 // On by default; users can opt out per-browser via the toggle. The overlay only
 // replays the background monitor's detections (already computed server-side
 // for alerts/recording), so it never runs its own inference and adds no
@@ -458,7 +461,8 @@ function normalizeLabelList(value) {
 
 function snapshotUrl(camera = selectedCamera) {
   const cameraId = encodeURIComponent(camera?.id || '');
-  return `/api/live/snapshot?camera_id=${cameraId}&t=${Date.now()}`;
+  const streamParam = liveStreamSource === 'recording' ? '&stream=recording' : '';
+  return `/api/live/snapshot?camera_id=${cameraId}&t=${Date.now()}${streamParam}`;
 }
 
 function isAllCameraMode() {
@@ -810,6 +814,22 @@ function setSelectedCamera(cameraId) {
   refreshFrame();
   refreshDetectionStatus();
   updatePtzVisibility();
+  updateStreamOptions();
+}
+
+function updateStreamOptions() {
+  if (!liveEls.liveStreamSelect) return;
+  let recOption = liveEls.liveStreamSelect.querySelector('option[value="recording"]');
+  if (recOption) {
+    let hasRecPath = !!(selectedCamera?.recording_stream_path);
+    recOption.hidden = !hasRecPath;
+    // If recording was selected but camera has no recording stream, fall back to detection
+    if (liveStreamSource === 'recording' && !hasRecPath) {
+      liveStreamSource = 'detection';
+      liveEls.liveStreamSelect.value = 'detection';
+      refreshFrame();
+    }
+  }
 }
 
 function renderCameraOptions() {
@@ -837,9 +857,10 @@ liveEls.frame.addEventListener('load', () => {
 liveEls.frame.addEventListener('error', () => {
   liveEls.frame.dataset.loading = 'false';
   clearLiveOverlay();
+  const streamLabel = liveStreamSource === 'recording' ? 'Recording stream' : '';
   liveEls.status.textContent = selectedCamera?.name
-    ? `${selectedCamera.name} - Unable to load live footage. Retrying...`
-    : 'Unable to load live footage. Retrying...';
+    ? `${selectedCamera.name} - ${streamLabel || 'Unable to load live footage'}. Retrying...`
+    : `${streamLabel || 'Unable to load live footage'}. Retrying...`;
   liveEls.status.classList.add('live-status-offline');
   liveEls.status.classList.remove('live-status-online');
   if (liveEls.pulse) {
@@ -874,6 +895,16 @@ if (liveEls.liveAiTrackToggle) {
 }
 
 liveEls.cameraSelect.addEventListener('change', () => setSelectedCamera(liveEls.cameraSelect.value));
+if (liveEls.liveStreamSelect) {
+  const saved = localStorage.getItem(LIVE_STREAM_KEY);
+  if (saved === 'recording') liveStreamSource = 'recording';
+  liveEls.liveStreamSelect.value = liveStreamSource;
+  liveEls.liveStreamSelect.addEventListener('change', () => {
+    liveStreamSource = liveEls.liveStreamSelect.value;
+    localStorage.setItem(LIVE_STREAM_KEY, liveStreamSource);
+    refreshFrame();
+  });
+}
 document.querySelectorAll('[data-view-mode]').forEach((btn) => {
   btn.addEventListener('click', () => {
     viewMode = btn.dataset.viewMode;

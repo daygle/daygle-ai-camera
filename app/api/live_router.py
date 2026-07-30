@@ -68,12 +68,26 @@ def live_motion_history(request: Request, camera_id: str | None = None, window_s
 
 
 @router.get('/api/live/snapshot')
-def live_snapshot(request: Request, camera_id: str | None = None, recording_service=Depends(get_recording_service)):
+def live_snapshot(request: Request, camera_id: str | None = None, stream: str = 'detection', recording_service=Depends(get_recording_service)):
     # M1 fix: defence-in-depth handler gate (mirror
     # ``live_detection_status_api`` / ``live_motion_history``).
     require_user(request)
     selected_config = get_camera_config(camera_id)
     resolved_id = str(selected_config.get('id') or camera_id or '')
+
+    # When stream=recording and a recording_stream_path is configured, grab a
+    # single frame directly from the recording stream so operators can verify
+    # the high-res stream is working from the Live page.
+    if stream == 'recording':
+        from app.utils import build_recording_stream_url
+        rec_url = build_recording_stream_url(selected_config)
+        if rec_url:
+            frame_bytes = recording_service.grab_frame_from_url(rec_url)
+            if frame_bytes is not None:
+                return Response(content=frame_bytes, media_type='image/jpeg')
+            raise HTTPException(status_code=503, detail='Could not grab a frame from the recording stream. Verify the Recording Stream Path in Camera Settings.')
+        # Fall through to detection stream when no recording stream is configured
+
     has_stream = bool(resolved_id and build_stream_url(selected_config))
     if has_stream:
         sample = recording_service.latest_frame_jpeg(resolved_id)
