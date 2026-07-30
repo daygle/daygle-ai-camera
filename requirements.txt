@@ -6,7 +6,7 @@ numpy>=1.26,<3.0
 # For GPU/CUDA inference set DAYGLE_ONNXRUNTIME_VARIANT=gpu before running
 # install_python_deps.sh - that installs onnxruntime-gpu instead.
 onnxruntime>=1.18,<2.0
-onnx>=1.16,<2.0
+onnx>=1.22.0,<2.0
 # torch.onnx._internal.exporter (used by Ultralytics YOLO.export)
 # imports onnxscript at module load; not pulled in by ``onnx`` itself.
 onnxscript>=0.7.1,<1.0
