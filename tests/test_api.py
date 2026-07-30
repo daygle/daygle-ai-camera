@@ -3141,7 +3141,7 @@ def test_email_alert_subject_lists_all_triggered_labels():
 
         assert len(sent_messages) == 2, 'expected one email per matching rule'
         for message in sent_messages:
-            assert message['Subject'] == 'Daygle AI Camera alert: Cat, Person detected (Front Door)'
+            assert message['Subject'] == 'Daygle AI Camera Alert: Cat, Person detected (Front Door)'
             # Walk the multipart tree to find the html part. get_payload() may
             # return a flat list of parts (multipart/alternative) or a nested
             # Message with its own walk() (multipart/related).
