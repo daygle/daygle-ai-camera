@@ -176,18 +176,20 @@ function wireEditFormHandlers(index) {
   var formId = 'edit-form-' + index;
   var form = document.getElementById(formId);
   if (!form) return;
+  var panel = form.closest('.camera-edit-panel');
+  if (!panel) return;
 
-  // Tab switching
-  form.querySelectorAll('.modal-tab').forEach(function(tab) {
+  // Tab switching - tabs are siblings of the form, so query from the panel
+  panel.querySelectorAll('.modal-tab').forEach(function(tab) {
     tab.addEventListener('click', function() {
       var tabName = tab.dataset.tab;
-      form.querySelectorAll('.modal-tab').forEach(function(t) {
+      panel.querySelectorAll('.modal-tab').forEach(function(t) {
         var active = t.dataset.tab === tabName;
         t.classList.toggle('active', active);
         t.setAttribute('aria-selected', String(active));
       });
-      form.querySelectorAll('.modal-tab-panel').forEach(function(panel) {
-        panel.hidden = panel.dataset.panel !== tabName;
+      form.querySelectorAll('.modal-tab-panel').forEach(function(panelEl) {
+        panelEl.hidden = panelEl.dataset.panel !== tabName;
       });
     });
   });
