@@ -612,6 +612,7 @@ textarea {
   row-gap: 16px;
   margin-top: 16px;
 }
+.form-grid-hint { margin-bottom: 14px; }
 .form-grid label { display: grid; gap: 8px; min-width: 0; color: var(--muted); font-weight: 800; }
 .form-grid label > span:first-child { font-weight: 500; }
 .form-grid > input,

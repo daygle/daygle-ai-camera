@@ -166,24 +166,21 @@
         </div>
       </div>
       <form id="storageSettingsForm">
-        <details class="settings-advanced">
-          <summary>Advanced: on-disk data directories</summary>
-          <p class="settings-advanced-hint">Set at install time and rarely changed. Paths are restricted to the application data directory and take effect after saving.</p>
-          <div class="form-grid">
-            <label>
-              <span>Data Directory <span class="info-tip" data-tip="Root directory for all application data. Default: data" title="Root directory for all application data. Default: data" tabindex="0" aria-label="Help: Root directory for all application data. Default: data"></span></span>
-              <input name="data_dir" placeholder="/opt/daygle/data" /></label>
-            <label>
-              <span>Snapshots Directory <span class="info-tip" data-tip="Where event snapshot images are saved. Default: data/snapshots" title="Where event snapshot images are saved. Default: data/snapshots" tabindex="0" aria-label="Help: Where event snapshot images are saved. Default: data/snapshots"></span></span>
-              <input name="snapshots_dir" placeholder="/opt/daygle/data/snapshots" /></label>
-            <label>
-              <span>Events Directory <span class="info-tip" data-tip="Where event clip videos are saved. Default: data/events" title="Where event clip videos are saved. Default: data/events" tabindex="0" aria-label="Help: Where event clip videos are saved. Default: data/events"></span></span>
-              <input name="events_dir" placeholder="/opt/daygle/data/events" /></label>
-            <label>
-              <span>Recordings Directory <span class="info-tip" data-tip="Where continuous recordings are saved. Default: data/recordings" title="Where continuous recordings are saved. Default: data/recordings" tabindex="0" aria-label="Help: Where continuous recordings are saved. Default: data/recordings"></span></span>
-              <input name="recordings_dir" placeholder="/opt/daygle/data/recordings" /></label>
-          </div>
-        </details>
+        <p class="settings-section-subtitle form-grid-hint">Set at install time and rarely changed. Paths are restricted to the application data directory and take effect after saving.</p>
+        <div class="form-grid">
+          <label>
+            <span>Data Directory <span class="info-tip" data-tip="Root directory for all application data. Default: data" title="Root directory for all application data. Default: data" tabindex="0" aria-label="Help: Root directory for all application data. Default: data"></span></span>
+            <input name="data_dir" placeholder="/opt/daygle/data" /></label>
+          <label>
+            <span>Snapshots Directory <span class="info-tip" data-tip="Where event snapshot images are saved. Default: data/snapshots" title="Where event snapshot images are saved. Default: data/snapshots" tabindex="0" aria-label="Help: Where event snapshot images are saved. Default: data/snapshots"></span></span>
+            <input name="snapshots_dir" placeholder="/opt/daygle/data/snapshots" /></label>
+          <label>
+            <span>Events Directory <span class="info-tip" data-tip="Where event clip videos are saved. Default: data/events" title="Where event clip videos are saved. Default: data/events" tabindex="0" aria-label="Help: Where event clip videos are saved. Default: data/events"></span></span>
+            <input name="events_dir" placeholder="/opt/daygle/data/events" /></label>
+          <label>
+            <span>Recordings Directory <span class="info-tip" data-tip="Where continuous recordings are saved. Default: data/recordings" title="Where continuous recordings are saved. Default: data/recordings" tabindex="0" aria-label="Help: Where continuous recordings are saved. Default: data/recordings"></span></span>
+            <input name="recordings_dir" placeholder="/opt/daygle/data/recordings" /></label>
+        </div>
       </form>
       <div class="button-row">
         <button type="submit" form="storageSettingsForm">Save Storage</button>
