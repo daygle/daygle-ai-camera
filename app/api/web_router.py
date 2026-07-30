@@ -233,9 +233,9 @@ def recording_playback_page(recording_id: str, web_dir: Path = Depends(get_web_d
     # require_admin) so viewers can watch. The client reads the id from the URL.
     if not recording_id.isdigit():
         raise HTTPException(status_code=404, detail='Not found')
-    playback_path = web_dir / 'playback.html'
-    if playback_path.exists():
-        return FileResponse(playback_path)
+    recordings_path = web_dir / 'recordings.html'
+    if recordings_path.exists():
+        return FileResponse(recordings_path)
     return root(web_dir=web_dir)
 
 

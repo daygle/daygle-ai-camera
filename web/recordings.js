@@ -15,11 +15,13 @@ const els = {
   deleteAllRecordingsBtn: document.getElementById('deleteAllRecordingsBtn'),
   clipOverlay: document.getElementById('clipOverlay'),
   clipOverlayToggle: document.getElementById('clipOverlayToggle'),
+  clipPlayerCard: document.getElementById('clipPlayerCard'),
+  clipPlayerTitle: document.getElementById('clipPlayerTitle'),
+  clipPlayerClose: document.getElementById('clipPlayerClose'),
   clipTimeline: document.getElementById('clipTimeline'),
   clipTimelineBar: document.getElementById('clipTimelineBar'),
   clipTimelineLegend: document.getElementById('clipTimelineLegend'),
-  videoModal: document.getElementById('videoModal'),
-  videoModalClose: document.getElementById('videoModalClose'),
+  // Download button and subtitle live in the inline player card.
   videoModalDownload: document.getElementById('videoModalDownload'),
   videoModalSubtitle: document.getElementById('videoModalSubtitle'),
   listStatus: document.getElementById('listStatus'),
@@ -82,10 +84,9 @@ let configuredLabels = null; // null = no filter loaded yet
 //    are stripped), and
 //  * the trigger type wasn't the always-on / disabled placeholders
 //    ('continuous', 'none', 'off') so we don't accidentally label
-//    always-on clips as motion recordings.
-// isMotionOnlyRecording + motionConfidenceFor live in web/utils.js so the
-// recordings list, the recordings playback modal, the timeline page and
-// the dashboard activity feed all share the same boundary.
+//    always-on clips as motion recordings.  // isMotionOnlyRecording + motionConfidenceFor live in web/utils.js so the
+  // recordings list, the timeline page and
+  // the dashboard activity feed all share the same boundary.
 
 // Kept page-local (not hoisted to utils.js): app.js and yamnet-tflite.js
 // define their own cameraLabel() with different signatures, and a shared
@@ -326,7 +327,7 @@ function renderRecordings(recordings) {
         </div>
         <div class="recording-row-actions">
           ${mediaReady
-            ? `<a class="secondary" href="/recordings/${recording.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg> Play</a>`
+            ? `<button class="secondary" data-play-recording="${recording.id}" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg> Play</button>`
             : '<button class="secondary" disabled><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Preparing...</button>'}
           <button class="secondary delete-btn" data-delete-recording="${recording.id}" aria-label="Delete recording #${recording.id}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
@@ -694,28 +695,27 @@ function nudgeClipTime(deltaSeconds) {
 }
 // ── End clip segment timeline ───────────────────────────────────────────────
 
-function openVideoModal() {
-  // On the dedicated /recordings/{id} page there is no modal — the player is
-  // rendered inline and always visible — so this is a no-op there.
-  if (!els.videoModal) return;
-  els.videoModal.hidden = false;
-  els.videoModalClose?.focus();
+function showInlinePlayer() {
+  if (els.clipPlayerCard) {
+    els.clipPlayerCard.hidden = false;
+    els.clipPlayerCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 }
 
-function closeVideoModal() {
-  if (!els.videoModal) return;
-  els.videoModal.hidden = true;
-  els.clipPlayer.pause();
-  stopOverlayRaf();
-  els.clipPlayer.removeAttribute('src');
-  els.clipPlayer.load();
-  els.videoModalDownload.hidden = true;
-  els.videoModalDownload.removeAttribute('href');
+function hideInlinePlayer() {
+  if (els.clipPlayerCard) els.clipPlayerCard.hidden = true;
+  if (els.clipPlayer) {
+    els.clipPlayer.pause();
+    stopOverlayRaf();
+    els.clipPlayer.removeAttribute('src');
+    els.clipPlayer.load();
+  }
   clearClipOverlay();
   resetClipTimeline();
   activeRecording = null;
-  els.clipPlayerStatus.textContent = '';
-  els.recordingDetails.innerHTML = '';
+  if (els.clipPlayerStatus) els.clipPlayerStatus.textContent = '';
+  if (els.recordingDetails) els.recordingDetails.innerHTML = '';
+  if (els.clipPlayerTitle) els.clipPlayerTitle.textContent = 'Recording';
   if (els.videoModalSubtitle) {
     els.videoModalSubtitle.textContent = 'Watch a recording and review its detection details.';
   }
@@ -733,14 +733,16 @@ async function playRecording(id) {
       : `Recording from ${camera}.`;
   }
   resetClipTimeline();
-  openVideoModal();
+  showInlinePlayer();
   if (recording.media_ready === false) {
     clearClipOverlay();
     els.clipPlayerStatus.textContent = `Recording #${id} is still being prepared.`;
     return;
   }
-  els.videoModalDownload.href = `/api/recordings/${id}/download`;
-  els.videoModalDownload.hidden = false;
+  if (els.videoModalDownload) {
+    els.videoModalDownload.href = `/api/recordings/${id}/download`;
+    els.videoModalDownload.hidden = false;
+  }
   els.clipPlayer.pause();
   els.clipPlayer.removeAttribute('src');
   els.clipPlayer.load();
@@ -762,8 +764,14 @@ async function playRecording(id) {
 }
 
 function bindRecordingButtons() {
-  // "Play" is now an anchor to /recordings/{id} (deep-linkable), so no click
-  // handler is wired for it here — only the delete action needs JS.
+  // Inline play buttons: open the clip player above the library card.
+  document.querySelectorAll('[data-play-recording]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      const id = button.dataset.playRecording;
+      if (id) playRecording(id);
+    });
+  });
   document.querySelectorAll('[data-delete-recording]').forEach((button) => {
     button.addEventListener('click', async () => {
       const id = button.dataset.deleteRecording;
@@ -1047,11 +1055,11 @@ function populateLabelFilterOptions(recordings) {
   els.labelFilter.value = availableValues.has(currentFilter) ? currentFilter : '';
 }
 
-els.videoModalClose?.addEventListener('click', () => closeVideoModal());
+els.clipPlayerClose?.addEventListener('click', () => hideInlinePlayer());
 
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && els.videoModal && !els.videoModal.hidden) closeVideoModal();
+  if (event.key === 'Escape' && !els.clipPlayerCard?.hidden) hideInlinePlayer();
 });
 
 // Re-render the recordings list (and any open modal's "Started" line) when
@@ -1071,30 +1079,24 @@ window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
 };
 
 const playbackPageMatch = window.location.pathname.match(/^\/recordings\/(\d+)$/);
-if (playbackPageMatch) {
-  // Dedicated playback page (/recordings/{id}): load the single recording and
-  // render it inline. loadLiveSettings feeds the overlay's configured-label
-  // filter exactly as it does on the list page.
-  loadAuth().then(async () => {
-    await loadLiveSettings();
-    await playRecording(playbackPageMatch[1]);
-  }).catch((error) => {
-    if (els.clipPlayerStatus) els.clipPlayerStatus.textContent = error.message;
-    window.showToast?.(error.message, true);
-  });
-} else {
-  // Recordings list page.
-  loadAuth().then(async () => {
-    await Promise.all([loadCameras(), loadLiveSettings()]);
-    await populateLabelFilterOptionsFromApi();
-    await loadRecordings();
-    // Preserve legacy ?recording_id= deep links by forwarding to the page.
-    const selected = new URLSearchParams(window.location.search).get('recording_id');
-    if (selected && /^\d+$/.test(String(selected))) {
-      window.location.assign(`/recordings/${encodeURIComponent(selected)}`);
-    }
-  }).catch((error) => {
-    if (els.listStatus) els.listStatus.textContent = error.message;
-    window.showToast?.(error.message, true);
-  });
+const deepLinkId = playbackPageMatch?.[1]
+  || new URLSearchParams(window.location.search).get('recording_id');
+const autoPlayId = deepLinkId && /^\d+$/.test(String(deepLinkId)) ? deepLinkId : null;
+// Clean up the URL when opened via /recordings/{id} deep link so a page
+// refresh re-shows the list rather than re-playing the clip.
+if (autoPlayId && playbackPageMatch) {
+  history.replaceState(null, '', '/recordings');
 }
+
+loadAuth().then(async () => {
+  await Promise.all([loadCameras(), loadLiveSettings()]);
+  await populateLabelFilterOptionsFromApi();
+  await loadRecordings();
+  // Auto-play the deep-linked recording inline above the library card.
+  if (autoPlayId) {
+    await playRecording(autoPlayId);
+  }
+}).catch((error) => {
+  if (els.listStatus) els.listStatus.textContent = error.message;
+  window.showToast?.(error.message, true);
+});
