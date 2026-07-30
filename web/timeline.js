@@ -5,13 +5,17 @@ const els = {
   toTime: null,   // populated by renderTimelineTimeSelects() below
   filterSelect: document.getElementById('timelineFilterSelect'),
   timelineLoadBtn: document.getElementById('timelineLoadBtn'),
-  timelineStatus: document.getElementById('timelineStatus'),
-  timelineStatusChip: document.getElementById('timelineStatusChip'),
-  timelineSummary: document.getElementById('timelineSummary'),
+  // The timeline visualisation now renders into two parallel cards
+  // (Objects + Sounds). Their per-card DOM refs live on TIMELINE_CARDS
+  // (populated by initTimelineCards() further down) so a single render
+  // call can fan out to both tracks without scattering element IDs
+  // through this map. Segment clicks also stream through document-level
+  // delegation so we don't keep a hand-bound listener per card.
+  // timelineLegend stays in els (returns null on the page since there's
+  // no #timelineLegend element any more) so tests/test_timeline_legend_js.test.js
+  // - which calls renderLegend() directly against an in-vm stub - can
+  // still write into the element it expects.
   timelineLegend: document.getElementById('timelineLegend'),
-  timelineHours: document.getElementById('timelineHours'),
-  timelineGrid: document.getElementById('timelineGrid'),
-  timelineRows: document.getElementById('timelineRows'),
   clipPlayer: document.getElementById('clipPlayer'),
   clipPlayerStatus: document.getElementById('clipPlayerStatus'),
   clipOverlay: document.getElementById('clipOverlay'),
@@ -58,6 +62,35 @@ function renderTimelineTimeSelects() {
 }
 
 renderTimelineTimeSelects();
+
+// ── Two-card timeline ────────────────────────────────────────────────────
+// /timeline now renders two parallel cards: an Objects track (motion +
+// detected objects) and a Sounds track. Both cards share the same Camera /
+// Day / Filter / From / To selectors above so they always represent the
+// same selected day in sync, and the page-level API call
+// (/api/recordings/timeline) returns the union of both. initTimelineCards()
+// binds each card's hours/grid/rows/status/statusChip to its data-*
+// attributes once at script load so renderTimelineForCard() can write into
+// one card without the other knowing about it.
+const TIMELINE_CARDS = [
+  { kind: 'object', root: null, hours: null, grid: null, rows: null, status: null, statusChip: null },
+  { kind: 'sound',  root: null, hours: null, grid: null, rows: null, status: null, statusChip: null },
+];
+
+function initTimelineCards() {
+  TIMELINE_CARDS.forEach((card) => {
+    const root = document.querySelector(`[data-timeline-card="${card.kind}"]`);
+    if (!root) return;
+    card.root = root;
+    card.hours = root.querySelector('[data-timeline-card-hours]');
+    card.grid = root.querySelector('[data-timeline-card-grid]');
+    card.rows = root.querySelector('[data-timeline-card-rows]');
+    card.status = root.querySelector('[data-timeline-card-status]');
+    card.statusChip = root.querySelector('[data-timeline-card-status-chip]');
+  });
+}
+
+initTimelineCards();
 
 // CSRF token and current user live on window.daygleAuth (loaded by
 // web/utils.js) and are populated by each page's loadAuth() via
@@ -577,33 +610,55 @@ function renderSummary(payload, totalRecordingCount) {
   }
 }
 
-function setTimelineStatusChip(state) {
-  if (!els.timelineStatusChip) return;
-  els.timelineStatusChip.textContent = state.label;
-  els.timelineStatusChip.className = 'chip ' + (
-    state.kind === 'empty' ? 'chip-warn' :
-    state.kind === 'error' ? 'chip-warn' :
-    state.kind === 'filtered' ? 'chip-info' :
+function setTimelineStatusChip(card, chipState) {
+  // chips used to be a single global element keyed off #timelineStatusChip;
+  // the visualisation now has two cards, each with its own chip, so the
+  // helper takes the card ref and writes into card.statusChip directly.
+  if (!card || !card.statusChip) return;
+  card.statusChip.textContent = chipState.label;
+  card.statusChip.className = 'chip ' + (
+    chipState.kind === 'empty' ? 'chip-warn' :
+    chipState.kind === 'error' ? 'chip-warn' :
+    chipState.kind === 'filtered' ? 'chip-info' :
     'chip-dim'
   );
 }
 
+// Fan-out error helper. Every error path used to write into one global
+// #timelineStatus / #timelineStatusChip element, but the page now has two
+// cards. reportTimelineError() mirrors the message onto both so each card's
+// chip flips to "Error" and a status blurb appears below each header
+// instead of silently blowing away only the first card.
+function reportTimelineError(message) {
+  TIMELINE_CARDS.forEach((card) => {
+    if (card.status) card.status.textContent = message;
+    setTimelineStatusChip(card, { kind: 'error', label: 'Error' });
+  });
+}
+
 function renderLegend(recordings) {
-  // The legend is a "what happened today" key: one chip per distinct object
-  // label, one per distinct sound class, plus a single Motion chip for
-  // motion-only clips. A multi-object recording therefore contributes a chip
-  // for every object it saw (e.g. Person AND Dog), not just its primary label,
-  // and every sound class gets its own chip rather than collapsing into one.
-  const unique = [];
+  // The legend is a "what happened today" key, but it now splits into two
+  // side-by-side buckets that mirror the rest of the timeline surface: an
+  // Objects group (Motion + every distinct detected-object label) and a
+  // Sounds group (one chip per distinct sound class). Users can tell at a
+  // glance which kind of trigger dominated the day without parsing every
+  // chip, and the group titles line up with the same two-bucket vocabulary
+  // the stats grid (statTriggers "X/Y objects/sounds") and the Filter
+  // dropdown's "Sound" / "Object" options already speak. A multi-object
+  // recording still contributes a chip for every object it saw (e.g.
+  // Person AND Dog), and every sound class still gets its own chip
+  // rather than collapsing into one.
+  const objectChips = [];
+  const soundChips = [];
   const seen = new Set();
-  const addChip = (dedupKey, label, color, kind) => {
+  const addChip = (group, dedupKey, label, color, kind) => {
     if (seen.has(dedupKey)) return;
     seen.add(dedupKey);
-    unique.push({ label, color, kind });
+    group.push({ label, color, kind });
   };
   recordings.forEach((recording) => {
     if (isMotionOnlyRecording(recording)) {
-      addChip('__motion__', 'Motion', colorForKey('__motion__'), 'motion');
+      addChip(objectChips, '__motion__', 'Motion', colorForKey('__motion__'), 'motion');
       return;
     }
     const isSound = isSoundRecording(recording);
@@ -622,29 +677,54 @@ function renderLegend(recordings) {
       // whole chip off isSoundRecording() alone let a sound label leak in as a
       // second "object" chip - the recurring Dog Bark legend duplicate.
       if (isSound || isSoundLabel(label)) {
-        addChip(`__sound__:${label}`, label, colorForKey('__sound__'), 'sound');
+        addChip(soundChips, `__sound__:${label}`, label, colorForKey('__sound__'), 'sound');
       } else {
-        addChip(label, label, colorForKey(label), 'object');
+        addChip(objectChips, label, label, colorForKey(label), 'object');
       }
     });
   });
-  if (!unique.length) {
+  if (!objectChips.length && !soundChips.length) {
     els.timelineLegend.innerHTML = '<p class="muted">No recordings match this filter for the selected day.</p>';
     return;
   }
-  els.timelineLegend.innerHTML = unique.map((item) => {
+  const renderChip = (item) => {
     // Reserve the dedicated icons so the legend reads the same as the
     // row + pill treatments on the other surfaces: speaker for sound,
     // running man for motion, eye for everything else.
     const labelText = item.kind === 'motion' ? 'Motion' : titleCase(item.label);
     const icon = item.kind === 'sound' ? '🔊' : item.kind === 'motion' ? DETECTION_MOTION_ICON : DETECTION_EYE_ICON;
     return `
-    <span class="timeline-legend-chip">
-      <span class="timeline-legend-swatch" style="background:${item.color}"></span>
-      ${icon} <span>${escapeHtml(labelText)}</span>
-    </span>
-  `;
-  }).join('');
+      <span class="timeline-legend-chip">
+        <span class="timeline-legend-swatch" style="background:${item.color}"></span>
+        ${icon} <span>${escapeHtml(labelText)}</span>
+      </span>
+    `;
+  };
+  // Render each non-empty group with its own small uppercase title. The
+  // Objects eyebrow uses the motion icon when a motion chip is present
+  // (otherwise the eye icon) so the section header matches the most
+  // recognisable child icon for that day; the Sounds eyebrow keeps the
+  // speaker icon since every Sound chip already uses it. Each group gets a
+  // role + aria-label so screen readers announce the two-bucket split the
+  // sighted UI shows, plus a small numeric badge next to the title that
+  // mirrors the "X/Y" count on the stats grid's Triggers card. Empty
+  // groups are skipped wholesale (avoids dangling headers when a day is
+  // all motion or all sound).
+  const objectEyebrowIcon = objectChips.some((chip) => chip.kind === 'motion') ? DETECTION_MOTION_ICON : DETECTION_EYE_ICON;
+  const renderGroup = (title, icon, items, ariaLabel) => items.length
+    ? `<div class="timeline-legend-group" role="group" aria-label="${escapeHtml(ariaLabel)}">
+        <div class="timeline-legend-group-title">
+          ${icon}
+          <span class="timeline-legend-group-name">${escapeHtml(title)}</span>
+          <span class="timeline-legend-group-count" aria-hidden="true">${items.length}</span>
+        </div>
+        <div class="timeline-legend-chips">${items.map(renderChip).join('')}</div>
+      </div>`
+    : '';
+  els.timelineLegend.innerHTML = [
+    renderGroup('Objects', objectEyebrowIcon, objectChips, 'Objects legend'),
+    renderGroup('Sounds', '🔊', soundChips, 'Sounds legend'),
+  ].join('');
 }
 
 function buildTimelineLayout(recordings, preEventSeconds = 0) {
@@ -663,11 +743,14 @@ function buildTimelineLayout(recordings, preEventSeconds = 0) {
   });
 }
 
-function renderTimeline(payload) {
+function renderTimelineForCard(card, viewPayload, cardRecordings, totalRecordingCount) {
   const { fromSeconds, toSeconds, totalSeconds, tickIntervalSeconds } = getTimeRangeConfig();
 
-  // Clip recordings to the visible window [fromSeconds, toSeconds], rebasing positions to fromSeconds
-  const windowRecordings = (payload.recordings || [])
+  // Clip this card's recordings to the visible [fromSeconds, toSeconds]
+  // window and rebase positions so the existing left%/width% flow still
+  // resolves against the shared hour scale. Identical math to the
+  // pre-split renderTimeline() - we just slice the input set first.
+  const windowRecordings = (cardRecordings || [])
     .filter((r) => {
       const start = Number(r.timeline_start_seconds || 0);
       const end = Number(r.timeline_end_seconds || start + 1);
@@ -687,7 +770,7 @@ function renderTimeline(payload) {
       };
     });
 
-  const recordings = buildTimelineLayout(windowRecordings, Number(payload.pre_event_seconds || 0));
+  const recordings = buildTimelineLayout(windowRecordings, Number(viewPayload.pre_event_seconds || 0));
   const rowCount = Math.max(1, recordings.reduce((max, recording) => Math.max(max, recording.rowIndex + 1), 0));
 
   const ticks = [];
@@ -696,20 +779,67 @@ function renderTimeline(payload) {
 
   const tickPos = (s) => ((s - fromSeconds) / totalSeconds) * 100;
 
-  els.timelineHours.innerHTML = ticks.map((s) => (
+  card.hours.innerHTML = ticks.map((s) => (
     `<span class="timeline-hour major" style="left:${tickPos(s)}%">${formatClock(Math.min(s, DAY_SECONDS - 1))}</span>`
   )).join('');
-  els.timelineGrid.innerHTML = ticks.map((s) => `
+  card.grid.innerHTML = ticks.map((s) => `
     <span class="timeline-grid-line" style="left:${tickPos(s)}%"></span>
   `).join('');
-  els.timelineRows.style.height = `${Math.max(96, rowCount * TIMELINE_ROW_HEIGHT)}px`;
+  card.rows.style.height = `${Math.max(96, rowCount * TIMELINE_ROW_HEIGHT)}px`;
+
+  const kindWord = card.kind === 'sound' ? 'sound' : 'object';
+  const cameraName = viewPayload.camera?.name || viewPayload.camera?.id || 'this camera';
+  const formattedDay = formatUserDate(viewPayload.day);
+
+  // Per-card empty state. Three distinguishable reasons can leave a card
+  // blank: "no recordings today at all", "filter narrowed this kind away"
+  // (recordings exist elsewhere but none of this kind), and "recordings
+  // exist for this kind but not in the current time window". We surface
+  // each one so the user can tell which lever to adjust instead of seeing
+  // a generic "no data" message regardless of cause.
+  function emptyStateFor(reason) {
+    // Different chip labels per kind ("No object matches" / "No sound
+    // matches") so users glancing at the chip row can tell which card
+    // ran out without reading the row text below it.
+    const reasonPrefix = kindWord === 'sound' ? 'sound' : 'object';
+    if (reason === 'no-data') {
+      return {
+        chipKind: 'empty',
+        chipLabel: 'No recordings',
+        statusText: `No ${kindWord} recordings found for ${escapeHtml(cameraName)} on ${escapeHtml(formattedDay)}.`,
+        rowHtml: `<div class="empty timeline-empty">No ${kindWord} recordings for ${escapeHtml(cameraName)} on ${escapeHtml(formattedDay)}.</div>`,
+      };
+    }
+    if (reason === 'filtered') {
+      return {
+        chipKind: 'filtered',
+        chipLabel: `No ${reasonPrefix} matches`,
+        statusText: `No ${kindWord} recordings match the selected filter for ${escapeHtml(cameraName)} on ${escapeHtml(formattedDay)}.`,
+        rowHtml: `<div class="empty timeline-empty">No ${kindWord} recordings match the selected filter for ${escapeHtml(cameraName)} on ${escapeHtml(formattedDay)}.</div>`,
+      };
+    }
+    // reason === 'windowed' - cards have recordings but none visible in
+    // [fromSeconds, toSeconds] for this kind.
+    return {
+      chipKind: 'filtered',
+      chipLabel: `${reasonPrefix} windowed`,
+      statusText: `No ${kindWord} recordings in the visible time window.`,
+      rowHtml: `<div class="empty timeline-empty">No ${kindWord} recordings in the selected time window.</div>`,
+    };
+  }
 
   if (!recordings.length) {
-    els.timelineRows.innerHTML = '<div class="empty timeline-empty">No recordings match the selected filter for this camera and day.</div>';
+    const reason = cardRecordings.length === 0
+      ? (totalRecordingCount > 0 ? 'filtered' : 'no-data')
+      : 'windowed';
+    const msg = emptyStateFor(reason);
+    card.rows.innerHTML = msg.rowHtml;
+    setTimelineStatusChip(card, { kind: msg.chipKind, label: msg.chipLabel });
+    if (card.status) card.status.textContent = msg.statusText;
     return;
   }
 
-  els.timelineRows.innerHTML = recordings.map((recording) => {
+  card.rows.innerHTML = recordings.map((recording) => {
     const visStart = Number(recording.timeline_start_seconds || 0);
     const origStart = Number(recording._orig_start_seconds ?? visStart + fromSeconds);
     const duration = Math.max(1, Number(recording.timeline_duration_seconds || 1));
@@ -728,6 +858,21 @@ function renderTimeline(payload) {
       ></button>
     `;
   }).join('');
+
+  // Success path: per-card "Ready / Filtered / Windowed" chip + a status
+  // blurb that mirrors the global stats grid's clip count but for this
+  // kind only, so an object-heavy day and a sound-heavy day each speak
+  // for themselves regardless of how the other card is populated.
+  const isFiltered = !!els.filterSelect.value;
+  const isWindowed = fromSeconds > 0 || toSeconds < DAY_SECONDS;
+  const chipKind = isFiltered || isWindowed ? 'filtered' : 'ready';
+  const chipLabel = isFiltered ? 'Filtered' : isWindowed ? 'Windowed' : 'Ready';
+  setTimelineStatusChip(card, { kind: chipKind, label: chipLabel });
+  if (card.status) {
+    const filterPart = isFiltered ? ` matching ${filterDisplayLabel(els.filterSelect.value)}` : '';
+    const windowPart = isWindowed ? ` from ${formatUserClock(fromSeconds)} to ${formatUserClock(toSeconds)}` : '';
+    card.status.textContent = `${cardRecordings.length} ${kindWord} clip${cardRecordings.length === 1 ? '' : 's'}${filterPart}${windowPart} for ${escapeHtml(cameraName)} on ${escapeHtml(formattedDay)}.`;
+  }
 }
 
 function renderRecordingDetails(recording) {
@@ -845,34 +990,26 @@ async function renderFilteredTimeline({ preserveSelection = true } = {}) {
   const recordings = filteredRecordings();
   const viewPayload = { ...(state.payload || {}), recordings };
   renderSummary(viewPayload, allRecordings.length);
-  renderLegend(recordings);
-  renderTimeline(viewPayload);
 
-  if (!recordings.length) {
-    const formattedDay = formatUserDate(state.payload.day);
-    els.timelineStatus.textContent = allRecordings.length
-      ? `No recordings match the selected filter for ${state.payload.camera.name} on ${formattedDay}.`
-      : `No recordings found for ${state.payload.camera.name} on ${formattedDay}.`;
-    setTimelineStatusChip({
-      kind: allRecordings.length ? 'filtered' : 'empty',
-      label: allRecordings.length ? 'No matches' : 'No recordings',
-    });
-    clearPlayback(false);
-    replaceUrl(null);
-    return;
-  }
+  // Partition the filtered set so each card sees only its own slice.
+  // isSoundRecording() is the canonical predicate - any sound-detected
+  // clip and any clip whose primary label is a sound class routes to
+  // the Sounds card; everything else (motion + detected objects) lands
+  // in the Objects card. renderLegend() is intentionally not called
+  // here: the cards themselves now split the day visually, so a
+  // standalone eyebrow row above them would be redundant. The function
+  // stays defined so tests/test_timeline_legend_js.test.js keeps
+  // passing unchanged.
+  const objectRecordings = recordings.filter((r) => !isSoundRecording(r));
+  const soundRecordings = recordings.filter((r) => isSoundRecording(r));
 
-  const filterLabel = els.filterSelect.value ? ` matching ${filterDisplayLabel(els.filterSelect.value)}` : '';
-  const { fromSeconds, toSeconds } = getTimeRangeConfig();
-  const timeRangeLabel = (fromSeconds > 0 || toSeconds < DAY_SECONDS)
-    ? ` from ${formatUserClock(fromSeconds)} to ${formatUserClock(toSeconds)}`
-    : '';
-  els.timelineStatus.textContent = `${recordings.length} clip${recordings.length === 1 ? '' : 's'}${filterLabel}${timeRangeLabel} for ${state.payload.camera.name} on ${formatUserDate(state.payload.day)}.`;
-  setTimelineStatusChip({
-    kind: els.filterSelect.value || (fromSeconds > 0 || toSeconds < DAY_SECONDS) ? 'filtered' : 'ready',
-    label: els.filterSelect.value ? 'Filtered' : (fromSeconds > 0 || toSeconds < DAY_SECONDS) ? 'Windowed' : 'Ready',
+  TIMELINE_CARDS.forEach((card) => {
+    const cardRecordings = card.kind === 'object' ? objectRecordings : soundRecordings;
+    renderTimelineForCard(card, viewPayload, cardRecordings, allRecordings.length);
   });
 
+  // Playback selection: still keyed off the global filtered set so an
+  // existing play state survives a filter that hides one card.
   const querySelection = Number(new URLSearchParams(window.location.search).get('recording_id')) || null;
   const requestedSelection = preserveSelection ? (state.activeRecordingId || querySelection) : null;
   const selectedRecording = recordings.find((recording) => Number(recording.id) === Number(requestedSelection));
@@ -886,8 +1023,10 @@ async function renderFilteredTimeline({ preserveSelection = true } = {}) {
 
 async function loadTimeline({ preserveSelection = true } = {}) {
   const { cameraId, day } = timelineParams();
-  els.timelineStatus.textContent = 'Loading timeline…';
-  setTimelineStatusChip({ kind: 'idle', label: 'Loading' });
+  TIMELINE_CARDS.forEach((card) => {
+    if (card.status) card.status.textContent = 'Loading timeline…';
+    setTimelineStatusChip(card, { kind: 'idle', label: 'Loading' });
+  });
   const timezoneOffsetMinutes = new Date().getTimezoneOffset();
   let payload;
   try {
@@ -897,8 +1036,11 @@ async function loadTimeline({ preserveSelection = true } = {}) {
   } catch (err) {
     // Special-cases benign 'No cameras configured' inline; re-throws to outer guarded .catch().
     if (err.message === 'No cameras configured') {
-      els.timelineStatus.textContent = 'No cameras configured. Add a camera in Settings to use the timeline.';
-      setTimelineStatusChip({ kind: 'empty', label: 'No cameras' });
+      const msg = 'No cameras configured. Add a camera in Settings to use the timeline.';
+      TIMELINE_CARDS.forEach((card) => {
+        if (card.status) card.status.textContent = msg;
+        setTimelineStatusChip(card, { kind: 'empty', label: 'No cameras' });
+      });
       return;
     }
     throw err;
@@ -945,8 +1087,7 @@ els.timelineLoadBtn.addEventListener('click', () => {
   loadTimeline({ preserveSelection: false }).catch((error) => {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
-    els.timelineStatus.textContent = error.message;
-    setTimelineStatusChip({ kind: 'error', label: 'Error' });
+    reportTimelineError(error.message);
   });
 });
 
@@ -965,8 +1106,7 @@ els.timelineNowBtn?.addEventListener('click', () => {
   loadTimeline({ preserveSelection: false }).catch((error) => {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
-    els.timelineStatus.textContent = error.message;
-    setTimelineStatusChip({ kind: 'error', label: 'Error' });
+    reportTimelineError(error.message);
   });
 });
 
@@ -974,8 +1114,7 @@ els.cameraSelect.addEventListener('change', () => {
   loadTimeline({ preserveSelection: false }).catch((error) => {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
-    els.timelineStatus.textContent = error.message;
-    setTimelineStatusChip({ kind: 'error', label: 'Error' });
+    reportTimelineError(error.message);
   });
 });
 
@@ -983,8 +1122,7 @@ els.timelineDate.addEventListener('change', () => {
   loadTimeline({ preserveSelection: false }).catch((error) => {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
-    els.timelineStatus.textContent = error.message;
-    setTimelineStatusChip({ kind: 'error', label: 'Error' });
+    reportTimelineError(error.message);
   });
 });
 
@@ -992,8 +1130,7 @@ els.filterSelect.addEventListener('change', () => {
   renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
-    els.timelineStatus.textContent = error.message;
-    setTimelineStatusChip({ kind: 'error', label: 'Error' });
+    reportTimelineError(error.message);
   });
 });
 
@@ -1019,8 +1156,7 @@ function scheduleTimelineTimeRefresh() {
     renderFilteredTimeline({ preserveSelection: true }).catch((error) => {
       // Skip UI updates if api() triggered a 401 redirect
       if (window.daygleAuth?.redirecting) return;
-      els.timelineStatus.textContent = error.message;
-      setTimelineStatusChip({ kind: 'error', label: 'Error' });
+      reportTimelineError(error.message);
     });
   }, 150);
 }
@@ -1029,13 +1165,20 @@ document.getElementById('timelineFromTimeMount').addEventListener('change', sche
 
 document.getElementById('timelineToTimeMount').addEventListener('change', scheduleTimelineTimeRefresh);
 
-els.timelineRows.addEventListener('click', (event) => {
-  const button = event.target.closest('[data-recording-id]');
-  if (!button) return;
-  playRecording(button.dataset.recordingId).catch((error) => {
-    // Skip UI updates if api() triggered a 401 redirect
-    if (window.daygleAuth?.redirecting) return;
-    els.clipPlayerStatus.textContent = error.message;
+// Row-level click delegation, fanned out across both .timeline-rows
+// elements. A single delegated handler per card is enough because the
+// segment markup (data-recording-id) stays the same on each card - the
+// only thing that changes is which recordings live on which track.
+TIMELINE_CARDS.forEach((card) => {
+  if (!card.rows) return;
+  card.rows.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-recording-id]');
+    if (!button) return;
+    playRecording(button.dataset.recordingId).catch((error) => {
+      // Skip UI updates if api() triggered a 401 redirect
+      if (window.daygleAuth?.redirecting) return;
+      els.clipPlayerStatus.textContent = error.message;
+    });
   });
 });
 
@@ -1112,15 +1255,14 @@ loadAuth().then(async () => {
   if (queryFilter) els.filterSelect.innerHTML = `<option value="${escapeHtml(queryFilter)}" selected>${escapeHtml(titleCase(queryFilter))}</option>`;
   if (queryFromTime) setTimeSelectValue(els.fromTime, queryFromTime);
   if (queryToTime) setTimeSelectValue(els.toTime, queryToTime);
-  setTimelineStatusChip({ kind: 'idle', label: 'Loading' });
+  TIMELINE_CARDS.forEach((card) => setTimelineStatusChip(card, { kind: 'idle', label: 'Loading' }));
   await loadConfiguredLabels();
   await loadTimeline({ preserveSelection: true });
 }).catch((error) => {
   // Skip UI updates if api() triggered a 401 redirect
   if (window.daygleAuth?.redirecting) return;
-  els.timelineStatus.textContent = error.message;
   els.clipPlayerStatus.textContent = error.message;
-  setTimelineStatusChip({ kind: 'error', label: 'Error' });
+  reportTimelineError(error.message);
 });
 
 // Re-render the timeline (ticks, segments, list, modal) when the user's
@@ -1140,7 +1282,6 @@ window.daygleDatePrefsChanged = function daygleDatePrefsChanged() {
   loadTimeline({ preserveSelection: true }).catch((error) => {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
-    els.timelineStatus.textContent = error.message;
-    setTimelineStatusChip({ kind: 'error', label: 'Error' });
+    reportTimelineError(error.message);
   });
 };

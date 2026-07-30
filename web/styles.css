@@ -2330,8 +2330,21 @@ tr.drag-over {
 }
 
 /* ─── Timeline & video modal ─────────────────────────────────────────────── */
-.recording-timeline-layout {
-  display: block;
+.timeline-cards-layout {
+  /* Two parallel tracks - Objects left, Sounds right - so users can read
+     them at a glance, scan the same hour scale across both, and only the
+     card relevant to their filter stays focused. The single timeline that
+     used to live here was replaced because mixing every category on one
+     track forced colour-coding to do the work of a layout divider. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+}
+@media (max-width: 900px) {
+  /* Tablets / phones: stack the two cards so each track gets its own
+     960px-wide scroll viewport, matching how the rest of the page
+     collapses single-column layouts at this breakpoint. */
+  .timeline-cards-layout { grid-template-columns: minmax(0, 1fr); }
 }
 .timeline-card {
   display: grid;
@@ -2340,6 +2353,16 @@ tr.drag-over {
 .timeline-card .status-panel {
   margin: 0;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.timeline-card-status {
+  margin: 0;
+  padding: 0;
+  border-top: 0;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+.timeline-card-status .chip {
+  font-size: 11px;
 }
 .timeline-controls {
   display: grid;
@@ -2368,6 +2391,54 @@ tr.drag-over {
 .timeline-legend {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px 22px;
+  min-height: 24px;
+}
+.timeline-legend-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 220px;
+}
+.timeline-legend-group-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+.timeline-legend-group-name {
+  /* Lets the count badge sit right of the label without inheriting the
+     letter-spacing/uppercase casing quirks on the badge itself. */
+  font: inherit;
+  letter-spacing: inherit;
+}
+.timeline-legend-group-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.05);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.timeline-legend-chips {
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   min-height: 24px;
 }
@@ -2389,8 +2460,12 @@ tr.drag-over {
   border-radius: 999px;
   box-shadow: 0 0 0 3px rgba(255,255,255,.06);
 }
-@media (max-width: 600px) {
-  .timeline-legend { gap: 8px; }
+@media (max-width: 900px) {
+  /* Tablets + phones: stack the two groups so long object lists next to
+     short sound lists don't wrap awkwardly inside the same row. */
+  .timeline-legend { gap: 14px; }
+  .timeline-legend-group { flex: 1 1 100%; }
+  .timeline-legend-chips { gap: 8px; }
   .timeline-legend-chip { padding: 6px 10px; font-size: 11px; }
 }
 .timeline-scroll {

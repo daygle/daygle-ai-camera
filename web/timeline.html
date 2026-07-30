@@ -99,25 +99,45 @@
       </form>
     </section>
 
-    <section class="recording-timeline-layout">
-      <article class="card timeline-card">
+    <section class="timeline-cards-layout">
+      <article class="card timeline-card" data-timeline-card="object" role="group" aria-label="Objects timeline">
         <div class="settings-section-header">
-          <div class="settings-section-icon" aria-hidden="true">📊</div>
+          <div class="settings-section-icon" aria-hidden="true">👁</div>
           <div>
-            <h2>Daily Timeline</h2>
-            <p class="settings-section-subtitle">Click a coloured segment to open and play that clip.</p>
+            <h2>Objects</h2>
+            <p class="settings-section-subtitle">Motion and detected objects across the day. Click a coloured segment to open that clip.</p>
           </div>
           <div class="button-row timeline-card-status">
-            <span class="chip chip-dim" id="timelineStatusChip">Idle</span>
+            <span class="chip chip-dim" data-timeline-card-status-chip>Idle</span>
           </div>
         </div>
-        <p id="timelineStatus" class="muted timeline-status-text" aria-live="polite">Loading timeline…</p>
-        <div id="timelineLegend" class="timeline-legend"></div>
+        <p class="muted timeline-status-text" data-timeline-card-status aria-live="polite">Loading timeline…</p>
         <div class="timeline-scroll">
-          <div id="timelineHours" class="timeline-hours"></div>
-          <div id="timelineTrack" class="timeline-track">
-            <div id="timelineGrid" class="timeline-grid" aria-hidden="true"></div>
-            <div id="timelineRows" class="timeline-rows"></div>
+          <div class="timeline-hours" data-timeline-card-hours></div>
+          <div class="timeline-track">
+            <div class="timeline-grid" data-timeline-card-grid aria-hidden="true"></div>
+            <div class="timeline-rows" data-timeline-card-rows></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="card timeline-card" data-timeline-card="sound" role="group" aria-label="Sounds timeline">
+        <div class="settings-section-header">
+          <div class="settings-section-icon" aria-hidden="true">🔊</div>
+          <div>
+            <h2>Sounds</h2>
+            <p class="settings-section-subtitle">Sound detections across the day. Click a coloured segment to open that clip.</p>
+          </div>
+          <div class="button-row timeline-card-status">
+            <span class="chip chip-dim" data-timeline-card-status-chip>Idle</span>
+          </div>
+        </div>
+        <p class="muted timeline-status-text" data-timeline-card-status aria-live="polite">Loading timeline…</p>
+        <div class="timeline-scroll">
+          <div class="timeline-hours" data-timeline-card-hours></div>
+          <div class="timeline-track">
+            <div class="timeline-grid" data-timeline-card-grid aria-hidden="true"></div>
+            <div class="timeline-rows" data-timeline-card-rows></div>
           </div>
         </div>
       </article>
