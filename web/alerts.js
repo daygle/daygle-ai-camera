@@ -471,8 +471,9 @@ function renderRecordingDetails(recording) {
     detectionBadges = motionPill(motionConfidenceFor(recording));
   } else if (isSound) {
     detectionLabel = 'Sound';
-    detectionBadges = detections.length
-      ? detections.map((d) => detectionPill(d.label, d.confidence, true)).join(' ')
+    const soundDetections = recordingDetectionSummary(recording);
+    detectionBadges = soundDetections.length
+      ? soundDetections.map((d) => detectionPill(d.label, d.confidence, true)).join(' ')
       : 'none';
   } else {
     detectionLabel = 'Detections';
@@ -487,7 +488,7 @@ function renderRecordingDetails(recording) {
   const detailRows = [
     safeHtml`<div><span>Recording</span><strong>#${recording.id}</strong></div>`,
     safeHtml`<div><span>Event</span><strong>${recording.event_id || 'none'}</strong></div>`,
-    safeHtml`<div><span>Camera</span><strong>${recordingCameraLabel(recording)}</strong></div>`,
+    safeHtml`<div><span>Camera</span><strong>${cameraLabel(recording)}</strong></div>`,
     zoneRow,
     safeHtml`<div><span>Trigger</span><strong>${recordingDisplayTrigger(recording)}</strong></div>`,
     safeHtml`<div><span>Started</span><strong>${formatDateTime(recording.started_at)}</strong></div>`,
@@ -500,21 +501,15 @@ function renderRecordingDetails(recording) {
   );
 }
 
-function recordingCameraLabel(recording) {
-  const metadata = recording?.event?.metadata || {};
-  return metadata.camera_name || recording.camera_id || recording.source || 'unknown';
-}
 
 function recordingDisplayTrigger(recording) {
   if (isSoundRecording(recording)) {
     const meta = recording.event?.metadata || {};
     const classLabel = meta.class_label || meta.label || recording.trigger_label || 'sound';
-    return `\u{1F50A} ${titleCase(classLabel)}`;
+    return titleCase(classLabel);
   }
-  const triggerType = recordingTriggerType(recording);
   const triggerLabel = recordingTriggerLabel(recording);
-  if (triggerLabel && triggerLabel !== triggerType) return `${triggerType} \u00b7 ${triggerLabel}`;
-  return triggerLabel || triggerType;
+  return titleCase(triggerLabel || 'motion');
 }
 
 // ── Clip segment timeline ───────────────────────────────────────────────────
@@ -667,7 +662,7 @@ async function playRecording(id) {
   if (els.clipPlayerTitle) els.clipPlayerTitle.textContent = `Recording #${recording.id}`;
   if (els.videoModalSubtitle) {
     const started = formatDateTime(recording.started_at);
-    const camera = recordingCameraLabel(recording);
+    const camera = cameraLabel(recording);
     els.videoModalSubtitle.textContent = started
       ? `Recording from ${camera} captured ${started}.`
       : `Recording from ${camera}.`;

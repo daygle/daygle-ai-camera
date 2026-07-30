@@ -85,12 +85,12 @@ function buildEditFormHtml(camera, index) {
       // Streams tab
       '<div class="modal-tab-panel" data-panel="streams" hidden>' +
         '<div class="form-grid">' +
-          '<label class="full-width cam-onvif-fields"' + (isRtsp ? ' hidden' : '') + '><span>Stream Path</span><input name="path" placeholder="stream1" value="' + escapeAttr(camera.path || 'stream1') + '" /></label>' +
+              '<label class="full-width cam-onvif-fields"' + (isRtsp ? ' hidden' : '') + '><span>Detection Stream Path</span><input name="path" placeholder="stream1" value="' + escapeAttr(camera.path || 'stream1') + '" /></label>' +
           '<label class="full-width"><span>Recording Stream Path <span class="info-tip" data-tip="Optional: the path for the high-res recording stream (e.g. stream2). Uses the same host, port, and login details as the primary stream. Leave empty to use the primary stream for recording." title="Optional: the path for the high-res recording stream (e.g. stream2). Uses the same host, port, and login details as the primary stream. Leave empty to use the primary stream for recording." tabindex="0" aria-label="Help: Optional path for the high-res recording stream. Uses the same host, port, and login details."></span></span><input name="recording_stream_path" placeholder="e.g. stream2" value="' + escapeAttr(camera.recording_stream_path || '') + '" /></label>' +
         '</div>' +
         (isRtsp
           ? '<p class="form-help muted">Recording Stream Path is optional and points to a higher-resolution stream used for recordings.</p>'
-          : '<p class="form-help muted">Stream Path is the primary detection stream (e.g. stream1). Recording Stream Path is optional and points to a higher-resolution stream used for recordings.</p>') +
+              : '<p class="form-help muted">Detection Stream Path is the primary detection stream (e.g. stream1). Recording Stream Path is optional and points to a higher-resolution stream used for recordings.</p>') +
       '</div>' +
 
       // Recording tab

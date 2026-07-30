@@ -528,8 +528,9 @@ function renderRecordingDetails(recording) {
     detectionBadges = motionPill(motionConfidenceFor(recording));
   } else if (isSound) {
     detectionLabel = 'Sound';
-    detectionBadges = detections.length
-      ? detections.map((d) => detectionPill(d.label, d.confidence, true)).join(' ')
+    const soundDetections = recordingDetectionSummary(recording);
+    detectionBadges = soundDetections.length
+      ? soundDetections.map((d) => detectionPill(d.label, d.confidence, true)).join(' ')
       : 'none';
   } else {
     detectionLabel = 'Detections';
@@ -544,7 +545,7 @@ function renderRecordingDetails(recording) {
   const detailRows = [
     safeHtml`<div><span>Recording</span><strong>#${recording.id}</strong></div>`,
     safeHtml`<div><span>Event</span><strong>${recording.event_id || 'none'}</strong></div>`,
-    safeHtml`<div><span>Camera</span><strong>${recording.camera_name || recording.metadata?.camera_name || ''}</strong></div>`,
+    safeHtml`<div><span>Camera</span><strong>${cameraLabel(recording)}</strong></div>`,
     zoneRow,
     safeHtml`<div><span>Trigger</span><strong>${recordingDisplayTrigger(recording)}</strong></div>`,
     safeHtml`<div><span>Started</span><strong>${formatDateTime(recording.started_at)}</strong></div>`,
@@ -561,7 +562,7 @@ function recordingDisplayTrigger(recording) {
   if (isSoundRecording(recording)) {
     const meta = recording.event?.metadata || {};
     const classLabel = meta.class_label || meta.label || recording.trigger_label || 'sound';
-    return `\u{1F50A} ${titleCase(classLabel)}`;
+    return titleCase(classLabel);
   }
   const triggerLabel = recordingTriggerLabel(recording);
   return titleCase(triggerLabel || 'motion');

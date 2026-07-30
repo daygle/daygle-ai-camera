@@ -120,7 +120,7 @@ function recordingDisplayTrigger(recording) {
   if (isSoundRecording(recording)) {
     const meta = recording.event?.metadata || {};
     const classLabel = meta.class_label || meta.label || recording.trigger_label || 'sound';
-    return `🔊 ${titleCase(classLabel)}`;
+    return titleCase(classLabel);
   }
 
   const triggerType = recordingTriggerType(recording);
@@ -370,8 +370,9 @@ function renderRecordingDetails(recording) {
     detectionBadges = motionPill(motionConfidenceFor(recording));
   } else if (isSound) {
     detectionLabel = 'Sound';
-    detectionBadges = detections.length
-      ? detections.map((d) => detectionPill(d.label, d.confidence, true)).join(' ')
+    const soundDetections = recordingDetectionSummary(recording);
+    detectionBadges = soundDetections.length
+      ? soundDetections.map((d) => detectionPill(d.label, d.confidence, true)).join(' ')
       : 'none';
   } else {
     detectionLabel = 'Detections';
