@@ -49,7 +49,13 @@ def read_ingest_frame(camera_id: str) -> tuple[Any, dict[str, Any]] | None:
 def create_camera(settings: dict[str, Any]) -> Any:
     width = int(settings.get('width', 1280))
     height = int(settings.get('height', 720))
-    fps = int(settings.get('fps', 15))
+    raw_fps = settings.get('fps')
+    try:
+        fps = int(raw_fps) if raw_fps is not None else None
+        if fps is not None and fps <= 0:
+            fps = None
+    except (TypeError, ValueError):
+        fps = None
     stale = settings.get('stale_frame_grabs')
     return OpenCvStreamCamera(build_stream_url(settings), width=width, height=height, fps=fps, stale_frame_grabs=stale)
 

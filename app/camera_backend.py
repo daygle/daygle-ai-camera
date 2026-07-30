@@ -113,11 +113,13 @@ class OpenCvStreamCamera:
     to pull snapshots for the live view.
     """
 
-    def __init__(self, stream_url: str, width: int = 1280, height: int = 720, fps: int = 15, stale_frame_grabs: int | None = None) -> None:
+    def __init__(self, stream_url: str, width: int = 1280, height: int = 720, fps: int | None = 15, stale_frame_grabs: int | None = None) -> None:
         self.stream_url = stream_url
         self.width = width
         self.height = height
-        self.fps = fps
+        self.configured_fps = fps
+        self.fps = fps or 15
+        self.detected_fps: float | None = None
         self._stale_frame_grabs_configured = stale_frame_grabs
         self.frame_number = 0
         self.started_at = time.time()
@@ -135,6 +137,9 @@ class OpenCvStreamCamera:
             "timestamp": timestamp if timestamp is not None else time.time(),
             "width": self.width,
             "height": self.height,
+            "fps": self.fps,
+            "configured_fps": self.configured_fps,
+            "detected_fps": self.detected_fps,
             "uptime_seconds": round(time.time() - self.started_at, 1),
             "stream_url": self.stream_url,
             "last_error": self.last_error,
@@ -163,6 +168,19 @@ class OpenCvStreamCamera:
             self._release_capture()
             self.last_error = "Unable to open ONVIF/RTSP stream."
             raise RuntimeError(self.last_error)
+        # Try to read the stream's declared FPS from the container. Some
+        # RTSP sources report 0 or a nonsensical value, in which case we
+        # keep the configured/default FPS for buffer calculations. Only do
+        # this after confirming the capture opened, otherwise we may read a
+        # bogus value from an uninitialised capture.
+        try:
+            cap_fps = self._capture.get(cv2.CAP_PROP_FPS)
+            if cap_fps and cap_fps > 0:
+                self.detected_fps = float(cap_fps)
+                if self.configured_fps is None:
+                    self.fps = self.detected_fps
+        except Exception:
+            pass
         return self._capture
 
     def _release_capture(self) -> None:

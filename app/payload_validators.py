@@ -203,7 +203,19 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     updated['device'] = payload.get('device', current.get('device', 0))
     updated['width'] = _int_field({**current, **payload}, 'width', 1280, 160, 7680)
     updated['height'] = _int_field({**current, **payload}, 'height', 720, 120, 4320)
-    updated['fps'] = _int_field({**current, **payload}, 'fps', 15, 1, 120)
+    raw_fps = payload.get('fps') if 'fps' in payload else current.get('fps')
+    if raw_fps is None or raw_fps == '' or (isinstance(raw_fps, (int, float)) and raw_fps <= 0):
+        updated['fps'] = None
+    else:
+        # Validate the override explicitly; the default fallback below is
+        # unreachable because raw_fps is present and positive in this branch.
+        try:
+            fps_val = int(raw_fps)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail='fps must be an integer.') from exc
+        if fps_val < 1 or fps_val > 120:
+            raise HTTPException(status_code=400, detail='fps must be between 1 and 120.')
+        updated['fps'] = fps_val
     if 'port' in updated or 'port' in payload:
         updated['port'] = _int_field({**current, **payload}, 'port', 554, 1, 65535)
     for key in ('stream_url', 'recording_stream_path', 'host', 'path', 'username', 'password'):

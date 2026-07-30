@@ -202,8 +202,8 @@ def test_normalize_camera_id_preserves_underscore_and_dash(cc):
 def test_normalize_camera_settings_layers_defaults_id_name_backend(cc):
     """When ``settings`` is empty/None, ``normalize_camera_settings``
     layers in defaults for id (``camera-1``), name (``Camera 1``),
-    backend (``onvif``), width (1280), height (720), fps (15),
-    stale_frame_grabs (None). Sibling helpers on main.py are reached
+    backend (``onvif``), width (1280), height (720), fps (None for
+    auto-detect), stale_frame_grabs (None). Sibling helpers on main.py are reached
     at call time and return their own sensible defaults, so we don't
     monkeypatch them away -- this is the closest "happy path" unit
     test of the cross-module Pool C wiring. Sibling-helper changes
@@ -216,7 +216,7 @@ def test_normalize_camera_settings_layers_defaults_id_name_backend(cc):
     assert out['backend'] == 'onvif'
     assert out['width'] == 1280
     assert out['height'] == 720
-    assert out['fps'] == 15
+    assert out['fps'] is None
     assert out['stale_frame_grabs'] is None
     # detection block should also have been normalized, and the
     # ``default_camera_detection_settings()`` helper from main fills
