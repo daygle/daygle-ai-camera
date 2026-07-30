@@ -21,7 +21,7 @@ from app.config_facades import (
     effective_storage_config,
     get_camera_config,
 )
-from app.deps import get_auth_enabled, get_database, get_detector
+from app.deps import get_auth, get_auth_enabled, get_database, get_detector
 from app.detector import DetectorUnavailableError
 from app.request_helpers import write_audit_log, _read_uploaded_image
 from app.state import active_rtsp_recordings, active_rtsp_recordings_lock
@@ -59,8 +59,15 @@ def list_audit_log(
 
 
 @router.get('/api/auth/me')
-def me(request: Request):
+def me(request: Request, auth=Depends(get_auth)):
     session = require_session(request)
+    # Rotate the CSRF token on every explicit auth-state check so a stolen
+    # token has a bounded abuse window (at most the interval between two
+    # scheduled frontend refreshes, typically a few minutes). The old token
+    # is invalidated immediately when the DB row is written.
+    new_csrf = auth.rotate_csrf_token(session['session_token'])
+    if new_csrf is not None:
+        session['csrf_token'] = new_csrf
     return {'user': session['user'], 'csrf_token': session['csrf_token'], 'expires_at': session['expires_at']}
 
 

@@ -695,6 +695,31 @@ class AuthService:
         )
         return new_expires_at
 
+    def rotate_csrf_token(self, session_token: str) -> str | None:
+        """Generate a fresh CSRF token for *session_token* and persist it.
+
+        Returns the new token string on success, or ``None`` if the session
+        row was not found (expired / already deleted by another thread).
+        The caller must update ``request.state.session['csrf_token']`` with
+        the returned value so the middleware's CSRF check passes against the
+        new token for subsequent requests.
+
+        Token rotation on every ``/api/auth/me`` call (which the frontend
+        polls on a schedule) means a stolen CSRF token has a bounded abuse
+        window: at most the interval between two scheduled auth-state
+        refreshes (typically a few minutes). The old token is invalidated
+        immediately when the row is written.
+        """
+        new_token = secrets.token_urlsafe(32)
+        with self.connect() as db:
+            cursor = db.execute(
+                "UPDATE user_sessions SET csrf_token = ? WHERE session_token = ?",
+                (new_token, session_token),
+            )
+            if cursor.rowcount == 0:
+                return None
+            return new_token
+
     def get_session(self, session_token: str | None) -> dict[str, Any] | None:
         if not session_token:
             return None
