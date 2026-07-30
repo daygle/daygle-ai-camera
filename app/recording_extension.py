@@ -532,7 +532,6 @@ def attach_event_recording(
     from app.utils import build_stream_url, build_recording_stream_url
     from app.config_facades import get_camera_config
     stream_url = ''
-    recording_stream_url = build_recording_stream_url(cam_config)
     if source == 'rtsp' and camera_id:
         cam_config = get_camera_config(camera_id)
         recording_stream_url = build_recording_stream_url(cam_config)
