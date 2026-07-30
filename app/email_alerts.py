@@ -111,9 +111,10 @@ class EmailAlertService:
                 ordered_labels.append(label)
         primary_label = str(alert.get('label', 'object') or 'object').strip() or 'object'
         # Title-case for display (e.g. "Cat, Person") while keeping the original
-        # label strings intact for any downstream lookups.
-        display_labels = [label.title() for label in ordered_labels]
-        display_primary = primary_label.title() if primary_label else 'Object'
+        # label strings intact for any downstream lookups. Replace underscores
+        # with spaces first so labels like "Cat_Meow" render as "Cat Meow".
+        display_labels = [label.replace('_', ' ').title() for label in ordered_labels]
+        display_primary = primary_label.replace('_', ' ').title() if primary_label else 'Object'
         subject_label = ', '.join(display_labels) if display_labels else display_primary
         subject = f"Daygle AI Camera Alert: {subject_label} Detected{subject_suffix}"
         headline = subject_label

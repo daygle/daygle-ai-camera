@@ -75,8 +75,8 @@ class PushNotificationService:
                 seen.add(key)
                 ordered_labels.append(label)
         primary_label = str(alert.get('label', 'object') or 'object').strip() or 'object'
-        display_labels = [label.title() for label in ordered_labels]
-        display_primary = primary_label.title()
+        display_labels = [label.replace('_', ' ').title() for label in ordered_labels]
+        display_primary = primary_label.replace('_', ' ').title()
         subject_label = ', '.join(display_labels) if display_labels else display_primary
         title = f"Daygle AI Camera alert: {subject_label} Detected"
 
