@@ -100,7 +100,7 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
         stream_url = build_stream_url(selected_config)
         cam_rec_config = _state.camera_event_recording_config(selected_config)
         if stream_url:
-            _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config, recording_stream_url=build_recording_stream_url(selected_config))
+            _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config, recording_stream_path=build_recording_stream_url(selected_config))
             if cam_rec_config.get('continuous'):
                 _state.recording_service.start_continuous_chunk_recording(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config, on_chunk_complete=_make_continuous_chunk_callback(camera_id))
         if not background_detection_enabled:
@@ -218,7 +218,7 @@ def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings
     camera_id = str(settings.get('id') or 'camera')
     stream_url = build_stream_url(settings)
     if stream_url:
-        _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=_state.camera_event_recording_config(settings), recording_stream_url=build_recording_stream_url(settings))
+        _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=_state.camera_event_recording_config(settings), recording_stream_path=build_recording_stream_url(settings))
     live_cfg = effective_live_config()
     if normalize_bool_setting(live_cfg.get('background_detection_enabled'), True):
         return

@@ -74,7 +74,7 @@ def normalize_camera_settings(
     camera_settings['width'] = int(camera_settings.get('width') or 1280)
     camera_settings['height'] = int(camera_settings.get('height') or 720)
     camera_settings['fps'] = int(camera_settings.get('fps') or 15)
-    camera_settings['recording_stream_url'] = str(camera_settings.get('recording_stream_url') or '').strip()
+    camera_settings['recording_stream_path'] = str(camera_settings.get('recording_stream_path') or '').strip()
     raw_stale = camera_settings.get('stale_frame_grabs')
     camera_settings['stale_frame_grabs'] = (
         int(raw_stale) if raw_stale is not None else None

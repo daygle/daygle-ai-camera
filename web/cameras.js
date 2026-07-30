@@ -287,7 +287,7 @@ function fillModal(camera, index) {
   const staleVal = camera.stale_frame_grabs;
   document.getElementById('editStaleFrameGrabs').value = staleVal != null ? staleVal : '';
   document.getElementById('editContinuous').value = String(camera.recording?.continuous === true);
-  document.getElementById('editRecordingStreamUrl').value = camera.recording_stream_url || '';
+  document.getElementById('editRecordingStreamPath').value = camera.recording_stream_path || '';
 
   document.getElementById('editMotionPixelThreshold').value = camera.motion_pixel_threshold != null ? camera.motion_pixel_threshold : '';
   document.getElementById('editMotionGateFraction').value = camera.motion_gate_fraction != null ? camera.motion_gate_fraction : '';
@@ -328,7 +328,7 @@ function collectModalData() {
     name: document.getElementById('editName').value.trim(),
     backend,
     stream_url: backend === 'rtsp' ? document.getElementById('editStreamUrl').value.trim() : '',
-    recording_stream_url: document.getElementById('editRecordingStreamUrl').value.trim(),
+    recording_stream_path: document.getElementById('editRecordingStreamPath').value.trim(),
     host: backend !== 'rtsp' ? document.getElementById('editHost').value.trim() : '',
     port: parseInt(document.getElementById('editPort').value || '554', 10),
     path: backend !== 'rtsp' ? document.getElementById('editPath').value.trim() : '',

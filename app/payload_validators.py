@@ -99,7 +99,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 from fastapi import HTTPException
 
@@ -193,8 +192,8 @@ def validate_push_notification_settings(payload: dict[str, Any]) -> dict[str, An
 
 def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | None=None, index: int=1) -> dict[str, Any]:
     current = current or {}
-    updated = {key: current.get(key) for key in ('id', 'name', 'backend', 'device', 'width', 'height', 'fps', 'flip', 'stream_url', 'recording_stream_url', 'host', 'port', 'path', 'username', 'password') if key in current}
-    updated.update({key: payload[key] for key in ('id', 'name', 'backend', 'device', 'flip', 'stream_url', 'recording_stream_url', 'host', 'port', 'path', 'username', 'password') if key in payload})
+    updated = {key: current.get(key) for key in ('id', 'name', 'backend', 'device', 'width', 'height', 'fps', 'flip', 'stream_url', 'recording_stream_path', 'host', 'port', 'path', 'username', 'password') if key in current}
+    updated.update({key: payload[key] for key in ('id', 'name', 'backend', 'device', 'flip', 'stream_url', 'recording_stream_path', 'host', 'port', 'path', 'username', 'password') if key in payload})
     backend = str(updated.get('backend', 'onvif')).lower()
     if backend not in {'onvif', 'rtsp'}:
         raise HTTPException(status_code=400, detail='Camera backend must be onvif or rtsp.')
@@ -207,19 +206,13 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     updated['fps'] = _int_field({**current, **payload}, 'fps', 15, 1, 120)
     if 'port' in updated or 'port' in payload:
         updated['port'] = _int_field({**current, **payload}, 'port', 554, 1, 65535)
-    for key in ('stream_url', 'recording_stream_url', 'host', 'path', 'username', 'password'):
+    for key in ('stream_url', 'recording_stream_path', 'host', 'path', 'username', 'password'):
         if key in updated:
             updated[key] = str(updated.get(key) or '').strip()
     if not updated.get('password') and current.get('password'):
         updated['password'] = current['password']
     if backend in {'onvif', 'rtsp'} and (not build_stream_url(updated)):
         raise HTTPException(status_code=400, detail='stream_url is required for ONVIF/RTSP cameras, or provide host plus optional username, password, port, and path.')
-    # Validate recording_stream_url format when set (optional dual-stream field)
-    recording_url = updated.get('recording_stream_url', '')
-    if recording_url:
-        parsed_rec = urlsplit(recording_url)
-        if parsed_rec.scheme not in {'rtsp', 'rtsps', ''}:
-            raise HTTPException(status_code=400, detail='recording_stream_url must use rtsp:// or rtsps:// scheme.')
     flip = str(updated.get('flip', 'none')).lower()
     if flip not in {'none', 'horizontal', 'vertical', 'both'}:
         raise HTTPException(status_code=400, detail='flip must be none, horizontal, vertical, or both.')

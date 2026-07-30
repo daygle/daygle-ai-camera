@@ -648,7 +648,7 @@ class RecordingService:
         stream_url: str,
         camera_id: str,
         recording_config: dict[str, Any] | None = None,
-        recording_stream_url: str = '',
+        recording_stream_path: str = '',
     ) -> bool:
         # Bug 6 follow-up: acquire ``_state._apply_settings_lock`` so a
         # concurrent monitor poll (live_alert_monitor_loop,
@@ -678,8 +678,8 @@ class RecordingService:
             # the main stream so event clips render at full resolution
             # throughout (pre-roll + post), eliminating the resolution jump
             # at the trigger point.
-            if recording_stream_url:
-                self._ensure_rec_prebuffer_worker(camera_key, recording_stream_url, self.prebuffer_window_seconds(config), camera_id=camera_id)
+            if recording_stream_path:
+                self._ensure_rec_prebuffer_worker(camera_key, recording_stream_path, self.prebuffer_window_seconds(config), camera_id=camera_id)
             return True
 
     def write_rtsp_clip_with_prebuffer(
