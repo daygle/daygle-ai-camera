@@ -1520,7 +1520,7 @@ tr.drag-over {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.02);
-  margin-top: 4px;
+  margin-top: 16px;
 }
 :root.light .settings-advanced { background: rgba(0, 0, 0, 0.02); }
 .settings-advanced > summary {
