@@ -1269,7 +1269,13 @@ class RecordingService:
                         severity='info',
                         details={'reason': 'no_audio_stream'},
                     )
-                stderr_path.unlink(missing_ok=True)
+                try:
+                    stderr_path.unlink(missing_ok=True)
+                except OSError:
+                    # The ffmpeg process or another worker may still hold the log
+                    # file briefly on Windows. Missing or locked logs are not
+                    # fatal; they will be re-created or cleaned up later.
+                    pass
                 keep_seconds = int(worker_state.get('buffer_seconds') or 15)
                 self._prune_prebuffer_segments(camera_dir, keep_seconds)
                 self._prune_audio_segments(audio_camera_dir, keep_seconds)
@@ -1403,7 +1409,13 @@ class RecordingService:
                         process.wait(timeout=2)
                     except subprocess.TimeoutExpired:
                         process.kill()
-                stderr_path.unlink(missing_ok=True)
+                try:
+                    stderr_path.unlink(missing_ok=True)
+                except OSError:
+                    # The ffmpeg process or another worker may still hold the log
+                    # file briefly on Windows. Missing or locked logs are not
+                    # fatal; they will be re-created or cleaned up later.
+                    pass
                 keep_seconds = int(worker_state.get('buffer_seconds') or 15)
                 self._prune_prebuffer_segments(camera_dir, keep_seconds)
             if not stop_event.is_set():

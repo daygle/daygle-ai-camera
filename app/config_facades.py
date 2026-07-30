@@ -44,6 +44,19 @@ import app.state as _state
 from app.camera_config import normalize_camera_id, normalize_camera_settings
 
 
+def _database_setting(key: str) -> Any:
+    """Safely read a setting from the database when it is initialised.
+
+    During startup (and in some test paths) ``_state.database`` may still be
+    ``None`` when background threads first call into the config facades.
+    Returning ``None`` lets the caller fall back to the on-disk config or
+    hard-coded defaults, avoiding ``AttributeError`` races.
+    """
+    db = _state.database
+    if db is None:
+        return None
+    return db.get_setting(key)
+
 
 # Source of truth for the live-config defaults. Kept as a module
 # constant (not module-level on main.py) because it is purely a
@@ -70,7 +83,7 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
 
 def effective_ai_config() -> dict[str, Any]:
     settings = copy.deepcopy(_state.config.get('ai', {}))
-    override = _state.database.get_setting('ai')
+    override = _database_setting('ai')
     if isinstance(override, dict):
         settings.update(override)
     return settings
@@ -78,7 +91,7 @@ def effective_ai_config() -> dict[str, Any]:
 
 def effective_recording_config() -> dict[str, Any]:
     settings = copy.deepcopy(_state.config.get('recording', {}))
-    override = _state.database.get_setting('recording')
+    override = _database_setting('recording')
     if isinstance(override, dict):
         settings.update(override)
     return settings
@@ -89,7 +102,7 @@ def effective_live_config() -> dict[str, Any]:
     config_live = _state.config.get('live', {})
     if isinstance(config_live, dict):
         settings.update(config_live)
-    override = _state.database.get_setting('live')
+    override = _database_setting('live')
     if isinstance(override, dict):
         settings.update(override)
     return settings
@@ -97,7 +110,7 @@ def effective_live_config() -> dict[str, Any]:
 
 def effective_storage_config() -> dict[str, Any]:
     settings = copy.deepcopy(_state.config.get('storage', {}))
-    override = _state.database.get_setting('storage')
+    override = _database_setting('storage')
     if isinstance(override, dict):
         database_path = settings.get('database')
         settings.update(override)
@@ -110,7 +123,7 @@ def effective_storage_config() -> dict[str, Any]:
 
 def effective_auth_config() -> dict[str, Any]:
     settings = copy.deepcopy(_state.auth_config)
-    override = _state.database.get_setting('auth')
+    override = _database_setting('auth')
     if isinstance(override, dict):
         settings.update(override)
     return settings
@@ -118,7 +131,7 @@ def effective_auth_config() -> dict[str, Any]:
 
 def effective_email_alert_settings() -> dict[str, Any]:
     settings = copy.deepcopy(_state.config.get('alerts', {}).get('email', {}))
-    override = _state.database.get_setting('alert_email')
+    override = _database_setting('alert_email')
     if isinstance(override, dict):
         settings.update(override)
     return settings
@@ -126,14 +139,14 @@ def effective_email_alert_settings() -> dict[str, Any]:
 
 def effective_push_notification_settings() -> dict[str, Any]:
     settings = copy.deepcopy(_state.config.get('alerts', {}).get('push_notification', {}))
-    override = _state.database.get_setting('alert_push')
+    override = _database_setting('alert_push')
     if isinstance(override, dict):
         settings.update(override)
     return settings
 
 
 def effective_cameras_config() -> list[dict[str, Any]]:
-    override = _state.database.get_setting('cameras')
+    override = _database_setting('cameras')
     if isinstance(override, list) and override:
         return [
             normalize_camera_settings(camera_settings, index)
