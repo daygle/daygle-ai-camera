@@ -821,8 +821,12 @@ function renderTimelineForCard(card, viewPayload, cardRecordings, totalRecording
     // reason === 'windowed' - cards have recordings but none visible in
     // [fromSeconds, toSeconds] for this kind.
     return {
+      // The chip and the empty-state blurb already convey the time-range
+      // situation ("Time Range" + "in the selected time window"), so
+      // there's no need to repeat "{{kind}} Time Range" - the card
+      // header above already names the kind (Objects / Sounds).
       chipKind: 'filtered',
-      chipLabel: `${reasonPrefix} windowed`,
+      chipLabel: 'Time Range',
       statusText: `No ${kindWord} recordings in the visible time window.`,
       rowHtml: `<div class="empty timeline-empty">No ${kindWord} recordings in the selected time window.</div>`,
     };
@@ -866,7 +870,7 @@ function renderTimelineForCard(card, viewPayload, cardRecordings, totalRecording
   const isFiltered = !!els.filterSelect.value;
   const isWindowed = fromSeconds > 0 || toSeconds < DAY_SECONDS;
   const chipKind = isFiltered || isWindowed ? 'filtered' : 'ready';
-  const chipLabel = isFiltered ? 'Filtered' : isWindowed ? 'Windowed' : 'Ready';
+  const chipLabel = isFiltered ? 'Filtered' : isWindowed ? 'Time Range' : 'Ready';
   setTimelineStatusChip(card, { kind: chipKind, label: chipLabel });
   if (card.status) {
     const filterPart = isFiltered ? ` matching ${filterDisplayLabel(els.filterSelect.value)}` : '';
