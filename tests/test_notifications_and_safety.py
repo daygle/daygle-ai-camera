@@ -146,9 +146,9 @@ class EmailAlertsCleanupSwallowTests(unittest.TestCase):
         # Make ``quit()`` raise so the finally-cleanup except fires.
         fake_smtp.quit.side_effect = OSError('socket already closed')
         with patch.object(_ea_mod.smtplib, 'SMTP', return_value=fake_smtp):
-            with self.assertLogs('daygle.notifications', level='WARNING') as caplog:
+            with self.assertLogs('daygle.notifications', level='DEBUG') as caplog:
                 # ``_create_smtp_session()`` finally-block swallows the
-                # ``smtp.quit()`` OSError after logging a WARNING. The
+                # ``smtp.quit()`` OSError after logging a DEBUG. The
                 # session __enter__() itself succeeds (SMTP() + starttls()
                 # + login() all return the fake), so no EmailAlertError
                 # escapes. The test asserts the BEST-EFFORT cleanup

@@ -380,7 +380,7 @@ class EmailAlertService:
                     # transport is already torn down on the server side,
                     # so this is normally ``smtplib.SMTPNotSupportedError``
                     # / ``OSError`` - both safe to ignore AFTER logging.
-                    logger.warning(
+                    logger.debug(
                         'SMTP session close failed (resource already gone?): %s: %s',
                         type(exc).__name__, exc,
                     )
@@ -435,7 +435,7 @@ class EmailAlertService:
                 # disconnected" in app.log. See companion block in
                 # ``_create_smtp_session`` for the rationale on why this
                 # stays ``pass``-equivalent after logging.
-                logger.warning(
+                logger.debug(
                     'SMTP dead-socket close failed: %s: %s',
                     type(quit_exc).__name__, quit_exc,
                 )
