@@ -55,7 +55,7 @@ TEST_API_PY = PROJECT_ROOT / 'tests' / 'test_api.py'
 APP_MAIN_PY = PROJECT_ROOT / 'app' / 'main.py'
 APP_API_INIT = PROJECT_ROOT / 'app' / 'api' / '__init__.py'
 APP_API_MODULES = sorted((PROJECT_ROOT / 'app' / 'api').glob('*.py'))
-EXPECTED_SETTINGS_AI_REMOVE_COUNT = 11
+EXPECTED_SETTINGS_AI_REMOVE_COUNT = 10
 
 
 def _discover_main_attr_references(*, source_text: str, source_path: Path) -> list[str]:
