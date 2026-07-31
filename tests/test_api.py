@@ -458,6 +458,75 @@ def test_export_yolo_onnx_uses_ultralytics_export(tmp_path, monkeypatch):
     assert destination.exists()
 
 
+def test_same_model_resolutions_coexist_and_switch_independently(tmp_path, monkeypatch):
+    """A second export of one YOLO family must not replace the first size."""
+    _load_app(tmp_path, monkeypatch)
+    import app.model_management as mm
+    import app.api.settings_ai_router as ai_router
+
+    models_dir = tmp_path / 'models'
+    monkeypatch.setattr(mm, 'BASE_DIR', tmp_path)
+    monkeypatch.setattr(mm, 'MODELS_DIR', models_dir)
+    monkeypatch.setattr(ai_router, 'BASE_DIR', tmp_path)
+
+    active_settings = {
+        'backend': 'onnx',
+        'model_path': 'models/yolo11n-768.onnx',
+        'labels_path': 'models/coco.names',
+        'input_size': 768,
+    }
+    monkeypatch.setattr(mm, 'effective_ai_config', lambda: dict(active_settings))
+    monkeypatch.setattr(ai_router, 'effective_ai_config', lambda: dict(active_settings))
+    monkeypatch.setattr(mm, 'validate_ai_settings', lambda payload: dict(payload))
+    monkeypatch.setattr(mm, 'detector_status', lambda settings: dict(settings))
+    monkeypatch.setattr(mm, '_installed_package_version', lambda _package: 'test-version')
+    reload_calls = []
+
+    def fake_reload(settings):
+        active_settings.update(settings)
+        reload_calls.append(dict(settings))
+        return True, None
+
+    monkeypatch.setattr(mm._state, 'reload_detector', fake_reload)
+    monkeypatch.setattr(mm._state.database, 'set_setting', lambda *_args: None)
+
+    def fake_export(model_name, destination, imgsz, **_kwargs):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(f'{model_name}-{imgsz}'.encode())
+        return destination.stat().st_size
+
+    monkeypatch.setattr(mm, 'export_yolo_onnx', fake_export)
+
+    first = mm._do_download_model('yolo11n', True, 768)
+    second = mm._do_download_model('yolo11n', True, 1024)
+
+    first_path = models_dir / 'yolo11n-768.onnx'
+    second_path = models_dir / 'yolo11n-1024.onnx'
+    assert first_path.read_bytes() == b'yolo11n-768'
+    assert second_path.read_bytes() == b'yolo11n-1024'
+    assert first['model_path'] == 'models/yolo11n-768.onnx'
+    assert second['model_path'] == 'models/yolo11n-1024.onnx'
+    assert reload_calls[-1]['model_path'] == 'models/yolo11n-1024.onnx'
+
+    listed = ai_router.list_ai_models()
+    variants = [row for row in listed if row['id'] == 'yolo11n' and row['installed']]
+    assert {row['exported_imgsz'] for row in variants} >= {768, 1024}
+    assert any(row['active'] and row['path'] == 'models/yolo11n-1024.onnx' for row in variants)
+
+    # Deleting one non-active variant leaves the other resolution usable.
+    monkeypatch.setattr(mm, 'effective_ai_config', lambda: {
+        **active_settings,
+        'model_path': 'models/yolo11n-1024.onnx',
+        'input_size': 1024,
+    })
+    mm.delete_model('yolo11n', imgsz=768)
+    assert not first_path.exists()
+    assert second_path.exists()
+    metadata = mm._read_installed_models()['yolo11n']['variants']
+    assert '768' not in metadata
+    assert '1024' in metadata
+
+
 def test_detection_backoff_keeps_prebuffer_warm(tmp_path, monkeypatch):
     # A camera in *detection* backoff (transient frame-read/inference errors)
     # must still have its recording prebuffer maintained, otherwise the next

@@ -208,6 +208,25 @@ def test_preprocess_defaults_to_float32_when_dtype_unresolved():
     assert tensor.dtype == np.float32
 
 
+def test_configured_input_size_controls_dynamic_preprocess_geometry():
+    """The AI ``input_size`` setting must reach the detector instead of being
+    accepted and then silently ignored at the default 640-pixel canvas."""
+    pytest.importorskip("cv2")
+    from app.detector import create_detector
+
+    det = create_detector({
+        "backend": "onnx",
+        "model_path": "/does-not-exist.onnx",
+        "labels_path": "models/coco.names",
+        "input_size": 768,
+    })
+    assert det.input_width == 768
+    assert det.input_height == 768
+    frame = np.zeros((OH, OW, 3), dtype=np.uint8)
+    tensor, *_ = det._preprocess(frame)
+    assert tensor.shape == (1, 3, 768, 768)
+
+
 # -- active_precision reflects the running precision after fallback ---------
 
 def test_active_precision_reports_int8_when_quantized():

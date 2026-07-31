@@ -202,8 +202,13 @@ class _YamnetBackend:
         if tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
         logger.info('Downloading %s to %s', label, path)
-        urlretrieve(url, tmp_path)  # noqa: S310 - trusted model/class-map URLs controlled by the app
-        tmp_path.replace(path)
+        try:
+            urlretrieve(url, tmp_path)  # noqa: S310 - trusted model/class-map URLs controlled by the app
+            tmp_path.replace(path)
+        finally:
+            # A failed transfer must not leave stale bytes that a later
+            # retry could mistake for a completed download.
+            tmp_path.unlink(missing_ok=True)
 
     @staticmethod
     def _sha256_file(path: Path) -> str:
@@ -258,14 +263,19 @@ class _YamnetBackend:
         current_sha = self._read_metadata().get('installed_sha256', '')
         if not current_sha and _YAMNET_TFLITE_PATH.exists():
             current_sha = self._sha256_file(_YAMNET_TFLITE_PATH)
+        tmp_path = _YAMNET_TFLITE_PATH.with_suffix('.tflite.check')
         try:
-            tmp_path = _YAMNET_TFLITE_PATH.with_suffix('.tflite.check')
+            tmp_path.unlink(missing_ok=True)
             urlretrieve(_YAMNET_TFLITE_URL, tmp_path)  # noqa: S310
             new_sha = self._sha256_file(tmp_path)
             new_size = tmp_path.stat().st_size
-            tmp_path.unlink(missing_ok=True)
         except Exception as exc:
             return {'update_available': False, 'error': str(exc)}
+        finally:
+            # A failed download, hash, or stat must not leave a misleading
+            # check artifact beside the installed model. In particular, a
+            # later check must not accidentally treat stale bytes as fresh.
+            tmp_path.unlink(missing_ok=True)
         update_available = bool(current_sha and new_sha and current_sha != new_sha)
         return {
             'update_available': update_available,
@@ -281,26 +291,76 @@ class _YamnetBackend:
         download never leaves the model unavailable.
         """
         with self._lock:
+            had_working_model = self._available is True and self._model is not None
+            previous_reason = self._unavailable_reason
+            previous_metadata = self._read_metadata()
+            asset_rollback_failed = False
+            reload_failed_after_commit = False
+            assets_committed = False
             try:
                 Interpreter = self._interpreter_class()
                 # Download to temp files first
                 tmp_tflite = _YAMNET_TFLITE_PATH.with_suffix('.tflite.update')
                 tmp_csv = _YAMNET_CLASS_MAP_PATH.with_suffix('.csv.update')
+                rollback_tflite = _YAMNET_TFLITE_PATH.with_suffix('.tflite.rollback')
+                rollback_csv = _YAMNET_CLASS_MAP_PATH.with_suffix('.csv.rollback')
+                tflite_replaced = False
+                csv_replaced = False
+                had_tflite = _YAMNET_TFLITE_PATH.exists()
+                had_csv = _YAMNET_CLASS_MAP_PATH.exists()
                 try:
                     self._ensure_asset(tmp_tflite, _YAMNET_TFLITE_URL, 'YAMNet TFLite model (update)')
                     self._ensure_asset(tmp_csv, _YAMNET_CLASS_MAP_URL, 'YAMNet class map (update)')
                     class_names = self._load_class_names(tmp_csv)
                     interpreter = Interpreter(model_path=str(tmp_tflite), num_threads=1)
                     interpreter.allocate_tensors()
-                    # Swap: delete old files and rename new ones atomically
-                    _YAMNET_TFLITE_PATH.unlink(missing_ok=True)
-                    _YAMNET_CLASS_MAP_PATH.unlink(missing_ok=True)
+                    # Keep rollback copies while committing both assets. A
+                    # successful replacement of the model followed by a
+                    # failed class-map replacement must never leave mixed
+                    # model/label versions on disk.
+                    rollback_tflite.unlink(missing_ok=True)
+                    rollback_csv.unlink(missing_ok=True)
+                    if had_tflite:
+                        shutil.copy2(_YAMNET_TFLITE_PATH, rollback_tflite)
+                    if had_csv:
+                        shutil.copy2(_YAMNET_CLASS_MAP_PATH, rollback_csv)
                     tmp_tflite.replace(_YAMNET_TFLITE_PATH)
+                    tflite_replaced = True
                     tmp_csv.replace(_YAMNET_CLASS_MAP_PATH)
+                    csv_replaced = True
+                    assets_committed = True
                 except Exception:
-                    # Clean up temp files on failure
+                    # Restore the previous pair if either commit step failed.
+                    # ``replace`` is used rather than unlink+rename so readers
+                    # never observe an intentional empty-file gap. If a restore
+                    # itself fails, retain that backup for operator recovery and
+                    # do not mask the original reload error.
+                    rollback_failed = False
+                    if tflite_replaced:
+                        try:
+                            if had_tflite and rollback_tflite.exists():
+                                rollback_tflite.replace(_YAMNET_TFLITE_PATH)
+                            else:
+                                _YAMNET_TFLITE_PATH.unlink(missing_ok=True)
+                        except OSError as restore_exc:
+                            rollback_failed = True
+                            logger.error('Could not restore YAMNet TFLite asset after failed reload: %s', restore_exc)
+                    if csv_replaced:
+                        try:
+                            if had_csv and rollback_csv.exists():
+                                rollback_csv.replace(_YAMNET_CLASS_MAP_PATH)
+                            else:
+                                _YAMNET_CLASS_MAP_PATH.unlink(missing_ok=True)
+                        except OSError as restore_exc:
+                            rollback_failed = True
+                            logger.error('Could not restore YAMNet class map after failed reload: %s', restore_exc)
                     tmp_tflite.unlink(missing_ok=True)
                     tmp_csv.unlink(missing_ok=True)
+                    if not rollback_failed:
+                        rollback_tflite.unlink(missing_ok=True)
+                        rollback_csv.unlink(missing_ok=True)
+                    else:
+                        asset_rollback_failed = True
                     raise
                 self._model = interpreter
                 self._input_details = interpreter.get_input_details()
@@ -310,11 +370,59 @@ class _YamnetBackend:
                 self._unavailable_reason = None
                 self._dynamic_target_len = None
                 self._save_installed_version()
+                # The in-memory model and metadata are now committed; remove
+                # rollback copies only after every post-swap initialization step
+                # succeeds. This keeps recovery possible if metadata writing or
+                # class-index setup fails after the two asset replacements.
+                rollback_tflite.unlink(missing_ok=True)
+                rollback_csv.unlink(missing_ok=True)
                 logger.info('YAMNet TFLite reloaded successfully')
                 return True
             except Exception as exc:
-                self._unavailable_reason = f'YAMNet TFLite reload failed: {exc}'
-                logger.warning('YAMNet TFLite reload failed: %s', exc)
+                failure_reason = f'YAMNet TFLite reload failed: {exc}'
+                logger.warning('%s', failure_reason)
+                if assets_committed:
+                    # A failure after the pair was swapped must restore the
+                    # previous on-disk pair before retaining the old in-memory
+                    # interpreter. Otherwise a process restart could load a
+                    # partially initialized or mixed-version asset set.
+                    reload_failed_after_commit = True
+                    try:
+                        if had_tflite and rollback_tflite.exists():
+                            rollback_tflite.replace(_YAMNET_TFLITE_PATH)
+                        else:
+                            _YAMNET_TFLITE_PATH.unlink(missing_ok=True)
+                        if had_csv and rollback_csv.exists():
+                            rollback_csv.replace(_YAMNET_CLASS_MAP_PATH)
+                        else:
+                            _YAMNET_CLASS_MAP_PATH.unlink(missing_ok=True)
+                        rollback_tflite.unlink(missing_ok=True)
+                        rollback_csv.unlink(missing_ok=True)
+                        try:
+                            self._write_metadata(previous_metadata)
+                        except OSError as metadata_exc:
+                            asset_rollback_failed = True
+                            logger.error('Could not restore YAMNet metadata after post-commit reload failure: %s', metadata_exc)
+                        assets_committed = False
+                    except OSError as restore_exc:
+                        asset_rollback_failed = True
+                        logger.error('Could not restore YAMNet assets after post-commit reload failure: %s', restore_exc)
+                if had_working_model and not asset_rollback_failed and not reload_failed_after_commit:
+                    # Reload is a refresh operation, not a destructive reset:
+                    # retain the already allocated interpreter when the new
+                    # assets or interpreter cannot be prepared.
+                    self._unavailable_reason = previous_reason
+                    self._available = True
+                    return True
+                if had_working_model and (asset_rollback_failed or reload_failed_after_commit):
+                    # The old in-memory interpreter remains usable, but the
+                    # on-disk asset pair could not be restored consistently.
+                    # Report reload failure so operators repair the assets
+                    # before the next process restart.
+                    self._unavailable_reason = failure_reason
+                    self._available = True
+                    return False
+                self._unavailable_reason = failure_reason
                 self._available = False
                 return False
 

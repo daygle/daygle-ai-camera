@@ -141,8 +141,13 @@ def onnx_runtime_installed() -> bool:
 
 
 def model_exists(ai_settings: dict[str, Any]) -> bool:
-    model_path = str(ai_settings.get('model_path') or '')
-    return bool(model_path) and Path(model_path).exists()
+    model_path = str(ai_settings.get('model_path') or '').strip()
+    if not model_path:
+        return False
+    path = Path(model_path)
+    if not path.is_absolute():
+        path = BASE_DIR / path
+    return path.is_file()
 
 
 def detector_loaded_for(settings: dict[str, Any]) -> bool:
@@ -198,7 +203,10 @@ def ai_status_payload(
         (
             info['label']
             for info in YOLO_MODELS.values()
-            if info['onnx'] == model_filename
+            if (
+                info['onnx'] == model_filename
+                or model_filename.startswith(f"{Path(info['onnx']).stem}-")
+            )
         ),
         None,
     )
@@ -403,6 +411,16 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
                 ) from exc
         else:
             updated.pop(field, None)
+    raw_input_size = updated.get('input_size', 640)
+    if isinstance(raw_input_size, bool):
+        raise HTTPException(status_code=400, detail='input_size must be an integer between 32 and 2048.')
+    try:
+        input_size = int(raw_input_size)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='input_size must be an integer between 32 and 2048.') from exc
+    if not 32 <= input_size <= 2048:
+        raise HTTPException(status_code=400, detail='input_size must be an integer between 32 and 2048.')
+    updated['input_size'] = input_size
     raw_model_path = updated.get('model_path') or current.get('model_path') or 'models/yolo11n.onnx'
     model_path = _canonical_models_path(raw_model_path, 'model_path')
     # Existence guard, but only when the caller explicitly supplied a *new*

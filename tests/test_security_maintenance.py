@@ -276,27 +276,16 @@ class SafeWithinModelsDirTests(unittest.TestCase):
             self._fn('.bashrc')
 
     def test_rejects_parent_dir_in_subpath(self) -> None:
-        # ``../etc/passwd`` is normalised to its basename ``passwd`` by
-        # ``Path.name`` inside the helper, then resolved inside
-        # MODELS_DIR. The ``..`` segment does NOT survive -- the result
-        # is a plain ``passwd`` path under the models directory. The
-        # acceptance criterion is that the returned path contains no
-        # parent-dir reference.
-        resolved = self._fn('../etc/passwd')
-        self.assertEqual(resolved.name, 'passwd')
-        self.assertTrue(resolved.is_relative_to(self._models_dir))
-        self.assertNotIn('..', str(resolved))
+        with self.assertRaises(RuntimeError):
+            self._fn('../etc/passwd')
 
     def test_rejects_path_with_directory_separator(self) -> None:
-        # ``Path('a/b').name == 'b'`` so on a non-traversal segment the
-        # helper accepts ``b`` (resolves inside MODELS_DIR). The escape
-        # attempt ``models/yolov8n.pt`` strips to ``yolov8n.pt`` AND
-        # resolves inside MODELS_DIR so the helper accepts it. The only
-        # rejection-of-traversal cases are the explicit parent-ref and
-        # dot-prefix names (covered above).
-        out = self._fn('models/yolov8n.pt')
-        self.assertEqual(out.name, 'yolov8n.pt')
-        self.assertTrue(out.is_relative_to(self._models_dir))
+        with self.assertRaises(RuntimeError):
+            self._fn('models/yolov8n.pt')
+
+    def test_rejects_windows_path_separator(self) -> None:
+        with self.assertRaises(RuntimeError):
+            self._fn(r'..\\etc\\passwd')
 
     def test_none_input_rejected(self) -> None:
         with self.assertRaises(RuntimeError):

@@ -33,10 +33,18 @@ class DetectorUnavailableError(RuntimeError):
     """Raised when a configured detector backend cannot run inference."""
 
 
+_BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _resolve_project_path(path: str | Path) -> Path:
+    candidate = Path(path)
+    return candidate if candidate.is_absolute() else _BASE_DIR / candidate
+
+
 def load_labels(labels_path: str | Path | None, fallback: list[str] | None = None) -> list[str]:
     if labels_path:
-        path = Path(labels_path)
-        if path.exists():
+        path = _resolve_project_path(labels_path)
+        if path.is_file():
             labels = [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
             if labels:
                 return labels
@@ -109,11 +117,26 @@ class OnnxYoloDetector:
         confidence_only_nms: bool = False,
         precision: str = "fp32",
         use_io_binding: bool = False,
+        input_size: int = 640,
     ) -> None:
-        self.model_path = Path(model_path)
+        # Settings store project-relative paths (for example,
+        # ``models/yolo11n.onnx``). Resolve those against the application root,
+        # not the process cwd: systemd has an explicit WorkingDirectory, but
+        # CLI invocations, tests, and service wrappers do not necessarily share
+        # it.
+        self.model_path = _resolve_project_path(model_path)
         self.labels = load_labels(labels_path, categories)
-        self.input_width = 640
-        self.input_height = 640
+        # The requested size is used for dynamic-input exports and as the
+        # initial letterbox size. Fixed-shape ONNX models are corrected below
+        # from the session's real input shape.
+        try:
+            configured_size = int(input_size)
+        except (TypeError, ValueError):
+            configured_size = 640
+        if not 32 <= configured_size <= 2048:
+            configured_size = 640
+        self.input_width = configured_size
+        self.input_height = configured_size
         self.confidence = float(confidence)
         self.iou_threshold = float(iou_threshold)
         self.session: Any | None = None
@@ -757,6 +780,7 @@ def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
         labels_path=ai_config.get("labels_path", "models/coco.names"),
         confidence=float(ai_config.get("confidence", 0.45)),
         iou_threshold=float(ai_config.get("iou_threshold", 0.45)),
+        input_size=ai_config.get("input_size", 640),
         categories=ai_config.get("categories", []),
         num_threads=_optional_int("inference_threads"),
         max_concurrency=_optional_int("max_concurrent_inferences"),

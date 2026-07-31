@@ -185,6 +185,7 @@ function renderModelList(models) {
     return;
   }
   modelList.innerHTML = models.map((m) => {
+    const cardKey = m.variant_id || m.id;
     const updateInfo = modelUpdateMap[m.id] || {};
     const hasUpdate = updateInfo.update_available === true;
     const sizeMb = m.size_bytes ? `${(m.size_bytes / 1048576).toFixed(0)} MB` : `~${m.approx_mb} MB`;
@@ -227,7 +228,7 @@ function renderModelList(models) {
     if (!isInstalled) {
       actionsHtml = `
         <div class="model-download-row">
-          <select class="model-res-select" data-model-id="${escapeHtml(m.id)}" title="Model export resolution  -  this determines the input size the model accepts. Higher = more accurate on small objects, slower inference.">
+          <select class="model-res-select" data-model-id="${escapeHtml(cardKey)}" title="Model export resolution  -  this determines the input size the model accepts. Higher = more accurate on small objects, slower inference.">
             <option value="320">320 (Fast)</option>
             <option value="416">416</option>
             <option value="480">480</option>
@@ -239,27 +240,27 @@ function renderModelList(models) {
             <option value="1024">1024 (Accurate)</option>
             <option value="1280">1280 (Max)</option>
           </select>
-          <button class="btn-info model-action-btn" data-action="download" data-model-id="${escapeHtml(m.id)}">\u2B07 Download</button>
+          <button class="btn-info model-action-btn" data-action="download" data-model-id="${escapeHtml(cardKey)}" data-model-name="${escapeHtml(m.id)}">\u2B07 Download</button>
         </div>`;
     } else if (isActive && hasUpdate) {
       // Active model with update: allow re-export in place
       actionsHtml = `
         <span class="model-active-label">\u25CF In Use</span>
-        <button class="btn-warning model-action-btn" data-action="update" data-model-id="${escapeHtml(m.id)}">\u21BB Update</button>`;
+        <button class="btn-warning model-action-btn" data-action="update" data-model-id="${escapeHtml(cardKey)}" data-model-name="${escapeHtml(m.id)}" data-model-imgsz="${m.exported_imgsz || ''}">\u21BB Update</button>`;
     } else if (isActive) {
       actionsHtml = '<button class="btn-success model-action-btn" disabled>\u2713 In Use</button>';
     } else {
       const updateBtn = hasUpdate
-        ? `<button class="btn-warning model-action-btn" data-action="update" data-model-id="${escapeHtml(m.id)}">\u21BB Update</button>`
+        ? `<button class="btn-warning model-action-btn" data-action="update" data-model-id="${escapeHtml(cardKey)}" data-model-name="${escapeHtml(m.id)}" data-model-imgsz="${m.exported_imgsz || ''}">\u21BB Update</button>`
         : '';
       actionsHtml = `
-        <button class="btn-success model-action-btn" data-action="use" data-model-id="${escapeHtml(m.id)}" data-model-path="${escapeHtml(m.path)}">\u25B6 Use</button>
+        <button class="btn-success model-action-btn" data-action="use" data-model-id="${escapeHtml(cardKey)}" data-model-name="${escapeHtml(m.id)}" data-model-path="${escapeHtml(m.path)}" data-model-imgsz="${m.exported_imgsz || ''}">\u25B6 Use</button>
         ${updateBtn}
-        <button class="btn-danger model-action-btn" data-action="delete" data-model-id="${escapeHtml(m.id)}">\u2715 Delete</button>`;
+        <button class="btn-danger model-action-btn" data-action="delete" data-model-id="${escapeHtml(cardKey)}" data-model-name="${escapeHtml(m.id)}" data-model-imgsz="${m.exported_imgsz || ''}">\u2715 Delete</button>`;
     }
 
     return `
-      <div class="${cardClass}" id="model-card-${escapeHtml(m.id)}">
+      <div class="${cardClass}" id="model-card-${escapeHtml(cardKey)}">
         <div class="model-card-header">
           <div class="model-card-title">
             <h3>${escapeHtml(m.label)}</h3>
@@ -283,7 +284,9 @@ function renderModelList(models) {
     btn.addEventListener('click', async () => {
       const action = btn.dataset.action;
       const modelId = btn.dataset.modelId;
+      const modelName = btn.dataset.modelName || modelId;
       const modelPath = btn.dataset.modelPath;
+      const modelImgsz = btn.dataset.modelImgsz ? parseInt(btn.dataset.modelImgsz, 10) : null;
       const originalText = btn.textContent;
 
       if (action === 'delete') {
@@ -309,18 +312,19 @@ function renderModelList(models) {
           // Read selected resolution from the dropdown next to the button
           const resSelect = document.querySelector(`.model-res-select[data-model-id="${modelId}"]`);
           const imgsz = resSelect ? parseInt(resSelect.value, 10) : 640;
-          result = await api('/api/settings/ai/download-model', { method: 'POST', body: JSON.stringify({ model: modelId, imgsz }) });
+          result = await api('/api/settings/ai/download-model', { method: 'POST', body: JSON.stringify({ model: modelName, imgsz }) });
         } else if (action === 'use') {
           btn.textContent = 'Switching\u2026';
           const current = await api('/api/settings/ai');
-          result = await api('/api/settings/ai', { method: 'PUT', body: JSON.stringify({ ...current, model_path: modelPath }) });
+          result = await api('/api/settings/ai', { method: 'PUT', body: JSON.stringify({ ...current, model_path: modelPath, input_size: modelImgsz || current.input_size }) });
         } else if (action === 'update') {
           btn.textContent = 'Updating\u2026';
-          result = await api('/api/settings/ai/update-model', { method: 'POST', body: JSON.stringify({ model: modelId }) });
+          result = await api('/api/settings/ai/update-model', { method: 'POST', body: JSON.stringify({ model: modelName, imgsz: modelImgsz || undefined }) });
           delete modelUpdateMap[modelId];
         } else if (action === 'delete') {
           btn.textContent = 'Deleting\u2026';
-          result = await api(`/api/settings/ai/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' });
+          const query = modelImgsz ? `?imgsz=${encodeURIComponent(modelImgsz)}` : '';
+          result = await api(`/api/settings/ai/models/${encodeURIComponent(modelName)}${query}`, { method: 'DELETE' });
         }
 
         if (action === 'use') {
@@ -335,7 +339,7 @@ function renderModelList(models) {
           update: `${modelId} updated successfully.`,
           delete: `${modelId} deleted.`,
         };
-        setModelMessage(modelId, result.message || successMessages[action] || `${modelId} ${action}d.`, 'success');
+        setModelMessage(modelId, result.message || successMessages[action] || `${modelName} ${action}d.`, 'success');
         // Clear message after 5 seconds
         setTimeout(() => setModelMessage(modelId, '', 'info'), 5000);
         await loadModels();

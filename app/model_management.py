@@ -25,10 +25,13 @@ import importlib.metadata
 import importlib.util
 import json
 import logging
+import re
 import subprocess
 import sys
+import tempfile
 import threading
 import urllib.error
+import shutil
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -94,9 +97,110 @@ logger = logging.getLogger('daygle.ai')
 BASE_DIR = Path(__file__).resolve().parent.parent
 PYPI_ULTRALYTICS_URL = 'https://pypi.org/pypi/ultralytics/json'
 _installed_models_lock = threading.Lock()
+# Ultralytics exports and weight-cache updates are process-local and must not
+# overlap: two resolutions of the same model can otherwise race on the source
+# .pt cache or the temporary export lifecycle.
+_model_export_lock = threading.Lock()
 
 
 MODELS_DIR: Path = BASE_DIR / 'models'
+
+
+def _relative_model_path(path: Path) -> str:
+    """Return a stable forward-slash path for settings/API payloads."""
+    return path.relative_to(BASE_DIR).as_posix()
+
+
+def _normalise_model_path(value: Any) -> str:
+    return str(value or '').replace('\\', '/')
+
+
+def _same_model_path(left: Any, right: Any) -> bool:
+    """Compare project-relative/absolute model paths canonically."""
+    def resolve(value: Any) -> Path:
+        path = Path(_normalise_model_path(value))
+        return (path if path.is_absolute() else BASE_DIR / path).resolve()
+
+    return bool(left) and resolve(left) == resolve(right)
+
+
+def _resolution_filename(model_name: str, imgsz: int) -> str:
+    """Return the stable filename for one model/export resolution."""
+    info = YOLO_MODELS[model_name]
+    stem = Path(info['onnx']).stem
+    return f'{stem}-{int(imgsz)}.onnx'
+
+
+def _resolution_path(model_name: str, imgsz: int) -> Path:
+    return _safe_within_models_dir(_resolution_filename(model_name, imgsz))
+
+
+def _model_variants(model_name: str, installed_meta: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+    """Collect installed resolution variants, including legacy flat metadata."""
+    info = YOLO_MODELS[model_name]
+    meta = installed_meta if installed_meta is not None else _read_installed_models()
+    raw = meta.get(model_name, {})
+    variants: dict[str, dict[str, Any]] = {}
+    stored_variants = raw.get('variants') if isinstance(raw, dict) else None
+    if isinstance(stored_variants, dict):
+        for key, value in stored_variants.items():
+            if isinstance(value, dict):
+                variants[str(key)] = dict(value)
+    elif isinstance(raw, dict) and raw:
+        # Metadata written before resolution-specific artifacts existed. Keep
+        # its original fixed filename when that file is still present; older
+        # installs may have exported the legacy file at a non-default size.
+        size = raw.get('imgsz', info.get('input_size', 640))
+        variants[str(size)] = dict(raw)
+        if (MODELS_DIR / info['onnx']).is_file():
+            variants[str(size)].setdefault('path', _relative_model_path(MODELS_DIR / info['onnx']))
+
+    # Discover files created by an earlier/newer process even if metadata was
+    # interrupted. Only the exact model stem and numeric suffix are accepted.
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    stem = Path(info['onnx']).stem
+    for path in MODELS_DIR.glob(f'{stem}-*.onnx'):
+        match = re.fullmatch(re.escape(stem) + r'-(\d+)\.onnx', path.name)
+        if match:
+            variants.setdefault(match.group(1), {'imgsz': int(match.group(1))})
+
+    # Preserve support for the original fixed filename. A resolution-specific
+    # artifact takes precedence for the same size, but the legacy file is never
+    # deleted or overwritten by the new flow.
+    legacy = MODELS_DIR / info['onnx']
+    legacy_size = str(info.get('input_size', 640))
+    has_flat_metadata = (
+        isinstance(raw, dict)
+        and bool(raw)
+        and not isinstance(raw.get('variants'), dict)
+    )
+    legacy_rel = _relative_model_path(legacy) if legacy.is_file() else ''
+    legacy_already_represented = any(
+        _normalise_model_path(value.get('path')) == legacy_rel
+        for value in variants.values()
+        if isinstance(value, dict)
+    )
+    if legacy.is_file() and not has_flat_metadata and not legacy_already_represented:
+        variants.setdefault(legacy_size, {'imgsz': int(legacy_size), 'path': legacy_rel})
+    for key, value in variants.items():
+        value.setdefault('imgsz', int(key))
+        if value.get('path'):
+            value['path'] = _normalise_model_path(value['path'])
+        if not value.get('path'):
+            size = int(value['imgsz'])
+            value['path'] = _relative_model_path(
+                legacy if size == int(legacy_size) and legacy.is_file() else _resolution_path(model_name, size)
+            )
+    # Do not advertise metadata-only artifacts that disappeared or were
+    # manually removed. Also reject tampered metadata paths that escape the
+    # models directory before they can reach the API/UI.
+    models_root = MODELS_DIR.resolve()
+    valid_variants: dict[str, dict[str, Any]] = {}
+    for key, value in variants.items():
+        candidate = (BASE_DIR / _normalise_model_path(value['path'])).resolve()
+        if candidate.is_relative_to(models_root) and candidate.is_file():
+            valid_variants[key] = value
+    return valid_variants
 
 
 def _safe_within_models_dir(filename: str) -> Path:
@@ -105,30 +209,38 @@ def _safe_within_models_dir(filename: str) -> Path:
     M4 (round-7) defence-in-depth for any code path that takes a
     user/operator-supplied filename and joins it onto the models directory:
 
-    - Strips any directory components (``pathlib.PurePosixPath(...).name``).
+    - Requires a plain basename; absolute paths, separators, and parent
+      components are rejected instead of being silently stripped.
     - Rejects empty / dot-only / leading-dot names so a misconfigured
       ``YOLO_MODELS[model_name]['onnx'] = ''`` cannot resolve to MODELS_DIR
       itself and ``.bashrc`` / ``..`` cannot pass through.
     - Confirms the resolved path stays inside ``MODELS_DIR``.
 
-    Raises ``RuntimeError`` on rejection so the existing
-    ``_do_download_model`` HTTP-422 wrapper surfaces a clean 502 to the
-    caller without leaking ``str(filename)`` contents into the response
-    body. ``RuntimeError`` is also caught / mapped by ``export_yolo_onnx``
-    callers, which already return ``HTTPException(502, …)`` on the same
-    shape, so the new check composes cleanly.
+    Raises ``RuntimeError`` on rejection. Download flows map this to a
+    generic HTTP 502 response so malformed internal registry data cannot
+    become an unhandled server error or leak path details.
 
     The check is deliberately tighter than ``PurePath.is_relative_to``:
-    a filename like ``yolov8n.pt`` resolves identically to its origin
-    so ``is_relative_to(MODELS_DIR)`` returns True; a filename like
-    ``../etc/passwd`` becomes ``/etc/passwd`` after stripping and
-    ``is_relative_to(MODELS_DIR)`` returns False. Both branches covered.
+    a filename like ``yolov8n.pt`` resolves inside MODELS_DIR, while
+    ``../etc/passwd`` and ``models/yolov8n.pt`` are rejected before
+    resolution because they are not plain basenames.
     """
     if not isinstance(filename, str) or not filename.strip():
         raise RuntimeError('Model filename must be a non-empty string.')
-    stripped = filename.strip()
-    name = Path(stripped).name  # strips any path separator + parent refs
-    if not name or name in {'.', '..'} or name.startswith('.'):
+    name = filename.strip()
+    # Do not normalize away path components: callers of this helper are
+    # expected to provide a model filename, not a path. Reject both POSIX and
+    # Windows separators so this remains safe if a config is moved between
+    # platforms.
+    if (
+        not name
+        or name in {'.', '..'}
+        or name.startswith('.')
+        or '/' in name
+        or '\\' in name
+        or Path(name).is_absolute()
+        or any(part == '..' for part in Path(name).parts)
+    ):
         raise RuntimeError('Model filename must be a non-hidden basename.')
     resolved = (MODELS_DIR / name).resolve()
     if not resolved.is_relative_to(MODELS_DIR.resolve()):
@@ -238,29 +350,56 @@ def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, preci
     # export still succeeds. INT8 is NOT honored here; it's a runtime
     # concern handled by ``app.quantization.quantize_int8_dynamic``.
     export_kwargs = _export_kwargs(nms_free, precision=precision, device=device)
+    cached_weights = MODELS_DIR / pt_name
+    weights_arg = pt_name
     export_script = (
         "import sys\n"
         "from ultralytics import YOLO\n"
         f"YOLO(sys.argv[1]).export({export_kwargs}, imgsz=int(sys.argv[2]))\n"
     )
     command = [sys.executable, '-c', export_script, pt_name, str(imgsz)]
-    result = subprocess.run(command, cwd=destination.parent, capture_output=True, text=True, timeout=600, check=False)
-    if result.returncode != 0:
-        details = (result.stderr or result.stdout or '').strip()
-        raise RuntimeError(details or f'Ultralytics export exited with status {result.returncode}.')
-    exported = destination.parent / info['onnx']
-    if exported != destination and exported.exists():
-        exported.replace(destination)
-    if not destination.exists():
-        details = (result.stderr or result.stdout or '').strip()
-        raise RuntimeError(details or f'Ultralytics export did not create {destination.name}.')
-    if destination.stat().st_size <= 0:
-        destination.unlink(missing_ok=True)
-        raise RuntimeError('Exported model file is empty.')
-    return destination.stat().st_size
+    # Ultralytics always emits ``<weights-stem>.onnx``. Export resolution
+    # variants in an isolated directory so producing ``yolo11n-1024.onnx``
+    # cannot overwrite the legacy ``yolo11n.onnx`` or another variant.
+    export_dir = destination.parent
+    temporary_export_dir: tempfile.TemporaryDirectory[str] | None = None
+    if destination.name != info['onnx']:
+        temporary_export_dir = tempfile.TemporaryDirectory(prefix='daygle-onnx-', dir=str(destination.parent))
+        export_dir = Path(temporary_export_dir.name)
+        # Keep Ultralytics' relative-weight lookup/cache behavior while
+        # isolating the export output. A cached local weight is copied into the
+        # temporary directory; otherwise Ultralytics may download it there.
+        if cached_weights.is_file():
+            shutil.copy2(cached_weights, export_dir / pt_name)
+    try:
+        command = [sys.executable, '-c', export_script, weights_arg, str(imgsz)]
+        result = subprocess.run(command, cwd=export_dir, capture_output=True, text=True, timeout=600, check=False)
+        if result.returncode != 0:
+            details = (result.stderr or result.stdout or '').strip()
+            raise RuntimeError(details or f'Ultralytics export exited with status {result.returncode}.')
+        exported = export_dir / info['onnx']
+        if exported != destination and exported.exists():
+            exported.replace(destination)
+        if not destination.exists():
+            details = (result.stderr or result.stdout or '').strip()
+            raise RuntimeError(details or f'Ultralytics export did not create {destination.name}.')
+        if destination.stat().st_size <= 0:
+            destination.unlink(missing_ok=True)
+            raise RuntimeError('Exported model file is empty.')
+        return destination.stat().st_size
+    finally:
+        if temporary_export_dir is not None:
+            # Ultralytics may download the source weights into its cwd when
+            # they were not already cached. Preserve that download before the
+            # isolated directory is removed, so the next resolution reuses it.
+            downloaded_weights = export_dir / pt_name
+            if downloaded_weights.is_file() and not cached_weights.is_file():
+                cached_weights.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(downloaded_weights, cached_weights)
+            temporary_export_dir.cleanup()
 
 
-def delete_model(model_name: str) -> dict[str, Any]:
+def delete_model(model_name: str, imgsz: int | None = None) -> dict[str, Any]:
     """Delete an installed ONNX model file and its metadata.
 
     Safety checks:
@@ -275,7 +414,42 @@ def delete_model(model_name: str) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'.")
 
     info = YOLO_MODELS[model_name]
-    onnx_path = _safe_within_models_dir(info['onnx'])
+    installed_meta = _read_installed_models()
+    variants = _model_variants(model_name, installed_meta)
+    if imgsz is not None:
+        try:
+            imgsz = int(imgsz)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail='imgsz must be an integer.') from exc
+        if not 32 <= imgsz <= 1280:
+            raise HTTPException(status_code=400, detail='imgsz must be between 32 and 1280.')
+    if imgsz is None:
+        if len(variants) > 1:
+            raise HTTPException(status_code=400, detail=f"Specify a resolution when deleting '{model_name}'.")
+        if variants:
+            imgsz = int(next(iter(variants.values())).get('imgsz', info.get('input_size', 640)))
+        else:
+            imgsz = int(info.get('input_size', 640))
+    try:
+        variant = variants.get(str(int(imgsz)), {})
+        stored_path = variant.get('path') if isinstance(variant, dict) else None
+        if isinstance(stored_path, str) and stored_path.strip():
+            candidate = (BASE_DIR / _normalise_model_path(stored_path)).resolve()
+            models_root = MODELS_DIR.resolve()
+            if candidate.is_relative_to(models_root):
+                onnx_path = candidate
+            else:
+                raise RuntimeError('Stored model variant path is outside the models directory.')
+        else:
+            onnx_path = _resolution_path(model_name, int(imgsz))
+        legacy_path = _safe_within_models_dir(info['onnx'])
+        if not onnx_path.exists() and int(imgsz) == int(info.get('input_size', 640)) and legacy_path.exists():
+            onnx_path = legacy_path
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Model path is invalid for {info['label']}.",
+        ) from exc
 
     if not onnx_path.exists():
         raise HTTPException(status_code=404, detail=f"Model '{model_name}' is not installed.")
@@ -283,8 +457,8 @@ def delete_model(model_name: str) -> dict[str, Any]:
     # Check if this model is currently active
     ai_settings = effective_ai_config()
     active_path = str(ai_settings.get('model_path') or '')
-    rel_path = str(onnx_path.relative_to(BASE_DIR))
-    if active_path == rel_path:
+    rel_path = _relative_model_path(onnx_path)
+    if _same_model_path(active_path, rel_path):
         raise HTTPException(
             status_code=400,
             detail=f"Cannot delete '{model_name}' because it is the active model. Switch to another model first."
@@ -302,12 +476,32 @@ def delete_model(model_name: str) -> dict[str, Any]:
     except Exception as exc:  # pragma: no cover - cache cleanup is best-effort
         logger.warning('Failed to remove INT8 cache for %s: %s', model_name, exc)
 
-    # Remove from installed.json metadata
+    # Remove only this resolution's metadata. Other model resolutions remain
+    # installed and available for switching.
     with _installed_models_lock:
         installed_meta = _read_installed_models()
-        if model_name in installed_meta:
-            del installed_meta[model_name]
-            _write_installed_models(installed_meta)
+        raw = installed_meta.get(model_name, {})
+        stored = raw.get('variants') if isinstance(raw, dict) else None
+        if isinstance(stored, dict):
+            stored.pop(str(int(imgsz)), None)
+            if stored:
+                # Keep the flat summary pointed at a real remaining variant;
+                # otherwise a later update with no explicit resolution would
+                # target the variant just deleted.
+                remaining_key, remaining = max(
+                    stored.items(),
+                    key=lambda item: int(item[1].get('imgsz', item[0])),
+                )
+                raw['variants'] = stored
+                for field in ('version', 'installed_at', 'sha256', 'imgsz', 'path'):
+                    if field in remaining:
+                        raw[field] = remaining[field]
+                installed_meta[model_name] = raw
+            else:
+                installed_meta.pop(model_name, None)
+        elif model_name in installed_meta:
+            installed_meta.pop(model_name, None)
+        _write_installed_models(installed_meta)
 
     return {
         'ok': True,
@@ -320,14 +514,22 @@ def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int =
     if model_name not in YOLO_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
     info = YOLO_MODELS[model_name]
-    # M4: route operator-supplied ``info['onnx']`` through the path
-    # canonicaliser so a misconfigured entry like
-    # ``YOLO_MODELS[model_name]['onnx'] = '../etc/passwd'`` cannot be
-    # used as the export destination. ``_safe_within_models_dir`` raises
-    # ``RuntimeError`` which is mapped to ``HTTPException(502, …)``
-    # below by the same try/except already wrapping ``export_yolo_onnx``,
-    # so no new error-path code is needed.
-    destination = _safe_within_models_dir(info['onnx'])
+    try:
+        imgsz = int(imgsz)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='imgsz must be an integer.') from exc
+    if not 32 <= imgsz <= 1280:
+        raise HTTPException(status_code=400, detail='imgsz must be between 32 and 1280.')
+    # Route the resolution-specific destination through the strict basename
+    # canonicaliser. The legacy fixed filename remains untouched.
+    try:
+        destination = _resolution_path(model_name, imgsz)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=f"Model export destination is invalid for {info['label']}.") from exc
+    # Route the registry filename through the strict basename
+    # canonicaliser so a malformed entry cannot become an export destination
+    # outside the models directory. Rejections are mapped to a generic 502
+    # below rather than exposing internal path details.
     # Honour the active ``precision`` / ``device`` so re-downloading a model
     # reuses the user's chosen export knobs. INT8 is intentionally excluded
     # from this path -- Ultralytics export can't satisfy it without
@@ -339,7 +541,14 @@ def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int =
         precision = 'fp32'
     device = str(ai_settings_for_export.get('device', 'auto') or 'auto').strip().lower()
     try:
-        exported_bytes = export_yolo_onnx(model_name, destination, imgsz=imgsz, precision=precision, device=device)
+        with _model_export_lock:
+            exported_bytes = export_yolo_onnx(
+                model_name,
+                destination,
+                imgsz=imgsz,
+                precision=precision,
+                device=device,
+            )
     except ModuleNotFoundError as exc:
         # ``torch.onnx._internal.exporter._core`` imports ``onnxscript`` at
         # module-load time (and ``onnx`` itself does not pull it in), so a
@@ -369,18 +578,38 @@ def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int =
     installed_version = _installed_package_version('ultralytics')
     with _installed_models_lock:
         installed_meta = _read_installed_models()
-        installed_meta[model_name] = {'version': installed_version, 'installed_at': utc_now(), 'sha256': _sha256_file(destination), 'imgsz': imgsz}
+        raw = installed_meta.get(model_name, {})
+        existing_variants = _model_variants(model_name, installed_meta)
+        variants = {key: dict(value) for key, value in existing_variants.items()}
+        variants[str(imgsz)] = {
+            'version': installed_version,
+            'installed_at': utc_now(),
+            'sha256': _sha256_file(destination),
+            'imgsz': imgsz,
+            'path': _relative_model_path(destination),
+        }
+        installed_meta[model_name] = {
+            'version': installed_version,
+            'installed_at': variants[str(imgsz)]['installed_at'],
+            'sha256': variants[str(imgsz)]['sha256'],
+            'imgsz': imgsz,
+            'path': _relative_model_path(destination),
+            'variants': variants,
+        }
         _write_installed_models(installed_meta)
     ai_settings = effective_ai_config()
-    rel_path = str(destination.relative_to(BASE_DIR))
-    is_active = ai_settings.get('model_path') == rel_path
+    rel_path = _relative_model_path(destination)
+    is_active = _same_model_path(ai_settings.get('model_path'), rel_path)
     if switch_active or is_active:
-        model_input_size = info.get('input_size', ai_settings.get('input_size', 640))
-        updated = validate_ai_settings({**ai_settings, 'model_path': rel_path, 'input_size': model_input_size})
+        # Persist the resolution actually used for this export. The model
+        # endpoint allows an operator-selected ``imgsz``; using the catalog's
+        # nominal size here made dynamic-input models run at a different
+        # resolution than the one just exported until the next reload.
+        updated = validate_ai_settings({**ai_settings, 'model_path': rel_path, 'input_size': imgsz})
         _state.database.set_setting('ai', updated, utc_now())
         reloaded, error = _state.reload_detector(updated)
     else:
         updated = ai_settings
         reloaded = False
         error = None
-    return {'ok': True, 'message': f"Exported {info['label']} ONNX to {destination.relative_to(BASE_DIR)}.", 'model_path': rel_path, 'bytes': exported_bytes, 'reload_succeeded': reloaded, 'reload_error': error, 'status': detector_status(updated)}
+    return {'ok': True, 'message': f"Exported {info['label']} ONNX to {_relative_model_path(destination)}.", 'model_path': rel_path, 'bytes': exported_bytes, 'reload_succeeded': reloaded, 'reload_error': error, 'status': detector_status(updated)}

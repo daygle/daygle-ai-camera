@@ -7,7 +7,7 @@ import json
 import logging
 import urllib.error
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -21,7 +21,10 @@ from app.model_management import (
     BASE_DIR,
     _do_download_model,
     _fetch_models_manifest,
+    _model_variants,
+    _normalise_model_path,
     _parse_semver,
+    _same_model_path,
     _read_installed_models,
     delete_model,
 )
@@ -81,29 +84,71 @@ def check_ai_model(request: Request):
 
 @router.get('/api/settings/ai/models')
 def list_ai_models():
+    """List one selectable entry per installed model resolution.
+
+    The catalog still returns an available base entry when no variant exists,
+    while installed variants are flattened into separate rows. This keeps the
+    existing frontend/API shape useful and makes ``path`` the stable identity
+    used when switching the active detector.
+    """
     models_dir = BASE_DIR / 'models'
-    active_path = str(effective_ai_config().get('model_path') or '')
+    active_path = str(effective_ai_config().get('model_path') or '').replace('\\', '/')
     installed_meta = _read_installed_models()
     result = []
     for model_id, info in YOLO_MODELS.items():
-        onnx_path = models_dir / info['onnx']
-        rel_path = str((models_dir / info['onnx']).relative_to(BASE_DIR))
-        installed = onnx_path.exists()
-        meta = installed_meta.get(model_id, {})
+        variants = _model_variants(model_id, installed_meta)
+        if not variants:
+            result.append({
+                'id': model_id,
+                'variant_id': model_id,
+                'label': info['label'],
+                'description': info['description'],
+                'approx_mb': info['approx_mb'],
+                'input_size': info.get('input_size'),
+                'nms_free': info.get('nms_free', False),
+                'path': (models_dir / info['onnx']).relative_to(BASE_DIR).as_posix(),
+                'installed': False,
+                'active': False,
+                'size_bytes': None,
+                'installed_version': None,
+                'exported_imgsz': None,
+            })
+            continue
+        # Keep a download card alongside installed variants so another
+        # resolution can always be added without replacing an existing one.
         result.append({
             'id': model_id,
+            'variant_id': f'{model_id}-new',
             'label': info['label'],
             'description': info['description'],
             'approx_mb': info['approx_mb'],
             'input_size': info.get('input_size'),
             'nms_free': info.get('nms_free', False),
-            'path': rel_path,
-            'installed': installed,
-            'active': active_path == rel_path,
-            'size_bytes': onnx_path.stat().st_size if installed else None,
-            'installed_version': meta.get('version') if installed else None,
-            'exported_imgsz': meta.get('imgsz') if installed else None,
+            'path': (models_dir / info['onnx']).relative_to(BASE_DIR).as_posix(),
+            'installed': False,
+            'active': False,
+            'size_bytes': None,
+            'installed_version': None,
+            'exported_imgsz': None,
         })
+        for variant in sorted(variants.values(), key=lambda item: int(item.get('imgsz', info.get('input_size', 640)))):
+            path = str(variant['path'])
+            absolute = BASE_DIR / path
+            result.append({
+                'id': model_id,
+                'variant_id': f"{model_id}-{int(variant['imgsz'])}",
+                'label': f"{info['label']} · {int(variant['imgsz'])}×{int(variant['imgsz'])}",
+                'description': info['description'],
+                'approx_mb': info['approx_mb'],
+                'input_size': info.get('input_size'),
+                'nms_free': info.get('nms_free', False),
+                'path': path,
+                'installed': absolute.is_file(),
+                'active': _same_model_path(active_path, path),
+                'size_bytes': absolute.stat().st_size if absolute.is_file() else None,
+                'installed_version': variant.get('version'),
+                'exported_imgsz': int(variant['imgsz']),
+            })
     return result
 
 
@@ -211,7 +256,25 @@ async def update_ai_model(request: Request, db=Depends(get_database)):
     installed_meta = _read_installed_models()
     stored_imgsz = installed_meta.get(model_name, {}).get('imgsz', info.get('input_size', 640))
     try:
-        imgsz = int(body.get('imgsz') or stored_imgsz)
+        stored_imgsz = int(stored_imgsz)
+    except (TypeError, ValueError):
+        stored_imgsz = int(info.get('input_size', 640))
+    requested_imgsz = body.get('imgsz')
+    if requested_imgsz in (None, ''):
+        # With multiple installed resolutions, update the currently active
+        # variant by default. This avoids silently re-exporting a different
+        # size merely because it happens to be the metadata summary variant.
+        active_path = _normalise_model_path(effective_ai_config().get('model_path'))
+        active_variant = next(
+            (
+                variant for variant in _model_variants(model_name, installed_meta).values()
+                if _normalise_model_path(variant.get('path')) == active_path
+            ),
+            None,
+        )
+        requested_imgsz = (active_variant or {}).get('imgsz', stored_imgsz)
+    try:
+        imgsz = int(requested_imgsz)
     except (TypeError, ValueError):
         imgsz = stored_imgsz
     imgsz = max(32, min(1280, imgsz))
@@ -228,37 +291,13 @@ async def update_ai_model(request: Request, db=Depends(get_database)):
 
 
 @router.delete('/api/settings/ai/models/{model_id}')
-def delete_ai_model(model_id: str, request: Request, db=Depends(get_database)):
+def delete_ai_model(model_id: str, request: Request, db=Depends(get_database), imgsz: int | None = Query(default=None)):
     require_admin(request)
     model_name = model_id.strip().lower()
-    result = delete_model(model_name)
+    result = delete_model(model_name, imgsz=imgsz)
     write_audit_log(request, db, 'delete', 'settings.ai.model',
-                    details={'model_id': model_name})
-    # Return updated model list
-    models_dir = BASE_DIR / 'models'
-    active_path = str(effective_ai_config().get('model_path') or '')
-    installed_meta = _read_installed_models()
-    models = []
-    for mid, info in YOLO_MODELS.items():
-        onnx_path = models_dir / info['onnx']
-        rel_path = str((models_dir / info['onnx']).relative_to(BASE_DIR))
-        installed = onnx_path.exists()
-        meta = installed_meta.get(mid, {})
-        models.append({
-            'id': mid,
-            'label': info['label'],
-            'description': info['description'],
-            'approx_mb': info['approx_mb'],
-            'input_size': info.get('input_size'),
-            'nms_free': info.get('nms_free', False),
-            'path': rel_path,
-            'installed': installed,
-            'active': active_path == rel_path,
-            'size_bytes': onnx_path.stat().st_size if installed else None,
-            'installed_version': meta.get('version') if installed else None,
-            'exported_imgsz': meta.get('imgsz') if installed else None,
-        })
-    result['models'] = models
+                    details={'model_id': model_name, 'imgsz': imgsz})
+    result['models'] = list_ai_models()
     return result
 
 
