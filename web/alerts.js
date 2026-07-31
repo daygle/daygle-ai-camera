@@ -141,7 +141,6 @@ function renderAlertItem(group) {
   const cameraLine = group.camera ? `Camera: ${escapeHtml(group.camera)}` : 'Camera: unknown';
   const zonePart = !isSound && group.zones?.length ? ` · Zone: ${group.zones.map(escapeHtml).join(', ')}` : '';
   const metaLine = `${cameraLine}${zonePart}`;
-  const rulePart = group.ruleNames?.length ? ` · Rule: ${group.ruleNames.map(escapeHtml).join(', ')}` : '';
   const actions = [];
   if (group.recordingId) actions.push(recordingLink(group.recordingId, 'Footage'));
 
@@ -167,7 +166,7 @@ function renderAlertItem(group) {
             <span class="activity-item-when-absolute">${escapeHtml(formatDate(group.latestAt))}</span>
           </div>
         </div>
-        <p class="muted activity-item-meta">${metaLine}${rulePart}</p>
+        <p class="muted activity-item-meta">${metaLine}</p>
         <div class="activity-item-badges">${isMotionOnly ? motionPill() : detectionBadges(group.detections, { isSound })}</div>
       </div>
       ${actions.length ? `<div class="activity-item-actions">${actions.join('')}</div>` : ''}
