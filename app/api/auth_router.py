@@ -40,7 +40,7 @@ def _session_cookie_name() -> str:
 async def login(request: Request, db=Depends(get_database), auth=Depends(get_auth), auth_enabled=Depends(get_auth_enabled), logger=Depends(get_logger)):
     data = await form_data(request)
     if data.get('csrf_token') != request.cookies.get(CSRF_COOKIE):
-        return login_page(request, 'Security token expired. Try again.')
+        return login_page(request, 'Security token expired. Try again.', auth=auth, auth_enabled=auth_enabled)
     username = data.get('username', '')
     ip = _request_ip(request)
 
@@ -164,9 +164,9 @@ async def setup(request: Request, auth=Depends(get_auth), auth_enabled=Depends(g
         return RedirectResponse('/login', status_code=303)
     data = await form_data(request)
     if data.get('csrf_token') != request.cookies.get(CSRF_COOKIE):
-        return setup_page(request, 'Security token expired. Try again.')
+        return setup_page(request, 'Security token expired. Try again.', auth=auth, auth_enabled=auth_enabled)
     if data.get('password') != data.get('confirm_password'):
-        return setup_page(request, 'Passwords do not match.')
+        return setup_page(request, 'Passwords do not match.', auth=auth, auth_enabled=auth_enabled)
     try:
         auth.create_user(
             data.get('username', ''),

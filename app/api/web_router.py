@@ -91,14 +91,19 @@ def favicon(web_dir: Path = Depends(get_web_dir)):
     raise HTTPException(status_code=404, detail='Favicon not found')
 
 
-@router.get('/login')
 def login_page(
     request: Request,
     error: str | None = None,
     return_to: str | None = None,
-    auth=Depends(get_auth),
-    auth_enabled: bool = Depends(get_auth_enabled),
+    *,
+    auth,
+    auth_enabled: bool,
 ):
+    """Render the login page.
+
+    ``auth`` and ``auth_enabled`` must be resolved by the caller. Route
+    handler at :func:`_login_page_route` injects them via ``Depends()``.
+    """
     if auth_enabled and auth.users_exist() and auth.get_session(request.cookies.get(_session_cookie_name())):
         # If the caller was bounced away from a real page (e.g. session timed
         # out while the tab was idle and api() triggered handleSessionLoss),
@@ -126,13 +131,18 @@ def login_page(
     )
 
 
-@router.get('/setup')
 def setup_page(
     request: Request,
     error: str | None = None,
-    auth=Depends(get_auth),
-    auth_enabled: bool = Depends(get_auth_enabled),
+    *,
+    auth,
+    auth_enabled: bool,
 ):
+    """Render the setup page.
+
+    ``auth`` and ``auth_enabled`` must be resolved by the caller. Route
+    handler at :func:`_setup_page_route` injects them via ``Depends()``.
+    """
     if auth_enabled and auth.users_exist():
         return RedirectResponse('/login', status_code=303)
     error_html = f'<p class="error">{escape(error)}</p>' if error else ''
@@ -151,6 +161,28 @@ def setup_page(
         '  <button class="primary" type="submit">Create Admin Account</button>\n'
         '</form>',
     )
+
+
+@router.get('/login')
+def _login_page_route(
+    request: Request,
+    error: str | None = None,
+    return_to: str | None = None,
+    auth=Depends(get_auth),
+    auth_enabled: bool = Depends(get_auth_enabled),
+):
+    """Route handler — injects deps and delegates to :func:`login_page`."""
+    return login_page(request, error=error, return_to=return_to, auth=auth, auth_enabled=auth_enabled)
+
+
+@router.get('/setup')
+def _setup_page_route(
+    request: Request,
+    auth=Depends(get_auth),
+    auth_enabled: bool = Depends(get_auth_enabled),
+):
+    """Route handler — injects deps and delegates to :func:`setup_page`."""
+    return setup_page(request, auth=auth, auth_enabled=auth_enabled)
 
 
 @router.get('/live')
