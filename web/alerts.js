@@ -30,7 +30,9 @@ const els = {
 
 // SOUND_CLASS_IDS, isSoundLabel, isMotionOnlyAlertGroup, isMotionOnlyAlertItem,
 // GENERIC_TRIGGER_LABELS, detectionPill, motionPill, formatDate, timeAgo,
-// escapeHtml, titleCase, safeHtml are provided by web/utils.js.
+// escapeHtml, titleCase, safeHtml, cameraLabel are provided by web/utils.js.
+// cameraLabel(recording) reads the camera NAME from recording.event.metadata
+// (the recording detail API only exposes camera_id at the top level).
 
 let alertGroups = [];
 let activeFilter = 'all';
@@ -127,13 +129,6 @@ function recordingLink(recordingId, label) {
   if (!recordingId) return '';
   const playIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg>';
   return `<button class="secondary activity-item-action" data-play-recording="${encodeURIComponent(recordingId)}" type="button">${playIcon} ${escapeHtml(label)}</button>`;
-}
-
-function cameraLabel(cameraName, cameraId) {
-  const name = String(cameraName || '').trim();
-  const id = String(cameraId || '').trim();
-  if (name && id) return `${name} (${id})`;
-  return name || id || '';
 }
 
 function renderAlertItem(group) {
@@ -488,7 +483,7 @@ function renderRecordingDetails(recording) {
   const detailRows = [
     safeHtml`<div><span>Recording</span><strong>#${recording.id}</strong></div>`,
     safeHtml`<div><span>Event</span><strong>${recording.event_id || 'none'}</strong></div>`,
-    safeHtml`<div><span>Camera</span><strong>${cameraLabel(recording.camera_name, recording.camera_id)}</strong></div>`,
+    safeHtml`<div><span>Camera</span><strong>${cameraLabel(recording)}</strong></div>`,
     zoneRow,
     safeHtml`<div><span>Trigger</span><strong>${recordingDisplayTrigger(recording)}</strong></div>`,
     safeHtml`<div><span>Started</span><strong>${formatDateTime(recording.started_at)}</strong></div>`,
@@ -662,7 +657,7 @@ async function playRecording(id) {
   if (els.clipPlayerTitle) els.clipPlayerTitle.textContent = `Recording #${recording.id}`;
   if (els.videoModalSubtitle) {
     const started = formatDateTime(recording.started_at);
-    const camera = cameraLabel(recording.camera_name, recording.camera_id);
+    const camera = cameraLabel(recording);
     els.videoModalSubtitle.textContent = started
       ? `Recording from ${camera} captured ${started}.`
       : `Recording from ${camera}.`;
