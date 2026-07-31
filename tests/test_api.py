@@ -4834,7 +4834,7 @@ def test_sound_detection_with_email_rule_delivers_to_rule_recipients(tmp_path, m
 
     assert len(sent) == 1
     assert sent[0]['To'] == 'alerts@example.test'
-    assert 'cat_meow' in sent[0]['Subject'].lower()
+    assert 'Cat Meow' in sent[0]['Subject']
 
 
 def test_object_detection_without_global_email_enabled_sends_nothing(tmp_path, monkeypatch):
