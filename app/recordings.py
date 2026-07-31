@@ -79,6 +79,12 @@ class RecordingService:
     # worker is replaced or explicitly stopped so ``stop_*`` are synchronously
     # bound to the same ceiling as the ``_ensure_*`` paths.
     CONTINUOUS_WORKER_JOIN_TIMEOUT_SECONDS = 7.0
+    # Minimum interval between prebuffer restarts for the same camera.
+    # When two callers (e.g. live-monitor loop and an API-driven prime)
+    # alternate different stream URLs they restart each other on every
+    # cycle. This debounce suppresses rapid toggles: a genuine admin-saved
+    # URL change still restarts the worker once the window expires.
+    PREBUFFER_RESTART_DEBOUNCE_SECONDS: float = 10.0
 
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
@@ -98,6 +104,13 @@ class RecordingService:
         self.audio_dir.mkdir(parents=True, exist_ok=True)
         self._prebuffer_lock = threading.Lock()
         self._prebuffer_workers: dict[str, dict[str, Any]] = {}
+        # Per-camera timestamp of the last prebuffer restart; used to debounce
+        # rapid ping-pong restarts when two callers (e.g. live-monitor loop and
+        # an API-driven prime) alternate different stream URLs for the same
+        # camera. Without this guard each caller restarts the other's worker on
+        # every cycle, the rolling buffer never fills, and events render with no
+        # pre-roll footage.
+        self._prebuffer_last_restart: dict[str, float] = {}
         # High-res recording prebuffer: parallel video-only worker for the
         # recording stream URL when a camera exposes dual streams. Captures
         # full-resolution segments so event clips render at recording quality
@@ -989,6 +1002,7 @@ class RecordingService:
 
     def _ensure_prebuffer_worker(self, camera_key: str, stream_url: str, buffer_seconds: int, camera_id: str | None = None) -> None:
         restart_reason: str | None = None
+        old_url: str | None = None
         with self._prebuffer_lock:
             existing = self._prebuffer_workers.get(camera_key)
             if existing and existing.get('stream_url') == stream_url:
@@ -1004,7 +1018,21 @@ class RecordingService:
                     # happening the buffer never fills and events render as near-
                     # still clips - so surface why, to catch config churn / collisions.
                     if existing.get('stream_url') != stream_url:
+                        old_url = str(existing.get('stream_url') or '')
                         restart_reason = 'stream_url_changed'
+                        # Debounce: when two callers alternate different URLs they
+                        # restart each other on every cycle, and the rolling buffer
+                        # never fills. Suppress the restart (and keep the current
+                        # worker running) when one was already performed within the
+                        # debounce window for this camera. A genuine admin-saved
+                        # URL change still takes effect once the window expires.
+                        now = time.monotonic()
+                        last = self._prebuffer_last_restart.get(camera_key, 0)
+                        if now - last < self.PREBUFFER_RESTART_DEBOUNCE_SECONDS:
+                            # Update buffer_seconds on the existing worker so the
+                            # window size stays current even while we suppress.
+                            existing['buffer_seconds'] = int(buffer_seconds)
+                            return
             # Bug 2 fix: join the OLD worker's thread (via ``_stop_worker``)
             # BEFORE clearing the marker or starting a replacement worker.
             # Without joining, two ffmpegs race over the same rolling-buffer
@@ -1064,14 +1092,22 @@ class RecordingService:
             self._prebuffer_workers[camera_key] = worker_state
             thread.start()
         if restart_reason:
-            logger.info('Prebuffer worker for %s restarted (%s); rolling buffer was reset.', camera_key, restart_reason)
+            url_detail = self._url_diff_summary(old_url or '', stream_url) if old_url else ''
+            logger.info(
+                'Prebuffer worker for %s restarted (%s)%s; rolling buffer was reset.',
+                camera_key,
+                restart_reason,
+                f': {url_detail}' if url_detail else '',
+            )
+            with self._prebuffer_lock:
+                self._prebuffer_last_restart[camera_key] = time.monotonic()
             self._emit_diagnostic(
                 camera_id or camera_key,
                 'prebuffer_restart',
                 f'Pre-event buffer worker restarted ({restart_reason}); the rolling buffer was reset. '
                 'Frequent restarts leave events without pre-roll footage.',
                 severity='warning',
-                details={'reason': restart_reason, 'camera_key': camera_key},
+                details={'reason': restart_reason, 'camera_key': camera_key, 'url_diff': url_detail} if url_detail else {'reason': restart_reason, 'camera_key': camera_key},
             )
 
     def _run_prebuffer_worker(self, camera_key: str, stream_url: str, worker_state: dict[str, Any]) -> None:
@@ -1730,6 +1766,22 @@ class RecordingService:
     @staticmethod
     def redact_stream_credentials(message: str) -> str:
         return re.sub(r'(rtsps?://[^:\s/@]+):[^@]+@', r'\1:***@', message)
+
+    @staticmethod
+    def _url_diff_summary(old_url: str, new_url: str) -> str:
+        """Return a short human-readable summary of what changed between two
+        RTSP URLs, with credentials stripped. Returns 'credentials-only change'
+        when they differ only in the credential portion.
+
+        Uses a broader credential-strip regex than ``redact_stream_credentials``
+        because the diff only needs to show host/port/path differences;
+        ``redact_stream_credentials`` preserves the username portion for
+        operator recognition in error messages."""
+        a = re.sub(r'(rtsps?://)[^@]+@', r'\1<creds>@', old_url)
+        b = re.sub(r'(rtsps?://)[^@]+@', r'\1<creds>@', new_url)
+        if a == b:
+            return '(credentials-only change)'
+        return f'{a} -> {b}'
 
     @staticmethod
     def clip_has_video_stream(file_path: Path) -> bool:
