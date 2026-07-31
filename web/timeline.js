@@ -412,11 +412,14 @@ function recordingColorKey(recording) {
 }
 
 function recordingTriggerSummary(recording) {
-  const confidenceSummary = recordingDetectionSummary(recording)
+  // Trigger summary shows the detected labels only - the confidence
+  // percentages are intentionally omitted on the timeline page; users
+  // review exact confidence in the detail pills below the player instead.
+  const labelSummary = recordingDetectionSummary(recording)
     .filter((d) => d.confidence > 0)
-    .map((d) => `${titleCase(d.label)} ${Math.round(d.confidence * 100)}%`)
+    .map((d) => titleCase(d.label))
     .join(' / ');
-  if (confidenceSummary) return confidenceSummary;
+  if (labelSummary) return labelSummary;
   if (isSoundRecording(recording)) {
     return `🔊 ${recordingTypeLabel(recording)}`;
   }
