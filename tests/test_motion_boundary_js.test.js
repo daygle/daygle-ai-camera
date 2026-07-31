@@ -117,6 +117,19 @@ test('recordingZoneNames: empty for sounds, deduped for objects', () => {
   );
 });
 
+test('recordingZoneNames: folds in zone names from the detection track, deduped', () => {
+  // Objects detected after the trigger live in recording.track samples; their
+  // zone names must surface too, without duplicating the event detections.
+  const recording = {
+    detections: [{ zone_name: 'Drive' }],
+    track: [
+      { detections: [{ zone_name: 'Drive' }, { zone_name: 'Porch' }, {}] },
+      { detections: [{ zone_name: 'Porch' }] },
+    ],
+  };
+  assert.deepEqual(plain(recordingZoneNames(recording)), ['Drive', 'Porch']);
+});
+
 // ─── GENERIC_TRIGGER_LABELS sanity ─────────────────────────────────────────
 
 test('GENERIC_TRIGGER_LABELS contains the trigger placeholders and excludes concrete labels', () => {

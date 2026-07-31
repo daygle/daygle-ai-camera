@@ -258,6 +258,59 @@ def test_zone_motion_detections_threshold_filters_low_confidence():
     assert zd.zone_motion_detections(settings, 0.5, diff_mask=None) == []
 
 
+def test_zone_motion_detections_stamps_zone_name_and_id():
+    """Motion pseudo-detections must carry the zone name so the playback cards
+    can render a Zone row for motion-triggered events."""
+    from app import zone_detection as zd
+    settings = {
+        'id': 'cam-1',
+        'name': 'Cam 1',
+        'detection': {
+            'zones': [
+                {
+                    'id': 'porch',
+                    'name': 'Porch',
+                    'enabled': True,
+                    'monitor_motion': True,
+                    'x': 0,
+                    'y': 0,
+                    'width': 1,
+                    'height': 1,
+                    'object_rules': [{'label': 'motion', 'min_confidence': 0.0}],
+                },
+            ],
+        },
+    }
+    result = zd.zone_motion_detections(settings, 0.9, diff_mask=None)
+    assert len(result) == 1
+    assert result[0]['zone_id'] == 'porch'
+    assert result[0]['zone_name'] == 'Porch'
+
+
+def test_zone_motion_detections_zone_name_falls_back_to_id():
+    """A zone without a human name must still stamp its id as the zone name."""
+    from app import zone_detection as zd
+    settings = {
+        'id': 'cam-1',
+        'detection': {
+            'zones': [
+                {
+                    'id': 'z1',
+                    'enabled': True,
+                    'monitor_motion': True,
+                    'x': 0,
+                    'y': 0,
+                    'width': 1,
+                    'height': 1,
+                    'object_rules': [{'label': 'motion', 'min_confidence': 0.0}],
+                },
+            ],
+        },
+    }
+    result = zd.zone_motion_detections(settings, 0.9, diff_mask=None)
+    assert result[0]['zone_name'] == 'z1'
+
+
 def test_zone_motion_detections_default_gate_fraction_resolves_via_state(
     monkeypatch, zd
 ):

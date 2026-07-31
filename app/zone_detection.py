@@ -357,6 +357,7 @@ def zone_motion_detections(
         result.append({
             'confidence': zone_confidence,
             'zone_id': zone_id,
+            'zone_name': zone.get('name') or zone_id,
             'box': {
                 'x': float(zone.get('x', 0)),
                 'y': float(zone.get('y', 0)),

@@ -514,7 +514,20 @@ function recordingTriggerLabel(recording) {
 
 function recordingZoneNames(recording) {
   if (isSoundRecording(recording)) return [];
-  return [...new Set((recording.detections || []).map((d) => d.zone_name).filter(Boolean))];
+  const names = new Set();
+  const remember = (detection) => {
+    const zoneName = String(detection?.zone_name || '').trim();
+    if (zoneName) names.add(zoneName);
+  };
+  for (const d of (recording.detections || [])) remember(d);
+  // The live detection track (recording.track, loaded for the playback modal
+  // and timeline) can carry zone names for objects detected after the trigger
+  // event. Fold those in so the playback-card Zone row is complete even when
+  // the event's detections table row lacks a zone name.
+  for (const sample of (recording.track || [])) {
+    for (const d of (sample?.detections || [])) remember(d);
+  }
+  return [...names];
 }
 
 // Returns an array of { label, confidence } sorted by confidence descending.

@@ -358,7 +358,25 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             if _zone_name or zone_record_on_detect(_det, settings):
                 _confident_object_detections.append({**_det, 'zone_name': _zone_name or None})
     else:
-        _confident_object_detections = list(object_detections)
+        # No object-monitoring zones with enabled rules: stamp the first
+        # enabled zone whose geometry contains the detection so the playback
+        # cards / recordings list still show a zone name for cameras that
+        # monitor motion only (or have zones but no object rules yet).
+        _enabled_zones = [
+            zone for zone in (settings.get('detection') or {}).get('zones', [])
+            if zone.get('enabled', True)
+        ]
+        _confident_object_detections = [
+            {
+                **_det,
+                'zone_name': next((
+                    str(zone.get('name') or zone.get('id') or '').strip() or None
+                    for zone in _enabled_zones
+                    if detection_matches_zone(_det, zone)
+                ), None),
+            }
+            for _det in object_detections
+        ]
     recording_detections = [{**detection, 'alert_matched': bool(zone_detection_alert_rule_names(settings, detection) & triggered_rule_names) if has_object_zone_rules else str(detection.get('label') or '').lower() in triggered_labels, 'alert_triggered': zone_record_on_detect(detection, settings)} for detection in _confident_object_detections]
     if motion_detections:
         _motion_record = zone_motion_record_on_detect(settings)
