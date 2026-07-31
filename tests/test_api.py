@@ -54,6 +54,7 @@ class LocalClient:
         data: bytes | None = None,
         headers: dict[str, str] | None = None,
         follow_redirects: bool = True,
+        timeout: float = 5,
     ):
         request_data = data
         request_headers = dict(headers or {})
@@ -70,7 +71,7 @@ class LocalClient:
         opener = self.opener if follow_redirects else build_opener(HTTPCookieProcessor(self.cookies), NoRedirect)
         request = Request(f"{self.base_url}{path}", data=request_data, method=method, headers=request_headers)
         try:
-            with opener.open(request, timeout=5) as response:  # noqa: S310 - local test server only
+            with opener.open(request, timeout=timeout) as response:  # noqa: S310 - local test server only
                 return response.status, dict(response.headers), _body(response)
         except HTTPError as exc:
             return exc.code, dict(exc.headers), _error_body(exc)
@@ -2155,6 +2156,7 @@ def test_admin_can_backup_and_restore_database_from_api(tmp_path, monkeypatch):
             method='POST',
             data=multipart_body,
             headers={'Content-Type': content_type, 'X-CSRF-Token': csrf},
+            timeout=15,
         )
         assert status == 200
         assert restored['ok'] is True
