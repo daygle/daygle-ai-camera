@@ -95,6 +95,8 @@ def list_ai_models():
             'label': info['label'],
             'description': info['description'],
             'approx_mb': info['approx_mb'],
+            'input_size': info.get('input_size'),
+            'nms_free': info.get('nms_free', False),
             'path': rel_path,
             'installed': installed,
             'active': active_path == rel_path,
@@ -110,22 +112,17 @@ async def download_ai_model(request: Request, db=Depends(get_database)):
     require_admin(request)
     body = await request.json()
     model_name = str(body.get('model') or '').strip().lower()
+    if model_name not in YOLO_MODELS:
+        raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'.")
+    info = YOLO_MODELS[model_name]
     try:
-        imgsz = int(body.get('imgsz') or 640)
+        imgsz = int(body.get('imgsz') or info.get('input_size', 640))
     except (TypeError, ValueError):
-        imgsz = 640
+        imgsz = info.get('input_size', 640)
     # Clamp to reasonable range: Ultralytics supports 32-4096, we cap at 1280
     imgsz = max(32, min(1280, imgsz))
     # Round to nearest multiple of 32 for optimal Ultralytics export
     imgsz = ((imgsz + 16) // 32) * 32
-    # H1 fix: add the same YOLO_MODELS whitelist gate that
-    # ``update_ai_model`` already enforces, so this handler cannot be
-    # used to ask ``_do_download_model`` to fetch an arbitrary off-list
-    # blob (path-traversal / SSRF depending on what the underlying
-    # ``_do_download_model`` does with the name). Same pattern, same
-    # 400 response, same whitelist; just tighter input validation.
-    if model_name not in YOLO_MODELS:
-        raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'.")
     # Audit-log gate (audit-trail finding): admin downloads of
     # bin/exported artefacts must leave a trail, mirroring
     # ``update_ai_settings``. Without this row, an admin replacement
@@ -210,8 +207,9 @@ async def update_ai_model(request: Request, db=Depends(get_database)):
     # Read stored export resolution from installed.json so the model
     # is re-exported at the same resolution it was originally downloaded at.
     # This prevents silently downgrading from e.g. 1024 to 640 on update.
+    info = YOLO_MODELS[model_name]
     installed_meta = _read_installed_models()
-    stored_imgsz = installed_meta.get(model_name, {}).get('imgsz', 640)
+    stored_imgsz = installed_meta.get(model_name, {}).get('imgsz', info.get('input_size', 640))
     try:
         imgsz = int(body.get('imgsz') or stored_imgsz)
     except (TypeError, ValueError):
@@ -251,6 +249,8 @@ def delete_ai_model(model_id: str, request: Request, db=Depends(get_database)):
             'label': info['label'],
             'description': info['description'],
             'approx_mb': info['approx_mb'],
+            'input_size': info.get('input_size'),
+            'nms_free': info.get('nms_free', False),
             'path': rel_path,
             'installed': installed,
             'active': active_path == rel_path,

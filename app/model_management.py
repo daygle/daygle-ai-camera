@@ -375,7 +375,8 @@ def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int =
     rel_path = str(destination.relative_to(BASE_DIR))
     is_active = ai_settings.get('model_path') == rel_path
     if switch_active or is_active:
-        updated = validate_ai_settings({**ai_settings, 'model_path': rel_path})
+        model_input_size = info.get('input_size', ai_settings.get('input_size', 640))
+        updated = validate_ai_settings({**ai_settings, 'model_path': rel_path, 'input_size': model_input_size})
         _state.database.set_setting('ai', updated, utc_now())
         reloaded, error = _state.reload_detector(updated)
     else:
