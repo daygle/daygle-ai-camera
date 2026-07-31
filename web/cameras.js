@@ -13,7 +13,6 @@ const stats = {
   total: document.getElementById('statTotalCameras'),
   recording: document.getElementById('statRecordingOn'),
   zones: document.getElementById('statWithZones'),
-  backends: document.getElementById('statBackends'),
   health: document.getElementById('statCameraHealth'),
 };
 const filter = {
@@ -527,11 +526,6 @@ function updateStats() {
   if (stats.zones) {
     var withZones = cameras.filter(function(c) { return (c.detection?.zones || []).length > 0; }).length;
     stats.zones.textContent = String(withZones);
-  }
-  if (stats.backends) {
-    var onvif = cameras.filter(function(c) { return (c.backend || 'onvif') === 'onvif'; }).length;
-    var rtsp = cameras.filter(function(c) { return c.backend === 'rtsp'; }).length;
-    stats.backends.textContent = onvif + ' / ' + rtsp;
   }
 }
 
