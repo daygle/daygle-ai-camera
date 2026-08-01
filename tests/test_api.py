@@ -1927,6 +1927,17 @@ def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypat
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main._state.live_detection_last_checked.clear()
+    # The 'jpeg-frame' bytes below are not a decodable image, so the adaptive
+    # background gate cannot measure them and would fail open. Pin the gate to
+    # a deterministic low-confidence (0.4) motion read instead: this test
+    # exercises the motion-rule min_confidence filter itself, and the fail-open
+    # constant is deliberately >= the default 0.45 rule threshold (so motion-only
+    # alerts survive gate-error windows) -- it is not what this test asserts.
+    monkeypatch.setattr(
+        mods.live_monitor,
+        'detect_frame_motion',
+        lambda camera_id, image, **_kwargs: (True, 0.4, None),
+    )
 
     strict_settings = {
         'id': 'camera-1',
