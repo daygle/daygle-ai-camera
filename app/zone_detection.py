@@ -516,16 +516,24 @@ def zone_record_on_detect(detection: dict[str, Any], settings: dict[str, Any]) -
     return bool(zone_object_rule_matches(settings, detection, action='record'))
 
 
-def zone_motion_record_on_detect(settings: dict[str, Any]) -> bool:
-    """Return True if any enabled motion-monitoring zone has a motion rule with record_on_detect=True.
+def zone_motion_record_on_detect(settings: dict[str, Any], zone_id: str | None = None) -> bool:
+    """Return True if the motion rule covering ``zone_id`` has record_on_detect=True.
 
     zone_record_on_detect / zone_object_rule_matches filter by monitor_objects=True and therefore
     skip motion-only zones (monitor_objects=False, monitor_motion=True). This helper checks the
     correct monitor_motion axis so motion-only zones are not silently excluded from recording.
+
+    When ``zone_id`` is provided only that zone is considered, so the recording
+    decision is per-zone: motion in a record-off zone cannot piggyback on a
+    record-on rule in a different zone. Without ``zone_id`` (legacy callers,
+    tests) any matching zone counts.
     """
     detection_settings = settings.get('detection') or {}
     for zone in detection_settings.get('zones', []):
         if not zone.get('enabled', True) or not zone.get('monitor_motion', True):
+            continue
+        zone_key = str(zone.get('id') or zone.get('name') or id(zone))
+        if zone_id is not None and zone_key != str(zone_id):
             continue
         for rule in zone.get('object_rules') or []:
             if not rule.get('enabled', True):

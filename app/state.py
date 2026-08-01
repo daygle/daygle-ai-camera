@@ -32,7 +32,7 @@ _MOTION_FRAME_W: int = 160
 _MOTION_FRAME_H: int = 120
 _MOTION_PIXEL_THRESHOLD: int = 30
 _MOTION_GATE_FRACTION: float = 0.003
-_MOTION_SCALE_FRACTION: float = 0.1
+_MOTION_SCALE_FRACTION: float = 0.03
 _MOTION_BACKGROUND_ALPHA: float = 0.05
 
 # Middleware / auth constants (moved from app.main so app.middleware can

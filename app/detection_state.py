@@ -86,6 +86,13 @@ except Exception:
 
 _EXPECTED_MOTION_ERRORS = (ValueError, TypeError, MemoryError, OSError) + _CV2_ERROR
 
+# Confidence reported when the motion gate fails open. Chosen above the default
+# motion-rule min_confidence (0.45, see app.zone_schema.zone_motion_min_confidence)
+# so motion-only zones keep firing during a gate-error window instead of going
+# silently quiet; object rules alert either way. High enough to clear default
+# rules, low enough that aggressively-thresholded rules still gate.
+_MOTION_FAIL_OPEN_CONFIDENCE = 0.5
+
 
 logger = logging.getLogger('daygle.ai')
 
@@ -218,10 +225,10 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
             if camera_id not in _state._frame_motion_error_cameras:
                 logger.warning('Motion gate unavailable for camera %s: %s; failing open', camera_id, exc)
                 _state._frame_motion_error_cameras.add(camera_id)
-        return (True, 0.4, None)
+        return (True, _MOTION_FAIL_OPEN_CONFIDENCE, None)
     except Exception as exc:
         with _state._frame_motion_lock:
             if camera_id not in _state._frame_motion_error_cameras:
                 logger.exception('Unexpected motion gate failure for camera %s; failing open', camera_id)
                 _state._frame_motion_error_cameras.add(camera_id)
-        return (True, 0.4, None)
+        return (True, _MOTION_FAIL_OPEN_CONFIDENCE, None)

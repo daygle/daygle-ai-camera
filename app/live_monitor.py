@@ -316,12 +316,22 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         force_scan = True
         _state._periodic_scan_last_ts[camera_id] = now
     frame_has_motion, frame_motion_confidence, diff_mask = detect_frame_motion(camera_id, image, pixel_threshold=_pixel_threshold, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, background_alpha=_background_alpha)
-    if not frame_has_motion and (not force_scan):
-        update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[])
-        return None
     if not frame_has_motion:
         frame_motion_confidence = 0.0
-        diff_mask = None
+        # A periodic scan bypasses the gate but measured no pixel motion, so
+        # motion zone rules stay silent (matches the docs). On a normal
+        # sub-gate frame the diff mask is still valid: each zone scores its
+        # OWN rectangle, so motion confined to a small zone (a doorway, a
+        # distant subject) can clear that zone's rule without ever reaching
+        # the frame-wide gate fraction. Evaluate the zone rules before the
+        # bail below so those per-zone rules actually fire.
+        if force_scan:
+            diff_mask = None
+    # Per-zone motion rules score independently of the frame-wide gate.
+    motion_detections = zone_motion_detections(settings, frame_motion_confidence, diff_mask=diff_mask, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction)
+    if not frame_has_motion and (not force_scan) and (not motion_detections):
+        update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[])
+        return None
     min_conf = compute_minimum_rule_confidence()
     try:
         if frame_is_numpy and hasattr(_state.detector, 'detect_frame'):
@@ -334,7 +344,6 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         return None
     detections = normalize_detection_boxes_for_frame(detections, frame)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
-    motion_detections = zone_motion_detections(settings, frame_motion_confidence, diff_mask=diff_mask, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction)
     object_detections = filter_detections_for_camera(detections, settings)
     zone_rules = zone_object_alert_rules(settings)
     has_object_zone_rules = any((zone.get('enabled', True) and zone.get('monitor_objects', True) and any((rule.get('enabled', True) and str(rule.get('label') or '').strip() for rule in zone.get('object_rules') or [])) for zone in (settings.get('detection') or {}).get('zones', [])))
@@ -383,9 +392,15 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             for _det in object_detections
         ]
     recording_detections = [{**detection, 'alert_matched': bool(zone_detection_alert_rule_names(settings, detection) & triggered_rule_names) if has_object_zone_rules else str(detection.get('label') or '').lower() in triggered_labels, 'alert_triggered': zone_record_on_detect(detection, settings)} for detection in _confident_object_detections]
-    if motion_detections:
-        _motion_record = zone_motion_record_on_detect(settings)
-        recording_detections.append({**strongest_motion, 'label': 'motion', 'motion_event': True, 'alert_matched': 'motion' in triggered_labels, 'alert_triggered': 'motion' in triggered_labels or _motion_record or detection_has_matching_record_rule({**strongest_motion, 'label': 'motion'}, zone_rules)})
+    # Each motion detection is stamped with the record decision for ITS OWN
+    # zone, so motion in a record-off zone cannot piggyback on a record-on
+    # rule in a different zone. Appending every firing zone (not just the
+    # strongest) keeps the event's detection list faithful when multiple
+    # zones move at once.
+    for _mot in motion_detections:
+        _motion_zone_key = str(_mot.get('zone_id') or _mot.get('zone_name') or '')
+        _motion_record = zone_motion_record_on_detect(settings, _motion_zone_key) if _motion_zone_key else zone_motion_record_on_detect(settings)
+        recording_detections.append({**_mot, 'label': 'motion', 'motion_event': True, 'alert_matched': 'motion' in triggered_labels, 'alert_triggered': 'motion' in triggered_labels or _motion_record or detection_has_matching_record_rule({**_mot, 'label': 'motion'}, zone_rules)})
     matched_labels = [str(detection.get('label')) for detection in alert_detections if detection.get('label')]
     camera_recording_config = _state.camera_event_recording_config(settings)
     should_record_event, _trigger_type, _trigger_label = _state.recording_service.should_record(recording_detections, camera_recording_config)

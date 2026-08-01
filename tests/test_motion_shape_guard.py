@@ -50,7 +50,7 @@ def test_shape_mismatch_resets_instead_of_failing_open(monkeypatch):
     has_motion, conf, mask = detect_frame_motion(cam, _img(100, 120))
 
     # Self-heal: reported as a fresh (no-motion) frame, background re-seeded at the
-    # new size -- NOT the fail-open (True, 0.4) the old except path produced.
+    # new size -- NOT the fail-open (True, 0.5) the except path would produce.
     assert has_motion is False, "shape mismatch must self-heal, not fail open"
     assert conf == 0.0 and mask is None
     assert _state._frame_motion_prev[cam].shape == (45, 60)

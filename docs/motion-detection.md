@@ -121,14 +121,14 @@ Default: `0.003`
 
 ### Motion Scale Fraction
 
-The pixel change fraction that maps to 100% motion confidence. At `0.10`, if 10% of pixels changed, confidence is 1.0. At 5%, confidence is 0.5.
+The pixel change fraction that maps to 100% motion confidence. At `0.03`, if 3% of pixels changed, confidence is 1.0. At 1.5%, confidence is 0.5.
 
 This does not affect whether motion fires - that is controlled by Gate Fraction. It only affects the confidence score that Layer 3 motion rules compare against.
 
 - **Lower:** More sensitive confidence scoring - small movements get higher scores
 - **Higher:** Only large, obvious movements score close to 1.0
 
-Default: `0.10`
+Default: `0.03`
 
 ---
 
