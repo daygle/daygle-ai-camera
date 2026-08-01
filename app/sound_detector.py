@@ -1017,9 +1017,14 @@ class SoundDetector:
                     # second of audio permanently.
                     logger.debug('Sound monitor could not read audio segment %s: %s', path, exc)
                     continue
-                last_ts = max(last_ts, mtime)
                 if not frames:
+                    # A header-only / zero-frame segment is usually a file still
+                    # being written by the ingest. Don't advance last_ts: retry it
+                    # next poll instead of dropping the second of audio permanently
+                    # (mirrors the read-error branch above).
+                    logger.debug('Sound monitor read an empty audio segment %s', path)
                     continue
+                last_ts = max(last_ts, mtime)
                 audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
                 if not audio.size:
                     continue

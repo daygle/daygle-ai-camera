@@ -6,10 +6,18 @@ Daygle AI Camera can monitor RTSP audio streams and create alerts or recordings 
 
 1. A camera must have an RTSP stream with an audio track.
 2. Sound detection is enabled for that camera from `/sounds`.
-3. The background sound monitor samples the RTSP audio with `ffmpeg` and converts it to 16 kHz audio for classification.
+3. The per-camera ingest (the same single RTSP connection that feeds video pre-roll
+   and object detection) extracts the audio track and writes 1-second 16 kHz WAV
+   segments. The sound monitor consumes those segments, so it never opens a second
+   RTSP connection.
 4. The YAMNet TensorFlow Lite backend scores the audio against supported sound classes.
 5. Enabled per-camera rules compare the class confidence to the rule threshold and cooldown.
 6. Matching rules can create alert history entries, send email, send push notifications, and start recordings.
+
+> **Audio source:** The web UI always uses the shared ingest (`source='ingest'`).
+> The `SoundDetector` class also implements `'microphone'` (system audio input via
+> `sounddevice`) and `'rtsp'` (its own ffmpeg pipe) sources for programmatic use,
+> but they are not wired to the web UI.
 
 ## Supported sound classes
 
