@@ -70,9 +70,38 @@ rsync -a --delete \
 
 mkdir -p "${DATA_DIR}" "${MODEL_DIR}"
 
-# Python virtual environment. The dependency helper defaults to CPU-only
-# PyTorch and --no-cache-dir to avoid pulling/caching large CUDA wheels during
-# service installs on small disks or container overlays.
+# Resolve the ONNX Runtime wheel before creating/updating the environment.
+# ``auto`` selects GPU only when the NVIDIA driver can enumerate a device;
+# explicit ``cpu``/``gpu`` values are respected for operators who want a
+# deterministic choice. Driver/CUDA installation is intentionally not done by
+# this script because it is kernel-, repository-, and Secure-Boot-dependent.
+REQUESTED_VARIANT="${DAYGLE_ONNXRUNTIME_VARIANT:-auto}"
+case "${REQUESTED_VARIANT}" in
+  auto)
+    if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+      INSTALL_VARIANT='gpu'
+    else
+      INSTALL_VARIANT='cpu'
+    fi
+    ;;
+  cpu|gpu)
+    INSTALL_VARIANT="${REQUESTED_VARIANT}"
+    ;;
+  *)
+    echo "ERROR: DAYGLE_ONNXRUNTIME_VARIANT must be 'auto', 'cpu', or 'gpu' (got '${REQUESTED_VARIANT}')." >&2
+    exit 1
+    ;;
+esac
+if [[ "${INSTALL_VARIANT}" == 'gpu' ]] && ! command -v nvidia-smi >/dev/null 2>&1; then
+  echo "WARNING: GPU dependency variant selected, but nvidia-smi is not installed or not on PATH." >&2
+  echo "         Install and verify the NVIDIA driver before starting the service." >&2
+fi
+export DAYGLE_ONNXRUNTIME_VARIANT="${INSTALL_VARIANT}"
+echo "Installing ONNX Runtime variant: ${INSTALL_VARIANT}"
+
+# Python virtual environment. The dependency helper removes the opposite
+# ONNX Runtime wheel before installation, so re-running the installer can
+# safely switch an existing environment between CPU and GPU variants.
 python3 -m venv "${APP_DIR}/.venv"
 "${APP_DIR}/scripts/install_python_deps.sh" "${APP_DIR}/.venv/bin/python" "${APP_DIR}/requirements.txt"
 

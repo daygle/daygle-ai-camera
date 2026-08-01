@@ -3,8 +3,10 @@ uvicorn[standard]>=0.52.0,<1.0
 PyYAML>=6.0,<7.0
 bcrypt>=4.0,<6.0  # 5.0+ raises ValueError for passwords > 72 bytes (guard in auth.py)
 numpy>=1.26,<3.0
-# For GPU/CUDA inference set DAYGLE_ONNXRUNTIME_VARIANT=gpu before running
-# install_python_deps.sh - that installs onnxruntime-gpu instead.
+# install_python_deps.sh auto-selects onnxruntime-gpu when nvidia-smi can
+# enumerate an NVIDIA device. Override with DAYGLE_ONNXRUNTIME_VARIANT=cpu|gpu.
+# The GPU wheel's CUDA/cuDNN compatibility must match the installed driver;
+# see README.md for Tesla P4 guidance.
 onnxruntime>=1.18,<2.0
 onnx>=1.22.0,<2.0
 # torch.onnx._internal.exporter (used by Ultralytics YOLO.export)

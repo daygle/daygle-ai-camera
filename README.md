@@ -62,11 +62,17 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
    pip install --no-cache-dir pytest
    ```
 
-   If you want the default PyTorch/CUDA resolution instead of the CPU-first dependency set, run:
+   The dependency helper defaults to `auto`: it selects `onnxruntime-gpu` only
+   when `nvidia-smi -L` successfully enumerates an NVIDIA GPU. Override that
+   choice explicitly when needed:
 
    ```bash
-   DAYGLE_TORCH_VARIANT=default ./scripts/install_python_deps.sh python requirements.txt
+   DAYGLE_ONNXRUNTIME_VARIANT=cpu ./scripts/install_python_deps.sh python requirements.txt
+   DAYGLE_ONNXRUNTIME_VARIANT=gpu ./scripts/install_python_deps.sh python requirements.txt
    ```
+
+   The helper removes the opposite ONNX Runtime wheel before installing, so it
+   is safe to switch an existing virtual environment between CPU and GPU.
 
 4. Create the bootstrap config:
 
@@ -93,12 +99,45 @@ Run the installer from the repository root with `sudo`:
 The installer will:
 
 - install required system packages
+- detect a usable NVIDIA GPU with `nvidia-smi -L`
+- install `onnxruntime-gpu` on detected NVIDIA systems, otherwise the CPU wheel
 - create a `daygle` maintenance user
 - copy the app into `/opt/daygle-ai-camera`
 - create `/etc/daygle-ai-camera/config.yaml`
 - create `/opt/daygle-ai-camera/data` and `/opt/daygle-ai-camera/models`
 - install `daygle-ai-camera.service`
 - start the service automatically
+
+To force a deterministic choice, set the variable before running the installer:
+
+```bash
+DAYGLE_ONNXRUNTIME_VARIANT=cpu ./scripts/install_debian.sh
+DAYGLE_ONNXRUNTIME_VARIANT=gpu ./scripts/install_debian.sh
+```
+
+The installer does not install NVIDIA kernel drivers or CUDA system libraries;
+those are distribution-, kernel-, and Secure-Boot-dependent. For GPU installs,
+install the Debian/NVIDIA driver first, verify `nvidia-smi`, then run the
+Daygle installer. `onnxruntime-gpu` and `onnxruntime` must not be installed
+together in one virtual environment.
+
+#### Tesla P4 / Pascal notes
+
+A Tesla P4 is a Pascal (compute capability 6.1) GPU. Confirm that the selected
+ONNX Runtime GPU release and its CUDA/cuDNN requirements still support Pascal
+before upgrading the environment. Avoid CUDA 13-era packages that drop Pascal
+support; an older CUDA 11/12-compatible ONNX Runtime release may be required.
+The driver must also be new enough for that CUDA runtime. Verify the result
+from the installed environment:
+
+```bash
+/opt/daygle-ai-camera/.venv/bin/python -c \
+  "import onnxruntime as ort; print(ort.__version__); print(ort.get_available_providers())"
+```
+
+A healthy GPU installation should list `CUDAExecutionProvider`. The detector
+still uses CPU for runtime dynamic INT8 and falls back to FP32 if a selected
+model or provider cannot load.
 
 Check service status:
 
@@ -208,7 +247,7 @@ python -m pytest
 - Cannot log in after first start: open `/setup` and create the initial admin user.
 - Setup redirects to login: a user already exists.
 - `MODEL MISSING`: open `/onnx`, download/select a model, and reload the detector.
-- ONNX fails to load: verify model and label paths and confirm `onnxruntime` is installed.
+- ONNX fails to load: verify model and label paths and confirm the expected ONNX Runtime wheel is installed. For GPU, check that `CUDAExecutionProvider` appears in `ort.get_available_providers()` and that the NVIDIA driver/CUDA/cuDNN versions match the ONNX Runtime release.
 - Email alerts fail: verify SMTP settings under `/settings`, and confirm email notifications are enabled for the rule.
 - Push notifications fail: verify ntfy settings and use the test notification action.
 - Camera connection issues: check stream URL or ONVIF credentials in `/cameras` and use camera test connection.

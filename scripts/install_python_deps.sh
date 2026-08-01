@@ -3,60 +3,134 @@
 #
 # Installs the project's Python dependencies into a virtual environment
 # ``$1`` from ``$2`` (the requirements file). Selects CPU or GPU variants
-# of torch / onnxruntime via the ``DAYGLE_ONNXRUNTIME_VARIANT`` env
-# variable (``cpu`` [default] or ``gpu``).
+# of ONNX Runtime via ``DAYGLE_ONNXRUNTIME_VARIANT`` (``auto`` [default],
+# ``cpu``, or ``gpu``). ``auto`` selects GPU only when ``nvidia-smi`` can
+# successfully enumerate an NVIDIA device; use an explicit value to override.
+
+# This script deliberately does not install NVIDIA drivers or CUDA system
+# libraries. Install and verify those at the OS level first, then use the GPU
+# variant below. ONNX Runtime GPU includes the CPU execution provider as a
+# fallback, while the CPU and GPU pip wheels must not coexist in one venv.
 #
-# ROUND-5 (N3) NOTE:
-# ``pip install --require-hashes`` would be the canonical way to enforce
-# bit-for-bit reproducibility of the Python dependency tree, but it is
-# INCOMPATIBLE with the awk-based GPU/CPU variant selection below:
-# ``--require-hashes`` requires an UNBROKEN chain of ``--hash=sha256:``
-# annotations per line, and the awk filter drops lines before pip sees
-# them, breaking the chain. The fix lives in ``scripts/lock_python_deps.sh``,
-# which produces ``requirements.lock.txt`` -- a hash-pinned derivative of
-# ``requirements.txt`` -- on a known-good reference platform. When
-# ``requirements.lock.txt`` is present in the project root, this script
-# installs from it with ``--require-hashes``; otherwise it falls back to
-# the legacy non-hash install with the awk filter.
+# For reproducible deployments, scripts/lock_python_deps.sh can produce
+# variant-specific requirements.cpu.lock.txt and requirements.gpu.lock.txt.
+# The matching lock is preferred; an old generic requirements.lock.txt is
+# accepted only for CPU installs for backwards compatibility.
 set -euo pipefail
 
 VENV_BIN="${1:?usage: install_python_deps.sh VENV_BIN REQUIREMENTS_FILE}"
 REQUIREMENTS_FILE="${2:?usage: install_python_deps.sh VENV_BIN REQUIREMENTS_FILE}"
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOCK_FILE="${APP_DIR}/requirements.lock.txt"
-
-DEFAULT_VARIANT='cpu'
-VARIANT="${DAYGLE_ONNXRUNTIME_VARIANT:-${DEFAULT_VARIANT}}"
-case "${VARIANT}" in
-  cpu|gpu) ;;
+# Keep the default in the CUDA 11/12-era ORT line commonly used with Pascal;
+# operators may override this after validating their driver/runtime matrix.
+GPU_REQUIREMENT="${DAYGLE_ONNXRUNTIME_GPU_REQUIREMENT:-onnxruntime-gpu>=1.18,<1.21}"
+GPU_REQUIREMENT_SUFFIX="${GPU_REQUIREMENT#onnxruntime-gpu}"
+if [[ "${GPU_REQUIREMENT}" == "${GPU_REQUIREMENT_SUFFIX}" || "${GPU_REQUIREMENT_SUFFIX}" == *$'\n'* || "${GPU_REQUIREMENT_SUFFIX}" == *$'\r'* ]]; then
+  echo "ERROR: DAYGLE_ONNXRUNTIME_GPU_REQUIREMENT must be one onnxruntime-gpu requirement with an optional version specifier." >&2
+  exit 1
+fi
+case "${GPU_REQUIREMENT_SUFFIX}" in
+  ""|[[:space:]]*|[\<\>\=\!\~]*) ;;
   *)
-    echo "ERROR: DAYGLE_ONNXRUNTIME_VARIANT must be 'cpu' or 'gpu' (got '${VARIANT}')." >&2
+    echo "ERROR: DAYGLE_ONNXRUNTIME_GPU_REQUIREMENT must name only onnxruntime-gpu." >&2
     exit 1
     ;;
 esac
+DEFAULT_VARIANT='auto'
+VARIANT="${DAYGLE_ONNXRUNTIME_VARIANT:-${DEFAULT_VARIANT}}"
+case "${VARIANT}" in
+  auto)
+    if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+      VARIANT='gpu'
+    else
+      VARIANT='cpu'
+    fi
+    ;;
+  cpu|gpu) ;;
+  *)
+    echo "ERROR: DAYGLE_ONNXRUNTIME_VARIANT must be 'auto', 'cpu', or 'gpu' (got '${VARIANT}')." >&2
+    exit 1
+    ;;
+esac
+echo "Resolved ONNX Runtime dependency variant: ${VARIANT}"
 
-# Prefer the hash-locked lock file when present (round-5 N3 fix). On
-# systems where the lock has been vendored (developer ran lock_python_deps.sh
-# on a reference platform) this is the strict-install path.
+_validate_lock() {
+  local lock_file="$1"
+  local cpu_count gpu_count
+  cpu_count="$(awk 'tolower($0) ~ /^[[:space:]]*onnxruntime([[:space:]]|[<>=!~;]|$)/ { count++ } END { print count + 0 }' "${lock_file}")"
+  gpu_count="$(awk 'tolower($0) ~ /^[[:space:]]*onnxruntime-gpu([[:space:]]|[<>=!~;]|$)/ { count++ } END { print count + 0 }' "${lock_file}")"
+  if [[ "${VARIANT}" == 'gpu' ]]; then
+    if [[ "${gpu_count}" -ne 1 || "${cpu_count}" -ne 0 ]]; then
+      echo "ERROR: ${lock_file} does not contain exactly the GPU ONNX Runtime package." >&2
+      echo "       Refusing to install an ambiguous dependency lock." >&2
+      exit 1
+    fi
+  elif [[ "${cpu_count}" -ne 1 || "${gpu_count}" -ne 0 ]]; then
+    echo "ERROR: ${lock_file} does not contain exactly the CPU ONNX Runtime package." >&2
+    echo "       Refusing to install an ambiguous dependency lock." >&2
+    exit 1
+  fi
+}
+
+_verify_runtime() {
+  # This confirms provider registration after installation. The first actual
+  # model session will still be the definitive CUDA initialization test.
+  if [[ "${VARIANT}" == 'gpu' ]] && ! "${VENV_BIN}" -c 'import sys, onnxruntime as ort; sys.exit(0 if "CUDAExecutionProvider" in ort.get_available_providers() else 1)'; then
+    echo "ERROR: onnxruntime-gpu installed, but CUDAExecutionProvider is unavailable." >&2
+    echo "       Verify the NVIDIA driver and CUDA/cuDNN compatibility, or rerun with DAYGLE_ONNXRUNTIME_VARIANT=cpu." >&2
+    exit 1
+  fi
+}
+
+# A lock is variant-specific. Never install a generic CPU lock for a GPU
+# deployment: that was the source of clean installs silently receiving the
+# CPU-only onnxruntime wheel. A legacy generic lock remains usable only for
+# an explicitly/automatically selected CPU deployment.
+LOCK_FILE="${APP_DIR}/requirements.${VARIANT}.lock.txt"
+if [[ ! -f "${LOCK_FILE}" && "${VARIANT}" == 'cpu' && -f "${APP_DIR}/requirements.lock.txt" ]]; then
+  LOCK_FILE="${APP_DIR}/requirements.lock.txt"
+fi
 if [[ -f "${LOCK_FILE}" ]]; then
-  echo "Installing from hash-locked ${LOCK_FILE} (variants pre-pinned by developer)."
-  "${VENV_BIN}" -m pip install --no-cache-dir --require-hashes -r "${LOCK_FILE}"
+  _validate_lock "${LOCK_FILE}"
+  echo "Installing from ${LOCK_FILE}."
+  # Do not remove the existing ORT wheel until the lock has been validated.
+  "${VENV_BIN}" -m pip uninstall -y onnxruntime onnxruntime-gpu >/dev/null 2>&1 || true
+  if grep -q -- '--hash=sha256:' "${LOCK_FILE}"; then
+    "${VENV_BIN}" -m pip install --no-cache-dir --require-hashes -r "${LOCK_FILE}"
+  else
+    echo "WARNING: ${LOCK_FILE} has no hashes; installing its pinned constraints without --require-hashes." >&2
+    "${VENV_BIN}" -m pip install --no-cache-dir -r "${LOCK_FILE}"
+  fi
+  _verify_runtime
   exit 0
 fi
 
-# Fallback: legacy non-hash install with the GPU/CPU variant filter.
-echo "Lock file not present, falling back to legacy filtered install (variant=${VARIANT})."
-STRIP_PATTERN='(torch|torchvision)'
-if [[ "${VARIANT}" == 'gpu' ]]; then
-  STRIP_PATTERN='(torch|torchvision|onnxruntime)'
-fi
+# No lock is available. Remove the old ORT wheel before resolving the
+# replacement; the runtime verification below prevents a silent CPU install
+# on a requested GPU deployment.
+"${VENV_BIN}" -m pip uninstall -y onnxruntime onnxruntime-gpu >/dev/null 2>&1 || true
+
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "${WORK_DIR}"' EXIT
-REQUIREMENTS_WITHOUT_TORCH="${WORK_DIR}/requirements-stripped.txt"
-awk -v pat="${STRIP_PATTERN}" '
-  /^[[:space:]]*($|#)/ { print; next }
-  tolower($0) ~ "^[[:space:]]*" pat "([[:space:]]|[<>=!~;[]|$)" { next }
-  { print }
-' "${REQUIREMENTS_FILE}" > "${REQUIREMENTS_WITHOUT_TORCH}"
+REQUIREMENTS_VARIANT="${WORK_DIR}/requirements-${VARIANT}.txt"
 
-"${VENV_BIN}" -m pip install --no-cache-dir -r "${REQUIREMENTS_WITHOUT_TORCH}"
+# Keep torch/torchvision out of this filter because they are not runtime
+# requirements of the detector. Ultralytics may install them as export-time
+# dependencies; ONNX Runtime is the component that controls inference here.
+if [[ "${VARIANT}" == 'gpu' ]]; then
+  awk '
+    /^[[:space:]]*($|#)/ { print; next }
+    tolower($0) ~ "^[[:space:]]*onnxruntime(-gpu)?([[:space:]]|[<>=!~;]|$)" { next }
+    { print }
+  ' "${REQUIREMENTS_FILE}" > "${REQUIREMENTS_VARIANT}"
+  printf '\n# Selected by install_python_deps.sh for NVIDIA inference.\n%s\n' "${GPU_REQUIREMENT}" >> "${REQUIREMENTS_VARIANT}"
+else
+  awk '
+    /^[[:space:]]*($|#)/ { print; next }
+    tolower($0) ~ "^[[:space:]]*onnxruntime-gpu([[:space:]]|[<>=!~;]|$)" { next }
+    { print }
+  ' "${REQUIREMENTS_FILE}" > "${REQUIREMENTS_VARIANT}"
+fi
+
+"${VENV_BIN}" -m pip install --no-cache-dir -r "${REQUIREMENTS_VARIANT}"
+_verify_runtime
