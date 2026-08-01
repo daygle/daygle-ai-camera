@@ -12,7 +12,7 @@ Every frame from every camera passes through three layers in order. Each layer b
 
 This runs on every single frame and is deliberately cheap. It shrinks the image to a small thumbnail (160×120 pixels), converts it to greyscale, and compares it to a learned background model of what the camera normally sees.
 
-If enough pixels have changed enough, it declares motion and passes the frame on. If nothing significant changed, the frame is dropped and nothing else runs.
+If enough pixels have changed enough, it declares motion and passes the frame on. If nothing significant changed at the whole-frame level, YOLO is not run from this gate alone - but per-zone motion rules (Layer 3) are still scored from the diff mask first, so motion confined to a small monitored zone can fire that zone's rule without ever opening the frame-wide gate.
 
 **Why this matters:** YOLO inference is slow and CPU-intensive. Running it on every frame of a static, empty scene would waste CPU constantly. The pixel-diff gate means YOLO only runs when something is actually happening.
 
@@ -22,7 +22,7 @@ If enough pixels have changed enough, it declares motion and passes the frame on
 
 ### Layer 2 - YOLO object detection
 
-This only runs when Layer 1 says motion was detected (or when a periodic scan is due - see below). It runs the full YOLOv8 neural network on the frame and identifies specific objects - person, car, dog, etc. - with bounding boxes and confidence scores.
+This runs when Layer 1 says motion was detected, when a per-zone motion rule fires from the diff mask, or when a periodic scan is due (see below). It runs the full YOLOv8 neural network on the frame and identifies specific objects - person, car, dog, etc. - with bounding boxes and confidence scores.
 
 These results are then matched against your zone rules. If a zone covers the area where an object was detected and you have a rule for that object label, an alert and/or recording fires.
 

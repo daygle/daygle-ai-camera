@@ -119,9 +119,12 @@ Cluster membership (21 helpers, 290 lines original):
   flat ``record_objects`` flag removed in Phase-9.
 
 - ``zone_motion_record_on_detect`` -- the motion-axis counterpart:
-  iterates the ``monitor_motion=True`` zones and returns True when
-  any motion rule has ``record_on_detect=True``. This is intentionally
-  separate from ``zone_record_on_detect`` which filters on
+  checks the ``monitor_motion=True`` zone(s) for a motion rule with
+  ``record_on_detect=True``. With the optional ``zone_id`` only that
+  zone is considered (per-zone recording: motion in a record-off zone
+  cannot piggyback on a record-on rule elsewhere); without it any
+  matching zone counts (legacy callers/tests). Intentionally separate
+  from ``zone_record_on_detect`` which filters on
   ``monitor_objects=True``.
 
 - ``zone_detection_alert_rule_names`` -- ``{zone_rule_name(...)}`` set
