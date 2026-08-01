@@ -532,10 +532,12 @@ def attach_event_recording(
     from app.utils import build_stream_url, build_recording_stream_url
     from app.config_facades import get_camera_config
     stream_url = ''
+    detection_stream_url: str | None = None
     if source == 'rtsp' and camera_id:
         cam_config = get_camera_config(camera_id)
+        detection_stream_url = build_stream_url(cam_config)
         recording_stream_url = build_recording_stream_url(cam_config)
-        stream_url = recording_stream_url or build_stream_url(cam_config)
+        stream_url = recording_stream_url or detection_stream_url
         extended_recording_id = extend_active_rtsp_recording(
             camera_id=camera_id, event_time=event_time,
             recording_config=recording_config, detections=detections,
@@ -562,6 +564,7 @@ def attach_event_recording(
             stream_url, metadata, event_id, detections,
             recording_id=recording_id, camera_id=camera_id,
             event_time=event_time, recording_config=recording_config,
+            detection_stream_url=detection_stream_url,
         )
     else:
         window = _recording_capture_window(metadata)
@@ -584,6 +587,7 @@ def start_rtsp_recording_capture(
     camera_id: str | None = None,
     event_time: str | None = None,
     recording_config: dict[str, Any] | None = None,
+    detection_stream_url: str | None = None,
 ) -> None:
     from app.diagnostics import log_camera_diagnostic
     file_path = Path(str(metadata.get('file_path') or ''))
@@ -671,16 +675,22 @@ def start_rtsp_recording_capture(
             # for the (RTSP-camera-less) case with no per-camera ingest to draw
             # from.
             if camera_id:
+                render_kwargs = {
+                    'stream_url': stream_url,
+                    'camera_id': camera_id,
+                    'file_path': file_path,
+                    'triggered_at': triggered_at,
+                    'pre_seconds': pre_seconds,
+                    'post_seconds': dynamic_post_seconds,
+                    'max_duration_seconds': final_duration_seconds,
+                    'buffer_seconds': _state.recording_service.prebuffer_window_seconds(
+                        recording_config
+                    ),
+                }
+                if detection_stream_url and detection_stream_url != stream_url:
+                    render_kwargs['detection_stream_url'] = detection_stream_url
                 content_start_ts, content_seconds = (
-                    _state.recording_service.write_rtsp_clip_with_prebuffer(
-                        stream_url=stream_url, camera_id=camera_id, file_path=file_path,
-                        triggered_at=triggered_at, pre_seconds=pre_seconds,
-                        post_seconds=dynamic_post_seconds,
-                        max_duration_seconds=final_duration_seconds,
-                        buffer_seconds=_state.recording_service.prebuffer_window_seconds(
-                            recording_config
-                        ),
-                    )
+                    _state.recording_service.write_rtsp_clip_with_prebuffer(**render_kwargs)
                 )
             else:
                 content_start_ts = time.time()

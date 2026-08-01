@@ -98,11 +98,16 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
             continue
         now = time.time()
         stream_url = build_stream_url(selected_config)
+        recording_stream_url = build_recording_stream_url(selected_config)
         cam_rec_config = _state.camera_event_recording_config(selected_config)
         if stream_url:
-            _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config, recording_stream_path=build_recording_stream_url(selected_config))
+            _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config, recording_stream_path=recording_stream_url)
             if cam_rec_config.get('continuous'):
-                _state.recording_service.start_continuous_chunk_recording(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config, on_chunk_complete=_make_continuous_chunk_callback(camera_id))
+                # Continuous recordings must use the optional high-resolution
+                # stream too; otherwise dual-stream cameras silently save their
+                # low-resolution detection stream. The chunk worker uses
+                # ``-c:v copy``, so the source resolution and FPS are preserved.
+                _state.recording_service.start_continuous_chunk_recording(stream_url=recording_stream_url or stream_url, camera_id=camera_id, recording_config=cam_rec_config, on_chunk_complete=_make_continuous_chunk_callback(camera_id))
         if not background_detection_enabled:
             continue
         with _state._live_backoff_lock:

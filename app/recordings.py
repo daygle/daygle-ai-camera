@@ -266,6 +266,12 @@ class RecordingService:
             '128k',
             '-preset',
             'veryfast',
+            # Preserve the source frame timestamps when the high-resolution
+            # prebuffer is unavailable and we must capture directly. No scale or
+            # output-rate filter is applied, so source resolution/FPS remain the
+            # recording stream's values rather than the detection ingest rate.
+            '-fps_mode',
+            'passthrough',
             '-pix_fmt',
             'yuv420p',
             '-movflags',
@@ -706,6 +712,7 @@ class RecordingService:
         post_seconds: int,
         max_duration_seconds: float,
         buffer_seconds: int | None = None,
+        detection_stream_url: str | None = None,
     ) -> tuple[float, float]:
         """Write the clip and return ``(content_start_ts, content_seconds)``:
         the wall-clock timestamp where the written media actually begins and
@@ -732,7 +739,15 @@ class RecordingService:
             buffer_seconds = self.prebuffer_window_seconds()
         buffer_seconds = max(int(buffer_seconds), pre_seconds + post_seconds + 5, pre_seconds + 10, 15)
         camera_key = self._camera_key(camera_id)
-        self._ensure_prebuffer_worker(camera_key, stream_url, buffer_seconds, camera_id=camera_id)
+        # Keep the shared detection/sound ingest on the primary stream. When
+        # ``stream_url`` is the optional high-resolution recording stream, it
+        # must never replace that worker or cause URL ping-pong with the live
+        # monitor. The recording stream has its own video-only prebuffer below.
+        ingest_stream_url = detection_stream_url or stream_url
+        self._ensure_prebuffer_worker(camera_key, ingest_stream_url, buffer_seconds, camera_id=camera_id)
+        has_dedicated_recording_stream = bool(
+            detection_stream_url and detection_stream_url != stream_url
+        )
 
         # Check for ffmpeg and pre-event segments BEFORE sleeping so that if we
         # must fall back to a live capture it starts now (at trigger time) rather
@@ -756,7 +771,11 @@ class RecordingService:
             triggered_at.timestamp(),
         )
         pre_only_segments = rec_segments
-        if not pre_only_segments:
+        # If a dedicated recording stream is configured, do not silently use
+        # lower-resolution detection footage when its high-res buffer is still
+        # warming up. The direct-capture fallback below uses ``stream_url``
+        # (the recording stream), preserving the requested recording quality.
+        if not pre_only_segments and not has_dedicated_recording_stream:
             pre_only_segments, _ = self._collect_prebuffer_segments(
                 camera_key,
                 triggered_at.timestamp() - pre_seconds,
@@ -783,7 +802,7 @@ class RecordingService:
         end_ts = end_capture_at
         # Prefer high-res recording prebuffer segments for the full render window.
         segments, content_start_ts = self._collect_rec_prebuffer_segments(camera_key, start_ts, end_ts)
-        if not segments:
+        if not segments and not has_dedicated_recording_stream:
             segments, content_start_ts = self._collect_prebuffer_segments(camera_key, start_ts, end_ts)
         if not segments:
             logger.info('No prebuffer segments available for %s after waiting; falling back to direct RTSP clip capture.', camera_key)
@@ -1654,12 +1673,34 @@ class RecordingService:
         return [item[0] for item in selected], selected[0][1]
 
     def _prebuffer_segment_durations(self, camera_key: str, segments: list[Path]) -> dict[Path, float]:
+        """Return real durations for selected primary or recording segments.
+
+        The high-resolution worker stores files under ``<camera>-rec`` while
+        the shared detection ingest stores them under ``<camera>``. Scanning
+        only the primary directory loses ``duration`` directives for recording
+        segments, which makes concat timing depend on muxer defaults and can
+        shorten or stretch high-resolution event clips.
+        """
         wanted = {segment.resolve() for segment in segments}
-        timed = self._segment_timeline(self.prebuffer_dir / camera_key, self.PREBUFFER_SEGMENT_GLOB, self.PREBUFFER_SEGMENT_SECONDS)
+        directories = {
+            segment.parent.resolve()
+            for segment in segments
+            if segment.parent.exists()
+        }
+        if not directories:
+            directories = {(self.prebuffer_dir / camera_key).resolve()}
         durations: dict[Path, float] = {}
-        for segment, start, end in timed:
-            if segment.resolve() in wanted:
-                durations[segment] = max(0.001, end - start)
+        for directory in directories:
+            timed = self._segment_timeline(directory, self.PREBUFFER_SEGMENT_GLOB, self.PREBUFFER_SEGMENT_SECONDS)
+            for segment, start, end in timed:
+                if segment.resolve() in wanted:
+                    duration = max(0.001, end - start)
+                    # Keep both spellings available: callers usually pass the
+                    # absolute paths returned by the collector, but preserving
+                    # the original spelling makes this helper safe for tests or
+                    # future callers that provide relative Path objects.
+                    durations[segment] = duration
+                    durations[segment.resolve()] = duration
         return durations
 
     def _collect_audio_segments(self, camera_key: str, start_ts: float, end_ts: float) -> list[Path]:

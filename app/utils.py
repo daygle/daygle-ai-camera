@@ -109,18 +109,37 @@ def build_stream_url(settings: dict[str, Any]) -> str:
 
 
 def build_recording_stream_url(settings: dict[str, Any]) -> str:
-    """Build the high-res recording stream URL from a camera's recording_stream_path.
+    """Build the high-res recording URL for a camera's optional second stream.
 
-    When a camera exposes dual streams (sub-stream for detection/live view,
-    main stream for recording), the operator provides just the recording
-    stream path (e.g. 'stream2') and this function constructs the full
-    RTSP URL using the same host, port, username and password as the
-    primary stream.  Falls back to empty string when no recording path
-    is configured.
+    ``recording_stream_path`` is normally a path such as ``stream2``. For
+    manually configured RTSP cameras, the same field may also be an absolute
+    RTSP URL or a path to replace on the primary ``stream_url``; this keeps the
+    dual-stream option usable when there is no separate ``host`` field.
     """
     recording_path = _non_empty_setting(settings, 'recording_stream_path')
     if not recording_path:
         return ''
+
+    parsed_recording = urlsplit(recording_path)
+    if parsed_recording.scheme in {'rtsp', 'rtsps'} and parsed_recording.netloc:
+        return _inject_credentials(recording_path, settings)
+    recording_path = parsed_recording.path or recording_path
+    recording_query = parsed_recording.query
+    recording_fragment = parsed_recording.fragment
+
+    base_stream_url = _non_empty_setting(settings, 'stream_url')
+    if base_stream_url:
+        base_stream_url = _inject_credentials(base_stream_url, settings)
+        parsed_base = urlsplit(base_stream_url)
+        if parsed_base.scheme in {'rtsp', 'rtsps'} and parsed_base.netloc:
+            return urlunsplit((
+                parsed_base.scheme,
+                parsed_base.netloc,
+                f'/{recording_path.lstrip("/")}',
+                recording_query or parsed_base.query,
+                recording_fragment or parsed_base.fragment,
+            ))
+
     host = _non_empty_setting(settings, 'host')
     if not host:
         return ''
@@ -130,14 +149,13 @@ def build_recording_stream_url(settings: dict[str, Any]) -> str:
         port = int(settings.get('port') or 554)
     except (TypeError, ValueError):
         port = 554
-    recording_path = recording_path.lstrip('/')
     credentials = ''
     if username:
         credentials = quote(username, safe='')
         if password:
             credentials += f":{quote(password, safe='')}"
         credentials += '@'
-    return f'rtsp://{credentials}{host}:{port}/{recording_path}'
+    return f'rtsp://{credentials}{host}:{port}/{recording_path.lstrip("/")}'
 
 def camera_default_name(settings: dict[str, Any], fallback: str = 'Primary Camera') -> str:
     return str(settings.get('name') or settings.get('device') or fallback).strip() or fallback
