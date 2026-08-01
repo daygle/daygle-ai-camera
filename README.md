@@ -43,6 +43,7 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 1. Clone the repository:
 
    ```bash
+   cd /opt/
    git clone https://github.com/daygle/daygle-ai-camera.git
    cd daygle-ai-camera
    ```
