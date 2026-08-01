@@ -510,6 +510,51 @@ def delete_model(model_name: str, imgsz: int | None = None) -> dict[str, Any]:
     }
 
 
+_DEFAULT_MODEL = 'yolo11n'
+
+
+def auto_download_default_model() -> None:
+    """Download the default YOLO model on first startup if no model exists.
+
+    On a clean install the ``models/`` directory has no ONNX file, so the
+    detector reports ``MODEL MISSING`` and object detection is completely
+    inert until the operator manually navigates to the Models tab and
+    clicks Download.  This helper checks whether *any* model variant is
+    already present; if none are, it exports the default (``yolo11n``)
+    in a background thread so the server can finish starting while the
+    ~5 MB export + Ultralytics weight download happens.
+
+    Failures are logged at WARNING level and intentionally swallowed —
+    a clean-install host that lacks network or is missing export
+    dependencies still starts normally, just without detection.
+    """
+    # If any ONNX file already exists in the models directory, the operator
+    # has already set up detection (or a prior startup downloaded it).
+    try:
+        MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        if any(MODELS_DIR.glob('*.onnx')):
+            return
+    except Exception:
+        return
+    info = YOLO_MODELS.get(_DEFAULT_MODEL)
+    if info is None:
+        return
+    def _background_download() -> None:
+        try:
+            logger.info(
+                'No ONNX model found — auto-downloading %s (first install).',
+                info['label'],
+            )
+            _do_download_model(_DEFAULT_MODEL, switch_active=True, imgsz=info.get('input_size', 640))
+            logger.info('Auto-download of %s completed successfully.', info['label'])
+        except Exception as exc:
+            logger.warning(
+                'Auto-download of %s failed: %s. You can download the model manually from the Models tab.',
+                info['label'], exc,
+            )
+    threading.Thread(target=_background_download, name='model-auto-download', daemon=True).start()
+
+
 def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int = 640) -> dict[str, Any]:
     if model_name not in YOLO_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
