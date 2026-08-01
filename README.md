@@ -87,7 +87,7 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 Run the installer from the repository root with `sudo`:
 
 ```bash
-sudo ./scripts/install_debian.sh
+./scripts/install_debian.sh
 ```
 
 The installer will:
@@ -103,8 +103,8 @@ The installer will:
 Check service status:
 
 ```bash
-sudo systemctl status daygle-ai-camera
-sudo journalctl -u daygle-ai-camera -f
+systemctl status daygle-ai-camera
+journalctl -u daygle-ai-camera -f
 ```
 
 Open:
@@ -190,8 +190,8 @@ python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8080
 ### Service update
 
 ```bash
-sudo ./scripts/install_debian.sh
-sudo systemctl restart daygle-ai-camera
+./scripts/install_debian.sh
+systemctl restart daygle-ai-camera
 ```
 
 The web UI also exposes a software update flow under `/settings`.
@@ -219,4 +219,4 @@ python -m pytest
 ## Logs
 
 - Application logs: `data/logs/app.log`
-- Service logs: `sudo journalctl -u daygle-ai-camera -f`
+- Service logs: `journalctl -u daygle-ai-camera -f`
