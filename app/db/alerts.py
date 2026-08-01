@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.utils import _normalize_iso_to_utc
+
 
 class AlertsMixin:
     """CRUD + dismiss helpers for the ``alert_history`` table.
@@ -21,6 +23,15 @@ class AlertsMixin:
             )
 
     def alerts(self, limit: int = 25, since: str | None = None) -> list[dict[str, Any]]:
+        # Normalise the since bound to canonical UTC ``+00:00`` form (rows are
+        # stored via ``add_alert`` with ``datetime.now(timezone.utc).isoformat()``
+        # which already yields ``+00:00``, but the frontend sends local-day-start
+        # bounds built with ``Date.toISOString()`` -- a ``Z`` suffix). Lexically
+        # ``Z`` (0x5A) sorts AFTER ``+`` (0x2B) and ``.`` (0x2E) sorts AFTER
+        # ``+``, so a raw Z-form bound at the exact local-midnight boundary
+        # would exclude the row that represents that same instant -- the same
+        # failure mode ``RecordingsMixin.list_recordings`` guards against.
+        since = _normalize_iso_to_utc(since) if since else None
         with self.connect() as db:
             since_clause = "AND ah.created_at >= ?" if since else ""
             params: tuple[Any, ...] = (since, limit) if since else (limit,)

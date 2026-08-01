@@ -834,6 +834,31 @@ function formatDateTime(value) {
   return formatDate(value);
 }
 
+// ─── Date-range "since" bound (alerts page + dashboard activity feed) ──────
+// Both the alerts page and the dashboard filter by a UI range preset
+// ('today' / '7d' / '30d' / 'all') and send a `since` ISO bound to
+// /api/alerts, /api/events and /api/stats. The backend compares stored UTC
+// ISO timestamps lexically (`created_at >= ?`), so the bound MUST be the
+// START OF THE LOCAL DAY expressed in UTC -- NOT the UTC date string. The
+// old code sent `new Date().toISOString().split('T')[0]` (the UTC date),
+// which for operators in timezones AHEAD of UTC silently dropped every
+// alert fired between local midnight and UTC midnight (those rows carry
+// yesterday's UTC date): the alerts page "Today" tab showed 1 of 6 alerts
+// while "7d" showed them all.
+function daygleLocalDayStartIso(daysAgo) {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  d.setHours(0, 0, 0, 0); // local midnight of that local day
+  return d.toISOString();
+}
+
+function daygleSinceParamForRange(range) {
+  if (range === 'today') return daygleLocalDayStartIso(0);
+  if (range === '7d') return daygleLocalDayStartIso(7);
+  if (range === '30d') return daygleLocalDayStartIso(30);
+  return ''; // 'all' - no since filter
+}
+
 // Seconds-of-day → wall clock (e.g. 37800 → "10:30" or "10:30 am"). Honours
 // the user's timeFormat preference so timeline ticks match the rest of the
 // app instead of being hardcoded to 24h.
@@ -1061,6 +1086,8 @@ window.daygleUi = {
   // User-facing date/time renderers (honour daygleDatePrefs)
   formatUserDate, formatUserTime, formatDate, formatDateTime, formatUserClock,
   setDaygleDatePrefs, getDaygleDatePrefs,
+  // Date-range "since" bounds (alerts page + dashboard share these)
+  daygleSinceParamForRange, daygleLocalDayStartIso,
   // Theme management
   setDaygleThemePref, getDaygleThemePref, applyDaygleTheme,
   watchDaygleSystemTheme, unwatchDaygleSystemTheme,

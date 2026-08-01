@@ -5801,3 +5801,70 @@ def test_stats_with_since_filter_builds_valid_sql(tmp_path):
     unfiltered = database.stats()
     assert unfiltered['total_events'] == 1
     assert unfiltered['total_alerts'] == 1
+
+
+def test_alerts_events_stats_accept_local_day_start_since_bound(tmp_path):
+    """Regression: the alerts page "Today" filter showed only 1 of 6 alerts.
+
+    The frontend sends the START OF THE LOCAL DAY as the `since` bound (e.g.
+    '2026-07-31T18:30:00.000Z' for a UTC+5:30 operator at local midnight on
+    Aug 1). Rows are stored as canonical UTC '+00:00' timestamps, so the
+    bound must be normalised to that same form before SQLite's lexical
+    comparison: a raw Z-suffix bound would sort the exact-midnight row
+    ('2026-07-31T18:30:00.000000+00:00') BEFORE the bound ('...000Z') --
+    '.' (0x2E) sorts before 'Z' (0x5A) -- and silently drop it, the 1-of-6
+    symptom. The old frontend also sent the bare UTC date string
+    ('2026-08-01'), which misses every alert whose UTC date is still the
+    previous day.
+    """
+    from app.database import EventDatabase
+
+    database = EventDatabase(str(tmp_path / 'daygle-since.sqlite3'))
+
+    # An alert fired exactly at local midnight for a UTC+5:30 operator on
+    # Aug 1: the stored UTC instant is 18:30 on Jul 31.
+    event_id = database.add_event(
+        created_at='2026-07-31T18:30:00+00:00',
+        source='camera',
+        snapshot_path=None,
+        detections=[{'label': 'person', 'confidence': 0.9, 'box': {'x': 0, 'y': 0, 'width': 1, 'height': 1}}],
+        alert_triggered=True,
+    )
+    database.add_alert(
+        created_at='2026-07-31T18:30:00.000000+00:00',
+        rule_name='Front Door / person',
+        event_id=event_id,
+        label='person',
+        confidence=0.9,
+        message='person matched',
+    )
+    # One second BEFORE local midnight: must stay excluded.
+    early_event = database.add_event(
+        created_at='2026-07-31T18:29:59+00:00',
+        source='camera',
+        snapshot_path=None,
+        detections=[{'label': 'cat', 'confidence': 0.7, 'box': {'x': 0, 'y': 0, 'width': 1, 'height': 1}}],
+        alert_triggered=True,
+    )
+    database.add_alert(
+        created_at='2026-07-31T18:29:59.000000+00:00',
+        rule_name='Side Door / cat',
+        event_id=early_event,
+        label='cat',
+        confidence=0.7,
+        message='cat matched',
+    )
+
+    # The fixed frontend bound (local day start, Z suffix from Date.toISOString()).
+    since = '2026-07-31T18:30:00.000Z'
+    alerts = database.alerts(limit=10, since=since)
+    assert [a['label'] for a in alerts] == ['person'], 'exact-midnight alert must be included'
+    events = database.search_events(limit=10, since=since)
+    assert [e['id'] for e in events] == [event_id]
+    stats = database.stats(since=since)
+    assert stats['total_alerts'] == 1
+    assert stats['total_events'] == 1
+
+    # The OLD frontend sent the UTC date string; that bound misses the
+    # midnight row entirely (its UTC date is still Jul 31) -- the bug.
+    assert database.alerts(limit=10, since='2026-08-01') == []

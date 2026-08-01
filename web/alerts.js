@@ -47,17 +47,15 @@ let overlayResizeObserver = null;
 let _frameDuration = 1 / 30;
 let configuredLabels = null;
 
-function dateDaysAgo(days) {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString().split('T')[0];
-}
-
+// daygleSinceParamForRange() is provided by web/utils.js: it converts the
+// active UI range preset ('today' / '7d' / '30d' / 'all') into a `since`
+// ISO bound that is the START OF THE LOCAL DAY expressed in UTC. The backend
+// compares stored UTC timestamps lexically (created_at >= ?), so a bound
+// based on the UTC date string would silently drop alerts fired between
+// local midnight and UTC midnight for timezones ahead of UTC (the "Today
+// shows 1 alert but 7d shows all" bug).
 function getSinceParam() {
-  if (activeRange === 'today') return new Date().toISOString().split('T')[0];
-  if (activeRange === '7d') return dateDaysAgo(7);
-  if (activeRange === '30d') return dateDaysAgo(30);
-  return ''; // 'all' - no since filter
+  return daygleSinceParamForRange(activeRange);
 }
 
 // api() is provided by web/utils.js - shared CSRF, 401 redirect, JSON.

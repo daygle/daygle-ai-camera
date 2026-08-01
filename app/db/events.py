@@ -105,6 +105,13 @@ class EventsMixin:
             return int(count)
 
     def search_events(self, label: str | None = None, limit: int = 50, alerted_only: bool = False, with_recording: bool = False, since: str | None = None) -> list[dict[str, Any]]:
+        # Normalise the since bound to canonical UTC ``+00:00`` form (events are
+        # stored canonical after ``add_event``; the frontend sends local-day-start
+        # bounds built with ``Date.toISOString()`` which carry a ``Z`` suffix).
+        # Without this, the lexical ``e.created_at >= ?`` compare mis-sorts at
+        # the exact boundary -- ``Z`` (0x5A) sorts AFTER ``+`` (0x2B) -- so an
+        # event at local midnight would be dropped for timezones ahead of UTC.
+        since = _normalize_iso_to_utc(since) if since else None
         with self.connect() as db:
             alert_filter = """
                 AND EXISTS (
@@ -176,7 +183,7 @@ class EventsMixin:
             else:
                 params = ((since,) if since else ()) + (limit,)
                 rows = db.execute(
-                    f"SELECT * FROM events WHERE dismissed = 0 {since_clause} ORDER BY created_at DESC LIMIT ?",
+                    f"SELECT * FROM events e WHERE e.dismissed = 0 {since_clause} ORDER BY e.created_at DESC LIMIT ?",
                     params,
                 ).fetchall()
 
@@ -190,6 +197,11 @@ class EventsMixin:
             return self._event_with_detections(db, row)
 
     def stats(self, since: str | None = None) -> dict[str, Any]:
+        # Same normalisation as ``search_events`` / ``alerts``: the frontend
+        # sends local-day-start bounds (``Date.toISOString()`` ``Z`` suffix)
+        # that must be canonicalised to ``+00:00`` before the lexical compare
+        # against stored rows so the day-boundary counts land on the right side.
+        since = _normalize_iso_to_utc(since) if since else None
         with self.connect() as db:
             since_clause = "AND e.created_at >= ?" if since else ""
             since_clause_ah = "AND ah.created_at >= ?" if since else ""
