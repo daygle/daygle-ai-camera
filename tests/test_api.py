@@ -1002,6 +1002,27 @@ def test_prebuffer_first_segment_uses_full_segment_length(tmp_path):
     assert durations[segments[0]] == pytest.approx(service.PREBUFFER_SEGMENT_SECONDS, abs=0.2)
 
 
+def test_audio_timeline_preserves_missing_segment_gap(tmp_path):
+    from app.recordings import RecordingService
+
+    service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'rec')}, 'recording': {}})
+    audio_dir = service.audio_dir / 'cam'
+    audio_dir.mkdir(parents=True)
+    now = time.time()
+    # The second WAV finishes two seconds after the first: one nominal 1s WAV
+    # is missing. The derived timeline must retain that missing second as
+    # silence instead of collapsing the audio against the video.
+    for name, end_ts in (('aud-00.wav', now - 2), ('aud-02.wav', now)):
+        segment = audio_dir / name
+        segment.write_bytes(b'wav')
+        os.utime(segment, (end_ts, end_ts))
+
+    timeline = service._segment_timeline(audio_dir, 'aud-*.wav', 1.0)
+    assert len(timeline) == 2
+    assert timeline[1][1] == pytest.approx(now - 1, abs=0.05)
+    assert timeline[1][1] > timeline[0][2]
+
+
 def test_audio_retention_follows_prebuffer_window(tmp_path):
     # Audio sidecar segments must be retained for the full prebuffer window, not
     # a fixed 20s - otherwise long event clips get audio shorter than the video
@@ -1028,9 +1049,9 @@ def test_audio_retention_follows_prebuffer_window(tmp_path):
 
 
 def test_mux_prebuffer_audio_pads_audio_to_video(tmp_path, monkeypatch):
-    # The audio mux must pad audio to the video length (-af apad -shortest) so
-    # the audio track never ends before the video, which would leave the
-    # player's buffered bar short of the clip end.
+    # The audio mux must align the sidecar audio clock with video, resample
+    # small clock drift, and pad audio to the video length (-shortest) so the
+    # player's buffered bar reaches the clip end.
     import app.recordings as recordings_module
     from app.recordings import RecordingService
 
@@ -1056,11 +1077,56 @@ def test_mux_prebuffer_audio_pads_audio_to_video(tmp_path, monkeypatch):
     video = tmp_path / 'rec' / 'event.mp4'
     video.parent.mkdir(parents=True, exist_ok=True)
     video.write_bytes(b'video')
-    service._mux_prebuffer_audio('cam', video, now - 1, 2.0)
+    service._mux_prebuffer_audio('cam', video, now - 2, 2.0)
 
     cmd = captured.get('cmd', [])
-    assert '-af' in cmd and cmd[cmd.index('-af') + 1] == 'apad', 'audio must be padded to video length'
+    assert '-filter_complex' in cmd
+    filter_graph = cmd[cmd.index('-filter_complex') + 1]
+    assert 'adelay=1000:all=1' in filter_graph, 'audio must preserve the one-second video/audio wall-clock offset'
+    assert 'amix=inputs=1' in filter_graph
+    assert 'aresample=async=1' in filter_graph, 'audio clock drift must be corrected'
+    assert 'apad' in filter_graph, 'audio must be padded to video length'
+    assert cmd.count('-i') == 2, 'video plus one sidecar WAV input'
+    assert '[aout]' in cmd
     assert '-shortest' in cmd
+
+
+def test_mux_prebuffer_audio_trims_audio_that_begins_before_video(tmp_path, monkeypatch):
+    import app.recordings as recordings_module
+    from app.recordings import RecordingService
+
+    service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'rec')}, 'recording': {}})
+    audio_dir = service.audio_dir / 'cam'
+    audio_dir.mkdir(parents=True)
+    now = time.time()
+    segment = audio_dir / 'aud-000.wav'
+    segment.write_bytes(b'x')
+    os.utime(segment, (now, now))
+
+    captured = {}
+
+    def fake_run(command, *_args, **_kwargs):
+        captured['cmd'] = command
+        Path(command[-1]).write_bytes(b'muxed')
+        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+    monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _p: True))
+
+    video = tmp_path / 'rec' / 'event.mp4'
+    video.parent.mkdir(parents=True, exist_ok=True)
+    video.write_bytes(b'video')
+    # The WAV timeline starts at now - 1s; video starts at now - 0.5s.
+    service._mux_prebuffer_audio('cam', video, now - 0.5, 1.5)
+
+    cmd = captured['cmd']
+    filter_graph = cmd[cmd.index('-filter_complex') + 1]
+    assert 'atrim=start=' in filter_graph
+    assert 'adelay=' not in filter_graph
+    assert 'amix=inputs=1' in filter_graph
+    assert 'aresample=async=1' in filter_graph
+    assert '-t' in cmd and cmd[cmd.index('-t') + 1] == '1.500'
 
 
 def test_favicon_is_served_publicly(tmp_path, monkeypatch):
@@ -2553,7 +2619,12 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
     assert render_seconds == pytest.approx(content_seconds, abs=0.01)
     mux_command = commands[1]
     assert mux_command[mux_command.index('-map') + 1] == '0:v:0'
-    assert '1:a:0' in mux_command
+    assert mux_command[mux_command.index('-map') + 3] == '[aout]'
+    assert mux_command.count('-i') == 16, 'video plus one input for each selected WAV segment'
+    mux_filter = mux_command[mux_command.index('-filter_complex') + 1]
+    assert 'amix=inputs=15' in mux_filter
+    assert 'aresample=async=1' in mux_filter
+    assert 'apad' in mux_filter
     assert mux_command[mux_command.index('-c:v') + 1] == 'copy'
     assert mux_command[mux_command.index('-c:a') + 1] == 'aac'
 

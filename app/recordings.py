@@ -1629,7 +1629,12 @@ class RecordingService:
         timed: list[tuple[Path, float, float]] = []
         prev_end: float | None = None
         for segment, end in stamped:
-            start = prev_end if prev_end is not None and 0 < end - prev_end <= 10 else end - nominal_seconds
+            # A small timing variance is normal at keyframe boundaries, but a
+            # gap materially larger than the segment's nominal duration means
+            # the worker missed one or more files. Keep that gap in the timeline
+            # instead of making later audio catch up to video.
+            gap = end - prev_end if prev_end is not None else None
+            start = prev_end if gap is not None and 0 < gap <= nominal_seconds * 1.5 else end - nominal_seconds
             timed.append((segment, start, end))
             prev_end = end
         return timed
@@ -1665,56 +1670,82 @@ class RecordingService:
         ffmpeg = shutil.which('ffmpeg')
         if not ffmpeg or duration_seconds <= 0:
             return False
-        audio_segments = self._collect_audio_segments(camera_key, start_ts, start_ts + duration_seconds)
-        if not audio_segments:
+        # The video render starts at the first selected video's content timestamp,
+        # while the first selected WAV can begin slightly before or after it (the
+        # two segmenters have different durations). Concatenating the WAVs from
+        # time zero therefore introduces up to a segment of audible offset. Keep
+        # the wall-clock position of the first audio segment and explicitly trim
+        # or delay the audio so its first sample lines up with video time zero.
+        audio_timed = self._segment_timeline(self.audio_dir / camera_key, 'aud-*.wav', 1.0)
+        selected_audio = [
+            item for item in audio_timed
+            if item[2] > start_ts and item[1] < start_ts + duration_seconds
+        ]
+        if not selected_audio:
             return False
-
-        audio_list_path = video_path.with_name(f'{video_path.stem}.audio.concat.txt')
         muxed_path = video_path.with_name(f'{video_path.stem}.audio{video_path.suffix}')
-        audio_list_path.write_text(''.join(self._concat_file_line(segment) for segment in audio_segments), encoding='utf-8')
         if muxed_path.exists():
             muxed_path.unlink(missing_ok=True)
-        command = [
-            ffmpeg,
-            '-y',
-            '-i',
-            str(video_path),
-            '-f',
-            'concat',
-            '-safe',
-            '0',
-            '-i',
-            str(audio_list_path),
+
+        # Feed every WAV as its own input and delay it to its wall-clock position.
+        # A concat demuxer would collapse any missing WAV segment, making audio
+        # catch up to video after an ingest restart. Separate delayed inputs keep
+        # both the initial offset and all gaps in the audio timeline.
+        filter_parts: list[str] = []
+        audio_labels: list[str] = []
+        for index, (_segment, segment_start, _segment_end) in enumerate(selected_audio):
+            delay_seconds = max(0.0, segment_start - start_ts)
+            operations = []
+            if index == 0 and segment_start < start_ts:
+                # The first WAV overlaps the beginning of the video. Remove only
+                # its leading overlap; dropping the whole segment would move audio
+                # late. Later segments retain their absolute wall-clock delays.
+                operations.append(f'atrim=start={start_ts - segment_start:.6f}')
+            operations.append('asetpts=PTS-STARTPTS')
+            if delay_seconds > 0.001:
+                # adelay accepts integer milliseconds across supported FFmpeg builds.
+                operations.append(f'adelay={max(1, round(delay_seconds * 1000))}:all=1')
+            label = f'a{index}'
+            filter_parts.append(f'[{index + 1}:a]' + ','.join(operations) + f'[{label}]')
+            audio_labels.append(f'[{label}]')
+        filter_parts.append(
+            ''.join(audio_labels)
+            + f'amix=inputs={len(audio_labels)}:duration=longest:dropout_transition=0:normalize=0'
+            + ',aresample=async=1,apad[aout]'
+        )
+        filter_complex = ';'.join(filter_parts)
+
+        command = [ffmpeg, '-y', '-i', str(video_path)]
+        for segment, _segment_start, _segment_end in selected_audio:
+            command.extend(['-i', str(segment)])
+        command.extend([
+            '-filter_complex',
+            filter_complex,
             '-map',
             '0:v:0',
             '-map',
-            '1:a:0',
+            '[aout]',
             '-c:v',
             'copy',
             '-c:a',
             'aac',
             '-b:a',
             '128k',
-            # Pad audio with trailing silence to the video length, then cut at
-            # the video end (-shortest). Without -af apad the audio track ends
-            # earlier than the video for clips longer than the audio we have,
-            # and browsers report the buffered range as the span where BOTH
-            # tracks exist - so the scrubber's loaded bar stopped short of the
-            # end. apad guarantees audio length == video length, keeping the
-            # full video while filling the timeline.
-            '-af',
-            'apad',
+            # Keep the audio and video clocks aligned even when the camera's
+            # audio/video packet clocks drift slightly. The filter preserves
+            # gaps between sidecar segments, resamples small clock differences,
+            # and pads trailing silence; -shortest/-t bound the output to video.
             '-shortest',
+            '-t',
+            f'{float(duration_seconds):.3f}',
             '-movflags',
             '+faststart',
             str(muxed_path),
-        ]
+        ])
         try:
             result = subprocess.run(command, capture_output=True, text=True, timeout=max(30, int(duration_seconds) + 20), check=False)
         except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
             result = None
-        finally:
-            audio_list_path.unlink(missing_ok=True)
 
         if result is None or result.returncode != 0 or not muxed_path.exists() or not self.clip_has_video_stream(muxed_path):
             muxed_path.unlink(missing_ok=True)
