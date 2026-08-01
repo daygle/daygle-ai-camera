@@ -67,7 +67,6 @@
             <span class="live-pulse" id="livePulse" aria-hidden="true"></span>
             <h2 id="liveFrameTitle">Camera</h2>
           </div>
-          <div class="live-frame-meta" id="liveFrameMeta">Connecting…</div>
         </div>
         <div class="live-frame-wrap" id="liveFrameWrap">
           <img id="liveFrame" class="live-frame" alt="Live camera footage" />
@@ -125,6 +124,36 @@
           </button>
         </div>
         <span id="ptzStatus" class="ptz-status" hidden aria-live="polite"></span>
+      </section>
+
+      <section class="card live-stream-details-card" id="streamDetailsCard">
+        <div class="settings-section-header">
+          <div class="settings-section-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </div>
+          <div>
+            <h2>Stream Details</h2>
+            <p class="settings-section-subtitle">Connection and stream information for the selected camera.</p>
+          </div>
+        </div>
+        <div class="status-panel">
+          <div>
+            <span>Connection Type</span>
+            <strong id="streamDetailBackend">-</strong>
+          </div>
+          <div>
+            <span>Resolution</span>
+            <strong id="streamDetailResolution">-</strong>
+          </div>
+          <div>
+            <span>FPS</span>
+            <strong id="streamDetailFps">-</strong>
+          </div>
+          <div>
+            <span>Stream Source</span>
+            <strong id="streamDetailSource">-</strong>
+          </div>
+        </div>
       </section>
     </div>
 

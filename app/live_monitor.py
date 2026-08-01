@@ -94,6 +94,8 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
     processed = 0
     for selected_config in list(_state.cameras_config):
         camera_id = str(selected_config.get('id') or 'camera')
+        if selected_config.get('enabled') is False:
+            continue
         if not _camera_has_live_alert_stream(selected_config):
             continue
         now = time.time()

@@ -71,7 +71,6 @@
             <span class="live-pulse" id="livePulse" aria-hidden="true"></span>
             <h2 id="liveFrameTitle">Camera</h2>
           </div>
-          <div class="live-frame-meta" id="liveFrameMeta">Connecting…</div>
         </div>
         <div class="live-frame-wrap zones-frame-wrap" id="liveFrameWrap">
           <img id="liveFrame" class="live-frame" alt="Live camera footage" />
@@ -101,6 +100,10 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
               Add Zone
             </button>
+            <button id="saveZonesBtnHeader" type="button" class="primary" style="display:none">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+              Save Zones
+            </button>
           </div>
         </div>
         <label class="zones-editor-camera">
@@ -122,7 +125,7 @@
         <div id="objectDetectionRules"></div>
 
         <div class="zone-editor-footer">
-          <button id="saveZonesBtn" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>Save Area</button>
+          <button id="saveZonesBtn" type="button" class="primary"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>Save Zones</button>
         </div>
       </section>
     </div>

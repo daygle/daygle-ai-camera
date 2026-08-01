@@ -297,6 +297,7 @@ function bindObjectRuleControls() {
       if (!zone.object_rules.some((rule) => rule.label === label)) zone.object_rules.push(defaultObjectRule(label));
       zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion').map((rule) => rule.label);
       renderZones();
+      markZoneUnsaved();
     });
   });
   document.querySelectorAll('[data-expand-zone-rule]').forEach((btn) => {
@@ -342,6 +343,7 @@ function bindObjectRuleControls() {
       rules.splice(tRuleI, 0, dragged);
       zone.object_labels = rules.filter((r) => r.label !== 'motion').map((r) => r.label);
       renderObjectDetectionRules();
+      markZoneUnsaved();
     });
   });
   document.querySelectorAll('[data-delete-zone-rule]').forEach((button) => {
@@ -371,6 +373,7 @@ function bindObjectRuleControls() {
       }
       zones[zoneIndex].object_labels = zones[zoneIndex].object_rules.filter((r) => r.label !== 'motion').map((r) => r.label);
       renderZones();
+      markZoneUnsaved();
     });
   });
   bindRuleFields();
@@ -389,6 +392,7 @@ function bindZoneControls(zones) {
       zones[index].name = input.value;
       const label = liveEls.zoneOverlay.querySelector(`.zone-label[data-zone-index="${index}"]`);
       if (label) label.textContent = input.value || `Zone ${index + 1}`;
+      markZoneUnsaved();
     });
   });
   document.querySelectorAll('[data-zone-enabled]').forEach((select) => {
@@ -397,6 +401,7 @@ function bindZoneControls(zones) {
       zones[selectedZoneIndex].enabled = select.value === 'true';
       renderZones();
       refreshFrame();
+      markZoneUnsaved();
     });
   });
   document.querySelectorAll('[data-delete-zone]').forEach((button) => {
@@ -413,6 +418,7 @@ function bindZoneControls(zones) {
       selectedZoneIndex = null;
       renderZones();
       refreshFrame();
+      markZoneUnsaved();
     });
   });
   document.querySelectorAll('[data-select-zone]').forEach((row) => {
@@ -438,6 +444,7 @@ function bindRuleFields() {
         if (!rule) return;
         rule[ruleKey] = cb.checked;
         cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
+        markZoneUnsaved();
       });
     });
   });
@@ -452,6 +459,7 @@ function bindRuleFields() {
         if (!rule) return;
         rule[ruleKey] = transform(inp.value);
         cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
+        markZoneUnsaved();
       });
     });
   });
@@ -461,6 +469,7 @@ function bindRuleFields() {
       if (!rule) return;
       rule.email_recipients = normalizeEmailList(input.value);
       cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
+      markZoneUnsaved();
     });
   });
   [
@@ -477,6 +486,7 @@ function bindRuleFields() {
           if (!rule) return;
           rule[ruleKey] = timeSelectValue(wrap);
           cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
+          markZoneUnsaved();
         });
       });
     });
@@ -512,6 +522,7 @@ function updateDraggedZone(event) {
   }
   normalizeZone(zone);
   renderZones();
+  markZoneUnsaved();
 }
 
 function draftPolygonMarkup() {
@@ -555,6 +566,7 @@ function finishDraftPolygon() {
   setAddZoneLabel('Draw area');
   renderZones();
   refreshFrame();
+  markZoneUnsaved();
 }
 
 function addFullFrameZone() {
@@ -581,6 +593,7 @@ function addFullFrameZone() {
   normalizeZone(zones[selectedZoneIndex]);
   renderZones();
   refreshFrame();
+  markZoneUnsaved();
 }
 
 function bindZoneDrawing() {
@@ -663,20 +676,41 @@ document.getElementById('addZoneBtnHeader')?.addEventListener('click', toggleDra
 
 liveEls.fullFrameZoneBtn?.addEventListener('click', () => {
   addFullFrameZone();
-  liveEls.status.textContent = 'Full-frame zone area added. Save areas to keep it.';
+  liveEls.status.textContent = 'Full-frame zone added — click Save Zones to apply.';
 });
 
-liveEls.saveZonesBtn?.addEventListener('click', async () => {
+let hasUnsavedZoneChanges = false;
+
+function markZoneUnsaved() {
+  if (hasUnsavedZoneChanges) return;
+  hasUnsavedZoneChanges = true;
+  const btn = document.getElementById('saveZonesBtnHeader');
+  if (btn) btn.style.display = '';
+  liveEls.status.textContent = 'Unsaved changes — click Save Zones to apply.';
+  liveEls.status.classList.add('has-unsaved');
+}
+
+function markZoneSaved() {
+  hasUnsavedZoneChanges = false;
+  const btn = document.getElementById('saveZonesBtnHeader');
+  if (btn) btn.style.display = 'none';
+  liveEls.status.classList.remove('has-unsaved');
+}
+
+async function saveZones() {
   try {
     liveEls.saveZonesBtn.disabled = true;
+    const headerBtn = document.getElementById('saveZonesBtnHeader');
+    if (headerBtn) headerBtn.disabled = true;
     cameraDetection().zones.forEach(normalizeZone);
     await api(`/api/cameras/${encodeURIComponent(selectedCamera.id)}`, { method: 'PUT', body: JSON.stringify(selectedCamera) });
     const payload = await api('/api/cameras');
     const cameraId = selectedCamera.id;
     cameras = payload.cameras || [];
     setSelectedCamera(cameraId);
-    liveEls.status.textContent = 'Zone areas saved.';
-    window.showToast?.('Zone areas saved.');
+    markZoneSaved();
+    liveEls.status.textContent = 'Zones saved successfully.';
+    window.showToast?.('Zones saved successfully.');
     await refreshDetectionStatus();
   } catch (error) {
     // Skip UI updates if api() triggered a 401 redirect
@@ -685,8 +719,13 @@ liveEls.saveZonesBtn?.addEventListener('click', async () => {
     window.showToast?.(error.message, true);
   } finally {
     liveEls.saveZonesBtn.disabled = false;
+    const headerBtn = document.getElementById('saveZonesBtnHeader');
+    if (headerBtn) headerBtn.disabled = false;
   }
-});
+}
+
+liveEls.saveZonesBtn?.addEventListener('click', saveZones);
+document.getElementById('saveZonesBtnHeader')?.addEventListener('click', saveZones);
 
 window.addEventListener('resize', syncZoneOverlayToImage);
 
@@ -696,5 +735,18 @@ document.addEventListener('keydown', (event) => {
     draftPolygon = null;
     setAddZoneLabel('Draw area');
     renderDraftPolygon();
+  }
+});
+
+window.addEventListener('beforeunload', (event) => {
+  if (!hasUnsavedZoneChanges) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
+
+document.addEventListener('keydown', (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key === 's') {
+    event.preventDefault();
+    if (hasUnsavedZoneChanges) saveZones();
   }
 });

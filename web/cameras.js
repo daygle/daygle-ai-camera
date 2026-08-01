@@ -40,7 +40,6 @@ function buildEditFormHtml(camera, index) {
   return '<tr class="camera-edit-row" id="' + rowId + '"><td colspan="7"><div class="camera-edit-panel">' +
     '<div class="modal-tabs" role="tablist">' +
       '<button class="modal-tab active" data-tab="connection" data-form="' + formId + '" type="button" role="tab" aria-selected="true">Connection</button>' +
-      '<button class="modal-tab" data-tab="streams" data-form="' + formId + '" type="button" role="tab" aria-selected="false" tabindex="-1">Streams</button>' +
       '<button class="modal-tab" data-tab="recording" data-form="' + formId + '" type="button" role="tab" aria-selected="false" tabindex="-1">Recording</button>' +
       '<button class="modal-tab" data-tab="ptz" data-form="' + formId + '" type="button" role="tab" aria-selected="false" tabindex="-1">PTZ</button>' +
       '<button class="modal-tab" data-tab="advanced" data-form="' + formId + '" type="button" role="tab" aria-selected="false" tabindex="-1">Advanced</button>' +
@@ -75,21 +74,23 @@ function buildEditFormHtml(camera, index) {
             '<label class="full-width"><span>Password</span><input name="password" type="password" autocomplete="new-password" placeholder="' + (camera.has_password ? '(saved - type to change)' : '(No Password)') + '" /></label>' +
           '</div>' +
         '</div>' +
+        '<div class="form-grid">' +
+          '<label><span>Camera Enabled</span>' +
+            '<select name="enabled">' +
+              '<option value="true"' + (camera.enabled !== false ? ' selected' : '') + '>Enabled</option>' +
+              '<option value="false"' + (camera.enabled === false ? ' selected' : '') + '>Disabled</option>' +
+            '</select>' +
+          '</label>' +
+        '</div>' +
+        '<div class="form-grid">' +
+          '<label class="full-width cam-onvif-fields"' + (isRtsp ? ' hidden' : '') + '><span>Detection Stream Path</span><input name="path" placeholder="e.g. stream1" value="' + escapeAttr(camera.path || '') + '" /></label>' +
+          '<label class="full-width"><span>Recording Stream Path <span class="info-tip" data-tip="Optional: the path for the high-res recording stream (e.g. stream2). Leave empty to use the primary stream for recording." title="Optional: the path for the high-res recording stream (e.g. stream2). Leave empty to use the primary stream for recording." tabindex="0" aria-label="Help: Optional path for the high-res recording stream."></span></span><input name="recording_stream_path" placeholder="e.g. stream2" value="' + escapeAttr(camera.recording_stream_path || '') + '" /></label>' +
+        '</div>' +
+        '<p class="form-help muted">Recording Stream Path is optional and points to a higher-resolution stream used for recordings. Leave empty to use the primary stream for both detection and recording.</p>' +
         '<div class="button-row" style="margin-top:8px">' +
           '<button class="btn-info cam-test-conn-btn" data-form="' + formId + '" type="button">Test Connection</button>' +
           '<span class="muted cam-test-conn-result" data-form="' + formId + '" style="font-size:13px;align-self:center"></span>' +
         '</div>' +
-      '</div>' +
-
-      // Streams tab
-      '<div class="modal-tab-panel" data-panel="streams" hidden>' +
-        '<div class="form-grid">' +
-              '<label class="full-width cam-onvif-fields"' + (isRtsp ? ' hidden' : '') + '><span>Detection Stream Path</span><input name="path" placeholder="stream1" value="' + escapeAttr(camera.path || 'stream1') + '" /></label>' +
-          '<label class="full-width"><span>Recording Stream Path <span class="info-tip" data-tip="Optional: the path for the high-res recording stream (e.g. stream2). Uses the same host, port, and login details as the primary stream. Leave empty to use the primary stream for recording." title="Optional: the path for the high-res recording stream (e.g. stream2). Uses the same host, port, and login details as the primary stream. Leave empty to use the primary stream for recording." tabindex="0" aria-label="Help: Optional path for the high-res recording stream. Uses the same host, port, and login details."></span></span><input name="recording_stream_path" placeholder="e.g. stream2" value="' + escapeAttr(camera.recording_stream_path || '') + '" /></label>' +
-        '</div>' +
-        (isRtsp
-          ? '<p class="form-help muted">Recording Stream Path is optional and points to a higher-resolution stream used for recordings.</p>'
-              : '<p class="form-help muted">Detection Stream Path is the primary detection stream (e.g. stream1). Recording Stream Path is optional and points to a higher-resolution stream used for recordings.</p>') +
       '</div>' +
 
       // Recording tab
@@ -299,11 +300,10 @@ function collectFormData(form, index) {
   var getVal = function(name) { var el = form.querySelector('[name="' + name + '"]'); return el ? el.value : ''; };
   var getName = function(name) { return getVal(name).trim(); };
   var getInt = function(name, def) { var v = parseInt(getVal(name), 10); return isNaN(v) ? def : v; };
-  var backend = getName('backend') || 'onvif';
-
-  return {
+  var backend = getName('backend') || 'onvif';    return {
     id: getName('id') || ('camera-' + (cameras.length + 1)),
     name: getName('name'),
+    enabled: getVal('enabled') !== 'false',
     backend: backend,
     stream_url: backend === 'rtsp' ? getName('stream_url') : '',
     recording_stream_path: getName('recording_stream_path'),
@@ -363,12 +363,13 @@ function renderCameraRow(camera, index) {
     : '<span class="chip chip-info">On Alert</span>';
 
   var hasStream = !!(camera.stream_url || camera.host);
-  var healthHtml = hasStream
-    ? '<span class="health-dot online"></span><span>Online</span>'
-    : '<span class="health-dot offline"></span><span>Offline</span>';
+  var isEnabled = camera.enabled !== false;
+  var healthHtml = !isEnabled
+    ? '<span class="health-dot offline"></span><span>Disabled</span>'
+    : (hasStream ? '<span class="health-dot online"></span><span>Online</span>' : '<span class="health-dot offline"></span><span>Offline</span>');
 
   var rowHtml = '';
-  rowHtml += '<tr draggable="true" data-drag-camera="' + index + '" data-camera-index="' + index + '">';
+  rowHtml += '<tr draggable="true" data-drag-camera="' + index + '" data-camera-index="' + index + '" class="' + (enabled ? '' : 'camera-row-disabled') + '">';
   rowHtml += '<td class="cell-drag"><span class="drag-handle" title="Drag to reorder">' + ICONS.grip + '</span></td>';
   var resolution = cameraResolutions[camera.id];
   var resolutionText = '';
@@ -380,9 +381,9 @@ function renderCameraRow(camera, index) {
   var fps = cameraFps[camera.id];
   var fpsText = '';
   if (fps && fps.source === 'detected' && Number(fps.detected) > 0) {
-    fpsText = Number(fps.detected) + ' FPS';
+    fpsText = Math.round(Number(fps.detected)) + ' FPS';
   } else if (fps && fps.source === 'configured' && Number(fps.configured) > 0) {
-    fpsText = Number(fps.configured) + ' FPS (override)';
+    fpsText = Math.round(Number(fps.configured)) + ' FPS (override)';
   } else if (fps && fps.source === 'fallback') {
     // The backend's 15 FPS fallback is only for buffer-drain calculations;
     // never present it as the camera's hardware/source rate.
@@ -404,6 +405,7 @@ function renderCameraRow(camera, index) {
   rowHtml += '<button class="delete-btn secondary cam-remove-btn" data-index="' + index + '" type="button" title="Remove camera">' + ICONS.remove + '</button>';
   rowHtml += '</div>';
   rowHtml += '</td>';
+  var enabled = camera.enabled !== false;
   rowHtml += '<td><span class="chip">' + backend + '</span></td>';
   rowHtml += '<td class="cell-zones">' + zonesHtml + '</td>';
   rowHtml += '<td class="cell-center">' + soundHtml + '</td>';
@@ -575,7 +577,7 @@ document.getElementById('deleteConfirmBtn').addEventListener('click', async func
 // ─── Add camera ───────────────────────────────────────────────────────────────
 
 function addNewCamera() {
-  var newCam = { id: ('camera-' + (cameras.length + 1)), name: ('Camera ' + (cameras.length + 1)), backend: 'onvif', port: 554, path: 'stream1', recording: { continuous: false }, detection: {}, ptz: { enabled: false, protocol: 'onvif', http_port: 80, port: 6060, address: 1, speed: 5, step_duration: 0.4 } };
+  var newCam = { id: ('camera-' + (cameras.length + 1)), name: ('Camera ' + (cameras.length + 1)), enabled: true, backend: 'onvif', port: 554, path: '', recording: { continuous: false }, detection: {}, ptz: { enabled: false, protocol: 'onvif', http_port: 80, port: 6060, address: 1, speed: 5, step_duration: 0.4 } };
   cameras.push(newCam);
   renderGrid();
   toggleEditForm(newCam, cameras.length - 1);

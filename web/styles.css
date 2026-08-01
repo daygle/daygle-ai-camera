@@ -153,6 +153,11 @@
 :root.light .activity-item-alert .activity-item-type { background: rgba(71,214,255,.12); color: var(--accent); border: 1px solid rgba(71,214,255,.3); }
 :root.light .zone-object-rule { background: rgba(0,0,0,.025); }
 :root.light .live-status,
+:root.light .live-status-pill.has-unsaved {
+  background: rgba(248, 197, 93, 0.12);
+  border-color: rgba(248, 197, 93, 0.35);
+  color: #b45309;
+}
 :root.light .live-status-pill,
 :root.light .live-camera-tile-image .live-status {
   background: rgba(255, 255, 255, 0.85);
@@ -1763,6 +1768,13 @@ tr.drag-over {
   background: rgba(71, 214, 255, 0.08);
   border-color: var(--accent);
 }
+.camera-row-disabled,
+.camera-row-disabled:hover {
+  opacity: 0.55;
+}
+.camera-row-disabled td {
+  opacity: 0.7;
+}
 .camera-edit-row td {
   background: var(--panel-strong);
   padding: 0;
@@ -3292,6 +3304,11 @@ a.activity-item-action {
 }
 
 /* Status pill overlaid on the frame */
+.live-status-pill.has-unsaved {
+  background: rgba(248, 197, 93, 0.15);
+  border-color: rgba(248, 197, 93, 0.4);
+  color: #f8c55d;
+}
 .live-status-pill {
   position: absolute;
   right: 18px;

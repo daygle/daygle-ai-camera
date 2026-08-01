@@ -4,8 +4,12 @@ const liveEls = {
   status: document.getElementById('liveStatus'),
   pulse: document.getElementById('livePulse'),
   frameTitle: document.getElementById('liveFrameTitle'),
-  frameMeta: document.getElementById('liveFrameMeta'),
   cameraEmpty: document.getElementById('liveCameraEmpty'),
+  streamDetailsCard: document.getElementById('streamDetailsCard'),
+  streamDetailBackend: document.getElementById('streamDetailBackend'),
+  streamDetailResolution: document.getElementById('streamDetailResolution'),
+  streamDetailFps: document.getElementById('streamDetailFps'),
+  streamDetailSource: document.getElementById('streamDetailSource'),
   detectionSubtitle: document.getElementById('liveDetectionSubtitle'),
   detectionStatus: document.getElementById('liveDetectionStatus'),
   detectionChips: document.getElementById('liveDetectionChips'),
@@ -286,6 +290,7 @@ function syncViewMode() {
   if (liveEls.cameraGrid) liveEls.cameraGrid.hidden = !allMode;
   if (liveEls.cameraControlGroup) liveEls.cameraControlGroup.hidden = allMode;
   if (liveEls.liveAiTrackGroup) liveEls.liveAiTrackGroup.hidden = allMode;
+  if (liveEls.streamDetailsCard) liveEls.streamDetailsCard.hidden = allMode;
   if (allMode) {
     clearLiveOverlay();
     renderCameraGrid();
@@ -300,12 +305,14 @@ function updateFrameHeader(camera) {
   if (liveEls.frameTitle) {
     liveEls.frameTitle.textContent = camera.name || camera.id || 'Camera';
   }
-  if (liveEls.frameMeta) {
-    const res = `${camera.width || 1280}×${camera.height || 720}`;
-    const fps = formatCameraFps(camera);
-    const backend = camera.backend === 'rtsp' ? 'RTSP' : 'ONVIF';
-    liveEls.frameMeta.textContent = `${backend} · ${res} · ${fps}`;
-  }
+  const backend = camera.backend === 'rtsp' ? 'RTSP' : 'ONVIF';
+  const res = `${camera.width || 1280} × ${camera.height || 720}`;
+  const fps = formatCameraFps(camera);
+  const source = liveStreamSource === 'recording' ? 'Recording (high-res)' : 'Detection';
+  if (liveEls.streamDetailBackend) liveEls.streamDetailBackend.textContent = backend;
+  if (liveEls.streamDetailResolution) liveEls.streamDetailResolution.textContent = res;
+  if (liveEls.streamDetailFps) liveEls.streamDetailFps.textContent = fps;
+  if (liveEls.streamDetailSource) liveEls.streamDetailSource.textContent = source;
 }
 
 function updateEmptyState() {
@@ -317,6 +324,7 @@ function updateEmptyState() {
     if (liveEls.cameraControlGroup) liveEls.cameraControlGroup.hidden = true;
     if (liveEls.liveAiTrackGroup) liveEls.liveAiTrackGroup.hidden = true;
     if (liveEls.livePtzToggleGroup) liveEls.livePtzToggleGroup.hidden = true;
+    if (liveEls.streamDetailsCard) liveEls.streamDetailsCard.hidden = true;
   } else {
     liveEls.cameraEmpty.hidden = true;
   }
@@ -681,6 +689,7 @@ if (liveEls.liveStreamSelect) {
     liveStreamSource = liveEls.liveStreamSelect.value;
     localStorage.setItem(LIVE_STREAM_KEY, liveStreamSource);
     refreshFrame();
+    updateFrameHeader(selectedCamera);
   });
 }
 document.querySelectorAll('[data-view-mode]').forEach((btn) => {
