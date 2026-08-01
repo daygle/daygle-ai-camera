@@ -141,6 +141,39 @@ def test_static_files_bypass_auth(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+def test_static_assets_must_revalidate_every_load(tmp_path, monkeypatch):
+    """``/static/*`` responses must carry ``Cache-Control: no-cache,
+    must-revalidate`` so browsers never keep executing a stale pre-update
+    script.
+
+    Regression guard for the dashboard "Today only goes back to 10am" bug:
+    the alerts-page fix shipped new web/app.js + web/utils.js, but static JS
+    responses had no cache directive, so browsers kept running the old
+    UTC-date-string `since` filter until the tab was hard-refreshed (for a
+    UTC+10 operator the old bound = UTC midnight = 10:00 local, which is
+    exactly the cutoff the user saw). With ``no-cache`` the browser
+    revalidates via ETag/Last-Modified on every page load -- 304 when the
+    file is unchanged, fresh 200 the moment an update rewrites it.
+    """
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    try:
+        status, headers, _body = LocalClient(base_url).request("/static/app.js")
+        assert status == 200
+        cache_control = LocalClient.header(headers, "Cache-Control") or ""
+        assert "no-cache" in cache_control, (
+            f"/static/app.js should be revalidated every load; "
+            f"got Cache-Control={cache_control!r}"
+        )
+        assert "must-revalidate" in cache_control, (
+            f"/static/app.js Cache-Control should require revalidation; "
+            f"got {cache_control!r}"
+        )
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 # ---------------------------------------------------------------------------
 # 2. No users exist yet (admin setup not done) -- redirect to /setup.
 # ---------------------------------------------------------------------------

@@ -300,6 +300,17 @@ async def app_navigation_middleware(request: Request, call_next):
         # endpoints (e.g. recording/video streams).
         for key, value in security_headers.items():
             response.headers.setdefault(key, value)
+        # Static assets (JS/CSS) must be revalidated on EVERY page load so a
+        # browser never keeps executing a stale pre-update script after an
+        # update rewrites web/*.js in place -- the exact failure that kept the
+        # dashboard running the old UTC-date-string `since` filter ("Today"
+        # stopped at 10am local for UTC+10 operators) until the tab was
+        # hard-refreshed. The ETag / Last-Modified validators Starlette emits
+        # make the revalidation cheap (304) when the file is unchanged.
+        # Direct assignment (not setdefault) deliberately overrides any
+        # Cache-Control StaticFiles/FileResponse might emit.
+        if path.startswith('/static/'):
+            response.headers['Cache-Control'] = 'no-cache, must-revalidate'
         # Public HTML pages (login, setup) should also not be cached, so a
         # stale copy isn't shown after the auth state changes.
         if content_type.startswith('text/html'):
