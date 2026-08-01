@@ -434,7 +434,14 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
                 continue
             if action == 'record' and (not rule.get('record_on_detect', True)):
                 continue
-            if str(rule.get('label') or '').strip().lower() != label:
+            # Canonicalise the rule label through the same alias map as the
+            # detection label, so a rule configured as ``human``/``people``/
+            # ``pedestrian`` matches a ``person`` detection. The recording
+            # path (``detection_has_matching_record_rule``) and the
+            # AlertEngine both alias both sides; without this the alert
+            # pre-filter silently dropped aliased rules.
+            rule_label = str(rule.get('label') or '').strip().lower()
+            if _LABEL_ALIASES.get(rule_label, rule_label) != label:
                 continue
             if float(detection.get('confidence') or 0) < float(rule.get('min_confidence', 0.5)):
                 continue

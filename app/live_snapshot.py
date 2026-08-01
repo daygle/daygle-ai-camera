@@ -63,7 +63,10 @@ def render_live_snapshot_svg(frame: dict[str, Any], detections: list[dict[str, A
             y = max(0, float(box.get('y') or 0) * height)
             box_width = max(1, float(box.get('width') or 0) * width)
             box_height = max(1, float(box.get('height') or 0) * height)
-            label = escape(str(detection.get('label') or 'object')).title()
+            # Underscores are not word boundaries for ``str.title()``, so strip
+            # them first (``Cat_Meow`` -> ``Cat Meow``) to match the email and
+            # push label formatting (see email_alerts.py / push_notifications.py).
+            label = escape(str(detection.get('label') or 'object').replace('_', ' ').title())
             confidence = round(float(detection.get('confidence') or 0) * 100)
             label_y = max(28, y - 10)
             detection_markup.append(f'<g class="detection-box"><rect x="{x:.1f}" y="{y:.1f}" width="{box_width:.1f}" height="{box_height:.1f}" /><text x="{x:.1f}" y="{label_y:.1f}">{label} · {confidence}%</text></g>')
@@ -94,7 +97,9 @@ def render_live_snapshot_jpeg_overlay(image_bytes: bytes, detections: list[dict[
         box_height = int(max(0.001, min(1, float(box.get('height') or 0))) * height)
         x2 = min(width - 1, x + box_width)
         y2 = min(height - 1, y + box_height)
-        label = escape(str(detection.get('label') or 'object')).title()
+        # Same underscore-strip as the SVG renderer so snapshot JPEG labels
+        # match the email/push title case (``Cat_Meow`` -> ``Cat Meow``).
+        label = escape(str(detection.get('label') or 'object').replace('_', ' ').title())
         confidence = round(float(detection.get('confidence') or 0) * 100)
         text = f'{label} {confidence}%'
         cv2.rectangle(image, (x, y), (x2, y2), (73, 230, 163), 2)
