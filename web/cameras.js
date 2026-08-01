@@ -379,11 +379,14 @@ function renderCameraRow(camera, index) {
   }
   var fps = cameraFps[camera.id];
   var fpsText = '';
-  if (fps && fps.effective > 0) {
-    fpsText = fps.effective + ' FPS';
-    if (fps.configured && Number(fps.configured) !== Number(fps.detected)) {
-      fpsText = fpsText + ' (override)';
-    }
+  if (fps && fps.source === 'detected' && Number(fps.detected) > 0) {
+    fpsText = Number(fps.detected) + ' FPS';
+  } else if (fps && fps.source === 'configured' && Number(fps.configured) > 0) {
+    fpsText = Number(fps.configured) + ' FPS (override)';
+  } else if (fps && fps.source === 'fallback') {
+    // The backend's 15 FPS fallback is only for buffer-drain calculations;
+    // never present it as the camera's hardware/source rate.
+    fpsText = 'Detecting FPS…';
   } else if (fps === null) {
     fpsText = '';
   }

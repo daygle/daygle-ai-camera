@@ -53,6 +53,10 @@ let detectionStatusRefreshMs = DEFAULT_DETECTION_STATUS_REFRESH_MS;
 let cameras = [];
 let availableLabels = [];
 let selectedCamera = null;
+// Runtime stream metadata is populated from /api/status. Camera configuration
+// may intentionally leave FPS on Auto, so never render the old 15 FPS fallback
+// when the backend has a better source-rate value.
+const cameraRuntimeFps = {};
 
 let configuredLabels = null;
 
@@ -233,11 +237,33 @@ function renderCameraGridFrames() {
   });
 }
 
+function cameraDisplayFps(camera) {
+  const runtime = cameraRuntimeFps[camera?.id];
+  const runtimeSource = runtime?.source;
+  const detectedFps = Number(runtime?.detected);
+  if (runtimeSource === 'detected' && Number.isFinite(detectedFps) && detectedFps > 0) return detectedFps;
+  if (runtimeSource === 'configured') {
+    const configuredFps = Number(runtime?.configured);
+    if (Number.isFinite(configuredFps) && configuredFps > 0) return configuredFps;
+  }
+  // A fallback effective value is an internal buffer-drain default, not the
+  // camera's source rate; never present it as hardware FPS. A configured value
+  // is safe to show while the runtime probe is still warming up.
+  const configuredFps = Number(camera?.fps);
+  return Number.isFinite(configuredFps) && configuredFps > 0 ? configuredFps : null;
+}
+
+function formatCameraFps(camera) {
+  const fps = cameraDisplayFps(camera);
+  if (fps != null) return `${fps} fps`;
+  return cameraRuntimeFps[camera?.id] ? 'Detecting FPS…' : 'FPS unavailable';
+}
+
 function renderCameraGrid() {
   if (!liveEls.cameraGrid) return;
   liveEls.cameraGrid.innerHTML = cameras.map((camera) => {
     const res = `${camera.width || 1280}×${camera.height || 720}`;
-    const fps = camera.fps || 15;
+    const fps = formatCameraFps(camera);
     return `
       <article class="live-camera-tile">
         <div class="live-camera-tile-image">
@@ -246,7 +272,7 @@ function renderCameraGrid() {
         </div>
         <div class="live-camera-tile-info">
           <div class="live-camera-tile-name">${escapeHtml(camera.name || camera.id)}</div>
-          <div class="live-camera-tile-meta">${escapeHtml(res)} · ${escapeHtml(fps)} fps</div>
+          <div class="live-camera-tile-meta">${escapeHtml(res)} · ${escapeHtml(fps)}</div>
         </div>
       </article>
     `;
@@ -276,9 +302,9 @@ function updateFrameHeader(camera) {
   }
   if (liveEls.frameMeta) {
     const res = `${camera.width || 1280}×${camera.height || 720}`;
-    const fps = camera.fps || 15;
+    const fps = formatCameraFps(camera);
     const backend = camera.backend === 'rtsp' ? 'RTSP' : 'ONVIF';
-    liveEls.frameMeta.textContent = `${backend} · ${res} · ${fps} fps`;
+    liveEls.frameMeta.textContent = `${backend} · ${res} · ${fps}`;
   }
 }
 
@@ -494,6 +520,19 @@ function restartDetectionStatusTimer() {
 async function refreshDetectionStatus() {
   if (!liveEls.detectionStatus) return;
   if (isAllCameraMode()) {
+    // The grid has no selected-camera status request, but each tile still needs
+    // runtime source metadata. Fetch status independently so Auto cameras do
+    // not remain stuck on a configuration fallback.
+    await Promise.all(cameras.map(async (camera) => {
+      if (!camera?.id) return;
+      try {
+        const streamStatus = await api(`/api/status?camera_id=${encodeURIComponent(camera.id)}`);
+        if (streamStatus?.fps) cameraRuntimeFps[camera.id] = streamStatus.fps;
+      } catch {
+        // A single offline camera should not prevent the other tiles updating.
+      }
+    }));
+    renderCameraGrid();
     renderDetectionStatus({
       state: 'idle',
       stateLabel: 'All Cameras',
@@ -509,10 +548,15 @@ async function refreshDetectionStatus() {
     const soundEnabled = selectedCamera.detection?.sound?.enabled === true;
     // The sound status endpoint now carries its own diagnostics/reason (heard,
     // below threshold, in cooldown), so the client no longer re-derives them.
-    const [payload, soundStatus] = await Promise.all([
+    const [payload, soundStatus, streamStatus] = await Promise.all([
       api(`/api/live/detection-status?camera_id=${cameraId}`),
       api(`/api/sound/status?camera_id=${cameraId}`).catch(() => null),
+      api(`/api/status?camera_id=${cameraId}`).catch(() => null),
     ]);
+    if (streamStatus?.fps) {
+      cameraRuntimeFps[selectedCamera.id] = streamStatus.fps;
+      updateFrameHeader(selectedCamera);
+    }
     ingestServerTrackDetections(payload);
     renderDetectionStatus(summarizeDetectionStatus(payload, soundStatus, soundEnabled));
   } catch (error) {

@@ -3,9 +3,13 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import logging
+import math
 import os
+import shutil
+import subprocess
 import threading
 import time
+from fractions import Fraction
 from typing import Any
 
 
@@ -113,33 +117,130 @@ class OpenCvStreamCamera:
     to pull snapshots for the live view.
     """
 
-    def __init__(self, stream_url: str, width: int = 1280, height: int = 720, fps: int | None = 15, stale_frame_grabs: int | None = None) -> None:
+    def __init__(self, stream_url: str, width: int = 1280, height: int = 720, fps: int | None = None, stale_frame_grabs: int | None = None) -> None:
         self.stream_url = stream_url
         self.width = width
         self.height = height
-        self.configured_fps = fps
-        self.fps = fps or 15
+        self.configured_fps = fps if fps and fps > 0 else None
+        # Keep a conservative fallback for buffer-draining until the stream's
+        # metadata is available. ``effective_fps`` exposes the distinction
+        # between this fallback and the camera's declared source rate.
+        self.fps = self.configured_fps or 15
         self.detected_fps: float | None = None
         self._stale_frame_grabs_configured = stale_frame_grabs
         self.frame_number = 0
         self.started_at = time.time()
         self.last_error: str | None = None
         self._capture: Any | None = None
+        self._fps_probe_attempted_at = 0.0
+        self._fps_probe_lock = threading.Lock()
+        self._fps_probe_thread: threading.Thread | None = None
         self._lock = threading.Lock()
 
     @property
     def backend(self) -> str:
         return "onvif"
 
+    @property
+    def effective_fps(self) -> float:
+        """Return the best-known source FPS for display and stream handling.
+
+        A configured value is an explicit operator override. Otherwise use
+        OpenCV/FFmpeg's declared stream rate when it is sane. RTSP metadata is
+        often absent, so retain the historical 15 FPS fallback without
+        presenting it as a detected hardware value.
+        """
+        if self.configured_fps is not None:
+            return float(self.configured_fps)
+        if self.detected_fps is not None and math.isfinite(self.detected_fps) and 0 < self.detected_fps <= 120:
+            return float(self.detected_fps)
+        return 15.0
+
+    def _probe_declared_fps(self) -> None:
+        """Populate ``detected_fps`` for shared-ingest cameras.
+
+        The shared FFmpeg ingest supplies frames to detection, so the OpenCV
+        capture is normally never opened and ``CAP_PROP_FPS`` cannot populate
+        the status payload. A short, cached ffprobe fills that metadata gap
+        without changing the ingest's deliberately lower detection sampling
+        rate. Failure is harmless and retried periodically.
+        """
+        if self.configured_fps is not None or self.detected_fps is not None:
+            return
+        ffprobe = shutil.which('ffprobe')
+        if not ffprobe or not self.stream_url:
+            return
+        command = [
+            ffprobe,
+            '-v', 'error',
+            '-rtsp_transport', 'tcp',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=avg_frame_rate,r_frame_rate',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            '-i', self.stream_url,
+        ]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=3, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return
+        if result.returncode != 0:
+            return
+        for raw_rate in result.stdout.splitlines():
+            try:
+                rate = float(Fraction(raw_rate.strip()))
+            except (ValueError, ZeroDivisionError):
+                continue
+            if math.isfinite(rate) and 0 < rate <= 120:
+                with self._fps_probe_lock:
+                    if self.configured_fps is None and self.detected_fps is None:
+                        self.detected_fps = rate
+                        self.fps = rate
+                return
+
+    def _schedule_fps_probe(self) -> None:
+        """Start the cached source-rate probe without blocking status calls."""
+        if self.configured_fps is not None or self.detected_fps is not None:
+            return
+        now = time.monotonic()
+        with self._fps_probe_lock:
+            if self.configured_fps is not None or self.detected_fps is not None:
+                return
+            if now - self._fps_probe_attempted_at < 60.0:
+                return
+            self._fps_probe_attempted_at = now
+            thread = self._fps_probe_thread
+            if isinstance(thread, threading.Thread) and thread.is_alive():
+                return
+            thread = threading.Thread(
+                target=self._probe_declared_fps,
+                name='camera-fps-probe',
+                daemon=True,
+            )
+            self._fps_probe_thread = thread
+            thread.start()
+
+    @property
+    def fps_source(self) -> str:
+        if self.configured_fps is not None:
+            return 'configured'
+        if self.detected_fps is not None and math.isfinite(self.detected_fps) and 0 < self.detected_fps <= 120:
+            return 'detected'
+        return 'fallback'
+
     def get_frame(self, timestamp: float | None = None) -> dict[str, Any]:
+        # Shared-ingest cameras normally do not open the OpenCV capture, so
+        # request a background metadata probe instead of blocking /api/status.
+        self._schedule_fps_probe()
         return {
             "frame_number": self.frame_number,
             "timestamp": timestamp if timestamp is not None else time.time(),
             "width": self.width,
             "height": self.height,
-            "fps": self.fps,
+            "fps": self.effective_fps,
             "configured_fps": self.configured_fps,
             "detected_fps": self.detected_fps,
+            "effective_fps": self.effective_fps,
+            "fps_source": self.fps_source,
             "uptime_seconds": round(time.time() - self.started_at, 1),
             "stream_url": self.stream_url,
             "last_error": self.last_error,
@@ -174,11 +275,11 @@ class OpenCvStreamCamera:
         # this after confirming the capture opened, otherwise we may read a
         # bogus value from an uninitialised capture.
         try:
-            cap_fps = self._capture.get(cv2.CAP_PROP_FPS)
-            if cap_fps and cap_fps > 0:
-                self.detected_fps = float(cap_fps)
+            cap_fps = float(self._capture.get(cv2.CAP_PROP_FPS) or 0)
+            if math.isfinite(cap_fps) and 0 < cap_fps <= 120:
+                self.detected_fps = cap_fps
                 if self.configured_fps is None:
-                    self.fps = self.detected_fps
+                    self.fps = cap_fps
         except Exception:
             pass
         return self._capture
@@ -241,7 +342,7 @@ class OpenCvStreamCamera:
         # (fps/2), which at 15 fps meant 7 grabs (~467 ms of latency).
         # Dropping to 25% (fps/4) halves that to ~233 ms while still
         # discarding enough stale frames on typical IP cameras.
-        return max(1, min(8, int(self.fps / 4)))
+        return max(1, min(8, int(self.effective_fps / 4)))
 
     @staticmethod
     def _read_latest_frame(capture, stale_frame_grabs: int, fps: int = 15) -> tuple[bool, Any, float]:
