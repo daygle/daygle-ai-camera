@@ -214,10 +214,12 @@ class OnnxYoloDetector:
         # once at construct time and caches the result; FP16 just loads
         # whatever the export produced (no runtime conversion).
         session_model_path = self.model_path
+        int8_runtime_model = False
         if self._precision == 'int8':
             quantized = quantize_int8_dynamic(self.model_path) if quantize_int8_dynamic else None
             if quantized is not None:
                 session_model_path = Path(quantized)
+                int8_runtime_model = True
                 logger.info(
                     'INT8 dynamic quantization ready for %s -> %s',
                     self.model_path, session_model_path,
@@ -243,10 +245,27 @@ class OnnxYoloDetector:
 
         try:
             available_providers = ort.get_available_providers()
-            use_cuda = (
+            requested_use_cuda = (
                 self._device == "cuda"
                 or (self._device == "auto" and "CUDAExecutionProvider" in available_providers)
             )
+            # ORT dynamic quantization emits CPU-oriented integer operators.
+            # Do not create a CUDA session for that graph: mixed CUDA/CPU EP
+            # partitioning can silently move tensors between devices, and it
+            # is incompatible with the direct CUDA io-binding path. INT8 is
+            # explicitly documented as CPU precision in the UI, so a CUDA
+            # device request is safely honored as CPU for this runtime model.
+            if int8_runtime_model:
+                use_cuda = False
+                if self._device in {"cuda", "auto"}:
+                    logger.info(
+                        'INT8 dynamic model is CPU-bound; using CPUExecutionProvider '
+                        'instead of requested device=%s.',
+                        self._device,
+                    )
+                self._use_io_binding = False
+            else:
+                use_cuda = requested_use_cuda
             if use_cuda and "CUDAExecutionProvider" not in available_providers:
                 self.unavailable_reason = (
                     "device=cuda requested but CUDAExecutionProvider is not available. "
@@ -281,7 +300,47 @@ class OnnxYoloDetector:
                     if self._execution_mode == "sequential"
                     else ort.ExecutionMode.ORT_PARALLEL
                 )
-            self.session = ort.InferenceSession(str(session_model_path), sess_options=session_options, providers=providers)
+            try:
+                self.session = ort.InferenceSession(
+                    str(session_model_path),
+                    sess_options=session_options,
+                    providers=providers,
+                )
+            except Exception as int8_load_exc:
+                # Quantization can succeed while a particular ORT build still
+                # rejects the rewritten graph (unsupported op or provider
+                # kernel). Do not turn that into an unavailable detector: retry
+                # the original FP32 model on the already-selected CPU path.
+                if not int8_runtime_model:
+                    raise
+                logger.warning(
+                    'INT8 model could not be loaded (%s); falling back to FP32 model %s.',
+                    int8_load_exc,
+                    self.model_path,
+                )
+                self._precision = 'fp32'
+                int8_runtime_model = False
+                self._use_io_binding = False
+                session_model_path = self.model_path
+                fallback_providers: list[Any]
+                if requested_use_cuda:
+                    fallback_cuda_options: dict[str, Any] = {
+                        "device_id": 0,
+                        "arena_extend_strategy": "kSameAsRequested",
+                    }
+                    if self._gpu_mem_limit:
+                        fallback_cuda_options["gpu_mem_limit"] = self._gpu_mem_limit
+                    fallback_providers = [
+                        ("CUDAExecutionProvider", fallback_cuda_options),
+                        "CPUExecutionProvider",
+                    ]
+                else:
+                    fallback_providers = ["CPUExecutionProvider"]
+                self.session = ort.InferenceSession(
+                    str(session_model_path),
+                    sess_options=session_options,
+                    providers=fallback_providers,
+                )
             self.input_name = self.session.get_inputs()[0].name
             self.output_names = [output.name for output in self.session.get_outputs()]
             self.active_providers = self.session.get_providers()
@@ -335,7 +394,60 @@ class OnnxYoloDetector:
                 else:
                     self.session.run(self.output_names, {self.input_name: warm})
             except Exception as warm_exc:
-                logger.debug('Detector warm-up inference skipped: %s', warm_exc)
+                if int8_runtime_model:
+                    # A quantized graph can parse successfully but still fail
+                    # its first real execution because an integer kernel is
+                    # unavailable in the installed ORT build. Do not leave a
+                    # detector marked available while reporting INT8: retry
+                    # the original FP32 graph on CPU instead.
+                    logger.warning(
+                        'INT8 warm-up failed (%s); falling back to FP32 model %s.',
+                        warm_exc,
+                        self.model_path,
+                    )
+                    try:
+                        self._precision = 'fp32'
+                        self._use_io_binding = False
+                        fallback_providers: list[Any]
+                        if requested_use_cuda:
+                            fallback_cuda_options: dict[str, Any] = {
+                                "device_id": 0,
+                                "arena_extend_strategy": "kSameAsRequested",
+                            }
+                            if self._gpu_mem_limit:
+                                fallback_cuda_options["gpu_mem_limit"] = self._gpu_mem_limit
+                            fallback_providers = [
+                                ("CUDAExecutionProvider", fallback_cuda_options),
+                                "CPUExecutionProvider",
+                            ]
+                        else:
+                            fallback_providers = ["CPUExecutionProvider"]
+                        self.session = ort.InferenceSession(
+                            str(self.model_path),
+                            sess_options=session_options,
+                            providers=fallback_providers,
+                        )
+                        self.input_name = self.session.get_inputs()[0].name
+                        self.output_names = [output.name for output in self.session.get_outputs()]
+                        self.active_providers = self.session.get_providers()
+                        self._input_dtype = np.float32
+                        self.session.run(
+                            self.output_names,
+                            {
+                                self.input_name: np.zeros(
+                                    (1, 3, self.input_height, self.input_width),
+                                    dtype=np.float32,
+                                )
+                            },
+                        )
+                    except Exception as fallback_exc:
+                        self.session = None
+                        self.input_name = None
+                        self.unavailable_reason = (
+                            f'INT8 warm-up failed and FP32 fallback could not load: {fallback_exc}'
+                        )
+                else:
+                    logger.debug('Detector warm-up inference skipped: %s', warm_exc)
         except Exception as exc:  # pragma: no cover - depends on runtime/model internals
             self.unavailable_reason = f"Failed to load ONNX model {self.model_path}: {exc}"
 

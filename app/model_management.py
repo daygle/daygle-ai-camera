@@ -464,17 +464,35 @@ def delete_model(model_name: str, imgsz: int | None = None) -> dict[str, Any]:
             detail=f"Cannot delete '{model_name}' because it is the active model. Switch to another model first."
         )
 
-    # Delete the ONNX file
-    onnx_path.unlink(missing_ok=True)
-
+    # Delete the source together with its INT8 cache under the same advisory
+    # lock used by quantization. This prevents a concurrent worker from
+    # publishing a cache for a model that is being deleted.
+    #
     # Also remove the sibling INT8 quantization cache (``*.int8.onnx``) if one
     # was produced for this model, so precision=int8 deployments don't leave an
     # orphaned quantized copy behind after the source model is deleted.
     try:
-        from app.quantization import int8_cache_path
-        int8_cache_path(onnx_path).unlink(missing_ok=True)
-    except Exception as exc:  # pragma: no cover - cache cleanup is best-effort
-        logger.warning('Failed to remove INT8 cache for %s: %s', model_name, exc)
+        from app.quantization import (
+            _int8_cache_metadata_path,
+            _int8_process_lock,
+            int8_cache_path,
+        )
+        int8_path = int8_cache_path(onnx_path)
+        with _int8_process_lock(int8_path):
+            # Remove derived artifacts first. If a later source unlink fails,
+            # the model remains usable and no stale INT8 artifact can be
+            # mistaken for a complete deployment.
+            int8_path.unlink(missing_ok=True)
+            _int8_cache_metadata_path(onnx_path).unlink(missing_ok=True)
+            onnx_path.unlink(missing_ok=True)
+    except Exception as exc:  # pragma: no cover - lock/filesystem failure is environment-specific
+        # Never report success when the source could not be deleted. Leaving
+        # the model intact is safer than a partial deletion with an orphaned
+        # cache that can later be mistaken for a complete deployment.
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not safely delete '{info['label']}'. Retry after the model is no longer in use.",
+        ) from exc
 
     # Remove only this resolution's metadata. Other model resolutions remain
     # installed and available for switching.

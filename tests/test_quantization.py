@@ -20,7 +20,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app.quantization import (  # noqa: E402
+import app.quantization as quantization  # noqa: E402
+from app.quantization import (
+    _int8_cache_metadata_path,
+    _source_signature,
     int8_cache_path,
     int8_quantization_available,
     normalize_precision,
@@ -137,7 +140,7 @@ def test_quantize_int8_dynamic_returns_none_when_lib_missing(tmp_path: Path, mon
     """When ``onnxruntime.quantization`` cannot be imported (the common
     case on minimal installs) the helper returns ``None`` instead of
     raising -- the detector then logs a warning and falls back to FP32."""
-    monkeypatch.setattr('app.quantization.int8_quantization_available', lambda: False)
+    monkeypatch.setattr(quantization, 'int8_quantization_available', lambda: False)
     source = tmp_path / 'yolo26n.onnx'
     source.write_bytes(b'')
     assert quantize_int8_dynamic(source) is None
@@ -148,11 +151,13 @@ def test_quantize_int8_dynamic_returns_existing_cache_when_fresh(tmp_path: Path,
     helper short-circuits without re-quantizing. Simulated by exposing
     a fake ``quantize_dynamic`` that would raise if invoked -- proving
     the short-circuit works."""
-    monkeypatch.setattr('app.quantization.int8_quantization_available', lambda: True)
+    monkeypatch.setattr(quantization, 'int8_quantization_available', lambda: True)
+    monkeypatch.setattr(quantization, '_is_valid_onnx_model', lambda path: True)
     source = tmp_path / 'yolo26n.onnx'
     cache = int8_cache_path(source)
     source.write_bytes(b'fake-source')
     cache.write_bytes(b'fake-cache')
+    _int8_cache_metadata_path(source).write_text(_source_signature(source) + '\n', encoding='ascii')
     # Cache newer than source: short-circuit, return cache path.
     os.utime(cache, (2000, 2000))
     os.utime(source, (1000, 1000))
@@ -165,7 +170,8 @@ def test_quantize_int8_dynamic_requantizes_when_cache_stale(tmp_path: Path, monk
     don't need a real ``onnxruntime`` install."""
     import types
 
-    monkeypatch.setattr('app.quantization.int8_quantization_available', lambda: True)
+    monkeypatch.setattr(quantization, 'int8_quantization_available', lambda: True)
+    monkeypatch.setattr(quantization, '_is_valid_onnx_model', lambda path: True)
     source = tmp_path / 'yolo26n.onnx'
     cache = int8_cache_path(source)
     source.write_bytes(b'fake-source')
@@ -199,8 +205,40 @@ def test_quantize_int8_dynamic_requantizes_when_cache_stale(tmp_path: Path, monk
     result = quantize_int8_dynamic(source)
     assert result == cache
     assert captured['called'] is True
-    assert Path(captured['model_output']).read_bytes() == b'fresh-cache'
+    # Quantization writes to a private temporary ONNX path and atomically
+    # replaces the cache only after completion; callers receive the final
+    # cache path, not the now-removed temporary path.
+    assert Path(captured['model_output']) != cache
+    assert cache.read_bytes() == b'fresh-cache'
 
+
+def test_quantize_int8_dynamic_preserves_stale_cache_when_conversion_fails(tmp_path: Path, monkeypatch):
+    """A failed conversion must not destroy the previous cache artifact."""
+    import types
+
+    monkeypatch.setattr(quantization, 'int8_quantization_available', lambda: True)
+    monkeypatch.setattr(quantization, '_is_valid_onnx_model', lambda path: True)
+    source = tmp_path / 'model.onnx'
+    cache = int8_cache_path(source)
+    source.write_bytes(b'new-source')
+    cache.write_bytes(b'old-cache')
+    os.utime(source, (3000, 3000))
+    os.utime(cache, (1000, 1000))
+
+    def _failing_quantize_dynamic(**kwargs):
+        raise RuntimeError('conversion failed')
+
+    qmod = types.ModuleType('onnxruntime.quantization')
+    qmod.QuantType = type('Q', (), {'QInt8': 1})
+    qmod.quantize_dynamic = _failing_quantize_dynamic
+    if 'onnxruntime' not in sys.modules:
+        stub_pkg = types.ModuleType('onnxruntime')
+        stub_pkg.__path__ = []
+        monkeypatch.setitem(sys.modules, 'onnxruntime', stub_pkg)
+    monkeypatch.setitem(sys.modules, 'onnxruntime.quantization', qmod)
+
+    assert quantize_int8_dynamic(source) is None
+    assert cache.read_bytes() == b'old-cache'
 
 # -- delete_model INT8 cache cleanup ---------------------------------------
 
@@ -215,6 +253,8 @@ def test_delete_model_removes_int8_cache_sibling(tmp_path: Path, monkeypatch):
     onnx.write_bytes(b'fake onnx')
     int8 = int8_cache_path(onnx)
     int8.write_bytes(b'fake int8')
+    metadata = _int8_cache_metadata_path(onnx)
+    metadata.write_text('stale-source-hash\n', encoding='ascii')
 
     monkeypatch.setattr(mm, 'BASE_DIR', tmp_path)
     monkeypatch.setattr(mm, 'MODELS_DIR', models_dir)
@@ -226,3 +266,4 @@ def test_delete_model_removes_int8_cache_sibling(tmp_path: Path, monkeypatch):
     assert result['ok'] is True
     assert not onnx.exists()
     assert not int8.exists()
+    assert not _int8_cache_metadata_path(onnx).exists()
