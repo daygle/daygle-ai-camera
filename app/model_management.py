@@ -650,7 +650,6 @@ def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int =
     installed_version = _installed_package_version('ultralytics')
     with _installed_models_lock:
         installed_meta = _read_installed_models()
-        raw = installed_meta.get(model_name, {})
         existing_variants = _model_variants(model_name, installed_meta)
         variants = {key: dict(value) for key, value in existing_variants.items()}
         variants[str(imgsz)] = {

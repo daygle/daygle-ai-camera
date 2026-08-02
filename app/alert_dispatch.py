@@ -275,7 +275,6 @@ def deliver_email_alerts(
     event = _state.database.get_event(event_id) or {}
     metadata = event.get('metadata') if isinstance(event.get('metadata'), dict) else {}
     camera_name = str(metadata.get('camera_name') or '').strip() or None
-    camera_id = str(metadata.get('camera_id') or '').strip() or None
     created_at_raw = str(event.get('created_at') or '').strip()
     detected_at = _format_alert_datetime(created_at_raw) if created_at_raw else None
     rules_by_name = {str(rule.get('name')): rule for rule in rules or []}
