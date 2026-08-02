@@ -437,6 +437,27 @@ def test_filter_for_camera_zones_no_zones_camera_labels_fallback(monkeypatch):
     assert [d['label'] for d in filtered] == ['cat']
 
 
+def test_filter_for_camera_zones_no_zones_fallback_aliases_detection_labels():
+    """The zone-less camera-label fallback must alias detection labels exactly
+    like the zones path (``detection_label_allowed_for_zone``): a camera with
+    ``object_labels: ['person']`` should accept a detection labeled 'human'.
+
+    Regression: the fallback previously compared the RAW lowercase label
+    against the already-aliased ``camera_labels`` set, silently dropping
+    'human'/'people'/'pedestrian' detections that the same camera accepted
+    once a zone was configured."""
+    from app import zone_detection as zd
+    settings = {'id': 'cam-1', 'detection': {'object_labels': ['person']}}
+    detections = [
+        {'label': 'human', 'box': {'x': 0, 'y': 0, 'width': 0.1, 'height': 0.1}},
+        {'label': 'dog', 'box': {'x': 0, 'y': 0, 'width': 0.1, 'height': 0.1}},
+    ]
+    filtered = zd.filter_detections_for_camera_zones(
+        detections, settings, zone_monitor_key='monitor_objects'
+    )
+    assert [d['label'] for d in filtered] == ['human']
+
+
 def test_filter_for_camera_zones_no_zones_require_zones_empty():
     from app import zone_detection as zd
     settings = {'id': 'cam-1', 'detection': {'object_labels': ['cat']}}
@@ -579,6 +600,61 @@ def test_zone_object_rule_matches_action_alert_requires_notify():
         action='alert',
     )
     assert matches == []
+
+
+def test_zone_object_alert_rules_includes_motion_rules_from_motion_only_zones():
+    """Motion-only zones (monitor_objects=False, monitor_motion=True) must still
+    contribute their MOTION rules to the AlertEngine rule list so email/push
+    motion alerts can fire there. The recording axis already honours these
+    zones (``zone_motion_record_on_detect``); the alert axis silently skipped
+    them before this fix."""
+    from app import zone_detection as zd
+    settings = {
+        'id': 'cam-1',
+        'name': 'Cam 1',
+        'detection': {
+            'zones': [
+                {
+                    'enabled': True, 'monitor_objects': False, 'monitor_motion': True,
+                    'id': 'porch', 'name': 'Porch',
+                    'x': 0, 'y': 0, 'width': 1, 'height': 1,
+                    'object_rules': [
+                        {'label': 'motion', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.45, 'cooldown_seconds': 30},
+                    ],
+                },
+            ],
+        },
+    }
+    rules = zd.zone_object_alert_rules(settings)
+    assert len(rules) == 1
+    assert rules[0]['object'] == 'motion'
+    assert rules[0]['email_enabled'] is True
+    assert rules[0]['zone_id'] == 'porch'
+
+
+def test_zone_object_alert_rules_keeps_object_rules_inert_in_motion_only_zones():
+    """An OBJECT rule inside a motion-only zone stays out of the alert list:
+    object detections are filtered through the monitor_objects axis and can
+    never carry this zone's id, so exposing the rule would only add dead
+    entries to the engine's list."""
+    from app import zone_detection as zd
+    settings = {
+        'id': 'cam-1',
+        'name': 'Cam 1',
+        'detection': {
+            'zones': [
+                {
+                    'enabled': True, 'monitor_objects': False, 'monitor_motion': True,
+                    'id': 'porch', 'name': 'Porch',
+                    'x': 0, 'y': 0, 'width': 1, 'height': 1,
+                    'object_rules': [
+                        {'label': 'person', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.5},
+                    ],
+                },
+            ],
+        },
+    }
+    assert zd.zone_object_alert_rules(settings) == []
 
 
 def test_zone_object_alert_rules_email_recipients_cleaned(monkeypatch):

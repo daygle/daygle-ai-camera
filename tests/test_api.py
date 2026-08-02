@@ -2559,6 +2559,43 @@ def test_collect_prebuffer_segments_selects_by_content_overlap(tmp_path):
     assert fallback_start is None
 
 
+def test_rec_prebuffer_segments_report_content_start_not_mtime(tmp_path):
+    """The high-res recording prebuffer collector (``<key>-rec``) must anchor
+    ``content_start_ts`` at the first selected segment's content START, exactly
+    like the primary collector - not at the segment's mtime (its content END).
+
+    Regression: ``_collect_prebuffer_segments_from_dir`` used the minimum mtime
+    as ``content_start_ts``, which is up to a full segment (~4s) late. The clip
+    render window, the muxed audio delay and the baked detection track all
+    followed that late anchor, so dual-stream recordings played with sound
+    lagging the video by roughly a segment."""
+    from app.recordings import RecordingService
+
+    service = RecordingService({
+        'storage': {'recordings_dir': str(tmp_path / 'recordings')},
+        'recording': {'format': 'mp4'},
+    })
+    rec_dir = service.prebuffer_dir / 'camera-1-rec'
+    rec_dir.mkdir(parents=True, exist_ok=True)
+
+    now = time.time()
+    segments = []
+    for offset in range(7):  # contiguous 1s segments ending at now-6 .. now
+        end_ts = now - 6 + offset
+        segment = rec_dir / f'segment-{offset:02d}.mp4'
+        segment.write_bytes(b'ts')
+        os.utime(segment, (end_ts, end_ts))
+        segments.append(segment)
+
+    selected, content_start = service._collect_rec_prebuffer_segments('camera-1', now - 4.0, now - 1.0)
+
+    # Same content-overlap selection as the primary collector...
+    assert selected == segments[3:6]
+    # ...and the content START of the first selected segment (previous segment's
+    # end = now-4), NOT its mtime (now-3, its content END).
+    assert content_start == pytest.approx(now - 4.0, abs=0.05)
+
+
 def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, monkeypatch):
     """The rendered clip starts at the first selected segment's content start
     (keyframe-aligned, so usually before triggered_at - pre_seconds) and runs
@@ -5153,6 +5190,48 @@ def test_debounce_window_refreshes_while_activity_continues(tmp_path, monkeypatc
     new_event = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
     assert new_event is not None
     assert new_event != first_event
+
+
+def test_alert_only_event_is_debounced_without_recording(tmp_path, monkeypatch):
+    """A camera whose alert rules match but whose record rules don't (or that has
+    recording off) must still be throttled by the debounce window. Previously the
+    debounce gate only ran when a recording attached, so an alert-only camera
+    created a fresh event + snapshot on every detection cycle (~4 Hz), flooding
+    the timeline with duplicates of the same activity."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    import app.live_monitor as _lm
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _bytes, confidence=None):
+            return [{'label': 'person', 'confidence': 0.91, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.3, 'height': 0.5}}]
+
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    main._state.live_detection_last_checked.clear()
+    main._state.live_event_last_emitted.clear()
+    main.alerts.last_triggered.clear()
+
+    # Alert rule with NO record_on_detect: the detection fires the alert path but
+    # never attaches a recording, so should_record_event is False.
+    settings = _zone_camera_settings([
+        {'label': 'person', 'email_enabled': True, 'min_confidence': 0.5, 'cooldown_seconds': 30},
+    ])
+
+    first_event = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    assert first_event is not None
+
+    # The same activity inside the 30s window: no recording ever attached, but
+    # the event must still be suppressed so the timeline doesn't flood.
+    suppressed = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    assert suppressed is None
+
+    events = main.database.search_events(limit=50)
+    assert len(events) == 1, 'alert-only activity must be debounced to one event per window'
 
 
 def test_empty_detection_track_is_marker_only(tmp_path, monkeypatch):

@@ -1489,23 +1489,22 @@ class RecordingService:
         return self._collect_prebuffer_segments_from_dir(camera_dir, start_ts, end_ts)
 
     def _collect_prebuffer_segments_from_dir(self, camera_dir: Path, start_ts: float, end_ts: float) -> tuple[list[Path], float | None]:
-        """Shared segment collector for any prebuffer directory."""
-        segments = []
-        content_start_ts = None
-        for segment in sorted(camera_dir.glob(self.PREBUFFER_SEGMENT_GLOB)):
-            try:
-                stat = segment.stat()
-                mtime = stat.st_mtime
-                if mtime < start_ts - self.PREBUFFER_SEGMENT_SECONDS:
-                    continue
-                if mtime > end_ts + self.PREBUFFER_SEGMENT_SECONDS:
-                    continue
-                segments.append(segment)
-                if content_start_ts is None or mtime < content_start_ts:
-                    content_start_ts = mtime
-            except OSError:
-                continue
-        return segments, content_start_ts
+        """Shared segment collector for any prebuffer directory.
+
+        A segment's mtime marks when its content ENDS. Anchoring
+        ``content_start_ts`` at the first selected segment's mtime therefore
+        reported a start up to a full segment LATE (e.g. ~4s), which then
+        dragged the rendered clip's ``-t`` window, the muxed audio delay and
+        the baked detection track all late together - the dual-stream
+        sound/video misalignment. Select by content overlap and report the
+        first selected segment's content START, exactly like
+        ``_collect_prebuffer_segments``.
+        """
+        timed = self._segment_timeline(camera_dir, self.PREBUFFER_SEGMENT_GLOB, self.PREBUFFER_SEGMENT_SECONDS)
+        selected = [item for item in timed if item[2] > start_ts and item[1] < end_ts]
+        if not selected:
+            return [], None
+        return [item[0] for item in selected], selected[0][1]
 
     def _prune_prebuffer_segments(self, camera_dir: Path, keep_seconds: int) -> None:
         cutoff = time.time() - max(keep_seconds, 5)
@@ -1665,12 +1664,10 @@ class RecordingService:
         Selecting by content overlap keeps footage from before the requested
         window out of the clip, and the returned start lets the caller align
         stored timing and the detection track with what the rendered video
-        actually shows."""
-        timed = self._segment_timeline(self.prebuffer_dir / camera_key, self.PREBUFFER_SEGMENT_GLOB, self.PREBUFFER_SEGMENT_SECONDS)
-        selected = [item for item in timed if item[2] > start_ts and item[1] < end_ts]
-        if not selected:
-            return [], None
-        return [item[0] for item in selected], selected[0][1]
+        actually shows. Delegates to the shared collector so the primary and
+        high-res recording paths can never drift apart again (the mtime-anchor
+        drift that broke dual-stream A/V sync)."""
+        return self._collect_prebuffer_segments_from_dir(self.prebuffer_dir / camera_key, start_ts, end_ts)
 
     def _prebuffer_segment_durations(self, camera_key: str, segments: list[Path]) -> dict[Path, float]:
         """Return real durations for selected primary or recording segments.

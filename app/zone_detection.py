@@ -392,7 +392,20 @@ def filter_detections_for_camera_zones(
     camera_labels = set(normalize_label_list(detection_settings.get('object_labels', [])))
     if not zones:
         if zone_monitor_key == 'monitor_objects' and camera_labels and (not require_zones):
-            return [detection for detection in detections if str(detection.get('label') or '').strip().lower() in camera_labels]
+            # Canonicalise the detection label through ``_LABEL_ALIASES`` exactly
+            # like ``detection_label_allowed_for_zone`` does on the zones path.
+            # ``camera_labels`` was already aliased by ``normalize_label_list``
+            # ('human' -> 'person'), so a raw comparison here would silently drop
+            # a 'human' detection that the same camera accepts once a zone is
+            # configured -- the two paths must agree on what 'person' means.
+            return [
+                detection
+                for detection in detections
+                if _LABEL_ALIASES.get(
+                    str(detection.get('label') or '').strip().lower(),
+                    str(detection.get('label') or '').strip().lower(),
+                ) in camera_labels
+            ]
         # No zones and no camera labels: keep legacy "accept all" behavior so a
         # camera with object detection enabled but unconfigured still records
         # and alerts. Log the fallback once per call to aid debugging.
@@ -454,7 +467,19 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
 
 def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
-    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
+    # A zone that monitors ONLY motion (``monitor_objects=False`` but
+    # ``monitor_motion=True``) must still contribute its motion rules to the
+    # AlertEngine rule list. Filtering on ``monitor_objects`` alone silently
+    # disabled email/push motion alerts for motion-only zones -- the recording
+    # axis (``zone_motion_record_on_detect``) already honours those zones, so
+    # the alert axis must too. Object rules inside a motion-only zone remain
+    # harmless: object detections are filtered through the ``monitor_objects``
+    # axis before they can carry that zone's id, so they can never match here.
+    zones = [
+        zone for zone in detection_settings.get('zones', [])
+        if zone.get('enabled', True)
+        and (zone.get('monitor_objects', True) or zone.get('monitor_motion', True))
+    ]
     rules: list[dict[str, Any]] = []
     camera_key = str(settings.get('id') or settings.get('name') or 'camera').strip() or 'camera'
     for zone in zones:
@@ -464,6 +489,13 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
                 continue
             label = str(rule.get('label') or '').strip().lower()
             if not label:
+                continue
+            # A motion-only zone (``monitor_objects=False``) contributes ONLY its
+            # motion rules to the alert list. Object rules inside it stay inert:
+            # object detections are filtered through the ``monitor_objects`` axis
+            # and can never carry this zone's id, so including them would just
+            # add dead rules to the engine's list.
+            if not zone.get('monitor_objects', True) and label != 'motion':
                 continue
             rules.append({
                 'name': zone_rule_name(settings, zone, rule),

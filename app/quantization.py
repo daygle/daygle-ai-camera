@@ -11,7 +11,8 @@ Cluster membership:
 
 - ``quantize_int8(model_path)`` -- quantize a FP32 ONNX to an INT8 QDQ
   model via ``onnxruntime.quantization.quantize_static`` (QDQ format with
-  synthetic MinMax calibration) and cache to disk. QDQ is the only format
+  camera-frame MinMax calibration plus synthetic fallback) and cache to disk.
+  QDQ is the only format
   modern ONNX Runtime accelerates on CPU: the legacy ``quantize_dynamic``
   output (``ConvInteger``/``MatMulInteger`` nodes) no longer has CPU kernels
   in recent ORT builds.
@@ -54,10 +55,14 @@ import hashlib
 import importlib.util
 import logging
 import os
+import queue
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any
+
+import app.state as _state
 
 logger = logging.getLogger('daygle.ai')
 
@@ -225,7 +230,7 @@ def _should_requantize(source: Path, cache: Path) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# INT8 QDQ quantization (static, synthetic calibration)
+# INT8 QDQ quantization (static, camera-aware calibration)
 # ---------------------------------------------------------------------------
 
 # The legacy ``quantize_dynamic`` (Integer-ops) format no longer runs on
@@ -234,13 +239,171 @@ def _should_requantize(source: Path, cache: Path) -> bool:
 # an implementation for ConvInteger(10) node" and the detector silently falls
 # back to FP32. QDQ (QuantizeLinear/DequantizeLinear) models fuse into
 # QLinearConv/QLinearMatMul kernels that every modern ORT CPU build ships, so
-# INT8 is produced with ``quantize_static`` here. ``quantize_static`` needs a
-# calibration set; there is no labelled dataset at install time, so a fixed,
-# seeded set of camera-like synthetic frames is used (see
-# ``_SyntheticCalibrationReader``). Calibration is a one-time cost, cached to
-# ``*.int8.onnx``.
-_INT8_CACHE_FORMAT = 'int8-qdq-v1'
+# INT8 is produced with ``quantize_static`` here. When cameras are configured,
+# a few frames are sampled from their active instances before quantization so
+# activation ranges resemble the deployment. Offline cameras contribute
+# deterministic synthetic frames instead; the same synthetic reader remains
+# the complete fallback when no real frame can be obtained. Calibration is a
+# one-time cost, cached to ``*.int8.onnx``.
+_INT8_CACHE_FORMAT = 'int8-qdq-v2-camera-calibration'
 _CALIBRATION_SAMPLE_COUNT = 64
+_REAL_CALIBRATION_FRAMES_PER_CAMERA = 2
+_REAL_CALIBRATION_MAX_FRAMES = 16
+_REAL_CALIBRATION_TIMEOUT_SECONDS = 4.0
+
+
+def _configured_camera_count() -> int:
+    """Return the number of enabled, identified cameras in the config."""
+    return sum(
+        1
+        for config in list(getattr(_state, 'cameras_config', []) or [])
+        if isinstance(config, dict)
+        and config.get('id')
+        and config.get('enabled', True) is not False
+    )
+
+
+def _read_shared_ingest_frame(camera_id: str) -> tuple[Any, dict[str, Any]] | None:
+    """Read one frame from the shared camera ingest without opening RTSP."""
+    try:
+        from app.camera_instance import read_ingest_frame
+        return read_ingest_frame(camera_id)
+    except Exception as exc:
+        logger.debug('Shared ingest frame read failed for camera %s: %s', camera_id, exc)
+        return None
+
+
+def _prime_shared_ingest(configs: list[dict[str, Any]]) -> set[str]:
+    """Best-effort start of shared ingest before first-start calibration.
+
+    Detector construction happens before the live-monitor loop on a fresh
+    boot. Starting the existing shared ingest here lets the sampler consume
+    its latest JPEG rather than opening a second uncancellable RTSP capture.
+    The worker itself is asynchronous; offline cameras simply yield no frame
+    and remain covered by synthetic calibration samples.
+    """
+    service = getattr(_state, 'recording_service', None)
+    prime = getattr(service, 'prime_rtsp_prebuffer', None)
+    if not callable(prime):
+        return set()
+    try:
+        from app.config_facades import effective_recording_config
+        recording_config = effective_recording_config()
+    except Exception:
+        recording_config = dict(getattr(_state, 'config', {}).get('recording', {}) or {})
+    try:
+        from app.utils import build_stream_url
+    except Exception:
+        return set()
+    primed_ids: set[str] = set()
+    for config in configs:
+        try:
+            stream_url = build_stream_url(config)
+            if stream_url:
+                result = prime(
+                    stream_url=stream_url,
+                    camera_id=str(config['id']),
+                    recording_config=recording_config,
+                )
+                # ``False`` means ffmpeg/ingest could not be started. Treat
+                # ``None`` as success for lightweight test doubles and legacy
+                # services whose prime method has no explicit return value.
+                if result is not False:
+                    primed_ids.add(str(config['id']))
+        except Exception as exc:
+            logger.debug('INT8 calibration could not prime camera %s ingest: %s', config.get('id'), exc)
+    return primed_ids
+
+
+def _configured_camera_calibration_frames() -> tuple[list[Any], int]:
+    """Best-effort sample frames from configured active camera instances.
+
+    Camera capture is deliberately isolated in daemon workers: an RTSP open
+    can block while a camera is offline, and INT8 calibration must never make
+    detector startup depend on camera availability. The returned count is the
+    number of enabled configured cameras, allowing the caller/reader to report
+    synthetic fallback coverage accurately.
+    """
+    try:
+        import numpy as np  # type: ignore[import-untyped]
+    except ImportError:
+        return [], 0
+
+    configs = [
+        config for config in list(getattr(_state, 'cameras_config', []) or [])
+        if isinstance(config, dict)
+        and config.get('id')
+        and config.get('enabled', True) is not False
+    ]
+    if not configs:
+        return [], 0
+    instances = getattr(_state, 'camera_instances', {}) or {}
+    sampled: list[Any] = []
+    primed_ids = _prime_shared_ingest(configs)
+    shared_ingest_ready = callable(getattr(getattr(_state, 'recording_service', None), 'latest_frame_jpeg', None))
+    if not shared_ingest_ready or not primed_ids:
+        # There is no cancellable read API on the camera backend. Do not call
+        # read_frame/read_jpeg here: an offline OpenCV/RTSP read can block while
+        # holding the camera lock after the sampler deadline. The shared ingest
+        # is the production-safe source and synthetic samples cover cold/offline
+        # startup when it has not produced a frame yet.
+        return [], len(configs)
+
+    sample_deadline = time.monotonic() + _REAL_CALIBRATION_TIMEOUT_SECONDS
+
+    def read_instance(camera_id: str, output: queue.Queue, deadline: float) -> None:
+        frames: list[Any] = []
+        try:
+            for frame_index in range(_REAL_CALIBRATION_FRAMES_PER_CAMERA):
+                image = None
+                # The shared ingest may need a moment to write its first JPEG
+                # after being primed. Poll only until the global sampler
+                # deadline; never open a second RTSP connection here.
+                while time.monotonic() < deadline:
+                    shared = _read_shared_ingest_frame(camera_id)
+                    if shared is not None:
+                        image = shared[0]
+                        break
+                    time.sleep(0.1)
+                if isinstance(image, np.ndarray) and image.ndim == 3 and image.shape[0] > 0 and image.shape[1] > 0:
+                    frames.append(image.copy())
+                if frame_index + 1 < _REAL_CALIBRATION_FRAMES_PER_CAMERA:
+                    time.sleep(0.1)
+        except Exception as exc:
+            logger.debug('INT8 calibration frame sampling failed for camera %s: %s', camera_id, exc)
+        output.put(frames)
+
+    pending: list[tuple[dict[str, Any], queue.Queue, threading.Thread]] = []
+    for config in configs:
+        camera_id = str(config['id'])
+        if camera_id not in primed_ids:
+            continue
+        instance = instances.get(camera_id)
+        if instance is None:
+            continue
+        output: queue.Queue = queue.Queue(maxsize=1)
+        thread = threading.Thread(
+            target=read_instance,
+            args=(camera_id, output, sample_deadline),
+            name=f'int8-calibration-{config["id"]}',
+            daemon=True,
+        )
+        pending.append((config, output, thread))
+        thread.start()
+
+    for config, output, thread in pending:
+        remaining = max(0.0, sample_deadline - time.monotonic())
+        thread.join(timeout=remaining)
+        if thread.is_alive():
+            logger.info('INT8 calibration camera %s did not provide frames within %.1fs; using synthetic fallback.', config['id'], _REAL_CALIBRATION_TIMEOUT_SECONDS)
+            continue
+        try:
+            sampled.extend(output.get_nowait())
+        except queue.Empty:
+            continue
+        if len(sampled) >= _REAL_CALIBRATION_MAX_FRAMES:
+            break
+    return sampled[:_REAL_CALIBRATION_MAX_FRAMES], len(configs)
 
 
 def _read_cache_metadata(metadata: Path) -> str:
@@ -249,6 +412,18 @@ def _read_cache_metadata(metadata: Path) -> str:
         return metadata.read_text(encoding='ascii').strip()
     except (FileNotFoundError, OSError, UnicodeError):
         return ''
+
+
+def _cached_real_frame_count(metadata: Path) -> int:
+    """Return real-frame provenance from the cache sidecar."""
+    lines = [line.strip() for line in _read_cache_metadata(metadata).splitlines() if line.strip()]
+    for line in lines[2:]:
+        if line.startswith('real_frames='):
+            try:
+                return max(0, int(line.split('=', 1)[1]))
+            except (TypeError, ValueError):
+                return 0
+    return 0
 
 
 def _cached_signature_matches(metadata: Path, source_signature: str) -> bool:
@@ -294,15 +469,12 @@ def _model_input_contract(model_path: Path) -> tuple[str, tuple[int, ...]]:
 
 
 class _SyntheticCalibrationReader:
-    """Deterministic iterable calibration reader for ``quantize_static``.
+    """Calibration reader combining captured camera frames and fallback data.
 
-    Yields ``count`` letterbox-style frames -- flat gray base with soft
-    lighting gradients, blurred blob "objects" and per-channel noise,
-    normalised to float32 in [0, 1] exactly like
-    ``OnnxYoloDetector._preprocess`` -- so the MinMax activation ranges
-    resemble a real deployment closely enough for QDQ calibration without any
-    on-disk dataset. Regenerating from a fixed seed keeps every re-quantize
-    reproducible.
+    Real BGR frames are letterboxed with the same geometry as detector
+    preprocessing. Any remaining samples use deterministic flat/gradient/blob
+    frames, so offline cameras never prevent quantization and re-quantization
+    remains reproducible for its synthetic portion.
     """
 
     def __init__(
@@ -311,15 +483,28 @@ class _SyntheticCalibrationReader:
         shape: tuple[int, ...],
         count: int = _CALIBRATION_SAMPLE_COUNT,
         seed: int = 20260802,
+        real_frames: list[Any] | None = None,
     ) -> None:
         self._input_name = input_name
         self._shape = tuple(int(d) for d in shape)
         self._count = count
         self._seed = seed
+        self._real_frames = tuple(real_frames or ())
         # ``get_next``-driven iteration state; ``rewind`` restarts both so a
-        # re-iterated reader reproduces identical frames (same seed).
+        # re-iterated reader reproduces identical synthetic frames. Real
+        # frames are captured once before quantization and replayed on rewind.
         self._index = 0
         self._rng = None
+
+    @property
+    def real_frame_count(self) -> int:
+        """Number of real camera frames available to this reader."""
+        return min(len(self._real_frames), self._count)
+
+    @property
+    def synthetic_frame_count(self) -> int:
+        """Number of deterministic fallback frames this reader will emit."""
+        return max(0, self._count - self.real_frame_count)
 
     def __len__(self) -> int:
         return self._count
@@ -339,7 +524,13 @@ class _SyntheticCalibrationReader:
             self._rng = self._make_rng()
         if self._index >= self._count:
             return None
+        sample_index = self._index
         self._index += 1
+        if sample_index < self.real_frame_count:
+            try:
+                return {self._input_name: self._real_frame(self._real_frames[sample_index])}
+            except Exception as exc:
+                logger.debug('INT8 calibration real-frame preprocessing failed: %s; using synthetic fallback.', exc)
         return {self._input_name: self._synthetic_frame(self._rng)}
 
     def rewind(self) -> None:
@@ -347,11 +538,42 @@ class _SyntheticCalibrationReader:
         self._index = 0
         self._rng = None
 
+    def _real_frame(self, image: Any) -> Any:
+        """Apply the detector's BGR uint8 -> letterboxed NCHW preprocessing."""
+        import cv2
+        import numpy as np  # type: ignore[import-untyped]
+        batch, channels, height, width = self._shape
+        image = np.asarray(image)
+        if image.ndim != 3:
+            raise ValueError('camera calibration frame is not HWC')
+        if channels == 1:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)[..., None]
+        elif channels != image.shape[2]:
+            if channels < image.shape[2]:
+                image = image[:, :, :channels]
+            else:
+                image = np.repeat(image[:, :, :1], channels, axis=2)
+        original_height, original_width = image.shape[:2]
+        scale = min(width / original_width, height / original_height)
+        resized_width = max(1, int(round(original_width * scale)))
+        resized_height = max(1, int(round(original_height * scale)))
+        resized = cv2.resize(image, (resized_width, resized_height), interpolation=cv2.INTER_LINEAR)
+        canvas = np.empty((height, width, channels), dtype=np.uint8)
+        canvas.fill(114)
+        pad_x = (width - resized_width) / 2
+        pad_y = (height - resized_height) / 2
+        left = int(round(pad_x - 0.1))
+        top = int(round(pad_y - 0.1))
+        canvas[top : top + resized_height, left : left + resized_width] = resized
+        tensor = np.transpose(canvas, (2, 0, 1)).astype(np.float32) / 255.0
+        return np.broadcast_to(tensor[None, ...], (batch, channels, height, width)).copy()
+
     def _synthetic_frame(self, rng: Any) -> Any:
         import numpy as np  # type: ignore[import-untyped]
         batch, channels, height, width = self._shape
         # Flat letterbox-gray base with per-sample brightness variance.
-        frame = np.full((height, width), rng.uniform(0.15, 0.55), dtype=np.float32)        # Soft horizontal/vertical lighting gradients.
+        frame = np.full((height, width), rng.uniform(0.15, 0.55), dtype=np.float32)
+        # Soft horizontal/vertical lighting gradients.
         frame += rng.uniform(-0.20, 0.20) * np.linspace(0.0, 1.0, width, dtype=np.float32)
         frame += rng.uniform(-0.20, 0.20) * np.linspace(0.0, 1.0, height, dtype=np.float32)[:, None]
         # Blurred blobs act as object stand-ins so middle layers see
@@ -379,8 +601,9 @@ def quantize_int8(model_path: Path) -> Path | None:
     - the quantization raises (callers fall back to FP32 with a warning).
 
     Uses ``quantize_static`` in QDQ format (the representation modern ORT CPU
-    builds accelerate) with a synthetic MinMax calibration set, so it can run
-    unattended at detector load time and is cached to disk.
+    builds accelerate) with a few real active-camera frames plus deterministic
+    synthetic MinMax fallback samples, so it can run unattended at detector
+    load time and is cached to disk.
     """
     source = Path(model_path)
     if not source.is_file():
@@ -397,18 +620,30 @@ def quantize_int8(model_path: Path) -> Path | None:
         # cache while this caller was blocked on the lock. Validate even a
         # fresh-by-mtime cache so a truncated legacy cache or a cache produced
         # from a different source cannot poison the detector load.
+        real_frames: list[Any] | None = None
+        configured_camera_count = _configured_camera_count()
         if not _should_requantize(source, cache):
-            if _cached_signature_matches(metadata, source_signature) and _is_valid_onnx_model(cache):
-                return cache
-            # A missing quantization dependency should not destroy an older
-            # artifact; it is unusable for this request but may be recoverable
-            # after dependencies are restored. Only remove it once a new
-            # conversion is actually available.
-            if not int8_quantization_available():
-                return None
-            logger.warning('Discarding invalid or stale-provenance INT8 cache for %s.', source)
-            cache.unlink(missing_ok=True)
-            metadata.unlink(missing_ok=True)
+            cache_is_valid = _cached_signature_matches(metadata, source_signature) and _is_valid_onnx_model(cache)
+            if cache_is_valid:
+                cached_real_frames = _cached_real_frame_count(metadata)
+                # A synthetic-only cache is reusable while cameras are offline,
+                # but when cameras are configured give them one bounded chance
+                # to improve that cache with real deployment frames.
+                if configured_camera_count == 0 or cached_real_frames > 0:
+                    return cache
+                real_frames, _ = _configured_camera_calibration_frames()
+                if not real_frames:
+                    return cache
+            if not cache_is_valid:
+                # A missing quantization dependency should not destroy an older
+                # artifact; it is unusable for this request but may be recoverable
+                # after dependencies are restored. Only remove it once a new
+                # conversion is actually available.
+                if not int8_quantization_available():
+                    return None
+                logger.warning('Discarding invalid or stale-provenance INT8 cache for %s.', source)
+                cache.unlink(missing_ok=True)
+                metadata.unlink(missing_ok=True)
 
         if not int8_quantization_available():
             return None
@@ -424,10 +659,19 @@ def quantize_int8(model_path: Path) -> Path | None:
                 quantize_static,
             )
             input_name, input_shape = _model_input_contract(source)
-            calibration_reader = _SyntheticCalibrationReader(input_name, input_shape)
+            if real_frames is None:
+                real_frames, configured_camera_count = _configured_camera_calibration_frames()
+            calibration_reader = _SyntheticCalibrationReader(
+                input_name,
+                input_shape,
+                real_frames=real_frames,
+            )
             logger.info(
-                'INT8 QDQ quantization (synthetic MinMax calibration, %d samples) for %s ...',
+                'INT8 QDQ quantization (MinMax calibration, %d samples: %d real camera, %d synthetic fallback; %d configured cameras) for %s ...',
                 len(calibration_reader),
+                calibration_reader.real_frame_count,
+                calibration_reader.synthetic_frame_count,
+                configured_camera_count,
                 source,
             )
 
@@ -476,7 +720,7 @@ def quantize_int8(model_path: Path) -> Path | None:
             fd = None
             temporary_metadata = Path(metadata_name)
             temporary_metadata.write_text(
-                f'{source_signature}\n{_INT8_CACHE_FORMAT}\n',
+                f'{source_signature}\n{_INT8_CACHE_FORMAT}\nreal_frames={calibration_reader.real_frame_count}\n',
                 encoding='ascii',
             )
             temporary_path.replace(cache)

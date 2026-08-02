@@ -405,7 +405,6 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         recording_detections.append({**_mot, 'label': 'motion', 'motion_event': True, 'alert_matched': 'motion' in triggered_labels, 'alert_triggered': 'motion' in triggered_labels or _motion_record or detection_has_matching_record_rule({**_mot, 'label': 'motion'}, zone_rules)})
     matched_labels = [str(detection.get('label')) for detection in alert_detections if detection.get('label')]
     camera_recording_config = _state.camera_event_recording_config(settings)
-    should_record_event, _trigger_type, _trigger_label = _state.recording_service.should_record(recording_detections, camera_recording_config)
     debounced_labels = detection_label_set([detection for detection in recording_detections if detection.get('alert_triggered')])
     if not debounced_labels:
         debounced_labels = detection_label_set(recording_detections)
@@ -427,7 +426,14 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _matching = [label_cooldowns[_lbl] for _lbl in debounced_labels if _lbl in label_cooldowns]
     debounce_seconds = max(_matching) if _matching else global_debounce
     frame_capture_time = datetime.fromtimestamp(frame_capture_ts, tz=timezone.utc).isoformat()
-    if should_record_event and live_event_is_debounced(camera_id, debounced_labels, debounce_seconds):
+    # Debounce gates EVENT creation, not just recording: a camera whose alert
+    # rules match but whose record rules don't (or that has recording off)
+    # would otherwise create a fresh event + snapshot on every detection cycle
+    # (~4 Hz), flooding the timeline with duplicates of the same activity. The
+    # debounce window is derived from the same label cooldowns regardless of
+    # whether a recording attaches, so an alert-only camera is throttled to one
+    # event per window like a recording camera is.
+    if live_event_is_debounced(camera_id, debounced_labels, debounce_seconds):
         extended_recording_id = extend_active_rtsp_recording(camera_id=camera_id, event_time=frame_capture_time, recording_config=camera_recording_config, detections=recording_detections)
         remember_live_event(camera_id, debounced_labels, merge=True)
         update_live_detection_status(camera_id, state='checked', reason=f'Ongoing detection extended active recording and suppressed duplicate event for {debounce_seconds:.1f}s debounce window.' if extended_recording_id is not None else f'Ongoing detection suppressed for {debounce_seconds:.1f}s debounce window.', detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, recording_id=extended_recording_id)
@@ -440,8 +446,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     snapshot_path = _state.storage.save_image_snapshot(image_bytes, f'{camera_id}.jpg')
     event_id = _state.database.add_event(created_at=event_time, source='rtsp', snapshot_path=snapshot_path, detections=recording_detections, alert_triggered=bool(triggered), metadata={'camera_id': settings.get('id'), 'camera_name': settings.get('name'), 'ai_backend': ai_state['configured_backend'], 'detector_backend': ai_state['active_backend'], 'source': 'live-stream'})
     recording_id = attach_event_recording(event_id, event_time, 'rtsp', recording_detections, camera_id=camera_id, recording_config=camera_recording_config)
-    if recording_id is not None:
-        remember_live_event(camera_id, debounced_labels)
+    # Remember the event even when no recording attached: the debounce state
+    # must advance for alert-only events too, otherwise the next cycle (which
+    # sees the same labels) is not suppressed and the timeline floods with
+    # duplicates. ``remember_live_event`` no-ops on an empty label set.
+    remember_live_event(camera_id, debounced_labels)
     _rule_by_name = {str(r.get('name') or ''): r for r in zone_rules or []}
     for alert in triggered:
         _rule = _rule_by_name.get(str(alert.get('rule_name') or ''), {})

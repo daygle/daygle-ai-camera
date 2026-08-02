@@ -240,7 +240,38 @@ def test_quantize_int8_requantizes_when_cache_stale(tmp_path: Path, monkeypatch)
     # A calibration reader was supplied (synthetic frames) -- the sidecar
     # records the new cache format marker.
     assert captured['reader'] is not None
-    assert _int8_cache_metadata_path(source).read_text(encoding='ascii').strip().splitlines()[-1] == _INT8_CACHE_FORMAT
+    metadata_lines = _int8_cache_metadata_path(source).read_text(encoding='ascii').strip().splitlines()
+    assert metadata_lines[1] == _INT8_CACHE_FORMAT
+    assert 'real_frames=0' in metadata_lines[2:]
+
+
+def test_quantize_int8_passes_real_camera_frames_to_static_quantizer(tmp_path: Path, monkeypatch):
+    """A cache miss with configured camera samples gives quantize_static a
+    reader whose first calibration tensor comes from a real BGR frame."""
+    import numpy as np
+
+    monkeypatch.setattr(quantization, 'int8_quantization_available', lambda: True)
+    monkeypatch.setattr(quantization, '_is_valid_onnx_model', lambda path: True)
+    source = tmp_path / 'camera-calibrated.onnx'
+    source.write_bytes(b'fake-source')
+    os.utime(source, (3000, 3000))
+    captured = {}
+    real = np.zeros((32, 64, 3), dtype=np.uint8)
+    real[:, :, 2] = 255
+    monkeypatch.setattr(quantization, '_configured_camera_calibration_frames', lambda: ([real], 1))
+
+    def _fake_quantize_static(**kwargs):
+        reader = kwargs['calibration_data_reader']
+        captured['sample'] = reader.get_next()['images']
+        Path(kwargs['model_output']).write_bytes(b'fresh-camera-calibrated-cache')
+
+    _install_fake_quantization_module(monkeypatch, _fake_quantize_static)
+
+    result = quantize_int8(source)
+    assert result == int8_cache_path(source)
+    assert captured['sample'].shape == (1, 3, 64, 64)
+    assert captured['sample'].dtype == np.float32
+    assert float(captured['sample'][0, 2].max()) > 0.9
 
 
 def test_quantize_int8_requantizes_legacy_cache_without_format_marker(tmp_path: Path, monkeypatch):
@@ -273,7 +304,8 @@ def test_quantize_int8_requantizes_legacy_cache_without_format_marker(tmp_path: 
     assert captured['called'] is True
     assert cache.read_bytes() == b'fresh-qdq-cache'
     lines = metadata.read_text(encoding='ascii').strip().splitlines()
-    assert lines[-1] == _INT8_CACHE_FORMAT
+    assert lines[1] == _INT8_CACHE_FORMAT
+    assert 'real_frames=0' in lines[2:]
 
 
 def test_quantize_int8_preserves_stale_cache_when_conversion_fails(tmp_path: Path, monkeypatch):
@@ -336,6 +368,70 @@ def test_synthetic_calibration_reader_yields_model_shaped_frames():
     assert len(replayed) == 8
     for original, replay in zip(frames, replayed):
         assert np.array_equal(original['images'], replay['images'])
+
+
+def test_calibration_reader_uses_real_frames_then_synthetic_fallback():
+    """Captured BGR camera frames are preprocessed first, while the remaining
+    calibration set remains deterministic synthetic data."""
+    import numpy as np
+
+    real = np.zeros((32, 64, 3), dtype=np.uint8)
+    real[:, :, 2] = 255  # distinguish the real frame from gray synthetic data
+    reader = quantization._SyntheticCalibrationReader(
+        'images', (1, 3, 64, 64), count=3, real_frames=[real]
+    )
+
+    first = reader.get_next()['images']
+    second = reader.get_next()['images']
+    assert reader.real_frame_count == 1
+    assert reader.synthetic_frame_count == 2
+    assert first.shape == (1, 3, 64, 64)
+    assert first.dtype == np.float32
+    # BGR red channel lands in CHW channel 2 after preprocessing.
+    assert float(first[0, 2].max()) > 0.9
+    assert second.shape == (1, 3, 64, 64)
+    assert second.dtype == np.float32
+
+    reader.rewind()
+    replay = reader.get_next()['images']
+    assert np.array_equal(first, replay)
+
+
+def test_configured_camera_sampler_collects_enabled_frames_and_skips_offline(monkeypatch):
+    """Sampling configured cameras is best-effort: available instances
+    contribute frames and missing/offline cameras simply use fallback data."""
+    import numpy as np
+
+    class FakeCamera:
+        def read_frame(self):
+            raise AssertionError('INT8 calibration must use shared ingest, not direct RTSP reads')
+
+    real = np.full((24, 32, 3), 80, dtype=np.uint8)
+
+    class FakeRecordingService:
+        def prime_rtsp_prebuffer(self, **kwargs):
+            return True
+
+        def latest_frame_jpeg(self, camera_id):
+            return object()
+
+    monkeypatch.setattr(
+        quantization._state,
+        'cameras_config',
+        [
+            {'id': 'online', 'enabled': True, 'stream_url': 'rtsp://camera/stream'},
+            {'id': 'offline', 'enabled': True},
+            {'id': 'disabled', 'enabled': False},
+        ],
+    )
+    monkeypatch.setattr(quantization._state, 'camera_instances', {'online': FakeCamera()})
+    monkeypatch.setattr(quantization._state, 'recording_service', FakeRecordingService())
+    monkeypatch.setattr(quantization, '_read_shared_ingest_frame', lambda camera_id: (real, {'timestamp': 1.0}))
+
+    frames, configured_count = quantization._configured_camera_calibration_frames()
+    assert configured_count == 2
+    assert len(frames) == quantization._REAL_CALIBRATION_FRAMES_PER_CAMERA
+    assert all(frame.shape == (24, 32, 3) for frame in frames)
 
 
 # -- invalidate_int8_cache ---------------------------------------------------

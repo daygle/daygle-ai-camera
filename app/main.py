@@ -134,10 +134,10 @@ def _startup() -> None:
     _state.recording_service = recording_service
     auth = AuthService(config['storage']['database'], effective_auth_config())
     _state.auth = auth
-    _state.detector = create_detector(effective_ai_config())
-    _state.last_detector_error = getattr(_state.detector, 'unavailable_reason', None)
-    alerts = AlertEngine([])
-    _state.alerts = alerts
+    # Publish camera configuration and instances before constructing the
+    # detector. INT8 quantization runs during detector construction, so this
+    # ordering lets its camera-aware calibration sample real frames on the
+    # initial startup as well as on later detector reloads.
     cameras_config = effective_cameras_config()
     _state.cameras_config = cameras_config
     camera_config = cameras_config[0] if cameras_config else {}
@@ -145,6 +145,10 @@ def _startup() -> None:
     camera_instances = create_camera_instances(cameras_config)
     _state.camera_instances = camera_instances
     _state.camera = camera_instances[camera_config['id']] if camera_config else None
+    _state.detector = create_detector(effective_ai_config())
+    _state.last_detector_error = getattr(_state.detector, 'unavailable_reason', None)
+    alerts = AlertEngine([])
+    _state.alerts = alerts
     _state.recording_service.diagnostic_callback = log_camera_diagnostic
 
 
