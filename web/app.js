@@ -147,29 +147,32 @@ function buildEventItems() {
     if (isMotionOnlyEventItem(item)) item.isMotionOnly = true;
     return item;
   });
-  // Collapse every event that shares one recording into a single row. A single
-  // continuous clip accrues several detection events - each new object or sound
-  // seen during the post-event window extends the same recording (via
-  // extend_active_rtsp_recording) rather than starting a new clip, so they all
-  // carry the same recordingId. Titling each one "Recording #N" made one clip
-  // look like several duplicate rows on the dashboard. Merge the detections of
-  // the later events onto the first (newest) one so the recording appears once
-  // with every label it saw. This generalises the previous sound-only dedup;
-  // events with no recordingId stay separate - they are distinct system events
-  // keyed by "Event #id", not the same clip.
+  // Collapse the multiple detection events that belong to one continuous clip
+  // into a single row. Each new detection during the post-event window extends
+  // the same recording (via extend_active_rtsp_recording) rather than starting a
+  // new clip, so those events all carry the same recordingId. Titling each one
+  // "Recording #N" made one clip look like several duplicate rows.
+  //
+  // Key the dedup on recordingId AND detection type (sound / motion / object).
+  // A single clip can legitimately carry events of different types - e.g. an
+  // object trigger whose recording a later sound detection extends - and the
+  // Type filter reads item.isSound / item.isMotionOnly, so merging across types
+  // would drop one type from its tab. Same-type events merge (their detections
+  // combine onto the newest row); different types stay separate rows so each is
+  // still filterable. This generalises the previous sound-only dedup. Events
+  // with no recordingId are distinct system events ("Event #id") and never merge.
+  const itemType = (item) => (item.isSound ? 'sound' : item.isMotionOnly ? 'motion' : 'object');
   const seenRecording = new Map();
   return eventItems.filter((item) => {
     const recId = item.recordingId;
     if (!recId) return true;
-    const prev = seenRecording.get(recId);
+    const groupKey = `${recId}|${itemType(item)}`;
+    const prev = seenRecording.get(groupKey);
     if (prev) {
       for (const d of item.detections) prev.detections.push(d);
-      // Merging can fold a real object into what was a motion-only row, so
-      // re-evaluate the flag that drives the type badge and the filter.
-      prev.isMotionOnly = isMotionOnlyEventItem(prev);
       return false;
     }
-    seenRecording.set(recId, item);
+    seenRecording.set(groupKey, item);
     return true;
   }).filter((item) => item.createdAt)
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
