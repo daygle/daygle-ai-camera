@@ -2191,7 +2191,7 @@ tr.drag-over {
 /* The expand row (per-rule inline settings) must keep its own zero padding
    and divider; the generic td padding above would otherwise crush it. Every
    rule row is followed by its expand row, so the tbody's last row is always
-   an expand row — drop its bottom border so it doesn't poke at the wrap's
+   an expand row - drop its bottom border so it doesn't poke at the wrap's
    rounded corners. */
 .cameras-table-wrap .rule-table .rule-expand-row > td {
   padding: 0;
@@ -5021,7 +5021,7 @@ a.activity-item-action {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   ONNX Model Cards – Modern card grid for model library
+   ONNX Model Cards - Modern card grid for model library
    ═══════════════════════════════════════════════════════════════════════ */
 .model-card-grid {
   display: grid;
