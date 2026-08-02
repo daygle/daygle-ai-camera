@@ -147,21 +147,29 @@ function buildEventItems() {
     if (isMotionOnlyEventItem(item)) item.isMotionOnly = true;
     return item;
   });
-  // Deduplicate sound events by recordingId: multiple sound detections during
-  // the same recording share a recordingId (via extend_active_rtsp_recording),
-  // so collapse them into one entry. Merge detections from all grouped events
-  // so every detected sound class shows as a badge on the single entry.
-  const seenSoundRecording = new Map();
+  // Collapse every event that shares one recording into a single row. A single
+  // continuous clip accrues several detection events - each new object or sound
+  // seen during the post-event window extends the same recording (via
+  // extend_active_rtsp_recording) rather than starting a new clip, so they all
+  // carry the same recordingId. Titling each one "Recording #N" made one clip
+  // look like several duplicate rows on the dashboard. Merge the detections of
+  // the later events onto the first (newest) one so the recording appears once
+  // with every label it saw. This generalises the previous sound-only dedup;
+  // events with no recordingId stay separate - they are distinct system events
+  // keyed by "Event #id", not the same clip.
+  const seenRecording = new Map();
   return eventItems.filter((item) => {
-    if (!item.isSound) return true;
     const recId = item.recordingId;
     if (!recId) return true;
-    const prev = seenSoundRecording.get(recId);
+    const prev = seenRecording.get(recId);
     if (prev) {
       for (const d of item.detections) prev.detections.push(d);
+      // Merging can fold a real object into what was a motion-only row, so
+      // re-evaluate the flag that drives the type badge and the filter.
+      prev.isMotionOnly = isMotionOnlyEventItem(prev);
       return false;
     }
-    seenSoundRecording.set(recId, item);
+    seenRecording.set(recId, item);
     return true;
   }).filter((item) => item.createdAt)
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));

@@ -63,7 +63,15 @@ class AlertsMixin:
         except ValueError:
             return 0
         with self.connect() as db:
-            if kind == 'event':
+            if kind == 'recording':
+                # The alerts page groups by recording_id (a continuous clip can
+                # span several events), so dismissing the group must clear every
+                # alert tied to that recording, not just one event's.
+                cursor = db.execute(
+                    "UPDATE alert_history SET dismissed = 1 WHERE recording_id = ? AND dismissed = 0",
+                    (id_val,),
+                )
+            elif kind == 'event':
                 cursor = db.execute(
                     "UPDATE alert_history SET dismissed = 1 WHERE event_id = ? AND dismissed = 0",
                     (id_val,),
