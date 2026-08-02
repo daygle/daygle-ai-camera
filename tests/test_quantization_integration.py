@@ -67,7 +67,16 @@ def _tiny_conv_model(path: Path) -> Path:
         [helper.make_tensor_value_info('c2', TensorProto.FLOAT, [1, 2, 60, 60])],
         [conv1_w, conv1_b, conv2_w, conv2_b],
     )
-    model = helper.make_model(graph, opset_imports=[helper.make_opsetid('', 13)])
+    # Newer ``onnx`` releases default to an IR version newer than the
+    # ONNX Runtime wheel used by the supported dependency range can read
+    # (for example, ORT 1.18 accepts IR <= 11). Keep this synthetic fixture
+    # portable so the test reaches quantization/kernel validation instead of
+    # failing during model loading with an unrelated IR-version error.
+    model = helper.make_model(
+        graph,
+        opset_imports=[helper.make_opsetid('', 13)],
+        ir_version=9,
+    )
     onnx.save(model, str(path))
     return path
 
@@ -108,6 +117,11 @@ def test_legacy_quantize_dynamic_output_fails_on_modern_cpu_ort(tmp_path: Path):
     try:
         ort.InferenceSession(str(legacy), providers=['CPUExecutionProvider'])
     except Exception as exc:
-        assert 'ConvInteger' in str(exc)
+        error_text = str(exc)
+        # Different ORT builds include either the offending node type or a
+        # generic kernel-resolution marker. Reject an unrelated load failure
+        # (such as unsupported IR/opset) while keeping the test portable across
+        # modern CPU wheels.
+        assert any(marker in error_text for marker in ('ConvInteger', 'NOT_IMPLEMENTED', 'no implementation'))
     else:
         pytest.skip('installed ONNX Runtime still ships the legacy ConvInteger kernel')
