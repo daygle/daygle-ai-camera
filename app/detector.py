@@ -649,7 +649,15 @@ class OnnxYoloDetector:
         if len(dims) != 2:
             return None
         lo, hi = min(dims), max(dims)
-        if lo == 6 and hi < 1000:
+        # NMS-free heads emit ``[N, 6]``: the 6-feature row is the LAST
+        # axis. A grid head always emits ``[4+nc, anchors]`` with the anchor
+        # count last, so requiring ``dims[-1] == 6`` (rather than merely
+        # ``lo == 6``) prevents a tiny custom 2-class grid export -- e.g.
+        # ``[1, 6, 567]`` at 96px input, where the anchor count dips below
+        # 1000 -- from being misread as an end-to-end head and decoded as
+        # garbage. ``hi < 1000`` stays as a second bound for the model's
+        # NMS-free detection cap (YOLO26 emits at most 300).
+        if dims[-1] == 6 and hi < 1000:
             return True
         return False
 

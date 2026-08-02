@@ -130,6 +130,11 @@ def test_nms_free_single_detection_does_not_crash():
     ((1, 84, 8400), False),   # YOLOv8/11 COCO-80 grid head
     ((84, 8400), False),
     ((1, 84, 2100), False),   # grid head at 320px input
+    # 2-class grid exports: the 6-feature dim is a MIN class count, not the
+    # NMS-free row. At tiny inputs the anchor count can dip below 1000
+    # (e.g. 567 at 96px), which must not be mistaken for an end-to-end head.
+    ((1, 6, 567), False),
+    ((6, 567), False),
     ((2, 300, 6), None),      # >2 real dims: can't classify, fall back to flag
 ])
 def test_looks_nms_free_shape_dispatch(shape, expected):
