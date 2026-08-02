@@ -160,7 +160,7 @@ function renderRules() {
       <thead><tr>
         <th class="cell-drag-header"></th>
         <th>Sound</th>
-        <th class="cell-center">On</th>
+        <th class="cell-center">Enabled</th>
         <th class="cell-center">Record</th>
         <th class="cell-center">Email</th>
         <th class="cell-center">Push</th>

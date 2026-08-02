@@ -199,7 +199,7 @@ function renderObjectRules(zone, zoneIndex) {
     <thead><tr>
       <th class="cell-drag-header"></th>
       <th>Object</th>
-      <th class="cell-center">On</th>
+      <th class="cell-center">Enabled</th>
       <th class="cell-center">Record</th>
       <th class="cell-center">Email</th>
       <th class="cell-center">Push</th>
