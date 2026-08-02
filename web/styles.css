@@ -1826,6 +1826,134 @@ tr.drag-over {
 .camera-edit-panel .modal-footer button {
   min-width: 120px;
 }
+
+/* Camera editor: panel header bar with camera name + ID */
+.cam-edit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.cam-edit-head-title {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 900;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cam-edit-head-id {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+}
+
+/* Camera editor: grouped sections with labels + dividers */
+.cam-edit-section {
+  margin-top: 18px;
+}
+.cam-edit-section + .cam-edit-section {
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.cam-edit-section-title {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--muted);
+}
+.cam-edit-section .form-grid {
+  margin-top: 0;
+}
+.cam-edit-section .form-help {
+  margin-top: 12px;
+}
+.camera-edit-panel div.cam-rtsp-fields,
+.camera-edit-panel div.cam-onvif-fields {
+  margin-top: 14px;
+}
+
+/* Camera editor: test connection row */
+.camera-edit-panel .button-row.cam-test-conn-row {
+  margin-top: 8px;
+  padding-top: 0;
+  border-top: 0;
+  justify-content: flex-start;
+}
+.camera-edit-panel .cam-test-conn-result {
+  font-size: 13px;
+  align-self: center;
+}
+
+/* Camera editor: consistent two-up field grid on desktop */
+.camera-edit-panel .modal-tab-panel .form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* Camera editor: segmented pill tab bar */
+.camera-edit-panel .modal-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel-strong);
+}
+.camera-edit-panel .modal-tab {
+  position: static;
+  bottom: auto;
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 14px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.camera-edit-panel .modal-tab:hover {
+  color: var(--text);
+}
+.camera-edit-panel .modal-tab.active {
+  color: var(--text);
+  background: rgba(71, 214, 255, 0.10);
+  border-color: var(--accent);
+}
+.camera-edit-panel .modal-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+:root.light .camera-edit-panel .modal-tab.active {
+  background: #fff;
+  border-color: rgba(0,0,0,.1);
+  color: var(--text);
+}
+
+@media (max-width: 600px) {
+  .camera-edit-panel .modal-tab-panel .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .camera-edit-panel .modal-tab {
+    flex-basis: calc(50% - 6px);
+  }
+}
 .cameras-table .cell-drag {
   width: 32px;
   padding: 0 2px;
@@ -1943,6 +2071,23 @@ tr.drag-over {
   text-decoration: none;
   font-weight: 700;
 }
+.cameras-table .cell-actions .cam-toggle-btn {
+  color: var(--muted);
+  transition: color .15s, border-color .15s, background .15s;
+}
+.cameras-table .cell-actions .cam-toggle-btn.is-enabled {
+  color: var(--success);
+  border-color: rgba(73, 230, 163, 0.3);
+}
+.cameras-table .cell-actions .cam-toggle-btn.is-disabled {
+  color: var(--danger);
+  border-color: rgba(248, 113, 113, 0.3);
+}
+.cameras-table .cell-actions .cam-toggle-btn:hover {
+  color: var(--text);
+  border-color: rgba(71, 214, 255, 0.45);
+  background: rgba(71, 214, 255, 0.08);
+}
 .cameras-table .cell-actions a:hover {
   text-decoration: underline;
 }
@@ -2003,6 +2148,101 @@ tr.drag-over {
   .cameras-table {
     min-width: 820px;
   }
+}
+
+/* ─── Camera-style rule tables (zones + sounds) ────────────────────────────
+   The zones object-rules and sounds rule tables now share the cameras page's
+   `.cameras-table-wrap` chrome (border, radius, horizontal scroll). These
+   scoped rules give the inner `.rule-table` the same header tint, row
+   padding, hover highlight and 32px action buttons as `.cameras-table`.
+   Scoped to the wrap so the bare `.rule-table` used by the YAMNet page and
+   the sounds camera-status table keep their own look. */
+.cameras-table-wrap .rule-table {
+  min-width: 820px;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin-top: 0;
+}
+.cameras-table-wrap .rule-table th {
+  padding: 13px 16px;
+  background: rgba(255,255,255,.035);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.cameras-table-wrap .rule-table td {
+  padding: 16px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  vertical-align: middle;
+}
+.cameras-table-wrap .rule-table tbody tr {
+  transition: background 0.12s;
+}
+.cameras-table-wrap .rule-table tbody tr:hover {
+  background: rgba(71, 214, 255, 0.055);
+}
+.cameras-table-wrap .rule-table tr:last-child td {
+  border-bottom: 0;
+}
+/* The expand row (per-rule inline settings) must keep its own zero padding
+   and divider; the generic td padding above would otherwise crush it. Every
+   rule row is followed by its expand row, so the tbody's last row is always
+   an expand row — drop its bottom border so it doesn't poke at the wrap's
+   rounded corners. */
+.cameras-table-wrap .rule-table .rule-expand-row > td {
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+}
+.cameras-table-wrap .rule-table .rule-expand-row:last-child > td {
+  border-bottom: 0;
+}
+.cameras-table-wrap .rule-table .cell-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  gap: 4px;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1;
+  vertical-align: middle;
+}
+@media (max-width: 760px) {
+  /* Match the cameras table's mobile behaviour: keep the wrapped table a real
+     table that scrolls inside the wrap, hide the drag column, and let the
+     surrounding cards shrink so the min-width stays contained. */
+  .cameras-table-wrap .rule-table {
+    display: table;
+    overflow: visible;
+  }
+  .cameras-table-wrap .rule-table thead,
+  .cameras-table-wrap .rule-table tbody,
+  .cameras-table-wrap .rule-table tr {
+    display: table;
+    table-layout: fixed;
+    width: 100%;
+    min-width: 820px;
+  }
+  .cameras-table-wrap .rule-table th,
+  .cameras-table-wrap .rule-table td {
+    padding: 8px 6px;
+  }
+  .cameras-table-wrap .rule-table .cell-drag,
+  .cameras-table-wrap .rule-table .cell-drag-header {
+    display: none;
+  }
+  .cameras-table-wrap .rule-table .cell-actions button {
+    padding: 5px;
+  }
+  .zone-rules-card,
+  #objectDetectionRules,
+  .zone-object-rules { min-width: 0; }
 }
 
 .cam-card {

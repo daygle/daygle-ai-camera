@@ -12,7 +12,6 @@ const deleteModal = document.getElementById('deleteModal');
 const cameraHealth = {};
 const stats = {
   total: document.getElementById('statTotalCameras'),
-  enabled: document.getElementById('statEnabledCameras'),
   online: document.getElementById('statOnlineCameras'),
   offline: document.getElementById('statOfflineCameras'),
   ptz: document.getElementById('statPtzCameras'),
@@ -40,6 +39,10 @@ function buildEditFormHtml(camera, index) {
   const escapeAttr = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
   return '<tr class="camera-edit-row" id="' + rowId + '"><td colspan="6"><div class="camera-edit-panel">' +
+    '<div class="cam-edit-head">' +
+      '<span class="cam-edit-head-title">Editing <strong>' + escapeAttr(camera.name || camera.id || ('Camera ' + (index + 1))) + '</strong></span>' +
+      (camera.id ? '<span class="cam-edit-head-id">ID · ' + escapeAttr(camera.id) + '</span>' : '') +
+    '</div>' +
     '<div class="modal-tabs" role="tablist">' +
       '<button class="modal-tab active" data-tab="connection" data-form="' + formId + '" type="button" role="tab" aria-selected="true">Connection</button>' +
       '<button class="modal-tab" data-tab="recording" data-form="' + formId + '" type="button" role="tab" aria-selected="false" tabindex="-1">Recording</button>' +
@@ -51,95 +54,126 @@ function buildEditFormHtml(camera, index) {
 
       // Connection tab
       '<div class="modal-tab-panel" data-panel="connection">' +
-        '<div class="form-grid">' +
-          '<label><span>Camera Name</span><input name="name" placeholder="e.g. Front Door" required value="' + escapeAttr(camera.name || '') + '" /></label>' +
-          '<label><span>Camera ID</span><input name="id" placeholder="e.g. front-door" value="' + escapeAttr(camera.id || '') + '" /></label>' +
-          '<label class="full-width"><span>Backend</span>' +
-            '<select name="backend" class="cam-edit-backend">' +
-              '<option value="onvif"' + (backend === 'onvif' ? ' selected' : '') + '>ONVIF / RTSP (Auto-Build URL)</option>' +
-              '<option value="rtsp"' + (backend === 'rtsp' ? ' selected' : '') + '>RTSP (Manual URL)</option>' +
-            '</select>' +
-          '</label>' +
-        '</div>' +
-        '<div class="form-group cam-rtsp-fields"' + (isRtsp ? '' : ' hidden') + '>' +
-          '<p class="form-group-label">RTSP URL</p>' +
+        '<div class="cam-edit-section">' +
+          '<h4 class="cam-edit-section-title">Identity</h4>' +
           '<div class="form-grid">' +
-            '<label class="full-width"><span>Stream URL</span><input name="stream_url" placeholder="rtsp://user:pass@192.168.1.100:554/stream1" value="' + escapeAttr(camera.stream_url || '') + '" /></label>' +
+            '<label><span>Camera Name</span><input name="name" placeholder="e.g. Front Door" required value="' + escapeAttr(camera.name || '') + '" /></label>' +
+            '<label><span>Camera ID</span><input name="id" placeholder="e.g. front-door" value="' + escapeAttr(camera.id || '') + '" /></label>' +
           '</div>' +
         '</div>' +
-        '<div class="form-group cam-onvif-fields"' + (isRtsp ? ' hidden' : '') + '>' +
-          '<p class="form-group-label">Connection details</p>' +
+        '<div class="cam-edit-section">' +
+          '<h4 class="cam-edit-section-title">Backend</h4>' +
           '<div class="form-grid">' +
-            '<label><span>Host / IP</span><input name="host" placeholder="192.168.1.100" value="' + escapeAttr(camera.host || '') + '" /></label>' +
-            '<label><span>Port</span><input name="port" type="number" min="1" max="65535" placeholder="554" value="' + (camera.port || 554) + '" /></label>' +
-            '<label><span>Username</span><input name="username" placeholder="admin" autocomplete="off" value="' + escapeAttr(camera.username || '') + '" /></label>' +
-            '<label class="full-width"><span>Password</span><input name="password" type="password" autocomplete="new-password" placeholder="' + (camera.has_password ? '(saved - type to change)' : '(No Password)') + '" /></label>' +
+            '<label class="full-width"><span>Backend</span>' +
+              '<select name="backend" class="cam-edit-backend">' +
+                '<option value="onvif"' + (backend === 'onvif' ? ' selected' : '') + '>ONVIF / RTSP (Auto-Build URL)</option>' +
+                '<option value="rtsp"' + (backend === 'rtsp' ? ' selected' : '') + '>RTSP (Manual URL)</option>' +
+              '</select>' +
+            '</label>' +
+          '</div>' +
+          '<div class="cam-rtsp-fields"' + (isRtsp ? '' : ' hidden') + '>' +
+            '<div class="form-grid">' +
+              '<label class="full-width"><span>Stream URL</span><input name="stream_url" placeholder="rtsp://user:pass@192.168.1.100:554/stream1" value="' + escapeAttr(camera.stream_url || '') + '" /></label>' +
+            '</div>' +
+          '</div>' +
+          '<div class="cam-onvif-fields"' + (isRtsp ? ' hidden' : '') + '>' +
+            '<div class="form-grid">' +
+              '<label><span>Host / IP</span><input name="host" placeholder="192.168.1.100" value="' + escapeAttr(camera.host || '') + '" /></label>' +
+              '<label><span>Port</span><input name="port" type="number" min="1" max="65535" placeholder="554" value="' + (camera.port || 554) + '" /></label>' +
+              '<label><span>Username</span><input name="username" placeholder="admin" autocomplete="off" value="' + escapeAttr(camera.username || '') + '" /></label>' +
+              '<label class="full-width"><span>Password</span><input name="password" type="password" autocomplete="new-password" placeholder="' + (camera.has_password ? '(saved - type to change)' : '(No Password)') + '" /></label>' +
+            '</div>' +
           '</div>' +
         '</div>' +
-        '<div class="form-grid">' +
-          '<label><span>Camera Enabled</span>' +
-            '<select name="enabled">' +
-              '<option value="true"' + (camera.enabled !== false ? ' selected' : '') + '>Enabled</option>' +
-              '<option value="false"' + (camera.enabled === false ? ' selected' : '') + '>Disabled</option>' +
-            '</select>' +
-          '</label>' +
+        '<div class="cam-edit-section">' +
+          '<h4 class="cam-edit-section-title">Streams</h4>' +
+          '<div class="form-grid">' +
+            '<label class="full-width cam-onvif-fields"' + (isRtsp ? ' hidden' : '') + '><span>Detection Stream Path</span><input name="path" placeholder="e.g. stream1" value="' + escapeAttr(camera.path || '') + '" /></label>' +
+            '<label class="full-width"><span>Recording Stream Path <span class="info-tip" data-tip="Optional: the path for the high-res recording stream (e.g. stream2). Leave empty to use the primary stream for recording." title="Optional: the path for the high-res recording stream (e.g. stream2). Leave empty to use the primary stream for recording." tabindex="0" aria-label="Help: Optional path for the high-res recording stream."></span></span><input name="recording_stream_path" placeholder="e.g. stream2" value="' + escapeAttr(camera.recording_stream_path || '') + '" /></label>' +
+          '</div>' +
+          '<p class="form-help muted">Recording Stream Path is optional and points to a higher-resolution stream used for recordings. Leave empty to use the primary stream for both detection and recording.</p>' +
         '</div>' +
-        '<div class="form-grid">' +
-          '<label class="full-width cam-onvif-fields"' + (isRtsp ? ' hidden' : '') + '><span>Detection Stream Path</span><input name="path" placeholder="e.g. stream1" value="' + escapeAttr(camera.path || '') + '" /></label>' +
-          '<label class="full-width"><span>Recording Stream Path <span class="info-tip" data-tip="Optional: the path for the high-res recording stream (e.g. stream2). Leave empty to use the primary stream for recording." title="Optional: the path for the high-res recording stream (e.g. stream2). Leave empty to use the primary stream for recording." tabindex="0" aria-label="Help: Optional path for the high-res recording stream."></span></span><input name="recording_stream_path" placeholder="e.g. stream2" value="' + escapeAttr(camera.recording_stream_path || '') + '" /></label>' +
+        '<div class="cam-edit-section">' +
+          '<h4 class="cam-edit-section-title">Status</h4>' +
+          '<div class="form-grid">' +
+            '<label class="full-width"><span>Camera Enabled</span>' +
+              '<select name="enabled">' +
+                '<option value="true"' + (camera.enabled !== false ? ' selected' : '') + '>Enabled</option>' +
+                '<option value="false"' + (camera.enabled === false ? ' selected' : '') + '>Disabled</option>' +
+              '</select>' +
+            '</label>' +
+          '</div>' +
         '</div>' +
-        '<p class="form-help muted">Recording Stream Path is optional and points to a higher-resolution stream used for recordings. Leave empty to use the primary stream for both detection and recording.</p>' +
-        '<div class="button-row" style="margin-top:8px">' +
+        '<div class="button-row cam-test-conn-row">' +
           '<button class="btn-info cam-test-conn-btn" data-form="' + formId + '" type="button">Test Connection</button>' +
-          '<span class="muted cam-test-conn-result" data-form="' + formId + '" style="font-size:13px;align-self:center"></span>' +
+          '<span class="muted cam-test-conn-result" data-form="' + formId + '"></span>' +
         '</div>' +
       '</div>' +
 
       // Recording tab
       '<div class="modal-tab-panel" data-panel="recording" hidden>' +
-        '<div class="form-grid">' +
-          '<label><span>Continuous Recording</span>' +
-            '<select name="continuous">' +
-              '<option value="false"' + (camera.recording?.continuous ? '' : ' selected') + '>Disabled</option>' +
-              '<option value="true"' + (camera.recording?.continuous ? ' selected' : '') + '>Enabled</option>' +
-            '</select>' +
-          '</label>' +
+        '<div class="cam-edit-section">' +
+          '<h4 class="cam-edit-section-title">Recording</h4>' +
+          '<div class="form-grid">' +
+            '<label class="full-width"><span>Continuous Recording</span>' +
+              '<select name="continuous">' +
+                '<option value="false"' + (camera.recording?.continuous ? '' : ' selected') + '>Disabled</option>' +
+                '<option value="true"' + (camera.recording?.continuous ? ' selected' : '') + '>Enabled</option>' +
+              '</select>' +
+            '</label>' +
+          '</div>' +
+          '<p class="form-help muted">When enabled, the camera writes an uninterrupted stream regardless of events. Otherwise, clips are recorded per detection rule (configured on the Zones page per object).</p>' +
         '</div>' +
-        '<p class="form-help muted">When enabled, the camera writes an uninterrupted stream regardless of events. Otherwise, clips are recorded per detection rule (configured on the Zones page per object).</p>' +
       '</div>' +
 
       // PTZ tab
       '<div class="modal-tab-panel" data-panel="ptz" hidden>' +
-        '<div class="form-grid">' +
-          '<label><span>PTZ Control</span>' +
-            '<select name="ptz_enabled">' +
-              '<option value="false"' + (camera.ptz?.enabled ? '' : ' selected') + '>Disabled</option>' +
-              '<option value="true"' + (camera.ptz?.enabled ? ' selected' : '') + '>Enabled</option>' +
-            '</select>' +
-          '</label>' +
-          '<label class="full-width"><span>Protocol <span class="info-tip" data-tip="ONVIF uses standard PTZ over the camera&#39;s HTTP port. TCP PelcoD sends raw binary commands to the Command Port." title="ONVIF uses standard PTZ over the camera&#39;s HTTP port. TCP PelcoD sends raw binary commands to the Command Port." tabindex="0" aria-label="Help: ONVIF uses standard PTZ over the camera&#39;s HTTP port. TCP PelcoD sends raw binary commands to the Command Port."></span></span>' +
-            '<select name="ptz_protocol">' +
-              '<option value="onvif"' + ((camera.ptz?.protocol || 'onvif') === 'onvif' ? ' selected' : '') + '>ONVIF (Recommended)</option>' +
-              '<option value="tcp_pelcod"' + (camera.ptz?.protocol === 'tcp_pelcod' ? ' selected' : '') + '>TCP PelcoD (Legacy Cameras)</option>' +
-            '</select></label>' +
-          '<label><span>HTTP Port <span class="info-tip" data-tip="Camera web port used by HTTP CGI (default 80)." title="Camera web port used by HTTP CGI (default 80)." tabindex="0" aria-label="Help: Camera web port used by HTTP CGI (default 80)."></span></span><input name="ptz_http_port" type="number" min="1" max="65535" placeholder="80" value="' + (camera.ptz?.http_port || 80) + '" /></label>' +
-          '<label><span>Command Port <span class="info-tip" data-tip="Port for TCP PelcoD only (default 6060)." title="Port for TCP PelcoD only (default 6060)." tabindex="0" aria-label="Help: Port for TCP PelcoD only (default 6060)."></span></span><input name="ptz_port" type="number" min="1" max="65535" placeholder="6060" value="' + (camera.ptz?.port || 6060) + '" /></label>' +
-          '<label><span>PTZ Address <span class="info-tip" data-tip="PelcoD device address (default 1, TCP PelcoD only)." title="PelcoD device address (default 1, TCP PelcoD only)." tabindex="0" aria-label="Help: PelcoD device address (default 1, TCP PelcoD only)."></span></span><input name="ptz_address" type="number" min="1" max="255" placeholder="1" value="' + (camera.ptz?.address || 1) + '" /></label>' +
-          '<label><span>Speed <span class="info-tip" data-tip="Movement speed (1-8, default 5)." title="Movement speed (1-8, default 5)." tabindex="0" aria-label="Help: Movement speed (1-8, default 5)."></span></span><input name="ptz_speed" type="number" min="1" max="8" placeholder="5" value="' + (camera.ptz?.speed || 5) + '" /></label>' +
-          '<label><span>Step Duration (s) <span class="info-tip" data-tip="How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)." title="How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)." tabindex="0" aria-label="Help: How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)."></span></span><input name="ptz_step_duration" type="number" min="0.1" max="5" step="0.1" placeholder="0.4" value="' + (camera.ptz?.step_duration != null ? Number(camera.ptz.step_duration).toFixed(2) : '') + '" /></label>' +
+        '<div class="cam-edit-section">' +
+          '<h4 class="cam-edit-section-title">Control</h4>' +
+          '<div class="form-grid">' +
+            '<label class="full-width"><span>PTZ Control</span>' +
+              '<select name="ptz_enabled">' +
+                '<option value="false"' + (camera.ptz?.enabled ? '' : ' selected') + '>Disabled</option>' +
+                '<option value="true"' + (camera.ptz?.enabled ? ' selected' : '') + '>Enabled</option>' +
+              '</select>' +
+            '</label>' +
+          '</div>' +
         '</div>' +
-        '<p class="form-help muted">Enable PTZ and save to show the control pad on the Live page. The camera&#39;s username and password from the Connection tab are used for HTTP CGI authentication.</p>' +
+        '<div class="cam-edit-section">' +
+          '<h4 class="cam-edit-section-title">Connection</h4>' +
+          '<div class="form-grid">' +
+            '<label class="full-width"><span>Protocol <span class="info-tip" data-tip="ONVIF uses standard PTZ over the camera&#39;s HTTP port. TCP PelcoD sends raw binary commands to the Command Port." title="ONVIF uses standard PTZ over the camera&#39;s HTTP port. TCP PelcoD sends raw binary commands to the Command Port." tabindex="0" aria-label="Help: ONVIF uses standard PTZ over the camera&#39;s HTTP port. TCP PelcoD sends raw binary commands to the Command Port."></span></span>' +
+              '<select name="ptz_protocol">' +
+                '<option value="onvif"' + ((camera.ptz?.protocol || 'onvif') === 'onvif' ? ' selected' : '') + '>ONVIF (Recommended)</option>' +
+                '<option value="tcp_pelcod"' + (camera.ptz?.protocol === 'tcp_pelcod' ? ' selected' : '') + '>TCP PelcoD (Legacy Cameras)</option>' +
+              '</select></label>' +
+            '<label><span>HTTP Port <span class="info-tip" data-tip="Camera web port used by HTTP CGI (default 80)." title="Camera web port used by HTTP CGI (default 80)." tabindex="0" aria-label="Help: Camera web port used by HTTP CGI (default 80)."></span></span><input name="ptz_http_port" type="number" min="1" max="65535" placeholder="80" value="' + (camera.ptz?.http_port || 80) + '" /></label>' +
+            '<label><span>Command Port <span class="info-tip" data-tip="Port for TCP PelcoD only (default 6060)." title="Port for TCP PelcoD only (default 6060)." tabindex="0" aria-label="Help: Port for TCP PelcoD only (default 6060)."></span></span><input name="ptz_port" type="number" min="1" max="65535" placeholder="6060" value="' + (camera.ptz?.port || 6060) + '" /></label>' +
+          '</div>' +
+        '</div>' +
+        '<div class="cam-edit-section">' +
+          '<h4 class="cam-edit-section-title">Movement</h4>' +
+          '<div class="form-grid">' +
+            '<label><span>PTZ Address <span class="info-tip" data-tip="PelcoD device address (default 1, TCP PelcoD only)." title="PelcoD device address (default 1, TCP PelcoD only)." tabindex="0" aria-label="Help: PelcoD device address (default 1, TCP PelcoD only)."></span></span><input name="ptz_address" type="number" min="1" max="255" placeholder="1" value="' + (camera.ptz?.address || 1) + '" /></label>' +
+            '<label><span>Speed <span class="info-tip" data-tip="Movement speed (1-8, default 5)." title="Movement speed (1-8, default 5)." tabindex="0" aria-label="Help: Movement speed (1-8, default 5)."></span></span><input name="ptz_speed" type="number" min="1" max="8" placeholder="5" value="' + (camera.ptz?.speed || 5) + '" /></label>' +
+            '<label class="full-width"><span>Step Duration (s) <span class="info-tip" data-tip="How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)." title="How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)." tabindex="0" aria-label="Help: How long each press keeps the camera moving. Hold longer for continuous pan; short values act like fixed-step nudges (0.1-5 s, default 0.4)."></span></span><input name="ptz_step_duration" type="number" min="0.1" max="5" step="0.1" placeholder="0.4" value="' + (camera.ptz?.step_duration != null ? Number(camera.ptz.step_duration).toFixed(2) : '') + '" /></label>' +
+          '</div>' +
+          '<p class="form-help muted">Enable PTZ and save to show the control pad on the Live page. The camera&#39;s username and password from the Connection tab are used for HTTP CGI authentication.</p>' +
+        '</div>' +
       '</div>' +
 
       // Advanced tab
       '<div class="modal-tab-panel" data-panel="advanced" hidden>' +
-        '<div class="form-grid">' +
-          '<label><span>FPS <span class="info-tip" data-tip="Leave empty to auto-detect from the stream. Enter a value only if the detected FPS is wrong." title="Leave empty to auto-detect from the stream. Enter a value only if the detected FPS is wrong." tabindex="0" aria-label="Help: Leave empty to auto-detect from the stream. Enter a value only if the detected FPS is wrong."></span></span><input name="fps" type="number" min="1" max="120" placeholder="Auto" value="' + (camera.fps != null ? camera.fps : '') + '" /></label>' +
-          '<label><span>Frame Buffer Drains <span class="info-tip" data-tip="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." title="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." tabindex="0" aria-label="Help: Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)."></span></span><input name="stale_frame_grabs" type="number" min="0" max="20" placeholder="Auto" value="' + (camera.stale_frame_grabs != null ? camera.stale_frame_grabs : '') + '" /></label>' +
+        '<div class="cam-edit-section">' +
+          '<h4 class="cam-edit-section-title">Stream</h4>' +
+          '<div class="form-grid">' +
+            '<label><span>FPS <span class="info-tip" data-tip="Leave empty to auto-detect from the stream. Enter a value only if the detected FPS is wrong." title="Leave empty to auto-detect from the stream. Enter a value only if the detected FPS is wrong." tabindex="0" aria-label="Help: Leave empty to auto-detect from the stream. Enter a value only if the detected FPS is wrong."></span></span><input name="fps" type="number" min="1" max="120" placeholder="Auto" value="' + (camera.fps != null ? camera.fps : '') + '" /></label>' +
+            '<label><span>Frame Buffer Drains <span class="info-tip" data-tip="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." title="Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)." tabindex="0" aria-label="Help: Stale frames to discard before reading the latest. Lower = faster response, higher = more stable. Leave empty for auto (FPS/4)."></span></span><input name="stale_frame_grabs" type="number" min="0" max="20" placeholder="Auto" value="' + (camera.stale_frame_grabs != null ? camera.stale_frame_grabs : '') + '" /></label>' +
+          '</div>' +
+          '<p class="form-help muted">Frame-buffer drains is a hint passed to the stream decoder. Leave FPS empty to auto-detect it from the stream; override it only if the detected value is wrong.</p>' +
         '</div>' +
-        '<p class="form-help muted">Frame-buffer drains is a hint passed to the stream decoder. Leave FPS empty to auto-detect it from the stream; override it only if the detected value is wrong.</p>' +
-        '<div class="form-group">' +
-          '<p class="form-group-label">Motion Detection Overrides</p>' +
+        '<div class="cam-edit-section">' +
+          '<h4 class="cam-edit-section-title">Motion Detection Overrides</h4>' +
           '<p class="form-help muted">Override the global motion settings for this camera only. Leave blank to use the global defaults from Live Detection settings.</p>' +
           '<div class="form-grid">' +
             '<label><span>Pixel Threshold <span class="info-tip" data-tip="Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras." title="Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras." tabindex="0" aria-label="Help: Pixel intensity change required to count as motion (1-255). Raise for noisy IR cameras."></span></span><input name="motion_pixel_threshold" type="number" min="1" max="255" step="1" placeholder="Global default (30)" value="' + (camera.motion_pixel_threshold != null ? camera.motion_pixel_threshold : '') + '" /></label>' +
@@ -380,7 +414,7 @@ function renderCameraRow(camera, index) {
   var resolution = escapeHtml(formatCameraResolution(camera, runtimeResolution));
   var fps = cameraFps[camera.id];
   var fpsText = camera.fps ? Math.round(Number(camera.fps)) + ' FPS configured' : 'FPS auto-detect';
-  if (fps && fps.source === 'detected' && Number(fps.detected) > 0) fpsText = Math.round(Number(fps.detected)) + ' FPS detected';
+  if (fps && fps.source === 'detected' && Number(fps.detected) > 0) fpsText = Math.round(Number(fps.detected)) + ' FPS Detected';
   else if (fps && fps.source === 'configured' && Number(fps.configured) > 0) fpsText = Math.round(Number(fps.configured)) + ' FPS configured';
   var ptzEnabled = camera.ptz?.enabled === true;
 
@@ -388,12 +422,12 @@ function renderCameraRow(camera, index) {
   rowHtml += '<td class="cell-drag"><span class="drag-handle" title="Drag to reorder">' + ICONS.grip + '</span></td>';
   rowHtml += '<td class="cell-camera">';
   rowHtml += '<div class="cam-info"><span class="cam-name">' + name + '</span>' + (id ? '<span class="cam-id">ID · ' + id + '</span>' : '') + '</div>';
-  rowHtml += '<div class="cell-actions"><button class="secondary cam-edit-btn" data-index="' + index + '" type="button" title="Edit camera" aria-label="Edit ' + name + '">' + ICONS.edit + '</button><button class="delete-btn secondary cam-remove-btn" data-index="' + index + '" type="button" title="Remove camera" aria-label="Remove ' + name + '">' + ICONS.remove + '</button></div>';
+  rowHtml += '<div class="cell-actions"><button class="secondary cam-edit-btn" data-index="' + index + '" type="button" title="Edit camera" aria-label="Edit ' + name + '">' + ICONS.edit + '</button><button class="secondary cam-toggle-btn' + (isEnabled ? ' is-enabled' : ' is-disabled') + '" data-index="' + index + '" type="button" title="' + (isEnabled ? 'Disable camera' : 'Enable camera') + '" aria-label="' + (isEnabled ? 'Disable ' : 'Enable ') + name + '">' + ICONS.power + '</button><button class="delete-btn secondary cam-remove-btn" data-index="' + index + '" type="button" title="Remove camera" aria-label="Remove ' + name + '">' + ICONS.remove + '</button></div>';
   rowHtml += '</td>';
   rowHtml += '<td class="cell-connection"><span class="chip camera-backend-chip">' + backend + '</span><span class="camera-endpoint">' + endpoint + '</span></td>';
   rowHtml += '<td class="cell-video"><strong>' + resolution + '</strong><span>' + escapeHtml(fpsText) + '</span></td>';
   rowHtml += '<td class="cell-state">' + healthHtml + '<span class="camera-enabled-label">' + (isEnabled ? 'Enabled' : 'Configuration paused') + '</span></td>';
-  rowHtml += '<td class="cell-ptz"><span class="camera-feature-pill ' + (ptzEnabled ? 'is-ready' : '') + '">' + (ptzEnabled ? 'PTZ ready' : 'Fixed') + '</span></td>';
+  rowHtml += '<td class="cell-ptz"><span class="camera-feature-pill ' + (ptzEnabled ? 'is-ready' : '') + '">' + (ptzEnabled ? 'PTZ Enabled' : 'Fixed') + '</span></td>';
   rowHtml += '</tr>';
   return rowHtml;
 }
@@ -458,6 +492,29 @@ function renderGrid() {
       toggleEditForm(cameras[idx], idx);
     });
   });
+  gridEl.querySelectorAll('.cam-toggle-btn').forEach(function(btn) {
+    btn.addEventListener('click', async function() {
+      var idx = Number(btn.dataset.index);
+      if (!cameras[idx]) return;
+      var camerasBefore = cameras.slice();
+      var newEnabled = cameras[idx].enabled !== false ? false : true;
+      var next = cameras.map(function(c, i) {
+        if (i !== idx) return c;
+        return { ...c, enabled: newEnabled };
+      });
+      try {
+        var result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras: next }) });
+        cameras = result.cameras || next;
+        updateStats();
+        renderGrid();
+        setMessage(newEnabled ? 'Camera enabled.' : 'Camera disabled.');
+      } catch (err) {
+        cameras.splice(0, cameras.length, ...camerasBefore);
+        if (window.daygleAuth?.redirecting) return;
+        setMessage(err.message, true);
+      }
+    });
+  });
   gridEl.querySelectorAll('.cam-remove-btn').forEach(function(btn) {
     btn.addEventListener('click', function() { openDeleteModal(Number(btn.dataset.index)); });
   });
@@ -507,7 +564,6 @@ function renderGrid() {
 
 function updateStats() {
   if (stats.total) stats.total.textContent = String(cameras.length);
-  if (stats.enabled) stats.enabled.textContent = String(cameras.filter(function(c) { return c.enabled !== false; }).length);
   if (stats.ptz) stats.ptz.textContent = String(cameras.filter(function(c) { return c.ptz?.enabled === true; }).length);
 }
 

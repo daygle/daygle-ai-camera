@@ -156,20 +156,22 @@ function renderRules() {
   }
 
   rulesWrap.innerHTML = `
-    <table class="rule-table">
-      <thead><tr>
-        <th class="cell-drag-header"></th>
-        <th>Sound</th>
-        <th class="cell-center">Enabled</th>
-        <th class="cell-center">Record</th>
-        <th class="cell-center">Email</th>
-        <th class="cell-center">Push</th>
-        <th>Threshold</th>
-        <th>Cooldown (s)</th>
-        <th></th>
-      </tr></thead>
-      <tbody></tbody>
-    </table>`;
+    <div class="cameras-table-wrap">
+      <table class="rule-table">
+        <thead><tr>
+          <th class="cell-drag-header"></th>
+          <th>Sound</th>
+          <th class="cell-center">Enabled</th>
+          <th class="cell-center">Record</th>
+          <th class="cell-center">Email</th>
+          <th class="cell-center">Push</th>
+          <th>Threshold</th>
+          <th>Cooldown (s)</th>
+          <th></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>`;
   const rowsHtml = rules.map((rule, ruleIndex) => buildSoundRuleRow(rule, ruleIndex, rules)).join('');
   rulesWrap.querySelector('tbody').insertAdjacentHTML('beforeend', rowsHtml);
 

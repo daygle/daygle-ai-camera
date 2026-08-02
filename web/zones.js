@@ -195,7 +195,7 @@ function renderObjectRules(zone, zoneIndex) {
   if (!zone.object_rules.length) {
     return '<div class="empty compact-empty">No object rules yet. Choose an object above to add detection settings for this zone.</div>';
   }
-  return `<table class="rule-table" data-zone-rules-table="${zoneIndex}">
+  return `<div class="cameras-table-wrap"><table class="rule-table" data-zone-rules-table="${zoneIndex}">
     <thead><tr>
       <th class="cell-drag-header"></th>
       <th>Object</th>
@@ -227,7 +227,7 @@ function renderObjectRules(zone, zoneIndex) {
         </tr>
         ${renderRuleExpandRow('zone-rule', key, rule, expanded)}`;
     }).join('')}</tbody>
-  </table>`;
+  </table></div>`;
 }
 
 function renderZones() {
