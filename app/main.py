@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 import logging.handlers
 import subprocess  # noqa: F401 -- tests monkeypatch via main.subprocess
+import threading  # noqa: F401 -- tests monkeypatch via main.threading.Thread
 import app.state as _state
 from contextlib import asynccontextmanager
 from pathlib import Path
