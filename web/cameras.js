@@ -9,11 +9,13 @@ const emptyEl = document.getElementById('cameraEmpty');
 const deleteModal = document.getElementById('deleteModal');
 
 // Stats + filter state
+const cameraHealth = {};
 const stats = {
   total: document.getElementById('statTotalCameras'),
-  recording: document.getElementById('statRecordingOn'),
-  zones: document.getElementById('statWithZones'),
-  health: document.getElementById('statCameraHealth'),
+  enabled: document.getElementById('statEnabledCameras'),
+  online: document.getElementById('statOnlineCameras'),
+  offline: document.getElementById('statOfflineCameras'),
+  ptz: document.getElementById('statPtzCameras'),
 };
 const filter = {
   text: document.getElementById('cameraFilter'),
@@ -37,7 +39,7 @@ function buildEditFormHtml(camera, index) {
   const formId = 'edit-form-' + index;
   const escapeAttr = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-  return '<tr class="camera-edit-row" id="' + rowId + '"><td colspan="7"><div class="camera-edit-panel">' +
+  return '<tr class="camera-edit-row" id="' + rowId + '"><td colspan="6"><div class="camera-edit-panel">' +
     '<div class="modal-tabs" role="tablist">' +
       '<button class="modal-tab active" data-tab="connection" data-form="' + formId + '" type="button" role="tab" aria-selected="true">Connection</button>' +
       '<button class="modal-tab" data-tab="recording" data-form="' + formId + '" type="button" role="tab" aria-selected="false" tabindex="-1">Recording</button>' +
@@ -336,81 +338,62 @@ function collectFormData(form, index) {
 
 // ─── Camera row rendering ─────────────────────────────────────────────────────
 
+function formatCameraEndpoint(camera) {
+  var host = String(camera.host || '').trim();
+  var port = camera.port ? ':' + camera.port : '';
+  var path = String(camera.path || '').trim();
+  if (!host && camera.stream_url) {
+    try {
+      var parsed = new URL(camera.stream_url);
+      host = parsed.hostname || '';
+      port = parsed.port ? ':' + parsed.port : '';
+      path = parsed.pathname || '';
+    } catch (err) {
+      return 'Manual stream URL';
+    }
+  }
+  if (!host) return 'Not configured';
+  return host + port + (path ? path.charAt(0) === '/' ? path : '/' + path : '');
+}
+
+function formatCameraResolution(camera, runtimeResolution) {
+  var configured = camera.width && camera.height ? camera.width + ' × ' + camera.height : '';
+  if (runtimeResolution && runtimeResolution.width > 0 && runtimeResolution.height > 0) {
+    var live = runtimeResolution.width + ' × ' + runtimeResolution.height;
+    return live + (configured && live !== configured ? ' live' : '');
+  }
+  return configured ? configured + ' configured' : 'Auto';
+}
+
 function renderCameraRow(camera, index) {
   var name = escapeHtml(camera.name || camera.id || ('Camera ' + (index + 1)));
   var id = escapeHtml(camera.id || '');
   var backend = camera.backend === 'rtsp' ? 'RTSP' : 'ONVIF';
-
-  var zones = camera.detection?.zones || [];
-  var zoneCount = zones.length;
-  var ruleCount = zones.reduce(function(n, z) { return n + (z.object_rules?.length || 0); }, 0);
-
-  var sound = camera.detection?.sound;
-  var soundEnabled = sound?.enabled === true;
-
-  var continuous = camera.recording?.continuous === true;
-
-  var zonesHtml = zoneCount === 0
-    ? '<span class="chip chip-warn">No zones</span>'
-    : '<span class="chip chip-green">' + zoneCount + ' zone' + (zoneCount !== 1 ? 's' : '') + '</span>' + (ruleCount > 0 ? ' <span class="chip chip-info">' + ruleCount + ' rule' + (ruleCount !== 1 ? 's' : '') + '</span>' : '');
-
-  var soundHtml = soundEnabled
-    ? '<span class="chip chip-green">On</span>'
-    : '<span class="chip chip-dim">Off</span>';
-
-  var recordingHtml = continuous
-    ? '<span class="chip chip-green">Continuous</span>'
-    : '<span class="chip chip-info">On Alert</span>';
-
-  var hasStream = !!(camera.stream_url || camera.host);
   var isEnabled = camera.enabled !== false;
-  var healthHtml = !isEnabled
-    ? '<span class="health-dot offline"></span><span>Disabled</span>'
-    : (hasStream ? '<span class="health-dot online"></span><span>Online</span>' : '<span class="health-dot offline"></span><span>Offline</span>');
-
-  var rowHtml = '';
-  rowHtml += '<tr draggable="true" data-drag-camera="' + index + '" data-camera-index="' + index + '" class="' + (enabled ? '' : 'camera-row-disabled') + '">';
-  rowHtml += '<td class="cell-drag"><span class="drag-handle" title="Drag to reorder">' + ICONS.grip + '</span></td>';
-  var resolution = cameraResolutions[camera.id];
-  var resolutionText = '';
-  if (resolution && resolution.width > 0 && resolution.height > 0) {
-    resolutionText = resolution.width + ' x ' + resolution.height;
-  } else if (resolution === null) {
-    resolutionText = 'No signal';
-  }
+  var runtimeHealth = cameraHealth[camera.id];
+  var healthState = !isEnabled ? 'disabled' : runtimeHealth ? (runtimeHealth.online ? 'online' : 'offline') : 'checking';
+  var healthLabel = healthState === 'disabled' ? 'Disabled' : healthState === 'online' ? 'Online' : healthState === 'offline' ? 'Offline' : 'Checking';
+  var healthDotState = healthState === 'online' ? 'online' : healthState === 'checking' ? 'checking' : 'offline';
+  var healthHtml = '<span class="camera-status-pill camera-status-' + healthState + '"><span class="health-dot ' + healthDotState + '"></span>' + healthLabel + '</span>';
+  var endpoint = escapeHtml(formatCameraEndpoint(camera));
+  var runtimeResolution = cameraResolutions[camera.id];
+  var resolution = escapeHtml(formatCameraResolution(camera, runtimeResolution));
   var fps = cameraFps[camera.id];
-  var fpsText = '';
-  if (fps && fps.source === 'detected' && Number(fps.detected) > 0) {
-    fpsText = Math.round(Number(fps.detected)) + ' FPS';
-  } else if (fps && fps.source === 'configured' && Number(fps.configured) > 0) {
-    fpsText = Math.round(Number(fps.configured)) + ' FPS (override)';
-  } else if (fps && fps.source === 'fallback') {
-    // The backend's 15 FPS fallback is only for buffer-drain calculations;
-    // never present it as the camera's hardware/source rate.
-    fpsText = 'Detecting FPS…';
-  } else if (fps === null) {
-    fpsText = '';
-  }
-  var streamMetaText = resolutionText && fpsText
-    ? resolutionText + ' @ ' + fpsText
-    : (resolutionText || fpsText);
-  var resolutionHtml = streamMetaText
-    ? '<span class="cam-resolution">' + streamMetaText + '</span>'
-    : '<span class="cam-resolution muted">-</span>';
+  var fpsText = camera.fps ? Math.round(Number(camera.fps)) + ' FPS configured' : 'FPS auto-detect';
+  if (fps && fps.source === 'detected' && Number(fps.detected) > 0) fpsText = Math.round(Number(fps.detected)) + ' FPS detected';
+  else if (fps && fps.source === 'configured' && Number(fps.configured) > 0) fpsText = Math.round(Number(fps.configured)) + ' FPS configured';
+  var ptzEnabled = camera.ptz?.enabled === true;
 
+  var rowHtml = '<tr draggable="true" data-drag-camera="' + index + '" data-camera-index="' + index + '" class="' + (isEnabled ? '' : 'camera-row-disabled') + '">';
+  rowHtml += '<td class="cell-drag"><span class="drag-handle" title="Drag to reorder">' + ICONS.grip + '</span></td>';
   rowHtml += '<td class="cell-camera">';
-  rowHtml += '<div class="cam-info"><span class="cam-name">' + name + '</span>' + (id ? '<span class="cam-id">' + id + '</span>' : '') + resolutionHtml + '</div>';
-  rowHtml += '<div class="cell-actions">';
-  rowHtml += '<button class="secondary cam-edit-btn" data-index="' + index + '" type="button" title="Edit camera">' + ICONS.edit + '</button>';
-  rowHtml += '<button class="delete-btn secondary cam-remove-btn" data-index="' + index + '" type="button" title="Remove camera">' + ICONS.remove + '</button>';
-  rowHtml += '</div>';
+  rowHtml += '<div class="cam-info"><span class="cam-name">' + name + '</span>' + (id ? '<span class="cam-id">ID · ' + id + '</span>' : '') + '</div>';
+  rowHtml += '<div class="cell-actions"><button class="secondary cam-edit-btn" data-index="' + index + '" type="button" title="Edit camera" aria-label="Edit ' + name + '">' + ICONS.edit + '</button><button class="delete-btn secondary cam-remove-btn" data-index="' + index + '" type="button" title="Remove camera" aria-label="Remove ' + name + '">' + ICONS.remove + '</button></div>';
   rowHtml += '</td>';
-  var enabled = camera.enabled !== false;
-  rowHtml += '<td><span class="chip">' + backend + '</span></td>';
-  rowHtml += '<td class="cell-zones">' + zonesHtml + '</td>';
-  rowHtml += '<td class="cell-center">' + soundHtml + '</td>';
-  rowHtml += '<td>' + recordingHtml + '</td>';
-  rowHtml += '<td class="cell-health">' + healthHtml + '</td>';
+  rowHtml += '<td class="cell-connection"><span class="chip camera-backend-chip">' + backend + '</span><span class="camera-endpoint">' + endpoint + '</span></td>';
+  rowHtml += '<td class="cell-video"><strong>' + resolution + '</strong><span>' + escapeHtml(fpsText) + '</span></td>';
+  rowHtml += '<td class="cell-state">' + healthHtml + '<span class="camera-enabled-label">' + (isEnabled ? 'Enabled' : 'Configuration paused') + '</span></td>';
+  rowHtml += '<td class="cell-ptz"><span class="camera-feature-pill ' + (ptzEnabled ? 'is-ready' : '') + '">' + (ptzEnabled ? 'PTZ ready' : 'Fixed') + '</span></td>';
   rowHtml += '</tr>';
   return rowHtml;
 }
@@ -465,7 +448,7 @@ function renderGrid() {
     var realIndex = cameras.indexOf(cam);
     return renderCameraRow(cam, realIndex);
   }).join('');
-  var tableHtml = '<div class="cameras-table-wrap"><table class="cameras-table"><thead><tr><th class="cell-drag"></th><th>Camera</th><th>Backend</th><th>Zones</th><th class="cell-center">Sound</th><th>Record</th><th>Health</th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
+  var tableHtml = '<div class="cameras-table-wrap"><table class="cameras-table"><thead><tr><th class="cell-drag" scope="col"></th><th scope="col">Camera</th><th scope="col">Connection</th><th scope="col">Video</th><th scope="col">Status</th><th scope="col">PTZ</th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
   gridEl.innerHTML = tableHtml;
   updateFilterHint(filtered.length);
 
@@ -524,14 +507,8 @@ function renderGrid() {
 
 function updateStats() {
   if (stats.total) stats.total.textContent = String(cameras.length);
-  if (stats.recording) {
-    var continuous = cameras.filter(function(c) { return c.recording?.continuous === true; }).length;
-    stats.recording.textContent = (cameras.length - continuous) + ' / ' + continuous;
-  }
-  if (stats.zones) {
-    var withZones = cameras.filter(function(c) { return (c.detection?.zones || []).length > 0; }).length;
-    stats.zones.textContent = String(withZones);
-  }
+  if (stats.enabled) stats.enabled.textContent = String(cameras.filter(function(c) { return c.enabled !== false; }).length);
+  if (stats.ptz) stats.ptz.textContent = String(cameras.filter(function(c) { return c.ptz?.enabled === true; }).length);
 }
 
 // ─── Delete modal ─────────────────────────────────────────────────────────────
@@ -657,16 +634,22 @@ async function updateHealthStats() {
   try {
     var data = await api('/api/cameras/health');
     var s = data.summary;
-    if (stats.health) {
+    Object.keys(cameraHealth).forEach(function(key) { delete cameraHealth[key]; });
+    Object.keys(data.cameras || {}).forEach(function(cameraId) {
+      cameraHealth[cameraId] = data.cameras[cameraId];
+    });
+    if (stats.online) {
       var online = s.online || 0;
-      var offline = s.offline || 0;
-      stats.health.textContent = online + ' / ' + offline;
-      if (offline > 0) {
-        stats.health.style.color = 'var(--danger-color, #e74c3c)';
-      } else if (online > 0) {
-        stats.health.style.color = 'var(--success-color, #2ecc71)';
-      }
+      stats.online.textContent = String(online);
+      stats.online.style.color = online > 0 ? 'var(--success-color, #2ecc71)' : '';
     }
+    if (stats.offline) {
+      var offline = s.offline || 0;
+      stats.offline.textContent = String(offline);
+      stats.offline.style.color = offline > 0 ? 'var(--danger-color, #e74c3c)' : '';
+    }
+    // Keep an open inline editor intact during the periodic health refresh.
+    if (!document.querySelector('.camera-edit-row')) renderGrid();
   } catch (e) {
     // silently ignore
   }
