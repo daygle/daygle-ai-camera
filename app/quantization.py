@@ -652,6 +652,13 @@ def quantize_int8(model_path: Path) -> Path | None:
     builds accelerate) with a few real active-camera frames plus deterministic
     synthetic MinMax fallback samples, so it can run unattended at detector
     load time and is cached to disk.
+
+    The first-time conversion runs synchronously (64 calibration samples plus
+    graph rewriting), so an initial ``precision='int8'`` detector (re)load can
+    take tens of seconds; the ``*.int8.onnx`` cache makes subsequent loads
+    instant. On failure the detector falls back to FP32, and a previously
+    valid cache is still served when only the real-frame improvement pass
+    failed.
     """
     source = Path(model_path)
     if not source.is_file():
@@ -670,9 +677,17 @@ def quantize_int8(model_path: Path) -> Path | None:
         # from a different source cannot poison the detector load.
         real_frames: list[Any] | None = None
         configured_camera_count = _configured_camera_count()
+        # Tracks whether a valid cache existed when the (re)conversion below
+        # started. A failed improvement pass -- real camera frames failing to
+        # upgrade a working synthetic-only cache -- must fall back to that
+        # valid cache instead of pushing the detector to FP32; the
+        # source-change guards below still prevent serving a cache built from
+        # a different export.
+        had_valid_cache = False
         if not _should_requantize(source, cache):
             cache_is_valid = _cached_signature_matches(metadata, source_signature) and _is_valid_onnx_model(cache)
             if cache_is_valid:
+                had_valid_cache = True
                 cached_real_frames = _cached_real_frame_count(metadata)
                 # A synthetic-only cache is reusable while cameras are offline,
                 # but when cameras are configured give them one bounded chance
@@ -807,6 +822,20 @@ def quantize_int8(model_path: Path) -> Path | None:
                 temporary_path.unlink(missing_ok=True)
             if temporary_metadata is not None:
                 temporary_metadata.unlink(missing_ok=True)
+            # An improvement pass can fail while a valid cache from a prior
+            # boot is still on disk (e.g. real camera frames could not upgrade
+            # a working synthetic-only cache). Serve that cache rather than
+            # forcing the detector to FP32. Re-verify the source hash so a
+            # source that moved mid-conversion is never paired with a stale
+            # cache -- the publication-time guards already removed the cache
+            # in the source-changed case.
+            if had_valid_cache and cache.exists():
+                try:
+                    source_unchanged = _source_signature(source) == source_signature
+                except FileNotFoundError:
+                    source_unchanged = False
+                if source_unchanged:
+                    return cache
             # Deliberately preserve an older cache. It is still stale and will
             # not be returned by this call, but preserving it avoids turning a
             # transient conversion failure into destructive cache loss.

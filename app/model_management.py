@@ -71,16 +71,25 @@ def _export_kwargs(nms_free: bool, precision: str = 'fp32', device: str = 'auto'
     INT8 is a runtime concern handled by ``app.quantization.quantize_int8``.
     """
     parts = ["format='onnx'", f"end2end={'True' if nms_free else 'False'}", 'opset=13']
-    if precision == 'fp16' and device.lower() == 'cuda':
-        from app.quantization import onnxruntime_gpu_available
-        if onnxruntime_gpu_available():
-            parts.append('half=True')
-        else:
-            import logging
-            logging.getLogger('daygle.ai').warning(
-                'precision=fp16 requested but onnxruntime-gpu is not installed; '
-                'exporting FP32. Install onnxruntime-gpu + CUDA drivers and re-export.',
-            )
+    # Delegate the precision rule to its single source of truth in
+    # ``app.quantization.precision_export_kwargs``: fp16 emits ``half=True``
+    # only when ``device='cuda'`` AND onnxruntime-gpu is registered; fp32 and
+    # int8 never contribute export kwargs here (INT8 is a runtime concern
+    # handled by ``quantize_int8`` at detector load time).
+    from app.quantization import onnxruntime_gpu_available, precision_export_kwargs
+    precision_kwargs = precision_export_kwargs(
+        precision, device, onnxruntime_gpu_available()
+    )
+    if precision_kwargs:
+        parts.append(precision_kwargs)
+    elif precision == 'fp16' and device.lower() == 'cuda':
+        # Keep the operator-visible warning for the fp16+cuda-without-GPU
+        # case so the silent FP32 export is not hidden.
+        import logging
+        logging.getLogger('daygle.ai').warning(
+            'precision=fp16 requested but onnxruntime-gpu is not installed; '
+            'exporting FP32. Install onnxruntime-gpu + CUDA drivers and re-export.',
+        )
     if _onnxsim_available():
         parts.append('simplify=True')
     return ', '.join(parts)

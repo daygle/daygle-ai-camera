@@ -207,6 +207,17 @@ def test_nms_free_skips_dedupe_when_enabled():
     assert len(res) == 2
 
 
+def test_nms_free_fp16_output_cast_before_nms():
+    """FP16 model output must flow through the class-aware NMS dedupe
+    without subnormal/NaN IoU: the NMS-free path casts boxes and scores to
+    float32 before ``non_max_suppression``, mirroring the grid head."""
+    det = _detector(nms_free=True)
+    out = _nms_free_overlapping_output().astype(np.float16)
+    res = det._postprocess_nms_free(out[0], SCALE, PAD_X, PAD_Y, OW, OH, 0.45)
+    assert len(res) == 1  # overlapping pair collapses, as in float32
+    assert res[0]["confidence"] == pytest.approx(0.9, abs=1e-3)
+
+
 # -- INT8 precision support --------------------------------------------------
 
 @pytest.mark.parametrize('nms_free,expected', [

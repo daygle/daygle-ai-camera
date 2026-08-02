@@ -743,7 +743,18 @@ class OnnxYoloDetector:
 
         filtered_boxes = boxes[conf_mask]
         filtered_scores = scores[conf_mask]
-        filtered_class_ids = class_ids[conf_mask]        # YOLO26 is NMS-free at train time, so when ``confidence_only_nms``
+        filtered_class_ids = class_ids[conf_mask]
+        # Cast to float32 before NMS. FP16 model output can carry subnormal
+        # values that underflow the IoU union guard (``1e-9`` -> 0 in half
+        # precision), yielding NaN IoU for degenerate zero-area pairs and
+        # suppressing nothing; the grid path already normalises to float32
+        # before ``non_max_suppression``, so keep both heads symmetric.
+        # Coordinates are transformed and rounded to 4 decimals downstream
+        # regardless of the working dtype.
+        if filtered_boxes.dtype != np.float32:
+            filtered_boxes = filtered_boxes.astype(np.float32)
+            filtered_scores = filtered_scores.astype(np.float32)
+        # YOLO26 is NMS-free at train time, so when ``confidence_only_nms``
         # is set the model head's one-to-one label assignment plus the
         # confidence threshold already give us a clean detection list --
         # skipping the class-aware NMS saves the per-frame Python sort +

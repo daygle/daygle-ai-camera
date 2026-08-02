@@ -397,6 +397,52 @@ def test_quantize_int8_preserves_stale_cache_when_conversion_fails(tmp_path: Pat
     assert cache.read_bytes() == b'old-cache'
 
 
+def test_quantize_int8_returns_valid_cache_when_improvement_fails(tmp_path: Path, monkeypatch):
+    """A valid synthetic-only cache must survive a failed real-frame upgrade:
+    the conversion error returns the cache instead of forcing an FP32 reload."""
+    import numpy as np
+
+    monkeypatch.setattr(quantization, 'int8_quantization_available', lambda: True)
+    monkeypatch.setattr(quantization, '_is_valid_onnx_model', lambda path: True)
+    monkeypatch.setattr(quantization, '_configured_camera_count', lambda: 1)
+    real = np.zeros((24, 32, 3), dtype=np.uint8)
+    monkeypatch.setattr(quantization, '_configured_camera_calibration_frames', lambda: ([real], 1))
+    source, cache, _ = _fresh_cache(tmp_path)
+
+    def _failing_improvement_quantize_static(**kwargs):
+        raise RuntimeError('improvement conversion failed')
+
+    _install_fake_quantization_module(monkeypatch, _failing_improvement_quantize_static)
+
+    result = quantize_int8(source)
+    assert result == cache
+    assert cache.read_bytes() == b'fake-cache'
+
+
+def test_quantize_int8_improvement_does_not_serve_cache_after_source_change(tmp_path: Path, monkeypatch):
+    """Even with a valid cache present, a source that moves during the
+    improvement pass must NOT be paired with the stale cache -- the detector
+    would run quantized weights from a different export."""
+    import numpy as np
+
+    monkeypatch.setattr(quantization, 'int8_quantization_available', lambda: True)
+    monkeypatch.setattr(quantization, '_is_valid_onnx_model', lambda path: True)
+    monkeypatch.setattr(quantization, '_configured_camera_count', lambda: 1)
+    real = np.zeros((24, 32, 3), dtype=np.uint8)
+    monkeypatch.setattr(quantization, '_configured_camera_calibration_frames', lambda: ([real], 1))
+    source, cache, _ = _fresh_cache(tmp_path)
+
+    def _source_changing_quantize_static(**kwargs):
+        source.write_bytes(b'changed-source')  # simulate a re-export mid-quantize
+        raise RuntimeError('conversion failed after source changed')
+
+    _install_fake_quantization_module(monkeypatch, _source_changing_quantize_static)
+
+    assert quantize_int8(source) is None
+    # The old artifact is preserved on disk but is never served.
+    assert cache.read_bytes() == b'fake-cache'
+
+
 # -- synthetic calibration reader -------------------------------------------
 
 
