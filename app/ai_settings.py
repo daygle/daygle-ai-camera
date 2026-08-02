@@ -163,10 +163,12 @@ def log_detector_initialization(context: str = 'startup') -> None:
     active_providers = getattr(_state.detector, 'active_providers', None)
     providers_str = ','.join(active_providers) if active_providers else '<none>'
     logger.info(
-        'AI detector %s: active_backend=%s configured_backend=%s model_loaded=%s inference_available=%s providers=%s model_path=%s labels_path=%s error=%s',
+        'AI detector %s: active_backend=%s configured_backend=%s model_loaded=%s inference_available=%s active_precision=%s requested_precision=%s providers=%s model_path=%s labels_path=%s error=%s',
         context, ai_status['active_backend'], ai_status['configured_backend'], ai_status['model_loaded'],
-        ai_status['inference_available'], providers_str, ai_status['model_path'] or '<none>',
-        ai_status['labels_path'] or '<none>', ai_status['error'] or '<none>',
+        ai_status['inference_available'], ai_status.get('active_precision') or '<none>',
+        str(ai_status.get('precision') or '<none>').lower(), providers_str,
+        ai_status['model_path'] or '<none>', ai_status['labels_path'] or '<none>',
+        ai_status['error'] or '<none>',
     )
 
 
@@ -238,6 +240,9 @@ def ai_status_payload(
         'active_config_source': active_ai_config_source(),
         'model_input_size': model_input_size,
         'active_precision': active_precision,
+        # Keep the persisted request beside the runtime result so operators
+        # can distinguish an intentional FP32 fallback from an FP32 setting.
+        'precision': str(settings.get('precision') or 'fp32').strip().lower(),
     }
 
 

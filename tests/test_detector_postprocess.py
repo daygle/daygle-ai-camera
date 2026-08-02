@@ -9,10 +9,17 @@ unavailable) and the post-process helpers are exercised directly.
 """
 from __future__ import annotations
 
+import sys
+import types
+
 import numpy as np
 import pytest
 
-from app.detector import OnnxYoloDetector, _resolve_confidence_only_nms
+from app.detector import (
+    OnnxYoloDetector,
+    _int8_precision_supported_for_detector,
+    _resolve_confidence_only_nms,
+)
 
 # Frame + letterbox geometry shared by the tests: a 1280x720 frame scaled
 # into a 640x640 square input. scale = min(640/1280, 640/720) = 0.5;
@@ -193,6 +200,97 @@ def test_nms_free_skips_dedupe_when_enabled():
     det.input_width = det.input_height = 640
     res = det._postprocess_nms_free(_nms_free_overlapping_output()[0], SCALE, PAD_X, PAD_Y, OW, OH, 0.45)
     assert len(res) == 2
+
+
+# -- INT8 precision support --------------------------------------------------
+
+@pytest.mark.parametrize('nms_free,expected', [
+    (False, True),
+    (True, False),
+])
+def test_int8_precision_support_excludes_nms_free_heads(nms_free, expected):
+    """The current static QDQ PTQ path must not run on YOLO26-style heads:
+    they can load successfully while returning confidence scores too damaged
+    to produce object detections. Traditional grid heads retain INT8 support.
+    """
+    assert _int8_precision_supported_for_detector(nms_free) is expected
+
+
+def test_nms_free_int8_request_loads_fp32_without_quantizing(monkeypatch, tmp_path):
+    """An INT8 request for a YOLO26-style detector must bypass PTQ entirely.
+
+    This exercises the constructor path that previously published a healthy
+    QDQ session while returning no real detections. The fallback is observable
+    through both the source model path and ``active_precision``.
+    """
+    model_path = tmp_path / "yolo26l-768.onnx"
+    model_path.write_bytes(b"fake model")
+    quantize_calls = []
+
+    def _unexpected_quantize(path):
+        quantize_calls.append(path)
+        raise AssertionError("NMS-free models must not be INT8-quantized")
+
+    import app.quantization as quantization
+    monkeypatch.setattr(quantization, "quantize_int8", _unexpected_quantize)
+
+    class _Input:
+        name = "images"
+        shape = [1, 3, 64, 64]
+        type = "tensor(float)"
+
+    class _Output:
+        name = "output"
+
+    class _SessionOptions:
+        graph_optimization_level = None
+        intra_op_num_threads = 0
+        inter_op_num_threads = 0
+        execution_mode = None
+
+    class _Session:
+        last_path = None
+
+        def __init__(self, path, *, sess_options, providers):
+            self.last_path = path
+            self._providers = ["CPUExecutionProvider"]
+
+        def get_inputs(self):
+            return [_Input()]
+
+        def get_outputs(self):
+            return [_Output()]
+
+        def get_providers(self):
+            return self._providers
+
+        def run(self, output_names, feeds):
+            return [np.array([[[8, 8, 56, 56, 0.9, 0]]], dtype=np.float32)]
+
+    fake_ort = types.ModuleType("onnxruntime")
+    fake_ort.get_available_providers = lambda: ["CPUExecutionProvider"]
+    fake_ort.SessionOptions = _SessionOptions
+    fake_ort.GraphOptimizationLevel = types.SimpleNamespace(ORT_ENABLE_ALL=1)
+    fake_ort.ExecutionMode = types.SimpleNamespace(ORT_PARALLEL=1, ORT_SEQUENTIAL=2)
+    fake_ort.InferenceSession = _Session
+    monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
+
+    detector = OnnxYoloDetector(
+        model_path=model_path,
+        categories=LABELS,
+        # Omit nms_free deliberately: direct callers must still get the
+        # filename-based safety guard used by create_detector().
+        precision="int8",
+        input_size=64,
+    )
+
+    assert quantize_calls == []
+    assert detector.available
+    assert detector.active_precision == "fp32"
+    assert detector.session.last_path == str(model_path)
+    detections = detector.detect_frame(np.zeros((64, 64, 3), dtype=np.uint8))
+    assert detections and detections[0]["label"] == "person"
+    assert detections[0]["confidence"] == pytest.approx(0.9, abs=1e-3)
 
 
 # -- input dtype default ---------------------------------------------------

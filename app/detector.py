@@ -145,7 +145,12 @@ class OnnxYoloDetector:
         self._gpu_mem_limit = gpu_mem_limit
         self.unavailable_reason: str | None = None
         self._device = device.lower() if device else "auto"
-        self._nms_free = nms_free
+        # Keep the safety decision conservative even when a caller constructs
+        # the detector directly instead of going through ``create_detector``.
+        # YOLO26 exports are NMS-free by definition, and allowing a filename
+        # such as ``yolo26l-768.onnx`` to enter the INT8 PTQ path would recreate
+        # the silent no-detection failure this guard is meant to prevent.
+        self._nms_free = bool(nms_free) or _detect_model_type(self.model_path)
         # ``execution_mode`` selects ORT's ``ORT_SEQUENTIAL`` vs ``ORT_PARALLEL``
         # model-level executor. ``parallel`` matches the ORT default and the
         # prior behavior of this codebase; ``sequential`` is an A/B lever --
@@ -217,21 +222,35 @@ class OnnxYoloDetector:
         session_model_path = self.model_path
         int8_runtime_model = False
         if self._precision == 'int8':
-            quantized = quantize_int8(self.model_path) if quantize_int8 else None
-            if quantized is not None:
-                session_model_path = Path(quantized)
-                int8_runtime_model = True
-                logger.info(
-                    'INT8 QDQ quantization ready for %s -> %s',
-                    self.model_path, session_model_path,
-                )
-            else:
+            if not _int8_precision_supported_for_detector(self._nms_free):
+                # YOLO26's end-to-end/NMS-free head is highly sensitive to
+                # post-training activation quantization. A QDQ graph can load
+                # and warm up successfully while its confidence values collapse
+                # on real frames, yielding no detections. Keep this model on
+                # FP32 until a representative/QAT path exists; silently losing
+                # object recordings is worse than the speed trade-off.
                 logger.warning(
-                    'precision=int8 requested but quantization is unavailable or failed; '
-                    'falling back to FP32 model %s.',
+                    'precision=int8 is not supported for NMS-free YOLO output; '
+                    'forcing FP32 for %s.',
                     self.model_path,
                 )
                 self._precision = 'fp32'
+            else:
+                quantized = quantize_int8(self.model_path) if quantize_int8 else None
+                if quantized is not None:
+                    session_model_path = Path(quantized)
+                    int8_runtime_model = True
+                    logger.info(
+                        'INT8 QDQ quantization ready for %s -> %s',
+                        self.model_path, session_model_path,
+                    )
+                else:
+                    logger.warning(
+                        'precision=int8 requested but quantization is unavailable or failed; '
+                        'falling back to FP32 model %s.',
+                        self.model_path,
+                    )
+                    self._precision = 'fp32'
         elif self._precision == 'fp16':
             # The exported ONNX is already FP16 -- nothing to convert.
             logger.info('precision=fp16: loading pre-exported half-precision model %s', self.model_path)
@@ -877,6 +896,17 @@ class OnnxYoloDetector:
                 )
             )
         return [detection.to_dict() for detection in detections]
+
+
+def _int8_precision_supported_for_detector(nms_free: bool) -> bool:
+    """Return whether runtime INT8 PTQ is safe for this detector head.
+
+    NMS-free YOLO26 exports use a sensitive end-to-end head whose confidence
+    distribution is not preserved reliably by the current static QDQ PTQ
+    pipeline. They must remain FP32 rather than appearing healthy while
+    silently returning zero detections.
+    """
+    return not bool(nms_free)
 
 
 def _detect_model_type(model_path: str) -> bool:

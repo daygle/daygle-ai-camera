@@ -260,8 +260,13 @@ def test_ai_status_payload_surfaces_active_precision_when_loaded(monkeypatch, ai
         onnx_runtime_installed=True,
         model_exists=True,
     )
-    out = ais.ai_status_payload({'backend': 'onnx', 'model_path': 'models/yolov8n.onnx'})
+    out = ais.ai_status_payload({
+        'backend': 'onnx',
+        'model_path': 'models/yolov8n.onnx',
+        'precision': 'int8',
+    })
     assert out['model_loaded'] is True
+    assert out['precision'] == 'int8'
     assert out['active_precision'] == 'int8'
 
 
@@ -276,6 +281,29 @@ def test_ai_status_payload_active_precision_none_when_not_loaded(monkeypatch, ai
     out = ais.ai_status_payload({'backend': 'onnx', 'model_path': 'models/missing.onnx'})
     assert out['model_loaded'] is False
     assert out['active_precision'] is None
+
+
+def test_ai_status_payload_distinguishes_int8_request_from_fp32_fallback(monkeypatch, ais):
+    """An NMS-free INT8 request is reported as requested INT8 but active FP32.
+
+    This is the operator-facing proof that the detector avoided the unsafe
+    quantized graph instead of pretending that FP32 was the configured mode.
+    """
+    _install_ai_dependencies(
+        monkeypatch,
+        detector=_DetectorStub(backend='onnx', available=True, active_precision='fp32'),
+        detector_loaded_for=True,
+        onnx_runtime_installed=True,
+        model_exists=True,
+    )
+    out = ais.ai_status_payload({
+        'backend': 'onnx',
+        'model_path': 'models/yolo26l-768.onnx',
+        'precision': 'int8',
+    })
+    assert out['model_loaded'] is True
+    assert out['precision'] == 'int8'
+    assert out['active_precision'] == 'fp32'
 
 
 def test_ai_status_payload_returns_model_missing_when_onnx_configured_but_file_absent(monkeypatch, ais):
