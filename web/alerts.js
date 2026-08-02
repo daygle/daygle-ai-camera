@@ -60,12 +60,33 @@ function getSinceParam() {
 
 // api() is provided by web/utils.js - shared CSRF, 401 redirect, JSON.
 
-// ─── Alert grouping (consolidates multiple alerts for the same event) ──────
+// ─── Alert grouping (consolidates alerts belonging to the same clip) ───────
+// A single continuous clip accrues several detection events (each new object or
+// sound extends the same recording via extend_active_rtsp_recording), and every
+// alert fired against them carries the same recording_id. Grouping object/motion
+// alerts by recording collapses those into one row so a clip is not listed as
+// several duplicate "Recording #N" alerts.
+//
+// Sound alerts are deliberately NOT folded into the recording group: a clip can
+// carry both a sound alert and an object alert (a sound extending an
+// object-triggered recording), and the renderer/filter treat any group holding a
+// sound label as a Sound Alert. Merging them would hide the object alert from the
+// Object Alerts tab. Sound alerts therefore keep per-event grouping so each type
+// stays its own filterable, separately dismissible row. Alerts with no recording
+// fall back to per-event grouping, and alerts with neither stay individual.
+function alertIsSound(alert) {
+  return SOUND_CLASS_IDS.has(String(alert.label || '').trim().toLowerCase());
+}
+
 function groupAlertsByEvent(alerts) {
   const order = [];
   const groups = new Map();
   for (const alert of alerts) {
-    const key = alert.event_id !== null && alert.event_id !== undefined ? `event-${alert.event_id}` : `alert-${alert.id}`;
+    const key = !alertIsSound(alert) && alert.recording_id !== null && alert.recording_id !== undefined
+      ? `recording-${alert.recording_id}`
+      : alert.event_id !== null && alert.event_id !== undefined
+        ? `event-${alert.event_id}`
+        : `alert-${alert.id}`;
     if (!groups.has(key)) {
       order.push(key);
       groups.set(key, {

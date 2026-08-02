@@ -63,7 +63,26 @@ class AlertsMixin:
         except ValueError:
             return 0
         with self.connect() as db:
-            if kind == 'event':
+            if kind == 'recording':
+                # The alerts page groups object/motion alerts by recording_id (a
+                # continuous clip can span several events), so dismissing the group
+                # must clear every such alert tied to that recording, not just one
+                # event's. Sound alerts that share the recording are grouped and
+                # dismissed separately (by their own event), so exclude sound-source
+                # events here - otherwise dismissing the object row would silently
+                # clear the clip's still-visible sound alert too.
+                cursor = db.execute(
+                    """
+                    UPDATE alert_history SET dismissed = 1
+                    WHERE recording_id = ? AND dismissed = 0
+                      AND (
+                        event_id IS NULL
+                        OR event_id NOT IN (SELECT id FROM events WHERE source = 'sound')
+                      )
+                    """,
+                    (id_val,),
+                )
+            elif kind == 'event':
                 cursor = db.execute(
                     "UPDATE alert_history SET dismissed = 1 WHERE event_id = ? AND dismissed = 0",
                     (id_val,),
