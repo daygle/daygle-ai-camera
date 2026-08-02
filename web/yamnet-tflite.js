@@ -120,11 +120,19 @@ function cameraLabel(camera) {
 function renderOverall(status, enabledCameras) {
   const backend = status.backend || 'none';
   statusPanel.className = `status-panel yamnet-status-grid ${backendTone(backend)}`;
+  // Five short diagnostics sit in one responsive row (auto-fit grid). The
+  // full-width "Status Detail" note only renders when the backend is not in
+  // a healthy active state (or carries a diagnostic reason) -- a healthy
+  // panel doesn't need a whole row saying it's active.
+  const activeBackend = backend === 'yamnet' || backend === 'yamnet_tflite';
+  const detailNote = backendNote(backend, status.backend_reason);
   statusPanel.innerHTML = `
-    <div><span>Backend</span><strong>${escapeHtml(displayValue(backend, 'None'))}</strong></div>            <div><span>Running</span><strong>${escapeHtml(yesNo(status.running))}</strong></div>
-    <div><span>Detector Status</span><strong>${escapeHtml(displayValue(status.detector_status || status.state, 'Disabled'))}</strong></div>            <div><span>Sound Cameras</span><strong>${escapeHtml(enabledCameras.length)}</strong></div>
-    <div><span>Last Sound</span><strong>${escapeHtml(status.last_class_label || displayValue(status.last_class, 'None'))}</strong></div>            <div><span>Last Confidence</span><strong>${escapeHtml(percentValue(status.last_confidence))}</strong></div>
-    <div class="wide"><span>Status Detail</span><strong>${escapeHtml(backendNote(backend, status.backend_reason))}</strong></div>
+    <div><span>Backend</span><strong>${escapeHtml(displayValue(backend, 'None'))}</strong></div>
+    <div><span>Running</span><strong>${escapeHtml(yesNo(status.running))}</strong></div>
+    <div><span>Sound Cameras</span><strong>${escapeHtml(enabledCameras.length)}</strong></div>
+    <div><span>Last Sound</span><strong>${escapeHtml(status.last_class_label || displayValue(status.last_class, 'None'))}</strong></div>
+    <div><span>Last Confidence</span><strong>${escapeHtml(percentValue(status.last_confidence))}</strong></div>
+    ${(!activeBackend || status.backend_reason) ? `<div class="wide"><span>Status Detail</span><strong>${escapeHtml(detailNote)}</strong></div>` : ''}
   `;
 }
 

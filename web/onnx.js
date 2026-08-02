@@ -129,16 +129,18 @@ function renderStatus(status) {
   const rows = [
     safeHtml`<div><span>Current Backend</span><strong>${displayValue(status.current_backend || status.configured_backend, 'Not Set')}</strong></div>`,
     modelRow,
-    safeHtml`<div><span>Labels Path</span><strong>${status.labels_path || 'Not Set'}</strong></div>`,
     safeHtml`<div><span>Model Exists</span><strong>${yesNo(status.model_exists)}</strong></div>`,
     safeHtml`<div><span>ONNX Runtime Installed</span><strong>${yesNo(status.onnx_runtime_installed)}</strong></div>`,
     safeHtml`<div><span>Detector Loaded</span><strong>${yesNo(status.detector_loaded)}</strong></div>`,
-    safeHtml`<div><span>Active Config Source</span><strong>${displayValue(status.active_config_source, 'None')}</strong></div>`,
     safeHtml`<div><span>Mode</span><strong class="ai-mode ${String(status.mode || '').toLowerCase().replace(/\s+/g, '-')}">${displayValue(status.mode, 'None')}</strong></div>`,
     safeHtml`<div><span>Model Resolution</span><strong>${status.model_input_size || 'N/A'}</strong></div>`,
     safeHtml`<div><span>Precision</span><strong>${precisionText}</strong></div>`,
-    safeHtml`<div class="wide"><span>Last Detector Error</span><strong>${displayValue(status.last_detector_error, 'None')}</strong></div>`,
   ];
+  // Only surface the error row when there's an actual error -- a full-width
+  // "None" row just wastes space on an otherwise healthy panel.
+  if (status.last_detector_error) {
+    rows.push(safeHtml`<div class="wide"><span>Last Detector Error</span><strong>${status.last_detector_error}</strong></div>`);
+  }
   statusPanel.innerHTML = rows.join('');
 }
 

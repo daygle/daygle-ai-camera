@@ -732,11 +732,17 @@ input[type="file"] { padding: 10px; }
 .status-panel.status-ok { border: 1px solid rgba(73,230,163,.4); background: rgba(73,230,163,.07); border-radius: 10px; padding: 10px 14px; grid-template-columns: 1fr; }
 .status-panel.status-warning { border: 1px solid rgba(251,191,36,.4); background: rgba(251,191,36,.07); border-radius: 10px; padding: 10px 14px; grid-template-columns: 1fr; }
 .status-panel.status-error { border: 1px solid rgba(248,113,113,.4); background: rgba(248,113,113,.07); border-radius: 10px; padding: 10px 14px; grid-template-columns: 1fr; }
+/* YAMNet backend-status panel (yamnet-tflite.html #soundStatusPanel):
+   5 short diagnostics fit one responsive auto-fit row on desktop (the old
+   fixed 4-up grid no longer fits after the Detector Status trim), narrowing
+   gracefully as the card shrinks and dropping to 2-up on phones via the
+   rule below. The tone-variant selectors repeat at matching specificity so
+   they beat the generic .status-panel 1fr resets. */
 .yamnet-status-grid.status-panel,
 .yamnet-status-grid.status-panel.status-ok,
 .yamnet-status-grid.status-panel.status-warning,
 .yamnet-status-grid.status-panel.status-error {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 /* Playback-card details (recordings / dashboard / alerts / timeline): the
    shared .status-panel stays 2-up for the health/status panels on the
@@ -751,6 +757,19 @@ input[type="file"] { padding: 10px; }
 }
 @media (max-width: 400px) {
   #recordingDetails { grid-template-columns: 1fr; }
+}
+/* ONNX status panel (onnx.html #aiStatusPanel): the shared .status-panel
+   stays 2-up for the health/status panels on profile, settings and yamnet,
+   but the ONNX panel carries 8 short label/value diagnostics (plus an
+   occasional full-width error row), so it gets a 3-up grid on desktop,
+   2-up on tablets/phones and a single column on tiny screens. Scoped to
+   the #aiStatusPanel id so every other .status-panel keeps its layout. */
+#aiStatusPanel { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 900px) {
+  #aiStatusPanel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 400px) {
+  #aiStatusPanel { grid-template-columns: 1fr; }
 }
 .update-output { background: rgba(0,0,0,.4); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; font-size: 12px; line-height: 1.6; overflow-x: auto; white-space: pre-wrap; max-height: 320px; overflow-y: auto; margin-top: 12px; color: var(--muted); }
 .danger-zone-card {
@@ -4477,10 +4496,11 @@ a.activity-item-action {
   #soundCameraStatusList .rule-table tbody,
   #soundCameraStatusList .rule-table tr { min-width: 0; }
   #soundCameraStatusList .rule-table .cell-label { white-space: normal; }
-  /* The Backend Status grid keeps 4 columns via the `.status-ok/.warning/
-     .error` variants (specificity 0,3,0), which the general `.status-panel`
-     1fr reset can't override, so on phones the values wrap mid-word
-     ("YAM Net TFLi te"). Drop it to 2 columns here at matching specificity. */
+  /* The Backend Status grid keeps its multi-column layout via the
+     `.status-ok/.warning/.error` variants (specificity 0,3,0), which the
+     general `.status-panel` 1fr reset can't override, so on phones the
+     values wrap mid-word ("YAM Net TFLi te"). Drop it to 2 columns here at
+     matching specificity. */
   .yamnet-status-grid.status-panel,
   .yamnet-status-grid.status-panel.status-ok,
   .yamnet-status-grid.status-panel.status-warning,
