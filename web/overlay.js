@@ -316,7 +316,14 @@ function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
     ctx.strokeRect(dx, dy, dw, dh);
 
     const confidence = Math.round(Number(detection.confidence || 0) * 100);
-    const label = `${String(detection.label || 'object')} ${confidence}%`;
+    // Labels are stored lowercase (e.g. "person", "traffic light") for matching;
+    // title-case them for display so the overlay reads "Person 79%", consistent
+    // with the detection pills and label filter. Reuses the shared titleCase
+    // helper (utils.js loads before overlay.js on every page that draws the
+    // overlay), with a raw fallback if this file is ever used standalone.
+    const rawLabel = String(detection.label || 'object');
+    const displayLabel = typeof titleCase === 'function' ? titleCase(rawLabel) : rawLabel;
+    const label = `${displayLabel} ${confidence}%`;
     // measureText is cached per unique label string - it's the most expensive
     // per-frame canvas operation. Labels like "Person 85%" repeat across
     // frames, so we measure once and reuse.
