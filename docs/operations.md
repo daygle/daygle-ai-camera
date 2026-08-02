@@ -43,6 +43,7 @@ Open **YAMNet TFLite** (`/yamnet-tflite`) to confirm whether the sound detection
 
 - Application logs are written to `data/logs/app.log` with rotation.
 - SQLite backups can be downloaded from **Settings** → **Database**.
+- **Settings** → **Database** → **Download Full Backup** produces a zip with the database, recordings, and snapshots. The database-only backup does **not** contain video; back up the `recordings/` and `snapshots/` directories separately (or use the full backup) if you need the media itself.
 - Restores create a safety backup of the current database before replacing it.
 
 ## Update checks

@@ -37,6 +37,7 @@ from app.config_facades import (
 )
 from app.database import AUDIT_LOG_IMMUTABLE_TRIGGERS
 from app.recording_extension import delete_recording_files
+from app.media_utils import safe_storage_path
 from app.utils import normalize_bool_setting
 
 logger = logging.getLogger('daygle.ai')
@@ -114,6 +115,182 @@ def create_database_backup(prefix: str = 'daygle-database') -> Path:
         backup_path.unlink(missing_ok=True)
         raise
     return backup_path
+
+
+def _snapshot_database_file(destination: Path) -> None:
+    """Copy the live database to *destination* via SQLite's online backup API.
+
+    ``source.backup()`` produces a by-construction consistent page-by-page copy
+    even while the live connection is mid-write (WAL frames are folded in), so
+    the archived database never captures a torn state -- the same mechanism the
+    database-only backup relies on.
+    """
+    source = sqlite3.connect(str(_state.database.database_path))
+    try:
+        target = sqlite3.connect(str(destination))
+        try:
+            source.backup(target)
+        finally:
+            target.close()
+    finally:
+        source.close()
+    # Mirror create_database_backup's verification: the online-backup API is
+    # by-construction consistent, but confirming the page tree on the copy
+    # catches torn storage before an archive is served as "valid".
+    verify = sqlite3.connect(str(destination))
+    try:
+        integrity = verify.execute('PRAGMA integrity_check').fetchone()
+        if not integrity or str(integrity[0]).lower() != 'ok':
+            offending = '<none>' if not integrity else str(integrity[0])
+            raise RuntimeError(f'Full backup database snapshot failed integrity check ({offending})')
+    finally:
+        verify.close()
+
+
+def _archive_directory(
+    archive,
+    source_root: Path,
+    arc_prefix: str,
+    *,
+    excluded_abs: set[str],
+    excluded_names: frozenset[str],
+) -> dict[str, int]:
+    """Zip *source_root* into *archive* under ``arc_prefix/``.
+
+    Symlinks at any depth are skipped rather than followed, so a planted link
+    cannot pull external files into the archive. Directories in
+    ``excluded_names`` (rolling ingest state, the backups dir) and any path in
+    ``excluded_abs`` (the live database, the archive itself) are pruned. Media
+    is already compressed, so files >= 1 MiB are stored verbatim instead of
+    re-deflating gigabytes of video.
+    """
+    import os
+    import zipfile
+
+    manifest_section = {'files': 0, 'bytes': 0}
+    if not source_root.exists():
+        return manifest_section
+    for dirpath, dirnames, filenames in os.walk(source_root, followlinks=False):
+        current = Path(dirpath)
+        kept: list[str] = []
+        for name in dirnames:
+            child = current / name
+            if (
+                name in excluded_names
+                or child.is_symlink()
+                or str(child.resolve(strict=False)) in excluded_abs
+            ):
+                continue
+            kept.append(name)
+        dirnames[:] = kept
+        for name in filenames:
+            child = current / name
+            if child.is_symlink():
+                continue
+            try:
+                rel = child.relative_to(source_root)
+            except ValueError:
+                continue
+            arcname = f'{arc_prefix}/{rel.as_posix()}'
+            try:
+                size = child.stat().st_size
+            except OSError:
+                continue
+            if size < 1024 * 1024:
+                archive.write(child, arcname, compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
+            else:
+                archive.write(child, arcname, compress_type=zipfile.ZIP_STORED)
+            manifest_section['files'] += 1
+            manifest_section['bytes'] += size
+    return manifest_section
+
+
+def create_full_backup(prefix: str = 'daygle-full') -> Path:
+    """Create a downloadable zip containing the database, recordings, and snapshots.
+
+    The archive is intentionally a zip (openable on Windows and Linux without
+    extra tooling) and contains:
+
+    * ``database/<name>.sqlite3`` - a consistent online-backup snapshot of the
+      live database (metadata, settings, users, recording rows).
+    * ``recordings/`` - final event + continuous clips (the rolling
+      ``.prebuffer`` / ``.frames`` / ``.audio`` ingest state is EXCLUDED - it
+      is regenerated continuously and would only bloat the archive).
+    * ``snapshots/`` - saved event snapshots.
+    * ``manifest.json`` - format marker, timestamp, and per-section file
+      counts/sizes for restore-time verification.
+
+    Returns the archive path; the caller is responsible for deleting it once
+    served. The temporary database snapshot is always cleaned up here.
+    """
+    import json
+    import zipfile
+
+    storage_config = effective_storage_config()
+
+    def resolve_root(key: str) -> Path:
+        raw = storage_config.get(key)
+        root = Path(str(raw)).expanduser() if raw else Path.cwd()
+        if not root.is_absolute():
+            root = Path.cwd() / root
+        return root.resolve(strict=False)
+
+    recordings_root = resolve_root('recordings_dir')
+    snapshots_root = resolve_root('snapshots_dir')
+    archive_path = backup_directory() / f'{prefix}-{safe_backup_timestamp()}-{secrets.token_hex(4)}.zip'
+    db_filename = Path(str(_state.database.database_path)).name
+    db_snapshot = Path(str(_state.database.database_path)).parent / f'.full-backup-{secrets.token_hex(4)}.sqlite3'
+    excluded_abs = {
+        str(Path(str(_state.database.database_path)).resolve(strict=False)),
+        str(archive_path.resolve(strict=False)),
+        str(db_snapshot.resolve(strict=False)),
+    }
+    excluded_names = frozenset({'.prebuffer', '.frames', '.audio', 'backups'})
+    try:
+        _snapshot_database_file(db_snapshot)
+        included: dict[str, Any] = {}
+        with zipfile.ZipFile(archive_path, 'w', allowZip64=True) as archive:
+            try:
+                db_size = db_snapshot.stat().st_size
+            except OSError:
+                db_size = 0
+            archive.write(db_snapshot, f'database/{db_filename}', compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
+            included['database'] = {'files': 1, 'bytes': db_size}
+            included['recordings'] = _archive_directory(
+                archive, recordings_root, 'recordings',
+                excluded_abs=excluded_abs, excluded_names=excluded_names,
+            )
+            included['snapshots'] = _archive_directory(
+                archive, snapshots_root, 'snapshots',
+                excluded_abs=excluded_abs, excluded_names=excluded_names,
+            )
+            manifest = {
+                'format': 'daygle-full-backup',
+                'version': 1,
+                'created_at': datetime.now(timezone.utc).isoformat(),
+                'database_filename': db_filename,
+                'storage': {
+                    'data_dir': str(storage_config.get('data_dir') or ''),
+                    # Resolved absolute roots: the database's ``file_path``
+                    # values are absolute, so record the same form to let a
+                    # future restore remap them accurately.
+                    'recordings_dir': str(recordings_root),
+                    'snapshots_dir': str(snapshots_root),
+                    'database': str(Path(str(_state.database.database_path)).resolve(strict=False)),
+                },
+                'included': included,
+            }
+            archive.writestr(
+                'manifest.json',
+                json.dumps(manifest, indent=2, sort_keys=True),
+                compress_type=zipfile.ZIP_DEFLATED,
+            )
+    except BaseException:
+        archive_path.unlink(missing_ok=True)
+        raise
+    finally:
+        db_snapshot.unlink(missing_ok=True)
+    return archive_path
 
 
 def validate_restore_database(path: Path) -> None:
@@ -273,8 +450,8 @@ def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:
     bytes_deleted = 0
     files_deleted = 0
     for recording in purged:
-        file_path = Path(str(recording.get('file_path') or ''))
-        if file_path.exists() and file_path.is_file():
+        file_path = safe_storage_path(recording.get('file_path'), roots=('recordings_dir',))
+        if file_path is not None and file_path.exists() and file_path.is_file():
             bytes_deleted += file_path.stat().st_size
             files_deleted += 1
     delete_recording_files(purged)

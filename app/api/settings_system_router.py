@@ -37,6 +37,7 @@ from app.request_helpers import write_audit_log
 from app.backup import (
     DATABASE_RESTORE_LOCK,
     create_database_backup,
+    create_full_backup,
     overwrite_database_from_file,
     refresh_runtime_after_database_restore,
     validate_restore_database,
@@ -72,6 +73,20 @@ def backup_database(request: Request, db=Depends(get_database)):
     backup_path = create_database_backup()
     write_audit_log(request, db, 'backup', 'database', details={'filename': backup_path.name})
     return FileResponse(backup_path, media_type='application/vnd.sqlite3', filename=backup_path.name, headers={'Cache-Control': 'no-store'}, background=BackgroundTask(backup_path.unlink, missing_ok=True))
+
+
+@router.get('/api/settings/system/database/backup/full')
+def backup_database_full(request: Request, db=Depends(get_database)):
+    require_admin(request)
+    backup_path = create_full_backup()
+    write_audit_log(request, db, 'backup', 'database.full', details={'filename': backup_path.name})
+    return FileResponse(
+        backup_path,
+        media_type='application/zip',
+        filename=backup_path.name,
+        headers={'Cache-Control': 'no-store'},
+        background=BackgroundTask(backup_path.unlink, missing_ok=True),
+    )
 
 
 @router.post('/api/settings/system/database/restore')

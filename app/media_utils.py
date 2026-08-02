@@ -27,6 +27,81 @@ from typing import Any
 
 from app.utils import _parse_iso_datetime
 
+
+def _storage_roots(keys: tuple[str, ...]) -> tuple[Path, ...]:
+    """Resolve configured media roots used to validate persisted file paths."""
+    # Import lazily to avoid making this low-level ffmpeg helper participate in
+    # the config-facade import graph during application bootstrap.
+    from app.config_facades import effective_storage_config
+
+    config = effective_storage_config()
+    roots: list[Path] = []
+    for key in keys:
+        raw = config.get(key)
+        if not raw:
+            continue
+        root = Path(str(raw)).expanduser()
+        if not root.is_absolute():
+            root = Path.cwd() / root
+        roots.append(root.resolve(strict=False))
+    return tuple(roots)
+
+
+def safe_storage_path(
+    raw_path: Any,
+    *,
+    roots: tuple[str, ...] = ('recordings_dir',),
+) -> Path | None:
+    """Return a persisted media path only when it stays inside configured roots.
+
+    Recording metadata can be restored from an uploaded SQLite backup, so
+    ``file_path`` and ``thumbnail_path`` are untrusted data. Never serve or
+    unlink a path outside the configured media directories. Existing symlinks
+    are rejected rather than followed; ``resolve(strict=False)`` also catches
+    ``..`` traversal and symlinked parent directories that resolve elsewhere.
+    """
+    text = str(raw_path or '').strip()
+    if not text:
+        return None
+    candidate = Path(text).expanduser()
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    candidate = candidate.absolute()
+    try:
+        resolved = candidate.resolve(strict=False)
+    except OSError:
+        return None
+    for configured_root in _storage_roots(roots):
+        root = Path(configured_root).expanduser().absolute()
+        try:
+            # Require the stored spelling to be below the configured root as
+            # well as the resolved path. This rejects ``root/../secret``
+            # instead of accepting a path that happens to resolve back inside.
+            candidate.relative_to(root)
+            resolved.relative_to(root.resolve(strict=False))
+        except (ValueError, OSError):
+            continue
+        # Reject symlinks in every component below the configured root. Merely
+        # resolving the final path is not enough: a restored path such as
+        # ``recordings/camera-link/clip.mp4`` could otherwise follow a planted
+        # symlinked directory. The configured root itself is the trust anchor;
+        # a symlink root does not match the lexical check above.
+        current = candidate
+        has_symlink = False
+        while current != root and current != current.parent:
+            try:
+                if current.is_symlink():
+                    has_symlink = True
+                    break
+            except OSError:
+                has_symlink = True
+                break
+            current = current.parent
+        if has_symlink or resolved == root.resolve(strict=False):
+            continue
+        return resolved
+    return None
+
 logger = logging.getLogger('daygle.ai')
 
 ONE_PIXEL_PNG = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82'

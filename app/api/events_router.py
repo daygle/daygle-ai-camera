@@ -3,13 +3,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.auth_gates import require_admin
 from app.deps import get_database
 from app.request_helpers import write_audit_log
+from app.media_utils import safe_storage_path
 
 router = APIRouter()
 
@@ -40,11 +39,10 @@ def delete_event(event_id: int, request: Request, db=Depends(get_database)):
     event = db.delete_event(event_id)
     if event is None:
         raise HTTPException(status_code=404, detail='Event not found')
-    snapshot_path = event.get('snapshot_path')
-    if snapshot_path:
-        snapshot = Path(snapshot_path)
-        if snapshot.exists() and snapshot.is_file():
-            snapshot.unlink(missing_ok=True)
+    for artifact_value in (event.get('snapshot_path'), event.get('thumbnail_path')):
+        artifact = safe_storage_path(artifact_value, roots=('snapshots_dir',))
+        if artifact is not None and artifact.exists() and artifact.is_file():
+            artifact.unlink(missing_ok=True)
     write_audit_log(request, db, 'delete', 'event', event_id)
     return {'ok': True}
 

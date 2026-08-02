@@ -77,7 +77,6 @@ import logging
 import threading
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -90,6 +89,7 @@ from app.config_facades import (
 )
 from app.email_alerts import EmailAlertService, EmailAlertError
 from app.live_snapshot import render_live_snapshot_jpeg_overlay
+from app.media_utils import safe_storage_path
 from app.push_notifications import PushNotificationService, PushNotificationError
 
 logger = logging.getLogger('daygle.ai')
@@ -272,8 +272,8 @@ def deliver_email_alerts(
     snapshot_path = str(event.get('snapshot_path') or '')
     if any_email_enabled and snapshot_path:
         try:
-            snap_path = Path(snapshot_path)
-            if snap_path.exists():
+            snap_path = safe_storage_path(snapshot_path, roots=('snapshots_dir',))
+            if snap_path is not None and snap_path.exists():
                 raw_bytes = snap_path.read_bytes()
                 db_detections = event.get('detections') or []
                 _email_min_conf = compute_minimum_rule_confidence()

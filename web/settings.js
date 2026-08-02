@@ -364,6 +364,14 @@ document.getElementById('purgeRecordingsBtn').addEventListener('click', guard(as
 }));
 
 
+const fullBackupLink = document.getElementById('fullBackupLink');
+fullBackupLink?.addEventListener('click', () => {
+  // Full backups zip the database plus every recording/snapshot file, so they
+  // can take a while to assemble on large libraries. Keep the user informed
+  // while the browser waits for the archive to be generated.
+  setMessage('Generating full backup (database + recordings + snapshots)...');
+});
+
 forms.databaseRestore.addEventListener('submit', guard(async (event) => {
   event.preventDefault();
   if (!window.confirm('Restore this database backup? This will replace current events, users, settings, alert rules, and sessions.')) return;

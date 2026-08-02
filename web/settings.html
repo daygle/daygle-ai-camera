@@ -335,7 +335,7 @@
         <div class="settings-section-icon" aria-hidden="true">💾</div>
         <div>
           <h2>Database Backup &amp; Restore</h2>
-          <p class="settings-section-subtitle">Download a snapshot of your database or restore from a previous backup. A safety backup is automatically created before every restore.</p>
+          <p class="settings-section-subtitle">Download your database, a full backup that also includes recordings and snapshots, or restore from a previous backup. A safety backup is automatically created before every restore.</p>
         </div>
       </div>
       <form id="databaseRestoreForm" class="form-grid">
@@ -346,6 +346,7 @@
       <div class="button-row">
         <button class="btn-info daygle-icon-button" type="submit" form="databaseRestoreForm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg>Restore Database</button>
         <a class="button-link daygle-icon-button" href="/api/settings/system/database/backup"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>Download Database Backup</a>
+        <a id="fullBackupLink" class="button-link daygle-icon-button" href="/api/settings/system/database/backup/full"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>Download Full Backup</a>
       </div>
     </section>
 

@@ -6,8 +6,6 @@ from __future__ import annotations
 import mimetypes
 import re
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
@@ -15,7 +13,7 @@ from app.auth_gates import require_admin, require_user
 from app.camera_config import normalize_camera_id
 from app.config_facades import effective_cameras_config, effective_recording_config
 from app.deps import get_database
-from app.media_utils import mp4_has_video_stream, recording_stream_path
+from app.media_utils import mp4_has_video_stream, recording_stream_path, safe_storage_path
 from app.recording_extension import load_recording_detection_track, recording_track_sidecar_path
 from app.request_helpers import write_audit_log
 from app.utils import camera_default_name
@@ -165,11 +163,11 @@ def recording_detail(request: Request, recording_id: int, db=Depends(get_databas
         owner_id = recording.get('owner_user_id')
         if owner_id is not None and int(owner_id) != int(request_user.get('id') or 0):
             raise HTTPException(status_code=404, detail='Recording not found')
-    file_path = Path(str(recording.get('file_path') or ''))
-    recording['track'] = load_recording_detection_track(file_path)
+    file_path = safe_storage_path(recording.get('file_path'), roots=('recordings_dir',))
+    recording['track'] = load_recording_detection_track(file_path) if file_path is not None else None
     if (
-        recording['track'] is None
-        and str(file_path)
+        file_path is not None
+        and recording['track'] is None
         and file_path.exists()
         and not recording_track_sidecar_path(file_path).exists()
     ):
@@ -197,8 +195,8 @@ def stream_recording(recording_id: int, request: Request, db=Depends(get_databas
         owner_id = recording.get('owner_user_id')
         if owner_id is not None and int(owner_id) != int(request_user.get('id') or 0):
             raise HTTPException(status_code=404, detail='Recording not found')
-    file_path = Path(recording['file_path'])
-    if not file_path.exists() or not file_path.is_file():
+    file_path = safe_storage_path(recording.get('file_path'), roots=('recordings_dir',))
+    if file_path is None or not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail='Recording media file not found')
 
     stream_path = recording_stream_path(file_path)
@@ -283,8 +281,8 @@ def download_recording(request: Request, recording_id: int, db=Depends(get_datab
         owner_id = recording.get('owner_user_id')
         if owner_id is not None and int(owner_id) != int(request_user.get('id') or 0):
             raise HTTPException(status_code=404, detail='Recording not found')
-    file_path = Path(recording['file_path'])
-    if not file_path.exists() or not file_path.is_file():
+    file_path = safe_storage_path(recording.get('file_path'), roots=('recordings_dir',))
+    if file_path is None or not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail='Recording media file not found')
     stream_path = recording_stream_path(file_path)
     if not stream_path.exists() or not mp4_has_video_stream(stream_path):

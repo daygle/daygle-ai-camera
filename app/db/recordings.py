@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 
 from app.detection_status import GENERIC_TRIGGER_LABELS
+from app.media_utils import safe_storage_path
 from app.utils import _normalize_iso_to_utc
 
 
@@ -401,8 +401,8 @@ class RecordingsMixin:
                 if not file_path:
                     incomplete.append(dict(row))
                     continue
-                path = Path(str(file_path))
-                if not (path.exists() and path.stat().st_size > 0):
+                path = safe_storage_path(file_path, roots=('recordings_dir',))
+                if path is None or not (path.exists() and path.is_file() and path.stat().st_size > 0):
                     incomplete.append(dict(row))
             if incomplete:
                 ids = [int(r["id"]) for r in incomplete]
@@ -466,7 +466,10 @@ class RecordingsMixin:
                 existing_with_sizes: list[tuple[dict[str, Any], int]] = []
                 for row in candidates:
                     try:
-                        existing_with_sizes.append((row, Path(str(row["file_path"])).stat().st_size))
+                        path = safe_storage_path(row.get("file_path"), roots=('recordings_dir',))
+                        if path is None:
+                            raise OSError('recording path is outside configured storage')
+                        existing_with_sizes.append((row, path.stat().st_size))
                     except OSError:
                         if str(row.get("created_at") or "") < bound_grace_cutoff:
                             purge_ids.add(int(row["id"]))
@@ -485,8 +488,13 @@ class RecordingsMixin:
 
     def _recording_row(self, row: sqlite3.Row) -> dict[str, Any]:
         recording = dict(row)
-        file_path = Path(str(recording.get("file_path") or ""))
-        recording["media_ready"] = file_path.exists() and file_path.is_file() and file_path.stat().st_size > 0
+        file_path = safe_storage_path(recording.get("file_path"), roots=('recordings_dir',))
+        recording["media_ready"] = (
+            file_path is not None
+            and file_path.exists()
+            and file_path.is_file()
+            and file_path.stat().st_size > 0
+        )
         return recording
 
     def _recording_with_event(self, db: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:

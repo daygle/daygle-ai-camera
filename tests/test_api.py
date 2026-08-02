@@ -2315,6 +2315,47 @@ def test_admin_can_backup_and_restore_database_from_api(tmp_path, monkeypatch):
         server.should_exit = True
         thread.join(timeout=5)
 
+def test_admin_can_download_full_backup_from_api(tmp_path, monkeypatch):
+    """The full backup endpoint returns a zip containing the database snapshot,
+    the recordings directory, and the snapshots directory - and the generated
+    archive is cleaned up after the download completes."""
+    import io
+    import zipfile
+
+    app, database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        _login(client)
+
+        clip = main.storage.recordings_dir / 'clip.mp4'
+        clip.parent.mkdir(parents=True, exist_ok=True)
+        clip.write_bytes(b'video-bytes')
+        main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'test.png')
+
+        status, _headers, body = client.request(
+            '/api/settings/system/database/backup/full', timeout=30,
+        )
+        assert status == 200, 'full backup endpoint must be admin-gated and reachable'
+        assert isinstance(body, bytes)
+        with zipfile.ZipFile(io.BytesIO(body)) as archive:
+            names = set(archive.namelist())
+            assert 'manifest.json' in names
+            assert 'recordings/clip.mp4' in names
+            assert any(n.startswith('database/') and n.endswith('.sqlite3') for n in names)
+
+        # The server-side archive is deleted once the download completes.
+        backups_dir = Path(database_path).parent / 'backups'
+        deadline = time.time() + 10
+        while time.time() < deadline and list(backups_dir.glob('daygle-full-*.zip')):
+            time.sleep(0.05)
+        assert list(backups_dir.glob('daygle-full-*.zip')) == []
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
 
 def test_recording_table_creation(tmp_path):
     from app.database import EventDatabase

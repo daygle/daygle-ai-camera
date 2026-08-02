@@ -119,7 +119,7 @@ from app.detection_status import (
     detection_label_confidences,
     detection_label_strings,
 )
-from app.media_utils import recording_playback_sidecar_path
+from app.media_utils import recording_playback_sidecar_path, safe_storage_path
 
 logger = logging.getLogger('daygle.ai')
 
@@ -301,12 +301,17 @@ def _recording_capture_window(recording: dict[str, Any]) -> tuple[float, float] 
 
 
 def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
+    """Delete recording media only when paths stay inside configured storage.
+
+    Recording rows can come from a restored SQLite backup and are therefore
+    untrusted. Invalid/out-of-tree paths are deliberately skipped rather than
+    allowing retention or an admin delete to unlink arbitrary host files.
+    """
     for recording in recordings:
-        raw_file_path = str(recording.get('file_path') or '')
-        file_path = Path(raw_file_path)
-        if file_path.exists() and file_path.is_file():
-            file_path.unlink(missing_ok=True)
-        if raw_file_path:
+        file_path = safe_storage_path(recording.get('file_path'), roots=('recordings_dir',))
+        if file_path is not None:
+            if file_path.exists() and file_path.is_file():
+                file_path.unlink(missing_ok=True)
             playback_paths = [
                 recording_playback_sidecar_path(file_path),
                 recording_track_sidecar_path(file_path),
@@ -319,11 +324,9 @@ def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
             for playback_path in playback_paths:
                 if playback_path.exists() and playback_path.is_file():
                     playback_path.unlink(missing_ok=True)
-        thumbnail_path = recording.get('thumbnail_path')
-        if thumbnail_path:
-            thumbnail = Path(str(thumbnail_path))
-            if thumbnail.exists() and thumbnail.is_file():
-                thumbnail.unlink(missing_ok=True)
+        thumbnail = safe_storage_path(recording.get('thumbnail_path'), roots=('snapshots_dir',))
+        if thumbnail is not None and thumbnail.exists() and thumbnail.is_file():
+            thumbnail.unlink(missing_ok=True)
 
 
 def _safe_rmtree_no_follow(target: Path) -> int:
