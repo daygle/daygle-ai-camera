@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
-import app.state as _state
 from app.auth_gates import require_user
 from app.config_facades import get_camera_config
 from app.deps import get_recording_service

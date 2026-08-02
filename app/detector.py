@@ -648,7 +648,7 @@ class OnnxYoloDetector:
             return dims[0] == 6
         if len(dims) != 2:
             return None
-        lo, hi = min(dims), max(dims)
+        hi = max(dims)
         # NMS-free heads emit ``[N, 6]``: the 6-feature row is the LAST
         # axis. A grid head always emits ``[4+nc, anchors]`` with the anchor
         # count last, so requiring ``dims[-1] == 6`` (rather than merely

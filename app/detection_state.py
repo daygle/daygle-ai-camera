@@ -226,7 +226,7 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
                 logger.warning('Motion gate unavailable for camera %s: %s; failing open', camera_id, exc)
                 _state._frame_motion_error_cameras.add(camera_id)
         return (True, _MOTION_FAIL_OPEN_CONFIDENCE, None)
-    except Exception as exc:
+    except Exception:
         with _state._frame_motion_lock:
             if camera_id not in _state._frame_motion_error_cameras:
                 logger.exception('Unexpected motion gate failure for camera %s; failing open', camera_id)
