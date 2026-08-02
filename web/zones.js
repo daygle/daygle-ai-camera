@@ -676,7 +676,7 @@ document.getElementById('addZoneBtnHeader')?.addEventListener('click', toggleDra
 
 liveEls.fullFrameZoneBtn?.addEventListener('click', () => {
   addFullFrameZone();
-  liveEls.status.textContent = 'Full-frame zone added — click Save Zones to apply.';
+  liveEls.status.textContent = 'Full-frame zone added - click Save Zones to apply.';
 });
 
 let hasUnsavedZoneChanges = false;
@@ -686,7 +686,7 @@ function markZoneUnsaved() {
   hasUnsavedZoneChanges = true;
   const btn = document.getElementById('saveZonesBtnHeader');
   if (btn) btn.style.display = '';
-  liveEls.status.textContent = 'Unsaved changes — click Save Zones to apply.';
+  liveEls.status.textContent = 'Unsaved changes - click Save Zones to apply.';
   liveEls.status.classList.add('has-unsaved');
 }
 

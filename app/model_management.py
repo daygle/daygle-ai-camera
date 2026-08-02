@@ -542,7 +542,7 @@ def auto_download_default_model() -> None:
     in a background thread so the server can finish starting while the
     ~5 MB export + Ultralytics weight download happens.
 
-    Failures are logged at WARNING level and intentionally swallowed —
+    Failures are logged at WARNING level and intentionally swallowed -
     a clean-install host that lacks network or is missing export
     dependencies still starts normally, just without detection.
     """
@@ -560,7 +560,7 @@ def auto_download_default_model() -> None:
     def _background_download() -> None:
         try:
             logger.info(
-                'No ONNX model found — auto-downloading %s (first install).',
+                'No ONNX model found - auto-downloading %s (first install).',
                 info['label'],
             )
             _do_download_model(_DEFAULT_MODEL, switch_active=True, imgsz=info.get('input_size', 640))

@@ -9,6 +9,7 @@ const liveEls = {
   streamDetailBackend: document.getElementById('streamDetailBackend'),
   streamDetailResolution: document.getElementById('streamDetailResolution'),
   streamDetailFps: document.getElementById('streamDetailFps'),
+  streamDetailFpsLive: document.getElementById('streamDetailFpsLive'),
   streamDetailSource: document.getElementById('streamDetailSource'),
   detectionSubtitle: document.getElementById('liveDetectionSubtitle'),
   detectionStatus: document.getElementById('liveDetectionStatus'),
@@ -241,11 +242,20 @@ function renderCameraGridFrames() {
   });
 }
 
+// True when the backend reports a live measured source rate (source
+// 'detected') for this camera. Configured and fallback values are static
+// metadata, so they render without the live pulse indicator.
+function cameraFpsIsLive(camera) {
+  const runtime = cameraRuntimeFps[camera?.id];
+  const detectedFps = Number(runtime?.detected);
+  return runtime?.source === 'detected' && Number.isFinite(detectedFps) && detectedFps > 0;
+}
+
 function cameraDisplayFps(camera) {
   const runtime = cameraRuntimeFps[camera?.id];
   const runtimeSource = runtime?.source;
   const detectedFps = Number(runtime?.detected);
-  if (runtimeSource === 'detected' && Number.isFinite(detectedFps) && detectedFps > 0) return detectedFps;
+  if (cameraFpsIsLive(camera)) return detectedFps;
   if (runtimeSource === 'configured') {
     const configuredFps = Number(runtime?.configured);
     if (Number.isFinite(configuredFps) && configuredFps > 0) return configuredFps;
@@ -259,8 +269,15 @@ function cameraDisplayFps(camera) {
 
 function formatCameraFps(camera) {
   const fps = cameraDisplayFps(camera);
-  if (fps != null) return `${fps} fps`;
-  return cameraRuntimeFps[camera?.id] ? 'Detecting FPS…' : 'FPS unavailable';
+  if (fps == null) {
+    return cameraRuntimeFps[camera?.id] ? 'Detecting FPS…' : 'FPS unavailable';
+  }
+  // A measured source rate is often fractional (e.g. 24.967 from ffprobe),
+  // so pin it to one decimal - the trailing digit keeps a measured reading
+  // visually distinct from a whole-number configured rate. Configured rates
+  // are integers set by the operator, so they render as-is.
+  if (cameraFpsIsLive(camera)) return `${fps.toFixed(1)} fps`;
+  return `${Math.round(fps)} fps`;
 }
 
 function renderCameraGrid() {
@@ -312,6 +329,11 @@ function updateFrameHeader(camera) {
   if (liveEls.streamDetailBackend) liveEls.streamDetailBackend.textContent = backend;
   if (liveEls.streamDetailResolution) liveEls.streamDetailResolution.textContent = res;
   if (liveEls.streamDetailFps) liveEls.streamDetailFps.textContent = fps;
+  // Toggle the live-measured pulse indicator: visible only while the backend
+  // reports a detected source rate, so a static configured value stays calm.
+  const fpsIsLive = cameraFpsIsLive(camera);
+  if (liveEls.streamDetailFps) liveEls.streamDetailFps.classList.toggle('fps-live', fpsIsLive);
+  if (liveEls.streamDetailFpsLive) liveEls.streamDetailFpsLive.hidden = !fpsIsLive;
   if (liveEls.streamDetailSource) liveEls.streamDetailSource.textContent = source;
 }
 
@@ -643,6 +665,10 @@ liveEls.frame.addEventListener('load', () => {
 liveEls.frame.addEventListener('error', () => {
   liveEls.frame.dataset.loading = 'false';
   clearLiveOverlay();
+  // The stream is gone, so any measured-FPS pulse is stale: hide the Live
+  // indicator and drop the pulsing class until the next good status poll.
+  if (liveEls.streamDetailFps) liveEls.streamDetailFps.classList.remove('fps-live');
+  if (liveEls.streamDetailFpsLive) liveEls.streamDetailFpsLive.hidden = true;
   const streamLabel = liveStreamSource === 'recording' ? 'Recording stream' : '';
   liveEls.status.textContent = selectedCamera?.name
     ? `${selectedCamera.name} - ${streamLabel || 'Unable to load live footage'}. Retrying...`

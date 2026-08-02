@@ -917,8 +917,8 @@ function formatUserClock(seconds) {
 // ─── Unified camera label helper ─────────────────────────────────────────
 // Shared by the dashboard (app.js), recordings list (recordings.js), and
 // timeline (timeline.js). Handles both calling conventions:
-//   cameraLabel(recording)              — extract name from recording/event object
-//   cameraLabel(cameraName, cameraId)   — two-argument string form
+//   cameraLabel(recording)              - extract name from recording/event object
+//   cameraLabel(cameraName, cameraId)   - two-argument string form
 function cameraLabel(cameraNameOrRecording, cameraId) {
   // Object-style: cameraLabel(recording) or cameraLabel(cameraConfig)
   if (cameraNameOrRecording && typeof cameraNameOrRecording === 'object') {

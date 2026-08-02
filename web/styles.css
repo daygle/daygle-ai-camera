@@ -1835,54 +1835,104 @@ tr.drag-over {
   cursor: grab;
 }
 .cameras-table .cell-camera {
-  min-width: 140px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  min-width: 220px;
+  display: table-cell;
+  position: relative;
+  padding-right: 88px;
 }
 .cameras-table .cell-camera .cam-info {
   flex: 1;
   min-width: 0;
 }
 .cameras-table .cell-camera .cam-name {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.cameras-table .cell-camera .cam-name {
-  font-weight: 800;
   color: var(--text);
-  display: block;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -.01em;
 }
 .cameras-table .cell-camera .cam-id {
-  font-size: 11px;
+  display: block;
+  margin-top: 4px;
   color: var(--muted);
-  margin-top: 1px;
-  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: .02em;
 }
-.cameras-table .cell-camera .cam-resolution {
+.cameras-table .cell-connection { min-width: 230px; }
+.cameras-table .cell-video { min-width: 160px; }
+.cameras-table .cell-state { min-width: 150px; }
+.cameras-table .cell-ptz { min-width: 110px; }
+.cameras-table .cell-connection,
+.cameras-table .cell-video,
+.cameras-table .cell-state { display: table-cell; }
+.camera-backend-chip {
+  display: inline-flex;
+  padding: 5px 8px !important;
+  font-size: 10px !important;
+  letter-spacing: .04em;
+}
+.camera-endpoint,
+.cell-video > span,
+.camera-enabled-label {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
   font-size: 11px;
-  color: var(--accent);
-  margin-top: 2px;
-  display: block;
-  font-weight: 700;
+  line-height: 1.35;
 }
+.camera-endpoint {
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.cell-video strong { display: block; color: var(--text); font-size: 14px; }
+.camera-status-pill,
+.camera-feature-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 9px;
+  color: var(--muted);
+  background: rgba(255,255,255,.035);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.camera-status-online { color: var(--success); border-color: rgba(73,230,163,.28); background: rgba(73,230,163,.08); }
+.camera-status-offline { color: var(--danger); border-color: rgba(255,92,138,.28); background: rgba(255,92,138,.08); }
+.camera-status-disabled { color: var(--muted); }
+.camera-status-checking { color: #f8c55d; border-color: rgba(248,197,93,.28); background: rgba(248,197,93,.07); }
+.camera-feature-pill.is-ready { color: var(--accent); border-color: rgba(71,214,255,.3); background: rgba(71,214,255,.08); }
 .cameras-table .cell-center {
   text-align: center;
 }
 .cameras-table .cell-actions {
+  position: absolute;
+  top: 50%;
+  right: 16px;
   display: flex;
   align-items: center;
   gap: 6px;
+  transform: translateY(-50%);
   flex-shrink: 0;
 }
 .cameras-table .cell-actions button,
 .cameras-table .cell-actions a {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
   gap: 4px;
-  padding: 5px 8px;
+  padding: 0;
   border-radius: 8px;
   font-size: 12px;
   line-height: 1;
@@ -1912,20 +1962,14 @@ tr.drag-over {
   background: var(--danger);
   box-shadow: 0 0 0 2px rgba(255, 92, 138, 0.22);
 }
+.cameras-table .health-dot.checking {
+  background: #f8c55d;
+  box-shadow: 0 0 0 2px rgba(248,197,93,.2);
+}
 .cameras-table .chip {
   font-size: 11px;
   padding: 4px 8px;
 }
-.cameras-table .cell-zones {
-  white-space: nowrap;
-}
-.cameras-table .cell-zones .chip + .chip {
-  margin-left: 4px;
-}
-.cameras-table .cell-health {
-  white-space: nowrap;
-}
-
 .cameras-table tbody tr.dragging {
   opacity: 0.4;
 }
@@ -1946,7 +1990,7 @@ tr.drag-over {
   .cameras-table .cell-actions button {
     padding: 5px;
   }
-  /* The cameras table's ~7 columns give it a ~700px min-content width, and
+  /* The cameras table's six camera-focused columns give it a ~820px min-content width, and
      `.cameras-table-wrap` already scrolls it horizontally via overflow-x.
      But grid items default to `min-width: auto`, so without the resets below
      that min-content leaks up through the page grid and stretches the whole
@@ -1956,7 +2000,9 @@ tr.drag-over {
      keeps its columns legible while it scrolls. */
   .cameras-list-card { min-width: 0; grid-template-columns: minmax(0, 1fr); }
   .cameras-table-wrap { min-width: 0; }
-  .cameras-table { min-width: 680px; }
+  .cameras-table {
+    min-width: 820px;
+  }
 }
 
 .cam-card {
@@ -3380,14 +3426,73 @@ a.activity-item-action {
   align-items: start;
 }
 /* When PTZ card is hidden (all-cameras mode or camera without PTZ), let the
-   live frame card span the full width instead of leaving an empty auto column. */
+   live frame card span the full width instead of leaving an empty auto column.
+   The stream details card still renders on its own row below, so keep the
+   vertical gap between the two cards instead of collapsing it to zero. */
 .live-frame-ptz-layout:has(.live-ptz-card[hidden]) {
   grid-template-columns: 1fr;
-  gap: 0;
 }
 @media (max-width: 900px) {
   .live-frame-ptz-layout {
     grid-template-columns: 1fr;
+  }
+}
+/* Stream details card spans the full width of the frame+PTZ grid, sitting
+   on its own row below the live frame (and PTZ controls when shown) instead
+   of only filling the first column. */
+.live-stream-details-card {
+  grid-column: 1 / -1;
+}
+/* Live-measured FPS indicator (Stream Details card): a small pulsing dot
+   plus a soft breathing animation on the value marks an FPS read from the
+   camera's stream (source 'detected') rather than a static configured rate.
+   The dot pulses in the success colour; the value itself eases between full
+   and 70% opacity so the reading reads as "live" without blinking. */
+/* Scoped under .status-panel (0,2,0) so these beat the shared
+   .status-panel span { display:block; color:var(--muted); font-size:12px }
+   rule (0,1,1) that would otherwise flatten the pill to a stacked block. */
+.status-panel .fps-live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--success);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.status-panel .fps-live-dot {
+  width: 7px;
+  height: 7px;
+  margin: 0; /* cancel the shared .status-panel span margin so the dot stays centered */
+  border-radius: 999px;
+  background: var(--success);
+  animation: fps-live-pulse 1.6s ease-in-out infinite;
+}
+@keyframes fps-live-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(73, 230, 163, 0.45); }
+  50% { box-shadow: 0 0 0 5px rgba(73, 230, 163, 0); }
+}
+:root.light .status-panel .fps-live-dot {
+  animation-name: fps-live-pulse-light;
+}
+@keyframes fps-live-pulse-light {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0.4); }
+  50% { box-shadow: 0 0 0 5px rgba(5, 150, 105, 0); }
+}
+.status-panel strong.fps-live {
+  color: var(--success);
+  animation: fps-value-breathe 2.4s ease-in-out infinite;
+}
+@keyframes fps-value-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fps-live-dot,
+  .status-panel strong.fps-live {
+    animation: none;
   }
 }
 

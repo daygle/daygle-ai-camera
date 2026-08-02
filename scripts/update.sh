@@ -14,13 +14,13 @@ set -euo pipefail
 # suffix so the bare-URL form is also accepted.
 #
 # Two scopes are enforced so a tampered EITHER side fails the same way:
-#   (1) The invoking caller cwd — runs FIRST, before the ``cd ${APP_DIR}``,
+#   (1) The invoking caller cwd - runs FIRST, before the ``cd ${APP_DIR}``,
 #       so a tricked-admin running this script from a malicious fork's
 #       checkout dir fails fast and never reaches the always-allowlisted
 #       APP_DIR-side machinery. Without this check the original round-4 H1
 #       guard below would silently pass because APP_DIR is always the
 #       canonical repo, regardless of how dangerous the invoking cwd is.
-#   (2) The APP_DIR itself (after the cd) — the original round-4 H1 guard,
+#   (2) The APP_DIR itself (after the cd) - the original round-4 H1 guard,
 #       catches a tampered APP_DIR .git/config from a service-side breach.
 EXPECTED_REMOTE_REGEX='github\.com[:/]daygle/daygle-ai-camera(\.git)?$'
 if [[ -d "${PWD}/.git" ]]; then

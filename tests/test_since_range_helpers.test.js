@@ -4,7 +4,7 @@
 // The alerts page "Today" filter and the dashboard range presets send a
 // `since` ISO bound to /api/alerts, /api/events and /api/stats. The backend
 // compares stored UTC ISO timestamps lexically (`created_at >= ?`), so the
-// bound MUST be the START OF THE LOCAL DAY expressed in UTC — NOT the UTC
+// bound MUST be the START OF THE LOCAL DAY expressed in UTC - NOT the UTC
 // date string. The old code sent `new Date().toISOString().split('T')[0]`
 // (the UTC date), which for operators in timezones AHEAD of UTC silently
 // dropped every alert fired between local midnight and UTC midnight (those
@@ -13,7 +13,7 @@
 //
 // utils.js reaches for the browser surface at load (window.addEventListener
 // in the storage/theme/broadcast subscribers), so we load it into a vm
-// context behind a lightweight window stub — the same pattern as
+// context behind a lightweight window stub - the same pattern as
 // test_motion_boundary_js.test.js.
 //
 // Run with:

@@ -17,9 +17,9 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 
 ## Documentation
 
-- `docs/motion-detection.md` — motion detection and object rule tuning
-- `docs/sound-detection.md` — sound detection, audio rules, and runtime setup
-- `docs/operations.md` — health, logs, backups, and service operation
+- `docs/motion-detection.md` - motion detection and object rule tuning
+- `docs/sound-detection.md` - sound detection, audio rules, and runtime setup
+- `docs/operations.md` - health, logs, backups, and service operation
 
 ## Requirements
 
@@ -174,26 +174,26 @@ storage:
 
 Important bootstrap values:
 
-- `server.host` and `server.port` — Uvicorn listen address and port
-- `auth.enabled` — whether authentication is enabled
-- `storage.database` — SQLite database path
+- `server.host` and `server.port` - Uvicorn listen address and port
+- `auth.enabled` - whether authentication is enabled
+- `storage.database` - SQLite database path
 
 All other app settings are stored in SQLite and managed by the web UI.
 
 ## Running
 
-- `/setup` — initial admin creation
-- `/login` — user login
-- `/` — dashboard
-- `/cameras` — camera management
-- `/zones` — monitoring zone editor
-- `/sounds` — sound detection rules
-- `/onnx` — AI model and detector settings
-- `/settings` — system settings, notifications, retention, backup, and updates
-- `/audit` — audit log
-- `/recordings` — recordings list
-- `/recordings/timeline` — timeline playback
-- `/camera-log` — camera diagnostics
+- `/setup` - initial admin creation
+- `/login` - user login
+- `/` - dashboard
+- `/cameras` - camera management
+- `/zones` - monitoring zone editor
+- `/sounds` - sound detection rules
+- `/onnx` - AI model and detector settings
+- `/settings` - system settings, notifications, retention, backup, and updates
+- `/audit` - audit log
+- `/recordings` - recordings list
+- `/recordings/timeline` - timeline playback
+- `/camera-log` - camera diagnostics
 
 ## AI and sound detection
 

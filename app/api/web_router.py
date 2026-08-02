@@ -171,7 +171,7 @@ def _login_page_route(
     auth=Depends(get_auth),
     auth_enabled: bool = Depends(get_auth_enabled),
 ):
-    """Route handler — injects deps and delegates to :func:`login_page`."""
+    """Route handler - injects deps and delegates to :func:`login_page`."""
     return login_page(request, error=error, return_to=return_to, auth=auth, auth_enabled=auth_enabled)
 
 
@@ -181,7 +181,7 @@ def _setup_page_route(
     auth=Depends(get_auth),
     auth_enabled: bool = Depends(get_auth_enabled),
 ):
-    """Route handler — injects deps and delegates to :func:`setup_page`."""
+    """Route handler - injects deps and delegates to :func:`setup_page`."""
     return setup_page(request, auth=auth, auth_enabled=auth_enabled)
 
 
