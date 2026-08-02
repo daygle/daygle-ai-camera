@@ -9,22 +9,28 @@ Cluster membership:
 - ``int8_cache_path(model_path)`` -- deterministic on-disk path for the
   cached INT8-quantized copy of a model.
 
-- ``quantize_int8_dynamic(model_path)`` -- quantize a FP32 ONNX to INT8
-  via ``onnxruntime.quantization.quantize_dynamic`` (per-tensor weight
-  quantization, no calibration data needed) and cache to disk.
+- ``quantize_int8(model_path)`` -- quantize a FP32 ONNX to an INT8 QDQ
+  model via ``onnxruntime.quantization.quantize_static`` (QDQ format with
+  synthetic MinMax calibration) and cache to disk. QDQ is the only format
+  modern ONNX Runtime accelerates on CPU: the legacy ``quantize_dynamic``
+  output (``ConvInteger``/``MatMulInteger`` nodes) no longer has CPU kernels
+  in recent ORT builds.
+
+- ``invalidate_int8_cache(model_path)`` -- delete a cached INT8 model that
+  failed to load at runtime so the next reload re-quantizes.
 
 - ``precision_export_kwargs(precision, device, onnxruntime_gpu_available)``
   -- emit the Ultralytics ``YOLO(...).export(...)`` kwargs string fragment
   for the requested precision. ``fp16`` only emits ``half=True`` when
   device is CUDA AND onnxruntime-gpu is available; ``int8`` is NOT
   honored at export time (Ultralytics' ``int8=True`` requires calibration
-  data -- INT8 happens at runtime via ``quantize_int8_dynamic``).
+  data -- INT8 happens at runtime via ``quantize_int8``).
 
 Cache invalidation uses source mtime plus structural ONNX validation and
 source provenance:
 - A re-quantization is triggered when the cached ``*.int8.onnx`` is missing,
-  older than the source, lacks its source-hash sidecar, or is not a valid ONNX
-  graph.
+  older than the source, lacks its source-hash sidecar, carries a legacy
+  cache-format marker, or is not a valid ONNX graph.
 - A SHA-256 source signature is stored in a sibling ``*.int8.sha256`` sidecar
   and checked before reusing a cache. The signature is also checked again
   before replacement, preventing a cache from being accepted when the source
@@ -34,8 +40,8 @@ source provenance:
 
 Pool-C reach sites (resolved at call time inside function bodies):
 
-- ``app.detector._run_inference`` -- ``quantize_int8_dynamic`` is invoked
-  once during ``OnnxYoloDetector.__init__`` when ``precision='int8'``.
+- ``app.detector._run_inference`` -- ``quantize_int8`` is invoked once
+  during ``OnnxYoloDetector.__init__`` when ``precision='int8'``.
 - ``app.model_management._export_kwargs`` -- imports
   ``precision_export_kwargs`` to compose the Ultralytics export kwargs
   string when ``precision`` is non-default.
@@ -203,7 +209,7 @@ def _is_valid_onnx_model(path: Path) -> bool:
 def _should_requantize(source: Path, cache: Path) -> bool:
     """Return ``True`` iff the INT8 cache is missing or older than the source.
 
-    Structural validity is checked separately by ``quantize_int8_dynamic``.
+    Structural validity is checked separately by ``quantize_int8``.
     The source is rewritten by ``model_management.export_yolo_onnx``; on
     filesystems with coarse mtime resolution this may over-requantize once,
     which is harmless.
@@ -218,17 +224,163 @@ def _should_requantize(source: Path, cache: Path) -> bool:
         return True
 
 
-def quantize_int8_dynamic(model_path: Path) -> Path | None:
-    """Cache an INT8-quantized copy of ``model_path`` and return its path.
+# ---------------------------------------------------------------------------
+# INT8 QDQ quantization (static, synthetic calibration)
+# ---------------------------------------------------------------------------
+
+# The legacy ``quantize_dynamic`` (Integer-ops) format no longer runs on
+# recent ONNX Runtime CPU builds: the ConvInteger/MatMulInteger kernels were
+# removed, so a dynamically quantized model fails to load with "Could not find
+# an implementation for ConvInteger(10) node" and the detector silently falls
+# back to FP32. QDQ (QuantizeLinear/DequantizeLinear) models fuse into
+# QLinearConv/QLinearMatMul kernels that every modern ORT CPU build ships, so
+# INT8 is produced with ``quantize_static`` here. ``quantize_static`` needs a
+# calibration set; there is no labelled dataset at install time, so a fixed,
+# seeded set of camera-like synthetic frames is used (see
+# ``_SyntheticCalibrationReader``). Calibration is a one-time cost, cached to
+# ``*.int8.onnx``.
+_INT8_CACHE_FORMAT = 'int8-qdq-v1'
+_CALIBRATION_SAMPLE_COUNT = 64
+
+
+def _read_cache_metadata(metadata: Path) -> str:
+    """Return the raw sidecar text, or ``''`` when missing/unreadable."""
+    try:
+        return metadata.read_text(encoding='ascii').strip()
+    except (FileNotFoundError, OSError, UnicodeError):
+        return ''
+
+
+def _cached_signature_matches(metadata: Path, source_signature: str) -> bool:
+    """Return whether the sidecar records this source hash AND the current
+    cache-format marker.
+
+    Requiring the marker means caches produced by older code paths (including
+    the pre-QDQ ``quantize_dynamic`` era, whose artifacts fail to load on
+    modern ORT) are treated as stale and re-quantized exactly once instead of
+    being reused forever.
+    """
+    lines = [line.strip() for line in _read_cache_metadata(metadata).splitlines() if line.strip()]
+    return len(lines) >= 2 and lines[0] == source_signature and lines[1] == _INT8_CACHE_FORMAT
+
+
+def _model_input_contract(model_path: Path) -> tuple[str, tuple[int, ...]]:
+    """Return the model's first real (non-initializer) input name and a
+    concrete 4-D shape for calibration tensors.
+
+    Fixed-shape exports (the normal case) are used verbatim; dynamic
+    dimensions are replaced with detector defaults (batch 1, 3 channels,
+    640x640) so the synthetic calibration reader can materialise tensors.
+    """
+    import onnx  # type: ignore[import-untyped]
+    model = onnx.load(str(model_path))
+    initializer_names = {initializer.name for initializer in model.graph.initializer}
+    for tensor_input in model.graph.input:
+        if tensor_input.name in initializer_names:
+            continue
+        dims = [
+            dim.dim_value if dim.HasField('dim_value') and dim.dim_value > 0 else None
+            for dim in tensor_input.type.tensor_type.shape.dim
+        ]
+        if len(dims) == 4:
+            batch, channels, height, width = dims
+            return tensor_input.name, (
+                int(batch or 1),
+                int(channels or 3),
+                int(height or 640),
+                int(width or 640),
+            )
+    raise ValueError('model input is not a 4-D tensor; cannot synthesise calibration data')
+
+
+class _SyntheticCalibrationReader:
+    """Deterministic iterable calibration reader for ``quantize_static``.
+
+    Yields ``count`` letterbox-style frames -- flat gray base with soft
+    lighting gradients, blurred blob "objects" and per-channel noise,
+    normalised to float32 in [0, 1] exactly like
+    ``OnnxYoloDetector._preprocess`` -- so the MinMax activation ranges
+    resemble a real deployment closely enough for QDQ calibration without any
+    on-disk dataset. Regenerating from a fixed seed keeps every re-quantize
+    reproducible.
+    """
+
+    def __init__(
+        self,
+        input_name: str,
+        shape: tuple[int, ...],
+        count: int = _CALIBRATION_SAMPLE_COUNT,
+        seed: int = 20260802,
+    ) -> None:
+        self._input_name = input_name
+        self._shape = tuple(int(d) for d in shape)
+        self._count = count
+        self._seed = seed
+        # ``get_next``-driven iteration state; ``rewind`` restarts both so a
+        # re-iterated reader reproduces identical frames (same seed).
+        self._index = 0
+        self._rng = None
+
+    def __len__(self) -> int:
+        return self._count
+
+    def _make_rng(self) -> Any:
+        import numpy as np  # type: ignore[import-untyped]
+        return np.random.default_rng(self._seed)
+
+    def get_next(self) -> dict[str, Any] | None:
+        """Return the next calibration sample, or ``None`` when exhausted.
+
+        ONNX Runtime's calibrator drives calibration through the
+        ``CalibrationDataReader`` protocol (``get_next``/``rewind``), not
+        plain iteration -- this is the method ``quantize_static`` calls.
+        """
+        if self._rng is None:
+            self._rng = self._make_rng()
+        if self._index >= self._count:
+            return None
+        self._index += 1
+        return {self._input_name: self._synthetic_frame(self._rng)}
+
+    def rewind(self) -> None:
+        """Restart the sequence from the same seed (deterministic)."""
+        self._index = 0
+        self._rng = None
+
+    def _synthetic_frame(self, rng: Any) -> Any:
+        import numpy as np  # type: ignore[import-untyped]
+        batch, channels, height, width = self._shape
+        # Flat letterbox-gray base with per-sample brightness variance.
+        frame = np.full((height, width), rng.uniform(0.15, 0.55), dtype=np.float32)        # Soft horizontal/vertical lighting gradients.
+        frame += rng.uniform(-0.20, 0.20) * np.linspace(0.0, 1.0, width, dtype=np.float32)
+        frame += rng.uniform(-0.20, 0.20) * np.linspace(0.0, 1.0, height, dtype=np.float32)[:, None]
+        # Blurred blobs act as object stand-ins so middle layers see
+        # structured (not purely noisy) activations.
+        for _ in range(int(rng.integers(3, 10))):
+            bh = int(rng.integers(height // 32, max(2, height // 4)))
+            bw = int(rng.integers(width // 32, max(2, width // 4)))
+            y0 = int(rng.integers(0, max(1, height - bh)))
+            x0 = int(rng.integers(0, max(1, width - bw)))
+            frame[y0 : y0 + bh, x0 : x0 + bw] += rng.uniform(-0.45, 0.85)
+        frame = np.clip(frame, 0.0, 1.0)
+        # Independent per-channel noise plus slight per-channel gain.
+        noise = rng.normal(0.0, 0.04, size=(channels, height, width)).astype(np.float32)
+        gain = rng.uniform(0.85, 1.15, size=(channels, 1, 1)).astype(np.float32)
+        tensor = np.clip(frame[None, :, :] * gain + noise, 0.0, 1.0).astype(np.float32)
+        return np.broadcast_to(tensor, (batch, channels, height, width)).copy()
+
+
+def quantize_int8(model_path: Path) -> Path | None:
+    """Cache an INT8 QDQ-quantized copy of ``model_path`` and return its path.
 
     Returns ``None`` when:
     - ``onnxruntime.quantization`` is not importable,
     - the source model is missing,
     - the quantization raises (callers fall back to FP32 with a warning).
 
-    Per-tensor weight quantization via ``quantize_dynamic`` does not
-    require a calibration dataset, so this can run unattended at detector
-    load time.
+    Uses ``quantize_static`` in QDQ format (the representation modern ORT CPU
+    builds accelerate) with a synthetic MinMax calibration set, so it can run
+    unattended at detector load time and is cached to disk.
     """
     source = Path(model_path)
     if not source.is_file():
@@ -246,12 +398,7 @@ def quantize_int8_dynamic(model_path: Path) -> Path | None:
         # fresh-by-mtime cache so a truncated legacy cache or a cache produced
         # from a different source cannot poison the detector load.
         if not _should_requantize(source, cache):
-            cached_signature = ''
-            try:
-                cached_signature = metadata.read_text(encoding='ascii').strip()
-            except (FileNotFoundError, OSError, UnicodeError):
-                pass
-            if cached_signature == source_signature and _is_valid_onnx_model(cache):
+            if _cached_signature_matches(metadata, source_signature) and _is_valid_onnx_model(cache):
                 return cache
             # A missing quantization dependency should not destroy an older
             # artifact; it is unusable for this request but may be recoverable
@@ -270,7 +417,19 @@ def quantize_int8_dynamic(model_path: Path) -> Path | None:
         temporary_metadata: Path | None = None
         fd: int | None = None
         try:
-            from onnxruntime.quantization import QuantType, quantize_dynamic  # type: ignore[import-untyped]
+            from onnxruntime.quantization import (  # type: ignore[import-untyped]
+                CalibrationMethod,
+                QuantFormat,
+                QuantType,
+                quantize_static,
+            )
+            input_name, input_shape = _model_input_contract(source)
+            calibration_reader = _SyntheticCalibrationReader(input_name, input_shape)
+            logger.info(
+                'INT8 QDQ quantization (synthetic MinMax calibration, %d samples) for %s ...',
+                len(calibration_reader),
+                source,
+            )
 
             # Never let ORT write directly to the cache. A killed or failed
             # conversion must not leave a newer, truncated file that passes
@@ -289,17 +448,21 @@ def quantize_int8_dynamic(model_path: Path) -> Path | None:
             fd = None
             temporary_path = Path(temporary_name)
             temporary_path.unlink(missing_ok=True)
-            quantize_dynamic(
+            quantize_static(
                 model_input=str(source),
                 model_output=str(temporary_path),
+                calibration_data_reader=calibration_reader,
+                quant_format=QuantFormat.QDQ,
+                activation_type=QuantType.QUInt8,
                 weight_type=QuantType.QInt8,
+                calibrate_method=CalibrationMethod.MinMax,
             )
             if not temporary_path.is_file() or temporary_path.stat().st_size <= 0:
-                raise RuntimeError('quantize_dynamic produced no usable output file')
+                raise RuntimeError('quantize_static produced no usable output file')
             if _source_signature(source) != source_signature:
                 raise RuntimeError('source model changed during INT8 quantization')
             if not _is_valid_onnx_model(temporary_path):
-                raise RuntimeError('quantize_dynamic produced an invalid ONNX model')
+                raise RuntimeError('quantize_static produced an invalid ONNX model')
             # Write provenance to a sibling temporary file before publishing
             # either artifact. The cache itself is still replaced atomically;
             # a crash between the two replaces is safe because the next call
@@ -312,7 +475,10 @@ def quantize_int8_dynamic(model_path: Path) -> Path | None:
             os.close(fd)
             fd = None
             temporary_metadata = Path(metadata_name)
-            temporary_metadata.write_text(source_signature + '\n', encoding='ascii')
+            temporary_metadata.write_text(
+                f'{source_signature}\n{_INT8_CACHE_FORMAT}\n',
+                encoding='ascii',
+            )
             temporary_path.replace(cache)
             temporary_path = None
             temporary_metadata.replace(metadata)
@@ -337,6 +503,22 @@ def quantize_int8_dynamic(model_path: Path) -> Path | None:
             # not be returned by this call, but preserving it avoids turning a
             # transient conversion failure into destructive cache loss.
             return None
+
+
+def invalidate_int8_cache(model_path: Path) -> None:
+    """Delete the INT8 cache and its provenance sidecar for ``model_path``.
+
+    Used when a cached quantized model fails to load or warm up at runtime: a
+    cache that cannot run is worse than no cache, because the detector would
+    otherwise reuse it on every restart and keep silently falling back to
+    FP32. Deleting it makes the next reload re-quantize from scratch.
+    """
+    source = Path(model_path)
+    cache = int8_cache_path(source)
+    metadata = _int8_cache_metadata_path(source)
+    with _int8_quantization_lock, _int8_process_lock(cache):
+        cache.unlink(missing_ok=True)
+        metadata.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -371,7 +553,7 @@ def precision_export_kwargs(
       so the export keeps working on CPU hosts that happen to carry the
       ``precision=fp16`` setting from a prior CUDA deployment.
     - ``int8``: always returns ``''``. INT8 is a runtime concern in this
-      codebase -- see ``quantize_int8_dynamic``. Ultralytics'
+      codebase -- see ``quantize_int8``. Ultralytics'
       ``int8=True`` would require a calibration dataset which the
       download flow can't supply.
     - ``fp32``: always returns ``''``.

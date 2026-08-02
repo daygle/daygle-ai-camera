@@ -163,7 +163,7 @@ class OnnxYoloDetector:
         # ``fp32`` (default -- prior behavior) loads the source ONNX.
         # ``fp16`` assumes the export already produced a half-precision
         # ONNX (handled by ``model_management._export_kwargs``). ``int8``
-        # runs ``quantize_int8_dynamic`` once at constructor time and
+        # runs ``quantize_int8`` once at constructor time and
         # swaps in the cached quantized copy; on failure we silently
         # fall back to FP32 with a warning.
         self._precision = (precision or "fp32").strip().lower()
@@ -206,22 +206,23 @@ class OnnxYoloDetector:
         # callers that never use INT8 (most CPU deployments default to
         # ``precision='fp32'`` and never touch this branch).
         try:
-            from app.quantization import quantize_int8_dynamic
+            from app.quantization import invalidate_int8_cache, quantize_int8
         except ImportError:
-            quantize_int8_dynamic = None  # type: ignore[assignment]
+            quantize_int8 = None  # type: ignore[assignment]
+            invalidate_int8_cache = None  # type: ignore[assignment]
 
-        # Resolve the runtime model path. INT8 dynamic quantization runs
-        # once at construct time and caches the result; FP16 just loads
+        # Resolve the runtime model path. INT8 quantization runs once at
+        # construct time and caches the result; FP16 just loads
         # whatever the export produced (no runtime conversion).
         session_model_path = self.model_path
         int8_runtime_model = False
         if self._precision == 'int8':
-            quantized = quantize_int8_dynamic(self.model_path) if quantize_int8_dynamic else None
+            quantized = quantize_int8(self.model_path) if quantize_int8 else None
             if quantized is not None:
                 session_model_path = Path(quantized)
                 int8_runtime_model = True
                 logger.info(
-                    'INT8 dynamic quantization ready for %s -> %s',
+                    'INT8 QDQ quantization ready for %s -> %s',
                     self.model_path, session_model_path,
                 )
             else:
@@ -318,6 +319,16 @@ class OnnxYoloDetector:
                     int8_load_exc,
                     self.model_path,
                 )
+                # The cached INT8 artifact cannot run on this ORT build. Drop
+                # it so the next reload re-quantizes instead of reusing a
+                # known-bad cache and falling back to FP32 on every restart.
+                # Cache cleanup must never block the FP32 fallback below, so
+                # failures here are logged and swallowed.
+                if invalidate_int8_cache is not None:
+                    try:
+                        invalidate_int8_cache(self.model_path)
+                    except Exception as invalidate_exc:  # pragma: no cover - filesystem/lock issue
+                        logger.debug('Could not invalidate INT8 cache for %s: %s', self.model_path, invalidate_exc)
                 self._precision = 'fp32'
                 int8_runtime_model = False
                 self._use_io_binding = False
@@ -405,6 +416,15 @@ class OnnxYoloDetector:
                         warm_exc,
                         self.model_path,
                     )
+                    # Same cache hygiene as the session-construction path: a
+                    # quantized graph that parses but fails its first run
+                    # should not be reused on every restart. Cleanup failures
+                    # are logged, never allowed to block the FP32 fallback.
+                    if invalidate_int8_cache is not None:
+                        try:
+                            invalidate_int8_cache(self.model_path)
+                        except Exception as invalidate_exc:  # pragma: no cover - filesystem/lock issue
+                            logger.debug('Could not invalidate INT8 cache for %s: %s', self.model_path, invalidate_exc)
                     try:
                         self._precision = 'fp32'
                         self._use_io_binding = False

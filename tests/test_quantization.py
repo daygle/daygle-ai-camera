@@ -1,17 +1,20 @@
-"""Unit tests for ``app.quantization`` -- the INT8 cache helper and the
+"""Unit tests for ``app.quantization`` -- the INT8 QDQ cache helper and the
 precision / device dispatch used by ``app.detector`` and
 ``app.model_management``.
 
-These tests cover pure-Python paths only (mtime invalidation, string
-normalization, kwargs assembly); they do NOT require
-``onnxruntime.quantization`` to be installed. The runtime quantize /
-gpu-availability paths are exercised through public introspection
-helpers and skip cleanly when the optional dependency is absent.
+These tests cover pure-Python paths only (mtime invalidation, cache-format
+markers, string normalization, kwargs assembly, synthetic calibration
+shapes); they do NOT require ``onnxruntime.quantization`` to be installed.
+The runtime quantize paths are exercised through public introspection
+helpers and skip cleanly when the optional dependency is absent. The real
+``quantize_static`` pipeline is covered by ``test_quantization_integration.py``
+when ONNX Runtime is available.
 """
 from __future__ import annotations
 
 import os
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -21,16 +24,55 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import app.quantization as quantization  # noqa: E402
-from app.quantization import (
+from app.quantization import (  # noqa: E402
+    _INT8_CACHE_FORMAT,
     _int8_cache_metadata_path,
     _source_signature,
     int8_cache_path,
     int8_quantization_available,
+    invalidate_int8_cache,
     normalize_precision,
     onnxruntime_gpu_available,
     precision_export_kwargs,
-    quantize_int8_dynamic,
+    quantize_int8,
 )
+
+
+def _install_fake_quantization_module(monkeypatch, quantize_static, model_input_contract=('images', (1, 3, 64, 64))):
+    """Register a stub ``onnxruntime.quantization`` and a fake input contract.
+
+    The in-function ``from onnxruntime.quantization import ...`` and
+    ``_model_input_contract(source)`` calls resolve to the stubs regardless
+    of whether the real wheel is installed, so the cache logic can be tested
+    without a real model or ONNX Runtime.
+    """
+    qmod = types.ModuleType('onnxruntime.quantization')
+    qmod.QuantType = type('Q', (), {'QInt8': 1, 'QUInt8': 2})
+    qmod.QuantFormat = type('F', (), {'QDQ': 1})
+    qmod.CalibrationMethod = type('C', (), {'MinMax': 1})
+    qmod.quantize_static = quantize_static
+    if 'onnxruntime' not in sys.modules:
+        # CPython's import machinery also needs the parent package to be
+        # importable when resolving ``from X.Y import Z``; register an
+        # empty stub package so the resolution chain completes.
+        stub_pkg = types.ModuleType('onnxruntime')
+        stub_pkg.__path__ = []  # mark as a package
+        monkeypatch.setitem(sys.modules, 'onnxruntime', stub_pkg)
+    monkeypatch.setitem(sys.modules, 'onnxruntime.quantization', qmod)
+    monkeypatch.setattr(quantization, '_model_input_contract', lambda path: model_input_contract)
+
+
+def _fresh_cache(tmp_path: Path, name: str = 'yolo26n.onnx') -> tuple[Path, Path, Path]:
+    """Create a source + fresh-by-mtime cache pair with a valid sidecar."""
+    source = tmp_path / name
+    cache = int8_cache_path(source)
+    metadata = _int8_cache_metadata_path(source)
+    source.write_bytes(b'fake-source')
+    cache.write_bytes(b'fake-cache')
+    metadata.write_text(f'{_source_signature(source)}\n{_INT8_CACHE_FORMAT}\n', encoding='ascii')
+    os.utime(cache, (2000, 2000))
+    os.utime(source, (1000, 1000))
+    return source, cache, metadata
 
 
 # -- int8_cache_path --------------------------------------------------------
@@ -97,7 +139,7 @@ def test_precision_export_kwargs_fp16_cpu_returns_empty():
 def test_precision_export_kwargs_int8_returns_empty():
     """``int8`` is a runtime concern -- the export always emits an FP32
     ONNX; INT8 quantization runs in-process via
-    ``quantize_int8_dynamic``. The export kwargs must stay empty."""
+    ``quantize_int8``. The export kwargs must stay empty."""
     for dev in ('cpu', 'cuda', 'auto'):
         assert precision_export_kwargs('int8', dev, onnxruntime_gpu=True) == ''
         assert precision_export_kwargs('int8', dev, onnxruntime_gpu=False) == ''
@@ -126,96 +168,116 @@ def test_onnxruntime_gpu_available_returns_bool():
     assert isinstance(onnxruntime_gpu_available(), bool)
 
 
-# -- quantize_int8_dynamic -------------------------------------------------
+# -- quantize_int8 ---------------------------------------------------------
 
 
-def test_quantize_int8_dynamic_returns_none_for_missing_source(tmp_path: Path):
+def test_quantize_int8_returns_none_for_missing_source(tmp_path: Path):
     """When the source ``.onnx`` doesn't exist (e.g. MODEL MISSING), the
     helper returns ``None`` so the caller falls back to FP32 without
     raising."""
-    assert quantize_int8_dynamic(tmp_path / 'nonexistent.onnx') is None
+    assert quantize_int8(tmp_path / 'nonexistent.onnx') is None
 
 
-def test_quantize_int8_dynamic_returns_none_when_lib_missing(tmp_path: Path, monkeypatch):
+def test_quantize_int8_returns_none_when_lib_missing(tmp_path: Path, monkeypatch):
     """When ``onnxruntime.quantization`` cannot be imported (the common
     case on minimal installs) the helper returns ``None`` instead of
     raising -- the detector then logs a warning and falls back to FP32."""
     monkeypatch.setattr(quantization, 'int8_quantization_available', lambda: False)
     source = tmp_path / 'yolo26n.onnx'
     source.write_bytes(b'')
-    assert quantize_int8_dynamic(source) is None
+    assert quantize_int8(source) is None
 
 
-def test_quantize_int8_dynamic_returns_existing_cache_when_fresh(tmp_path: Path, monkeypatch):
-    """When the cache exists AND its mtime is >= the source's mtime the
-    helper short-circuits without re-quantizing. Simulated by exposing
-    a fake ``quantize_dynamic`` that would raise if invoked -- proving
-    the short-circuit works."""
+def test_quantize_int8_returns_existing_cache_when_fresh(tmp_path: Path, monkeypatch):
+    """When the cache exists, its mtime is >= the source's, and its
+    sidecar carries the current format marker, the helper short-circuits
+    without re-quantizing. Simulated by exposing a fake ``quantize_static``
+    that would raise if invoked -- proving the short-circuit works."""
     monkeypatch.setattr(quantization, 'int8_quantization_available', lambda: True)
     monkeypatch.setattr(quantization, '_is_valid_onnx_model', lambda path: True)
-    source = tmp_path / 'yolo26n.onnx'
-    cache = int8_cache_path(source)
-    source.write_bytes(b'fake-source')
-    cache.write_bytes(b'fake-cache')
-    _int8_cache_metadata_path(source).write_text(_source_signature(source) + '\n', encoding='ascii')
-    # Cache newer than source: short-circuit, return cache path.
-    os.utime(cache, (2000, 2000))
-    os.utime(source, (1000, 1000))
-    assert quantize_int8_dynamic(source) == cache
+    source, cache, _ = _fresh_cache(tmp_path)
+    _install_fake_quantization_module(
+        monkeypatch,
+        quantize_static=lambda **kwargs: (_ for _ in ()).throw(AssertionError('must not re-quantize')),
+    )
+    assert quantize_int8(source) == cache
 
 
-def test_quantize_int8_dynamic_requantizes_when_cache_stale(tmp_path: Path, monkeypatch):
+def test_quantize_int8_requantizes_when_cache_stale(tmp_path: Path, monkeypatch):
     """When the cache is OLDER than the source (model was re-exported),
-    the helper invokes ``quantize_dynamic`` -- simulated here so we
+    the helper invokes ``quantize_static`` -- simulated here so we
     don't need a real ``onnxruntime`` install."""
-    import types
-
     monkeypatch.setattr(quantization, 'int8_quantization_available', lambda: True)
     monkeypatch.setattr(quantization, '_is_valid_onnx_model', lambda path: True)
-    source = tmp_path / 'yolo26n.onnx'
-    cache = int8_cache_path(source)
-    source.write_bytes(b'fake-source')
-    cache.write_bytes(b'stale-cache')
+    source, cache, _ = _fresh_cache(tmp_path)
     os.utime(source, (3000, 3000))
     os.utime(cache, (1000, 1000))
     captured = {}
 
-    def _fake_quantize_dynamic(model_input, model_output, weight_type):
+    def _fake_quantize_static(**kwargs):
         captured['called'] = True
-        captured['model_input'] = model_input
-        captured['model_output'] = model_output
-        Path(model_output).write_bytes(b'fresh-cache')
+        captured['model_input'] = kwargs['model_input']
+        captured['model_output'] = kwargs['model_output']
+        captured['reader'] = kwargs['calibration_data_reader']
+        captured['format'] = kwargs['quant_format']
+        captured['activation_type'] = kwargs['activation_type']
+        captured['weight_type'] = kwargs['weight_type']
+        Path(kwargs['model_output']).write_bytes(b'fresh-cache')
 
-    # Build a stub ``onnxruntime.quantization`` and register it in
-    # ``sys.modules`` so the in-function ``from onnxruntime.quantization
-    # import ...`` resolves to our fake regardless of whether the wheel is
-    # actually installed.
-    qmod = types.ModuleType('onnxruntime.quantization')
-    qmod.QuantType = type('Q', (), {'QInt8': 1})
-    qmod.quantize_dynamic = _fake_quantize_dynamic
-    if 'onnxruntime' not in sys.modules:
-        # CPython's import machinery also needs the parent package to be
-        # importable when resolving ``from X.Y import Z``; register an
-        # empty stub package so the resolution chain completes.
-        stub_pkg = types.ModuleType('onnxruntime')
-        stub_pkg.__path__ = []  # mark as a package
-        monkeypatch.setitem(sys.modules, 'onnxruntime', stub_pkg)
-    monkeypatch.setitem(sys.modules, 'onnxruntime.quantization', qmod)
+    _install_fake_quantization_module(monkeypatch, _fake_quantize_static)
 
-    result = quantize_int8_dynamic(source)
+    result = quantize_int8(source)
     assert result == cache
     assert captured['called'] is True
+    # QDQ static quantization is dispatched, not the legacy quantize_dynamic.
+    assert captured['activation_type'] == 2  # QuantType.QUInt8 (stub value)
+    assert captured['weight_type'] == 1  # QuantType.QInt8 (stub value)
     # Quantization writes to a private temporary ONNX path and atomically
     # replaces the cache only after completion; callers receive the final
     # cache path, not the now-removed temporary path.
     assert Path(captured['model_output']) != cache
     assert cache.read_bytes() == b'fresh-cache'
+    # A calibration reader was supplied (synthetic frames) -- the sidecar
+    # records the new cache format marker.
+    assert captured['reader'] is not None
+    assert _int8_cache_metadata_path(source).read_text(encoding='ascii').strip().splitlines()[-1] == _INT8_CACHE_FORMAT
 
 
-def test_quantize_int8_dynamic_preserves_stale_cache_when_conversion_fails(tmp_path: Path, monkeypatch):
+def test_quantize_int8_requantizes_legacy_cache_without_format_marker(tmp_path: Path, monkeypatch):
+    """A fresh-by-mtime cache whose sidecar predates the QDQ format marker
+    (e.g. produced by the old ``quantize_dynamic`` path, which fails to load
+    on modern ORT) must NOT be reused -- it is discarded and re-quantized
+    exactly once."""
+    monkeypatch.setattr(quantization, 'int8_quantization_available', lambda: True)
+    monkeypatch.setattr(quantization, '_is_valid_onnx_model', lambda path: True)
+    source = tmp_path / 'yolo26n.onnx'
+    cache = int8_cache_path(source)
+    metadata = _int8_cache_metadata_path(source)
+    source.write_bytes(b'fake-source')
+    cache.write_bytes(b'legacy-broken-cache')
+    # Old-format sidecar: source hash only, no format marker line.
+    metadata.write_text(_source_signature(source) + '\n', encoding='ascii')
+    os.utime(cache, (2000, 2000))
+    os.utime(source, (1000, 1000))
+
+    captured = {}
+
+    def _fake_quantize_static(**kwargs):
+        captured['called'] = True
+        Path(kwargs['model_output']).write_bytes(b'fresh-qdq-cache')
+
+    _install_fake_quantization_module(monkeypatch, _fake_quantize_static)
+
+    result = quantize_int8(source)
+    assert result == cache
+    assert captured['called'] is True
+    assert cache.read_bytes() == b'fresh-qdq-cache'
+    lines = metadata.read_text(encoding='ascii').strip().splitlines()
+    assert lines[-1] == _INT8_CACHE_FORMAT
+
+
+def test_quantize_int8_preserves_stale_cache_when_conversion_fails(tmp_path: Path, monkeypatch):
     """A failed conversion must not destroy the previous cache artifact."""
-    import types
-
     monkeypatch.setattr(quantization, 'int8_quantization_available', lambda: True)
     monkeypatch.setattr(quantization, '_is_valid_onnx_model', lambda path: True)
     source = tmp_path / 'model.onnx'
@@ -225,20 +287,69 @@ def test_quantize_int8_dynamic_preserves_stale_cache_when_conversion_fails(tmp_p
     os.utime(source, (3000, 3000))
     os.utime(cache, (1000, 1000))
 
-    def _failing_quantize_dynamic(**kwargs):
+    def _failing_quantize_static(**kwargs):
         raise RuntimeError('conversion failed')
 
-    qmod = types.ModuleType('onnxruntime.quantization')
-    qmod.QuantType = type('Q', (), {'QInt8': 1})
-    qmod.quantize_dynamic = _failing_quantize_dynamic
-    if 'onnxruntime' not in sys.modules:
-        stub_pkg = types.ModuleType('onnxruntime')
-        stub_pkg.__path__ = []
-        monkeypatch.setitem(sys.modules, 'onnxruntime', stub_pkg)
-    monkeypatch.setitem(sys.modules, 'onnxruntime.quantization', qmod)
+    _install_fake_quantization_module(monkeypatch, _failing_quantize_static)
 
-    assert quantize_int8_dynamic(source) is None
+    assert quantize_int8(source) is None
     assert cache.read_bytes() == b'old-cache'
+
+
+# -- synthetic calibration reader -------------------------------------------
+
+
+def test_synthetic_calibration_reader_yields_model_shaped_frames():
+    """The reader yields the requested number of frames via the
+    ``get_next``/``rewind`` protocol ONNX Runtime's calibrator drives, each
+    keyed by the model's input name with a float32 [0, 1] tensor of the
+    model's shape -- the same contract ``OnnxYoloDetector._preprocess`` feeds
+    the session."""
+    import numpy as np
+
+    reader = quantization._SyntheticCalibrationReader('images', (1, 3, 64, 64), count=8)
+    assert len(reader) == 8
+    frames = []
+    while True:
+        sample = reader.get_next()
+        if sample is None:
+            break
+        frames.append(sample)
+    assert len(frames) == 8
+    for frame in frames:
+        assert set(frame) == {'images'}
+        tensor = frame['images']
+        assert tensor.shape == (1, 3, 64, 64)
+        assert tensor.dtype == np.float32
+        assert float(tensor.min()) >= 0.0
+        assert float(tensor.max()) <= 1.0
+    # Exhausted readers return None, not raise.
+    assert reader.get_next() is None
+    # Deterministic: rewinding reproduces identical tensors from the seed.
+    reader.rewind()
+    replayed = []
+    while True:
+        sample = reader.get_next()
+        if sample is None:
+            break
+        replayed.append(sample)
+    assert len(replayed) == 8
+    for original, replay in zip(frames, replayed):
+        assert np.array_equal(original['images'], replay['images'])
+
+
+# -- invalidate_int8_cache ---------------------------------------------------
+
+
+def test_invalidate_int8_cache_removes_cache_and_metadata(tmp_path: Path):
+    """A cache that failed to load at runtime is deleted together with its
+    provenance sidecar so the next reload re-quantizes."""
+    source, cache, metadata = _fresh_cache(tmp_path)
+    assert cache.exists() and metadata.exists()
+    invalidate_int8_cache(source)
+    assert not cache.exists()
+    assert not metadata.exists()
+
 
 # -- delete_model INT8 cache cleanup ---------------------------------------
 

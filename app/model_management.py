@@ -68,7 +68,7 @@ def _export_kwargs(nms_free: bool, precision: str = 'fp32', device: str = 'auto'
     install can't emit -- an FP32 export is still a valid ORT input.
     ``precision='int8'`` is NOT honored at export time (Ultralytics would
     require a calibration dataset which the download flow doesn't carry);
-    INT8 is a runtime concern handled by ``app.quantization.quantize_int8_dynamic``.
+    INT8 is a runtime concern handled by ``app.quantization.quantize_int8``.
     """
     parts = ["format='onnx'", f"end2end={'True' if nms_free else 'False'}", 'opset=13']
     if precision == 'fp16' and device.lower() == 'cuda':
@@ -348,7 +348,7 @@ def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, preci
     # ``precision='fp16'`` emits ``half=True`` only when the host has
     # onnxruntime-gpu -- on CPU-only deployments it silently drops so the
     # export still succeeds. INT8 is NOT honored here; it's a runtime
-    # concern handled by ``app.quantization.quantize_int8_dynamic``.
+    #    concern handled by ``app.quantization.quantize_int8``.
     export_kwargs = _export_kwargs(nms_free, precision=precision, device=device)
     cached_weights = MODELS_DIR / pt_name
     weights_arg = pt_name
@@ -597,7 +597,7 @@ def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int =
     # reuses the user's chosen export knobs. INT8 is intentionally excluded
     # from this path -- Ultralytics export can't satisfy it without
     # calibration data; INT8 is handled at detector load time by
-    # ``app.quantization.quantize_int8_dynamic``.
+    # ``app.quantization.quantize_int8``.
     ai_settings_for_export = effective_ai_config()
     precision = str(ai_settings_for_export.get('precision', 'fp32') or 'fp32').strip().lower()
     if precision not in ('fp32', 'fp16'):
