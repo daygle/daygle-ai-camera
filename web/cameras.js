@@ -418,8 +418,13 @@ function renderCameraRow(camera, index) {
   else if (fps && fps.source === 'configured' && Number(fps.configured) > 0) fpsText = Math.round(Number(fps.configured)) + ' FPS configured';
   var ptzEnabled = camera.ptz?.enabled === true;
 
-  var rowHtml = '<tr draggable="true" data-drag-camera="' + index + '" data-camera-index="' + index + '" class="' + (isEnabled ? '' : 'camera-row-disabled') + '">';
-  rowHtml += '<td class="cell-drag"><span class="drag-handle" title="Drag to reorder">' + ICONS.grip + '</span></td>';
+  // Drag-to-reorder only applies in config order: while a column sort is
+  // active the visual order is a permutation, so dragging (which splices the
+  // config array by index) would land rows somewhere unexpected. Gate it off
+  // and dim the grip until the sort is cleared.
+  const isSortedView = cameraSortState !== null;
+  var rowHtml = '<tr draggable="' + (isSortedView ? 'false' : 'true') + '" data-drag-camera="' + index + '" data-camera-index="' + index + '" class="' + (isEnabled ? '' : 'camera-row-disabled') + (isSortedView ? ' camera-row-sorted' : '') + '">';
+  rowHtml += '<td class="cell-drag"><span class="drag-handle' + (isSortedView ? ' drag-handle-disabled' : '') + '" title="' + (isSortedView ? 'Clear the column sort to reorder' : 'Drag to reorder') + '">' + ICONS.grip + '</span></td>';
   rowHtml += '<td class="cell-camera">';
   rowHtml += '<div class="cam-info"><span class="cam-name">' + name + '</span>' + (id ? '<span class="cam-id">ID · ' + id + '</span>' : '') + '</div>';
   rowHtml += '<div class="cell-actions"><button class="secondary cam-edit-btn" data-index="' + index + '" type="button" title="Edit camera" aria-label="Edit ' + name + '">' + ICONS.edit + '</button><button class="secondary cam-toggle-btn' + (isEnabled ? ' is-enabled' : ' is-disabled') + '" data-index="' + index + '" type="button" title="' + (isEnabled ? 'Disable camera' : 'Enable camera') + '" aria-label="' + (isEnabled ? 'Disable ' : 'Enable ') + name + '">' + ICONS.power + '</button><button class="delete-btn secondary cam-remove-btn" data-index="' + index + '" type="button" title="Remove camera" aria-label="Remove ' + name + '">' + ICONS.remove + '</button></div>';
@@ -430,6 +435,76 @@ function renderCameraRow(camera, index) {
   rowHtml += '<td class="cell-ptz"><span class="camera-feature-pill ' + (ptzEnabled ? 'is-ready' : '') + '">' + (ptzEnabled ? 'PTZ Enabled' : 'Fixed') + '</span></td>';
   rowHtml += '</tr>';
   return rowHtml;
+}
+
+// ─── Click-to-sort column headers ─────────────────────────────────────────
+// Headers re-order the currently displayed cameras client-side. `null` means
+// the config order (the order saved by drag-and-drop) applies; clicking a
+// column cycles asc → desc → back to config order. The sort survives health /
+// resolution refreshes and filter changes, and clears when the user drags a
+// camera to reorder (drag is the config-order control, like the Sort By
+// select on the recordings page).
+let cameraSortState = null;
+
+function cameraSortValue(camera, key) {
+  switch (key) {
+    case 'camera': return String(camera.name || camera.id || '').toLowerCase();
+    case 'connection': {
+      const host = String(camera.host || '').trim() || String(camera.stream_url || '').trim();
+      return (String(camera.backend || 'onvif') + ' ' + host).toLowerCase();
+    }
+    case 'video': {
+      const fps = cameraFps[camera.id];
+      if (fps && fps.source === 'detected' && Number(fps.detected) > 0) return Number(fps.detected);
+      if (fps && fps.source === 'configured' && Number(fps.configured) > 0) return Number(fps.configured);
+      return Number(camera.fps) > 0 ? Number(camera.fps) : 0;
+    }
+    case 'status': {
+      if (camera.enabled === false) return 3; // disabled always sorts last
+      const health = cameraHealth[camera.id];
+      if (!health) return 2; // checking (no health payload yet)
+      return health.online ? 0 : 1;
+    }
+    case 'ptz': return camera.ptz?.enabled === true ? 1 : 0;
+    default: return 0;
+  }
+}
+
+function compareCameras(left, right) {
+  if (!cameraSortState) return 0;
+  const leftValue = cameraSortValue(left, cameraSortState.key);
+  const rightValue = cameraSortValue(right, cameraSortState.key);
+  let result;
+  if (typeof leftValue === 'number' && typeof rightValue === 'number') {
+    result = leftValue - rightValue;
+  } else {
+    result = String(leftValue).localeCompare(String(rightValue), undefined, { numeric: true, sensitivity: 'base' });
+  }
+  return cameraSortState.dir === 'asc' ? result : -result;
+}
+
+function renderCameraSortHeader(label, key) {
+  const active = cameraSortState && cameraSortState.key === key;
+  const ariaSort = active ? (cameraSortState.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+  const glyph = active ? (cameraSortState.dir === 'asc' ? '▲' : '▼') : '⇅';
+  const cls = active ? 'table-sort-btn is-active' : 'table-sort-btn';
+  return `<th scope="col" aria-sort="${ariaSort}"><button type="button" class="${cls}" data-sort-key="${key}" aria-label="Sort by ${label}">${label}<span class="table-sort-glyph" aria-hidden="true">${glyph}</span></button></th>`;
+}
+
+function bindCameraSortHeaders() {
+  gridEl.querySelectorAll('[data-sort-key]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const key = button.dataset.sortKey;
+      if (cameraSortState && cameraSortState.key === key) {
+        cameraSortState = cameraSortState.dir === 'asc'
+          ? { key, dir: 'desc' }
+          : null;
+      } else {
+        cameraSortState = { key, dir: 'asc' };
+      }
+      renderGrid();
+    });
+  });
 }
 
 // ─── Filter + stats ───────────────────────────────────────────────────────────
@@ -478,11 +553,23 @@ function renderGrid() {
     updateFilterHint(0);
     return;
   }
-  var rowsHtml = filtered.map(function(cam) {
+  // Sort a copy of the filtered list so the rows keep their real config
+  // index (edit / toggle / delete / drag handlers all address the cameras
+  // array by index, so the visual order must not disturb that mapping).
+  var sorted = cameraSortState
+    ? filtered.slice().sort(compareCameras)
+    : filtered;
+  var rowsHtml = sorted.map(function(cam) {
     var realIndex = cameras.indexOf(cam);
     return renderCameraRow(cam, realIndex);
   }).join('');
-  var tableHtml = '<div class="cameras-table-wrap"><table class="cameras-table"><thead><tr><th class="cell-drag" scope="col"></th><th scope="col">Camera</th><th scope="col">Connection</th><th scope="col">Video</th><th scope="col">Status</th><th scope="col">PTZ</th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
+  var tableHtml = '<div class="cameras-table-wrap"><table class="cameras-table"><thead><tr><th class="cell-drag" scope="col"></th>' +
+    renderCameraSortHeader('Camera', 'camera') +
+    renderCameraSortHeader('Connection', 'connection') +
+    renderCameraSortHeader('Video', 'video') +
+    renderCameraSortHeader('Status', 'status') +
+    renderCameraSortHeader('PTZ', 'ptz') +
+    '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
   gridEl.innerHTML = tableHtml;
   updateFilterHint(filtered.length);
 
@@ -518,6 +605,7 @@ function renderGrid() {
   gridEl.querySelectorAll('.cam-remove-btn').forEach(function(btn) {
     btn.addEventListener('click', function() { openDeleteModal(Number(btn.dataset.index)); });
   });
+  bindCameraSortHeaders();
 
   // Drag-and-drop reorder
   var table = gridEl.querySelector('table');
@@ -551,6 +639,9 @@ function renderGrid() {
       try {
         var result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras: cameras }) });
         cameras = result.cameras || cameras;
+        // Drag-to-reorder is the config-order control: clear any active column
+        // sort so the freshly saved order is what the table shows.
+        cameraSortState = null;
         renderGrid();
         setMessage('Camera order updated.');
       } catch (err) {
@@ -667,7 +758,12 @@ document.addEventListener('keydown', function(e) {
 
 filter.text?.addEventListener('input', function() { renderGrid(); });
 filter.backend?.addEventListener('change', function() { renderGrid(); });
-filter.reset?.addEventListener('click', function() { setTimeout(function() { renderGrid(); }, 0); });
+filter.reset?.addEventListener('click', function() {
+  // Reset Filters also clears any active column sort (mirrors the recordings
+  // page), so the table returns to the config order the user sees on load.
+  cameraSortState = null;
+  setTimeout(function() { renderGrid(); }, 0);
+});
 filter.form?.addEventListener('submit', function(e) { e.preventDefault(); });
 
 window.daygleDatePrefsChanged = function daygleDatePrefsChanged() { /* no-op */ };

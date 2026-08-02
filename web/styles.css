@@ -2259,6 +2259,42 @@ tr.drag-over {
 .cameras-table-wrap .rule-table.activity-table th button.table-sort-btn.is-active {
   color: var(--accent);
 }
+/* The cameras page table uses its own .cameras-table chrome (not the shared
+   .rule-table.activity-table), so the same sort-button treatment is repeated
+   for its header cells. */
+.cameras-table th button.table-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+.cameras-table th button.table-sort-btn:hover {
+  color: var(--text);
+}
+.cameras-table th button.table-sort-btn.is-active {
+  color: var(--accent);
+}
+/* While a column sort is active the rows are not draggable (dragging would
+   splice the config array against the sorted visual order) - dim the grip so
+   the disabled state reads as intentional. */
+.cameras-table tr.camera-row-sorted .drag-handle {
+  cursor: default;
+  opacity: 0.35;
+}
+.cameras-table tr.camera-row-sorted .drag-handle:hover {
+  color: var(--muted);
+  background: none;
+}
 .table-sort-glyph {
   font-size: 9px;
   line-height: 1;
