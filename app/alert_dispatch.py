@@ -96,23 +96,37 @@ logger = logging.getLogger('daygle.ai')
 
 _MIN_RULE_CONFIDENCE_TTL = 5.0
 _min_rule_confidence_cache: tuple[float, float] | None = None
+_per_camera_min_rule_confidence_cache: dict[str, tuple[float, float]] = {}
 _min_rule_confidence_lock = threading.Lock()
 
 
-def compute_minimum_rule_confidence(fallback: float | None = None) -> float:
-    """Return the lowest min_confidence across all enabled object rules.
+def compute_minimum_rule_confidence(fallback: float | None = None, camera_settings: dict | None = None) -> float:
+    """Return the lowest min_confidence across enabled object rules.
 
-    Result is cached for _MIN_RULE_CONFIDENCE_TTL seconds to avoid a database
-    read on every detection frame (called at ~4 Hz per camera from the hot path).
+    Without ``camera_settings`` this is the global floor across ALL cameras
+    (used by status readouts / snapshot overlays). When a camera's settings are
+    passed, only that camera's zones are scanned, so a low-threshold rule on
+    one camera can no longer drag every camera's detector floor down. A camera
+    with no enabled object rules falls back to the AI-settings confidence.
+    Motion rules are always skipped (motion is gated separately). The result
+    is cached per camera (or globally for the no-camera form) for
+    _MIN_RULE_CONFIDENCE_TTL seconds to avoid a database read on every
+    detection frame (called at ~4 Hz per camera from the hot path).
     """
     global _min_rule_confidence_cache
-    cached = _min_rule_confidence_cache
+    camera_key = ''
+    if camera_settings is not None:
+        camera_key = str(camera_settings.get('id') or camera_settings.get('name') or '').strip()
+    cached = _min_rule_confidence_cache if not camera_key else None
     if cached is not None:
         cached_value, cached_at = cached
         if time.time() - cached_at < _MIN_RULE_CONFIDENCE_TTL:
             return cached_value
     with _min_rule_confidence_lock:
-        cached = _min_rule_confidence_cache
+        if camera_key:
+            cached = _per_camera_min_rule_confidence_cache.get(camera_key)
+        else:
+            cached = _min_rule_confidence_cache
         if cached is not None:
             cached_value, cached_at = cached
             if time.time() - cached_at < _MIN_RULE_CONFIDENCE_TTL:
@@ -120,7 +134,8 @@ def compute_minimum_rule_confidence(fallback: float | None = None) -> float:
         if fallback is None:
             fallback = float(effective_ai_config().get('confidence') or 0.45)
         min_conf: float = fallback
-        for camera in effective_cameras_config():
+        cameras = [camera_settings] if camera_settings is not None else effective_cameras_config()
+        for camera in cameras:
             for zone in camera.get('detection', {}).get('zones', []):
                 for rule in zone.get('object_rules', []):
                     if not rule.get('enabled', True):
@@ -134,7 +149,10 @@ def compute_minimum_rule_confidence(fallback: float | None = None) -> float:
                     except (TypeError, ValueError):
                         pass
         result = min_conf
-        _min_rule_confidence_cache = (result, time.time())
+        if camera_key:
+            _per_camera_min_rule_confidence_cache[camera_key] = (result, time.time())
+        else:
+            _min_rule_confidence_cache = (result, time.time())
         return result
 
 

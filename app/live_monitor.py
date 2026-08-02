@@ -31,7 +31,7 @@ from app.detection_status import _camera_has_live_alert_stream, update_live_dete
 from app.detector import DetectorUnavailableError
 from app.event_debounce import (
     clear_live_camera_backoff,
-    live_event_is_debounced,
+    live_event_fresh_labels,
     remember_live_event,
     schedule_live_camera_backoff,
 )
@@ -44,7 +44,6 @@ from app.recording_extension import (
 from app.backup import purge_camera_diagnostics_by_policy
 from app.utils import build_stream_url, build_recording_stream_url, normalize_bool_setting
 from app.zone_detection import (
-    detection_has_matching_record_rule,
     detection_matches_zone,
     filter_detections_for_camera,
     normalize_detection_boxes_for_frame,
@@ -334,7 +333,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     if not frame_has_motion and (not force_scan) and (not motion_detections):
         update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[])
         return None
-    min_conf = compute_minimum_rule_confidence()
+    min_conf = compute_minimum_rule_confidence(camera_settings=settings)
     try:
         if frame_is_numpy and hasattr(_state.detector, 'detect_frame'):
             detections = _state.detector.detect_frame(image, confidence=min_conf)
@@ -402,7 +401,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     for _mot in motion_detections:
         _motion_zone_key = str(_mot.get('zone_id') or _mot.get('zone_name') or '')
         _motion_record = zone_motion_record_on_detect(settings, _motion_zone_key) if _motion_zone_key else zone_motion_record_on_detect(settings)
-        recording_detections.append({**_mot, 'label': 'motion', 'motion_event': True, 'alert_matched': 'motion' in triggered_labels, 'alert_triggered': 'motion' in triggered_labels or _motion_record or detection_has_matching_record_rule({**_mot, 'label': 'motion'}, zone_rules)})
+        # alert_triggered tracks ONLY the motion rule's own Record flag: an
+        # enabled Email/Push alert on the motion rule must not silently force a
+        # recording when Record is off. The alert itself still fires via
+        # ``triggered_labels`` (visible as ``alert_matched``) and delivery.
+        recording_detections.append({**_mot, 'label': 'motion', 'motion_event': True, 'alert_matched': 'motion' in triggered_labels, 'alert_triggered': _motion_record})
     matched_labels = [str(detection.get('label')) for detection in alert_detections if detection.get('label')]
     camera_recording_config = _state.camera_event_recording_config(settings)
     debounced_labels = detection_label_set([detection for detection in recording_detections if detection.get('alert_triggered')])
@@ -423,8 +426,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
                 _cd = 60.0
             if _lbl not in label_cooldowns or _cd > label_cooldowns[_lbl]:
                 label_cooldowns[_lbl] = _cd
-    _matching = [label_cooldowns[_lbl] for _lbl in debounced_labels if _lbl in label_cooldowns]
-    debounce_seconds = max(_matching) if _matching else global_debounce
+    # Each label is debounced against its OWN cooldown window (per-label
+    # debounce), so a label whose window has elapsed fires a new event even
+    # while a slower label on the same camera is still cooling. Labels without
+    # a rule cooldown use the global event_debounce_seconds.
+    resolved_cooldowns = {_lbl: label_cooldowns.get(_lbl, global_debounce) for _lbl in debounced_labels}
     frame_capture_time = datetime.fromtimestamp(frame_capture_ts, tz=timezone.utc).isoformat()
     # Debounce gates EVENT creation, not just recording: a camera whose alert
     # rules match but whose record rules don't (or that has recording off)
@@ -433,7 +439,8 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # debounce window is derived from the same label cooldowns regardless of
     # whether a recording attaches, so an alert-only camera is throttled to one
     # event per window like a recording camera is.
-    if live_event_is_debounced(camera_id, debounced_labels, debounce_seconds):
+    if resolved_cooldowns and not live_event_fresh_labels(camera_id, resolved_cooldowns):
+        debounce_seconds = max(resolved_cooldowns.values())
         extended_recording_id = extend_active_rtsp_recording(camera_id=camera_id, event_time=frame_capture_time, recording_config=camera_recording_config, detections=recording_detections)
         remember_live_event(camera_id, debounced_labels, merge=True)
         update_live_detection_status(camera_id, state='checked', reason=f'Ongoing detection extended active recording and suppressed duplicate event for {debounce_seconds:.1f}s debounce window.' if extended_recording_id is not None else f'Ongoing detection suppressed for {debounce_seconds:.1f}s debounce window.', detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, recording_id=extended_recording_id)

@@ -87,14 +87,61 @@ def live_event_is_debounced(camera_id: str, labels: set[str], debounce_seconds: 
     return bool(previous_labels & labels)
 
 
+def live_event_fresh_labels(camera_id: str, label_cooldowns: dict[str, float]) -> set[str]:
+    """Return the labels whose OWN cooldown window has elapsed (fresh).
+
+    Per-label debounce: each label's window starts from its last remembered
+    emission, so a fast label can fire its own event while a slower label on
+    the same camera is still cooling. A label with no prior emission is always
+    fresh. Each label is anchored to the earlier of its per-label timestamp or
+    the legacy event timestamp, so state written before per-label tracking
+    (and tests that simulate elapsed time via ``timestamp``) stay correct.
+
+    Motion-only events after a non-motion event use the short trailing
+    suppression window (background re-settling noise) rather than the label
+    cooldown - mirrors ``live_event_is_debounced``.
+    """
+    if not label_cooldowns:
+        return set()
+    with _state.live_event_last_emitted_lock:
+        previous = _state.live_event_last_emitted.get(camera_id) or {}
+        label_times = previous.get('label_times') or {}
+        prev_timestamp = float(previous.get('timestamp') or 0)
+        prev_labels = {str(label).strip().lower() for label in previous.get('labels', []) if str(label).strip()}
+    now = time.time()
+    fresh: set[str] = set()
+    for label, cooldown in label_cooldowns.items():
+        anchor = label_times.get(label)
+        if anchor is None and label in prev_labels:
+            anchor = prev_timestamp
+        if anchor is None:
+            fresh.add(label)
+            continue
+        anchor = min(float(anchor), prev_timestamp)
+        if now - anchor > cooldown:
+            fresh.add(label)
+    # Motion-only events after a non-motion event: suppress within the trailing
+    # window regardless of the motion rule's own cooldown.
+    if fresh and fresh <= {'motion'} and 'motion' not in prev_labels and (now - prev_timestamp) < _MOTION_TRAILING_SUPPRESSION_SECONDS:
+        fresh = set()
+    return fresh
+
+
 def remember_live_event(camera_id: str, labels: set[str], *, merge: bool=False) -> None:
     if not labels:
         return
+    now = time.time()
+    normalized = {str(label).strip().lower() for label in labels if str(label).strip()}
+    if not normalized:
+        return
     with _state.live_event_last_emitted_lock:
+        previous = _state.live_event_last_emitted.get(camera_id) or {}
         if merge:
-            previous = _state.live_event_last_emitted.get(camera_id) or {}
-            labels = labels | {str(label).strip().lower() for label in previous.get('labels', []) if str(label).strip()}
-        _state.live_event_last_emitted[camera_id] = {'timestamp': time.time(), 'labels': sorted(labels)}
+            normalized = normalized | {str(label).strip().lower() for label in previous.get('labels', []) if str(label).strip()}
+        label_times = dict(previous.get('label_times') or {})
+        for label in normalized:
+            label_times[label] = now
+        _state.live_event_last_emitted[camera_id] = {'timestamp': now, 'labels': sorted(normalized), 'label_times': label_times}
 
 
 def clear_live_camera_backoff(camera_id: str) -> None:
