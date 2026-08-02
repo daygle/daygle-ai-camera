@@ -41,7 +41,7 @@ PUBLIC_PREFIXES: tuple[str, ...] = ('/static/',)
 PUBLIC_PATHS: frozenset[str] = frozenset({'/favicon.ico', '/login', '/setup'})
 ADMIN_PATHS: frozenset[str] = frozenset({
     '/onnx', '/yamnet-tflite', '/ai', '/cameras', '/settings',
-    '/users', '/zones', '/sounds', '/audit', '/camera-log',
+    '/users', '/zones', '/sounds', '/audit', '/camera-log', '/application-log',
 })
 MUTATING_METHODS: frozenset[str] = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
 

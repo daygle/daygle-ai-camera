@@ -235,6 +235,65 @@ function renderEmptyState() {
   `;
 }
 
+// ── Click-to-sort activity headers ────────────────────────────────────────
+// Sorting is client-side, matching the recordings table. `null` preserves the
+// existing newest-first API order; clicking a column cycles asc → desc → back
+// to that default. The active sort survives filter and time-range changes.
+let activitySortState = null;
+
+function activitySortValue(item, key) {
+  switch (key) {
+    case 'type': return item.isSound ? 2 : item.isMotionOnly ? 1 : 0;
+    case 'camera': return String(item.camera || '').toLowerCase();
+    case 'detections': return new Set((item.detections || []).map((d) => String(d.label || '').trim().toLowerCase()).filter(Boolean)).size;
+    case 'zone': return String(item.zoneNames?.[0] || '').toLowerCase();
+    case 'when': {
+      const timestamp = Date.parse(item.createdAt);
+      return Number.isFinite(timestamp) ? timestamp : null;
+    }
+    default: return 0;
+  }
+}
+
+function compareActivityItems(left, right) {
+  if (!activitySortState) return 0;
+  const leftValue = activitySortValue(left, activitySortState.key);
+  const rightValue = activitySortValue(right, activitySortState.key);
+  let result;
+  if (leftValue === null && rightValue !== null) return 1;
+  if (leftValue !== null && rightValue === null) return -1;
+  if (typeof leftValue === 'number' && typeof rightValue === 'number') {
+    result = leftValue - rightValue;
+  } else {
+    result = String(leftValue).localeCompare(String(rightValue), undefined, { numeric: true, sensitivity: 'base' });
+  }
+  return activitySortState.dir === 'asc' ? result : -result;
+}
+
+function renderActivitySortHeader(label, key) {
+  const active = activitySortState && activitySortState.key === key;
+  const ariaSort = active ? (activitySortState.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+  const glyph = active ? (activitySortState.dir === 'asc' ? '▲' : '▼') : '⇅';
+  const cls = active ? 'table-sort-btn is-active' : 'table-sort-btn';
+  return `<th scope="col" aria-sort="${ariaSort}"><button type="button" class="${cls}" data-sort-key="${key}" aria-label="Sort by ${label}">${label}<span class="table-sort-glyph" aria-hidden="true">${glyph}</span></button></th>`;
+}
+
+function bindActivitySortHeaders() {
+  document.querySelectorAll('#activityFeed [data-sort-key]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const key = button.dataset.sortKey;
+      if (activitySortState && activitySortState.key === key) {
+        activitySortState = activitySortState.dir === 'asc'
+          ? { key, dir: 'desc' }
+          : null;
+      } else {
+        activitySortState = { key, dir: key === 'when' ? 'desc' : 'asc' };
+      }
+      renderActivityFeed();
+    });
+  });
+}
+
 function renderActivityFeed() {
   const items = applyFilter(buildEventItems());
   if (!items.length) {
@@ -243,13 +302,22 @@ function renderActivityFeed() {
     updateDismissButtons();
     return;
   }
+  const ordered = activitySortState ? items.slice().sort(compareActivityItems) : items;
   els.activityFeed.innerHTML =
     '<div class="cameras-table-wrap"><table class="rule-table activity-table">' +
-      '<thead><tr><th scope="col">Type</th><th scope="col">Camera</th><th scope="col">Detections</th><th scope="col">Zone</th><th scope="col">When</th><th class="cell-center" scope="col">Actions</th></tr></thead>' +
-      '<tbody>' + items.map(renderActivityItem).join('') + '</tbody>' +
+      '<thead><tr>' +
+        renderActivitySortHeader('Type', 'type') +
+        renderActivitySortHeader('Camera', 'camera') +
+        renderActivitySortHeader('Detections', 'detections') +
+        renderActivitySortHeader('Zone', 'zone') +
+        renderActivitySortHeader('When', 'when') +
+        '<th class="cell-center" scope="col">Actions</th>' +
+      '</tr></thead>' +
+      '<tbody>' + ordered.map(renderActivityItem).join('') + '</tbody>' +
     '</table></div>';
   updateListStatus(items.length);
   bindActivityActions();
+  bindActivitySortHeaders();
   updateDismissButtons();
 }
 

@@ -245,7 +245,10 @@ def _should_requantize(source: Path, cache: Path) -> bool:
 # deterministic synthetic frames instead; the same synthetic reader remains
 # the complete fallback when no real frame can be obtained. Calibration is a
 # one-time cost, cached to ``*.int8.onnx``.
-_INT8_CACHE_FORMAT = 'int8-qdq-v2-camera-calibration'
+# Bump this whenever the quantized graph contract changes. Existing caches
+# produced before output-head exclusion can suppress real object scores and
+# must be regenerated rather than reused under the new runtime.
+_INT8_CACHE_FORMAT = 'int8-qdq-v3-output-fp32-camera-calibration'
 _CALIBRATION_SAMPLE_COUNT = 64
 _REAL_CALIBRATION_FRAMES_PER_CAMERA = 2
 _REAL_CALIBRATION_MAX_FRAMES = 16
@@ -468,6 +471,51 @@ def _model_input_contract(model_path: Path) -> tuple[str, tuple[int, ...]]:
     raise ValueError('model input is not a 4-D tensor; cannot synthesise calibration data')
 
 
+def _model_output_nodes(model_path: Path) -> list[str]:
+    """Return named nodes that produce the final detection outputs.
+
+    YOLO confidence/box heads commonly terminate at a ``Concat`` or similar
+    node, sometimes followed by transparent export wrappers such as
+    ``Transpose`` or ``Identity``. Static QDQ calibration can quantize that
+    final activation using only background calibration frames, clamping real
+    object scores to the tiny observed range before the detector's confidence
+    filter sees them. Keep the final producer and transparent wrapper chain in
+    FP32 while still quantizing the backbone and most of the detection head.
+
+    If an output producer is unnamed, return an empty list. The caller then
+    safely falls back to the source FP32 model instead of publishing an INT8
+    graph whose detection head cannot be protected.
+    """
+    import onnx  # type: ignore[import-untyped]
+    model = onnx.load(str(model_path))
+    producers = {
+        output: node
+        for node in model.graph.node
+        for output in node.output
+        if output
+    }
+    pending = [output.name for output in model.graph.output]
+    excluded: list[str] = []
+    transparent = {'Cast', 'Identity', 'Reshape', 'Squeeze', 'Transpose', 'Unsqueeze'}
+    seen_tensors: set[str] = set()
+    while pending:
+        tensor_name = pending.pop()
+        if not tensor_name or tensor_name in seen_tensors:
+            continue
+        seen_tensors.add(tensor_name)
+        node = producers.get(tensor_name)
+        if node is None or not node.name:
+            return []
+        if node.name not in excluded:
+            excluded.append(node.name)
+        if node.op_type in transparent:
+            # The first input is the data tensor; shape/axes inputs for
+            # Reshape/Squeeze/Unsqueeze are initializers and are not part of
+            # the detection-output producer chain.
+            pending.extend(node.input[:1])
+    return excluded
+
+
 class _SyntheticCalibrationReader:
     """Calibration reader combining captured camera frames and fallback data.
 
@@ -659,6 +707,17 @@ def quantize_int8(model_path: Path) -> Path | None:
                 quantize_static,
             )
             input_name, input_shape = _model_input_contract(source)
+            output_nodes = _model_output_nodes(source)
+            if not output_nodes:
+                # Never publish an INT8 graph whose output head could not be
+                # protected. Exporters normally name their output producers;
+                # if this graph does not, returning None makes the detector
+                # use the original FP32 model instead of risking silent loss
+                # of real detections.
+                raise RuntimeError(
+                    'could not identify named ONNX graph-output producer nodes; '
+                    'refusing INT8 quantization'
+                )
             if real_frames is None:
                 real_frames, configured_camera_count = _configured_camera_calibration_frames()
             calibration_reader = _SyntheticCalibrationReader(
@@ -700,6 +759,11 @@ def quantize_int8(model_path: Path) -> Path | None:
                 activation_type=QuantType.QUInt8,
                 weight_type=QuantType.QInt8,
                 calibrate_method=CalibrationMethod.MinMax,
+                # Keep the final YOLO head output in FP32. Background-only
+                # calibration can otherwise quantize a confidence activation
+                # to a very small range, making real objects fail the normal
+                # postprocess confidence threshold.
+                nodes_to_exclude=output_nodes,
             )
             if not temporary_path.is_file() or temporary_path.stat().st_size <= 0:
                 raise RuntimeError('quantize_static produced no usable output file')

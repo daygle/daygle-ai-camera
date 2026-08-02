@@ -84,7 +84,7 @@ def recordings_timeline(
     tz_offset_minutes: int | None = Query(None, ge=-840, le=840),
     db=Depends(get_database),
 ):
-    require_user(request)
+    user = require_user(request)
     cameras = [
         {
             'id': str(camera_settings.get('id') or ''),
@@ -120,6 +120,14 @@ def recordings_timeline(
     day_end = day_end_local.astimezone(timezone.utc)
 
     recordings_list = db.list_recordings_for_camera_day(selected_camera_id, day_start.isoformat(), day_end.isoformat())
+    request_user = user
+    if str(request_user.get('role') or '').strip().lower() != 'admin':
+        session_user_id = int(request_user.get('id') or 0)
+        recordings_list = [
+            recording for recording in recordings_list
+            if recording.get('owner_user_id') is None
+            or int(recording.get('owner_user_id') or 0) == session_user_id
+        ]
     segments = [
         segment
         for segment in (

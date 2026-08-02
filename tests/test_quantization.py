@@ -38,7 +38,12 @@ from app.quantization import (  # noqa: E402
 )
 
 
-def _install_fake_quantization_module(monkeypatch, quantize_static, model_input_contract=('images', (1, 3, 64, 64))):
+def _install_fake_quantization_module(
+    monkeypatch,
+    quantize_static,
+    model_input_contract=('images', (1, 3, 64, 64)),
+    model_output_nodes=('detect_head',),
+):
     """Register a stub ``onnxruntime.quantization`` and a fake input contract.
 
     The in-function ``from onnxruntime.quantization import ...`` and
@@ -60,6 +65,7 @@ def _install_fake_quantization_module(monkeypatch, quantize_static, model_input_
         monkeypatch.setitem(sys.modules, 'onnxruntime', stub_pkg)
     monkeypatch.setitem(sys.modules, 'onnxruntime.quantization', qmod)
     monkeypatch.setattr(quantization, '_model_input_contract', lambda path: model_input_contract)
+    monkeypatch.setattr(quantization, '_model_output_nodes', lambda path: list(model_output_nodes))
 
 
 def _fresh_cache(tmp_path: Path, name: str = 'yolo26n.onnx') -> tuple[Path, Path, Path]:
@@ -168,7 +174,41 @@ def test_onnxruntime_gpu_available_returns_bool():
     assert isinstance(onnxruntime_gpu_available(), bool)
 
 
-# -- quantize_int8 ---------------------------------------------------------
+# -- output graph protection -------------------------------------------------
+
+
+def test_model_output_nodes_traverses_data_input_only_for_wrappers(monkeypatch, tmp_path: Path):
+    """Reshape's shape initializer must not be mistaken for an unnamed graph
+    branch while walking through transparent output wrappers."""
+    class _Value:
+        def __init__(self, name):
+            self.name = name
+
+    class _Node:
+        def __init__(self, name, op_type, inputs, outputs):
+            self.name = name
+            self.op_type = op_type
+            self.input = inputs
+            self.output = outputs
+
+    class _Graph:
+        node = [
+            _Node('head', 'Conv', ['image', 'weights'], ['head_out']),
+            _Node('reshape', 'Reshape', ['head_out', 'shape_initializer'], ['reshaped']),
+            _Node('identity', 'Identity', ['reshaped'], ['final']),
+        ]
+        output = [_Value('final')]
+
+    class _Model:
+        graph = _Graph()
+
+    fake_onnx = types.ModuleType('onnx')
+    fake_onnx.load = lambda path: _Model()
+    monkeypatch.setitem(sys.modules, 'onnx', fake_onnx)
+
+    assert quantization._model_output_nodes(tmp_path / 'fixture.onnx') == [
+        'identity', 'reshape', 'head',
+    ]
 
 
 def test_quantize_int8_returns_none_for_missing_source(tmp_path: Path):
@@ -222,6 +262,7 @@ def test_quantize_int8_requantizes_when_cache_stale(tmp_path: Path, monkeypatch)
         captured['format'] = kwargs['quant_format']
         captured['activation_type'] = kwargs['activation_type']
         captured['weight_type'] = kwargs['weight_type']
+        captured['nodes_to_exclude'] = kwargs['nodes_to_exclude']
         Path(kwargs['model_output']).write_bytes(b'fresh-cache')
 
     _install_fake_quantization_module(monkeypatch, _fake_quantize_static)
@@ -232,6 +273,7 @@ def test_quantize_int8_requantizes_when_cache_stale(tmp_path: Path, monkeypatch)
     # QDQ static quantization is dispatched, not the legacy quantize_dynamic.
     assert captured['activation_type'] == 2  # QuantType.QUInt8 (stub value)
     assert captured['weight_type'] == 1  # QuantType.QInt8 (stub value)
+    assert captured['nodes_to_exclude'] == ['detect_head']
     # Quantization writes to a private temporary ONNX path and atomically
     # replaces the cache only after completion; callers receive the final
     # cache path, not the now-removed temporary path.
@@ -274,6 +316,24 @@ def test_quantize_int8_passes_real_camera_frames_to_static_quantizer(tmp_path: P
     assert float(captured['sample'][0, 2].max()) > 0.9
 
 
+def test_quantize_int8_refuses_graph_without_named_output_producer(tmp_path: Path, monkeypatch):
+    """An unnameable detection output must fall back to FP32 rather than
+    publishing an INT8 graph whose confidence head may be range-clipped."""
+    monkeypatch.setattr(quantization, 'int8_quantization_available', lambda: True)
+    monkeypatch.setattr(quantization, '_model_output_nodes', lambda path: [])
+    source = tmp_path / 'unnamed-output.onnx'
+    source.write_bytes(b'fake-source')
+    cache = int8_cache_path(source)
+
+    def _unexpected_quantize_static(**kwargs):
+        raise AssertionError('must not quantize an unprotected output graph')
+
+    _install_fake_quantization_module(monkeypatch, _unexpected_quantize_static)
+
+    assert quantize_int8(source) is None
+    assert not cache.exists()
+
+
 def test_quantize_int8_requantizes_legacy_cache_without_format_marker(tmp_path: Path, monkeypatch):
     """A fresh-by-mtime cache whose sidecar predates the QDQ format marker
     (e.g. produced by the old ``quantize_dynamic`` path, which fails to load
@@ -287,7 +347,10 @@ def test_quantize_int8_requantizes_legacy_cache_without_format_marker(tmp_path: 
     source.write_bytes(b'fake-source')
     cache.write_bytes(b'legacy-broken-cache')
     # Old-format sidecar: source hash only, no format marker line.
-    metadata.write_text(_source_signature(source) + '\n', encoding='ascii')
+    metadata.write_text(''.join([
+        _source_signature(source),
+        '\nint8-qdq-v2-camera-calibration\n',
+    ]), encoding='ascii')
     os.utime(cache, (2000, 2000))
     os.utime(source, (1000, 1000))
 
@@ -295,13 +358,19 @@ def test_quantize_int8_requantizes_legacy_cache_without_format_marker(tmp_path: 
 
     def _fake_quantize_static(**kwargs):
         captured['called'] = True
+        captured['nodes_to_exclude'] = kwargs['nodes_to_exclude']
         Path(kwargs['model_output']).write_bytes(b'fresh-qdq-cache')
 
-    _install_fake_quantization_module(monkeypatch, _fake_quantize_static)
+    _install_fake_quantization_module(
+        monkeypatch,
+        _fake_quantize_static,
+        model_output_nodes=('detect_head',),
+    )
 
     result = quantize_int8(source)
     assert result == cache
     assert captured['called'] is True
+    assert captured['nodes_to_exclude'] == ['detect_head']
     assert cache.read_bytes() == b'fresh-qdq-cache'
     lines = metadata.read_text(encoding='ascii').strip().splitlines()
     assert lines[1] == _INT8_CACHE_FORMAT

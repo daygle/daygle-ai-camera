@@ -13,7 +13,11 @@ router = APIRouter()
 
 
 @router.get('/api/alerts')
-def alert_history(limit: int = Query(25, ge=1, le=10000), since: str | None = Query(None), db=Depends(get_database)):
+def alert_history(request: Request, limit: int = Query(25, ge=1, le=10000), since: str | None = Query(None), db=Depends(get_database)):
+    # Alert history is an administrator-only surface, matching the /alerts
+    # page and the dismiss/delete operations. Do not return alert metadata or
+    # recording references to viewer accounts.
+    require_admin(request)
     return db.alerts(limit=limit, since=since)
 
 

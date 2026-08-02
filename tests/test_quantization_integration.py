@@ -91,6 +91,12 @@ def test_quantize_int8_produces_loadable_qdq_model(tmp_path: Path):
     assert quantized.is_file()
 
     model = onnx.load(str(quantized))
+    # The final graph-output producer is intentionally excluded so YOLO box
+    # and confidence values remain FP32 after calibration. This is the
+    # regression guard for detections disappearing under INT8.
+    assert quantization._model_output_nodes(source) == ['conv2']
+    output_elem_type = model.graph.output[0].type.tensor_type.elem_type
+    assert output_elem_type == TensorProto.FLOAT
     op_types = {node.op_type for node in model.graph.node}
     # QDQ format only: QuantizeLinear/DequantizeLinear pairs, no legacy ops.
     assert 'ConvInteger' not in op_types
@@ -101,6 +107,7 @@ def test_quantize_int8_produces_loadable_qdq_model(tmp_path: Path):
     session = ort.InferenceSession(str(quantized), providers=['CPUExecutionProvider'])
     out = session.run(None, {'input': np.zeros((1, 3, 64, 64), dtype=np.float32)})
     assert out and out[0].shape == (1, 2, 60, 60)
+    assert out[0].dtype == np.float32
 
 
 def test_legacy_quantize_dynamic_output_fails_on_modern_cpu_ort(tmp_path: Path):

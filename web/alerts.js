@@ -219,6 +219,71 @@ function updateStats() {
   if (els.statSoundAlerts) els.statSoundAlerts.textContent = String(soundAlerts);
 }
 
+// ── Click-to-sort activity headers ────────────────────────────────────────
+// Sorting is client-side, matching the recordings table. `null` preserves the
+// existing newest-first API order; clicking a column cycles asc → desc → back
+// to that default. The active sort survives filter and time-range changes.
+let activitySortState = null;
+
+function alertGroupSortType(group) {
+  const isSound = group.labels.some((label) => SOUND_CLASS_IDS.has(label))
+    || group.detections.some((d) => SOUND_CLASS_IDS.has(String(d.label || '').toLowerCase()));
+  return isSound ? 2 : isMotionOnlyAlertGroup(group) ? 1 : 0;
+}
+
+function activitySortValue(group, key) {
+  switch (key) {
+    case 'type': return alertGroupSortType(group);
+    case 'camera': return String(group.camera || '').toLowerCase();
+    case 'detections': return new Set((group.detections || []).map((d) => String(d.label || '').trim().toLowerCase()).filter(Boolean)).size;
+    case 'zone': return String(group.zones?.[0] || '').toLowerCase();
+    case 'when': {
+      const timestamp = Date.parse(group.latestAt);
+      return Number.isFinite(timestamp) ? timestamp : null;
+    }
+    default: return 0;
+  }
+}
+
+function compareActivityItems(left, right) {
+  if (!activitySortState) return 0;
+  const leftValue = activitySortValue(left, activitySortState.key);
+  const rightValue = activitySortValue(right, activitySortState.key);
+  let result;
+  if (leftValue === null && rightValue !== null) return 1;
+  if (leftValue !== null && rightValue === null) return -1;
+  if (typeof leftValue === 'number' && typeof rightValue === 'number') {
+    result = leftValue - rightValue;
+  } else {
+    result = String(leftValue).localeCompare(String(rightValue), undefined, { numeric: true, sensitivity: 'base' });
+  }
+  return activitySortState.dir === 'asc' ? result : -result;
+}
+
+function renderActivitySortHeader(label, key) {
+  const active = activitySortState && activitySortState.key === key;
+  const ariaSort = active ? (activitySortState.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+  const glyph = active ? (activitySortState.dir === 'asc' ? '▲' : '▼') : '⇅';
+  const cls = active ? 'table-sort-btn is-active' : 'table-sort-btn';
+  return `<th scope="col" aria-sort="${ariaSort}"><button type="button" class="${cls}" data-sort-key="${key}" aria-label="Sort by ${label}">${label}<span class="table-sort-glyph" aria-hidden="true">${glyph}</span></button></th>`;
+}
+
+function bindActivitySortHeaders() {
+  document.querySelectorAll('#alertFeed [data-sort-key]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const key = button.dataset.sortKey;
+      if (activitySortState && activitySortState.key === key) {
+        activitySortState = activitySortState.dir === 'asc'
+          ? { key, dir: 'desc' }
+          : null;
+      } else {
+        activitySortState = { key, dir: key === 'when' ? 'desc' : 'asc' };
+      }
+      renderFeed();
+    });
+  });
+}
+
 function renderFeed() {
   const filtered = applyFilter(alertGroups);
   if (!filtered.length) {
@@ -226,12 +291,21 @@ function renderFeed() {
     updateListStatus(0);
     return;
   }
+  const ordered = activitySortState ? filtered.slice().sort(compareActivityItems) : filtered;
   els.alertFeed.innerHTML =
     '<div class="cameras-table-wrap"><table class="rule-table activity-table">' +
-      '<thead><tr><th scope="col">Type</th><th scope="col">Camera</th><th scope="col">Detections</th><th scope="col">Zone</th><th scope="col">When</th><th class="cell-center" scope="col">Actions</th></tr></thead>' +
-      '<tbody>' + filtered.map(renderAlertItem).join('') + '</tbody>' +
+      '<thead><tr>' +
+        renderActivitySortHeader('Type', 'type') +
+        renderActivitySortHeader('Camera', 'camera') +
+        renderActivitySortHeader('Detections', 'detections') +
+        renderActivitySortHeader('Zone', 'zone') +
+        renderActivitySortHeader('When', 'when') +
+        '<th class="cell-center" scope="col">Actions</th>' +
+      '</tr></thead>' +
+      '<tbody>' + ordered.map(renderAlertItem).join('') + '</tbody>' +
     '</table></div>';
   bindActions();
+  bindActivitySortHeaders();
   updateListStatus(filtered.length);
 }
 

@@ -347,7 +347,8 @@ def camera_log_page(request: Request, web_dir: Path = Depends(get_web_dir)):
 
 
 @router.get('/application-log')
-def application_log_page(web_dir: Path = Depends(get_web_dir)):
+def application_log_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
     page_path = web_dir / 'application-log.html'
     if page_path.exists():
         return FileResponse(page_path)
