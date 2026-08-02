@@ -2186,8 +2186,8 @@ tr.drag-over {
    The dashboard Detection Feed, Recordings Library and Alert Feed share the
    cameras page's wrapped-table chrome. These scoped rules adapt the shared
    activity building blocks (type pill, when stamps, detection badges) to
-   table cells, and let the row actions keep their readable text labels
-   instead of collapsing to the cameras page's 32px icon squares. */
+   table cells. Desktop row actions keep readable text labels; mobile rules
+   below switch them to compact, accessible icon buttons. */
 .cameras-table-wrap .rule-table.activity-table {
   min-width: 980px;
 }
@@ -2314,11 +2314,31 @@ tr.drag-over {
 }
 @media (max-width: 760px) {
   .cameras-table-wrap .rule-table.activity-table { min-width: 880px; }
+  .activity-card,
+  .recordings-list-card,
   .activity-list,
   .recordings-list,
   #activityFeed,
   #alertFeed,
   #recordings { min-width: 0; }
+  /* Keep table actions easy to tap without letting Play / Dismiss / Delete
+     labels consume the narrow actions column. The visible label remains in
+     the DOM for accessibility and desktop, while aria-label supplies the
+     spoken name when the text is hidden. */
+  .cameras-table-wrap .rule-table.activity-table .activity-cell-actions .cell-actions {
+    gap: 6px;
+  }
+  .cameras-table-wrap .rule-table.activity-table .activity-cell-actions .cell-actions button,
+  .cameras-table-wrap .rule-table.activity-table .activity-cell-actions .cell-actions a {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    padding: 0;
+    gap: 0;
+  }
+  .cameras-table-wrap .rule-table.activity-table .activity-cell-actions .activity-action-label {
+    display: none;
+  }
 }
   /* Match the cameras table's mobile behaviour: keep the wrapped table a real
      table that scrolls inside the wrap, hide the drag column, and let the
