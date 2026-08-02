@@ -111,18 +111,6 @@ function groupAlertsByEvent(alerts) {
 
 // ─── Rendering ──────────────────────────────────────────────────────────────
 
-function alertIcon() {
-  return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
-}
-
-function motionActivityIcon() {
-  return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="m4 19.5 4-4.5 1.5 4 5.5-3-2-7 4-3"/></svg>';
-}
-
-function soundIcon() {
-  return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
-}
-
 function recordingLink(recordingId, label) {
   if (!recordingId) return '';
   const playIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg>';
@@ -132,13 +120,11 @@ function recordingLink(recordingId, label) {
 function renderAlertItem(group) {
   const isSound = group.labels.some((l) => SOUND_CLASS_IDS.has(l)) || group.detections.some((d) => SOUND_CLASS_IDS.has(String(d.label || '').toLowerCase()));
   const isMotionOnly = isMotionOnlyAlertItem({ ...group, detections: group.detections, labels: group.labels });
-  const icon = isSound ? soundIcon() : isMotionOnly ? motionActivityIcon() : alertIcon();
   const typeClass = isSound ? 'activity-item-sound' : isMotionOnly ? 'activity-item-motion' : 'activity-item-alert';
   const typeLabel = isSound ? 'Sound Alert' : isMotionOnly ? 'Motion Alert' : 'Object Alert';
   const title = group.recordingId ? `Recording #${group.recordingId}` : 'Alert';
-  const cameraLine = group.camera ? `Camera: ${escapeHtml(group.camera)}` : 'Camera: unknown';
-  const zonePart = !isSound && group.zones?.length ? ` · Zone: ${group.zones.map(escapeHtml).join(', ')}` : '';
-  const metaLine = `${cameraLine}${zonePart}`;
+  const camera = group.camera ? escapeHtml(group.camera) : 'unknown';
+  const zone = !isSound && group.zones?.length ? group.zones.map(escapeHtml).join(', ') : '-';
   const actions = [];
   if (group.recordingId) actions.push(recordingLink(group.recordingId, 'Footage'));
 
@@ -148,27 +134,22 @@ function renderAlertItem(group) {
   }
 
   return `
-    <article class="item activity-item ${typeClass}" data-activity-id="${escapeHtml(String(group.key))}" data-activity-type="alert">
-      <div class="activity-item-icon">${icon}</div>
-      <div class="activity-item-main">
-        <div class="activity-item-header">
-          <div class="activity-item-title">
-            <span class="activity-item-type">${typeLabel}</span>
-            <span class="activity-item-name">${title}</span>
+    <tr class="activity-table-row ${typeClass}" data-activity-id="${escapeHtml(String(group.key))}" data-activity-type="alert">
+      <td class="activity-cell-type"><span class="activity-item-type">${typeLabel}</span><span class="activity-cell-ref">${escapeHtml(title)}</span></td>
+      <td class="activity-cell-camera">${camera}</td>
+      <td class="activity-cell-detections"><div class="activity-item-badges">${isMotionOnly ? motionPill() : detectionBadges(group.detections, { isSound })}</div></td>
+      <td class="activity-cell-zone">${zone}</td>
+      <td class="activity-cell-when">
+        <div class="activity-item-when">
+          <div class="activity-item-when-relative">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span>${escapeHtml(timeAgo(group.latestAt))}</span>
           </div>
-          <div class="activity-item-when">
-            <div class="activity-item-when-relative">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-              <span>${escapeHtml(timeAgo(group.latestAt))}</span>
-            </div>
-            <span class="activity-item-when-absolute">${escapeHtml(formatDate(group.latestAt))}</span>
-          </div>
+          <span class="activity-item-when-absolute">${escapeHtml(formatDate(group.latestAt))}</span>
         </div>
-        <p class="muted activity-item-meta">${metaLine}</p>
-        <div class="activity-item-badges">${isMotionOnly ? motionPill() : detectionBadges(group.detections, { isSound })}</div>
-      </div>
-      ${actions.length ? `<div class="activity-item-actions">${actions.join('')}</div>` : ''}
-    </article>
+      </td>
+      <td class="activity-cell-actions"><div class="cell-actions">${actions.join('')}</div></td>
+    </tr>
   `;
 }
 
@@ -245,7 +226,11 @@ function renderFeed() {
     updateListStatus(0);
     return;
   }
-  els.alertFeed.innerHTML = filtered.map(renderAlertItem).join('');
+  els.alertFeed.innerHTML =
+    '<div class="cameras-table-wrap"><table class="rule-table activity-table">' +
+      '<thead><tr><th scope="col">Type</th><th scope="col">Camera</th><th scope="col">Detections</th><th scope="col">Zone</th><th scope="col">When</th><th class="cell-center" scope="col">Actions</th></tr></thead>' +
+      '<tbody>' + filtered.map(renderAlertItem).join('') + '</tbody>' +
+    '</table></div>';
   bindActions();
   updateListStatus(filtered.length);
 }

@@ -174,18 +174,6 @@ function applyFilter(items) {
   return items;
 }
 
-function eventIcon() {
-  return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg>';
-}
-
-function motionActivityIcon() {
-  return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="m4 19.5 4-4.5 1.5 4 5.5-3-2-7 4-3"/></svg>';
-}
-
-function soundIcon() {
-  return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
-}
-
 function recordingLink(recordingId, label) {
   if (!recordingId) return '';
   const playIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg>';
@@ -195,15 +183,13 @@ function recordingLink(recordingId, label) {
 function renderActivityItem(item) {
   const isSound = Boolean(item.isSound);
   const isMotionOnly = Boolean(item.isMotionOnly);
-  const icon = isSound ? soundIcon() : isMotionOnly ? motionActivityIcon() : eventIcon();
   const typeClass = isSound ? 'activity-item-sound' : isMotionOnly ? 'activity-item-motion' : 'activity-item-event';
   const typeLabel = isSound ? 'Sound Detection' : isMotionOnly ? 'Motion Detection' : 'Object Detection';
   const title = item.recordingId ? `Recording #${item.recordingId}` : `Event #${item.id}`;
-  const cameraLine = item.camera ? `Camera: ${escapeHtml(item.camera)}` : 'Camera: unknown';
-  const zonePart = !isSound && item.zoneNames?.length
-    ? ` · Zone: ${item.zoneNames.map(escapeHtml).join(', ')}`
-    : '';
-  const metaLine = `${cameraLine}${zonePart}`;
+  const camera = item.camera ? escapeHtml(item.camera) : 'unknown';
+  const zone = !isSound && item.zoneNames?.length
+    ? item.zoneNames.map(escapeHtml).join(', ')
+    : '-';
   const actions = [];
   if (item.recordingId) actions.push(recordingLink(item.recordingId, 'Recording'));
   if (window.daygleAuth?.user?.role === 'admin') {
@@ -211,27 +197,22 @@ function renderActivityItem(item) {
     actions.push(`<button class="secondary delete-btn activity-item-action" data-dismiss-event="${escapeHtml(String(item.id))}" type="button">${dismissIcon} Dismiss</button>`);
   }
   return `
-    <article class="item activity-item ${typeClass}" data-activity-id="${escapeHtml(String(item.id))}">
-      <div class="activity-item-icon">${icon}</div>
-      <div class="activity-item-main">
-        <div class="activity-item-header">
-          <div class="activity-item-title">
-            <span class="activity-item-type">${typeLabel}</span>
-            <span class="activity-item-name">${title}</span>
+    <tr class="activity-table-row ${typeClass}" data-activity-id="${escapeHtml(String(item.id))}">
+      <td class="activity-cell-type"><span class="activity-item-type">${typeLabel}</span><span class="activity-cell-ref">${escapeHtml(title)}</span></td>
+      <td class="activity-cell-camera">${camera}</td>
+      <td class="activity-cell-detections"><div class="activity-item-badges">${isMotionOnly ? motionPill() : detectionBadges(item.detections, { isSound })}</div></td>
+      <td class="activity-cell-zone">${zone}</td>
+      <td class="activity-cell-when">
+        <div class="activity-item-when">
+          <div class="activity-item-when-relative">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span>${escapeHtml(timeAgo(item.createdAt))}</span>
           </div>
-          <div class="activity-item-when">
-            <div class="activity-item-when-relative">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-              <span>${escapeHtml(timeAgo(item.createdAt))}</span>
-            </div>
-            <span class="activity-item-when-absolute">${escapeHtml(formatDate(item.createdAt))}</span>
-          </div>
+          <span class="activity-item-when-absolute">${escapeHtml(formatDate(item.createdAt))}</span>
         </div>
-        <p class="muted activity-item-meta">${metaLine}</p>
-        <div class="activity-item-badges">${isMotionOnly ? motionPill() : detectionBadges(item.detections, { isSound })}</div>
-      </div>
-      ${actions.length ? `<div class="activity-item-actions">${actions.join('')}</div>` : ''}
-    </article>
+      </td>
+      <td class="activity-cell-actions"><div class="cell-actions">${actions.join('')}</div></td>
+    </tr>
   `;
 }
 
@@ -262,7 +243,11 @@ function renderActivityFeed() {
     updateDismissButtons();
     return;
   }
-  els.activityFeed.innerHTML = items.map(renderActivityItem).join('');
+  els.activityFeed.innerHTML =
+    '<div class="cameras-table-wrap"><table class="rule-table activity-table">' +
+      '<thead><tr><th scope="col">Type</th><th scope="col">Camera</th><th scope="col">Detections</th><th scope="col">Zone</th><th scope="col">When</th><th class="cell-center" scope="col">Actions</th></tr></thead>' +
+      '<tbody>' + items.map(renderActivityItem).join('') + '</tbody>' +
+    '</table></div>';
   updateListStatus(items.length);
   bindActivityActions();
   updateDismissButtons();

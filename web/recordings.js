@@ -265,7 +265,77 @@ function renderStats(recordings) {
   }
 }
 
+// ── Click-to-sort column headers ─────────────────────────────────────────
+// Headers re-order the currently loaded list client-side. `null` means the
+// server order from the Sort By select applies; clicking a column cycles
+// asc → desc → back to the server default. The sort survives filter changes
+// and the preparing-clip auto-refresh, and clears when the user explicitly
+// changes the Sort By select (server-side newest/oldest).
+let recordingsSortState = null;
+let currentRecordings = [];
+
+function recordingSortValue(recording, key) {
+  switch (key) {
+    case 'type': {
+      if (isSoundRecording(recording)) return 2;
+      return isMotionOnlyRecording(recording) ? 1 : 0;
+    }
+    case 'camera': return String(cameraLabel(recording) || '').toLowerCase();
+    case 'detections': {
+      if (isMotionOnlyRecording(recording)) return 0;
+      return recordingDetectionSummary(recording).length;
+    }
+    case 'zone': {
+      const zones = recordingZoneNames(recording);
+      return String(zones[0] || '').toLowerCase();
+    }
+    case 'when': return Date.parse(recording.started_at) || 0;
+    case 'duration': return Number(recording.duration_seconds) || 0;
+    default: return 0;
+  }
+}
+
+function compareRecordings(left, right) {
+  if (!recordingsSortState) return 0;
+  const leftValue = recordingSortValue(left, recordingsSortState.key);
+  const rightValue = recordingSortValue(right, recordingsSortState.key);
+  let result;
+  if (typeof leftValue === 'number' && typeof rightValue === 'number') {
+    result = leftValue - rightValue;
+  } else {
+    result = String(leftValue).localeCompare(String(rightValue), undefined, { numeric: true, sensitivity: 'base' });
+  }
+  return recordingsSortState.dir === 'asc' ? result : -result;
+}
+
+function renderSortHeader(label, key) {
+  const active = recordingsSortState && recordingsSortState.key === key;
+  const ariaSort = active ? (recordingsSortState.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+  const glyph = active ? (recordingsSortState.dir === 'asc' ? '▲' : '▼') : '⇅';
+  const cls = active ? 'table-sort-btn is-active' : 'table-sort-btn';
+  return `<th scope="col" aria-sort="${ariaSort}"><button type="button" class="${cls}" data-sort-key="${key}" aria-label="Sort by ${label}">${label}<span class="table-sort-glyph" aria-hidden="true">${glyph}</span></button></th>`;
+}
+
+function bindSortHeaders() {
+  document.querySelectorAll('#recordings [data-sort-key]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const key = button.dataset.sortKey;
+      if (recordingsSortState && recordingsSortState.key === key) {
+        recordingsSortState = recordingsSortState.dir === 'asc'
+          ? { key, dir: 'desc' }
+          : null;
+      } else {
+        // Date columns read newest-first by default so a single click lands on
+        // the familiar order; every other column starts ascending.
+        recordingsSortState = { key, dir: key === 'when' ? 'desc' : 'asc' };
+      }
+      renderRecordings(currentRecordings);
+    });
+  });
+}
+
 function renderRecordings(recordings) {
+  currentRecordings = recordings;
   renderStats(recordings);
   if (!recordings.length) {
     els.recordings.innerHTML = `
@@ -278,22 +348,31 @@ function renderRecordings(recordings) {
       </div>`;
     return;
   }
-  els.recordings.innerHTML = recordings.map((recording) => {
+  const ordered = recordingsSortState
+    ? recordings.slice().sort(compareRecordings)
+    : recordings;
+  els.recordings.innerHTML = '<div class="cameras-table-wrap"><table class="rule-table activity-table">' +
+    '<thead><tr>' +
+      renderSortHeader('Type', 'type') +
+      renderSortHeader('Camera', 'camera') +
+      renderSortHeader('Detections', 'detections') +
+      renderSortHeader('Zone', 'zone') +
+      renderSortHeader('When', 'when') +
+      renderSortHeader('Duration', 'duration') +
+      '<th class="cell-center" scope="col">Actions</th>' +
+    '</tr></thead>' +
+    '<tbody>' + ordered.map((recording) => {
     const mediaReady = recording.media_ready !== false;
     const isSound = isSoundRecording(recording);
     const isMotion = isMotionOnlyRecording(recording);
     const typeClass = isSound ? 'activity-item-sound' : isMotion ? 'activity-item-motion' : 'activity-item-event';
     const typeLabel = isSound ? 'Sound Recording' : isMotion ? 'Motion Recording' : 'Object Recording';
-    const icon = isSound
-      ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>'
-      : isMotion
-        ? MOTION_RUNNING_ROW_ICON
-        : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>';
     const zones = recordingZoneNames(recording);
-    const metaParts = [`Camera: ${escapeHtml(cameraLabel(recording))}`];
-    if (zones.length) metaParts.push(`Zone: ${zones.map(escapeHtml).join(', ')}`);
-    metaParts.push(`Duration: ${Number(recording.duration_seconds || 0).toFixed(1)}s`);
-    if (!mediaReady) metaParts.push('Preparing...');
+    const zoneCell = zones.length ? zones.map(escapeHtml).join(', ') : '-';
+    const durationText = `${Number(recording.duration_seconds || 0).toFixed(1)}s`;
+    const durationCell = mediaReady
+      ? `<span class="recording-duration">${escapeHtml(durationText)}</span>`
+      : '<span class="muted">Preparing...</span>';
     let badges;
     if (isMotion) {
       // Motion-only clips have no concrete object labels - show a single
@@ -303,38 +382,32 @@ function renderRecordings(recordings) {
     } else {
       badges = recordingDetectionSummary(recording).map((d) => detectionPill(d.label, d.confidence, isSound)).join('') || '<span class="muted">No detections</span>';
     }
+    const actions = [
+      mediaReady
+        ? `<button class="secondary activity-item-action" data-play-recording="${recording.id}" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg> Play</button>`
+        : '<button class="secondary activity-item-action" disabled><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Preparing...</button>',
+      `<button class="secondary delete-btn activity-item-action" data-delete-recording="${recording.id}" aria-label="Delete recording #${recording.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg> Delete</button>`,
+    ];
     return `
-      <div class="item activity-item ${typeClass}" data-recording-row="${recording.id}">
-        <div class="activity-item-icon">${icon}</div>
-        <div class="activity-item-main">
-          <div class="activity-item-header">
-            <div class="activity-item-title">
-              <span class="activity-item-type">${typeLabel}</span>
-              <span class="activity-item-name">Recording #${recording.id}</span>
+      <tr class="activity-table-row ${typeClass}" data-recording-row="${recording.id}">
+        <td class="activity-cell-type"><span class="activity-item-type">${typeLabel}</span><span class="activity-cell-ref">Recording #${recording.id}</span></td>
+        <td class="activity-cell-camera">${escapeHtml(cameraLabel(recording))}</td>
+        <td class="activity-cell-detections"><div class="activity-item-badges">${badges}</div></td>
+        <td class="activity-cell-zone">${zoneCell}</td>
+        <td class="activity-cell-when">
+          <div class="activity-item-when">
+            <div class="activity-item-when-relative">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <span>${escapeHtml(timeAgo(recording.started_at))}</span>
             </div>
-            <div class="activity-item-when">
-              <div class="activity-item-when-relative">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                <span>${escapeHtml(timeAgo(recording.started_at))}</span>
-              </div>
-              <span class="activity-item-when-absolute">${escapeHtml(formatDateTime(recording.started_at))}</span>
-            </div>
+            <span class="activity-item-when-absolute">${escapeHtml(formatDateTime(recording.started_at))}</span>
           </div>
-          <p class="muted activity-item-meta">${metaParts.join(' · ')}</p>
-          <div class="activity-item-badges">${badges}</div>
-        </div>
-        <div class="recording-row-actions">
-          ${mediaReady
-            ? `<button class="secondary" data-play-recording="${recording.id}" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg> Play</button>`
-            : '<button class="secondary" disabled><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Preparing...</button>'}
-          <button class="secondary delete-btn" data-delete-recording="${recording.id}" aria-label="Delete recording #${recording.id}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
-            Delete
-          </button>
-        </div>
-      </div>
+        </td>
+        <td class="activity-cell-duration">${durationCell}</td>
+        <td class="activity-cell-actions"><div class="cell-actions">${actions.join('')}</div></td>
+      </tr>
     `;
-  }).join('');
+  }).join('') + '</tbody></table></div>';
   if (recordings.some((recording) => recording.media_ready === false)) {
     clearTimeout(recordingRefreshTimer);
     recordingRefreshTimer = setTimeout(() => loadRecordings(), 3000);
@@ -343,6 +416,7 @@ function renderRecordings(recordings) {
     recordingRefreshTimer = null;
   }
   bindRecordingButtons();
+  bindSortHeaders();
 }
 
 function renderRecordingDetails(recording) {
@@ -980,12 +1054,18 @@ els.filterForm?.addEventListener('submit', (event) => {
     if (els.listStatus) els.listStatus.textContent = error.message;
   });
 });
+els.recordingSort?.addEventListener('change', () => {
+  // The user picked an explicit server-side order (newest/oldest) - drop any
+  // active column sort so the select's order is what the table shows.
+  recordingsSortState = null;
+});
 els.recordingClearBtn?.addEventListener('click', () => {
   if (els.labelFilter) els.labelFilter.value = '';
   if (els.cameraFilter) els.cameraFilter.value = '';
   if (els.recordingDateFrom) els.recordingDateFrom.value = '';
   if (els.recordingDateTo) els.recordingDateTo.value = '';
   if (els.recordingSort) els.recordingSort.value = 'newest';
+  recordingsSortState = null;
   // Re-render the From/To time pickers back to their defaults. Going through
   // renderFilterTimeSelects (rather than poking child selects directly) means
   // Reset Filters also handles the 12h vs 24h AM/PM swap correctly.
