@@ -3129,6 +3129,7 @@ tr.drag-over {
 .timeline-segment {
   position: absolute;
   height: 30px;
+  min-height: 30px;
   min-width: 4px;
   box-sizing: border-box;
   border: 1px solid rgba(255,255,255,.08);
