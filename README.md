@@ -4,19 +4,24 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 
 ## Features
 
-- Multi-camera RTSP/ONVIF support with browser management
-- Object detection via ONNX YOLO models
+- Multi-camera RTSP/ONVIF support with browser management and optional PTZ control
+- Object detection via ONNX YOLO models - YOLOv8, YOLO11, and NMS-free YOLO26 families in Nano through Extra Large sizes
+- In-app model library that downloads and exports models at a chosen input resolution
+- CPU and CUDA (NVIDIA GPU) inference with FP32, FP16, and INT8 precision options
 - Sound detection using YAMNet TFLite
-- Monitoring zones, motion and object rules, per-zone cooldowns
-- Email alerts and ntfy-compatible push notifications
+- Three-layer detection: pixel-diff motion gate, YOLO object detection, and per-zone motion rules
+- Monitoring zones, motion and object rules, per-label confidence and cooldowns
+- Continuous per-camera recording plus event clips with pre/post-event buffering
+- Email alerts and ntfy-compatible push notifications, including camera offline alerts
 - Recording, timeline playback, retention, and manual purge
 - User roles: `admin` and `viewer`
-- Audit log of admin actions and camera diagnostics
-- Database backup / restore and over-the-air updates
+- Audit log of admin actions, camera diagnostics, and an in-browser application log viewer
+- Database backup / restore (database-only or full with media) and over-the-air updates
 - Debian install script with a systemd service bundle
 
 ## Documentation
 
+- `docs/ai-detection.md` - ONNX object detection: models, precision, device, and advanced tuning
 - `docs/motion-detection.md` - motion detection and object rule tuning
 - `docs/sound-detection.md` - sound detection, audio rules, and runtime setup
 - `docs/operations.md` - health, logs, backups, and service operation
@@ -184,27 +189,33 @@ All other app settings are stored in SQLite and managed by the web UI.
 
 - `/setup` - initial admin creation
 - `/login` - user login
-- `/` - dashboard
-- `/cameras` - camera management
-- `/zones` - monitoring zone editor
+- `/` - dashboard and event search
+- `/live` - live camera view with detection overlay
+- `/cameras` - camera management, recording, and PTZ
+- `/zones` - monitoring zone editor and object/motion rules
 - `/sounds` - sound detection rules
-- `/onnx` - AI model and detector settings
-- `/settings` - system settings, notifications, retention, backup, and updates
+- `/onnx` - AI model library and detector settings
+- `/alerts` - alert history
+- `/settings` - detection, recording, notifications, retention, backup, and updates
+- `/users` - user management (admin)
+- `/profile` - change your own password
 - `/audit` - audit log
 - `/recordings` - recordings list
 - `/recordings/timeline` - timeline playback
 - `/camera-log` - camera diagnostics
+- `/application-log` - in-browser application log viewer
+- `/yamnet-tflite` - sound detection backend status
 
 ## AI and sound detection
 
 ### ONNX detection
 
-- Open `/onnx` as an admin
-- Select a YOLO model size and download it
-- Save AI settings
-- Check model, reload detector, and test detector
+- Open `/onnx` as an admin. The page is split into **Status**, **Models**, and **Settings** tabs.
+- On **Models**, pick a YOLO model (YOLOv8, YOLO11, or YOLO26) and a download resolution, then download and install it. Use **Use** to activate an installed model and **Check for Updates** to re-export newer weights.
+- On **Settings**, choose the inference device (Auto, CUDA, or CPU), precision (FP32, FP16, or INT8), and any advanced tuning such as concurrency, inference threads, GPU memory limit, execution mode, NMS dedupe, and CUDA IO Binding.
+- On **Status**, use **Check Model**, **Reload Detector**, and **Test Detector** to confirm the detector is healthy.
 
-Models are stored under `models/`.
+Models are stored under `models/`. The default model is `yolo11n`, downloaded automatically on first start when no model is present. See `docs/ai-detection.md` for the full settings reference.
 
 ### Sound detection
 

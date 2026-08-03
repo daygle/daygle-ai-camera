@@ -145,8 +145,11 @@
             <option value="off">Force Class-Aware NMS</option>
           </select></label>
         <label>
-          <span>CUDA IO Binding <span class="info-tip" data-tip="Copy frames to/from the GPU with ORT's io_binding API instead of host round-trips. CUDA only - automatically disabled when CUDA is unavailable. Can reduce per-frame latency on GPU systems. Default: Off" title="Copy frames to/from the GPU with ORT's io_binding API instead of host round-trips. CUDA only - automatically disabled when CUDA is unavailable. Can reduce per-frame latency on GPU systems. Default: Off" tabindex="0" aria-label="Help: CUDA IO Binding - direct CUDA memory path for frames, avoiding host round-trips. CUDA only, automatically disabled on CPU. Default: Off"></span></span>
-          <input name="use_io_binding" type="checkbox" /></label>
+          <span>CUDA IO Binding <span class="info-tip" data-tip="Copy frames to/from the GPU with ORT's io_binding API instead of host round-trips. CUDA only - automatically disabled when CUDA is unavailable. Can reduce per-frame latency on GPU systems. Default: Disabled" title="Copy frames to/from the GPU with ORT's io_binding API instead of host round-trips. CUDA only - automatically disabled when CUDA is unavailable. Can reduce per-frame latency on GPU systems. Default: Disabled" tabindex="0" aria-label="Help: CUDA IO Binding - direct CUDA memory path for frames, avoiding host round-trips. CUDA only, automatically disabled on CPU. Default: Disabled"></span></span>
+          <select name="use_io_binding">
+            <option value="false">Disabled</option>
+            <option value="true">Enabled</option>
+          </select></label>
         <label>
           <span>Model Path <span class="info-tip" data-tip="Path to the active ONNX model file. Managed by the Model Library above - use Download &amp; Install or the Use button to change it. Default: models/yolo11n.onnx" title="Path to the active ONNX model file. Managed by the Model Library above - use Download &amp; Install or the Use button to change it. Default: models/yolo11n.onnx" tabindex="0" aria-label="Help: Path to the active ONNX model file. Managed by the Model Library above. Default: models/yolo11n.onnx"></span></span>
           <input name="model_path" readonly /></label>
