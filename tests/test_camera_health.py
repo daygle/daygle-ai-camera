@@ -201,7 +201,7 @@ def test_state_primitives_not_promoted_into_camera_health(ch):
 # symbol. Two rules follow.
 #
 # 1. Registry imports MUST happen inside the test function body, not at the
-#    top of this file. `tests/test_api.py::_load_app()` reloads `app.main`
+#    top of this file. `tests/support.py::_load_app()` reloads `app.main`
 #    and, depending on its reload strategy, may also replace
 #    `sys.modules['app.state']` with a fresh instance. A file-top
 #    `import app.state as _app_state` captured at pytest collection time

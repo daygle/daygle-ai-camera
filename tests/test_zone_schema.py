@@ -22,7 +22,7 @@ Tests pin three contracts:
 1. **Pool A back-compat identity.** The 8 Pool A rebinds (``_LABEL_ALIASES``
    + 7 cluster helpers) MUST wire ``main.<name>`` to the SAME
    function/object as ``app.zone_schema.<name>``. Re-resolved via
-   ``sys.modules`` to defeat the ``tests/test_api.py::_load_app``
+   ``sys.modules`` to defeat the ``tests/support.py::_load_app``
    sys-modules-wipe state leak (Phase-17 lesson).
 2. **Behavior of each facade.** Each helper has subtle ordering /
    fallback semantics:
@@ -75,7 +75,7 @@ import app.zone_schema as zone_schema  # noqa: E402
 # ---------------------------------------------------------------------------
 # 1. Pool A back-compat identity -- ``main.<name> is zone_schema.<name>``.
 #    Re-resolve via sys.modules per Phase-17 lesson (defeats the
-#    tests/test_api.py::_load_app() sys-modules-wipe state leak).
+#    tests/support.py::_load_app() sys-modules-wipe state leak).
 # ---------------------------------------------------------------------------
 
 

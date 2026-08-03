@@ -82,7 +82,7 @@ def _stub_database(monkeypatch):
 def main():
     """Return the CURRENT ``app.main`` module instance.
 
-    Earlier test files (e.g. ``tests/test_api.py::_load_app``) wipe
+    Earlier test files (e.g. ``tests/support.py::_load_app``) wipe
     ``sys.modules`` for any ``app.*`` module then re-import the app tree
     fresh per test session. The test file's module-level
     ``config_facades`` global is bound at pytest collection time and can

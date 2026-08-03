@@ -58,7 +58,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.test_api import LocalClient, _load_app, _login, _server, _setup_admin
+from tests.support import LocalClient, _load_app, _login, _server, _setup_admin
 
 
 @pytest.fixture

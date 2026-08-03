@@ -19,7 +19,7 @@ Tests pin three contracts:
 1. **Pool A back-compat identity.** The 3 Pool A rebinds MUST wire
    ``main.<name>`` to the SAME function object as
    ``app.ai_settings.<name>``. Re-resolved via ``sys.modules`` to
-   defeat the ``tests/test_api.py::_load_app`` sys-modules-wipe state
+   defeat the ``tests/support.py::_load_app`` sys-modules-wipe state
    leak (Phase-17 lesson).
 2. **Behavior of each facade.** Each helper has subtle ordering /
    fallback semantics:
@@ -74,7 +74,7 @@ import app.ai_settings as ai_settings  # noqa: E402
 # ---------------------------------------------------------------------------
 # 1. Pool A back-compat identity -- ``main.<name> is ai_settings.<name>``.
 #    Re-resolve via sys.modules per Phase-17 lesson (defeats the
-#    tests/test_api.py::_load_app() sys-modules-wipe state leak).
+#    tests/support.py::_load_app() sys-modules-wipe state leak).
 # ---------------------------------------------------------------------------
 
 
