@@ -77,6 +77,7 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     'motion_frame_width': 160,
     'motion_frame_height': 120,
     'ingest_frame_fps': 4,
+    'snapshot_quality': 2,
     'periodic_scan_interval_seconds': 0,
 }
 

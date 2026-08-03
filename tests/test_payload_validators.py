@@ -868,5 +868,23 @@ def test_validate_live_settings_returns_all_expected_fields(monkeypatch, pv):
         'motion_pixel_threshold', 'motion_gate_fraction',
         'motion_scale_fraction', 'motion_background_alpha',
         'motion_frame_width', 'motion_frame_height', 'ingest_frame_fps',
-        'periodic_scan_interval_seconds',
+        'snapshot_quality', 'periodic_scan_interval_seconds',
     }
+
+
+def test_validate_live_settings_defaults_snapshot_quality(monkeypatch, pv):
+    _install_validator_dependencies(monkeypatch)
+    out = pv.validate_live_settings({})
+    assert out['snapshot_quality'] == 2
+
+
+def test_validate_live_settings_rejects_snapshot_quality_out_of_range(monkeypatch, pv):
+    """snapshot_quality maps to ffmpeg's mjpeg -q:v 2-31 scale; anything
+    outside that range must be rejected before it reaches ffmpeg."""
+    from fastapi import HTTPException
+    _install_validator_dependencies(monkeypatch)
+    for bad in (1, 32):
+        with pytest.raises(HTTPException) as exc_info:
+            pv.validate_live_settings({'snapshot_quality': bad})
+        assert exc_info.value.status_code == 400
+        assert 'snapshot_quality must be between 2 and 31' in exc_info.value.detail

@@ -37,6 +37,11 @@ class RecordingService:
     # detection. The live monitor samples at ~2 Hz by default, so 4 fps keeps a
     # fresh frame available without spending CPU on frames nothing reads.
     INGEST_FRAME_FPS = 4
+    # JPEG quality for live snapshots on mjpeg's 2-31 scale (lower = better,
+    # larger files). 2 matches the old OpenCV-encoded quality; ffmpeg's mjpeg
+    # default is noticeably more compressed. Operator-overridable via the
+    # Detection & Live "Snapshot Quality" setting.
+    SNAPSHOT_QUALITY = 2
     # Event prebuffer video segment length. Tiny 1s stream-copy segments are
     # fragile with sparse-keyframe RTSP streams; 4s reduces concat boundaries
     # while keeping event timing reasonably granular.
@@ -1164,7 +1169,9 @@ class RecordingService:
 
         while not stop_event.is_set():
             from app.config_facades import effective_live_config as _elc  # noqa: PLC0415
-            _ingest_fps = int(_elc().get('ingest_frame_fps', self.INGEST_FRAME_FPS))
+            _live_config = _elc()
+            _ingest_fps = int(_live_config.get('ingest_frame_fps', self.INGEST_FRAME_FPS))
+            _snapshot_quality = int(_live_config.get('snapshot_quality', self.SNAPSHOT_QUALITY))
             command = [
                 ffmpeg,
                 '-nostdin',
@@ -1208,11 +1215,12 @@ class RecordingService:
                 '0:v:0',
                 '-vf',
                 f'fps={_ingest_fps}',
-                # High JPEG quality (2 on mjpeg's 2-31 scale, lower=better) so the
-                # live snapshot matches the old OpenCV-encoded quality; ffmpeg's
-                # mjpeg default is noticeably more compressed.
+                # JPEG quality on mjpeg's 2-31 scale (lower=better) so the live
+                # snapshot matches the old OpenCV-encoded quality; ffmpeg's mjpeg
+                # default is noticeably more compressed. Operator-overridable via
+                # the Detection & Live "Snapshot Quality" setting.
                 '-q:v',
-                '2',
+                str(_snapshot_quality),
                 '-update',
                 '1',
                 '-atomic_writing',
@@ -1804,6 +1812,8 @@ class RecordingService:
         ffmpeg = shutil.which('ffmpeg')
         if not ffmpeg:
             return None
+        from app.config_facades import effective_live_config as _elc  # noqa: PLC0415
+        snapshot_quality = int(_elc().get('snapshot_quality', RecordingService.SNAPSHOT_QUALITY))
         with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
             tmp_path = Path(tmp.name)
         try:
@@ -1813,7 +1823,7 @@ class RecordingService:
                 '-rtsp_transport', 'tcp',
                 '-i', stream_url,
                 '-vframes', '1',
-                '-q:v', '2',
+                '-q:v', str(snapshot_quality),
                 '-f', 'image2',
                 str(tmp_path),
             ]
