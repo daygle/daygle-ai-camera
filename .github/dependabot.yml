@@ -16,8 +16,10 @@
 #     stops that keep the Pascal/Tesla-P4 and Python-3.10 constraints from being
 #     bumped away by an auto-PR.
 #
-# Exact-pinned entries (ultralytics==...) need neither: the pin itself prevents
-# Dependabot from touching them.
+# An exact pin (e.g. ultralytics==..., or the nvidia-*-cu12 CUDA wheels) does
+# NOT stop Dependabot on its own -- it still proposes a new pin at the latest
+# release (e.g. nvidia-cuda-runtime-cu12 12.4.127 -> 12.9.79). Dependencies that
+# must never be auto-bumped therefore also need an `ignore` rule below.
 
 version: 2
 
@@ -55,6 +57,13 @@ updates:
       # onnxruntime-gpu>=1.18,<1.21 default in scripts/install_python_deps.sh.
       - dependency-name: "onnxruntime"
         versions: [">=1.21"]
+      # The nvidia-*-cu12 CUDA userspace wheels in requirements-gpu-pascal.txt
+      # are pinned to the CUDA 12.4 line because those exact versions still ship
+      # Pascal (sm_61) cubins; CUDA 12.8+/12.9 wheels drop them, which silently
+      # breaks GPU inference on the Tesla P4. They are updated only by hand via
+      # docs/tesla-p4-gpu-setup.md, so ignore every version -- an exact pin does
+      # not stop Dependabot from proposing 12.4.127 -> 12.9.x.
+      - dependency-name: "nvidia-*-cu12"
     # Exact-pinned entries (ultralytics==...) are deliberately left for manual
     # review per the supply-chain notes in requirements.txt; the pin already
     # prevents Dependabot from touching them. Tight ranges that stay below the
