@@ -247,7 +247,7 @@ function renderZones() {
   liveEls.zoneOverlay.innerHTML = zones.map((zone, index) => (zone.enabled === false ? '' : renderZoneBox(zone, index))).join('');
   updateZonesStats();
   if (!zones.length) {
-    liveEls.zoneList.innerHTML = '<div class="empty">No zone areas yet. Click "Draw area", place corner dots on the footage, then click the first dot to close the area.</div>';
+    liveEls.zoneList.innerHTML = '<div class="empty">No zone areas yet. Click "Draw Area", place corner dots on the footage, then click the first dot to close the area.</div>';
     renderObjectDetectionRules();
     return;
   }
@@ -581,7 +581,7 @@ function finishDraftPolygon() {
   normalizeZone(zones[selectedZoneIndex]);
   draftPolygon = null;
   drawingMode = false;
-  setAddZoneLabel('Draw area');
+  setAddZoneLabel('Draw Area');
   renderZones();
   refreshFrame();
   markZoneUnsaved();
@@ -607,7 +607,7 @@ function addFullFrameZone() {
   draftPolygon = null;
   drawingMode = false;
   zoneDrag = null;
-  setAddZoneLabel('Draw area');
+  setAddZoneLabel('Draw Area');
   normalizeZone(zones[selectedZoneIndex]);
   renderZones();
   refreshFrame();
@@ -685,7 +685,7 @@ function toggleDrawingMode() {
   drawingMode = !drawingMode;
   draftPolygon = null;
   zoneDrag = null;
-  setAddZoneLabel(drawingMode ? 'Cancel drawing' : 'Draw area');
+  setAddZoneLabel(drawingMode ? 'Cancel drawing' : 'Draw Area');
   renderZones();
 }
 
@@ -751,7 +751,7 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && drawingMode) {
     drawingMode = false;
     draftPolygon = null;
-    setAddZoneLabel('Draw area');
+    setAddZoneLabel('Draw Area');
     renderDraftPolygon();
   }
 });
