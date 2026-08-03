@@ -20,7 +20,7 @@ numpy>=2.2.6,<2.3
 # quiet fall back to CPU). This mirrors the onnxruntime-gpu>=1.18,<1.21 default
 # in scripts/install_python_deps.sh -- bump both together, and only after
 # confirming the target GPUs are still supported by the newer release.
-onnxruntime>=1.18,<1.21
+onnxruntime>=1.20.1,<1.21
 onnx>=1.22.0,<2.0
 # torch.onnx._internal.exporter (used by Ultralytics YOLO.export)
 # imports onnxscript at module load; not pulled in by ``onnx`` itself.
