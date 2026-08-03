@@ -3737,18 +3737,26 @@ a.activity-item-action {
   padding: 5px 10px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: var(--sense-lane-bg);
+  /* Mirror the monitor pill's --sense-lane-bg, but that token is scoped to
+     .live-detection-card; this pill lives in the Stream Details card, so the
+     value is set directly (with a light override) instead of via the var. */
+  background: rgba(255,255,255,.03);
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   white-space: nowrap;
+}
+:root.light .status-panel .fps-live-indicator {
+  background: rgba(0,0,0,.02);
 }
 .status-panel .fps-live-dot {
   width: 7px;
   height: 7px;
   margin: 0; /* cancel the shared .status-panel span margin so the dot stays centered */
   border-radius: 50%;
-  background: var(--g-fg);
+  /* --g-fg (the monitor dot's green) is scoped to .live-detection-card; use the
+     root-level --success token so the dot stays green in the Stream Details card. */
+  background: var(--success);
   box-shadow: 0 0 0 0 rgba(73,230,163,.4);
   animation: live-monitor-pulse 2.4s ease-out infinite;
 }
