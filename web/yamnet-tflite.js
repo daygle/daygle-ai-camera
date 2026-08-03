@@ -241,7 +241,7 @@ async function loadYamnetModelInfo() {
       return;
     }
     const installedAt = info.installed_at ? escapeHtml(new Date(info.installed_at).toLocaleDateString()) : '';
-    const statusLabel = info.available ? 'Model loaded' : 'Model file found';
+    const statusLabel = info.available ? 'Model Loaded' : 'Model File Found';
     const statusClass = info.available ? 'status-ok' : 'status-warning';
     const sizeText = info.model_size ? escapeHtml(formatBytes(info.model_size)) : 'Unknown';
     const hashText = info.sha256 ? escapeHtml(info.sha256) : 'Not available';
