@@ -489,6 +489,31 @@ class OnnxYoloDetector:
                         self.unavailable_reason = (
                             f'INT8 warm-up failed and FP32 fallback could not load: {fallback_exc}'
                         )
+                elif self._use_io_binding:
+                    # The warm-up ran the io_binding path and it failed. Leaving
+                    # io_binding on would make every live frame fail the same way
+                    # (the per-call path has no runtime fallback), degrading the
+                    # detector to per-frame errors while still reporting
+                    # available. Disable io_binding and retry the standard
+                    # session.run warm-up so detection falls back to the plain
+                    # (still-GPU) path instead. Same graceful-degradation
+                    # philosophy as the CUDA preflight and INT8->FP32 fallbacks.
+                    logger.warning(
+                        'io_binding warm-up failed (%s); disabling io_binding and '
+                        'falling back to session.run for %s.',
+                        warm_exc, self.model_path,
+                    )
+                    self._use_io_binding = False
+                    try:
+                        self.session.run(
+                            self.output_names,
+                            {self.input_name: np.zeros(
+                                (1, 3, self.input_height, self.input_width),
+                                dtype=self._input_dtype,
+                            )},
+                        )
+                    except Exception as rerun_exc:
+                        logger.debug('Detector warm-up inference skipped: %s', rerun_exc)
                 else:
                     logger.debug('Detector warm-up inference skipped: %s', warm_exc)
         except Exception as exc:  # pragma: no cover - depends on runtime/model internals
