@@ -19,7 +19,7 @@ onnxscript>=0.7.1,<1.0
 # only after reviewing the upstream release notes for supply-chain
 # concerns.
 # Bumped to 8.4.107 on 2026-07-27 after reviewing upstream release notes.
-ultralytics==8.4.107
+ultralytics==8.4.113
 # Bumped to the 5.x line on 2026-07-27. Audited every cv2 symbol this repo
 # uses (imdecode/imencode, cvtColor, resize INTER_NEAREST/LINEAR, rectangle,
 # putText/getTextSize, VideoWriter[_fourcc], VideoCapture + CAP_PROP_BUFFERSIZE,
