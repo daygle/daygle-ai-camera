@@ -13,11 +13,14 @@ const liveEls = {
   streamDetailSource: document.getElementById('streamDetailSource'),
   detectionSubtitle: document.getElementById('liveDetectionSubtitle'),
   detectionStatus: document.getElementById('liveDetectionStatus'),
-  detectionChips: document.getElementById('liveDetectionChips'),
   detectionState: document.getElementById('liveDetectionState'),
   soundState: document.getElementById('liveSoundState'),
   soundStatus: document.getElementById('liveSoundStatus'),
-  detectionMeta: document.querySelector('.live-detection-meta'),
+  visionLane: document.getElementById('liveVisionLane'),
+  visionBody: document.getElementById('liveVisionBody'),
+  hearingBody: document.getElementById('liveHearingBody'),
+  monitorPill: document.getElementById('liveMonitorPill'),
+  monitorPillText: document.getElementById('liveMonitorPillText'),
   // Zones-page stats (null on live page - harmless)
   statZoneCount: document.getElementById('statZoneCount'),
   statRuleCount: document.getElementById('statRuleCount'),
@@ -437,7 +440,10 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
 
   if (payload.state === 'checked') {
     if (!labelStr) {
-      return { state: 'idle', stateLabel: 'Monitoring', chips, ...sound, message: '' };
+      // 'monitoring' (not the generic 'idle') marks a real empty check: an
+      // inference cycle ran and found nothing. The renderer relies on this to
+      // show "Clear" only here, and never for waiting/skipped/error/all-cameras.
+      return { state: 'monitoring', stateLabel: 'Monitoring', chips, ...sound, message: '' };
     }
     const reason = String(payload.reason || '');
     let suffix;
@@ -459,13 +465,41 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
   };
 }
 
+// Build one "detected item" row for a sense lane: label, a confidence meter,
+// and the percent. Zero-confidence readings (label known but no score, e.g.
+// from `detected_labels`) show the label alone with no meter.
+function detectionRowHtml(label, confidence, { faint = false, alerted = false } = {}) {
+  const conf = Number(confidence || 0);
+  const hasPct = conf > 0;
+  const pct = Math.round(conf * 100);
+  const classes = 'sense-det' + (faint ? ' sense-det-faint' : '') + (alerted ? ' sense-det-alert' : '');
+  const pctHtml = hasPct ? `<span class="sense-det-pct">${pct}%</span>` : '';
+  const meterHtml = hasPct ? `<span class="sense-meter"><i style="width:${pct}%"></i></span>` : '';
+  return `<div class="${classes}">`
+    + `<span class="sense-det-label">${escapeHtml(titleCase(label))}</span>`
+    + pctHtml + meterHtml
+    + '</div>';
+}
+
+// Empty-lane placeholder. `tick` shows the affirmative green check and is used
+// ONLY for a confirmed all-clear; every other empty state gets a neutral line.
+function senseEmptyHtml(text, { tick = false } = {}) {
+  const tickHtml = tick ? '<span class="sense-empty-tick">✓</span>' : '';
+  return `<div class="sense-empty">${tickHtml}${escapeHtml(text)}</div>`;
+}
+
 function renderDetectionStatus(summary) {
+  const objChips = summary.chips || [];
+  const soundState = summary.soundState || { label: 'Listening', state: 'idle' };
+  const soundChips = summary.soundChips || [];
+  const alerted = summary.state === 'alerted';
+
   // Subtitle: summarise what is actively seen/heard, or fall back to the default description.
   if (liveEls.detectionSubtitle) {
-    const objParts = (summary.chips || []).slice(0, 3).map((c) =>
+    const objParts = objChips.slice(0, 3).map((c) =>
       c.confidence > 0 ? `${titleCase(c.label)} (${Math.round(c.confidence * 100)}%)` : titleCase(c.label)
     );
-    const sndParts = (summary.soundChips || []).filter((c) => !c.isBelowThreshold).slice(0, 2).map((c) =>
+    const sndParts = soundChips.filter((c) => !c.isBelowThreshold).slice(0, 2).map((c) =>
       c.confidence > 0 ? `${titleCase(c.label)} (${Math.round(c.confidence * 100)}%)` : titleCase(c.label)
     );
     if (objParts.length || sndParts.length) {
@@ -477,47 +511,75 @@ function renderDetectionStatus(summary) {
       liveEls.detectionSubtitle.textContent = 'What the AI is currently seeing and hearing on the live feed.';
     }
   }
-  // Object state chip (👁️ Monitoring / Detected / Alerted).
-  if (liveEls.detectionState) {
-    liveEls.detectionState.textContent = `👁️ ${summary.stateLabel}`;
-    liveEls.detectionState.className = 'chip ' + (
-      summary.state === 'alerted' ? 'chip-warn' :
-      summary.state === 'detected' ? 'chip-info' :
-      summary.state === 'error' ? 'chip-warn' :
-      'chip-dim'
-    );
-  }
-  // Sound state chip (🔊 Listening / Heard / Sound Off) - mirrors the object
-  // state chip so both senses are presented the same way.
-  if (liveEls.soundState) {
-    const soundState = summary.soundState || { label: 'Listening', state: 'idle' };
-    liveEls.soundState.textContent = `🔊 ${soundState.label}`;
-    liveEls.soundState.className = 'chip ' + (soundState.state === 'detected' ? 'chip-sound' : 'chip-dim');
+
+  // Monitor pill: a "live" affordance that dims when the status feed is down.
+  if (liveEls.monitorPill) {
+    const offline = summary.state === 'error';
+    liveEls.monitorPill.classList.toggle('is-offline', offline);
+    if (liveEls.monitorPillText) liveEls.monitorPillText.textContent = offline ? 'Paused' : 'Live';
   }
 
-  // Both object and sound detection pills go in the chips row below the header.
-  if (liveEls.detectionChips) {
-    const objectHtml = (summary.chips || []).map((c) => {
-      const variant = summary.state === 'alerted' ? 'detection-chip-alert' : '';
-      const text = c.confidence > 0 ? `👁️ ${titleCase(c.label)} · ${Math.round(c.confidence * 100)}%` : `👁️ ${titleCase(c.label)}`;
-      return `<span class="detection-chip ${variant}">${escapeHtml(text)}</span>`;
-    }).join('');
-    const soundHtml = (summary.soundChips || []).map((c) => {
-      const cls = c.isBelowThreshold ? 'detection-chip detection-chip-sound detection-chip-faint' : 'detection-chip detection-chip-sound';
-      const text = c.confidence > 0 ? `🔊 ${c.label} · ${Math.round(c.confidence * 100)}%` : `🔊 ${c.label}`;
-      return `<span class="${cls}">${escapeHtml(text)}</span>`;
-    }).join('');
-    liveEls.detectionChips.innerHTML = objectHtml + soundHtml;
+  // ── Vision lane ──────────────────────────────────────────────
+  if (liveEls.visionLane) liveEls.visionLane.classList.toggle('sense-lane-alerted', alerted);
+  if (liveEls.detectionState) {
+    liveEls.detectionState.textContent = summary.stateLabel || 'Monitoring';
+    liveEls.detectionState.className = 'sense-badge ' + (
+      alerted ? 'sense-badge-alert' :
+      summary.state === 'detected' ? 'sense-badge-detected' :
+      summary.state === 'error' ? 'sense-badge-alert' :
+      'sense-badge-idle'
+    );
   }
-  // Status lines carry alert/diagnostic context only; each stays hidden when it
-  // has nothing to say. Objects and sounds get their own line.
+  if (liveEls.visionBody) {
+    if (objChips.length) {
+      liveEls.visionBody.innerHTML = objChips.map((c) => detectionRowHtml(c.label, c.confidence, { alerted })).join('');
+    } else if (summary.state === 'monitoring') {
+      // Confirmed empty check — the only case that earns the affirmative "Clear".
+      liveEls.visionBody.innerHTML = senseEmptyHtml('Clear — nothing in frame', { tick: true });
+    } else if (summary.state === 'waiting') {
+      liveEls.visionBody.innerHTML = senseEmptyHtml('Waiting for first detection…');
+    } else if (summary.state === 'skipped' || summary.state === 'error') {
+      liveEls.visionBody.innerHTML = senseEmptyHtml('Detection unavailable');
+    } else {
+      // idle / all-cameras / no payload: don't assert anything about the frame.
+      liveEls.visionBody.innerHTML = senseEmptyHtml('No detection data');
+    }
+  }
+
+  // ── Hearing lane ─────────────────────────────────────────────
+  // The inline all-cameras/error summaries carry no soundState, so the sound
+  // status is genuinely unknown there — don't fall back to a "Listening" claim.
+  const hasSound = !!summary.soundState;
+  if (liveEls.soundState) {
+    liveEls.soundState.textContent = hasSound ? soundState.label : '—';
+    liveEls.soundState.className = 'sense-badge ' + (
+      soundState.state === 'detected' ? 'sense-badge-heard' :
+      soundState.state === 'disabled' ? 'sense-badge-off' :
+      'sense-badge-idle'
+    );
+  }
+  if (liveEls.hearingBody) {
+    if (soundChips.length) {
+      liveEls.hearingBody.innerHTML = soundChips.map((c) => detectionRowHtml(c.label, c.confidence, { faint: !!c.isBelowThreshold })).join('');
+    } else if (!hasSound) {
+      liveEls.hearingBody.innerHTML = senseEmptyHtml('Sound status unavailable');
+    } else if (soundState.state === 'disabled') {
+      liveEls.hearingBody.innerHTML = senseEmptyHtml('Sound detection disabled');
+    } else {
+      liveEls.hearingBody.innerHTML = senseEmptyHtml('Quiet — listening', { tick: true });
+    }
+  }
+
+  // Contextual status lines carry alert/diagnostic context only; each stays
+  // hidden when it has nothing to say. Objects and sounds get their own line.
   if (liveEls.detectionStatus) {
     liveEls.detectionStatus.textContent = summary.message || '';
-    liveEls.detectionStatus.style.display = summary.message ? '' : 'none';
+    liveEls.detectionStatus.hidden = !summary.message;
+    liveEls.detectionStatus.classList.toggle('sense-lane-note-warn', alerted);
   }
   if (liveEls.soundStatus) {
     liveEls.soundStatus.textContent = summary.soundMessage || '';
-    liveEls.soundStatus.style.display = summary.soundMessage ? '' : 'none';
+    liveEls.soundStatus.hidden = !summary.soundMessage;
   }
 }
 
