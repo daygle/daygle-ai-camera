@@ -2,12 +2,25 @@ fastapi>=0.115,<1.0
 uvicorn[standard]>=0.52.0,<1.0
 PyYAML>=6.0,<7.0
 bcrypt>=4.0,<6.0  # 5.0+ raises ValueError for passwords > 72 bytes (guard in auth.py)
-numpy>=1.26,<3.0
+# numpy 2.3 raised its minimum to Python 3.11 and 2.5 to Python 3.12. This
+# project still targets Python 3.10 (see the test matrix in
+# .github/workflows/python-app.yml), so cap below 2.3 to keep 3.10 resolvable.
+# Raising this ceiling requires dropping Python 3.10 from the support matrix
+# first -- otherwise the install simply fails to find a compatible wheel.
+numpy>=1.26,<2.3
 # install_python_deps.sh auto-selects onnxruntime-gpu when nvidia-smi can
 # enumerate an NVIDIA device. Override with DAYGLE_ONNXRUNTIME_VARIANT=cpu|gpu.
 # The GPU wheel's CUDA/cuDNN compatibility must match the installed driver;
 # see README.md for Tesla P4 guidance.
-onnxruntime>=1.18,<2.0
+#
+# Ceiling held at <1.21 to stay on the CUDA 11/12-era ONNX Runtime line that
+# still ships Pascal (compute capability 6.1, e.g. Tesla P4) sm_61 cubins.
+# Newer ORT releases move to a CUDA stack that drops Pascal support, which
+# silently breaks GPU inference on P4 deployments (session-create failure or a
+# quiet fall back to CPU). This mirrors the onnxruntime-gpu>=1.18,<1.21 default
+# in scripts/install_python_deps.sh -- bump both together, and only after
+# confirming the target GPUs are still supported by the newer release.
+onnxruntime>=1.18,<1.21
 onnx>=1.22.0,<2.0
 # torch.onnx._internal.exporter (used by Ultralytics YOLO.export)
 # imports onnxscript at module load; not pulled in by ``onnx`` itself.

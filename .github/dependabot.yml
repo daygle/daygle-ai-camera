@@ -2,10 +2,12 @@
 #
 # Keeps `requirements.txt` and `.github/workflows/*.yml` up to date with a
 # weekly scan. Tight version ranges in requirements.txt (e.g. ultralytics
-# exact-pinned, opencv-python-headless capped at <6.0) are respected by the
-# default "increase" versioning strategy, so Dependabot will only propose
-# updates that already fall inside those ranges -- anything outside them
-# (e.g. an ultralytics 8.x.y bump) stays a manual change.
+# exact-pinned, opencv-python-headless capped at <6.0, onnxruntime capped at
+# <1.21 to keep Pascal/Tesla-P4 support, numpy capped at <2.3 to keep Python
+# 3.10 support) are respected by the default "increase" versioning strategy,
+# so Dependabot will only propose updates that already fall inside those ranges
+# -- anything outside them (e.g. an ultralytics 8.x.y bump, or an ORT release
+# that drops Pascal) stays a manual change and never lands as an auto-PR.
 
 version: 2
 
