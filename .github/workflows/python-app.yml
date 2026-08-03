@@ -46,3 +46,18 @@ jobs:
 
       - name: Run test suite
         run: .venv/bin/python -m pytest
+
+  js-test:
+    name: Frontend JS tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run frontend test suite
+        run: node --test tests/*.test.js
