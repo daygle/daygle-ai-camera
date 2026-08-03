@@ -251,6 +251,27 @@ def zone_motion_min_confidence(zone: dict[str, Any]) -> float:
     return 0.45
 
 
+def zone_motion_max_confidence(zone: dict[str, Any]) -> float:
+    """Return the enabled motion rule's ``max_confidence`` upper bound.
+
+    Mirrors ``zone_motion_min_confidence`` so a zone's motion detections are
+    gated by the SAME ``[min, max]`` window as its object rules. Defaults to
+    1.0 (no upper limit) when no enabled motion rule exists or the value is
+    absent/invalid, so pre-existing zones keep firing on any motion at or
+    above their min threshold.
+    """
+    for rule in zone.get('object_rules', []):
+        if (
+            str(rule.get('label') or '').strip().lower() == 'motion'
+            and rule.get('enabled', True)
+        ):
+            try:
+                return max(0.0, min(1.0, float(rule.get('max_confidence', 1.0))))
+            except (TypeError, ValueError):
+                return 1.0
+    return 1.0
+
+
 def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     if not isinstance(zones, list):
