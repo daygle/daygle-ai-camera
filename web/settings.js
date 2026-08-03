@@ -56,6 +56,7 @@ const FIELD_LABELS = {
   motion_frame_width: 'Motion Frame Width',
   motion_frame_height: 'Motion Frame Height',
   ingest_frame_fps: 'Detection Frame Rate (fps)',
+  snapshot_quality: 'Snapshot Quality',
   data_dir: 'Data Directory',
   snapshots_dir: 'Snapshots Directory',
   events_dir: 'Events Directory',
@@ -193,7 +194,7 @@ const FIELD_TYPES = {
     'max_login_attempts', 'lockout_minutes', 'snapshot_refresh_ms',
     'detection_status_refresh_ms', 'motion_pixel_threshold',
     'periodic_scan_interval_seconds', 'motion_frame_width', 'motion_frame_height',
-    'ingest_frame_fps', 'offline_delay_minutes',
+    'ingest_frame_fps', 'snapshot_quality', 'offline_delay_minutes',
   ]),
   number: new Set([
     'detection_interval_seconds', 'event_debounce_seconds', 'detection_history_minutes',

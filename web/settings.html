@@ -64,6 +64,9 @@
           <label>
             <span>Detection Frame Rate (fps) <span class="info-tip" data-tip="Frames per second decoded from the camera stream for AI detection. Lower = less CPU; higher = catches faster movements. Takes effect on next camera reconnect. Default: 4" title="Frames per second decoded from the camera stream for AI detection. Lower = less CPU; higher = catches faster movements. Takes effect on next camera reconnect. Default: 4" tabindex="0" aria-label="Help: Frames per second decoded from the camera stream for AI detection. Lower = less ..."></span></span>
             <input name="ingest_frame_fps" type="number" min="1" max="30" step="1" placeholder="4" /></label>
+          <label>
+            <span>Snapshot Quality <span class="info-tip" data-tip="JPEG quality for live snapshots and previews on the mjpeg 2-31 scale. Lower = better quality and larger files; higher = more compressed. Takes effect on next camera reconnect. Default: 2" title="JPEG quality for live snapshots and previews on the mjpeg 2-31 scale. Lower = better quality and larger files; higher = more compressed. Takes effect on next camera reconnect. Default: 2" tabindex="0" aria-label="Help: JPEG quality for live snapshots and previews on the mjpeg 2-31 scale. Lower = be..."></span></span>
+            <input name="snapshot_quality" type="number" min="2" max="31" step="1" placeholder="2" /></label>
         </div>
         <details class="settings-advanced">
           <summary>Advanced Motion Tuning</summary>
