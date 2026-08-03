@@ -34,7 +34,7 @@
 # confirm pip did not quietly upgrade cuBLAS past the pin below. If it did,
 # re-pin with a second install of the cuBLAS line.
 
-nvidia-cuda-runtime-cu12==12.4.127
+nvidia-cuda-runtime-cu12==12.9.79
 nvidia-cuda-nvrtc-cu12==12.4.127
 nvidia-cublas-cu12==12.4.5.8
 nvidia-cufft-cu12==11.2.1.3
