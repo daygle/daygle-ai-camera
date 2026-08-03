@@ -1,0 +1,16 @@
+# Ruff configuration.
+#
+# The CI lint job (.github/workflows/python-app.yml) runs `ruff check app`.
+# We select the Pyflakes ("F") rules: the highest-signal, low-false-positive
+# set - unused/undefined names, duplicate definitions, and f-string mistakes.
+# app/ is clean under these today, so the gate is meaningful without noise.
+#
+# tests/ are intentionally not gated yet: they use a deliberate "Pool-A"
+# preload pattern (`import app.main` for its module-rebind side effects before
+# importing the module under test) that reads as F401 "imported but unused".
+# Enforcing F there would require annotating ~45 intentional imports; that is
+# deferred to keep this change focused on production code.
+target-version = "py310"
+
+[lint]
+select = ["F"]
