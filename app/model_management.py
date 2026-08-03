@@ -61,11 +61,15 @@ def _export_kwargs(nms_free: bool, precision: str = 'fp32', device: str = 'auto'
     are usable on the exported model (the Ultralytics default opset often
     lands below 13 and skips some CPU-friendly fusions).
 
-    ``precision='fp16'`` emits ``half=True`` only when ``device='cuda'`` AND
-    ``onnxruntime-gpu`` is registered on the host. On CPU-only hosts (the
-    default deployment) we deliberately drop ``half=True`` so the export
-    doesn't crash trying to use FP16 CUDA tensors that the local Ultralytics
-    install can't emit -- an FP32 export is still a valid ORT input.
+    ``precision='fp16'`` emits ``half=True`` when ``device`` is ``'cuda'``
+    OR ``'auto'`` (the default) AND ``onnxruntime-gpu`` is registered on the
+    host. ``'auto'`` is treated like CUDA because the detector's auto device
+    resolution lands on the CUDA provider whenever it is available -- an fp16
+    request under the default ``device=auto`` must produce a genuine
+    half-precision model on a CUDA-capable host. On CPU-only hosts (no
+    onnxruntime-gpu) we deliberately drop ``half=True`` so the export doesn't
+    crash trying to use FP16 CUDA tensors that the local Ultralytics install
+    can't emit -- an FP32 export is still a valid ORT input.
     ``precision='int8'`` is NOT honored at export time (Ultralytics would
     require a calibration dataset which the download flow doesn't carry);
     INT8 is a runtime concern handled by ``app.quantization.quantize_int8``.
@@ -73,18 +77,19 @@ def _export_kwargs(nms_free: bool, precision: str = 'fp32', device: str = 'auto'
     parts = ["format='onnx'", f"end2end={'True' if nms_free else 'False'}", 'opset=13']
     # Delegate the precision rule to its single source of truth in
     # ``app.quantization.precision_export_kwargs``: fp16 emits ``half=True``
-    # only when ``device='cuda'`` AND onnxruntime-gpu is registered; fp32 and
-    # int8 never contribute export kwargs here (INT8 is a runtime concern
-    # handled by ``quantize_int8`` at detector load time).
+    # when ``device`` is 'cuda' OR 'auto' (the default) AND onnxruntime-gpu
+    # is registered; fp32 and int8 never contribute export kwargs here (INT8
+    # is a runtime concern handled by ``quantize_int8`` at detector load
+    # time).
     from app.quantization import onnxruntime_gpu_available, precision_export_kwargs
     precision_kwargs = precision_export_kwargs(
         precision, device, onnxruntime_gpu_available()
     )
     if precision_kwargs:
         parts.append(precision_kwargs)
-    elif precision == 'fp16' and device.lower() == 'cuda':
-        # Keep the operator-visible warning for the fp16+cuda-without-GPU
-        # case so the silent FP32 export is not hidden.
+    elif precision == 'fp16' and device.lower() in ('cuda', 'auto'):
+        # Keep the operator-visible warning for the fp16-without-GPU case so
+        # the silent FP32 export is not hidden.
         import logging
         logging.getLogger('daygle.ai').warning(
             'precision=fp16 requested but onnxruntime-gpu is not installed; '

@@ -284,7 +284,33 @@ class ClearRuntimeMediaDirectorySymlinkTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
+    def _skip_if_symlinks_unavailable(self):
+        """Skip symlink tests when the host can't create symlinks.
+
+        On Windows, ``Path.symlink_to`` / ``os.symlink`` require Developer
+        Mode or elevated privileges; without them the call raises OSError
+        and the security behaviour under test (unlink the link, never follow
+        it) can't be exercised. Probing in the test's own tmp dir keeps the
+        check hermetic and lets the suite pass on unprivileged Windows
+        runners instead of failing on test setup.
+        """
+        probe = Path(self.tmpdir) / '__symlink_probe__'
+        probe_target = Path(self.tmpdir) / '__symlink_probe_target__'
+        probe_target.write_text('probe')
+        try:
+            probe.symlink_to(probe_target)
+        except (OSError, NotImplementedError):
+            # OSError covers unprivileged Windows (winerror 1314);
+            # NotImplementedError covers hosts where symlink isn't
+            # implemented at all.
+            self.skipTest('symlink creation not permitted on this host '
+                          '(Windows Developer Mode / elevation required)')
+        finally:
+            probe.unlink(missing_ok=True)
+            probe_target.unlink(missing_ok=True)
+
     def test_top_level_symlink_storage_root_unlinked_not_followed(self):
+        self._skip_if_symlinks_unavailable()
         link_path = Path(self.tmpdir) / 'storage_link'
         link_path.symlink_to(self.target_dir)
         n = clear_runtime_media_directory(str(link_path))
@@ -294,6 +320,7 @@ class ClearRuntimeMediaDirectorySymlinkTests(unittest.TestCase):
         self.assertTrue((self.target_dir_subdir / 'must-survive-2.txt').exists())
 
     def test_inner_symlink_to_dir_unlinked_not_followed(self):
+        self._skip_if_symlinks_unavailable()
         sub_link = self.storage / 'sneaky'
         sub_link.symlink_to(self.target_dir)
         n = clear_runtime_media_directory(str(self.storage))
@@ -302,6 +329,7 @@ class ClearRuntimeMediaDirectorySymlinkTests(unittest.TestCase):
         self.assertTrue((self.target_dir / 'must-survive.txt').exists())
 
     def test_inner_symlink_file_unlinked_not_followed(self):
+        self._skip_if_symlinks_unavailable()
         target_file = Path(self.tmpdir) / 'real_target.txt'
         target_file.write_text('precious-file')
         sym_file = self.storage / 'fake.txt'

@@ -132,7 +132,15 @@ def compute_minimum_rule_confidence(fallback: float | None = None, camera_settin
             if time.time() - cached_at < _MIN_RULE_CONFIDENCE_TTL:
                 return cached_value
         if fallback is None:
-            fallback = float(effective_ai_config().get('confidence') or 0.45)
+            # ``0`` is a legitimate persisted confidence (the ONNX slider's
+            # floor) and must NOT fall through the ``or 0.45`` truthiness trap
+            # -- only a genuinely absent value (None) or a non-numeric config
+            # entry falls back to the 0.45 default.
+            raw_conf = effective_ai_config().get('confidence')
+            try:
+                fallback = 0.45 if raw_conf is None else float(raw_conf)
+            except (TypeError, ValueError):
+                fallback = 0.45
         min_conf: float = fallback
         cameras = [camera_settings] if camera_settings is not None else effective_cameras_config()
         for camera in cameras:

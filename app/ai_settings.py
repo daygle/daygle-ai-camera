@@ -178,6 +178,15 @@ def ai_status_payload(
     settings = ai_settings or effective_ai_config()
     active_backend = getattr(_state.detector, 'backend', 'unknown')
     configured_backend = str(settings.get('backend', 'onnx')).lower()
+    # ``enabled`` is the master toggle for object detection. Coerce legacy
+    # string forms (config YAML / old payloads) the same way
+    # ``validate_ai_settings`` does, so a 'false' string reliably reports
+    # AI DISABLED rather than being truthy.
+    enabled = settings.get('enabled', True)
+    if isinstance(enabled, str):
+        enabled = enabled.strip().lower() in {'1', 'true', 'yes', 'on'}
+    else:
+        enabled = bool(enabled)
     detector_loaded = detector_loaded_for(settings)
     model_loaded = bool(
         configured_backend == 'onnx'
@@ -188,7 +197,9 @@ def ai_status_payload(
     exists = model_exists(settings)
     detector_reason = getattr(_state.detector, 'unavailable_reason', None)
     error = _state.last_detector_error or detector_reason
-    if configured_backend == 'onnx' and (not exists):
+    if not enabled:
+        mode = 'AI DISABLED'
+    elif configured_backend == 'onnx' and (not exists):
         mode = 'MODEL MISSING'
         error = error or f"ONNX model not found: {settings.get('model_path')}"
     elif configured_backend == 'onnx' and (not model_loaded):
@@ -198,7 +209,9 @@ def ai_status_payload(
         error = detector_reason
     else:
         mode = 'MODEL FAILED'
-    inference_available = detector_loaded
+    # A disabled master toggle means no inference is available even when the
+    # detector session is resident (it is only rebuilt on reload).
+    inference_available = bool(enabled and detector_loaded)
     model_path_str = str(settings.get('model_path') or '')
     model_filename = Path(model_path_str).name if model_path_str else ''
     model_label = next(

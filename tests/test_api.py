@@ -5112,6 +5112,11 @@ def test_object_detection_without_global_email_enabled_sends_nothing(tmp_path, m
 @pytest.mark.parametrize('zone_rules,global_conf,expected', [
     # No zone rules -> falls back to global AI confidence
     (None, 0.62, 0.62),
+    # Global confidence 0 is a REAL persisted value ('accept everything'),
+    # not 'unset' -- the fallback uses an explicit None check so 0 survives
+    # the old ``or 0.45`` truthiness trap (pins the ONNX Min Confidence
+    # slider's floor behaviour end to end).
+    (None, 0.0, 0.0),
     # Zone with person rule at 0.35 -> uses lowest rule confidence
     ([{'label': 'person', 'min_confidence': 0.35, 'record_on_detect': True, 'alert_on_detect': True, 'cooldown_seconds': 60}], 0.5, 0.35),
     # Zone with motion rule at 0.1 -> motion rule ignored, falls back to global

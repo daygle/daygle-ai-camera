@@ -748,7 +748,11 @@ def test_validate_storage_settings_accepts_data_dir_descendant(monkeypatch, pv, 
     out = pv.validate_storage_settings({'snapshots_dir': str(envelope / 'snapshots')})
     # Resolved to an absolute path ending in 'snapshots'.
     assert out['snapshots_dir'].endswith('snapshots')
-    assert '/' in out['snapshots_dir']  # absolute, not relative
+    # ``Path.is_absolute()`` is OS-aware: on POSIX it checks for the '/'
+    # prefix, on Windows it accepts drive letters + backslashes (the old
+    # ``'/' in path`` assertion falsely failed on Windows paths like
+    # ``C:\Users\...\data\snapshots``).
+    assert Path(out['snapshots_dir']).is_absolute()
 
 
 def test_validate_storage_settings_returns_all_five_dir_fields(monkeypatch, pv):

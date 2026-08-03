@@ -89,7 +89,11 @@ function setModelMessage(modelId, text, type = 'info') {
 function formPayload(form) {
   const data = Object.fromEntries(new FormData(form).entries());
   data.enabled = data.enabled === 'true';
-  for (const key of ['iou_threshold']) if (data[key] !== '') data[key] = Number(data[key]);
+  // Checkboxes are omitted from FormData when unchecked, so read the
+  // control directly to persist an explicit false (not a stale default).
+  const ioBinding = aiForm.elements['use_io_binding'];
+  if (ioBinding) data.use_io_binding = ioBinding.checked;
+  for (const key of ['iou_threshold', 'confidence']) if (data[key] !== '') data[key] = Number(data[key]);
   for (const key of ['inference_threads', 'max_concurrent_inferences']) {
     if (data[key] !== '') data[key] = Number.parseInt(data[key], 10);
     else delete data[key];
@@ -174,6 +178,16 @@ function renderAi(settings) {
     aiForm.elements['gpu_mem_limit_gb'].value = (limitBytes != null && limitBytes > 0)
       ? (limitBytes / (1024 * 1024 * 1024)).toFixed(1)
       : '0';
+  }
+  // Min Confidence slider: range inputs only accept numeric strings, so
+  // coerce here (the generic loop above would pass '' through when the
+  // key is absent, which the browser resets to the midpoint 0.5).
+  // ``null``/``undefined``/absent map to the 0.45 default; ``0`` stays 0
+  // (it is a legitimate persisted value, not 'unset').
+  if (aiForm.elements['confidence']) {
+    const conf = settings.confidence == null ? NaN : Number(settings.confidence);
+    aiForm.elements['confidence'].value = Number.isFinite(conf) ? String(conf) : '0.45';
+    syncConfidenceReadout();
   }
   renderStatus(settings);
   renderLabels(settings.available_labels);
@@ -424,6 +438,18 @@ async function runAction(buttonId, path, label) {
   } finally {
     button.disabled = false;
   }
+}
+
+function syncConfidenceReadout() {
+  const slider = aiForm.elements['confidence'];
+  const readout = document.getElementById('confidenceValue');
+  if (slider && readout) readout.textContent = Number(slider.value).toFixed(2);
+}
+
+// Keep the numeric readout next to the slider in sync while dragging.
+const confidenceSlider = aiForm.elements['confidence'];
+if (confidenceSlider) {
+  confidenceSlider.addEventListener('input', syncConfidenceReadout);
 }
 
 document.querySelectorAll('.field-help').forEach((el) => {

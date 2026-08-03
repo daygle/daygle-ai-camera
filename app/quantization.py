@@ -885,16 +885,21 @@ def precision_export_kwargs(
 ) -> str:
     """Return the kwargs string fragment for the requested ``precision``.
 
-    - ``fp16``: emits ``half=True`` only when ``device='cuda'`` AND
-      onnxruntime-gpu is registered. Otherwise returns the empty string
-      so the export keeps working on CPU hosts that happen to carry the
-      ``precision=fp16`` setting from a prior CUDA deployment.
+    - ``fp16``: emits ``half=True`` when ``device`` is ``'cuda'`` OR
+      ``'auto'`` AND onnxruntime-gpu is registered. ``'auto'`` is treated
+      like CUDA here because the detector's ``auto`` device resolution
+      lands on the CUDA provider whenever it is available, so an fp16
+      request under the default ``device=auto`` must produce a genuine
+      half-precision model on a CUDA-capable host. Otherwise returns the
+      empty string so the export keeps working on CPU hosts that happen
+      to carry the ``precision=fp16`` setting from a prior CUDA
+      deployment.
     - ``int8``: always returns ``''``. INT8 is a runtime concern in this
       codebase -- see ``quantize_int8``. Ultralytics'
       ``int8=True`` would require a calibration dataset which the
       download flow can't supply.
     - ``fp32``: always returns ``''``.
     """
-    if precision == 'fp16' and device.lower() == 'cuda' and onnxruntime_gpu:
+    if precision == 'fp16' and device.lower() in ('cuda', 'auto') and onnxruntime_gpu:
         return 'half=True'
     return ''

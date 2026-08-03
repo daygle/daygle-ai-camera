@@ -124,9 +124,19 @@ def test_normalize_precision(value, expected):
 
 
 def test_precision_export_kwargs_fp16_cuda_gpu_returns_half_true():
-    """``fp16 + cuda + onnxruntime-gpu available`` emits ``half=True``;
-    this is the only combination the export honors at export time."""
+    """``fp16 + cuda + onnxruntime-gpu available`` emits ``half=True``."""
     assert precision_export_kwargs('fp16', 'cuda', onnxruntime_gpu=True) == 'half=True'
+
+
+def test_precision_export_kwargs_fp16_auto_gpu_returns_half_true():
+    """``fp16 + auto + onnxruntime-gpu available`` emits ``half=True``.
+
+    ``device='auto'`` resolves to the CUDA provider whenever it is available
+    (same resolution the detector uses), so an fp16 request under the default
+    ``device=auto`` must produce a genuine half-precision model on a
+    CUDA-capable host -- not silently export FP32.
+    """
+    assert precision_export_kwargs('fp16', 'auto', onnxruntime_gpu=True) == 'half=True'
 
 
 def test_precision_export_kwargs_fp16_cuda_no_gpu_returns_empty():
@@ -134,6 +144,13 @@ def test_precision_export_kwargs_fp16_cuda_no_gpu_returns_empty():
     the export still succeeds on hosts that carry the setting from a
     prior CUDA deployment but no longer have the wheel installed."""
     assert precision_export_kwargs('fp16', 'cuda', onnxruntime_gpu=False) == ''
+
+
+def test_precision_export_kwargs_fp16_auto_no_gpu_returns_empty():
+    """``fp16 + auto + onnxruntime-gpu MISSING`` returns the empty string --
+    a CPU-only host under the default device setting still exports FP32
+    rather than crashing on FP16 CUDA tensors."""
+    assert precision_export_kwargs('fp16', 'auto', onnxruntime_gpu=False) == ''
 
 
 def test_precision_export_kwargs_fp16_cpu_returns_empty():
@@ -156,6 +173,55 @@ def test_precision_export_kwargs_fp32_always_empty(precision):
     """``fp32`` (the default) never injects extra kwargs -- preserves
     current behavior and keeps the export kwargs string stable."""
     assert precision_export_kwargs(precision, 'auto', onnxruntime_gpu=False) == ''
+
+
+# -- model_management._export_kwargs ---------------------------------------
+
+
+def test_export_kwargs_fp16_auto_gpu_emits_half_true(monkeypatch):
+    """``model_management._export_kwargs`` delegates its fp16 decision to
+    ``precision_export_kwargs``: ``fp16 + device=auto`` on a GPU host emits
+    ``half=True`` (previously only an explicit ``device='cuda'`` did)."""
+    import app.model_management as mm
+
+    monkeypatch.setattr(mm, '_onnxsim_available', lambda: False)
+    monkeypatch.setattr(quantization, 'onnxruntime_gpu_available', lambda: True)
+    kwargs = mm._export_kwargs(nms_free=False, precision='fp16', device='auto')
+    assert 'half=True' in kwargs
+
+
+def test_export_kwargs_fp16_auto_no_gpu_omits_half_true(monkeypatch):
+    """On a CPU-only host under the default ``device=auto``, fp16 stays a
+    silent no-op (no ``half=True``) so the export succeeds as FP32."""
+    import app.model_management as mm
+
+    monkeypatch.setattr(mm, '_onnxsim_available', lambda: False)
+    monkeypatch.setattr(quantization, 'onnxruntime_gpu_available', lambda: False)
+    kwargs = mm._export_kwargs(nms_free=False, precision='fp16', device='auto')
+    assert 'half=True' not in kwargs
+
+
+def test_export_kwargs_fp16_cpu_gpu_omits_half_true(monkeypatch):
+    """Explicit ``device='cpu'`` never emits ``half=True`` even when
+    onnxruntime-gpu is present -- FP16 is CUDA-only."""
+    import app.model_management as mm
+
+    monkeypatch.setattr(mm, '_onnxsim_available', lambda: False)
+    monkeypatch.setattr(quantization, 'onnxruntime_gpu_available', lambda: True)
+    kwargs = mm._export_kwargs(nms_free=False, precision='fp16', device='cpu')
+    assert 'half=True' not in kwargs
+
+
+def test_export_kwargs_int8_never_emits_half_true(monkeypatch):
+    """INT8 is a runtime concern -- the export kwargs must never carry
+    ``half=True`` for any device / GPU combination."""
+    import app.model_management as mm
+
+    monkeypatch.setattr(mm, '_onnxsim_available', lambda: False)
+    for device in ('auto', 'cuda', 'cpu'):
+        monkeypatch.setattr(quantization, 'onnxruntime_gpu_available', lambda: True)
+        kwargs = mm._export_kwargs(nms_free=False, precision='int8', device=device)
+        assert 'half=True' not in kwargs
 
 
 # -- capability detection --------------------------------------------------

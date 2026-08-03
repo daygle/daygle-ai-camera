@@ -627,6 +627,22 @@ textarea {
 .form-grid > label { width: 100%; }
 .form-grid input[type="hidden"] { display: none; }
 .form-grid .object-select-field { align-self: stretch; }
+.range-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.range-field input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+.range-field output {
+  min-width: 42px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
 .field-help {
   color: var(--muted);
   font-size: 12px;

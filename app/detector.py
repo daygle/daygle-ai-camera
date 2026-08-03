@@ -310,16 +310,20 @@ class OnnxYoloDetector:
             if not use_cuda:
                 # Thread tuning only relevant for CPU execution.
                 session_options.intra_op_num_threads = self._num_threads
-                session_options.inter_op_num_threads = 1
-                # ORT CUDA EP manages its own model-level parallelism, so the
-                # executor toggle is meaningful only on the CPU path. Defaults
-                # to ``ORT_PARALLEL`` (prior behavior); ``ORT_SEQUENTIAL`` is
-                # an opt-in A/B lever from the AI settings form.
-                session_options.execution_mode = (
-                    ort.ExecutionMode.ORT_SEQUENTIAL
-                    if self._execution_mode == "sequential"
-                    else ort.ExecutionMode.ORT_PARALLEL
-                )
+                # ORT's parallel executor fans graph nodes out across the
+                # inter-op pool. Pinning it to 1 made the parallel/sequential
+                # toggle a no-op (both ran one inter-op thread); give the
+                # parallel mode a real (small) inter-op pool so it actually
+                # parallelizes independent nodes, while sequential stays on a
+                # single thread. Cap it modestly: intra-op threads already
+                # cover per-operator parallelism, and a large inter-op pool
+                # can add overhead on small graphs.
+                if self._execution_mode == "sequential":
+                    session_options.inter_op_num_threads = 1
+                    session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+                else:
+                    session_options.inter_op_num_threads = min(2, cpu_count)
+                    session_options.execution_mode = ort.ExecutionMode.ORT_PARALLEL
             try:
                 self.session = ort.InferenceSession(
                     str(session_model_path),

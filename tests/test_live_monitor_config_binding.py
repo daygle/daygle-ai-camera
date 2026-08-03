@@ -76,3 +76,92 @@ def test_each_detection_thread_uses_its_own_camera_config(monkeypatch):
     # Each recorded (frame, config-id) pair must be self-consistent: the frame
     # read for camera X must have been evaluated against camera X's config.
     assert sorted(recorded) == [('img-cam-a', 'cam-a'), ('img-cam-b', 'cam-b')], recorded
+
+
+class _ExplodingDetector:
+    """Stand-in detector whose inference methods raise if ever reached --
+    proves the AI-disabled gate short-circuits before any ONNX work."""
+
+    def detect_frame(self, image, confidence=None):
+        raise AssertionError('ONNX inference must not run when AI is disabled')
+
+    def detect_image(self, image_bytes, confidence=None):
+        raise AssertionError('ONNX inference must not run when AI is disabled')
+
+
+def test_process_live_stream_alerts_gates_on_ai_disabled(monkeypatch):
+    """The master AI toggle (``ai.enabled=False``) short-circuits
+    ``process_live_stream_alerts`` before any motion or ONNX inference work:
+    the status becomes 'skipped' with the disabled reason and the function
+    returns None without touching the detector."""
+    recorded: list[tuple[str, dict]] = []
+    monkeypatch.setattr(live_monitor, 'effective_ai_config', lambda: {'enabled': False})
+    monkeypatch.setattr(
+        live_monitor,
+        'update_live_detection_status',
+        lambda camera_id, **kwargs: recorded.append((camera_id, kwargs)),
+    )
+    # Any inference attempt would raise, proving the gate fires first.
+    monkeypatch.setattr(_state, 'detector', _ExplodingDetector())
+
+    result = live_monitor.process_live_stream_alerts(
+        b'jpeg-bytes',
+        {'timestamp': 1.0, 'width': 10, 'height': 10},
+        {'id': 'cam-1'},
+    )
+
+    assert result is None
+    assert recorded == [(
+        'cam-1',
+        {'state': 'skipped', 'reason': 'AI detection is disabled.', 'detections': []},
+    )], recorded
+
+
+def test_process_live_stream_alerts_proceeds_when_ai_enabled(monkeypatch):
+    """With ``ai.enabled`` unset (default True), the gate does NOT fire --
+    the function proceeds into the normal pipeline (motion detection path).
+    The status must not be marked as disabled."""
+    recorded: list[tuple[str, dict]] = []
+    monkeypatch.setattr(live_monitor, 'effective_ai_config', lambda: {})
+    monkeypatch.setattr(
+        live_monitor,
+        'update_live_detection_status',
+        lambda camera_id, **kwargs: recorded.append((camera_id, kwargs)),
+    )
+    # The gate passes, so the flow reaches the detector-loaded check; stub
+    # the status payload so the DB-backed source helper isn't hit.
+    monkeypatch.setattr(
+        live_monitor,
+        'ai_status_payload',
+        lambda: {
+            'detector_loaded': True,
+            'last_detector_error': None,
+            'configured_backend': 'onnx',
+            'active_backend': 'onnx',
+        },
+    )
+    # Empty motion -> 'No motion detected' branch returns before ONNX.
+    monkeypatch.setattr(live_monitor, 'detect_frame_motion',
+                        lambda cid, image, **kw: (False, 0.0, None))
+    monkeypatch.setattr(live_monitor, 'zone_motion_detections',
+                        lambda settings, conf, **kw: [])
+    monkeypatch.setattr(_state, 'detector', _ExplodingDetector())
+    monkeypatch.setattr(_state, '_MOTION_PIXEL_THRESHOLD', 30)
+    monkeypatch.setattr(_state, '_MOTION_GATE_FRACTION', 0.003)
+    monkeypatch.setattr(_state, '_MOTION_SCALE_FRACTION', 0.03)
+    monkeypatch.setattr(_state, '_MOTION_BACKGROUND_ALPHA', 0.05)
+    monkeypatch.setattr(_state, '_MOTION_FRAME_W', 160)
+    monkeypatch.setattr(_state, '_MOTION_FRAME_H', 120)
+    monkeypatch.setattr(_state, '_frame_motion_prev', {})
+    monkeypatch.setattr(_state, '_periodic_scan_last_ts', {})
+
+    result = live_monitor.process_live_stream_alerts(
+        b'jpeg-bytes',
+        {'timestamp': 1.0, 'width': 10, 'height': 10},
+        {'id': 'cam-1'},
+        enforce_interval=False,
+    )
+
+    assert result is None
+    # No 'AI detection is disabled' entry -- the gate did not fire.
+    assert all('disabled' not in str(reason) for _, kwargs in recorded for reason in [kwargs.get('reason', '')])

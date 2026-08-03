@@ -419,6 +419,61 @@ def test_ai_status_payload_resolves_model_name_from_yolo_models(monkeypatch, ais
     assert out['model_path'] == '/abs/path/yolov8s.onnx'
 
 
+def test_ai_status_payload_reports_disabled_when_enabled_false(monkeypatch, ais):
+    """The master AI toggle (``ai.enabled=False``) must gate the status: the
+    mode becomes ``AI DISABLED`` and ``inference_available`` is False even
+    when the detector session itself is loaded -- the toggle is now a real
+    kill-switch, not a persisted no-op."""
+    _install_ai_dependencies(
+        monkeypatch,
+        detector=_DetectorStub(backend='onnx', available=True),
+        detector_loaded_for=True,
+        onnx_runtime_installed=True,
+        model_exists=True,
+    )
+
+    out = ais.ai_status_payload({'backend': 'onnx', 'enabled': False, 'model_path': 'models/yolov8n.onnx'})
+    assert out['mode'] == 'AI DISABLED'
+    assert out['inference_available'] is False
+
+
+def test_ai_status_payload_coerces_string_false_enabled(monkeypatch, ais):
+    """A YAML string ``'false'`` for ``enabled`` (config-file path) is
+    coerced to False the same way ``validate_ai_settings`` does -- the
+    status must report AI DISABLED rather than treating the string as
+    truthy."""
+    _install_ai_dependencies(
+        monkeypatch,
+        detector=_DetectorStub(backend='onnx', available=True),
+        detector_loaded_for=True,
+        onnx_runtime_installed=True,
+        model_exists=True,
+    )
+
+    out = ais.ai_status_payload({'backend': 'onnx', 'enabled': 'false', 'model_path': 'models/yolov8n.onnx'})
+    assert out['mode'] == 'AI DISABLED'
+    assert out['inference_available'] is False
+
+
+def test_ai_status_payload_disabled_surfaces_through_detector_status(monkeypatch, ais):
+    """``detector_status`` (the settings-form payload) surfaces the disabled
+    mode and available=False so the ONNX page shows AI DISABLED end to end."""
+    ai_settings_module, ai_state, _capture = _install_ai_dependencies(
+        monkeypatch,
+        detector=_DetectorStub(backend='onnx', available=True),
+        detector_loaded_for=True,
+        onnx_runtime_installed=True,
+        model_exists=True,
+    )
+    monkeypatch.setattr(ai_settings_module, 'load_labels', lambda labels_path, categories: [])
+    monkeypatch.setattr(ai_state, 'config', {'ai': {'categories': []}})
+
+    out = ais.detector_status({'backend': 'onnx', 'enabled': False, 'model_path': 'models/yolov8n.onnx'})
+    assert out['mode'] == 'AI DISABLED'
+    assert out['available'] is False
+    assert out['enabled'] is False
+
+
 # -- detector_status ------------------------------------------------------
 
 
@@ -560,6 +615,67 @@ def test_validate_ai_settings_rejects_confidence_above_one(monkeypatch, ais):
     with pytest.raises(HTTPException) as exc_info:
         ais.validate_ai_settings({'confidence': 1.5})
     assert exc_info.value.status_code == 400
+
+
+def test_validate_ai_settings_rejects_confidence_below_zero(monkeypatch, ais):
+    """``confidence=-0.1`` is outside [0, 1] -> HTTPException(400) -- the
+    symmetric low-side guard to the above-one test, matching the slider's
+    min=0 floor so a below-range payload can't sneak in via the API."""
+    from fastapi import HTTPException
+
+    _install_ai_dependencies(
+        monkeypatch,
+        effective_ai_config_value={'confidence': 0.45, 'iou_threshold': 0.5},
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        ais.validate_ai_settings({'confidence': -0.1})
+    assert exc_info.value.status_code == 400
+
+
+def test_validate_ai_settings_accepts_confidence_zero(monkeypatch, ais):
+    """``confidence=0`` is the slider's floor and a legitimate persisted
+    value ('accept every detection') -- the validator must accept it rather
+    than treating 0 as 'unset' (the alert fallback treats 0 as real via an
+    explicit None check, see compute_minimum_rule_confidence)."""
+    _install_ai_dependencies(
+        monkeypatch,
+        effective_ai_config_value={},
+    )
+    out = ais.validate_ai_settings({'confidence': 0})
+    assert out['confidence'] == pytest.approx(0)
+
+
+def test_validate_ai_settings_defaults_confidence_to_045(monkeypatch, ais):
+    """``confidence`` falls back to 0.45 (the alert-dispatch fallback and the
+    detector's minimum) when neither the payload nor the stored config
+    supplies it -- the value the ONNX page's Min Confidence slider should
+    show on a fresh install."""
+    _install_ai_dependencies(
+        monkeypatch,
+        effective_ai_config_value={},
+    )
+    out = ais.validate_ai_settings({})
+    assert out['confidence'] == pytest.approx(0.45)
+
+
+def test_detector_status_round_trips_confidence_to_form(monkeypatch, ais):
+    """``detector_status`` (the ``GET /api/settings/ai`` payload the ONNX
+    page renders) must carry ``confidence`` through so the Min Confidence
+    slider reflects the persisted value -- the generic ``**ai_settings``
+    spread already forwards it; pin the contract so a future change to the
+    payload shape can't silently drop the slider's source value."""
+    ai_settings_module, ai_state, _capture = _install_ai_dependencies(
+        monkeypatch,
+        detector=_DetectorStub(backend='onnx', available=True),
+        detector_loaded_for=True,
+        onnx_runtime_installed=True,
+        model_exists=True,
+    )
+    monkeypatch.setattr(ai_settings_module, 'load_labels', lambda labels_path, categories: [])
+    monkeypatch.setattr(ai_state, 'config', {'ai': {'categories': []}})
+
+    out = ais.detector_status({'confidence': 0.62, 'model_path': 'models/yolov8n.onnx'})
+    assert out['confidence'] == pytest.approx(0.62)
 
 
 def test_validate_ai_settings_accepts_inference_threads_in_range(monkeypatch, ais):

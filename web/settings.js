@@ -42,12 +42,12 @@ function titleCaseWords(value) {
 }
 
 const FIELD_LABELS = {
-  snapshot_refresh_ms: 'Snapshot Refresh',
-  detection_status_refresh_ms: 'Detection Status Refresh',
-  detection_interval_seconds: 'Detection Interval',
-  event_debounce_seconds: 'Fallback Event Merge (s)',
+  snapshot_refresh_ms: 'Snapshot Refresh (ms)',
+  detection_status_refresh_ms: 'Detection Status Refresh (ms)',
+  detection_interval_seconds: 'Detection Interval (s)',
+  event_debounce_seconds: 'Event Merge Window (s)',
   detection_history_minutes: 'Detection History (min)',
-  background_detection_enabled: 'Background Alerts',
+  background_detection_enabled: 'Background Detection',
   periodic_scan_interval_seconds: 'Periodic Scan Interval (s)',
   motion_pixel_threshold: 'Motion Pixel Threshold',
   motion_gate_fraction: 'Motion Gate Fraction',
@@ -63,7 +63,6 @@ const FIELD_LABELS = {
   session_timeout_hours: 'Session Timeout Hours',
   max_login_attempts: 'Max Login Attempts',
   lockout_minutes: 'Lockout Minutes',
-  min_confidence: 'Min Confidence',
   from_address: 'From Address',
   use_tls: 'STARTTLS',
   use_ssl: 'SSL',
@@ -199,7 +198,7 @@ const FIELD_TYPES = {
   number: new Set([
     'detection_interval_seconds', 'event_debounce_seconds', 'detection_history_minutes',
     'motion_gate_fraction', 'motion_scale_fraction', 'motion_background_alpha',
-    'min_confidence', 'session_timeout_hours',
+    'session_timeout_hours',
   ]),
   csv: new Set(['vehicle_labels']),
 };

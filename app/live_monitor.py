@@ -21,7 +21,7 @@ from app.alert_dispatch import (
 )
 from app.camera_health import _check_cameras_health
 from app.camera_instance import read_ingest_frame
-from app.config_facades import effective_email_alert_settings, effective_live_config
+from app.config_facades import effective_ai_config, effective_email_alert_settings, effective_live_config
 from app.detection_state import (
     detect_frame_motion,
     detection_label_set,
@@ -115,7 +115,7 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
             retry_after = _state.live_detection_retry_after.get(camera_id, 0)
         if retry_after and now < retry_after:
             continue
-        detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 0.25))
+        detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 0.5))
         with _state.live_detection_worker_lock:
             if camera_id in _state.active_live_detection_cameras:
                 continue
@@ -190,7 +190,7 @@ def live_alert_monitor_loop() -> None:
             _prune_frame_motion_state()
             purge_camera_diagnostics_by_policy()
             _last_prune = now
-        interval = max(0.1, float(live_settings.get('detection_interval_seconds', 0.25)))
+        interval = max(0.1, float(live_settings.get('detection_interval_seconds', 0.5)))
         _state.live_alert_monitor_stop.wait(interval)
 
 def start_live_alert_monitor() -> None:
@@ -228,7 +228,7 @@ def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings
     live_cfg = effective_live_config()
     if normalize_bool_setting(live_cfg.get('background_detection_enabled'), True):
         return
-    detection_interval_seconds = float(live_cfg.get('detection_interval_seconds', 0.25))
+    detection_interval_seconds = float(live_cfg.get('detection_interval_seconds', 0.5))
     now = time.time()
     with _state.live_detection_worker_lock:
         if camera_id in _state.active_live_detection_cameras:
@@ -253,7 +253,16 @@ def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings
 def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict[str, Any], *, enforce_interval: bool = True) -> int | None:
     camera_id = str(settings.get('id') or 'camera')
     live_settings = effective_live_config()
-    detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 0.25))
+    detection_interval_seconds = float(live_settings.get('detection_interval_seconds', 0.5))
+    # Master AI toggle (ai.enabled): when disabled, skip inference and every
+    # downstream effect (detections, alerts, AI-triggered recordings). This is
+    # the single gate for both the background monitor thread and the
+    # event-driven queue path, so toggling AI off stops object detection
+    # everywhere without tearing down the detector session.
+    ai_config = effective_ai_config()
+    if not normalize_bool_setting(ai_config.get('enabled'), True):
+        update_live_detection_status(camera_id, state='skipped', reason='AI detection is disabled.', detections=[])
+        return None
     if not hasattr(_state.detector, 'detect_image'):
         update_live_detection_status(camera_id, state='skipped', reason='Live stream alerts require ONNX AI mode.', detections=[])
         return None
