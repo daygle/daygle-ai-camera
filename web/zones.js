@@ -460,8 +460,14 @@ function bindRuleFields() {
   const numberBindings = [
     ['zoneRuleConfidence', 'min_confidence', (value) => clamp(Number(value || 0), 0, 1)],
     // Stored as-typed in [0, 1]; normalizeObjectRules re-clamps max >= min on
-    // the next render, and the server does the same on save.
-    ['zoneRuleMaxConfidence', 'max_confidence', (value) => clamp(Number(value ?? 1), 0, 1)],
+    // the next render, and the server does the same on save. A CLEARED field
+    // arrives as '' (not nullish), so map empty back to the documented default
+    // of 1 (no cap) -- otherwise Number('') would be 0 and clear-and-save would
+    // collapse the rule to a [min, min] window that suppresses everything.
+    ['zoneRuleMaxConfidence', 'max_confidence', (value) => {
+      const text = String(value ?? '').trim();
+      return text === '' ? 1 : clamp(Number(text), 0, 1);
+    }],
     ['zoneRuleCooldown', 'cooldown_seconds', (value) => Math.max(0, Number.parseInt(value || 0, 10) || 0)],
   ];
   numberBindings.forEach(([datasetKey, ruleKey, transform]) => {

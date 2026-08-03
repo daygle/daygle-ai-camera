@@ -184,7 +184,7 @@ from app.config_facades import get_camera_config
 # don't flood logs on every frame. Cleared on success to allow self-healing.
 _zone_pixel_motion_errors: set[str] = set()
 from app.utils import normalize_email_recipients
-from app.zone_schema import _LABEL_ALIASES, normalize_label_list, zone_motion_min_confidence
+from app.zone_schema import _LABEL_ALIASES, normalize_label_list, zone_motion_max_confidence, zone_motion_min_confidence
 
 
 def get_camera_instance(camera_id: str | None = None):
@@ -354,6 +354,20 @@ def zone_motion_detections(
             logger.debug(
                 'Motion zone %r: zone_fraction=%.4f zone_confidence=%.3f below conf_threshold=%.3f (scale_fraction=%.4f)',
                 zone_id, zone_fraction, zone_confidence, conf_threshold, scale_fraction,
+            )
+            continue
+        # Upper bound of the motion rule's [min, max] window. Dropping the
+        # detection HERE -- the single source of truth for motion, before it is
+        # appended to alert_detections/recording_detections in live_monitor --
+        # keeps alerts AND recordings consistent with the window (the
+        # AlertEngine gate alone only suppressed the notification, not the
+        # zone_motion_record_on_detect recording path). Defaults to 1.0, so
+        # zones without a configured max are unaffected.
+        max_threshold = zone_motion_max_confidence(zone)
+        if zone_confidence > max_threshold:
+            logger.debug(
+                'Motion zone %r: zone_confidence=%.3f above max_confidence=%.3f -- ignored',
+                zone_id, zone_confidence, max_threshold,
             )
             continue
         seen_zones.add(zone_id)

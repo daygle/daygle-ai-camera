@@ -328,6 +328,24 @@ def test_zone_motion_min_confidence_handles_type_error_gracefully(zs):
     assert zs.zone_motion_min_confidence(zone) == 0.45
 
 
+def test_zone_motion_max_confidence_defaults_clamps_and_skips_disabled(zs):
+    """``zone_motion_max_confidence`` returns the enabled motion rule's upper
+    bound, defaulting to 1.0 (no cap) when absent/invalid/disabled/missing,
+    and clamps to [0.0, 1.0]."""
+    # No motion rule -> default no-cap.
+    assert zs.zone_motion_max_confidence({'object_rules': [{'label': 'person', 'max_confidence': 0.5, 'enabled': True}]}) == 1.0
+    # Enabled motion rule -> its value.
+    assert zs.zone_motion_max_confidence({'object_rules': [{'label': 'motion', 'max_confidence': 0.7, 'enabled': True}]}) == 0.7
+    # Absent max on the motion rule -> 1.0.
+    assert zs.zone_motion_max_confidence({'object_rules': [{'label': 'motion', 'min_confidence': 0.3, 'enabled': True}]}) == 1.0
+    # Out of range clamps.
+    assert zs.zone_motion_max_confidence({'object_rules': [{'label': 'motion', 'max_confidence': 5.0, 'enabled': True}]}) == 1.0
+    # Disabled motion rule -> default.
+    assert zs.zone_motion_max_confidence({'object_rules': [{'label': 'motion', 'max_confidence': 0.4, 'enabled': False}]}) == 1.0
+    # Non-numeric -> fallback.
+    assert zs.zone_motion_max_confidence({'object_rules': [{'label': 'motion', 'max_confidence': 'oops', 'enabled': True}]}) == 1.0
+
+
 # -- normalize_zone_object_rules -------------------------------------------
 
 def test_normalize_zone_object_rules_seeds_from_object_rules_list(monkeypatch, zs):

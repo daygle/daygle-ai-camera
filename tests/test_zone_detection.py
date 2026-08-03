@@ -258,6 +258,35 @@ def test_zone_motion_detections_threshold_filters_low_confidence():
     assert zd.zone_motion_detections(settings, 0.5, diff_mask=None) == []
 
 
+def test_zone_motion_detections_filters_above_max_confidence():
+    """A motion rule's ``max_confidence`` upper bound gates the motion
+    detection at its source, so an over-max motion never reaches the alert OR
+    the recording path (both derive from ``zone_motion_detections``)."""
+    from app import zone_detection as zd
+    settings = {
+        'id': 'cam-1',
+        'name': 'Cam 1',
+        'detection': {
+            'zones': [
+                {
+                    'id': 'z',
+                    'enabled': True,
+                    'monitor_motion': True,
+                    'x': 0,
+                    'y': 0,
+                    'width': 1,
+                    'height': 1,
+                    'object_rules': [{'label': 'motion', 'min_confidence': 0.2, 'max_confidence': 0.6}],
+                },
+            ],
+        },
+    }
+    # 0.9 is above the 0.6 max -> dropped entirely.
+    assert zd.zone_motion_detections(settings, 0.9, diff_mask=None) == []
+    # 0.5 sits inside [0.2, 0.6] -> kept.
+    assert len(zd.zone_motion_detections(settings, 0.5, diff_mask=None)) == 1
+
+
 def test_zone_motion_detections_stamps_zone_name_and_id():
     """Motion pseudo-detections must carry the zone name so the playback cards
     can render a Zone row for motion-triggered events."""
