@@ -27,7 +27,7 @@ Tests pin three contracts:
    ``main.<name>`` to the SAME function object as
    ``app.payload_validators.<name>``. Re-resolved via ``sys.modules``
    per the Phase-17 lesson (defeats the
-   ``tests/test_api.py::_load_app`` sys-modules-wipe state leak).
+   ``tests/support.py::_load_app`` sys-modules-wipe state leak).
 
 2. **Behavior of each validator.** Each validator has subtle coercion
    + range-check semantics:
@@ -91,7 +91,7 @@ import app.payload_validators as payload_validators  # noqa: E402
 # ---------------------------------------------------------------------------
 # 1. Pool A back-compat identity -- ``main.<name> is pv.<name>``.
 #    Re-resolve via sys.modules per Phase-17 lesson (defeats the
-#    tests/test_api.py::_load_app() sys-modules-wipe state leak).
+#    tests/support.py::_load_app() sys-modules-wipe state leak).
 # ---------------------------------------------------------------------------
 
 

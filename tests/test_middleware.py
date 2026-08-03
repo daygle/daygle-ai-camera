@@ -38,7 +38,7 @@ What the middleware actually does:
 
 These tests cover the full critical-path lifecycle end-to-end via the
 FastAPI ``app`` instance running on a uvicorn thread, just like the
-existing tests in ``tests/test_api.py`` and ``tests/test_web_auth_router_integration.py``.
+existing tests in ``tests/test_api_*.py`` and ``tests/test_web_auth_router_integration.py``.
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests.test_api import (  # noqa: E402
+from tests.support import (  # noqa: E402
     LocalClient,
     _load_app,
     _login,

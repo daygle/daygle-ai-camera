@@ -3,7 +3,8 @@
 Four assertions:
 
 1. ``test_all_main_attr_references_resolve_on_app_main`` - AST-walks every
-   ``main.<attr>`` reference in ``tests/test_api.py`` and asserts each
+   ``main.<attr>`` reference across the split ``tests/test_api_*.py`` suites
+   and asserts each
    ``<attr>`` is still defined on the freshly-loaded ``app.main`` module.
    Defends the hybrid-pattern rule documented in ``app/api/__init__.py``
    ("anything tests use as main.X must stay defined on app.main").
@@ -14,8 +15,8 @@ Four assertions:
    removal would silently remove its documentation; this fails fast.
 
 3. ``test_every_request_path_has_a_registered_route`` (NEW for Phase-2) -
-   AST-walks every ``LocalClient.request("<path>", ...)`` literal in
-   ``tests/test_api.py`` and asserts each path matches a registered FastAPI
+   AST-walks every ``LocalClient.request("<path>", ...)`` literal across the
+   split ``tests/test_api_*.py`` suites and asserts each path matches a FastAPI
    route on the loaded ``main.app`` (matched via Starlette's
    ``route.path_regex``). This is the assertion that would have caught the
    e365ec5 regression: the Phase-2 attempt used a path-agnostic splice that
@@ -27,7 +28,7 @@ Four assertions:
    so future edits can't silently drop or duplicate an endpoint.
 
 All assertions load ``app.main`` fresh against a tmpdir ``DAYGLE_CONFIG`` -
-mirrors ``tests/test_api.py::_load_app`` so any global that resolves there
+mirrors ``tests/support.py::_load_app`` so any global that resolves there
 resolves here. ``APP_API_MODULES`` is auto-discovered via glob so future
 Phase-N routers (cameras/recordings/live/etc.) join the routes-coverage
 walk without manual list upkeep.
@@ -43,7 +44,7 @@ import sys
 
 import pytest
 
-# Mirror tests/test_api.py's pattern: stick the repo root on sys.path so
+# Mirror tests/support.py's pattern: stick the repo root on sys.path so
 # `import app.main` resolves at collection time. Without this bootstrap the
 # AST-only invariant tests crash with `ModuleNotFoundError: No module named
 # 'app'` because pytest doesn't auto-add cwd to sys.path.
@@ -51,7 +52,18 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-TEST_API_PY = PROJECT_ROOT / 'tests' / 'test_api.py'
+# The former monolithic tests/test_api.py was split into tests/support.py
+# (shared harness) + tests/test_api_<theme>.py (themed suites). The invariant
+# walkers below scan the whole set so the main.<attr> and request-path coverage
+# assertions stay enforced across the split. This file (itself matching the
+# test_api_*.py glob) is excluded.
+TEST_API_FILES = [
+    PROJECT_ROOT / 'tests' / 'support.py',
+    *sorted(
+        p for p in (PROJECT_ROOT / 'tests').glob('test_api_*.py')
+        if p.name != 'test_api_router_split_invariants.py'
+    ),
+]
 APP_MAIN_PY = PROJECT_ROOT / 'app' / 'main.py'
 APP_API_INIT = PROJECT_ROOT / 'app' / 'api' / '__init__.py'
 APP_API_MODULES = sorted((PROJECT_ROOT / 'app' / 'api').glob('*.py'))
@@ -85,8 +97,8 @@ def _collect_api_imports_in_main(source_text: str, source_path: Path) -> dict[st
     Phase-7.1 invariant consumes this to assert each binding is
     referenced somewhere - either as a bare-name in ``app/main.py`` (the
     ``include_router`` pattern), as ``main.<attr>`` *inside*
-    ``app/main.py``, or as ``main.<attr>`` in ``tests/test_api.py``
-    (test-only back-compat aliases).
+    ``app/main.py``, or as ``main.<attr>`` in the split ``tests/test_api_*.py``
+    suites (test-only back-compat aliases).
 
     Walks module-level ``ImportFrom`` nodes only - nested from-imports
     inside function bodies are not relevant here (the hybrid pattern
@@ -133,31 +145,34 @@ def _collect_bare_name_references(source_text: str, source_path: Path) -> set[st
     return out
 
 
-def _collect_test_request_paths() -> tuple[list[tuple[int, str]], int]:
+def _collect_test_request_paths() -> tuple[list[tuple[str, int, str]], int]:
     """Every literal path-string passed as the first positional arg of a
-    ``*.request(...)`` call in ``tests/test_api.py``.
+    ``*.request(...)`` call across the split ``tests/support.py`` +
+    ``tests/test_api_<theme>.py`` suites.
 
-    Records ``(lineno, path)`` for AST nodes where the first arg is a string
-    ``Constant``. Variable / f-string paths (e.g.
+    Records ``(file, lineno, path)`` for AST nodes where the first arg is a
+    string ``Constant``. Variable / f-string paths (e.g.
     ``f"/api/users/{user['id']}"``) cannot be statically resolved, so the
     second return value counts the callsites we skip. The Phase-2 routes-
     coverage test surfaces that count so future readers see how much of the
     test surface the assertion actually validates.
     """
-    source = TEST_API_PY.read_text(encoding='utf-8')
-    tree = ast.parse(source, filename=str(TEST_API_PY))
-    out: list[tuple[int, str]] = []
+    out: list[tuple[str, int, str]] = []
     ignored = 0
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            if node.func.attr == 'request' and node.args:
-                first = node.args[0]
-                if isinstance(first, ast.Constant) and isinstance(first.value, str):
-                    p = first.value
-                    if p.startswith('/'):
-                        out.append((node.lineno, p))
-                else:
-                    ignored += 1
+    for path in TEST_API_FILES:
+        source = path.read_text(encoding='utf-8')
+        tree = ast.parse(source, filename=str(path))
+        rel = str(path.relative_to(PROJECT_ROOT))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                if node.func.attr == 'request' and node.args:
+                    first = node.args[0]
+                    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                        p = first.value
+                        if p.startswith('/'):
+                            out.append((rel, node.lineno, p))
+                    else:
+                        ignored += 1
     return out, ignored
 
 
@@ -198,7 +213,7 @@ def _collect_decorator_paths(source_text: str, source_path: Path) -> list[tuple[
 def _load_app_fresh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Fresh ``import app.main`` against a tmpdir DAYGLE_CONFIG.
 
-    Mirrors ``tests/test_api.py::_load_app`` shape so any global that
+    Mirrors ``tests/support.py::_load_app`` shape so any global that
     resolves there also resolves here. The ``sys.modules.pop`` ensures a
     clean import even if a previous test loaded the module under a different
     config.
@@ -219,10 +234,13 @@ def _load_app_fresh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def test_all_main_attr_references_resolve_on_app_main(tmp_path, monkeypatch):
     """Phase-1 invariant. Every ``main.X`` used by tests must still resolve
     on the freshly-loaded ``app.main`` module."""
-    refs = _discover_main_attr_references(
-        source_text=TEST_API_PY.read_text(encoding='utf-8'),
-        source_path=TEST_API_PY,
-    )
+    refs = sorted({
+        ref
+        for path in TEST_API_FILES
+        for ref in _discover_main_attr_references(
+            source_text=path.read_text(encoding='utf-8'), source_path=path,
+        )
+    })
     app_main = _load_app_fresh(tmp_path, monkeypatch)
     missing = [r for r in refs if not hasattr(app_main, r)]
     assert not missing, (
@@ -360,15 +378,15 @@ def test_every_request_path_has_a_registered_route(tmp_path, monkeypatch, caplog
             unregistered_decorators.append((src, ln, p))
 
     mismatches = []
-    for lineno, tp in test_paths:
+    for src_rel, lineno, tp in test_paths:
         base = tp.split('?', 1)[0]
         if not any(rx.match(base) for rx in registered_patterns):
-            mismatches.append((lineno, tp))
+            mismatches.append((src_rel, lineno, tp))
 
     if mismatches or unregistered_decorators:
         tests_section = '\n'.join(
-            f'  tests/test_api.py:{ln}: LocalClient.request("{p}", ...)'
-            for ln, p in mismatches
+            f'  {src_rel}:{ln}: LocalClient.request("{p}", ...)'
+            for src_rel, ln, p in mismatches
         ) or '  (none)'
         decos_section = '\n'.join(
             f'  {src.relative_to(PROJECT_ROOT)}:{ln}: @...("{p}", ...)'

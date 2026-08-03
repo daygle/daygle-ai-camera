@@ -127,7 +127,7 @@ def test_live_event_fresh_labels_motion_trailing_suppression():
 
 
 # ---------------------------------------------------------------------------
-# App harness (mirrors tests/test_api.py::_load_app)
+# App harness (mirrors tests/support.py::_load_app)
 # ---------------------------------------------------------------------------
 
 

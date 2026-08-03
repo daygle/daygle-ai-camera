@@ -16,7 +16,7 @@ Tests pin three contracts:
 1. **Pool A back-compat identity.** The 4 Pool A rebinds in
    ``app/main.py`` MUST wire ``main.<name>`` to the SAME function object
    as ``app.camera_config.<name>``. Re-resolved via ``sys.modules`` to
-   defeat the ``tests/test_api.py::_load_app`` sys-modules-wipe leak
+   defeat the ``tests/support.py::_load_app`` sys-modules-wipe leak
    that surfaces with stale collection-time module globals.
 
 2. **Behavior of each facade.** Each helper has subtle ordering /
@@ -70,7 +70,7 @@ import app.camera_config as camera_config  # noqa: E402
 # ---------------------------------------------------------------------------
 # 1. Pool A back-compat identity -- ``main.<name> is camera_config.<name>``.
 #    Re-resolve via sys.modules per Phase-17 lesson (defeats the
-#    tests/test_api.py::_load_app() sys-modules-wipe state leak).
+#    tests/support.py::_load_app() sys-modules-wipe state leak).
 # ---------------------------------------------------------------------------
 
 
