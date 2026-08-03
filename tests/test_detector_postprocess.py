@@ -368,3 +368,71 @@ def test_active_precision_fp16_request_but_fp32_model_reads_fp32():
 def test_active_precision_defaults_fp32():
     det = _detector(nms_free=False)
     assert det.active_precision == 'fp32'
+
+
+# -- CUDA io_binding inference path ----------------------------------------
+
+def test_run_inference_io_bound_binds_outputs_by_device(monkeypatch):
+    """Regression: the CUDA io_binding path must allocate outputs with
+    ``bind_output(name, device_type, device_id)``. The earlier code called
+    ``bind_ortvalue_output(name, 'cuda', 0)`` -- that method takes a
+    pre-allocated OrtValue, not a device, and raised at runtime with
+    'IOBinding.bind_ortvalue_output() takes 3 positional arguments but 4
+    were given'. The fake binding below mirrors the real ORT signatures so
+    a reintroduced 4-arg call would fail here."""
+    calls = {'bind_output': [], 'bind_input': 0, 'ran': False}
+    out_arr = np.zeros((1, 84, 8400), dtype=np.float32)
+
+    class _FakeOrtValue:
+        def __init__(self, arr):
+            self._arr = arr
+
+        @staticmethod
+        def ortvalue_from_numpy(arr, device_type, device_id):
+            return _FakeOrtValue(arr)
+
+        def numpy(self):
+            return self._arr
+
+    class _FakeIOBinding:
+        def bind_ortvalue_input(self, name, ortvalue):  # (self, name, ortvalue)
+            calls['bind_input'] += 1
+
+        def bind_output(self, name, device_type='cpu', device_id=0):
+            calls['bind_output'].append((name, device_type, device_id))
+
+        def bind_ortvalue_output(self, name, ortvalue):  # real ORT signature
+            raise AssertionError(
+                'device-allocated outputs must use bind_output, not '
+                'bind_ortvalue_output'
+            )
+
+        def get_outputs(self):
+            return [_FakeOrtValue(out_arr)]
+
+    fake_io = _FakeIOBinding()
+
+    class _FakeSession:
+        def io_binding(self):
+            return fake_io
+
+        def run_with_iobinding(self, io):
+            calls['ran'] = True
+
+    fake_ort = types.ModuleType('onnxruntime')
+    fake_ort.OrtValue = _FakeOrtValue
+
+    det = _detector(nms_free=False)
+    det.session = _FakeSession()
+    det.input_name = 'images'
+    det.output_names = ['output0', 'output1']
+
+    # ``_run_inference_io_bound`` does ``from onnxruntime import OrtValue`` at
+    # call time, so swapping the module in sys.modules is enough.
+    monkeypatch.setitem(sys.modules, 'onnxruntime', fake_ort)
+    result = det._run_inference_io_bound(np.zeros((1, 3, 640, 640), dtype=np.float32))
+
+    assert calls['ran'] is True
+    assert calls['bind_input'] == 1
+    assert calls['bind_output'] == [('output0', 'cuda', 0), ('output1', 'cuda', 0)]
+    assert [r.shape for r in result] == [(1, 84, 8400)]

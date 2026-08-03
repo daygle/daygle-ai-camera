@@ -567,10 +567,12 @@ class OnnxYoloDetector:
             self.input_name,  # type: ignore[arg-type]
             OrtValue.ortvalue_from_numpy(input_tensor, 'cuda', 0),
         )
-        # Output: bind CUDA buffers in the order we declared on the
-        # constructor; ORT fills them in-place.
+        # Output: let ORT allocate each output on CUDA (device_id 0) and
+        # fill it during the run. ``bind_output(name, device_type, device_id)``
+        # is the device-allocation API; ``bind_ortvalue_output`` is a
+        # different method that takes a pre-allocated OrtValue, not a device.
         for name in self.output_names:
-            io.bind_ortvalue_output(name, 'cuda', 0)
+            io.bind_output(name, 'cuda', 0)
         self.session.run_with_iobinding(io)  # type: ignore[union-attr]
         # ``io.get_outputs()`` returns a list in the order outputs were
         # bound; we convert each OrtValue back to host numpy for the
