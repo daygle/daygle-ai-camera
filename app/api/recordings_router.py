@@ -307,21 +307,27 @@ def download_recording(request: Request, recording_id: int, db=Depends(get_datab
 
 @router.delete('/api/recordings/{recording_id}')
 def delete_recording(recording_id: int, request: Request, db=Depends(get_database)):
-    require_admin(request)
-    recording = db.delete_recording(recording_id)
+    user = require_admin(request)
+    # Fetch and ownership-check BEFORE the destructive delete. The previous
+    # order deleted the row first and then ran an ownership check that could
+    # never fire (``require_admin`` already guarantees admin), so if the route
+    # gate were ever relaxed to ``require_user`` a non-owner would destroy the
+    # row before the check ran. Reading first keeps the guard correct
+    # regardless of the top gate.
+    recording = db.get_recording(recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail='Recording not found')
-    # round-5 finish / M2: viewer cannot retrieve another user's recording --
+    # round-5 finish / M2: viewer cannot delete another user's recording --
     # returning 404 (NOT 403) so the existence of someone-else's recording is
-    # not leaked via the response status code. Lookup is route-local via
-    # ``request.state.user`` (set by authentication_middleware) so this
-    # block has no dependency on locals captured in OTHER handlers.
-    request_user = getattr(request.state, 'user', None) or {}
-    if str(request_user.get('role') or '').strip().lower() != 'admin':
+    # not leaked via the response status code.
+    if str(user.get('role') or '').strip().lower() != 'admin':
         owner_id = recording.get('owner_user_id')
-        if owner_id is not None and int(owner_id) != int(request_user.get('id') or 0):
+        if owner_id is not None and int(owner_id) != int(user.get('id') or 0):
             raise HTTPException(status_code=404, detail='Recording not found')
-    delete_recording_files([recording])
+    deleted = db.delete_recording(recording_id)
+    if deleted is None:
+        raise HTTPException(status_code=404, detail='Recording not found')
+    delete_recording_files([deleted])
     write_audit_log(request, db, 'delete', 'recording', recording_id)
     return {'ok': True}
 
