@@ -1712,6 +1712,47 @@ class RecordingService:
         timed = self._segment_timeline(self.audio_dir / camera_key, 'aud-*.wav', 1.0)
         return [segment for segment, start, end in timed if end > start_ts and start < end_ts]
 
+    def _readable_audio_segments(
+        self, segments: list[tuple[Path, float, float]]
+    ) -> list[tuple[Path, float, float]]:
+        """Keep only WAV sidecar segments ffmpeg can actually open.
+
+        The audio segmenter writes ``aud-<ts>.wav`` files continuously, so the
+        newest one in an event window is frequently still open (header/data
+        sizes not yet finalized) or otherwise corrupt. Feeding such a file to
+        the mux makes ffmpeg fail the entire input set with "Invalid data found
+        when processing input", so a single in-progress segment silences the
+        whole clip. Probing each candidate the same way the mux would open it
+        drops just the bad segment and preserves the rest of the audio.
+        """
+        ffprobe = shutil.which('ffprobe')
+        readable: list[tuple[Path, float, float]] = []
+        for item in segments:
+            segment = item[0]
+            try:
+                # A header-only (44-byte) or empty file is a segment that has
+                # just been created but not yet written -- skip without probing.
+                if not segment.exists() or segment.stat().st_size <= 44:
+                    continue
+            except OSError:
+                continue
+            if ffprobe:
+                command = [
+                    ffprobe, '-v', 'error',
+                    '-select_streams', 'a:0',
+                    '-show_entries', 'stream=codec_name',
+                    '-of', 'csv=p=0',
+                    str(segment),
+                ]
+                try:
+                    result = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+                except (OSError, subprocess.SubprocessError):
+                    continue
+                if result.returncode != 0 or not result.stdout.strip():
+                    continue
+            readable.append(item)
+        return readable
+
     def _mux_prebuffer_audio(self, camera_key: str, video_path: Path, start_ts: float, duration_seconds: float) -> bool:
         ffmpeg = shutil.which('ffmpeg')
         if not ffmpeg or duration_seconds <= 0:
@@ -1727,6 +1768,12 @@ class RecordingService:
             item for item in audio_timed
             if item[2] > start_ts and item[1] < start_ts + duration_seconds
         ]
+        # Drop any segment ffmpeg can't open before building the graph. The
+        # newest WAV in the window is often still being written when an event is
+        # finalized (its header/sizes are not yet patched), and ffmpeg aborts the
+        # whole mux -- dropping audio for the entire clip -- if a single input is
+        # invalid. Filtering here costs at most a ~1s gap instead of all audio.
+        selected_audio = self._readable_audio_segments(selected_audio)
         if not selected_audio:
             return False
         muxed_path = video_path.with_name(f'{video_path.stem}.audio{video_path.suffix}')
