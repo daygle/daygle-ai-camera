@@ -436,3 +436,76 @@ def test_run_inference_io_bound_binds_outputs_by_device(monkeypatch):
     assert calls['bind_input'] == 1
     assert calls['bind_output'] == [('output0', 'cuda', 0), ('output1', 'cuda', 0)]
     assert [r.shape for r in result] == [(1, 84, 8400)]
+
+
+def test_io_binding_warmup_failure_falls_back_to_session_run(monkeypatch, tmp_path):
+    """A failing io_binding warm-up must disable io_binding and keep the
+    detector available on the plain session.run path -- not leave it 'available'
+    with io_binding on, which would fail on every live frame (the exact symptom
+    the original bind_output bug produced). Graceful degradation mirrors the
+    CUDA preflight and INT8->FP32 fallbacks."""
+    model_path = tmp_path / 'yolo11n.onnx'
+    model_path.write_bytes(b'fake model')
+
+    run_feeds: list = []
+
+    class _Input:
+        name = 'images'
+        shape = [1, 3, 64, 64]
+        type = 'tensor(float)'
+
+    class _Output:
+        name = 'output'
+
+    class _SessionOptions:
+        graph_optimization_level = None
+        intra_op_num_threads = 0
+        inter_op_num_threads = 0
+        execution_mode = None
+
+    class _Session:
+        def __init__(self, path, *, sess_options, providers):
+            # Report CUDA active so the io_binding preflight keeps it enabled and
+            # the warm-up actually exercises the io_binding path.
+            self._providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+
+        def get_inputs(self):
+            return [_Input()]
+
+        def get_outputs(self):
+            return [_Output()]
+
+        def get_providers(self):
+            return self._providers
+
+        def io_binding(self):
+            # Simulate any io_binding-path failure at warm-up time.
+            raise RuntimeError('simulated io_binding failure')
+
+        def run(self, output_names, feeds):
+            run_feeds.append(feeds)
+            return [np.zeros((1, 84, 8400), dtype=np.float32)]
+
+    fake_ort = types.ModuleType('onnxruntime')
+    fake_ort.get_available_providers = lambda: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+    fake_ort.SessionOptions = _SessionOptions
+    fake_ort.GraphOptimizationLevel = types.SimpleNamespace(ORT_ENABLE_ALL=1)
+    fake_ort.ExecutionMode = types.SimpleNamespace(ORT_PARALLEL=1, ORT_SEQUENTIAL=2)
+    fake_ort.InferenceSession = _Session
+    fake_ort.OrtValue = types.SimpleNamespace(
+        ortvalue_from_numpy=lambda *a, **k: (_ for _ in ()).throw(AssertionError('unreached')),
+    )
+    monkeypatch.setitem(sys.modules, 'onnxruntime', fake_ort)
+
+    det = OnnxYoloDetector(
+        model_path=str(model_path),
+        categories=LABELS,
+        device='cuda',
+        use_io_binding=True,
+    )
+
+    # Detector still usable, io_binding disabled, and the fallback warm-up ran
+    # through the standard session.run path.
+    assert det.available is True
+    assert det._use_io_binding is False
+    assert len(run_feeds) == 1
