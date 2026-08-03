@@ -4813,6 +4813,33 @@ def test_alert_cooldown_is_scoped_by_internal_key_even_when_rule_names_match():
     assert repeated_first == []
 
 
+def test_alert_engine_respects_rule_max_confidence_upper_bound():
+    """The AlertEngine gates on the per-rule confidence window: a detection
+    above ``max_confidence`` does not fire even though it clears
+    ``min_confidence``. Rules without ``max_confidence`` keep no upper limit."""
+    from app.alerts import AlertEngine
+
+    engine = AlertEngine([])
+    rule = {
+        'name': 'Front Door / Full Frame / cat',
+        'object': 'cat',
+        'zone_id': 'full-frame',
+        'min_confidence': 0.4,
+        'max_confidence': 0.7,
+        'cooldown_seconds': 0,
+        'enabled': True,
+    }
+    over = {'label': 'cat', 'confidence': 0.92, 'zone_id': 'full-frame'}
+    inside = {'label': 'cat', 'confidence': 0.6, 'zone_id': 'full-frame'}
+
+    assert engine.process([over], rules=[rule]) == []
+    assert len(engine.process([inside], rules=[rule])) == 1
+
+    # No max_confidence -> the 0.92 detection fires (upper bound defaults to 1.0).
+    no_cap = {k: v for k, v in rule.items() if k != 'max_confidence'}
+    assert len(engine.process([over], rules=[no_cap])) == 1
+
+
 def test_coco_labels_load_person_and_cat_at_correct_indices(tmp_path):
     """Verify coco.names resolves COCO class IDs 0→'person' and 15→'cat'."""
     from app.detector import load_labels

@@ -459,7 +459,17 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
             rule_label = str(rule.get('label') or '').strip().lower()
             if _LABEL_ALIASES.get(rule_label, rule_label) != label:
                 continue
-            if float(detection.get('confidence') or 0) < float(rule.get('min_confidence', 0.5)):
+            # Per-rule confidence window: the detection must sit inside
+            # ``[min_confidence, max_confidence]``. ``max_confidence`` defaults
+            # to 1.0 (no upper limit) so rules that never configured it behave
+            # exactly as before. This window is authoritative over the global
+            # ONNX confidence slider -- a higher ``min`` gates here even though
+            # the detector floor is lower, and a ``max`` below 1.0 drops
+            # over-confident detections the global slider would otherwise pass.
+            confidence = float(detection.get('confidence') or 0)
+            if confidence < float(rule.get('min_confidence', 0.5)):
+                continue
+            if confidence > float(rule.get('max_confidence', 1.0)):
                 continue
             matches.append((zone, rule))
     return matches
@@ -503,6 +513,7 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
                 'object': label,
                 'zone_id': zone_id,
                 'min_confidence': rule.get('min_confidence', 0.5),
+                'max_confidence': rule.get('max_confidence', 1.0),
                 'cooldown_seconds': rule.get('cooldown_seconds', 60),
                 'enabled': True,
                 'email_enabled': bool(rule.get('email_enabled', False)),
@@ -604,7 +615,11 @@ def detection_has_matching_record_rule(detection: dict[str, Any], rules: list[di
             min_conf = float(rule.get('min_confidence', 0.0 if label == 'motion' else 0.5))
         except (TypeError, ValueError):
             min_conf = 0.0 if label == 'motion' else 0.5
-        if confidence >= min_conf:
+        try:
+            max_conf = float(rule.get('max_confidence', 1.0))
+        except (TypeError, ValueError):
+            max_conf = 1.0
+        if min_conf <= confidence <= max_conf:
             return True
     return False
 
