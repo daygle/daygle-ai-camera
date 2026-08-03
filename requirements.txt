@@ -28,7 +28,7 @@ ultralytics==8.4.107
 # exact pixel values; no test here asserts pixel-exact output, so they are a
 # no-op for us. Cap below 6.0 so a future major bump gets the same review.
 opencv-python-headless>=5.0,<6.0
-python-multipart>=0.0.9,<1.0
+python-multipart>=0.0.32,<1.0
 sounddevice>=0.5.5,<1.0
 # CPU-only YAMNet sound classifier runtime.
 ai-edge-litert>=2.1.6,<3.0
