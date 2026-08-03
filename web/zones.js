@@ -53,6 +53,7 @@ function defaultObjectRule(label = '') {
     enabled: true,
     record_on_detect: true,
     min_confidence: isMotion ? 0.45 : 0.5,
+    max_confidence: 1,
     cooldown_seconds: 60,
     email_enabled: false,
     email_recipients: [],
@@ -74,6 +75,12 @@ function normalizeObjectRules(zone) {
         enabled: rule.enabled !== false,
         record_on_detect: rule.record_on_detect !== false,
         min_confidence: clamp(Number(rule.min_confidence ?? 0.5), 0, 1),
+        // Upper bound of the confidence window. Defaults to 1 (no cap) and is
+        // never allowed below min_confidence so the [min, max] band is valid.
+        max_confidence: Math.max(
+          clamp(Number(rule.min_confidence ?? 0.5), 0, 1),
+          clamp(Number(rule.max_confidence ?? 1), 0, 1),
+        ),
         cooldown_seconds: Math.max(0, Number.parseInt(rule.cooldown_seconds ?? 60, 10) || 0),
         email_enabled: rule.email_enabled === true,
         email_recipients: normalizeEmailList(rule.email_recipients),
@@ -203,7 +210,8 @@ function renderObjectRules(zone, zoneIndex) {
       <th class="cell-center">Record</th>
       <th class="cell-center">Email</th>
       <th class="cell-center">Push</th>
-      <th>Confidence</th>
+      <th>Min Conf</th>
+      <th>Max Conf</th>
       <th>Cooldown (s)</th>
       <th></th>
     </tr></thead>
@@ -218,7 +226,8 @@ function renderObjectRules(zone, zoneIndex) {
           <td class="cell-center"><input type="checkbox" data-zone-rule-record="${key}" ${rule.record_on_detect !== false ? 'checked' : ''} /></td>
           <td class="cell-center"><input type="checkbox" data-zone-rule-email="${key}" ${rule.email_enabled === true ? 'checked' : ''} /></td>
           <td class="cell-center"><input type="checkbox" data-zone-rule-push="${key}" ${rule.push_enabled === true ? 'checked' : ''} /></td>
-          <td><input type="number" data-zone-rule-confidence="${key}" value="${escapeHtml(rule.min_confidence)}" min="0" max="1" step="0.05" /></td>
+          <td><input type="number" data-zone-rule-confidence="${key}" value="${escapeHtml(rule.min_confidence)}" min="0" max="1" step="0.05" title="Minimum confidence (0-1). Overrides the global ONNX slider for this object in this zone." /></td>
+          <td><input type="number" data-zone-rule-max-confidence="${key}" value="${escapeHtml(rule.max_confidence ?? 1)}" min="0" max="1" step="0.05" title="Maximum confidence (0-1). Detections above this are ignored for this rule. 1 = no upper limit." /></td>
           <td><input type="number" data-zone-rule-cooldown="${key}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" /></td>
           <td><div class="cell-actions">
             <button class="rule-expand-btn secondary" type="button" data-expand-zone-rule="${key}">${expanded ? ICONS.chevronUp : ICONS.email}</button>
@@ -450,6 +459,9 @@ function bindRuleFields() {
   });
   const numberBindings = [
     ['zoneRuleConfidence', 'min_confidence', (value) => clamp(Number(value || 0), 0, 1)],
+    // Stored as-typed in [0, 1]; normalizeObjectRules re-clamps max >= min on
+    // the next render, and the server does the same on save.
+    ['zoneRuleMaxConfidence', 'max_confidence', (value) => clamp(Number(value ?? 1), 0, 1)],
     ['zoneRuleCooldown', 'cooldown_seconds', (value) => Math.max(0, Number.parseInt(value || 0, 10) || 0)],
   ];
   numberBindings.forEach(([datasetKey, ruleKey, transform]) => {

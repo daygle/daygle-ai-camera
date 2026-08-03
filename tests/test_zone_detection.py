@@ -573,6 +573,63 @@ def test_zone_object_rule_matches_below_confidence_excluded():
     assert matches == []
 
 
+def test_zone_object_rule_matches_above_max_confidence_excluded():
+    """A detection above the rule's ``max_confidence`` upper bound is excluded
+    even though it clears ``min_confidence`` -- the per-zone window overrides
+    the global slider on the high end too."""
+    from app import zone_detection as zd
+    settings = {
+        'id': 'cam-1',
+        'detection': {
+            'zones': [
+                {
+                    'enabled': True, 'monitor_objects': True,
+                    'x': 0, 'y': 0, 'width': 1, 'height': 1,
+                    'object_rules': [{
+                        'label': 'person', 'enabled': True, 'email_enabled': True,
+                        'min_confidence': 0.4, 'max_confidence': 0.7,
+                    }],
+                },
+            ],
+        },
+    }
+    box = {'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1}
+    # 0.9 is inside [0.4, 1.0] but ABOVE the 0.7 max -> excluded.
+    assert zd.zone_object_rule_matches(
+        settings, {'label': 'person', 'confidence': 0.9, 'box': box}, action='alert',
+    ) == []
+    # 0.6 sits inside [0.4, 0.7] -> matches.
+    assert len(zd.zone_object_rule_matches(
+        settings, {'label': 'person', 'confidence': 0.6, 'box': box}, action='alert',
+    )) == 1
+
+
+def test_zone_object_rule_matches_default_max_confidence_is_no_upper_limit():
+    """A rule without ``max_confidence`` keeps its legacy behavior: any
+    confidence at or above ``min_confidence`` matches (upper bound = 1.0)."""
+    from app import zone_detection as zd
+    settings = {
+        'id': 'cam-1',
+        'detection': {
+            'zones': [
+                {
+                    'enabled': True, 'monitor_objects': True,
+                    'x': 0, 'y': 0, 'width': 1, 'height': 1,
+                    'object_rules': [{
+                        'label': 'person', 'enabled': True, 'email_enabled': True,
+                        'min_confidence': 0.5,
+                    }],
+                },
+            ],
+        },
+    }
+    matches = zd.zone_object_rule_matches(
+        settings, {'label': 'person', 'confidence': 0.99, 'box': {'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1}},
+        action='alert',
+    )
+    assert len(matches) == 1
+
+
 def test_zone_object_rule_matches_invalid_action_raises():
     from app import zone_detection as zd
     settings = {'id': 'cam-1', 'detection': {'zones': []}}

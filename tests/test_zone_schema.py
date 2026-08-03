@@ -376,6 +376,26 @@ def test_normalize_zone_object_rules_clamps_min_confidence_and_cooldown(monkeypa
     assert rules[1]['cooldown_seconds'] == 60
 
 
+def test_normalize_zone_object_rules_max_confidence_defaults_and_clamps(monkeypatch, zs):
+    """``max_confidence`` defaults to 1.0 (no upper limit), clamps to [0, 1],
+    falls back to 1.0 on bad input, and is never allowed below
+    ``min_confidence`` (an empty window is raised up to ``min``)."""
+    _install_zone_dependencies(monkeypatch)
+    zone = {'object_rules': [
+        {'label': 'person'},                                            # absent -> 1.0
+        {'label': 'car', 'max_confidence': 0.6},                        # explicit in range
+        {'label': 'dog', 'max_confidence': 5.0},                        # clamps to 1.0
+        {'label': 'cat', 'max_confidence': 'oops'},                     # bad -> 1.0
+        {'label': 'bus', 'min_confidence': 0.8, 'max_confidence': 0.3}, # max < min -> raised to min
+    ]}
+    rules = {r['label']: r for r in zs.normalize_zone_object_rules(zone)}
+    assert rules['person']['max_confidence'] == 1.0
+    assert rules['car']['max_confidence'] == 0.6
+    assert rules['dog']['max_confidence'] == 1.0
+    assert rules['cat']['max_confidence'] == 1.0
+    assert rules['bus']['max_confidence'] == 0.8  # never below min_confidence
+
+
 def test_normalize_zone_object_rules_dedupes_by_label(monkeypatch, zs):
     """Duplicate labels (case-insensitive, after aliasing) collapse to
     one rule -- the first occurrence wins."""

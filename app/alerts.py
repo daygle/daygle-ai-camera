@@ -123,7 +123,13 @@ class AlertEngine:
                 if rule_zone_id and rule_zone_id != detection_zone_id:
                     continue
 
+                # Per-rule confidence window (min/max). ``max_confidence``
+                # defaults to 1.0 so rules without an upper bound are unchanged.
+                # This window overrides the global ONNX slider: a detection is
+                # only alerted when it lands inside the rule's own band.
                 if confidence < float(rule.get('min_confidence', 0.5)):
+                    continue
+                if confidence > float(rule.get('max_confidence', 1.0)):
                     continue
 
                 rule_name = str(rule.get('name') or label)
@@ -155,6 +161,8 @@ class AlertEngine:
             if not self._is_active_now(rule):
                 continue
             if confidence < float(rule.get('min_confidence', 0.0)):
+                continue
+            if confidence > float(rule.get('max_confidence', 1.0)):
                 continue
             # Mirror the zone-id check used for object rules (line 43-46) so
             # a motion rule scoped to Zone A doesn't fire when motion is only

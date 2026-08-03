@@ -172,11 +172,25 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
             cooldown_seconds = int(rule.get('cooldown_seconds', 60))
         except (TypeError, ValueError):
             cooldown_seconds = 60
+        min_confidence = max(0.0, min(1.0, min_confidence))
+        # ``max_confidence`` is the inclusive upper bound of the per-rule
+        # confidence window: a detection fires the rule only when
+        # ``min_confidence <= confidence <= max_confidence``. It defaults to
+        # 1.0 (no upper limit) so pre-existing rules keep their behavior. A
+        # value below ``min_confidence`` would define an empty window that can
+        # never match, so we clamp it up to ``min_confidence`` -- the window is
+        # always non-empty and ``max`` is never below ``min``.
+        try:
+            max_confidence = float(rule.get('max_confidence', 1.0))
+        except (TypeError, ValueError):
+            max_confidence = 1.0
+        max_confidence = max(min_confidence, min(1.0, max_confidence))
         rules.append({
             'label': label,
             'enabled': normalize_bool_setting(rule.get('enabled'), True),
             'record_on_detect': normalize_bool_setting(rule.get('record_on_detect'), True),
-            'min_confidence': max(0.0, min(1.0, min_confidence)),
+            'min_confidence': min_confidence,
+            'max_confidence': max_confidence,
             'cooldown_seconds': max(0, cooldown_seconds),
             'email_enabled': normalize_bool_setting(rule.get('email_enabled'), False),
             'email_recipients': normalize_email_recipients(rule.get('email_recipients', [])),
@@ -281,6 +295,7 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
                 'enabled': True,
                 'record_on_detect': True,
                 'min_confidence': 0.45,
+                'max_confidence': 1.0,
                 'cooldown_seconds': 60,
                 'email_enabled': False,
                 'email_recipients': [],
