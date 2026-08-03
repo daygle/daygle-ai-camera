@@ -1073,6 +1073,10 @@ def test_mux_prebuffer_audio_pads_audio_to_video(tmp_path, monkeypatch):
     monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
     monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
     monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _p: True))
+    # This test exercises the mux command build from a placeholder WAV; skip the
+    # readability probe (covered by tests/test_mux_audio_readable.py) so the tiny
+    # stand-in file isn't discarded before the command is assembled.
+    monkeypatch.setattr(RecordingService, '_readable_audio_segments', lambda self, segments: segments)
 
     video = tmp_path / 'rec' / 'event.mp4'
     video.parent.mkdir(parents=True, exist_ok=True)
@@ -1113,6 +1117,9 @@ def test_mux_prebuffer_audio_trims_audio_that_begins_before_video(tmp_path, monk
     monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
     monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
     monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _p: True))
+    # Skip the readability probe (covered by tests/test_mux_audio_readable.py) so
+    # the placeholder WAV survives to the command-build step under test.
+    monkeypatch.setattr(RecordingService, '_readable_audio_segments', lambda self, segments: segments)
 
     video = tmp_path / 'rec' / 'event.mp4'
     video.parent.mkdir(parents=True, exist_ok=True)
@@ -2678,6 +2685,10 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
     monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
     monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _path: True))
     monkeypatch.setattr(RecordingService, 'clip_duration_seconds', staticmethod(lambda _path: 15.5))
+    # Placeholder WAV sidecars stand in for real audio here; skip the readability
+    # probe (covered by tests/test_mux_audio_readable.py) so the audio mux still
+    # runs as a second ffmpeg command.
+    monkeypatch.setattr(RecordingService, '_readable_audio_segments', lambda self, segments: segments)
 
     file_path = tmp_path / 'recordings' / 'event_window.mp4'
     triggered_at = datetime.fromtimestamp(now - 10, tz=timezone.utc)
