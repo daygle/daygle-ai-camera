@@ -140,9 +140,15 @@ from the installed environment:
   "import onnxruntime as ort; print(ort.__version__); print(ort.get_available_providers())"
 ```
 
-A healthy GPU installation should list `CUDAExecutionProvider`. The detector
-still uses CPU for runtime dynamic INT8 and falls back to FP32 if a selected
-model or provider cannot load.
+A healthy GPU installation should list `CUDAExecutionProvider`, but note that
+`get_available_providers()` reflects what ONNX Runtime was *built* with, not
+what can actually load — it can list the provider even when its CUDA/cuDNN
+dependencies are missing. For a definitive check, and for the full CUDA
+userspace install (the pinned CUDA 12.4 + cuDNN 9.x wheels and loader setup
+that `install_debian.sh` does not manage), see
+[docs/tesla-p4-gpu-setup.md](docs/tesla-p4-gpu-setup.md). The detector still
+uses CPU for runtime dynamic INT8 and falls back to FP32 if a selected model or
+provider cannot load.
 
 Check service status:
 
