@@ -27,7 +27,7 @@ ultralytics==8.4.113
 # compatible. The 5.x text-rendering / nearest-neighbor changes only alter
 # exact pixel values; no test here asserts pixel-exact output, so they are a
 # no-op for us. Cap below 6.0 so a future major bump gets the same review.
-opencv-python-headless>=5.0,<6.0
+opencv-python-headless>=5.0.0.93,<6.0
 python-multipart>=0.0.32,<1.0
 sounddevice>=0.5.5,<1.0
 # CPU-only YAMNet sound classifier runtime.
