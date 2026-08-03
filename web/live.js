@@ -440,7 +440,10 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
 
   if (payload.state === 'checked') {
     if (!labelStr) {
-      return { state: 'idle', stateLabel: 'Monitoring', chips, ...sound, message: '' };
+      // 'monitoring' (not the generic 'idle') marks a real empty check: an
+      // inference cycle ran and found nothing. The renderer relies on this to
+      // show "Clear" only here, and never for waiting/skipped/error/all-cameras.
+      return { state: 'monitoring', stateLabel: 'Monitoring', chips, ...sound, message: '' };
     }
     const reason = String(payload.reason || '');
     let suffix;
@@ -476,6 +479,13 @@ function detectionRowHtml(label, confidence, { faint = false, alerted = false } 
     + `<span class="sense-det-label">${escapeHtml(titleCase(label))}</span>`
     + pctHtml + meterHtml
     + '</div>';
+}
+
+// Empty-lane placeholder. `tick` shows the affirmative green check and is used
+// ONLY for a confirmed all-clear; every other empty state gets a neutral line.
+function senseEmptyHtml(text, { tick = false } = {}) {
+  const tickHtml = tick ? '<span class="sense-empty-tick">✓</span>' : '';
+  return `<div class="sense-empty">${tickHtml}${escapeHtml(text)}</div>`;
 }
 
 function renderDetectionStatus(summary) {
@@ -523,16 +533,25 @@ function renderDetectionStatus(summary) {
   if (liveEls.visionBody) {
     if (objChips.length) {
       liveEls.visionBody.innerHTML = objChips.map((c) => detectionRowHtml(c.label, c.confidence, { alerted })).join('');
+    } else if (summary.state === 'monitoring') {
+      // Confirmed empty check — the only case that earns the affirmative "Clear".
+      liveEls.visionBody.innerHTML = senseEmptyHtml('Clear — nothing in frame', { tick: true });
+    } else if (summary.state === 'waiting') {
+      liveEls.visionBody.innerHTML = senseEmptyHtml('Waiting for first detection…');
+    } else if (summary.state === 'skipped' || summary.state === 'error') {
+      liveEls.visionBody.innerHTML = senseEmptyHtml('Detection unavailable');
     } else {
-      liveEls.visionBody.innerHTML = summary.state === 'error'
-        ? '<div class="sense-empty">No detection data</div>'
-        : '<div class="sense-empty"><span class="sense-empty-tick">✓</span>Clear — nothing in frame</div>';
+      // idle / all-cameras / no payload: don't assert anything about the frame.
+      liveEls.visionBody.innerHTML = senseEmptyHtml('No detection data');
     }
   }
 
   // ── Hearing lane ─────────────────────────────────────────────
+  // The inline all-cameras/error summaries carry no soundState, so the sound
+  // status is genuinely unknown there — don't fall back to a "Listening" claim.
+  const hasSound = !!summary.soundState;
   if (liveEls.soundState) {
-    liveEls.soundState.textContent = soundState.label;
+    liveEls.soundState.textContent = hasSound ? soundState.label : '—';
     liveEls.soundState.className = 'sense-badge ' + (
       soundState.state === 'detected' ? 'sense-badge-heard' :
       soundState.state === 'disabled' ? 'sense-badge-off' :
@@ -542,10 +561,12 @@ function renderDetectionStatus(summary) {
   if (liveEls.hearingBody) {
     if (soundChips.length) {
       liveEls.hearingBody.innerHTML = soundChips.map((c) => detectionRowHtml(c.label, c.confidence, { faint: !!c.isBelowThreshold })).join('');
+    } else if (!hasSound) {
+      liveEls.hearingBody.innerHTML = senseEmptyHtml('Sound status unavailable');
     } else if (soundState.state === 'disabled') {
-      liveEls.hearingBody.innerHTML = '<div class="sense-empty">Sound detection disabled</div>';
+      liveEls.hearingBody.innerHTML = senseEmptyHtml('Sound detection disabled');
     } else {
-      liveEls.hearingBody.innerHTML = '<div class="sense-empty"><span class="sense-empty-tick">✓</span>Quiet — listening</div>';
+      liveEls.hearingBody.innerHTML = senseEmptyHtml('Quiet — listening', { tick: true });
     }
   }
 
