@@ -162,20 +162,35 @@
     </div>
 
     <section class="card live-detection-card">
-      <div class="settings-section-header">
+      <div class="settings-section-header live-detection-header">
         <div class="settings-section-icon" aria-hidden="true">🎯</div>
-        <div>
+        <div class="live-detection-heading">
           <h2>AI Detection Status</h2>
           <p class="settings-section-subtitle" id="liveDetectionSubtitle">What the AI is currently seeing and hearing on the live feed.</p>
         </div>
-        <div class="button-row live-detection-meta">
-          <span class="chip chip-dim" id="liveDetectionState">Monitoring</span>
-          <span class="chip chip-dim" id="liveSoundState">Listening</span>
+        <span class="live-monitor-pill" id="liveMonitorPill" aria-live="polite">
+          <span class="live-monitor-dot" aria-hidden="true"></span>
+          <span id="liveMonitorPillText">Live</span>
+        </span>
+      </div>
+      <div class="live-sense-lanes">
+        <div class="sense-lane sense-vision" id="liveVisionLane">
+          <div class="sense-lane-head">
+            <span class="sense-lane-name"><span class="sense-lane-glyph" aria-hidden="true">👁</span>Vision</span>
+            <span class="sense-badge sense-badge-idle" id="liveDetectionState">Monitoring</span>
+          </div>
+          <div class="sense-lane-body" id="liveVisionBody" aria-live="polite"></div>
+          <p class="sense-lane-note" id="liveDetectionStatus" hidden></p>
+        </div>
+        <div class="sense-lane sense-hearing" id="liveHearingLane">
+          <div class="sense-lane-head">
+            <span class="sense-lane-name"><span class="sense-lane-glyph" aria-hidden="true">🔊</span>Hearing</span>
+            <span class="sense-badge sense-badge-idle" id="liveSoundState">Listening</span>
+          </div>
+          <div class="sense-lane-body" id="liveHearingBody" aria-live="polite"></div>
+          <p class="sense-lane-note" id="liveSoundStatus" hidden></p>
         </div>
       </div>
-      <div id="liveDetectionChips" class="live-detection-chips"></div>
-      <p id="liveDetectionStatus" class="muted live-detection-message">Live AI status waiting for frames.</p>
-      <p id="liveSoundStatus" class="muted live-detection-message" style="display:none"></p>
     </section>
 
   </main>

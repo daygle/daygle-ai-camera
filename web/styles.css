@@ -4012,54 +4012,137 @@ a.activity-item-action {
 }
 
 /* AI detection card: state chip + detection chips + message */
-.live-detection-card { display: grid; gap: 14px; }
-.live-detection-meta {
-  flex-shrink: 0;
-  margin: 0 0 0 auto;
-  padding: 0;
-  border-top: 0;
-  justify-content: flex-end;
+/* ── AI Detection Status card (two sense lanes: Vision + Hearing) ──────── */
+.live-detection-card {
+  display: grid;
+  gap: 16px;
+  /* Sense-lane palette. Scoped tokens keep the two themes readable without
+     repeating every hue at each use site; light overrides follow below. */
+  --v-fg: #47d6ff; --v-bg: rgba(71,214,255,.1); --v-bd: rgba(71,214,255,.32);
+  --s-fg: #a855f7; --s-bg: rgba(168,85,247,.13); --s-bd: rgba(168,85,247,.34);
+  --a-fg: #f8c55d; --a-bg: rgba(248,197,93,.13); --a-bd: rgba(248,197,93,.36);
+  --g-fg: #49e6a3;
+  --sense-track: rgba(255,255,255,.08);
+  --sense-lane-bg: rgba(255,255,255,.03);
 }
-.live-detection-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+:root.light .live-detection-card {
+  --v-fg: #0284c7; --v-bg: rgba(2,132,199,.08); --v-bd: rgba(2,132,199,.28);
+  --s-fg: #7c3aed; --s-bg: rgba(124,58,237,.1); --s-bd: rgba(124,58,237,.28);
+  --a-fg: #b45309; --a-bg: rgba(248,197,93,.16); --a-bd: rgba(180,83,9,.34);
+  --g-fg: #0f9d63;
+  --sense-track: rgba(15,30,60,.09);
+  --sense-lane-bg: rgba(0,0,0,.02);
 }
-.detection-chip {
+.live-detection-header { align-items: center; gap: 12px; }
+.live-detection-heading { flex: 1; min-width: 0; }
+
+.live-monitor-pill {
+  flex: none;
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 11px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  padding: 5px 10px;
+  border: 1px solid var(--border);
   border-radius: 999px;
-  background: rgba(71, 214, 255, 0.1);
-  border: 1px solid rgba(71, 214, 255, 0.3);
-  color: var(--accent);
+  background: var(--sense-lane-bg);
+  white-space: nowrap;
+}
+.live-monitor-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--g-fg);
+  box-shadow: 0 0 0 0 rgba(73,230,163,.4);
+  animation: live-monitor-pulse 2.4s ease-out infinite;
+}
+.live-monitor-pill.is-offline .live-monitor-dot { background: var(--muted); animation: none; }
+@keyframes live-monitor-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(73,230,163,.35); }
+  70% { box-shadow: 0 0 0 7px rgba(73,230,163,0); }
+  100% { box-shadow: 0 0 0 0 rgba(73,230,163,0); }
+}
+@media (prefers-reduced-motion: reduce) { .live-monitor-dot { animation: none; } }
+
+.live-sense-lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 640px) { .live-sense-lanes { grid-template-columns: 1fr; } }
+
+.sense-lane {
+  display: flex;
+  flex-direction: column;
+  min-height: 130px;
+  padding: 13px 13px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--sense-lane-bg);
+}
+.sense-lane-alerted { border-color: var(--a-bd); background: var(--a-bg); }
+
+.sense-lane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.sense-lane-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
   font-weight: 800;
-  font-size: 12px;
-}
-.detection-chip-alert {
-  background: rgba(248, 113, 113, 0.12);
-  border-color: rgba(248, 113, 113, 0.35);
-  color: #ff8a8a;
-}
-.detection-chip-sound {
-  background: rgba(168, 85, 247, 0.14);
-  border-color: rgba(168, 85, 247, 0.4);
-  color: #a855f7;
-}
-.detection-chip-empty {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: var(--border);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   color: var(--muted);
 }
-.detection-chip-faint {
-  opacity: 0.55;
+.sense-lane-glyph { font-size: 14px; }
+.sense-vision .sense-lane-glyph { filter: none; }
+
+.sense-badge {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
 }
-.live-detection-message {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.5;
+.sense-badge-idle { color: var(--muted); background: var(--sense-track); border-color: var(--border); }
+.sense-badge-detected { color: var(--v-fg); background: var(--v-bg); border-color: var(--v-bd); }
+.sense-badge-heard { color: var(--s-fg); background: var(--s-bg); border-color: var(--s-bd); }
+.sense-badge-alert { color: var(--a-fg); background: var(--a-bg); border-color: var(--a-bd); }
+.sense-badge-off { color: var(--muted); background: transparent; border: 1px dashed var(--border); }
+
+.sense-lane-body { display: flex; flex-direction: column; gap: 10px; flex: 1; }
+
+.sense-det { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; }
+.sense-det-label { font-size: 13px; font-weight: 700; color: var(--text); }
+.sense-det-pct { font-size: 12px; font-weight: 800; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sense-meter { grid-column: 1 / -1; height: 5px; border-radius: 3px; background: var(--sense-track); overflow: hidden; }
+.sense-meter > i { display: block; height: 100%; border-radius: 3px; transition: width 0.3s ease; }
+@media (prefers-reduced-motion: reduce) { .sense-meter > i { transition: none; } }
+.sense-vision .sense-meter > i { background: linear-gradient(90deg, var(--v-bd), var(--v-fg)); }
+.sense-hearing .sense-meter > i { background: linear-gradient(90deg, var(--s-bd), var(--s-fg)); }
+.sense-det-alert .sense-meter > i { background: linear-gradient(90deg, var(--a-bd), var(--a-fg)); }
+.sense-det-faint { opacity: 0.5; }
+.sense-det-faint .sense-meter > i { background: var(--muted); }
+
+.sense-empty { display: flex; align-items: center; gap: 8px; flex: 1; color: var(--muted); font-size: 12.5px; }
+.sense-empty-tick { color: var(--g-fg); font-weight: 900; }
+
+.sense-lane-note {
+  margin: 10px 0 0;
+  padding-top: 9px;
+  border-top: 1px dashed var(--border);
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--muted);
 }
+.sense-lane-note-warn { color: var(--a-fg); }
+.sense-lane-note[hidden] { display: none; }
 
 @media (max-width: 760px) {
   .live-frame { height: 50vh; min-height: 280px; }
