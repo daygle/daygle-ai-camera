@@ -135,19 +135,55 @@ def _is_same_origin(request: Request) -> tuple[bool, str]:
         parsed = urllib.parse.urlsplit(source)
     except ValueError:
         return False, f'Unparsable {"Origin" if origin else "Referer"} value'
-    expected = request.url
+    # Resolve the *externally visible* scheme/host/port. ``request.url`` reflects
+    # the connection uvicorn actually received, which is the INTERNAL
+    # ``http://host:8080`` when a TLS-terminating reverse proxy sits in front --
+    # while the browser's ``Origin`` is the EXTERNAL ``https://host``. Comparing
+    # the two directly hard-403s every state-changing request in that (documented)
+    # topology. When the direct peer is a trusted proxy we therefore honour
+    # ``X-Forwarded-Proto`` / ``X-Forwarded-Host`` to reconstruct the external
+    # origin. This reuses the same trust model as ``_request_ip`` (only peers in
+    # ``auth.trusted_proxies`` can influence it), so an untrusted client cannot
+    # forge the comparison target by sending its own forwarded headers.
+    expected_scheme = request.url.scheme
+    expected_host = request.url.hostname
+    expected_port = request.url.port
+    from app.auth_gates import _trusted_proxies
+    direct_peer = request.client.host if getattr(request, 'client', None) else ''
+    if direct_peer in _trusted_proxies():
+        forwarded_proto = request.headers.get('x-forwarded-proto')
+        if forwarded_proto:
+            expected_scheme = forwarded_proto.split(',')[0].strip() or expected_scheme
+        forwarded_host = request.headers.get('x-forwarded-host')
+        if forwarded_host:
+            # First hop is the external host; may be ``host`` or ``host:port``
+            # (IPv6 arrives bracketed, which ``urlsplit`` handles via ``//``).
+            host_entry = forwarded_host.split(',')[0].strip()
+            fparsed = urllib.parse.urlsplit(f'//{host_entry}')
+            if fparsed.hostname:
+                expected_host = fparsed.hostname
+                expected_port = fparsed.port
+    # Normalise the scheme's default port: a browser ``Origin`` omits the port
+    # for 443 (https) / 80 (http), so ``https://host`` (port None) must compare
+    # equal to an ``https`` request served on 443.
+    def _effective_port(scheme: str, port: int | None) -> int | None:
+        if port is not None:
+            return port
+        return {'https': 443, 'http': 80}.get(scheme)
+
     if (
-        parsed.scheme != expected.scheme
-        or parsed.hostname != expected.hostname
-        or parsed.port != expected.port
+        parsed.scheme != expected_scheme
+        or parsed.hostname != expected_host
+        or _effective_port(parsed.scheme, parsed.port)
+        != _effective_port(expected_scheme, expected_port)
     ):
         return False, (
             f'{"Origin" if origin else "Referer"} '
             f'{parsed.scheme}://{parsed.hostname or "<empty>"}'
             f'{":" + str(parsed.port) if parsed.port else ""} '
             f'does not match request '
-            f'{expected.scheme}://{expected.hostname}'
-            f'{":" + str(expected.port) if expected.port else ""}'
+            f'{expected_scheme}://{expected_host}'
+            f'{":" + str(expected_port) if expected_port else ""}'
         )
     return True, ''
 
