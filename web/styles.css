@@ -5469,3 +5469,166 @@ button.secondary:disabled, a.secondary:disabled {
     min-width: 0;
   }
 }
+
+/* ─── Zones redesign ───────────────────────────────────────────────────── */
+.zones-shell { gap: 20px; }
+.zones-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 0;
+  padding: 4px 2px 2px;
+}
+.zones-hero-copy { max-width: 720px; }
+.zones-hero h1 { letter-spacing: -.045em; }
+.zones-hero .muted { max-width: 680px; margin: 12px 0 0; font-size: 15px; line-height: 1.55; }
+.zones-hero-action { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.zones-hero-action button,
+.zone-editor-footer button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.zones-hero-action button svg,
+.zone-editor-footer button svg { flex: 0 0 auto; }
+
+.zones-workflow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: linear-gradient(90deg, rgba(71,214,255,.08), rgba(73,230,163,.055));
+  box-shadow: 0 10px 30px rgba(0,0,0,.12);
+}
+.zones-workflow-step { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.zones-workflow-step > span {
+  display: grid; place-items: center; flex: 0 0 auto; width: 28px; height: 28px;
+  border-radius: 999px; border: 1px solid rgba(71,214,255,.35);
+  background: rgba(71,214,255,.12); color: var(--accent); font-size: 12px; font-weight: 900;
+}
+.zones-workflow-step.is-current > span { background: linear-gradient(135deg, var(--accent), var(--success)); color: #04111c; border-color: transparent; }
+.zones-workflow-step strong { display: block; font-size: 12px; white-space: nowrap; }
+.zones-workflow-step small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.zones-workflow-line { flex: 1; min-width: 18px; height: 1px; background: linear-gradient(90deg, rgba(71,214,255,.35), var(--border)); }
+
+.zones-stats { gap: 12px; }
+.zones-stats .stat-card { padding: 17px 18px 18px; border-radius: 18px; box-shadow: 0 12px 32px rgba(0,0,0,.16); }
+.zones-stats .stat-card-value { margin-top: 8px; font-size: 28px; }
+.zones-stats .stat-card-icon { width: 30px; height: 30px; border-radius: 10px; }
+.zones-stats .stat-card-camera .stat-card-icon { color: var(--success); background: rgba(73,230,163,.1); }
+
+.zones-layout {
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr);
+  gap: 18px;
+  align-items: start;
+}
+.zones-layout .zone-rules-card { grid-column: 1 / -1; }
+.zones-frame-card,
+.zone-settings-card,
+.zone-rules-card { min-width: 0; }
+.zones-frame-card { border-color: rgba(71,214,255,.22); box-shadow: 0 22px 55px rgba(0,0,0,.28); }
+.zones-frame-card .live-frame-header { padding: 17px 20px 15px; background: rgba(255,255,255,.025); }
+.zones-panel-kicker {
+  display: block; margin-bottom: 3px; color: var(--accent); font-size: 10px; font-weight: 900;
+  letter-spacing: .11em; line-height: 1.2; text-transform: uppercase;
+}
+.zones-canvas-hint { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.zones-frame-wrap { min-height: 420px; }
+.zones-frame-wrap .live-frame { height: min(64vh, 660px); min-height: 420px; }
+.zones-canvas-footer {
+  display: flex; align-items: center; gap: 7px; min-height: 42px; padding: 10px 18px;
+  border-top: 1px solid var(--border); color: var(--muted); font-size: 11px;
+}
+.zones-canvas-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--success); box-shadow: 0 0 0 3px rgba(73,230,163,.14); }
+.zones-canvas-separator { opacity: .45; }
+.zones-frame-card .zone-frame-toolbar { right: 16px; bottom: 16px; }
+.zones-frame-card .zone-frame-toolbar button { border: 1px solid rgba(255,255,255,.18); box-shadow: 0 10px 24px rgba(0,0,0,.28); }
+
+.zone-settings-card,
+.zone-rules-card { padding: 20px; }
+.zones-section-header { margin-bottom: 16px; padding-bottom: 15px; }
+.zones-section-header .settings-section-icon { width: 38px; height: 38px; border-radius: 11px; color: var(--accent); font-size: 22px; }
+.zones-section-header h2 { font-size: 19px; letter-spacing: -.02em; }
+.zones-editor-camera { gap: 7px; margin-bottom: 18px; }
+.zones-editor-camera > span,
+.zones-list-heading strong { color: var(--text); font-size: 11px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
+.zones-editor-camera select { min-height: 46px; border-radius: 13px; }
+.zones-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 9px; }
+.zones-list-heading > div { min-width: 0; }
+.zones-list-heading span:not(.zones-list-count) { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+.zones-list-count { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 10px; font-weight: 850; text-transform: uppercase; letter-spacing: .06em; }
+.zones-list { gap: 9px; }
+.zones-list .item { padding: 13px; border-radius: 15px; background: rgba(255,255,255,.025); }
+.zones-list .item:hover { transform: translateY(-1px); }
+.zones-list .zone-row.selected { border-color: rgba(73,230,163,.72); background: linear-gradient(90deg, rgba(73,230,163,.11), rgba(73,230,163,.035)); box-shadow: inset 3px 0 0 var(--success); }
+.zones-list .zone-row.disabled { filter: saturate(.65); }
+.zone-row-main { gap: 10px; }
+.zone-name-field { gap: 7px; }
+.zone-name-field input { min-height: 42px; border-radius: 11px; font-weight: 750; }
+.zone-row-main label { gap: 5px; }
+.zone-row-main label > span { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+.zone-row-main label select { min-height: 42px; border-radius: 11px; }
+.zone-action-btn { min-height: 42px; padding: 10px 12px; border-radius: 11px; }
+.live-detection-status { margin-top: 13px; padding: 11px 12px; border-radius: 12px; font-size: 11px; }
+
+.zones-rules-tip {
+  display: flex; align-items: flex-start; gap: 9px; margin: -2px 0 18px; padding: 11px 12px;
+  border: 1px solid rgba(71,214,255,.17); border-radius: 13px; background: rgba(71,214,255,.055);
+  color: var(--muted); font-size: 12px; line-height: 1.45;
+}
+.zones-rules-tip strong { color: var(--text); }
+.zones-tip-icon { display: grid; place-items: center; flex: 0 0 auto; width: 18px; height: 18px; border: 1px solid rgba(71,214,255,.45); border-radius: 999px; color: var(--accent); font-size: 11px; font-weight: 900; }
+.zone-object-rules { margin-bottom: 20px; padding: 14px; border: 1px solid var(--border); border-radius: 17px; background: rgba(255,255,255,.018); }
+.zone-name-card { margin: 0; padding: 0 0 11px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--text); font-size: 14px; }
+.zone-name-card::before { content: 'AREA'; display: block; margin-bottom: 4px; color: var(--accent); font-size: 9px; font-weight: 900; letter-spacing: .1em; }
+.zone-object-rules-header { margin: 12px 0 9px; justify-content: space-between; }
+.zone-object-rules-header::before { content: 'What should this area watch for?'; color: var(--muted); font-size: 12px; font-weight: 700; }
+.zone-object-rules-header select { max-width: 230px; min-height: 40px; border-radius: 11px; }
+.cameras-table-wrap { border: 1px solid var(--border); border-radius: 13px; background: rgba(0,0,0,.08); }
+.cameras-table-wrap .rule-table th { background: rgba(255,255,255,.035); }
+.cameras-table-wrap .rule-table tbody tr:hover td { background: rgba(71,214,255,.035); }
+.zone-editor-footer { align-items: center; gap: 14px; margin-top: 4px; padding-top: 16px; }
+.zones-save-copy { display: flex; align-items: center; gap: 8px; margin-right: auto; color: var(--muted); font-size: 11px; }
+.zones-save-indicator { width: 7px; height: 7px; border-radius: 999px; background: var(--success); box-shadow: 0 0 0 3px rgba(73,230,163,.13); }
+
+:root.light .zones-workflow { background: linear-gradient(90deg, rgba(2,132,199,.06), rgba(5,150,105,.045)); box-shadow: 0 8px 26px rgba(0,0,0,.06); }
+:root.light .zones-stats .stat-card,
+:root.light .zones-frame-card { box-shadow: 0 12px 32px rgba(0,0,0,.08); }
+:root.light .zones-list .item { background: rgba(255,255,255,.72); }
+:root.light .zone-object-rules { background: rgba(255,255,255,.7); }
+:root.light .cameras-table-wrap { background: rgba(0,0,0,.018); }
+:root.light .zones-rules-tip { background: rgba(2,132,199,.045); border-color: rgba(2,132,199,.16); }
+
+@media (max-width: 899px) {
+  .zones-layout { grid-template-columns: 1fr; }
+  .zones-frame-wrap, .zones-frame-wrap .live-frame { min-height: 360px; }
+  .zones-frame-wrap .live-frame { height: min(62vh, 600px); }
+}
+@media (max-width: 760px) {
+  .zones-hero { align-items: stretch; flex-direction: column; gap: 14px; }
+  .zones-hero-action { justify-content: stretch; }
+  .zones-hero-action button { flex: 1; }
+  .zones-workflow { align-items: stretch; flex-direction: column; gap: 10px; }
+  .zones-workflow-line { width: 1px; height: 10px; min-height: 10px; margin-left: 13px; flex: 0 0 auto; }
+  .zones-workflow-step small { white-space: normal; }
+  .zones-canvas-hint { display: none; }
+  .zones-canvas-footer { flex-wrap: wrap; }
+  .zone-object-rules-header { align-items: stretch; flex-direction: column; }
+  .zone-object-rules-header::before { order: 0; }
+  .zone-object-rules-header select { max-width: none; width: 100%; }
+  .zones-save-copy { flex: 1 1 100%; margin: 0; }
+  .zone-editor-footer button { width: 100%; }
+}
+@media (max-width: 600px) {
+  .zones-shell { gap: 14px; }
+  .zones-stats { gap: 9px; }
+  .zones-stats .stat-card { padding: 14px; }
+  .zones-stats .stat-card-value { font-size: 24px; }
+  .zone-settings-card, .zone-rules-card { padding: 16px; }
+  .zones-frame-wrap, .zones-frame-wrap .live-frame { min-height: 290px; }
+  .zones-frame-wrap .live-frame { height: min(58vh, 470px); }
+  .zones-frame-card .zone-frame-toolbar { right: 10px; bottom: 10px; }
+  .zones-frame-card .zone-frame-toolbar button { min-height: 42px; padding: 10px 12px; }
+  .zones-list .zone-row-main { grid-template-columns: 1fr auto; }
+  .zones-list .zone-row-main > .zone-name-field { grid-column: 1 / -1; }
+  .zones-list .zone-row-main > .zone-action-btn { justify-self: end; }
+}

@@ -10,67 +10,78 @@
 </head>
 <body>
   <main class="shell page-stack zones-shell" data-live-page="zones">
-    <header class="hero">
-      <div>
-        <p class="eyebrow">Monitoring</p>
+    <header class="hero zones-hero">
+      <div class="zones-hero-copy">
+        <p class="eyebrow">Monitoring workspace</p>
         <h1>Zones</h1>
-        <p class="muted">Choose a camera, draw zone areas, then decide which objects should record or alert inside each zone.</p>
+        <p class="muted">Shape the areas your camera should watch, then fine-tune what gets recorded or sent as an alert.</p>
       </div>
-
+      <div class="hero-action zones-hero-action">
+        <button id="addZoneBtnHeader" class="btn-info" type="button">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+          Draw Area
+        </button>
+        <button id="saveZonesBtnHeader" type="button" class="primary" style="display:none">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+          Save Changes
+        </button>
+      </div>
     </header>
 
-    <section class="grid stats-grid zones-stats">
+    <div class="zones-workflow" aria-label="Zone setup steps">
+      <div class="zones-workflow-step is-current"><span>1</span><div><strong>Choose a camera</strong><small>Set the view you want to edit</small></div></div>
+      <div class="zones-workflow-line" aria-hidden="true"></div>
+      <div class="zones-workflow-step"><span>2</span><div><strong>Draw areas</strong><small>Click points on the live preview</small></div></div>
+      <div class="zones-workflow-line" aria-hidden="true"></div>
+      <div class="zones-workflow-step"><span>3</span><div><strong>Set detection rules</strong><small>Decide what should trigger action</small></div></div>
+    </div>
+
+    <section class="grid stats-grid zones-stats" aria-label="Zone overview">
       <article class="card stat-card">
         <div class="stat-card-head">
-          <span class="stat-card-label">Active Zones</span>
-          <span class="stat-card-icon" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
-          </span>
+          <span class="stat-card-label">Active zones</span>
+          <span class="stat-card-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg></span>
         </div>
         <strong id="statZoneCount" class="stat-card-value">0</strong>
-        <small class="muted stat-card-sub">Zone areas on this camera</small>
+        <small class="muted stat-card-sub">Areas on this camera</small>
       </article>
       <article class="card stat-card">
         <div class="stat-card-head">
-          <span class="stat-card-label">Object Detection Rules</span>
-          <span class="stat-card-icon" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-          </span>
+          <span class="stat-card-label">Detection rules</span>
+          <span class="stat-card-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>
         </div>
         <strong id="statRuleCount" class="stat-card-value">0</strong>
-        <small class="muted stat-card-sub">Object rules across all zones</small>
+        <small class="muted stat-card-sub">Objects and motion</small>
       </article>
       <article class="card stat-card">
         <div class="stat-card-head">
-          <span class="stat-card-label">Alert Rules</span>
-          <span class="stat-card-icon" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
-          </span>
+          <span class="stat-card-label">Alert rules</span>
+          <span class="stat-card-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
         </div>
         <strong id="statAlertRules" class="stat-card-value">-</strong>
-        <small class="muted stat-card-sub">Rules with notifications enabled</small>
+        <small class="muted stat-card-sub">Notifications enabled</small>
       </article>
-      <article class="card stat-card">
+      <article class="card stat-card stat-card-camera">
         <div class="stat-card-head">
-          <span class="stat-card-label">Camera</span>
-          <span class="stat-card-icon" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-          </span>
+          <span class="stat-card-label">Editing camera</span>
+          <span class="stat-card-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg></span>
         </div>
         <strong id="statCameraName" class="stat-card-value stat-card-value-text">-</strong>
-        <small class="muted stat-card-sub">Currently being configured</small>
+        <small class="muted stat-card-sub">Current camera</small>
       </article>
     </section>
 
-
-
     <div class="zones-layout">
-      <div class="card live-frame-card zones-frame-card">
+      <section class="card live-frame-card zones-frame-card" aria-labelledby="liveFrameTitle">
         <div class="live-frame-header">
           <div class="live-frame-title">
             <span class="live-pulse" id="livePulse" aria-hidden="true"></span>
-            <h2 id="liveFrameTitle">Camera</h2>
+            <div>
+              <span class="zones-panel-kicker">Live canvas</span>
+              <h2 id="liveFrameTitle">Camera</h2>
+            </div>
           </div>
+          <span class="zones-canvas-hint">Drag a zone to reposition it</span>
         </div>
         <div class="live-frame-wrap zones-frame-wrap" id="liveFrameWrap">
           <img id="liveFrame" class="live-frame" alt="Live camera footage" />
@@ -87,44 +98,40 @@
             </button>
           </div>
         </div>
-      </div>
-      <section class="card zone-settings-card">
-        <div class="settings-section-header">
-          <div class="settings-section-icon" aria-hidden="true">🗺️</div>
+        <div class="zones-canvas-footer"><span class="zones-canvas-dot"></span><span>Live preview</span><span class="zones-canvas-separator">•</span><span>Click the first point to close a polygon</span></div>
+      </section>
+
+      <section class="card zone-settings-card" aria-labelledby="zoneAreasTitle">
+        <div class="settings-section-header zones-section-header">
+          <div class="settings-section-icon" aria-hidden="true">⌖</div>
           <div>
-            <h2>Zone Areas</h2>
-            <p class="settings-section-subtitle">Pick a camera, then place corner dots on the footage to define zone areas.</p>
-          </div>
-          <div class="hero-action">
-            <button id="addZoneBtnHeader" class="btn-info" type="button">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
-              Add Zone
-            </button>
-            <button id="saveZonesBtnHeader" type="button" class="primary" style="display:none">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
-              Save Zones
-            </button>
+            <span class="zones-panel-kicker">Step 1 of 3</span>
+            <h2 id="zoneAreasTitle">Zone areas</h2>
+            <p class="settings-section-subtitle">Choose a camera and manage the areas drawn on its view.</p>
           </div>
         </div>
         <label class="zones-editor-camera">
-          <span>Camera</span>
+          <span>Camera to configure</span>
           <select id="cameraSelect" aria-label="Select camera"></select>
         </label>
+        <div class="zones-list-heading"><div><strong>Your areas</strong><span>Click an area to select it on the preview.</span></div><span class="zones-list-count" id="zonesListCount" aria-live="polite">0 areas</span></div>
         <div id="zoneList" class="list zones-list"></div>
         <div id="liveDetectionStatus" class="live-detection-status">Live AI status waiting for frames.</div>
       </section>
 
-      <section class="card zone-rules-card">
-        <div class="settings-section-header">
-          <div class="settings-section-icon" aria-hidden="true">👁️</div>
+      <section class="card zone-rules-card" aria-labelledby="detectionRulesTitle">
+        <div class="settings-section-header zones-section-header">
+          <div class="settings-section-icon" aria-hidden="true">◉</div>
           <div>
-            <h2>Object Detection Rules</h2>
-            <p class="settings-section-subtitle">Configure which objects and motion trigger recordings and alerts per zone area.</p>
+            <span class="zones-panel-kicker">Steps 2–3</span>
+            <h2 id="detectionRulesTitle">Detection rules</h2>
+            <p class="settings-section-subtitle">Choose what each area should record, detect, or use for notifications.</p>
           </div>
         </div>
+        <div class="zones-rules-tip"><span class="zones-tip-icon" aria-hidden="true">i</span><span>Start with <strong>Enabled</strong> and <strong>Record</strong>. Turn on Email or Push only for the events you want to be notified about.</span></div>
         <div id="objectDetectionRules"></div>
-
         <div class="zone-editor-footer">
+          <div class="zones-save-copy"><span class="zones-save-indicator"></span><span>Remember to save your changes.</span></div>
           <button id="saveZonesBtn" type="button" class="primary"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>Save Zones</button>
         </div>
       </section>

@@ -160,6 +160,10 @@ function updateZonesStats() {
   if (liveEls.statCameraName) {
     liveEls.statCameraName.textContent = selectedCamera.name || selectedCamera.id || '-';
   }
+  const zonesListCount = document.getElementById('zonesListCount');
+  if (zonesListCount) {
+    zonesListCount.textContent = `${zones.length} area${zones.length === 1 ? '' : 's'}`;
+  }
 }
 
 function renderZoneBox(zone, index) {
@@ -256,7 +260,7 @@ function renderZones() {
       <div class="zone-row-main">
         <div class="zone-name-field">
           ${ICONS.edit}
-          <input data-zone-name="${index}" value="${escapeHtml(zone.name || `Zone ${index + 1}`)}" placeholder="Zone name…" />
+          <input data-zone-name="${index}" value="${escapeHtml(zone.name || `Zone ${index + 1}`)}" placeholder="Zone name…" aria-label="Name for ${escapeHtml(zone.name || `Zone ${index + 1}`)}" />
         </div>
         <label><span>Zone</span><select data-zone-enabled="${index}"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Shown</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
         <button class="btn-danger zone-action-btn" type="button" data-delete-zone="${index}">${ICONS.remove}Remove</button>
