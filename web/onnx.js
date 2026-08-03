@@ -89,10 +89,9 @@ function setModelMessage(modelId, text, type = 'info') {
 function formPayload(form) {
   const data = Object.fromEntries(new FormData(form).entries());
   data.enabled = data.enabled === 'true';
-  // Checkboxes are omitted from FormData when unchecked, so read the
-  // control directly to persist an explicit false (not a stale default).
-  const ioBinding = aiForm.elements['use_io_binding'];
-  if (ioBinding) data.use_io_binding = ioBinding.checked;
+  // ``use_io_binding`` is an Enabled/Disabled select posting 'true'/'false';
+  // coerce to a real bool so the payload matches the API's JSON shape.
+  if ('use_io_binding' in data) data.use_io_binding = data.use_io_binding === 'true';
   for (const key of ['iou_threshold', 'confidence']) if (data[key] !== '') data[key] = Number(data[key]);
   for (const key of ['inference_threads', 'max_concurrent_inferences']) {
     if (data[key] !== '') data[key] = Number.parseInt(data[key], 10);

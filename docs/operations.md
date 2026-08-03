@@ -19,9 +19,18 @@ Use **Camera Log** (`/camera-log`) to investigate operational issues. The log in
 
 Filter by camera ID, event type, or severity when investigating a specific stream. The newest diagnostic events are listed first.
 
+## Settings layout
+
+**Settings** (`/settings`) is organised into four tabs:
+
+- **Detection & Live** - live refresh rates, detection interval, event merge window, background detection, and (under *Advanced Motion Tuning*) the low-level motion-gate values documented in [motion-detection.md](motion-detection.md).
+- **Recording** - event clip timing (pre/post-event, keep-recording-after-motion, max clip length), retention/auto-purge, and storage directories.
+- **Notifications** - push (ntfy), camera offline alerts, and email (SMTP) delivery, each with a test action.
+- **System** - software updates, database backup/restore, login security, and the Danger Zone.
+
 ## Offline camera alerts
 
-Open **Settings** (`/settings`) to configure camera offline alert behavior. Offline alerts are useful when cameras are deployed remotely or when recordings are expected to be continuous.
+Open **Settings → Notifications → Camera Offline Notifications** to configure offline alert behavior. Offline alerts are useful when cameras are deployed remotely or when recordings are expected to be continuous. They can be delivered over both email and push channels, and the offline delay avoids alerts from brief connection blips.
 
 ## Application log
 
@@ -42,10 +51,14 @@ Open **YAMNet TFLite** (`/yamnet-tflite`) to confirm whether the sound detection
 ## Logs and backups
 
 - Application logs are written to `data/logs/app.log` with rotation.
-- SQLite backups can be downloaded from **Settings** → **Database**.
-- **Settings** → **Database** → **Download Full Backup** produces a zip with the database, recordings, and snapshots. The database-only backup does **not** contain video; back up the `recordings/` and `snapshots/` directories separately (or use the full backup) if you need the media itself.
-- Restores create a safety backup of the current database before replacing it.
+- SQLite backups can be downloaded from **Settings → System → Database Backup & Restore → Download Database Backup**.
+- **Download Full Backup** in the same section produces a zip with the database, recordings, and snapshots. The database-only backup does **not** contain video; back up the `recordings/` and `snapshots/` directories separately (or use the full backup) if you need the media itself.
+- Restores accept a previously downloaded `.sqlite` backup and create a safety backup of the current database before replacing it.
 
 ## Update checks
 
-Admins can check for application updates from **Settings** → **Software Updates**. Service installs restart automatically after a successful browser-initiated update.
+Admins can check for and apply application updates from **Settings → System → Software Updates**. The current version is shown at the top of the section. Service installs restart automatically after a successful browser-initiated update.
+
+## Start Clean (Danger Zone)
+
+**Settings → System → Danger Zone → Start Clean** deletes all **events, recordings, and alert history** so you can begin fresh. Settings, users, sessions, and alert rules are preserved. The action is irreversible and requires typing `START CLEAN` to confirm.

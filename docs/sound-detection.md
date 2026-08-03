@@ -65,7 +65,9 @@ The sound backend stores YAMNet assets in `models/` alongside object detection m
 - Lower thresholds when a sound is consistently missed, then increase cooldowns to avoid noisy alert bursts.
 - Use longer cooldowns for recurring sounds such as barking or car alarms.
 - Test close to the camera microphone. A camera that has clear video may still have poor audio quality.
-- If a camera has multiple RTSP profiles, choose one that includes audio.- If sound events appear in the application log viewer frequently, sound detection notifications are now filtered from `/application-log` to reduce log noise. Use `/camera-log` and the dashboard event history to investigate sound-triggered alerts instead.
+- If a camera has multiple RTSP profiles, choose one that includes audio.
+- Sound detection notifications are filtered out of the `/application-log` viewer to reduce log noise. Use `/camera-log` and the dashboard event history to investigate sound-triggered alerts instead.
+
 ## Troubleshooting
 
 ### YAMNet TFLite is unavailable

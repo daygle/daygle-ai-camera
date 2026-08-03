@@ -22,7 +22,7 @@ If enough pixels have changed enough, it declares motion and passes the frame on
 
 ### Layer 2 - YOLO object detection
 
-This runs when Layer 1 says motion was detected, when a per-zone motion rule fires from the diff mask, or when a periodic scan is due (see below). It runs the full YOLOv8 neural network on the frame and identifies specific objects - person, car, dog, etc. - with bounding boxes and confidence scores.
+This runs when Layer 1 says motion was detected, when a per-zone motion rule fires from the diff mask, or when a periodic scan is due (see below). It runs the full YOLO neural network on the frame and identifies specific objects - person, car, dog, etc. - with bounding boxes and confidence scores. The active model (a YOLOv8, YOLO11, or YOLO26 variant) is selected on the **ONNX** page; see [ai-detection.md](ai-detection.md).
 
 These results are then matched against your zone rules. If a zone covers the area where an object was detected and you have a rule for that object label, an alert and/or recording fires.
 
@@ -71,9 +71,9 @@ This solves the standing-still problem: even if a person has been absorbed into 
 
 ## Settings reference
 
-All of these are found in **Settings → Live Detection**.
+All of these live under **Settings → Detection & Live → Live Performance**. The **Periodic Scan Interval** and the low-level motion tuning values (**Motion Pixel Threshold**, **Motion Gate Fraction**, **Motion Scale Fraction**, **Motion Background Alpha**, **Motion Frame Width**, and **Motion Frame Height**) are grouped under the **Advanced Motion Tuning** disclosure on that card.
 
-These are global defaults. You can override the four motion gate tuning values - **Motion Pixel Threshold**, **Motion Gate Fraction**, **Motion Scale Fraction**, and **Motion Background Alpha** - for an individual camera from **Cameras → Edit Camera → Advanced → Motion Detection Overrides**. Blank override fields use the global Live Detection value.
+These are global defaults. You can override the four motion gate tuning values - **Motion Pixel Threshold**, **Motion Gate Fraction**, **Motion Scale Fraction**, and **Motion Background Alpha** - for an individual camera from **Cameras → Edit Camera → Advanced → Motion Detection Overrides**. Blank override fields use the global Live Performance value.
 
 ### Detection Interval (s)
 
@@ -140,6 +140,16 @@ How fast the background model adapts to scene changes when no motion is detected
 - **Lower:** Background adapts slowly - more stable, but it takes longer to settle after a genuine scene change (lighting shift, camera moved)
 
 Default: `0.05`
+
+---
+
+### Motion Frame Width / Motion Frame Height
+
+The size in pixels of the thumbnail used for the Layer 1 pixel-diff. Larger dimensions give finer per-zone precision but cost more CPU on every frame.
+
+**Important:** changing either value resets every camera's background model, so the gate re-learns the scene on the next few frames.
+
+Defaults: `160` × `120`
 
 ---
 
