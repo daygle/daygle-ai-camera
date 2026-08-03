@@ -7,7 +7,7 @@ bcrypt>=5.0.0,<6.0  # 5.0+ raises ValueError for passwords > 72 bytes (guard in 
 # .github/workflows/python-app.yml), so cap below 2.3 to keep 3.10 resolvable.
 # Raising this ceiling requires dropping Python 3.10 from the support matrix
 # first -- otherwise the install simply fails to find a compatible wheel.
-numpy>=1.26,<2.3
+numpy>=2.2.6,<2.3
 # install_python_deps.sh auto-selects onnxruntime-gpu when nvidia-smi can
 # enumerate an NVIDIA device. Override with DAYGLE_ONNXRUNTIME_VARIANT=cpu|gpu.
 # The GPU wheel's CUDA/cuDNN compatibility must match the installed driver;
