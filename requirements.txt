@@ -7,7 +7,7 @@ numpy>=1.26,<3.0
 # enumerate an NVIDIA device. Override with DAYGLE_ONNXRUNTIME_VARIANT=cpu|gpu.
 # The GPU wheel's CUDA/cuDNN compatibility must match the installed driver;
 # see README.md for Tesla P4 guidance.
-onnxruntime>=1.18,<2.0
+onnxruntime>=1.28.0,<2.0
 onnx>=1.22.0,<2.0
 # torch.onnx._internal.exporter (used by Ultralytics YOLO.export)
 # imports onnxscript at module load; not pulled in by ``onnx`` itself.
