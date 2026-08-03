@@ -14,64 +14,59 @@
       <div>
         <p class="eyebrow">Administration</p>
         <h1>User Management</h1>
-        <p class="muted">Create users, change roles, disable accounts, and reset passwords.</p>
+        <p class="muted">Manage accounts, permissions, access, and profile details from one place.</p>
+      </div>
+      <div class="hero-action">
+        <button id="addUserBtn" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add User
+        </button>
       </div>
     </header>
 
-    <section class="card">
+    <section class="card users-list-card">
       <div class="settings-section-header">
-        <div class="settings-section-icon">👥</div>
+        <div class="settings-section-icon" aria-hidden="true">👥</div>
         <div>
-          <h2>Users</h2>
-          <p class="settings-section-subtitle">All registered accounts. Change roles, enable/disable, or reset passwords from here.</p>
+          <h2>User Accounts</h2>
+          <p class="settings-section-subtitle">Review account details, update permissions, disable access, or reset a password. Click Edit to expand an account form inline.</p>
         </div>
       </div>
-      <div id="userMessage" class="muted"></div>
-      <div id="users" class="list"></div>
+      <p id="userMessage" class="muted users-list-status" aria-live="polite"></p>
+      <div id="users"></div>
+      <div id="usersEmpty" class="users-empty-state" hidden>
+        <div class="users-empty-icon" aria-hidden="true">👥</div>
+        <h2>No users yet</h2>
+        <p class="muted">Add the first account to start managing access.</p>
+        <button id="addUserEmptyBtn" type="button">Add User</button>
+      </div>
     </section>
 
-    <section class="card">
+    <section id="createUserCard" class="card user-editor-card" hidden>
       <div class="settings-section-header">
-        <div class="settings-section-icon">➕</div>
+        <div class="settings-section-icon" aria-hidden="true">➕</div>
         <div>
           <h2>Create User</h2>
           <p class="settings-section-subtitle">Add a new account. The temporary password should be changed on first login.</p>
         </div>
       </div>
-      <form id="createUserForm" class="form-grid">
-        <label>
-          <span>First Name</span>
-          <input name="first_name" placeholder="First name" autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore />
-        </label>
-        <label>
-          <span>Last Name</span>
-          <input name="last_name" placeholder="Last name" autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore />
-        </label>
-        <label>
-          <span>Email</span>
-          <input name="email" type="email" placeholder="Email address" autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore />
-        </label>
-        <label>
-          <span>Username</span>
-          <input name="username" placeholder="Username" required autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore />
-        </label>
-        <label>
-          <span>Role <span class="info-tip" data-tip="Viewers can view live feeds and recordings. Admins have full access. Default: Viewer" title="Viewers can view live feeds and recordings. Admins have full access. Default: Viewer" tabindex="0" aria-label="Help: Viewers can view live feeds and recordings. Admins have full access. Default: Vi..."></span></span>
-          <select name="role">
-            <option value="viewer">Viewer</option>
-            <option value="admin">Admin</option>
-          </select></label>
-        <label>
-          <span>Temporary Password <span class="info-tip" data-tip="The user should change this password after their first login." title="The user should change this password after their first login." tabindex="0" aria-label="Help: The user should change this password after their first login."></span></span>
-          <input name="password" type="password" placeholder="Temporary password" required /></label>
+      <form id="createUserForm" class="form-grid" autocomplete="off">
+        <label><span>First Name</span><input name="first_name" placeholder="First name" autocomplete="off" /></label>
+        <label><span>Last Name</span><input name="last_name" placeholder="Last name" autocomplete="off" /></label>
+        <label><span>Email</span><input name="email" type="email" placeholder="Email address" autocomplete="off" /></label>
+        <label><span>Username</span><input name="username" placeholder="Username" required autocomplete="off" /></label>
+        <label><span>Role <span class="info-tip" data-tip="Admins have full access. Viewers can view live feeds and recordings." title="Admins have full access. Viewers can view live feeds and recordings." tabindex="0" aria-label="Help: Admins have full access. Viewers can view live feeds and recordings."></span></span><select name="role"><option value="viewer">Viewer</option><option value="admin">Admin</option></select></label>
+        <label><span>Temporary Password</span><input name="password" type="password" placeholder="Temporary password" required autocomplete="new-password" /></label>
       </form>
-      <div class="button-row">
+      <div class="button-row user-editor-actions">
+        <button id="cancelCreateUserBtn" class="secondary" type="button">Cancel</button>
         <button type="submit" form="createUserForm">Create User</button>
       </div>
     </section>
   </main>
   <script src="/static/nav.js"></script>
   <script src="/static/utils.js"></script>
+  <script src="/static/icons.js"></script>
   <script src="/static/users.js"></script>
 </body>
 </html>

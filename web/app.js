@@ -580,7 +580,10 @@ function drawClipOverlay(vfcMediaTime) {
 }
 
 function renderRecordingDetails(recording) {
-  const detections = (recording.detections || []);
+  // Use the recording-level summary rather than only the linked event's
+  // detections. Extended clips can accumulate additional labels in
+  // recording_labels / label_confidences after the original event is saved.
+  const detections = recordingDetectionSummary(recording);
   const isSound = isSoundRecording(recording);
   const isMotionOnly = isMotionOnlyRecording(recording);
   let detectionBadges;
@@ -805,7 +808,9 @@ async function playRecording(id) {
   try {
     els.clipPlayer.load();
     await els.clipPlayer.play();
-    els.clipPlayerStatus.textContent = `Playing recording #${id}.`;
+    // Successful playback is self-evident from the native video controls;
+    // reserve this line for preparation, loading, and error feedback.
+    els.clipPlayerStatus.textContent = '';
   } catch (error) {
     if (['AbortError', 'NotAllowedError'].includes(error?.name)) {
       els.clipPlayerStatus.textContent = `Recording #${id} loaded.`;

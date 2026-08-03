@@ -75,20 +75,19 @@ YAMNET_PATCHED_SITES: tuple[tuple[str, str], ...] = (
     ),
     # The rows.map ``Running`` cell uses the same wrapped substring as the
     # statusPanel site. Covered by the first entry above.
-    # loadYamnetModelInfo (model-details row) - 3 helper-output sites wrapped
-    # for defense-in-depth so the model_size / sha256 / installed_at values
-    # baked into ``innerHTML`` route through escapeHtml like every other site.
+    # loadYamnetModelInfo (model card) keeps model_size, sha256, and
+    # installed_at values escaped before interpolation.
     (
-        '${escapeHtml(formatBytes(info.model_size))}',
-        'model-details ``size`` interpolation',
+        'const sizeText = info.model_size ? escapeHtml(formatBytes(info.model_size)) : \'Unknown\';',
+        'model-card ``size`` value',
     ),
     (
-        '${escapeHtml(formatSha(info.sha256))}',
-        'model-details ``SHA-256`` interpolation',
+        'const hashText = info.sha256 ? escapeHtml(info.sha256) : \'Not available\';',
+        'model-card ``SHA-256`` value',
     ),
     (
-        'escapeHtml(new Date(info.installed_at).toLocaleDateString())',
-        'model-details ``installed_at`` interpolation',
+        "const installedAt = info.installed_at ? escapeHtml(new Date(info.installed_at).toLocaleDateString()) : '';",
+        'model-card ``installed_at`` value',
     ),
 )
 

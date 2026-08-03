@@ -33,18 +33,19 @@
       </div>
     </section>
 
-    <section class="card">
-      <div class="settings-section-header">
-        <div class="settings-section-icon">📦</div>
+    <section class="card yamnet-model-card">
+      <div class="settings-section-header yamnet-model-section-header">
+        <div class="settings-section-icon" aria-hidden="true">📦</div>
         <div>
           <h2>Model</h2>
-          <p class="settings-section-subtitle">YAMNet TFLite model file information and update management.</p>
+          <p class="settings-section-subtitle">The audio classification engine used by sound-enabled cameras.</p>
         </div>
+        <span class="yamnet-model-engine-badge">TFLite · CPU</span>
       </div>
       <div id="yamnetModelInfo" class="yamnet-model-info" aria-live="polite"></div>
-      <div class="button-row" style="margin-top:0.75rem">
+      <div class="yamnet-model-actions">
         <button id="checkYamnetUpdateBtn" class="btn-info" type="button">Check for Update</button>
-        <button id="reloadYamnetModelBtn" type="button" style="display:none">Update Model</button>
+        <button id="reloadYamnetModelBtn" type="button" hidden>Update Model</button>
       </div>
     </section>
 

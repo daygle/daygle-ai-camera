@@ -107,7 +107,11 @@
           <h2 id="clipPlayerTitle">Recording</h2>
           <p class="settings-section-subtitle" id="videoModalSubtitle">Watch a recording and review its detection details.</p>
         </div>
-        <div class="button-row">
+        <div class="button-row clip-player-actions">
+          <label class="toggle-control clip-overlay-toggle" for="clipOverlayToggle">
+            <input id="clipOverlayToggle" type="checkbox" checked />
+            <span>Object Overlay</span>
+          </label>
           <a id="videoModalDownload" class="secondary" download hidden>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             <span>Download</span>
@@ -126,12 +130,6 @@
         <div id="clipTimelineBar" class="clip-timeline-bar" role="slider" tabindex="0"
              aria-label="Recording segments  -  click to seek" aria-valuemin="0" aria-valuenow="0"></div>
         <div id="clipTimelineLegend" class="clip-timeline-legend"></div>
-      </div>
-      <div class="clip-overlay-controls">
-        <label class="toggle-control clip-overlay-toggle" for="clipOverlayToggle">
-          <input id="clipOverlayToggle" type="checkbox" checked />
-          <span>Object Overlay</span>
-        </label>
       </div>
       <p id="clipPlayerStatus" class="muted"></p>
       <div id="recordingDetails" class="status-panel"></div>

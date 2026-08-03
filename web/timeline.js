@@ -992,7 +992,7 @@ function renderTimelineForCard(card, viewPayload, cardRecordings, totalRecording
   card.grid.innerHTML = ticks.map((s) => `
     <span class="timeline-grid-line" style="left:${tickPos(s)}%"></span>
   `).join('');
-  card.rows.style.height = `${Math.max(96, rowCount * TIMELINE_ROW_HEIGHT)}px`;
+  card.rows.style.height = `${Math.max(46, rowCount * TIMELINE_ROW_HEIGHT)}px`;
 
   const kindWord = card.kind === 'sound' ? 'sound' : 'object';
   const cameraName = viewPayload.camera?.name || viewPayload.camera?.id || 'this camera';
@@ -1195,7 +1195,9 @@ async function playRecording(recordingId, updateHistory = true) {
   try {
     els.clipPlayer.load();
     await els.clipPlayer.play();
-    els.clipPlayerStatus.textContent = `Playing recording #${recording.id}.`;
+    // Successful playback is self-evident from the native video controls;
+    // reserve this line for preparation, loading, and error feedback.
+    els.clipPlayerStatus.textContent = '';
   } catch (error) {
     // <video>.play() media error (never an api() throw) - redirect guard skipped by design.
     if (['AbortError', 'NotAllowedError'].includes(error?.name)) {

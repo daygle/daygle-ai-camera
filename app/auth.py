@@ -357,7 +357,18 @@ class AuthService:
             ).fetchone()
             return int(row["count"])
 
-    def update_user(self, user_id: int, *, role: str | None = None, is_active: bool | None = None, password: str | None = None) -> dict[str, Any]:
+    def update_user(
+        self,
+        user_id: int,
+        *,
+        username: str | None = None,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        email: str | None = None,
+        role: str | None = None,
+        is_active: bool | None = None,
+        password: str | None = None,
+    ) -> dict[str, Any]:
         # Fetch the existing row FIRST so we can (a) fail early on a bad user_id,
         # (b) diff incoming role against the stored role to detect a REAL change,
         # and (c) avoid unexpectedly invalidating sessions when a no-op role=SAME
@@ -365,6 +376,25 @@ class AuthService:
         existing = self.get_user(user_id)
         if not existing:
             raise AuthError("User not found.")
+        for field_name, field_value in (
+            ("username", username),
+            ("first name", first_name),
+            ("last name", last_name),
+            ("email", email),
+            ("role", role),
+            ("password", password),
+        ):
+            if field_value is not None and not isinstance(field_value, str):
+                raise AuthError(f"{field_name.capitalize()} must be text.")
+        if is_active is not None and not isinstance(is_active, bool):
+            raise AuthError("Account status must be true or false.")
+        username_changed = (
+            username is not None and username.strip() != str(existing.get("username") or "")
+        )
+        if username is not None:
+            username = username.strip()
+            if not username:
+                raise AuthError("Username is required.")
         role_will_change = role is not None and role != existing.get("role")
         # Last-admin protection: refuse an update that would remove the only
         # remaining ACTIVE administrator -- by demotion (role -> viewer) or
@@ -381,6 +411,18 @@ class AuthService:
             )
         updates: list[str] = []
         params: list[Any] = []
+        if username is not None:
+            updates.append("username = ?")
+            params.append(username)
+        if first_name is not None:
+            updates.append("first_name = ?")
+            params.append(str(first_name).strip())
+        if last_name is not None:
+            updates.append("last_name = ?")
+            params.append(str(last_name).strip())
+        if email is not None:
+            updates.append("email = ?")
+            params.append(str(email).strip())
         if role is not None:
             if role not in VALID_ROLES:
                 raise AuthError("Role must be admin or viewer.")
@@ -402,20 +444,18 @@ class AuthService:
         updates.append("updated_at = ?")
         params.append(utc_now())
         params.append(user_id)
-        with self.connect() as db:
-            cursor = db.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", params)
-            if cursor.rowcount == 0:
-                raise AuthError("User not found.")
-            # Privilege-escalation guard: any ACTUAL privilege change must force
-            # re-authentication. Without this, a stolen viewer cookie silently
-            # elevates to admin on the next request when an admin promotes the
-            # user. ``is_active is False`` already invalidates sessions and is
-            # combined here so the single DELETE statement covers both cases.
-            # Invalidate existing sessions on any security-sensitive change:
-            # role change (privilege escalation guard), account deactivation,
-            # OR password change (stolen-credential mitigation).
-            if is_active is False or role_will_change or password:
-                db.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
+        try:
+            with self.connect() as db:
+                cursor = db.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", params)
+                if cursor.rowcount == 0:
+                    raise AuthError("User not found.")
+                # Invalidate existing sessions on any security-sensitive change:
+                # role change, account deactivation, username change, or password
+                # change. This prevents stale sessions retaining old privileges.
+                if is_active is False or role_will_change or username_changed or password:
+                    db.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
+        except sqlite3.IntegrityError as exc:
+            raise AuthError("Username already exists.") from exc
         # Read AFTER the ``with`` block so the write transaction has committed;
         # ``get_user`` opens its own connection and (under WAL) would otherwise
         # read the pre-update snapshot and return stale role/is_active values to

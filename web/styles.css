@@ -723,6 +723,245 @@ input[type="file"] { padding: 10px; }
 .yamnet-status-grid.status-panel.status-error {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
+
+/* ─── YAMNet model card ────────────────────────────────────────────────────── */
+.yamnet-model-card {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(71,214,255,.18);
+  background:
+    radial-gradient(circle at 100% 0, rgba(71,214,255,.13), transparent 36%),
+    linear-gradient(145deg, rgba(255,255,255,.055), rgba(255,255,255,.018));
+}
+.yamnet-model-card::after {
+  position: absolute;
+  top: 0;
+  right: 12%;
+  width: 32%;
+  height: 2px;
+  content: '';
+  background: linear-gradient(90deg, transparent, var(--accent), var(--success), transparent);
+  opacity: .9;
+}
+.yamnet-model-section-header {
+  align-items: center;
+  gap: 14px;
+}
+.yamnet-model-section-header > div:not(.settings-section-icon) {
+  flex: 1;
+  min-width: 0;
+}
+.yamnet-model-engine-badge {
+  flex-shrink: 0;
+  padding: 7px 10px;
+  border: 1px solid rgba(71,214,255,.25);
+  border-radius: 999px;
+  color: var(--accent);
+  background: rgba(71,214,255,.08);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.yamnet-model-info {
+  margin-top: 6px;
+}
+.yamnet-model-overview {
+  display: grid;
+  grid-template-columns: minmax(220px, .85fr) minmax(0, 1.7fr);
+  gap: 14px;
+  align-items: stretch;
+}
+.yamnet-model-state {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-height: 116px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(0,0,0,.12);
+}
+.yamnet-model-orb {
+  position: relative;
+  flex: 0 0 15px;
+  width: 15px;
+  height: 15px;
+  border-radius: 999px;
+  background: var(--muted);
+  box-shadow: 0 0 0 6px rgba(145,161,186,.1);
+}
+.yamnet-model-orb::after {
+  position: absolute;
+  inset: -5px;
+  border: 1px solid currentColor;
+  border-radius: inherit;
+  content: '';
+  opacity: .35;
+  animation: yamnet-model-pulse 2.2s ease-out infinite;
+}
+.yamnet-model-orb.status-ok {
+  color: var(--success);
+  background: var(--success);
+  box-shadow: 0 0 0 6px rgba(73,230,163,.1), 0 0 22px rgba(73,230,163,.32);
+}
+.yamnet-model-orb.status-warning {
+  color: #f8c55d;
+  background: #f8c55d;
+  box-shadow: 0 0 0 6px rgba(248,197,93,.1), 0 0 22px rgba(248,197,93,.22);
+}
+.yamnet-model-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+.yamnet-model-status-pill.status-ok {
+  color: var(--success);
+  border-color: rgba(73,230,163,.32);
+  background: rgba(73,230,163,.1);
+}
+.yamnet-model-status-pill.status-warning {
+  color: #f8c55d;
+  border-color: rgba(248,197,93,.32);
+  background: rgba(248,197,93,.1);
+}
+.yamnet-model-caption {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.yamnet-model-specs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.yamnet-model-spec {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255,255,255,.035);
+}
+.yamnet-model-spec span {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.yamnet-model-spec strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 850;
+}
+.yamnet-model-spec-wide {
+  grid-column: 1 / -1;
+}
+.yamnet-model-spec code {
+  display: block;
+  overflow: hidden;
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.yamnet-model-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.yamnet-model-actions button {
+  min-width: 150px;
+}
+.yamnet-model-empty {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border: 1px dashed rgba(248,197,93,.35);
+  border-radius: 16px;
+  background: rgba(248,197,93,.055);
+}
+.yamnet-model-empty-icon {
+  display: grid;
+  flex: 0 0 42px;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(248,197,93,.3);
+  border-radius: 13px;
+  color: #f8c55d;
+  background: rgba(248,197,93,.1);
+  font-size: 25px;
+  line-height: 1;
+}
+.yamnet-model-empty-copy {
+  flex: 1;
+  min-width: 0;
+}
+.yamnet-model-empty-copy strong {
+  color: var(--text);
+  font-size: 14px;
+}
+.yamnet-model-empty-copy p {
+  margin: 5px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+@keyframes yamnet-model-pulse {
+  0% { transform: scale(.7); opacity: .7; }
+  70%, 100% { transform: scale(1.55); opacity: 0; }
+}
+:root.light .yamnet-model-card {
+  border-color: rgba(2,132,199,.18);
+  background:
+    radial-gradient(circle at 100% 0, rgba(2,132,199,.1), transparent 36%),
+    linear-gradient(145deg, rgba(255,255,255,.98), rgba(241,248,252,.9));
+}
+:root.light .yamnet-model-state { background: rgba(2,132,199,.035); }
+:root.light .yamnet-model-spec { background: rgba(255,255,255,.7); }
+:root.light .yamnet-model-engine-badge { color: #0369a1; background: rgba(2,132,199,.07); }
+:root.light .yamnet-model-status-pill.status-warning { color: #a16207; }
+:root.light .yamnet-model-empty { background: rgba(245,158,11,.07); }
+@media (prefers-reduced-motion: reduce) {
+  .yamnet-model-orb::after { animation: none; }
+}
+@media (max-width: 760px) {
+  .yamnet-model-overview { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .yamnet-model-section-header { align-items: flex-start; flex-wrap: wrap; }
+  .yamnet-model-engine-badge { margin-left: 0; }
+  .yamnet-model-specs { grid-template-columns: 1fr; }
+  .yamnet-model-spec-wide { grid-column: auto; }
+  .yamnet-model-actions { align-items: stretch; flex-direction: column; }
+  .yamnet-model-actions button { width: 100%; }
+  .yamnet-model-empty {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    align-items: start;
+  }
+  .yamnet-model-empty .yamnet-model-status-pill {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
 /* Playback-card details (recordings / dashboard / alerts / timeline): the
    shared .status-panel stays 2-up for the health/status panels on the
    profile, onnx, settings and yamnet pages, but the clip details carry up to
@@ -997,15 +1236,19 @@ input[type="file"] { padding: 10px; }
   pointer-events: none;
   border-radius: 16px;
 }
-.clip-overlay-toggle {
-  margin-top: 10px;
-}
-.clip-overlay-controls {
-  display: flex;
+.page-stack .button-row.clip-player-actions {
   align-items: center;
-  gap: 12px;
-  margin-top: 10px;
-  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 0 auto;
+  padding: 0;
+  border-top: 0;
+  flex-shrink: 0;
+}
+.clip-player-actions .clip-overlay-toggle {
+  margin: 0;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 14px;
 }
 .clip-timeline {
   display: flex;
@@ -1530,8 +1773,18 @@ tr.drag-over {
 @media (max-width: 600px) {
   .card { padding: 16px; }
   .brand-text { display: none; }
-  /* Clip overlay controls stack vertically on small phones */
-  .clip-overlay-controls { flex-direction: column; align-items: stretch; gap: 8px; }
+  /* Playback header actions stack cleanly on small phones. */
+  .page-stack .button-row.clip-player-actions {
+    width: 100%;
+    margin: 6px 0 0;
+    justify-content: stretch;
+  }
+  .page-stack .button-row.clip-player-actions > * {
+    flex: 1 1 auto;
+  }
+  .page-stack .button-row.clip-player-actions .clip-overlay-toggle {
+    justify-content: center;
+  }
   /* Stat cards: 2×2 grid holds better than a single column on small phones */
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   /* Text-valued stat cards (Detection "Enabled", Camera name) ellipsis-clip
@@ -1657,6 +1910,182 @@ tr.drag-over {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid var(--border);
+}
+
+/* ─── Users page ───────────────────────────────────────────────────────────── */
+.users-list-card {
+  display: grid;
+  gap: 18px;
+}
+.users-list-card .settings-section-header {
+  align-items: center;
+  gap: 14px;
+}
+.users-list-status {
+  margin: 0;
+  min-height: 1.2em;
+}
+.users-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(255,255,255,.018);
+}
+.users-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+.users-table th {
+  padding: 13px 16px;
+  text-align: left;
+  background: rgba(255,255,255,.035);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.users-table td {
+  padding: 16px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  vertical-align: middle;
+}
+.users-table tbody tr:last-child td { border-bottom: 0; }
+.users-table tbody tr.user-row {
+  display: table-row;
+  grid-template-columns: none;
+  align-items: initial;
+  gap: initial;
+  transition: background .12s;
+}
+.users-table tbody tr.user-row:hover,
+.users-table tbody tr.user-row-editing {
+  background: rgba(71,214,255,.055);
+}
+.users-table tbody tr.user-row-disabled { opacity: .58; }
+.user-account-cell {
+  min-width: 220px;
+}
+.user-account-cell strong,
+.user-account-cell span,
+.user-account-cell small {
+  display: block;
+}
+.user-account-cell strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 850;
+}
+.user-account-cell span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.user-account-cell small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-role-pill,
+.user-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 9px;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.user-role-admin { color: #c9b8ff; border-color: rgba(168,85,247,.35); background: rgba(168,85,247,.12); }
+.user-role-viewer { color: var(--accent); border-color: rgba(71,214,255,.3); background: rgba(71,214,255,.08); }
+.user-status-active { color: var(--success); border-color: rgba(73,230,163,.28); background: rgba(73,230,163,.08); }
+.user-status-disabled { color: var(--muted); background: rgba(255,255,255,.035); }
+.user-status-dot { width: 7px; height: 7px; border-radius: 999px; background: currentColor; }
+.user-last-login { min-width: 150px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.users-actions-heading { text-align: right !important; }
+.user-actions-cell { min-width: 190px; text-align: right; }
+.user-actions { display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
+.user-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 9px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1;
+}
+.user-actions .user-toggle-btn { color: var(--success); }
+.user-row-disabled .user-actions .user-toggle-btn { color: var(--danger); }
+.users-empty-state {
+  padding: 34px 20px;
+  border: 1px dashed var(--border);
+  border-radius: 16px;
+  text-align: center;
+  background: rgba(255,255,255,.018);
+}
+.users-empty-icon { font-size: 34px; margin-bottom: 8px; }
+.users-empty-state h2 { margin-bottom: 6px; }
+.users-empty-state button { margin-top: 8px; }
+.user-editor-card { display: grid; gap: 4px; }
+.user-editor-card[hidden] { display: none; }
+.user-editor-actions { margin-top: 10px; }
+.user-editor-actions button { min-width: 130px; }
+.user-edit-row td {
+  padding: 0;
+  border-bottom: 2px solid var(--accent);
+  background: var(--panel-strong);
+}
+.user-edit-panel {
+  padding: 14px 20px 18px;
+  border-left: 3px solid var(--accent);
+}
+.user-edit-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  font-weight: 800;
+}
+.user-edit-id {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.user-edit-form { margin-top: 0; }
+.user-password-field { grid-column: 1 / -1; }
+.user-edit-footer {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.user-edit-footer button { min-width: 120px; }
+@media (max-width: 600px) {
+  .user-edit-head { align-items: flex-start; flex-direction: column; }
+  .user-edit-form { grid-template-columns: 1fr; }
+  .user-password-field,
+  .user-edit-footer { grid-column: auto; }
 }
 
 /* ─── Cameras page ─────────────────────────────────────────────────────────── */
@@ -2665,7 +3094,7 @@ tr.drag-over {
 }
 .timeline-track {
   position: relative;
-  min-height: 112px;
+  min-height: 46px;
   border: 1px solid var(--border);
   border-radius: 22px;
   background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(7,11,19,.82));
@@ -2675,7 +3104,7 @@ tr.drag-over {
 .timeline-grid,
 .timeline-rows {
   position: relative;
-  min-height: 112px;
+  min-height: 46px;
 }
 .timeline-grid {
   position: absolute;
@@ -2695,7 +3124,7 @@ tr.drag-over {
 .timeline-empty {
   display: grid;
   place-items: center;
-  min-height: 112px;
+  min-height: 46px;
 }
 .timeline-segment {
   position: absolute;
@@ -2848,9 +3277,14 @@ tr.drag-over {
 .activity-card { display: grid; gap: 16px; }
 .page-stack .button-row.activity-toolbar-actions,
 .page-stack .button-row.timeline-controls-actions,
-.page-stack .button-row.timeline-card-status{
+.page-stack .button-row.timeline-card-status {
   border-top: 0;
   padding-top: 0;
+}
+/* Playback actions keep their existing spacing; remove only the divider above
+   Download and Close. */
+.page-stack #clipPlayerCard > .settings-section-header > .button-row {
+  border-top: 0;
 }
 .activity-toolbar-actions {
   flex-shrink: 0;
@@ -3282,9 +3716,15 @@ a.activity-item-action {
   }
 }
 /* Stream details card spans the full width of the frame+PTZ grid, sitting
-   on its own row below the live frame (and PTZ controls when shown) instead
-   of only filling the first column. */
+   on its own row below the AI Detection Status card instead of only filling
+   the first column. */
 .live-stream-details-card {
+  grid-column: 1 / -1;
+}
+/* AI Detection Status card spans the full width of the frame+PTZ grid too,
+   rendering on its own row between the live frame (and PTZ controls when
+   shown) and the Stream Details card below. */
+.live-detection-card {
   grid-column: 1 / -1;
 }
 /* Live-measured FPS indicator (Stream Details card): a small pulsing dot in a

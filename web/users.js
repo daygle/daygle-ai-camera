@@ -1,96 +1,205 @@
-// Top-level page-element references. Each id MUST exist on users.html; if a
-// future HTML refactor drops one we bail out cleanly instead of crashing
-// on `usersEl.innerHTML = ...` two lines below. `loadUsers()` consumes the
-// same elements, so leaving any null silently propagated would surface as a
-// cryptic TypeError on the first render attempt. Logging here points the
-// developer at the missing id before any user interaction happens.
+let users = [];
+
 const usersEl = document.getElementById('users');
-const form = document.getElementById('createUserForm');
-const message = document.getElementById('userMessage');
-if (!usersEl || !form || !message) {
-  console.error('[users.js] required page element missing:', { usersEl, form, message });
-  throw new Error('Users page is missing required elements; check users.html for the expected ids.');
+const emptyEl = document.getElementById('usersEmpty');
+const messageEl = document.getElementById('userMessage');
+const createCard = document.getElementById('createUserCard');
+const createForm = document.getElementById('createUserForm');
+const addUserBtn = document.getElementById('addUserBtn');
+const addUserEmptyBtn = document.getElementById('addUserEmptyBtn');
+const cancelCreateBtn = document.getElementById('cancelCreateUserBtn');
+
+if (!usersEl || !emptyEl || !messageEl || !createCard || !createForm) {
+  console.error('[users.js] required page element missing');
+  throw new Error('Users page is missing required elements; check users.html.');
 }
 
-// api() is provided by web/utils.js (loaded before this script). It reads
-// window.daygleAuth.csrfToken for state-changing verbs, redirects to /login
-// on 401, and sets Content-Type: application/json only on JSON bodies (GETs
-// no longer carry a forced Content-Type). The local duplicate + page-local
-// csrfToken were removed so every page shares the same fetch contract.
-
 function setMessage(text, isError = false) {
-  message.textContent = text;
+  messageEl.textContent = text;
+  messageEl.className = isError ? 'error users-list-status' : 'muted users-list-status';
   if (text) window.showToast?.(text, isError);
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value ?? '');
 }
 
 function roleLabel(value) {
   const normalized = String(value || '').trim().toLowerCase();
-  if (!normalized) return 'Unknown';
-  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  return normalized === 'admin' ? 'Admin' : 'Viewer';
 }
 
-function renderUsers(users) {
-  usersEl.innerHTML = users.map((user) => {
-    const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ');
-    const subtitle = [escapeHtml(roleLabel(user.role)), user.is_active ? 'Active' : 'Disabled', fullName ? escapeHtml(fullName) : '', user.email ? escapeHtml(user.email) : ''].filter(Boolean).join(' · ');
-    return `
-    <div class="item user-row">
-      <div><strong>${escapeHtml(user.username)}</strong><p class="muted">${subtitle}</p></div>
-      <select data-action="role" data-id="${user.id}">
-        <option value="viewer" ${user.role === 'viewer' ? 'selected' : ''}>Viewer</option>
-        <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
-      </select>
-      <button class="secondary" data-action="toggle" data-id="${user.id}" data-active="${user.is_active}">${user.is_active ? 'Disable' : 'Enable'}</button>
-      <button class="secondary" data-action="reset" data-id="${user.id}">Reset Password</button>
-    </div>
-  `;
-  }).join('');
+function formatDate(value) {
+  if (!value) return 'Never';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+  return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function userDisplayName(user) {
+  return [user.first_name, user.last_name].filter(Boolean).join(' ') || 'No name set';
+}
+
+function buildEditForm(user) {
+  const formId = `user-edit-form-${user.id}`;
+  return `
+    <tr class="user-edit-row">
+      <td colspan="5">
+        <div class="user-edit-panel">
+          <div class="user-edit-head">
+            <span>Editing <strong>${escapeHtml(user.username)}</strong></span>
+            <span class="user-edit-id">User ID · ${escapeHtml(user.id)}</span>
+          </div>
+          <form id="${formId}" class="user-edit-form form-grid" data-user-id="${escapeAttr(user.id)}" autocomplete="off">
+            <label><span>Username</span><input name="username" required value="${escapeAttr(user.username)}" /></label>
+            <label><span>First Name</span><input name="first_name" value="${escapeAttr(user.first_name)}" /></label>
+            <label><span>Last Name</span><input name="last_name" value="${escapeAttr(user.last_name)}" /></label>
+            <label><span>Email</span><input name="email" type="email" value="${escapeAttr(user.email)}" /></label>
+            <label><span>Role</span><select name="role"><option value="viewer" ${user.role === 'viewer' ? 'selected' : ''}>Viewer</option><option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option></select></label>
+            <label><span>Account Status</span><select name="is_active"><option value="true" ${user.is_active ? 'selected' : ''}>Active</option><option value="false" ${!user.is_active ? 'selected' : ''}>Disabled</option></select></label>
+            <label class="user-password-field"><span>New Password <small>(optional)</small></span><input name="password" type="password" placeholder="Leave blank to keep current" autocomplete="new-password" /></label>
+            <div class="user-edit-footer">
+              <button class="secondary user-cancel-edit" type="button" data-id="${escapeAttr(user.id)}">Cancel</button>
+              <button type="submit">Save User</button>
+            </div>
+          </form>
+        </div>
+      </td>
+    </tr>`;
+}
+
+function renderUserRow(user) {
+  const name = escapeHtml(userDisplayName(user));
+  const username = escapeHtml(user.username);
+  const active = Boolean(user.is_active);
+  const roleClass = user.role === 'admin' ? 'user-role-admin' : 'user-role-viewer';
+  return `
+    <tr class="user-row${active ? '' : ' user-row-disabled'}" data-user-id="${escapeAttr(user.id)}">
+      <td class="user-account-cell"><strong>${username}</strong><span>${name}</span>${user.email ? `<small>${escapeHtml(user.email)}</small>` : ''}</td>
+      <td><span class="user-role-pill ${roleClass}">${roleLabel(user.role)}</span></td>
+      <td><span class="user-status-pill ${active ? 'user-status-active' : 'user-status-disabled'}"><span class="user-status-dot"></span>${active ? 'Active' : 'Disabled'}</span></td>
+      <td class="user-last-login">${escapeHtml(formatDate(user.last_login_at))}</td>
+      <td class="user-actions-cell"><div class="user-actions">
+        <button class="secondary user-edit-btn" type="button" data-id="${escapeAttr(user.id)}" title="Edit user" aria-label="Edit ${username}">${ICONS.edit}</button>
+        <button class="secondary user-toggle-btn" type="button" data-id="${escapeAttr(user.id)}" title="${active ? 'Disable user' : 'Enable user'}" aria-label="${active ? 'Disable' : 'Enable'} ${username}">${ICONS.power}</button>
+        <button class="secondary user-reset-btn" type="button" data-id="${escapeAttr(user.id)}" title="Reset password" aria-label="Reset password for ${username}">Reset</button>
+      </div></td>
+    </tr>`;
+}
+
+function renderUsers() {
+  if (!users.length) {
+    usersEl.innerHTML = '';
+    emptyEl.hidden = false;
+    return;
+  }
+  emptyEl.hidden = true;
+  const rows = users.map((user) => renderUserRow(user)).join('');
+  usersEl.innerHTML = `<div class="users-table-wrap"><table class="users-table"><thead><tr><th scope="col">Account</th><th scope="col">Role</th><th scope="col">Status</th><th scope="col">Last Login</th><th scope="col" class="users-actions-heading">Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  bindUserActions();
+}
+
+function openCreateUser() {
+  createCard.hidden = false;
+  createCard.classList.add('user-editor-card-open');
+  createForm.querySelector('[name="username"]')?.focus();
+  createCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeCreateUser() {
+  createForm.reset();
+  createCard.hidden = true;
+  createCard.classList.remove('user-editor-card-open');
+}
+
+function closeEditRows() {
+  usersEl.querySelectorAll('.user-edit-row').forEach((row) => row.remove());
+  usersEl.querySelectorAll('.user-row-editing').forEach((row) => row.classList.remove('user-row-editing'));
+}
+
+function openEditUser(id) {
+  const user = users.find((entry) => String(entry.id) === String(id));
+  const row = Array.from(usersEl.querySelectorAll('tr.user-row')).find((entry) => entry.dataset.userId === String(id));
+  if (!user || !row) return;
+  const existing = row.nextElementSibling;
+  closeEditRows();
+  if (existing?.classList.contains('user-edit-row')) return;
+  row.classList.add('user-row-editing');
+  row.insertAdjacentHTML('afterend', buildEditForm(user));
+  const form = row.nextElementSibling?.querySelector('.user-edit-form');
+  form?.addEventListener('submit', saveEditedUser);
+  row.nextElementSibling?.querySelector('.user-cancel-edit')?.addEventListener('click', closeEditRows);
+  form?.querySelector('[name="username"]')?.focus();
+}
+
+async function saveEditedUser(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = new FormData(form);
+  const payload = {
+    username: String(data.get('username') || '').trim(),
+    first_name: String(data.get('first_name') || '').trim(),
+    last_name: String(data.get('last_name') || '').trim(),
+    email: String(data.get('email') || '').trim(),
+    role: data.get('role'),
+    is_active: data.get('is_active') === 'true',
+  };
+  const password = String(data.get('password') || '');
+  if (password) payload.password = password;
+  try {
+    await api(`/api/users/${form.dataset.userId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+    setMessage('User updated.');
+    await loadUsers();
+  } catch (error) {
+    if (window.daygleAuth?.redirecting) return;
+    setMessage(error.message, true);
+  }
+}
+
+async function resetPassword(id) {
+  const password = window.prompt('Enter the new password:');
+  if (!password) return;
+  try {
+    await api(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify({ password }) });
+    setMessage('Password reset.');
+    await loadUsers();
+  } catch (error) {
+    if (window.daygleAuth?.redirecting) return;
+    setMessage(error.message, true);
+  }
+}
+
+async function toggleUser(id) {
+  const user = users.find((entry) => String(entry.id) === String(id));
+  if (!user) return;
+  try {
+    await api(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify({ is_active: !user.is_active }) });
+    setMessage(user.is_active ? 'User disabled.' : 'User enabled.');
+    await loadUsers();
+  } catch (error) {
+    if (window.daygleAuth?.redirecting) return;
+    setMessage(error.message, true);
+  }
+}
+
+function bindUserActions() {
+  usersEl.querySelectorAll('.user-edit-btn').forEach((button) => button.addEventListener('click', () => openEditUser(button.dataset.id)));
+  usersEl.querySelectorAll('.user-toggle-btn').forEach((button) => button.addEventListener('click', () => toggleUser(button.dataset.id)));
+  usersEl.querySelectorAll('.user-reset-btn').forEach((button) => button.addEventListener('click', () => resetPassword(button.dataset.id)));
 }
 
 async function loadUsers() {
-  // nav.js's daygleAuthReady IIFE has already populated window.daygleAuth.{user, csrfToken}.
   await window.daygleAuthReady;
-  renderUsers(await api('/api/users'));
+  users = await api('/api/users');
+  renderUsers();
 }
 
-usersEl.addEventListener('change', async (event) => {
-  if (event.target.dataset.action !== 'role') return;
-  try {
-    await api(`/api/users/${event.target.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ role: event.target.value }) });
-    setMessage('Role updated.');
-    await loadUsers();
-  } catch (error) {
-    if (window.daygleAuth?.redirecting) return;
-    setMessage(error.message, true);
-  }
-});
-
-usersEl.addEventListener('click', async (event) => {
-  const button = event.target.closest('button');
-  if (!button) return;
-  try {
-    if (button.dataset.action === 'toggle') {
-      await api(`/api/users/${button.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ is_active: button.dataset.active !== 'true' }) });
-      setMessage('User status updated.');
-    } else if (button.dataset.action === 'reset') {
-      const password = window.prompt('Enter the new password:');
-      if (!password) return;
-      await api(`/api/users/${button.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ password }) });
-      setMessage('Password reset.');
-    }
-    await loadUsers();
-  } catch (error) {
-    if (window.daygleAuth?.redirecting) return;
-    setMessage(error.message, true);
-  }
-});
-
-form.addEventListener('submit', async (event) => {
+createForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
-    const data = new FormData(form);
+    const data = new FormData(createForm);
     await api('/api/users', { method: 'POST', body: JSON.stringify(Object.fromEntries(data.entries())) });
-    form.reset();
+    closeCreateUser();
     setMessage('User created.');
     await loadUsers();
   } catch (error) {
@@ -99,12 +208,17 @@ form.addEventListener('submit', async (event) => {
   }
 });
 
-document.querySelectorAll('.field-help').forEach((el) => {
-  if (!el.title) el.title = el.textContent;
+addUserBtn?.addEventListener('click', openCreateUser);
+addUserEmptyBtn?.addEventListener('click', openCreateUser);
+cancelCreateBtn?.addEventListener('click', closeCreateUser);
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    closeEditRows();
+    if (!createCard.hidden) closeCreateUser();
+  }
 });
 
 loadUsers().catch((error) => {
-  // Skip UI updates if api() triggered a 401 redirect
   if (window.daygleAuth?.redirecting) return;
   setMessage(error.message, true);
 });

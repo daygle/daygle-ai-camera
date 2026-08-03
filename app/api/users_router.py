@@ -92,6 +92,14 @@ async def update_user(user_id: int, request: Request, db=Depends(get_database), 
     require_admin(request)
     payload = await request.json()
     changes: dict[str, Any] = {}
+    if 'username' in payload:
+        changes['username'] = payload['username']
+    if 'first_name' in payload:
+        changes['first_name'] = payload['first_name']
+    if 'last_name' in payload:
+        changes['last_name'] = payload['last_name']
+    if 'email' in payload:
+        changes['email'] = payload['email']
     if 'role' in payload:
         changes['role'] = payload['role']
     if 'is_active' in payload:
@@ -101,6 +109,10 @@ async def update_user(user_id: int, request: Request, db=Depends(get_database), 
     try:
         user = auth.update_user(
             user_id,
+            username=payload.get('username'),
+            first_name=payload.get('first_name'),
+            last_name=payload.get('last_name'),
+            email=payload.get('email'),
             role=payload.get('role'),
             is_active=payload.get('is_active'),
             password=payload.get('password'),

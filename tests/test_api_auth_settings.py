@@ -148,6 +148,35 @@ def test_logout_user_creation_and_password_reset(tmp_path, monkeypatch):
         status, _headers, updated = client.request(
             f"/api/users/{viewer['id']}",
             method="PATCH",
+            json_body={
+                "username": "viewer-renamed",
+                "first_name": "View",
+                "last_name": "Er",
+                "email": "viewer@example.com",
+                "role": "viewer",
+                "is_active": True,
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert updated["username"] == "viewer-renamed"
+        assert updated["first_name"] == "View"
+        assert updated["last_name"] == "Er"
+        assert updated["email"] == "viewer@example.com"
+        assert updated["role"] == "viewer"
+
+        status, _headers, invalid_update = client.request(
+            f"/api/users/{viewer['id']}",
+            method="PATCH",
+            json_body={"is_active": "false"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 400
+        assert "Account status must be true or false" in invalid_update["detail"]
+
+        status, _headers, updated = client.request(
+            f"/api/users/{viewer['id']}",
+            method="PATCH",
             json_body={"password": "Viewer456!", "role": "viewer", "is_active": True},
             headers={"X-CSRF-Token": csrf},
         )
@@ -160,7 +189,7 @@ def test_logout_user_creation_and_password_reset(tmp_path, monkeypatch):
         assert client.request("/api/status")[0] == 401
 
         viewer_client = LocalClient(base_url)
-        _login(viewer_client, "viewer", "Viewer456!")
+        _login(viewer_client, "viewer-renamed", "Viewer456!")
         assert viewer_client.request("/api/status")[0] == 200
         assert viewer_client.request("/api/users")[0] == 403
 

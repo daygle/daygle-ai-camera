@@ -816,7 +816,9 @@ async function playRecording(id) {
   try {
     els.clipPlayer.load();
     await els.clipPlayer.play();
-    els.clipPlayerStatus.textContent = `Playing recording #${id}.`;
+    // Successful playback is self-evident from the native video controls;
+    // reserve this line for preparation, loading, and error feedback.
+    els.clipPlayerStatus.textContent = '';
   } catch (error) {
     // <video>.play() media error (never an api() throw) - redirect guard skipped by design.
     if (['AbortError', 'NotAllowedError'].includes(error?.name)) {

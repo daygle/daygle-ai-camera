@@ -542,7 +542,7 @@ function renderDetectionStatus(summary) {
     if (objChips.length) {
       liveEls.visionBody.innerHTML = objChips.map((c) => detectionRowHtml(c.label, c.confidence, { alerted })).join('');
     } else if (summary.state === 'monitoring') {
-      // Confirmed empty check — the only case that earns the affirmative "Clear".
+      // Confirmed empty check - the only case that earns the affirmative "Clear".
       liveEls.visionBody.innerHTML = senseEmptyHtml('Clear - nothing in frame', { tick: true });
     } else if (summary.state === 'waiting') {
       liveEls.visionBody.innerHTML = senseEmptyHtml('Waiting for first detection…');
@@ -556,7 +556,7 @@ function renderDetectionStatus(summary) {
 
   // ── Hearing lane ─────────────────────────────────────────────
   // The inline all-cameras/error summaries carry no soundState, so the sound
-  // status is genuinely unknown there — don't fall back to a "Listening" claim.
+  // status is genuinely unknown there - don't fall back to a "Listening" claim.
   const hasSound = !!summary.soundState;
   if (liveEls.soundState) {
     liveEls.soundState.textContent = hasSound ? soundState.label : '-';

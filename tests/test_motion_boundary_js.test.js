@@ -101,6 +101,20 @@ test('recordingDetectionSummary: objects dedupe per label, keeping best confiden
   ]);
 });
 
+test('recordingDetectionSummary: includes labels added after the original event', () => {
+  // The event may contain only the trigger object, while an extended clip's
+  // recording_labels table contains later objects seen in the same footage.
+  const summary = recordingDetectionSummary({
+    labels: ['bird', 'cat'],
+    detections: [{ label: 'bird', confidence: 0.69 }],
+    label_confidences: { bird: 0.69, cat: 0.19 },
+  });
+  assert.deepEqual(plain(summary), [
+    { label: 'bird', confidence: 0.69 },
+    { label: 'cat', confidence: 0.19 },
+  ]);
+});
+
 test('recordingDetectionSummary: generic trigger labels are filtered out', () => {
   const summary = recordingDetectionSummary({
     labels: ['motion', 'person'],

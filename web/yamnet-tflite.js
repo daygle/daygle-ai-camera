@@ -222,11 +222,6 @@ function formatBytes(bytes) {
   return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
-function formatSha(sha) {
-  if (!sha) return 'unknown';
-  return sha.substring(0, 12) + '…';
-}
-
 let pendingUpdate = null;
 
 async function loadYamnetModelInfo() {
@@ -234,13 +229,47 @@ async function loadYamnetModelInfo() {
     const info = await api('/api/sound/model/info');
     if (!yamnetModelInfo) return;
     if (!info.available && !info.sha256) {
-      yamnetModelInfo.innerHTML = '<p class="muted">YAMNet model not yet downloaded. It will be downloaded automatically when sound detection is first enabled.</p>';
+      yamnetModelInfo.innerHTML = `
+        <div class="yamnet-model-empty">
+          <div class="yamnet-model-empty-icon" aria-hidden="true">∿</div>
+          <div class="yamnet-model-empty-copy">
+            <strong>Model not installed yet</strong>
+            <p class="muted">YAMNet will download automatically when sound detection is first enabled.</p>
+          </div>
+          <span class="yamnet-model-status-pill status-warning">Not installed</span>
+        </div>`;
       return;
     }
-    const sizeInfo = info.model_size ? ` · ${escapeHtml(formatBytes(info.model_size))}` : '';
-    const shaInfo = info.sha256 ? `SHA-256: ${escapeHtml(formatSha(info.sha256))}` : '';
     const installedAt = info.installed_at ? escapeHtml(new Date(info.installed_at).toLocaleDateString()) : '';
-    yamnetModelInfo.innerHTML = `<div class="yamnet-model-details"><span class="yamnet-model-status ${info.available ? 'status-ok' : 'status-warning'}">${info.available ? 'Model loaded' : 'Model not loaded'}</span>${sizeInfo}${shaInfo ? ` · ${shaInfo}` : ''}${installedAt ? ` · Installed ${installedAt}` : ''}</div>`;
+    const statusLabel = info.available ? 'Model loaded' : 'Model file found';
+    const statusClass = info.available ? 'status-ok' : 'status-warning';
+    const sizeText = info.model_size ? escapeHtml(formatBytes(info.model_size)) : 'Unknown';
+    const hashText = info.sha256 ? escapeHtml(info.sha256) : 'Not available';
+    const installedText = installedAt || 'Unknown';
+    yamnetModelInfo.innerHTML = `
+      <div class="yamnet-model-overview">
+        <div class="yamnet-model-state">
+          <span class="yamnet-model-orb ${statusClass}" aria-hidden="true"></span>
+          <div>
+            <span class="yamnet-model-status-pill ${statusClass}">${statusLabel}</span>
+            <p class="yamnet-model-caption">${info.available ? 'Ready for CPU audio classification.' : 'The file is present but the detector is not currently loaded.'}</p>
+          </div>
+        </div>
+        <div class="yamnet-model-specs">
+          <div class="yamnet-model-spec">
+            <span>File size</span>
+            <strong>${sizeText}</strong>
+          </div>
+          <div class="yamnet-model-spec">
+            <span>Installed</span>
+            <strong>${installedText}</strong>
+          </div>
+          <div class="yamnet-model-spec yamnet-model-spec-wide">
+            <span>SHA-256</span>
+            <code title="${hashText}">${hashText}</code>
+          </div>
+        </div>
+      </div>`;
   } catch (err) {
     if (window.daygleAuth?.redirecting) return;
     if (yamnetModelInfo) yamnetModelInfo.innerHTML = `<p class="muted">Could not load model info: ${escapeHtml(err.message)}</p>`;
@@ -258,13 +287,13 @@ async function checkYamnetUpdate() {
     } else if (result.update_available) {
       pendingUpdate = result;
       if (reloadYamnetModelBtn) {
-        reloadYamnetModelBtn.style.display = '';
+        reloadYamnetModelBtn.hidden = false;
         reloadYamnetModelBtn.textContent = `Update Model (${formatBytes(result.latest_size)})`;
       }
       window.showToast?.('A newer YAMNet model is available!');
     } else {
       pendingUpdate = null;
-      if (reloadYamnetModelBtn) reloadYamnetModelBtn.style.display = 'none';
+      if (reloadYamnetModelBtn) reloadYamnetModelBtn.hidden = true;
       window.showToast?.('YAMNet model is up to date.');
     }
   } catch (err) {
@@ -285,7 +314,7 @@ async function reloadYamnetModel() {
     const result = await api('/api/sound/model/reload', { method: 'POST' });
     if (result.ok) {
       pendingUpdate = null;
-      reloadYamnetModelBtn.style.display = 'none';
+      reloadYamnetModelBtn.hidden = true;
       window.showToast?.('YAMNet model updated successfully!');
       await loadYamnetModelInfo();
       await loadSoundStatus();
