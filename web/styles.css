@@ -3721,11 +3721,11 @@ a.activity-item-action {
 .live-stream-details-card {
   grid-column: 1 / -1;
 }
-/* Live-measured FPS indicator (Stream Details card): a small pulsing dot
-   plus a soft breathing animation on the value marks an FPS read from the
-   camera's stream (source 'detected') rather than a static configured rate.
-   The dot pulses in the success colour; the value itself eases between full
-   and 70% opacity so the reading reads as "live" without blinking. */
+/* Live-measured FPS indicator (Stream Details card): a small pulsing dot in a
+   rounded pill marks an FPS read from the camera's stream (source 'detected')
+   rather than a static configured rate, and the value itself eases between full
+   and 70% opacity so the reading reads as "live" without blinking. The pill
+   mirrors the "Live" monitor pill in the AI Detection Status card. */
 /* Scoped under .status-panel (0,2,0) so these beat the shared
    .status-panel span { display:block; color:var(--muted); font-size:12px }
    rule (0,1,1) that would otherwise flatten the pill to a stacked block. */
@@ -3734,30 +3734,23 @@ a.activity-item-action {
   align-items: center;
   gap: 6px;
   margin-top: 6px;
-  color: var(--success);
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--sense-lane-bg);
+  color: var(--muted);
   font-size: 11px;
-  font-weight: 800;
-  letter-spacing: .04em;
-  text-transform: uppercase;
+  font-weight: 700;
+  white-space: nowrap;
 }
 .status-panel .fps-live-dot {
   width: 7px;
   height: 7px;
   margin: 0; /* cancel the shared .status-panel span margin so the dot stays centered */
-  border-radius: 999px;
-  background: var(--success);
-  animation: fps-live-pulse 1.6s ease-in-out infinite;
-}
-@keyframes fps-live-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(73, 230, 163, 0.45); }
-  50% { box-shadow: 0 0 0 5px rgba(73, 230, 163, 0); }
-}
-:root.light .status-panel .fps-live-dot {
-  animation-name: fps-live-pulse-light;
-}
-@keyframes fps-live-pulse-light {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0.4); }
-  50% { box-shadow: 0 0 0 5px rgba(5, 150, 105, 0); }
+  border-radius: 50%;
+  background: var(--g-fg);
+  box-shadow: 0 0 0 0 rgba(73,230,163,.4);
+  animation: live-monitor-pulse 2.4s ease-out infinite;
 }
 .status-panel strong.fps-live {
   color: var(--success);

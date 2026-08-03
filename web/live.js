@@ -427,7 +427,7 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
     .sort((a, b) => b[1] - a[1])
     .map(([label, confidence]) => ({ label, confidence, isSound: false }));
   const labelStr = chips.length
-    ? chips.map((c) => c.confidence > 0 ? `${titleCase(c.label)} (${Math.round(c.confidence * 100)}%)` : titleCase(c.label)).join(', ')
+    ? chips.map((c) => c.confidence > 0 ? `${sentenceCase(c.label)} (${Math.round(c.confidence * 100)}%)` : sentenceCase(c.label)).join(', ')
     : null;
 
   if (payload.state === 'alerted') {
@@ -465,6 +465,14 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
   };
 }
 
+// Sentence case for text shown in the Vision/Hearing lanes: only the first
+// letter is capitalised, so multi-word detection labels read "Traffic light"
+// rather than the Title Case "Traffic Light".
+function sentenceCase(value) {
+  const s = String(value || '').replace(/[-_]+/g, ' ').trim();
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+}
+
 // Build one "detected item" row for a sense lane: label, a confidence meter,
 // and the percent. Zero-confidence readings (label known but no score, e.g.
 // from `detected_labels`) show the label alone with no meter.
@@ -476,7 +484,7 @@ function detectionRowHtml(label, confidence, { faint = false, alerted = false } 
   const pctHtml = hasPct ? `<span class="sense-det-pct">${pct}%</span>` : '';
   const meterHtml = hasPct ? `<span class="sense-meter"><i style="width:${pct}%"></i></span>` : '';
   return `<div class="${classes}">`
-    + `<span class="sense-det-label">${escapeHtml(titleCase(label))}</span>`
+    + `<span class="sense-det-label">${escapeHtml(sentenceCase(label))}</span>`
     + pctHtml + meterHtml
     + '</div>';
 }
@@ -535,7 +543,7 @@ function renderDetectionStatus(summary) {
       liveEls.visionBody.innerHTML = objChips.map((c) => detectionRowHtml(c.label, c.confidence, { alerted })).join('');
     } else if (summary.state === 'monitoring') {
       // Confirmed empty check — the only case that earns the affirmative "Clear".
-      liveEls.visionBody.innerHTML = senseEmptyHtml('Clear — nothing in frame', { tick: true });
+      liveEls.visionBody.innerHTML = senseEmptyHtml('Clear - nothing in frame', { tick: true });
     } else if (summary.state === 'waiting') {
       liveEls.visionBody.innerHTML = senseEmptyHtml('Waiting for first detection…');
     } else if (summary.state === 'skipped' || summary.state === 'error') {
@@ -551,7 +559,7 @@ function renderDetectionStatus(summary) {
   // status is genuinely unknown there — don't fall back to a "Listening" claim.
   const hasSound = !!summary.soundState;
   if (liveEls.soundState) {
-    liveEls.soundState.textContent = hasSound ? soundState.label : '—';
+    liveEls.soundState.textContent = hasSound ? soundState.label : '-';
     liveEls.soundState.className = 'sense-badge ' + (
       soundState.state === 'detected' ? 'sense-badge-heard' :
       soundState.state === 'disabled' ? 'sense-badge-off' :
@@ -566,7 +574,7 @@ function renderDetectionStatus(summary) {
     } else if (soundState.state === 'disabled') {
       liveEls.hearingBody.innerHTML = senseEmptyHtml('Sound detection disabled');
     } else {
-      liveEls.hearingBody.innerHTML = senseEmptyHtml('Quiet — listening', { tick: true });
+      liveEls.hearingBody.innerHTML = senseEmptyHtml('Quiet - listening', { tick: true });
     }
   }
 
