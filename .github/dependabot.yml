@@ -1,13 +1,23 @@
 # Dependabot configuration for daygle-ai-camera.
 #
 # Keeps `requirements.txt` and `.github/workflows/*.yml` up to date with a
-# weekly scan. Tight version ranges in requirements.txt (e.g. ultralytics
-# exact-pinned, opencv-python-headless capped at <6.0, onnxruntime capped at
-# <1.21 to keep Pascal/Tesla-P4 support, numpy capped at <2.3 to keep Python
-# 3.10 support) are respected by the default "increase" versioning strategy,
-# so Dependabot will only propose updates that already fall inside those ranges
-# -- anything outside them (e.g. an ultralytics 8.x.y bump, or an ORT release
-# that drops Pascal) stays a manual change and never lands as an auto-PR.
+# weekly scan.
+#
+# Two mechanisms keep Dependabot inside the versions this project can actually
+# run, and they are NOT interchangeable:
+#
+#   * A range ceiling (e.g. opencv-python-headless <6.0) only suppresses a PR
+#     while the newest release still falls inside the range. Once a newer
+#     release exists ABOVE the ceiling, Dependabot proposes rewriting the whole
+#     specifier up to it (e.g. numpy <2.3 -> >=2.5.1,<2.6) -- the ceiling in
+#     requirements.txt does not stop that.
+#   * An `ignore` rule below is therefore required for any dependency whose
+#     latest upstream release is deliberately out of reach. These are the hard
+#     stops that keep the Pascal/Tesla-P4 and Python-3.10 constraints from being
+#     bumped away by an auto-PR.
+#
+# Exact-pinned entries (ultralytics==...) need neither: the pin itself prevents
+# Dependabot from touching them.
 
 version: 2
 
@@ -30,11 +40,26 @@ updates:
     commit-message:
       prefix: "deps(pip)"
       include: "scope"
-    # Exact-pinned entries (ultralytics==8.4.107, etc.) are deliberately
-    # left for manual review per the supply-chain notes in requirements.txt
-    # -- no ignore rules needed; the pin already prevents Dependabot from
-    # touching them. Tight ranges such as bcrypt>=4.0,<6.0 likewise let
-    # Dependabot propose only safe interim bumps.
+    ignore:
+      # Hard stops (see the mechanism note at the top of this file). The
+      # requirements.txt ceilings alone do not prevent these -- Dependabot would
+      # otherwise rewrite the range up to the newest release, which is exactly
+      # the update we must not take.
+      #
+      # numpy 2.3 raises its floor to Python 3.11 and 2.5 to Python 3.12; this
+      # project still supports Python 3.10 (CI matrix). Hold below 2.3.
+      - dependency-name: "numpy"
+        versions: [">=2.3"]
+      # onnxruntime 1.21+ moves to a CUDA stack that drops Pascal (Tesla P4 /
+      # compute capability 6.1) support. Hold below 1.21 to match the
+      # onnxruntime-gpu>=1.18,<1.21 default in scripts/install_python_deps.sh.
+      - dependency-name: "onnxruntime"
+        versions: [">=1.21"]
+    # Exact-pinned entries (ultralytics==...) are deliberately left for manual
+    # review per the supply-chain notes in requirements.txt; the pin already
+    # prevents Dependabot from touching them. Tight ranges that stay below the
+    # newest release (e.g. bcrypt>=5.0,<6.0) still let Dependabot propose only
+    # safe interim bumps.
 
   # --- GitHub Actions ------------------------------------------------------
   - package-ecosystem: "github-actions"
