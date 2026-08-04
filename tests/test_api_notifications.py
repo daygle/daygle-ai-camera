@@ -71,8 +71,9 @@ def test_admin_can_send_test_alert_email(tmp_path, monkeypatch):
 
 def test_push_notification_title_lists_all_triggered_labels(monkeypatch):
     """A cat+person event must produce TWO push notifications (one per matching
-    rule), each with the title "Daygle AI Camera alert: Cat, Person Detected" and a body
-    that lists every triggered label."""
+    rule), each with the SAME layout as the alert email: title
+    "Daygle AI Camera Alert: Cat, Person Detected (Front Door)" and a body that
+    lists every triggered label."""
     from app.push_notifications import PushNotificationService
     import urllib.request
 
@@ -111,11 +112,15 @@ def test_push_notification_title_lists_all_triggered_labels(monkeypatch):
 
     assert len(captured) == 2, 'expected one push per matching rule'
     for entry in captured:
-        assert entry['title'] == 'Daygle AI Camera alert: Cat, Person Detected'
+        # Same title + body layout as the alert email (shared formatter).
+        assert entry['title'] == 'Daygle AI Camera Alert: Cat, Person Detected (Front Door)'
         assert 'All triggers: Cat, Person' in entry['body']
         assert 'Camera: Front Door' in entry['body']
         assert 'Detection Type: Object' in entry['body']
         assert 'Rule:' in entry['body']
+        # Title-cased message + Event ID line, matching the email body.
+        assert 'Cat Matched' in entry['body'] or 'Person Matched' in entry['body']
+        assert 'Event ID: 42' in entry['body']
         assert 'Object - ' not in entry['body']
         assert 'Detected at:' not in entry['body']
 

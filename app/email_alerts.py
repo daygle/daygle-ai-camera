@@ -12,6 +12,8 @@ from email.utils import formatdate, make_msgid
 from html import escape
 from typing import Any, Iterator
 
+from app.alert_formatting import build_alert_content
+
 
 class EmailAlertError(Exception):
     pass
@@ -90,87 +92,26 @@ class EmailAlertService:
         if not recipients or not self.configured():
             return
 
-        camera_name = str(camera_name or '').strip() or 'Unknown camera'
-        camera_display = camera_name
-        subject_suffix = f" ({camera_display})"
-
-        # Surface the full label set in the subject so a multi-object event
-        # (e.g. cat + person in one clip) reads as "Cat, Person detected".
-        # Falls back to the single alert label for back-compat.
-        ordered_labels: list[str] = []
-        if triggered_labels:
-            seen: set[str] = set()
-            for raw in triggered_labels:
-                label = str(raw or '').strip()
-                if not label:
-                    continue
-                key = label.lower()
-                if key in seen:
-                    continue
-                seen.add(key)
-                ordered_labels.append(label)
-        primary_label = str(alert.get('label', 'object') or 'object').strip() or 'object'
-        # Title-case for display (e.g. "Cat, Person") while keeping the original
-        # label strings intact for any downstream lookups. Replace underscores
-        # with spaces first so labels like "Cat_Meow" render as "Cat Meow".
-        display_labels = [label.replace('_', ' ').title() for label in ordered_labels]
-        display_primary = primary_label.replace('_', ' ').title() if primary_label else 'Object'
-        subject_label = ', '.join(display_labels) if display_labels else display_primary
-        subject = f"Daygle AI Camera Alert: {subject_label} Detected{subject_suffix}"
-        headline = subject_label
-        if ordered_labels and len(ordered_labels) > 1:
-            headline = f"{headline} Detected"
-        all_triggers_line = (
-            f"All triggers: {subject_label}" if ordered_labels and len(ordered_labels) > 1 else None
+        # Build the shared title + body so the email and the push notification
+        # stay byte-identical in layout (see app.alert_formatting).
+        content = build_alert_content(
+            alert,
+            event_id=event_id,
+            camera_name=camera_name,
+            triggered_labels=triggered_labels,
+            detected_at=detected_at,
         )
-        detected_at_display = str(detected_at).strip() if detected_at else None
-
-        # Determine detection type and parse display fields from the alert.
-        rule_name = str(alert.get('rule_name') or '').strip()
-        label_val = str(alert.get('label') or '').strip()
-        label_lower = label_val.lower()
-
-        zone_name = ''
-        detection_type = 'Object'
-        if label_lower == 'motion':
-            detection_type = 'Motion'
-        elif '_' in label_lower and not label_lower.startswith(('car', 'person', 'truck')):
-            detection_type = 'Sound'
-
-        # Extract zone/label from the canonical "Camera / Zone / Label" rule name.
-        if ' / ' in rule_name:
-            parts = rule_name.split(' / ')
-            if len(parts) >= 2:
-                zone_name = parts[1].strip()
-            if len(parts) >= 3 and not label_val:
-                label_val = parts[-1].strip()
-
-        if not label_val:
-            label_val = detection_type
-
-        rule_display = label_val.replace('_', ' ').title()
-
-        # Title-case the alert message for cleaner display
-        raw_message = str(alert.get("message") or "Alert triggered.")
-        alert_message = raw_message.title()
-        plain_lines = [
-            alert_message,
-            "",
-            f"Camera: {camera_display}",
-        ]
-        if zone_name:
-            plain_lines.append(f"Zone: {zone_name}")
-        plain_lines.append(f"Detection Type: {detection_type}")
-        plain_lines.append(f"Rule: {rule_display}")
-        if detected_at_display:
-            plain_lines.append(f"Detected: {detected_at_display}")
-        if all_triggers_line:
-            plain_lines.append(all_triggers_line)
-        plain_lines.extend([
-            f"Confidence: {float(alert.get('confidence') or 0):.2%}",
-            f"Event ID: {event_id}",
-        ])
-        plain_text = "\n".join(plain_lines)
+        subject = content.subject
+        headline = content.headline
+        subject_label = content.subject_label
+        camera_display = content.camera_display
+        zone_name = content.zone_name
+        detection_type = content.detection_type
+        rule_display = content.rule_display
+        detected_at_display = content.detected_at_display
+        all_triggers_line = content.all_triggers_line
+        alert_message = content.alert_message
+        plain_text = content.plain_text
 
         cid = f"snapshot_{event_id}"
         img_tag = (

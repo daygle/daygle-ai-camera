@@ -7,6 +7,8 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from app.alert_formatting import build_alert_content
+
 
 class PushNotificationError(Exception):
     pass
@@ -54,57 +56,19 @@ class PushNotificationService:
         if not self.configured():
             return
 
-        camera_name = str(camera_name or '').strip() or None
-        camera_id = str(camera_id or '').strip() or None
-        camera_bits = [bit for bit in (camera_name, camera_id) if bit]
-        camera_line = ' / '.join(camera_bits) if camera_bits else 'Unknown camera'
-
-        # Surface the full label set in the title so a multi-object event
-        # (e.g. cat + person in one clip) reads as "Cat, Person detected".
-        # Falls back to the single alert label for back-compat.
-        ordered_labels: list[str] = []
-        if triggered_labels:
-            seen: set[str] = set()
-            for raw in triggered_labels:
-                label = str(raw or '').strip()
-                if not label:
-                    continue
-                key = label.lower()
-                if key in seen:
-                    continue
-                seen.add(key)
-                ordered_labels.append(label)
-        primary_label = str(alert.get('label', 'object') or 'object').strip() or 'object'
-        display_labels = [label.replace('_', ' ').title() for label in ordered_labels]
-        display_primary = primary_label.replace('_', ' ').title()
-        subject_label = ', '.join(display_labels) if display_labels else display_primary
-        title = f"Daygle AI Camera alert: {subject_label} Detected"
-
-        detected_at_display = str(detected_at).strip() if detected_at else None
-
-        label_val = str(alert.get('label') or '').strip()
-        label_lower = label_val.lower()
-        detection_type = 'Object'
-        if label_lower == 'motion':
-            detection_type = 'Motion'
-        elif '_' in label_lower and not label_lower.startswith(('car', 'person', 'truck')):
-            detection_type = 'Sound'
-
-        rule_display = label_val.replace('_', ' ').title() if label_val else detection_type
-
-        body_lines = [
-            str(alert.get("message") or "Alert triggered."),
-            f"Camera: {camera_line}",
-            f"Detection Type: {detection_type}",
-            f"Rule: {rule_display}",
-        ]
-        if detected_at_display:
-            body_lines.append(f"Detected: {detected_at_display}")
-        if display_labels and len(display_labels) > 1:
-            body_lines.append(f"All triggers: {subject_label}")
-        body_lines.append(f"Confidence: {float(alert.get('confidence') or 0):.2%}")
-        body = "\n".join(body_lines)
-        self._deliver(title, body)
+        # Use the shared formatter so the push notification matches the email
+        # alert exactly - same title (with camera), title-cased message, and the
+        # same Camera / Zone / Detection Type / Rule / Detected / All triggers /
+        # Confidence / Event ID body. ``camera_id`` is accepted for call-site
+        # compatibility but, like email, the body shows only the camera name.
+        content = build_alert_content(
+            alert,
+            event_id=event_id,
+            camera_name=camera_name,
+            triggered_labels=triggered_labels,
+            detected_at=detected_at,
+        )
+        self._deliver(content.subject, content.plain_text)
 
     def send_test(self) -> None:
         if not self.configured():
