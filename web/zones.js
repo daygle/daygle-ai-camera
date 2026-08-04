@@ -251,7 +251,7 @@ function renderZones() {
   liveEls.zoneOverlay.innerHTML = zones.map((zone, index) => (zone.enabled === false ? '' : renderZoneBox(zone, index))).join('');
   updateZonesStats();
   if (!zones.length) {
-    liveEls.zoneList.innerHTML = '<div class="empty">No zone areas yet. Click "Draw Area", place corner dots on the footage, then click the first dot to close the area.</div>';
+    liveEls.zoneList.innerHTML = '<div class="empty">No Zone Areas yet. Click "Draw Area", place corner dots on the footage, then click the first dot to close the area.</div>';
     renderObjectDetectionRules();
     return;
   }
@@ -262,7 +262,7 @@ function renderZones() {
           ${ICONS.edit}
           <input data-zone-name="${index}" value="${escapeHtml(zone.name || `Zone ${index + 1}`)}" placeholder="Zone name…" aria-label="Name for ${escapeHtml(zone.name || `Zone ${index + 1}`)}" />
         </div>
-        <label><span>Zone</span><select data-zone-enabled="${index}"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Shown</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
+        <label class="zone-visibility-field"><span>Visibility</span><select data-zone-enabled="${index}" aria-label="Zone visibility"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Shown</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
         <button class="btn-danger zone-action-btn" type="button" data-delete-zone="${index}">${ICONS.remove}Remove</button>
       </div>
     </div>
@@ -277,7 +277,7 @@ function renderObjectDetectionRules() {
   if (!selectedCamera) { container.innerHTML = ''; return; }
   const zones = cameraDetection().zones;
   if (!zones.length) {
-    container.innerHTML = '<p class="muted empty-message">No zone areas configured. Draw an area above first.</p>';
+    container.innerHTML = '<p class="muted empty-message">No Zone Areas configured. Draw an area above first.</p>';
     return;
   }
   container.innerHTML = zones.map((zone, zoneIndex) => {
@@ -289,7 +289,7 @@ function renderObjectDetectionRules() {
       : '<p class="muted empty-message">No rules yet. Add an object below.</p>';
     return `
       <div class="zone-object-rules" data-zone-rules-for="${zoneIndex}">
-        <div class="zone-name-card">${zoneName}</div>
+        <div class="zone-name-card"><span class="zone-name-kicker">Area</span><strong>${zoneName}</strong></div>
         <div class="zone-object-rules-header">
           <select data-add-zone-rule="${zoneIndex}" class="rule-add-select">${addOptions}</select>
         </div>

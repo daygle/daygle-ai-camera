@@ -5514,12 +5514,12 @@ button.secondary:disabled, a.secondary:disabled {
 .zones-stats .stat-card { padding: 17px 18px 18px; border-radius: 18px; box-shadow: 0 12px 32px rgba(0,0,0,.16); }
 .zones-stats .stat-card-value { margin-top: 8px; font-size: 28px; }
 .zones-stats .stat-card-icon { width: 30px; height: 30px; border-radius: 10px; }
-.zones-stats .stat-card-camera .stat-card-icon { color: var(--success); background: rgba(73,230,163,.1); }
+.zones-stats .stat-card-camera .stat-card-icon { color: var(--accent); background: rgba(71,214,255,.08); }
 
 .zones-layout {
   grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr);
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
 }
 .zones-layout .zone-rules-card { grid-column: 1 / -1; }
 .zones-frame-card,
@@ -5545,6 +5545,13 @@ button.secondary:disabled, a.secondary:disabled {
 
 .zone-settings-card,
 .zone-rules-card { padding: 20px; }
+.zone-settings-card {
+  display: flex;
+  flex-direction: column;
+}
+.zone-settings-card .live-detection-status {
+  margin-top: auto;
+}
 .zones-section-header { margin-bottom: 16px; padding-bottom: 15px; }
 .zones-section-header .settings-section-icon { width: 38px; height: 38px; border-radius: 11px; color: var(--accent); font-size: 22px; }
 .zones-section-header h2 { font-size: 19px; letter-spacing: -.02em; }
@@ -5566,6 +5573,7 @@ button.secondary:disabled, a.secondary:disabled {
 .zone-name-field input { min-height: 42px; border-radius: 11px; font-weight: 750; }
 .zone-row-main label { gap: 5px; }
 .zone-row-main label > span { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+.zone-row-main .zone-visibility-field > span { color: var(--muted); background: transparent; }
 .zone-row-main label select { min-height: 42px; border-radius: 11px; }
 .zone-action-btn { min-height: 42px; padding: 10px 12px; border-radius: 11px; }
 .live-detection-status { margin-top: 13px; padding: 11px 12px; border-radius: 12px; font-size: 11px; }
@@ -5578,8 +5586,38 @@ button.secondary:disabled, a.secondary:disabled {
 .zones-rules-tip strong { color: var(--text); }
 .zones-tip-icon { display: grid; place-items: center; flex: 0 0 auto; width: 18px; height: 18px; border: 1px solid rgba(71,214,255,.45); border-radius: 999px; color: var(--accent); font-size: 11px; font-weight: 900; }
 .zone-object-rules { margin-bottom: 20px; padding: 14px; border: 1px solid var(--border); border-radius: 17px; background: rgba(255,255,255,.018); }
-.zone-name-card { margin: 0; padding: 0 0 11px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--text); font-size: 14px; }
-.zone-name-card::before { content: 'AREA'; display: block; margin-bottom: 4px; color: var(--accent); font-size: 9px; font-weight: 900; letter-spacing: .1em; }
+.zone-name-card {
+  display: grid;
+  gap: 4px;
+  align-items: start;
+  margin: 0;
+  padding: 0 0 11px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+}
+.zone-name-card::before { content: none; display: none; }
+.zone-name-kicker {
+  display: block;
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .1em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+.zone-name-card strong {
+  display: block;
+  min-width: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 850;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
 .zone-object-rules-header { margin: 12px 0 9px; justify-content: space-between; }
 .zone-object-rules-header::before { content: 'What should this area watch for?'; color: var(--muted); font-size: 12px; font-weight: 700; }
 .zone-object-rules-header select { max-width: 230px; min-height: 40px; border-radius: 11px; }
