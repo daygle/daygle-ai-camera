@@ -390,6 +390,7 @@ class RecordingsMixin:
         params = [int(rid) for rid in recording_ids]
         db.execute(f"DELETE FROM recording_labels WHERE recording_id IN ({placeholders})", params)
         db.execute(f"UPDATE alert_history SET recording_id = NULL WHERE recording_id IN ({placeholders})", params)
+        db.execute(f"UPDATE events SET recording_id = NULL WHERE recording_id IN ({placeholders})", params)
 
     def cleanup_incomplete_recordings(self) -> list[dict[str, Any]]:
         """Delete recordings whose files were never written (e.g. service restarted mid-capture)."""
@@ -417,6 +418,7 @@ class RecordingsMixin:
             # the label join table and detach any alert_history rows first.
             db.execute("DELETE FROM recording_labels")
             db.execute("UPDATE alert_history SET recording_id = NULL")
+            db.execute("UPDATE events SET recording_id = NULL")
             db.execute("DELETE FROM recordings")
             return [dict(row) for row in rows]
 
@@ -521,6 +523,8 @@ class RecordingsMixin:
                 event["metadata"] = json.loads(event.get("metadata") or "{}")
                 recording["event"] = event
             recording["detections"] = [dict(detection) for detection in detections]
+        # A recording spans many events: attach every event linked to this clip.
+        recording["events"] = self._events_for_recordings(db, [int(recording["id"])]).get(int(recording["id"]), [])
         return recording
 
     def _assemble_recordings(self, db: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
@@ -531,6 +535,7 @@ class RecordingsMixin:
         recording_ids = [int(r['id']) for r in recordings]
 
         labels_map, confidences_map = self._fetch_labels_for_recordings(db, recording_ids)
+        events_by_recording = self._events_for_recordings(db, recording_ids)
 
         event_ids = [int(r['event_id']) for r in recordings if r.get('event_id') is not None]
         events_map: dict[int, Any] = {}
@@ -558,11 +563,47 @@ class RecordingsMixin:
             recording['label_confidences'] = confidences_map.get(int(recording['id']), {})
             recording['event'] = None
             recording['detections'] = []
+            recording['events'] = events_by_recording.get(int(recording['id']), [])
             if recording.get('event_id') is not None:
                 eid = int(recording['event_id'])
                 recording['event'] = events_map.get(eid)
                 recording['detections'] = detections_map.get(eid, [])
         return recordings
+
+    @staticmethod
+    def _events_for_recordings(
+        db: sqlite3.Connection, recording_ids: list[int]
+    ) -> dict[int, list[dict[str, Any]]]:
+        """Return the events linked to each recording (recording -> many events).
+
+        Events are ordered oldest-first (the order they occurred within the clip)
+        and each carries its own detections. Used to expose ``recording['events']``
+        so the recordings list can show every object/sound the clip contains.
+        """
+        if not recording_ids:
+            return {}
+        placeholders = ','.join('?' * len(recording_ids))
+        event_rows = db.execute(
+            f"SELECT * FROM events WHERE recording_id IN ({placeholders}) ORDER BY created_at ASC, id ASC",
+            [int(rid) for rid in recording_ids],
+        ).fetchall()
+        if not event_rows:
+            return {}
+        event_ids = [int(row['id']) for row in event_rows]
+        det_placeholders = ','.join('?' * len(event_ids))
+        detections_by_event: dict[int, list[dict[str, Any]]] = {}
+        for det_row in db.execute(
+            f"SELECT * FROM detections WHERE event_id IN ({det_placeholders}) ORDER BY confidence DESC",
+            event_ids,
+        ).fetchall():
+            detections_by_event.setdefault(int(det_row['event_id']), []).append(dict(det_row))
+        grouped: dict[int, list[dict[str, Any]]] = {}
+        for row in event_rows:
+            event = dict(row)
+            event['metadata'] = json.loads(event.get('metadata') or '{}')
+            event['detections'] = detections_by_event.get(int(event['id']), [])
+            grouped.setdefault(int(row['recording_id']), []).append(event)
+        return grouped
 
     @staticmethod
     def _fetch_labels_for_recordings(

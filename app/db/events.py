@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections import defaultdict
 from typing import Any
 
+from app.detection_status import GENERIC_TRIGGER_LABELS
 from app.utils import _normalize_iso_to_utc
 
 
@@ -23,6 +25,7 @@ class EventsMixin:
         detections: list[dict[str, Any]],
         alert_triggered: bool = False,
         metadata: dict[str, Any] | None = None,
+        recording_id: int | None = None,
     ) -> int:
         # Coerce ``created_at`` to canonical UTC ``+00:00`` before binding
         # so the storage form is consistent across every event row. There is
@@ -36,10 +39,10 @@ class EventsMixin:
         with self.connect() as db:
             cursor = db.execute(
                 """
-                INSERT INTO events (created_at, source, snapshot_path, alert_triggered, metadata)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO events (created_at, source, snapshot_path, alert_triggered, recording_id, metadata)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (created_at, source, snapshot_path, int(alert_triggered), json.dumps(metadata or {})),
+                (created_at, source, snapshot_path, int(alert_triggered), recording_id, json.dumps(metadata or {})),
             )
             if cursor.lastrowid is None:
                 raise RuntimeError("Failed to create event row")
@@ -63,6 +66,120 @@ class EventsMixin:
                     ),
                 )
             return event_id
+
+    def set_event_recording(self, event_id: int, recording_id: int | None) -> bool:
+        """Stamp an event with the recording (clip) it belongs to.
+
+        A recording spans many events, so the live-detection path creates the
+        event first (with the snapshot) and then, once the clip is resolved by
+        ``attach_event_recording``, links it back here. Idempotent.
+        """
+        with self.connect() as db:
+            cursor = db.execute(
+                "UPDATE events SET recording_id = ? WHERE id = ?",
+                (int(recording_id) if recording_id is not None else None, int(event_id)),
+            )
+            return cursor.rowcount > 0
+
+    def backfill_event_recording_links(self, db: sqlite3.Connection | None = None) -> int:
+        """One-shot migration: populate ``events.recording_id`` for installs
+        upgrading from the pre-link schema, then re-aggregate each recording's
+        object labels from ALL of its linked events.
+
+        Non-destructive: only fills rows where ``recording_id`` is NULL and never
+        deletes or merges recording rows/media. Safe to call on every ``init()``
+        - it is a no-op once every event that can be linked has been.
+
+        Cross-mixin helper ``_insert_recording_labels`` is reached via MRO
+        (EventDatabase inherits both EventsMixin and RecordingsMixin).
+        """
+        own = db is None
+        if own:
+            with self.connect() as conn:
+                return self.backfill_event_recording_links(conn)
+        # 1) The recording's declared "primary" event.
+        db.execute(
+            """
+            UPDATE events
+            SET recording_id = (
+                SELECT r.id FROM recordings r
+                WHERE r.event_id = events.id
+                ORDER BY r.id ASC LIMIT 1
+            )
+            WHERE recording_id IS NULL
+              AND EXISTS (SELECT 1 FROM recordings r WHERE r.event_id = events.id)
+            """
+        )
+        # 2) An event that fired an alert tied to a recording.
+        db.execute(
+            """
+            UPDATE events
+            SET recording_id = (
+                SELECT ah.recording_id FROM alert_history ah
+                WHERE ah.event_id = events.id AND ah.recording_id IS NOT NULL
+                ORDER BY ah.id ASC LIMIT 1
+            )
+            WHERE recording_id IS NULL
+              AND EXISTS (
+                SELECT 1 FROM alert_history ah
+                WHERE ah.event_id = events.id AND ah.recording_id IS NOT NULL
+              )
+            """
+        )
+        # 3) Time-window overlap on the same camera: an event whose created_at
+        #    falls inside a recording's [started_at, ended_at] and whose camera
+        #    matches is treated as belonging to that clip. Conservative - the
+        #    camera predicate rejects a recording that names a camera the event
+        #    does not, and only NULL links are filled.
+        window_predicate = """
+            events.created_at >= r.started_at
+            AND events.created_at <= COALESCE(r.ended_at, r.started_at)
+            AND (
+                r.camera_id IS NULL
+                OR r.camera_id = json_extract(events.metadata, '$.camera_id')
+            )
+        """
+        db.execute(
+            f"""
+            UPDATE events
+            SET recording_id = (
+                SELECT r.id FROM recordings r
+                WHERE {window_predicate}
+                ORDER BY r.started_at DESC, r.id DESC LIMIT 1
+            )
+            WHERE recording_id IS NULL
+              AND EXISTS (SELECT 1 FROM recordings r WHERE {window_predicate})
+            """
+        )
+        linked = db.execute(
+            "SELECT COUNT(*) AS c FROM events WHERE recording_id IS NOT NULL"
+        ).fetchone()["c"]
+        # Re-aggregate recording_labels from every linked event's detections so
+        # the recordings list shows all objects across the clip, not just those
+        # from its primary event. Generic markers (motion/alert/...) are skipped
+        # to mirror ``backfill_recording_labels``.
+        rows = db.execute(
+            """
+            SELECT e.recording_id AS recording_id, d.label AS label, MAX(d.confidence) AS confidence
+            FROM events e
+            JOIN detections d ON d.event_id = e.id
+            WHERE e.recording_id IS NOT NULL
+            GROUP BY e.recording_id, d.label
+            """
+        ).fetchall()
+        by_rec_labels: dict[int, list[str]] = defaultdict(list)
+        by_rec_conf: dict[int, dict[str, float]] = defaultdict(dict)
+        for row in rows:
+            label = str(row["label"] or "").strip().lower()
+            if not label or label in GENERIC_TRIGGER_LABELS:
+                continue
+            rid = int(row["recording_id"])
+            by_rec_labels[rid].append(label)
+            if row["confidence"] is not None:
+                by_rec_conf[rid][label] = float(row["confidence"])
+        for rid, labels in by_rec_labels.items():
+            self._insert_recording_labels(db, rid, labels, source="backfill", confidences=by_rec_conf.get(rid))
+        return int(linked)
 
     @staticmethod
     def _purge_event_children(db: sqlite3.Connection, event_ids: list[int]) -> None:
@@ -122,7 +239,8 @@ class EventsMixin:
             """
             recording_condition = """
                 (
-                    EXISTS (SELECT 1 FROM recordings WHERE recordings.event_id = e.id)
+                    EXISTS (SELECT 1 FROM recordings WHERE recordings.id = e.recording_id)
+                    OR EXISTS (SELECT 1 FROM recordings WHERE recordings.event_id = e.id)
                     OR EXISTS (
                         SELECT 1
                         FROM alert_history ah
@@ -307,6 +425,7 @@ class EventsMixin:
             SELECT DISTINCT r.*
             FROM recordings r
             WHERE r.event_id = ?
+               OR r.id = ?
                OR r.id IN (
                     SELECT ah.recording_id
                     FROM alert_history ah
@@ -315,11 +434,20 @@ class EventsMixin:
                )
             ORDER BY r.started_at DESC
             """,
-            (row["id"], row["id"]),
+            (row["id"], row["recording_id"], row["id"]),
         ).fetchall()
+        # The 1:1 alert for this event (if a rule fired). ``alert_history`` can
+        # hold more than one row when several rules match the same event; expose
+        # the strongest as the event's alert to match the "alert : event = 1:1"
+        # model the UI presents.
+        alert_row = db.execute(
+            "SELECT * FROM alert_history WHERE event_id = ? ORDER BY confidence DESC, id ASC LIMIT 1",
+            (row["id"],),
+        ).fetchone()
         event = dict(row)
         event["metadata"] = json.loads(event.get("metadata") or "{}")
         event["detections"] = [dict(detection) for detection in detections]
+        event["alert"] = dict(alert_row) if alert_row else None
         event["recordings"] = [self._recording_row(recording) for recording in recordings]
         if event["recordings"]:
             label_map, confidence_map = self._fetch_labels_for_recordings(db, [int(rec["id"]) for rec in event["recordings"]])

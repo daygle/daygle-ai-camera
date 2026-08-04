@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<script>(function(){var t=localStorage.getItem("daygle.theme");if(t)document.documentElement.classList.add(t);})()</script>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Events - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell page-stack">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Monitoring</p>
+        <h1>Events</h1>          <p class="muted">Every detection as it happened - one row per object or sound. Each event links to the recording it belongs to; an alert is the notification fired for an event.</p>
+      </div>
+    </header>
+
+    <section class="grid stats-grid alerts-stats">
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Total Events</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+          </span>
+        </div>
+        <strong id="statTotalEvents" class="stat-card-value">0</strong>
+        <small class="muted stat-card-sub">Detections in range</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Object Events</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg>
+          </span>
+        </div>
+        <strong id="statObjectEvents" class="stat-card-value">0</strong>
+        <small class="muted stat-card-sub">Object detections</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Sound Events</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+          </span>
+        </div>
+        <strong id="statSoundEvents" class="stat-card-value">0</strong>
+        <small class="muted stat-card-sub">Sound detections</small>
+      </article>
+    </section>
+
+    <section class="card activity-card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">📡</div>
+        <div>
+          <h2>Event Feed</h2>
+          <p class="settings-section-subtitle">Granular detection events across all cameras. Each row links to its recording; review the 1:1 alert on the Alerts page.</p>
+        </div>
+      </div>
+
+      <div class="activity-filter-row">
+        <div class="activity-filter-group" role="tablist" aria-label="Filter events">
+          <button class="activity-filter-pill active" data-filter="all" type="button" role="tab" aria-selected="true">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg> All
+          </button>
+          <button class="activity-filter-pill" data-filter="object" type="button" role="tab" aria-selected="false">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/></svg> Object
+          </button>
+          <button class="activity-filter-pill" data-filter="motion" type="button" role="tab" aria-selected="false">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="m4 19.5 4-4.5 1.5 4 5.5-3-2-7 4-3"/></svg> Motion
+          </button>
+          <button class="activity-filter-pill" data-filter="sound" type="button" role="tab" aria-selected="false">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg> Sound
+          </button>
+        </div>
+        <span id="listStatus" class="result-badge" aria-live="polite"></span>
+        <div class="activity-range-group" role="tablist" aria-label="Time range">
+          <button class="activity-filter-pill active" data-range="today" type="button" role="tab" aria-selected="true">Today</button>
+          <button class="activity-filter-pill" data-range="7d" type="button" role="tab" aria-selected="false">7d</button>
+          <button class="activity-filter-pill" data-range="30d" type="button" role="tab" aria-selected="false">30d</button>
+          <button class="activity-filter-pill" data-range="all" type="button" role="tab" aria-selected="false">All</button>
+        </div>
+      </div>
+
+      <div id="eventFeed" class="list activity-list" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <script src="/static/nav.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/events.js"></script>
+</body>
+</html>

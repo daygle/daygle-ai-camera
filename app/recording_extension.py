@@ -546,6 +546,9 @@ def attach_event_recording(
             recording_config=recording_config, detections=detections,
         )
         if extended_recording_id is not None:
+            # A recording spans many events: link this event to the active clip
+            # so one continuous scene stays one recording carrying all its events.
+            _state.database.set_event_recording(event_id, extended_recording_id)
             return extended_recording_id
     metadata = _state.recording_service.event_recording_metadata(
         event_id, event_time, source, detections,
@@ -562,6 +565,8 @@ def attach_event_recording(
         label_confidences=detection_label_confidences(detections) or None,
         **metadata,
     )
+    # Link the triggering event to the clip it opened (recording -> many events).
+    _state.database.set_event_recording(event_id, recording_id)
     if stream_url:
         start_rtsp_recording_capture(
             stream_url, metadata, event_id, detections,

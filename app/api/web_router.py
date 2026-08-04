@@ -12,7 +12,9 @@ Routes:
 - GET  /zones         -- zones_page
 - GET  /sounds        -- sounds_page
 - GET  /cameras       -- cameras_page
-- GET  /alerts /events /search -- dashboard_aliases
+- GET  /alerts        -- alerts_page
+- GET  /events        -- events_page
+- GET  /search        -- dashboard_aliases
 - GET  /recordings    -- recordings_page
 - GET  /recordings/timeline -- recordings_timeline_page
 - GET  /onnx          -- onnx_page
@@ -230,6 +232,17 @@ def alerts_page(request: Request, web_dir: Path = Depends(get_web_dir)):
 
 
 @router.get('/events')
+def events_page(web_dir: Path = Depends(get_web_dir)):
+    # Granular detection events (one row per occurrence), distinct from the
+    # /alerts feed (the 1:1 alert per event) and /recordings (the clips). Served
+    # to any authenticated user like /recordings; the middleware enforces the
+    # session and /api/events applies per-user recording scoping.
+    events_path = web_dir / 'events.html'
+    if events_path.exists():
+        return FileResponse(events_path)
+    return root(web_dir=web_dir)
+
+
 @router.get('/search')
 def dashboard_aliases(web_dir: Path = Depends(get_web_dir)):
     return root(web_dir=web_dir)

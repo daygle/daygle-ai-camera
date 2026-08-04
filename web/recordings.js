@@ -382,6 +382,12 @@ function renderRecordings(recordings) {
     } else {
       badges = recordingDetectionSummary(recording).map((d) => detectionPill(d.label, d.confidence, isSound)).join('') || '<span class="muted">No detections</span>';
     }
+    // A recording spans many events - surface the count so it reads as one
+    // clip containing several detections rather than looking duplicated.
+    const eventCount = Array.isArray(recording.events) ? recording.events.length : 0;
+    if (eventCount > 1) {
+      badges += `<span class="detection detection-object" title="This recording spans ${eventCount} events">${eventCount} events</span>`;
+    }
     const actions = [
       mediaReady
         ? `<button class="secondary activity-item-action" data-play-recording="${recording.id}" type="button" aria-label="Play recording #${recording.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg><span class="activity-action-label">Play</span></button>`
