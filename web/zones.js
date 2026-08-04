@@ -262,7 +262,10 @@ function renderZones() {
           ${ICONS.edit}
           <input data-zone-name="${index}" value="${escapeHtml(zone.name || `Zone ${index + 1}`)}" placeholder="Zone name…" aria-label="Name for ${escapeHtml(zone.name || `Zone ${index + 1}`)}" />
         </div>
-        <label class="zone-visibility-field"><span>Visibility</span><select data-zone-enabled="${index}" aria-label="Zone visibility"><option value="true" ${zone.enabled !== false ? 'selected' : ''}>Shown</option><option value="false" ${zone.enabled === false ? 'selected' : ''}>Hidden</option></select></label>
+        <div class="zone-visibility-field">
+          <span>Visibility</span>
+          <button class="secondary zone-visibility-toggle ${zone.enabled !== false ? 'is-shown' : 'is-hidden'}" type="button" data-zone-enabled="${index}" aria-label="${zone.enabled !== false ? 'Hide' : 'Show'} ${escapeHtml(zone.name || `Zone ${index + 1}`)} area" aria-pressed="${zone.enabled !== false}">${zone.enabled !== false ? 'Shown' : 'Hidden'}</button>
+        </div>
         <button class="btn-danger zone-action-btn" type="button" data-delete-zone="${index}">${ICONS.remove}Remove</button>
       </div>
     </div>
@@ -408,10 +411,10 @@ function bindZoneControls(zones) {
       markZoneUnsaved();
     });
   });
-  document.querySelectorAll('[data-zone-enabled]').forEach((select) => {
-    select.addEventListener('change', () => {
-      selectedZoneIndex = Number(select.dataset.zoneEnabled);
-      zones[selectedZoneIndex].enabled = select.value === 'true';
+  document.querySelectorAll('[data-zone-enabled]').forEach((button) => {
+    button.addEventListener('click', () => {
+      selectedZoneIndex = Number(button.dataset.zoneEnabled);
+      zones[selectedZoneIndex].enabled = zones[selectedZoneIndex].enabled === false;
       renderZones();
       refreshFrame();
       markZoneUnsaved();
