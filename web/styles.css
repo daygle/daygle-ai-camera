@@ -5566,7 +5566,7 @@ button.secondary:disabled, a.secondary:disabled {
   white-space: nowrap;
 }
 .zone-card-action-buttons button svg { flex: 0 0 auto; }
-.zone-card-action-buttons .btn-info { color: #fff; }
+.zone-card-action-buttons > button.btn-info { color: #fff; }
 .zone-row-main { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
 .zone-name-field { grid-column: 1 / -1; gap: 7px; }
 .zone-name-field input { min-height: 42px; border-radius: 11px; font-weight: 750; }
@@ -5574,7 +5574,15 @@ button.secondary:disabled, a.secondary:disabled {
 .zone-row-main label > span { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
 .zone-row-main .zone-visibility-field > span { color: var(--muted); background: transparent; }
 .zone-row-main label select { min-height: 42px; border-radius: 11px; }
-.zone-action-btn { grid-column: 2; grid-row: 2; min-height: 42px; padding: 10px 12px; border-radius: 11px; }
+.zone-action-btn {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: end;
+  height: 42px;
+  min-height: 42px;
+  padding: 10px 12px;
+  border-radius: 11px;
+}
 .zone-visibility-field { display: grid; grid-column: 1; grid-row: 2; gap: 5px; min-width: 0; }
 .zone-visibility-field > span { color: var(--muted); font-size: 10px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
 .zone-visibility-toggle {
