@@ -135,6 +135,13 @@ class UpdateScriptOriginGuardTests(unittest.TestCase):
         text = script.read_text()
         self.assertIn('scripts/install_cloudflared.sh', text)
 
+    def test_cloudflared_helper_is_invoked_through_bash(self):
+        """The helper must work even when an update loses its executable bit."""
+        installer_text = (Path(REPO_DIR) / 'scripts' / 'install_debian.sh').read_text()
+        updater_text = (Path(REPO_DIR) / 'scripts' / 'update.sh').read_text()
+        self.assertIn('bash "${REPO_DIR}/scripts/install_cloudflared.sh"', installer_text)
+        self.assertIn('bash "${APP_DIR}/scripts/install_cloudflared.sh"', updater_text)
+
 
 # H2 ---------------------------------------------------------------------
 

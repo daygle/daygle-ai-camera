@@ -45,7 +45,7 @@ mkdir -p "${APP_DIR}" "${CONFIG_DIR}" "${DATA_DIR}" "${MODEL_DIR}"
 # Install the cloudflared connector used by Daygle's optional built-in
 # Cloudflare Tunnel manager. The helper is idempotent and leaves an existing
 # administrator-managed binary unchanged.
-"${REPO_DIR}/scripts/install_cloudflared.sh"
+bash "${REPO_DIR}/scripts/install_cloudflared.sh"
 
 # Sync application files
 # Origin-URL allowlist - refuse to install from a tampered repo. Mirrors the

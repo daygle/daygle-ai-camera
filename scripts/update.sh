@@ -114,12 +114,12 @@ fi
 echo ""
 echo "Installing optional Cloudflare Tunnel runtime..."
 if run_privileged env DAYGLE_CLOUDFLARED_PATH=/usr/local/bin/cloudflared \
-    "${APP_DIR}/scripts/install_cloudflared.sh"; then
+    bash "${APP_DIR}/scripts/install_cloudflared.sh"; then
   echo "cloudflared installed system-wide."
 else
   echo "INFO: installing cloudflared into the application virtual environment..."
   DAYGLE_CLOUDFLARED_PATH="${APP_DIR}/.venv/bin/cloudflared" \
-    "${APP_DIR}/scripts/install_cloudflared.sh"
+    bash "${APP_DIR}/scripts/install_cloudflared.sh"
 fi
 
 # Existing installations used a direct ``uvicorn app.main:app`` command.
