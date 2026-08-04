@@ -238,7 +238,6 @@ window.daygleAuthReady = (async () => {
   const primaryLinks = [
     { href: '/', match: '/', label: 'Dashboard' },
     { href: '/events', match: '/events', label: 'Events' },
-    { href: '/alerts', match: '/alerts', label: 'Alerts' },
     { href: '/live', match: '/live', label: 'Live' },
   ];
 

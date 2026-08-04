@@ -1,10 +1,10 @@
-// events.js - Dedicated Events page.
+// events.js - Dedicated Events page (the single activity feed).
 // Loaded by events.html only. Shows GRANULAR detection events (one row per
 // occurrence) from /api/events, filterable by type (object / motion / sound)
-// and time range. This is distinct from:
-//   * /alerts      - the 1:1 alert (notification) fired for an event
-//   * /recordings  - the video clips (a recording spans many events)
-// Each event row links to the recording it belongs to (event.recording_id).
+// and time range. An alert is just a property of an event (whether a
+// notification fired), surfaced as an indicator on the row - there is no
+// separate alerts page. Each row links to the recording it belongs to, and a
+// recording spans many events (event.recording_id).
 //
 // isSoundLabel, GENERIC_TRIGGER_LABELS, detectionPill, motionPill, formatDate,
 // timeAgo, escapeHtml, titleCase, cameraLabel, daygleSinceParamForRange and
@@ -29,7 +29,7 @@ function getSinceParam() {
 }
 
 // ─── Event classification ───────────────────────────────────────────────────
-// Mirrors the recordings/alerts pages: sound events come from the sound
+// Mirrors the recordings page: sound events come from the sound
 // detector; motion-only events carry no concrete object label; everything else
 // is an object event.
 function concreteLabels(event) {
@@ -114,7 +114,7 @@ function renderEventRow(event) {
     : 'Object Event';
   const alerted = Boolean(event.alert) || Boolean(event.alert_triggered);
   const alertBadge = alerted
-    ? '<span class="detection detection-object" title="An alert notification was fired for this event">🔔 Alerted</span>'
+    ? '<span class="detection detection-alert" title="An alert notification was fired for this event">🔔 Alert</span>'
     : '';
   const recordingAction = event.recording_id != null
     ? `<a class="secondary activity-item-action" href="/recordings/${encodeURIComponent(event.recording_id)}" aria-label="View recording for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg><span class="activity-action-label">Recording</span></a>`
