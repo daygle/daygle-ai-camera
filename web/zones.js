@@ -694,7 +694,6 @@ function toggleDrawingMode() {
 }
 
 liveEls.addZoneBtn?.addEventListener('click', toggleDrawingMode);
-document.getElementById('addZoneBtnHeader')?.addEventListener('click', toggleDrawingMode);
 
 liveEls.fullFrameZoneBtn?.addEventListener('click', () => {
   addFullFrameZone();

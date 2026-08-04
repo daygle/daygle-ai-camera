@@ -17,10 +17,6 @@
         <p class="muted">Shape the areas your camera should watch, then fine-tune what gets recorded or sent as an alert.</p>
       </div>
       <div class="hero-action zones-hero-action">
-        <button id="addZoneBtnHeader" class="btn-info" type="button">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
-          Draw Area
-        </button>
         <button id="saveZonesBtnHeader" type="button" class="primary" style="display:none">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
           Save Changes
@@ -87,16 +83,6 @@
           <img id="liveFrame" class="live-frame" alt="Live camera footage" />
           <div id="zoneOverlay" class="zone-overlay" aria-label="Zone Areas"></div>
           <div id="liveStatus" class="live-status-pill">Connecting to camera…</div>
-          <div class="zone-frame-toolbar">
-            <button id="addZoneBtn" class="btn-info" type="button">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
-              <span class="zone-btn-label">Draw Area</span>
-            </button>
-            <button id="fullFrameZoneBtn" class="btn-info" type="button">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
-              Full Frame
-            </button>
-          </div>
         </div>
         <div class="zones-canvas-footer"><span class="zones-canvas-dot"></span><span>Live preview</span><span class="zones-canvas-separator">•</span><span>Click the first point to close a polygon</span></div>
       </section>
@@ -114,6 +100,22 @@
           <span>Camera to configure</span>
           <select id="cameraSelect" aria-label="Select camera"></select>
         </label>
+        <div class="zone-card-actions" aria-label="Zone drawing tools">
+          <div>
+            <strong>Draw on the live preview</strong>
+            <span>Add a custom polygon or use the full camera frame.</span>
+          </div>
+          <div class="zone-card-action-buttons">
+            <button id="addZoneBtn" class="btn-info" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+              <span class="zone-btn-label">Draw Area</span>
+            </button>
+            <button id="fullFrameZoneBtn" class="btn-info" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+              Full Frame
+            </button>
+          </div>
+        </div>
         <div class="zones-list-heading"><div><strong>Your areas</strong><span>Click an area to select it on the preview.</span></div><span class="zones-list-count" id="zonesListCount" aria-live="polite">0 areas</span></div>
         <div id="zoneList" class="list zones-list"></div>
         <div id="liveDetectionStatus" class="live-detection-status">Live AI status waiting for frames.</div>
