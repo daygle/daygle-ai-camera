@@ -237,7 +237,7 @@ window.daygleAuthReady = (async () => {
   /* ── Define nav structure ── */
   const primaryLinks = [
     { href: '/', match: '/', label: 'Dashboard' },
-    { href: '/alerts', match: '/alerts', label: 'Alerts' },
+    { href: '/events', match: '/events', label: 'Events' },
     { href: '/live', match: '/live', label: 'Live' },
   ];
 

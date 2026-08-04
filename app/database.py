@@ -104,6 +104,16 @@ class EventDatabase(
                 db.execute("ALTER TABLE detections ADD COLUMN zone_name TEXT")
             except sqlite3.OperationalError:
                 pass
+            # Migration: make "which clip this event belongs to" a first-class
+            # link. A recording spans many events (a continuous clip accrues a
+            # fresh event each time a new object/sound appears), so events carry
+            # the recording_id rather than recordings pointing at a single
+            # "primary" event. New installs get the column via the CREATE TABLE
+            # block below; ALTER covers the upgrade path.
+            try:
+                db.execute("ALTER TABLE events ADD COLUMN recording_id INTEGER REFERENCES recordings(id) ON DELETE SET NULL")
+            except sqlite3.OperationalError:
+                pass
             # Migration: track the best confidence seen for each recording label so
             # the recordings list can show a percentage for secondary objects that
             # were only detected after the trigger (their confidence otherwise lives
@@ -128,7 +138,9 @@ class EventDatabase(
                     thumbnail_path TEXT,
                     alert_triggered INTEGER DEFAULT 0,
                     dismissed INTEGER NOT NULL DEFAULT 0,
-                    metadata TEXT DEFAULT '{}'
+                    recording_id INTEGER,
+                    metadata TEXT DEFAULT '{}',
+                    FOREIGN KEY(recording_id) REFERENCES recordings(id) ON DELETE SET NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS detections (
@@ -159,6 +171,7 @@ class EventDatabase(
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
+                CREATE INDEX IF NOT EXISTS idx_events_recording ON events(recording_id);
                 CREATE INDEX IF NOT EXISTS idx_detections_label ON detections(label);
                 CREATE INDEX IF NOT EXISTS idx_detections_event ON detections(event_id);
 
@@ -268,8 +281,16 @@ class EventDatabase(
                 UPDATE alert_history SET recording_id = NULL
                     WHERE recording_id IS NOT NULL
                       AND recording_id NOT IN (SELECT id FROM recordings);
+                UPDATE events SET recording_id = NULL
+                    WHERE recording_id IS NOT NULL
+                      AND recording_id NOT IN (SELECT id FROM recordings);
                 """
             )
+
+            # Backfill events.recording_id for installs upgrading from the
+            # pre-link schema. Runs after the orphan cleanup above so it only
+            # links live rows. Resolved through MRO (EventsMixin).
+            self.backfill_event_recording_links(db)
 
             # ── Immutable audit log triggers ────────────────────────────────
             # These SQLite triggers are the last line of defense for the

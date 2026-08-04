@@ -78,6 +78,7 @@
 :root.light .detection.detection-object { background: rgba(2,132,199,.12); color: #0369a1; border-color: rgba(2,132,199,.35); font-weight: 800; }
 :root.light .detection.detection-sound { background: rgba(124,58,237,.16); color: #6d28d9; border-color: rgba(124,58,237,.35); font-weight: 800; }
 :root.light .detection.detection-motion { background: rgba(5,150,105,.14); color: #047857; border-color: rgba(5,150,105,.35); font-weight: 800; }
+:root.light .detection.detection-alert { background: rgba(220,38,38,.12); color: #b91c1c; border-color: rgba(220,38,38,.35); font-weight: 800; }
 :root.light .status-panel div { background: rgba(255,255,255,.6); }
 :root.light .danger-zone-card {
   border-color: rgba(220,38,38,.5);
@@ -537,6 +538,7 @@ textarea {
 .detection.detection-object { background: rgba(71,214,255,.1); color: #47d6ff; border: 1px solid rgba(71,214,255,.3); }
 .detection.detection-sound { background: rgba(168,85,247,.2); color: #a855f7; border: 1px solid rgba(168,85,247,.4); }
 .detection.detection-motion { background: rgba(45, 212, 191, 0.12); color: #2dd4bf; border: 1px solid rgba(45, 212, 191, 0.4); }
+.detection.detection-alert { background: rgba(239, 68, 68, 0.14); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
 .empty { color: var(--muted); padding: 12px; }
 
 .form-stack { display: grid; gap: 14px; margin-top: 18px; }

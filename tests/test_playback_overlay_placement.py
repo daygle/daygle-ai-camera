@@ -6,7 +6,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PLAYBACK_PAGES = (
     ROOT / 'web' / 'index.html',
-    ROOT / 'web' / 'alerts.html',
     ROOT / 'web' / 'recordings.html',
     ROOT / 'web' / 'timeline.html',
 )

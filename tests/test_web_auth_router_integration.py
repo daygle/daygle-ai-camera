@@ -126,15 +126,17 @@ def app_modules():
 
 
 def test_web_router_registers_expected_page_paths(app_modules):
-    """web_router should expose exactly 23 unique page-handler paths.
+    """web_router should expose exactly 22 unique page-handler paths.
 
     Path count comes from 21 functions × 1 decorator each + 1 function
-    (``dashboard_aliases``) × 2 decorators (``/events``, ``/search``).
-    Total = 23 routes + 23 unique paths (every path is distinct). ``/alerts``
-    is served by its own ``alerts_page`` function.
+    (``dashboard_aliases``) × 1 decorator (``/search``).
+    Total = 22 routes + 22 unique paths (every path is distinct). ``/events``
+    is served by its own ``events_page`` function (the single activity feed).
+    There is no separate ``/alerts`` page: an alert is a property of an event,
+    surfaced as an indicator on the Events row.
 
-    The 23 paths are: ``/``, ``/favicon.ico``, ``/login``, ``/setup``,
-    ``/live``, ``/zones``, ``/sounds``, ``/cameras``, ``/alerts``,
+    The 22 paths are: ``/``, ``/favicon.ico``, ``/login``, ``/setup``,
+    ``/live``, ``/zones``, ``/sounds``, ``/cameras``,
     ``/events``, ``/search``, ``/recordings``, ``/recordings/timeline``,
     ``/onnx``, ``/ai``, ``/yamnet-tflite``, ``/yamnet``, ``/profile``,
     ``/settings``, ``/users``, ``/audit``, ``/camera-log``,
@@ -149,7 +151,6 @@ def test_web_router_registers_expected_page_paths(app_modules):
         "/zones",
         "/sounds",
         "/cameras",
-        "/alerts",
         "/events",
         "/search",
         "/recordings",
@@ -176,22 +177,15 @@ def test_web_router_registers_expected_page_paths(app_modules):
     )
 
 
-def test_web_router_dashboard_aliases_function_serves_two_paths(app_modules):
+def test_web_router_dashboard_aliases_function_serves_search(app_modules):
     """``dashboard_aliases`` must be the route function for exactly
-    ``/events`` + ``/search``.
+    ``/search``.
 
-    2 decorators, 1 function, 2 handler entries. FastAPI is happy with
-    this and dispatches each URL to the same function. The body
-    returns ``root()`` (the dashboard shell) -- this is the contract
-    the HTTP-level delegation test below verifies end-to-end.
-    ``/alerts`` is served by its own ``alerts_page`` function (it renders
-    the dedicated ``alerts.html`` page), so it is intentionally NOT part
-    of the alias set.
-
-    This test catches the regression mode where a future refactor
-    splits ``dashboard_aliases`` into distinct functions (each with
-    its own body) or renames the function in a way that breaks the
-    alias contract.
+    ``/events`` is now a dedicated page served by its own ``events_page``
+    function (the single activity feed; there is no separate alerts page), so
+    ``dashboard_aliases`` is left aliasing only ``/search`` onto the dashboard
+    shell. This test catches the regression mode where a future refactor
+    re-folds ``/events`` back into the alias, or renames the function.
     """
     web_router = app_modules.web_router
     alias_handlers = [
@@ -200,9 +194,18 @@ def test_web_router_dashboard_aliases_function_serves_two_paths(app_modules):
         if getattr(route, "endpoint", None) is web_router.dashboard_aliases
     ]
     served_paths = {route.path for route in alias_handlers}
-    assert served_paths == {"/events", "/search"}, (
-        f"dashboard_aliases expected to serve {{'/events', '/search'}} "
+    assert served_paths == {"/search"}, (
+        f"dashboard_aliases expected to serve {{'/search'}} "
         f"but actually serves {served_paths}"
+    )
+    # /events must be its own function, not an alias of the dashboard shell.
+    events_paths = {
+        route.path
+        for route in web_router.router.routes
+        if getattr(route, "endpoint", None) is web_router.events_page
+    }
+    assert events_paths == {"/events"}, (
+        f"events_page expected to serve {{'/events'}} but serves {events_paths}"
     )
 
 
@@ -256,16 +259,15 @@ def test_auth_router_registers_expected_auth_endpoints(app_modules):
 def test_dashboard_aliases_dispatch_to_dashboard_shell_over_http(
     tmp_path, monkeypatch
 ):
-    """GET /events + /search both serve the SAME response as GET /.
+    """GET /search serves the SAME response as GET /.
 
     Bootstrap: ``_setup_admin`` + ``_login``. After that, ``GET /``
     returns the dashboard shell (200 + Content-Type + body).
 
-    The 2 dashboard_aliases routes (/events, /search) share one
-    decorator-mounted function (``dashboard_aliases``) which returns
+    ``/search`` is mounted on ``dashboard_aliases`` which returns
     ``root()`` -- so the same dashboard shell. We assert status,
-    Content-Type, and body all match ``GET /`` exactly. ``/alerts`` is
-    served by its own ``alerts_page`` function (the dedicated alerts
+    Content-Type, and body all match ``GET /`` exactly. ``/events`` is
+    served by its own ``events_page`` function (the dedicated Events
     page), so it is checked separately for a distinct 200 response
     rather than byte-equality with the shell.
 
@@ -295,8 +297,8 @@ def test_dashboard_aliases_dispatch_to_dashboard_shell_over_http(
         )
         root_content_type = LocalClient.header(root_headers, "Content-Type")
 
-        # Each dashboard_aliases path -- should be BYTE-IDENTICAL to /.
-        for path in ("/events", "/search"):
+        # /search -- should be BYTE-IDENTICAL to / (still a dashboard alias).
+        for path in ("/search",):
             status, headers, body = client.request(path)
             assert status == 200, (
                 f"GET {path} should return 200 after login but got {status}"
@@ -313,11 +315,12 @@ def test_dashboard_aliases_dispatch_to_dashboard_shell_over_http(
                 f"decorator paths must serve identical content"
             )
 
-        # /alerts is served by its own alerts_page function (dedicated
-        # page), so it should be a distinct 200 response, NOT the shell.
-        alerts_status, _alerts_headers, _alerts_body = client.request("/alerts")
-        assert alerts_status == 200, (
-            f"GET /alerts should return 200 after login but got {alerts_status}"
+        # /events is served by its own dedicated events_page function (the
+        # single activity feed), so it should be a distinct 200 response, NOT
+        # the dashboard shell.
+        events_status, _events_headers, _events_body = client.request("/events")
+        assert events_status == 200, (
+            f"GET /events should return 200 after login but got {events_status}"
         )
     finally:
         _server_obj.should_exit = True

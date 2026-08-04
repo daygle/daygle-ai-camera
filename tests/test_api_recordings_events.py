@@ -268,6 +268,52 @@ def test_recording_labels_api_filter_matches_any_recorded_label(tmp_path, monkey
         thread.join(timeout=5)
 
 
+def test_event_snapshot_endpoint_serves_annotated_image(tmp_path, monkeypatch):
+    """GET /api/events/{id}/snapshot returns the saved frame as a JPEG (with
+    detection boxes), and events advertise availability via has_snapshot."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.main as main
+
+    server, thread, base_url = _server(app)
+    admin = LocalClient(base_url)
+    try:
+        _setup_admin(admin)
+        _login(admin)
+        event_time = datetime.now(timezone.utc).isoformat()
+        snapshot_path = main.storage.save_image_snapshot(TEST_IMAGE_PNG, 'snap.png')
+        event_id = main.database.add_event(
+            created_at=event_time,
+            source='motion',
+            snapshot_path=snapshot_path,
+            detections=[{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.1, 'y': 0.1, 'width': 0.5, 'height': 0.5}}],
+            alert_triggered=True,
+            metadata={'camera_id': 'front'},
+        )
+
+        status, _, events = admin.request('/api/events')
+        assert status == 200
+        listed = next(event for event in events if event['id'] == event_id)
+        assert listed['has_snapshot'] is True
+
+        status, headers, body = admin.request(f'/api/events/{event_id}/snapshot')
+        assert status == 200
+        assert LocalClient.header(headers, 'Content-Type') == 'image/jpeg'
+        assert isinstance(body, (bytes, bytearray)) and len(body) > 0
+
+        # A frameless (sound) event has no snapshot: has_snapshot False + 404.
+        sound_id = main.database.add_event(
+            created_at=event_time, source='sound', snapshot_path=None, detections=[],
+        )
+        status, _, events2 = admin.request('/api/events')
+        sound_event = next(event for event in events2 if event['id'] == sound_id)
+        assert sound_event['has_snapshot'] is False
+        status, _, _ = admin.request(f'/api/events/{sound_id}/snapshot')
+        assert status == 404
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_recording_labels_backfill_seeds_existing_recordings(tmp_path):
     from app.database import EventDatabase
 
