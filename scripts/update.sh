@@ -9,6 +9,16 @@ set -euo pipefail
 # steps (such as cloudflared/systemd provisioning) run on the first GUI update.
 POST_PULL="${1:-}"
 
+run_privileged() {
+  if [[ "${EUID}" -eq 0 ]]; then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+    sudo -n "$@"
+  else
+    return 127
+  fi
+}
+
 # ── Origin-URL allowlist ─────────────────────────────────────────────────────
 # Refuse to fetch from any remote other than the canonical daygle/daygle-ai-camera
 # repo. Without this guard a tampered .git/config (post any service-side breach
@@ -103,11 +113,13 @@ fi
 
 echo ""
 echo "Installing optional Cloudflare Tunnel runtime..."
-if [[ "${EUID}" -eq 0 ]]; then
-  "${APP_DIR}/scripts/install_cloudflared.sh"
+if run_privileged env DAYGLE_CLOUDFLARED_PATH=/usr/local/bin/cloudflared \
+    "${APP_DIR}/scripts/install_cloudflared.sh"; then
+  echo "cloudflared installed system-wide."
 else
-  echo "WARNING: not running as root; cloudflared/systemd migration requires the one-time command:"
-  echo "  sudo ${APP_DIR}/scripts/install_cloudflared.sh"
+  echo "INFO: installing cloudflared into the application virtual environment..."
+  DAYGLE_CLOUDFLARED_PATH="${APP_DIR}/.venv/bin/cloudflared" \
+    "${APP_DIR}/scripts/install_cloudflared.sh"
 fi
 
 # Existing installations used a direct ``uvicorn app.main:app`` command.
@@ -116,20 +128,21 @@ fi
 SYSTEMD_DIR="/etc/systemd/system"
 DROPIN_DIR="${SYSTEMD_DIR}/daygle-ai-camera.service.d"
 DROPIN_FILE="${DROPIN_DIR}/20-daygle-launcher.conf"
-if [[ "${EUID}" -eq 0 ]] && command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files daygle-ai-camera.service >/dev/null 2>&1; then
-  mkdir -p "${DROPIN_DIR}"
-  cat > "${DROPIN_FILE}" <<EOF
+if command -v systemctl >/dev/null 2>&1 && run_privileged systemctl list-unit-files daygle-ai-camera.service >/dev/null 2>&1; then
+  DROPIN_TEMP="$(mktemp)"
+  cat > "${DROPIN_TEMP}" <<EOF
 [Service]
 ExecStart=
 ExecStart=${APP_DIR}/.venv/bin/python -m app.server
 EOF
-  systemctl daemon-reload
-  echo "Systemd launcher migrated to app.server."
-elif [[ "${EUID}" -ne 0 ]]; then
-  echo "WARNING: not running as root; systemd launcher migration requires the one-time command:"
-  echo "  sudo ${APP_DIR}/scripts/update.sh"
+  if run_privileged mkdir -p "${DROPIN_DIR}" && run_privileged install -m 0644 "${DROPIN_TEMP}" "${DROPIN_FILE}" && run_privileged systemctl daemon-reload; then
+    echo "Systemd launcher migrated to app.server."
+  else
+    echo "WARNING: unable to migrate the systemd launcher; tunnel mode may not be loopback-only." >&2
+  fi
+  rm -f "${DROPIN_TEMP}"
 else
-  echo "WARNING: systemd was not detected; skipping launcher migration."
+  echo "WARNING: systemd launcher migration requires root or passwordless sudo; tunnel mode may not be loopback-only." >&2
 fi
 
 echo ""

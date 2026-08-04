@@ -126,6 +126,9 @@ class UpdateScriptOriginGuardTests(unittest.TestCase):
         self.assertIn('20-daygle-launcher.conf', text)
         self.assertIn('ExecStart=${APP_DIR}/.venv/bin/python -m app.server', text)
         self.assertIn('systemctl daemon-reload', text)
+        self.assertIn('DAYGLE_CLOUDFLARED_PATH="${APP_DIR}/.venv/bin/cloudflared"', text)
+        self.assertIn('run_privileged', text)
+        self.assertIn('systemd launcher migration requires root or passwordless sudo', text)
 
     def test_cloudflared_helper_is_shared_by_installer(self):
         script = Path(REPO_DIR) / 'scripts' / 'install_debian.sh'

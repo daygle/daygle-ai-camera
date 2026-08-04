@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 
 from app.cloudflare_tunnel import (
     CloudflareTunnelManager,
@@ -37,7 +38,19 @@ def test_environment_token_wins_and_auto_starts() -> None:
         {"token": "db-token", "autostart": False},
         {"DAYGLE_CLOUDFLARED_TOKEN": " env-token ", "PATH": ""},
     )
-    assert settings == CloudflareTunnelSettings("env-token", "environment", True, "cloudflared")
+    assert settings.token == "env-token"
+    assert settings.source == "environment"
+    assert settings.autostart is True
+
+
+def test_local_virtualenv_binary_fallback(monkeypatch, tmp_path) -> None:
+    local_binary = tmp_path / "bin" / "cloudflared"
+    local_binary.parent.mkdir()
+    local_binary.write_bytes(b"binary")
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
+    monkeypatch.setattr("app.cloudflare_tunnel.shutil.which", lambda _name: None)
+    settings = resolve_cloudflare_tunnel_settings({}, {}, {"PATH": ""})
+    assert settings.binary == str(local_binary)
 
 
 def test_persisted_and_config_fallbacks() -> None:

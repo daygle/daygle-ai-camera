@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import subprocess
+import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -113,11 +115,25 @@ def resolve_cloudflare_tunnel_settings(
     else:
         token, source, autostart = None, "none", False
 
-    binary = str(
+    configured_binary = str(
         environ.get(CLOUDFLARED_BINARY_ENV)
         or config_block.get("binary")
-        or DEFAULT_CLOUDFLARED_BINARY
-    ).strip() or DEFAULT_CLOUDFLARED_BINARY
+        or ""
+    ).strip()
+    if configured_binary and configured_binary != DEFAULT_CLOUDFLARED_BINARY:
+        binary = configured_binary
+    elif shutil.which(DEFAULT_CLOUDFLARED_BINARY):
+        binary = DEFAULT_CLOUDFLARED_BINARY
+    else:
+        candidates = (
+            Path(sys.prefix) / "bin" / DEFAULT_CLOUDFLARED_BINARY,
+            Path.home() / ".local" / "bin" / DEFAULT_CLOUDFLARED_BINARY,
+            Path(__file__).resolve().parent.parent / "bin" / DEFAULT_CLOUDFLARED_BINARY,
+        )
+        binary = next(
+            (str(candidate) for candidate in candidates if candidate.is_file()),
+            DEFAULT_CLOUDFLARED_BINARY,
+        )
     return CloudflareTunnelSettings(token, source, autostart, binary)
 
 
