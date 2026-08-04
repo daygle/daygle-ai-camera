@@ -447,6 +447,9 @@ class EventsMixin:
         event = dict(row)
         event["metadata"] = json.loads(event.get("metadata") or "{}")
         event["detections"] = [dict(detection) for detection in detections]
+        # Whether an annotated snapshot can be served for this event
+        # (GET /api/events/{id}/snapshot). Sound / frameless events have none.
+        event["has_snapshot"] = bool(event.get("snapshot_path"))
         event["alert"] = dict(alert_row) if alert_row else None
         event["recordings"] = [self._recording_row(recording) for recording in recordings]
         if event["recordings"]:

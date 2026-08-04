@@ -116,9 +116,16 @@ function renderEventRow(event) {
   const alertBadge = alerted
     ? '<span class="detection detection-alert" title="An alert notification was fired for this event">🔔 Alert</span>'
     : '';
-  const recordingAction = event.recording_id != null
-    ? `<a class="secondary activity-item-action" href="/recordings/${encodeURIComponent(event.recording_id)}" aria-label="View recording for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg><span class="activity-action-label">Recording</span></a>`
-    : '<span class="muted">No recording</span>';
+  // Two per-event actions: open the annotated snapshot (green detection
+  // boxes, as in alert emails) and/or open the recording the event belongs to.
+  const actions = [];
+  if (event.has_snapshot) {
+    actions.push(`<a class="secondary activity-item-action" href="/api/events/${encodeURIComponent(event.id)}/snapshot" target="_blank" rel="noopener" aria-label="Open snapshot for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg><span class="activity-action-label">Snapshot</span></a>`);
+  }
+  if (event.recording_id != null) {
+    actions.push(`<a class="secondary activity-item-action" href="/recordings/${encodeURIComponent(event.recording_id)}" aria-label="Open recording for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg><span class="activity-action-label">Recording</span></a>`);
+  }
+  const recordingAction = actions.length ? actions.join('') : '<span class="muted">-</span>';
   return `
     <tr class="activity-table-row ${typeClass}" data-event-row="${escapeHtml(String(event.id))}">
       <td class="activity-cell-type"><span class="activity-item-type">${escapeHtml(typeLabel)}</span><span class="activity-cell-ref">${escapeHtml(eventTitle(event))}</span></td>
@@ -182,7 +189,7 @@ function renderList() {
       '<th scope="col">Camera</th>' +
       '<th scope="col">Detections</th>' +
       '<th scope="col">When</th>' +
-      '<th class="cell-center" scope="col">Recording</th>' +
+      '<th class="cell-center" scope="col">Actions</th>' +
     '</tr></thead>' +
     '<tbody>' + events.map(renderEventRow).join('') + '</tbody>' +
     '</table></div>';

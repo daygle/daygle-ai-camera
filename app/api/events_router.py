@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import Response
 
 from app.auth_gates import require_admin, require_user
 from app.deps import get_database
 from app.request_helpers import write_audit_log
 from app.media_utils import safe_storage_path
+from app.live_snapshot import render_live_snapshot_jpeg_overlay
 
 router = APIRouter()
 
@@ -67,6 +69,56 @@ def event_detail(event_id: int, request: Request, db=Depends(get_database)):
     if scoped is None:
         raise HTTPException(status_code=404, detail='Event not found')
     return scoped
+
+
+@router.get('/api/events/{event_id}/snapshot')
+def event_snapshot(
+    event_id: int,
+    request: Request,
+    boxes: bool = Query(True, description='Draw green detection boxes on the snapshot (as in alert emails).'),
+    db=Depends(get_database),
+):
+    """Serve the event's saved snapshot, annotated with the same green
+    detection boxes the alert emails use (via ``render_live_snapshot_jpeg_overlay``).
+
+    Sound events and any event captured without a frame have no snapshot and
+    return 404 - the client uses ``has_snapshot`` on the event payload to decide
+    whether to offer the "open snapshot" action.
+    """
+    user = require_user(request)
+    event = db.get_event(event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail='Event not found')
+    # Same visibility rule as event_detail: hide events whose linked recordings
+    # are outside the viewer's scope (returns None -> 404, no existence leak).
+    if _scope_event_recordings(event, user) is None:
+        raise HTTPException(status_code=404, detail='Event not found')
+    snapshot_path = safe_storage_path(event.get('snapshot_path'), roots=('snapshots_dir',))
+    if snapshot_path is None or not snapshot_path.exists() or not snapshot_path.is_file():
+        raise HTTPException(status_code=404, detail='Event snapshot not found')
+    raw_bytes = snapshot_path.read_bytes()
+    if boxes:
+        overlay_detections = [
+            {
+                'label': detection.get('label'),
+                'confidence': detection.get('confidence'),
+                'box': {
+                    'x': detection.get('x'),
+                    'y': detection.get('y'),
+                    'width': detection.get('width'),
+                    'height': detection.get('height'),
+                },
+            }
+            for detection in (event.get('detections') or [])
+        ]
+        image_bytes = render_live_snapshot_jpeg_overlay(raw_bytes, overlay_detections)
+    else:
+        image_bytes = raw_bytes
+    return Response(
+        content=image_bytes,
+        media_type='image/jpeg',
+        headers={'Cache-Control': 'private, max-age=300'},
+    )
 
 
 @router.delete('/api/events/{event_id}')
