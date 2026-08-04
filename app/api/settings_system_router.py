@@ -152,7 +152,6 @@ async def update_cloudflare_tunnel_settings(request: Request, db=Depends(get_dat
     manager = _state.cloudflare_tunnel_manager
     if manager is None:
         raise HTTPException(status_code=503, detail='Cloudflare Tunnel manager is not ready.')
-    current = db.get_setting('cloudflare_tunnel')
     token_store = CloudflareTunnelSecretStore(db.database_path)
     if token is None or token == '':
         # An empty field means clear the persisted token, not an accidental
