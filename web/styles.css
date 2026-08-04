@@ -5566,6 +5566,7 @@ button.secondary:disabled, a.secondary:disabled {
 }
 .zone-card-action-buttons button svg { flex: 0 0 auto; }
 .zone-card-action-buttons > button.btn-info { color: #fff; }
+.zone-card-action-buttons .zone-btn-label { color: inherit; }
 .zone-row-main { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
 .zone-name-field { grid-column: 1 / -1; gap: 7px; }
 .zone-name-field input { min-height: 42px; border-radius: 11px; font-weight: 750; }
