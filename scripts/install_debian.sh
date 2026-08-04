@@ -30,7 +30,9 @@ apt-get install -y --no-install-recommends \
   ffmpeg \
   v4l-utils \
   libgl1 \
-  libglib2.0-0
+  libglib2.0-0 \
+  wget \
+  coreutils
 
 # Create system user for optional maintenance access to writable runtime assets
 if ! id -u "${APP_USER}" >/dev/null 2>&1; then
@@ -39,6 +41,11 @@ fi
 
 # Create directories
 mkdir -p "${APP_DIR}" "${CONFIG_DIR}" "${DATA_DIR}" "${MODEL_DIR}"
+
+# Install the cloudflared connector used by Daygle's optional built-in
+# Cloudflare Tunnel manager. The helper is idempotent and leaves an existing
+# administrator-managed binary unchanged.
+"${REPO_DIR}/scripts/install_cloudflared.sh"
 
 # Sync application files
 # Origin-URL allowlist - refuse to install from a tampered repo. Mirrors the

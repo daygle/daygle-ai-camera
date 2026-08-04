@@ -12,6 +12,7 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from app.auth import utc_now
+from app.cloudflare_tunnel import MAX_TUNNEL_TOKEN_LENGTH, CloudflareTunnelSecretStore
 from app.auth_gates import require_admin
 from app.camera_lifecycle import apply_storage_and_recording_settings
 from app.config_facades import (
@@ -56,7 +57,8 @@ def get_system_settings(request: Request, db=Depends(get_database), auth_enabled
     # explicit gate here is the second line if a future refactor moves
     # the path out of the middleware's admin match list.
     require_admin(request)
-    return {'version': _current_version(), 'camera': get_camera_config(None), 'cameras': effective_cameras_config(), 'live': effective_live_config(), 'recording': effective_recording_config(), 'storage': effective_storage_config(),        'auth': {
+    tunnel = _state.cloudflare_tunnel_manager
+    return {'version': _current_version(), 'camera': get_camera_config(None), 'cameras': effective_cameras_config(), 'live': effective_live_config(), 'recording': effective_recording_config(), 'storage': effective_storage_config(), 'cloudflare_tunnel': tunnel.status() if tunnel is not None else {'configured': False, 'running': False, 'source': 'none', 'autostart': False, 'pid': None, 'binary': 'cloudflared', 'error': None},        'auth': {
             'session_timeout_hours': effective_auth_config().get('session_timeout_hours'),
             'max_login_attempts': effective_auth_config().get('max_login_attempts'),
             'lockout_minutes': effective_auth_config().get('lockout_minutes'),
@@ -122,6 +124,81 @@ async def restore_database(request: Request, file: UploadFile=File(...), db=Depe
         for sidecar_suffix in ('-wal', '-shm'):
             Path(f'{restore_temp}{sidecar_suffix}').unlink(missing_ok=True)
         await file.close()
+
+
+def _tunnel_status():
+    manager = _state.cloudflare_tunnel_manager
+    if manager is None:
+        return {'configured': False, 'running': False, 'source': 'none', 'autostart': False, 'pid': None, 'binary': 'cloudflared', 'error': None}
+    return manager.status()
+
+
+@router.get('/api/settings/system/cloudflare-tunnel')
+def get_cloudflare_tunnel_settings(request: Request):
+    require_admin(request)
+    return _tunnel_status()
+
+
+@router.put('/api/settings/system/cloudflare-tunnel')
+async def update_cloudflare_tunnel_settings(request: Request, db=Depends(get_database)):
+    require_admin(request)
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail='Cloudflare Tunnel settings must be an object.')
+    raw_token = payload.get('token')
+    token = str(raw_token or '').strip() if raw_token is not None else None
+    if token is not None and len(token) > MAX_TUNNEL_TOKEN_LENGTH:
+        raise HTTPException(status_code=400, detail='Cloudflare Tunnel token is too long.')
+    manager = _state.cloudflare_tunnel_manager
+    if manager is None:
+        raise HTTPException(status_code=503, detail='Cloudflare Tunnel manager is not ready.')
+    current = db.get_setting('cloudflare_tunnel')
+    token_store = CloudflareTunnelSecretStore(db.database_path)
+    if token is None or token == '':
+        # An empty field means clear the persisted token, not an accidental
+        # overwrite of a secret that the browser deliberately never receives.
+        token = None
+    autostart = bool(payload.get('autostart', False))
+    if token:
+        try:
+            token_store.write(token)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f'Could not securely store Cloudflare Tunnel token: {type(exc).__name__}.') from exc
+    else:
+        token_store.clear()
+    # SQLite stores only non-secret metadata; the secret lives in a 0600 file.
+    persisted = {'configured': bool(token), 'autostart': autostart}
+    db.set_setting('cloudflare_tunnel', persisted, utc_now())
+    manager.configure(token, source='database', autostart=autostart)
+    write_audit_log(request, db, 'update', 'settings.cloudflare_tunnel', details={'configured': bool(token), 'autostart': autostart})
+    return _tunnel_status()
+
+
+@router.post('/api/settings/system/cloudflare-tunnel/start')
+def start_cloudflare_tunnel(request: Request):
+    require_admin(request)
+    manager = _state.cloudflare_tunnel_manager
+    if manager is None:
+        raise HTTPException(status_code=503, detail='Cloudflare Tunnel manager is not ready.')
+    return manager.start()
+
+
+@router.post('/api/settings/system/cloudflare-tunnel/stop')
+def stop_cloudflare_tunnel(request: Request):
+    require_admin(request)
+    manager = _state.cloudflare_tunnel_manager
+    if manager is None:
+        raise HTTPException(status_code=503, detail='Cloudflare Tunnel manager is not ready.')
+    return manager.stop()
+
+
+@router.post('/api/settings/system/cloudflare-tunnel/restart')
+def restart_cloudflare_tunnel(request: Request):
+    require_admin(request)
+    manager = _state.cloudflare_tunnel_manager
+    if manager is None:
+        raise HTTPException(status_code=503, detail='Cloudflare Tunnel manager is not ready.')
+    return manager.restart()
 
 
 @router.put('/api/settings/system/live')

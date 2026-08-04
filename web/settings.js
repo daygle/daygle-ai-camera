@@ -8,6 +8,7 @@ requireElements([
   'systemMessage',
   'emailSettingsForm', 'testEmailRecipient', 'testEmailBtn',
   'pushSettingsForm', 'testPushBtn', 'startCleanBtn',
+  'cloudflareTunnelForm', 'cloudflareTunnelStatus',
 ]);
 const messageEl = document.getElementById('systemMessage');
 
@@ -147,6 +148,7 @@ const forms = {
   storage: document.getElementById('storageSettingsForm'),
   auth: document.getElementById('authSettingsForm'),
   databaseRestore: document.getElementById('databaseRestoreForm'),
+  cloudflareTunnel: document.getElementById('cloudflareTunnelForm'),
 };
 
 // api() is provided by web/utils.js (loaded before this script). It reads
@@ -186,7 +188,7 @@ function fillForm(form, values) {
 const FIELD_TYPES = {
   boolean: new Set([
     'enabled', 'continuous', 'auto_purge_enabled', 'background_detection_enabled',
-    'use_tls', 'use_ssl',
+    'use_tls', 'use_ssl', 'autostart',
   ]),
   integer: new Set([
     'width', 'height', 'fps', 'port', 'pre_event_seconds', 'post_event_seconds',
@@ -278,9 +280,47 @@ async function loadSettings() {
   renderEmail(emailSettings);
   renderPush(pushSettings);
   renderCameraOffline(cameraOfflineSettings);
+  renderCloudflareTunnel(settings.cloudflare_tunnel);
   enhanceFormFieldLabels();
   messageEl.textContent = '';
 }
+
+function renderCloudflareTunnel(status) {
+  const statusEl = document.getElementById('cloudflareTunnelStatus');
+  if (!statusEl) return;
+  const state = status?.running ? 'Running' : status?.configured ? 'Stopped' : 'Not configured';
+  statusEl.textContent = `${state}${status?.source ? ` · ${status.source}` : ''}${status?.error ? ` · ${status.error}` : ''}`;
+  const autostart = forms.cloudflareTunnel?.elements.autostart;
+  if (autostart && status?.autostart != null) autostart.value = status.autostart ? 'true' : 'false';
+}
+
+async function refreshCloudflareTunnel() {
+  const status = await api('/api/settings/system/cloudflare-tunnel');
+  renderCloudflareTunnel(status);
+  return status;
+}
+
+forms.cloudflareTunnel?.addEventListener('submit', guard(async (event) => {
+  event.preventDefault();
+  const data = payloadFor(forms.cloudflareTunnel);
+  const saved = await api('/api/settings/system/cloudflare-tunnel', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+  forms.cloudflareTunnel.elements.token.value = '';
+  renderCloudflareTunnel(saved);
+  setMessage('Cloudflare Tunnel settings saved.');
+}));
+
+async function tunnelAction(action) {
+  const result = await api(`/api/settings/system/cloudflare-tunnel/${action}`, { method: 'POST' });
+  renderCloudflareTunnel(result);
+  setMessage(`Cloudflare Tunnel ${action} requested.`);
+}
+
+document.getElementById('startCloudflareTunnelBtn')?.addEventListener('click', guard(() => tunnelAction('start')));
+document.getElementById('stopCloudflareTunnelBtn')?.addEventListener('click', guard(() => tunnelAction('stop')));
+document.getElementById('restartCloudflareTunnelBtn')?.addEventListener('click', guard(() => tunnelAction('restart')));
 
 function bindForm(name, label, endpointName = name) {
   forms[name].addEventListener('submit', guard(async (event) => {
@@ -512,3 +552,4 @@ startCleanBtn?.addEventListener('click', guard(async () => {
 // implementation (ARIA tabs pattern + URL-hash deep-linking) lives in
 // utils.js as initDaygleTabs() so the onnx page can reuse it.
 initDaygleTabs();
+refreshCloudflareTunnel().catch(() => {});

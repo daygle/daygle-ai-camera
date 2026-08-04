@@ -119,6 +119,19 @@ class UpdateScriptOriginGuardTests(unittest.TestCase):
         )
         self.assertIn('refusing to install from non-allowlisted source repo', text)
 
+    def test_update_script_provisions_cloudflared_and_managed_launcher(self):
+        script = Path(REPO_DIR) / 'scripts' / 'update.sh'
+        text = script.read_text()
+        self.assertIn('install_cloudflared.sh', text)
+        self.assertIn('20-daygle-launcher.conf', text)
+        self.assertIn('ExecStart=${APP_DIR}/.venv/bin/python -m app.server', text)
+        self.assertIn('systemctl daemon-reload', text)
+
+    def test_cloudflared_helper_is_shared_by_installer(self):
+        script = Path(REPO_DIR) / 'scripts' / 'install_debian.sh'
+        text = script.read_text()
+        self.assertIn('scripts/install_cloudflared.sh', text)
+
 
 # H2 ---------------------------------------------------------------------
 

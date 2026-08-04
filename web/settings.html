@@ -317,6 +317,37 @@
 
     <div class="settings-panel" id="panel-system" role="tabpanel" aria-labelledby="tab-system" data-panel="system" hidden>
 
+    <section class="card" id="cloudflareTunnelSection">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">☁️</div>
+        <div>
+          <h2>Cloudflare Tunnel</h2>
+          <p class="settings-section-subtitle">Publish Daygle over HTTPS without port forwarding or a reverse proxy. Create a remotely-managed tunnel in Cloudflare Zero Trust, then paste its token here.</p>
+        </div>
+      </div>
+      <form id="cloudflareTunnelForm" class="form-grid">
+        <label>
+          <span>Tunnel Token <span class="info-tip" data-tip="The token from Cloudflare Zero Trust. Daygle stores it in its protected SQLite settings store and never returns it to the browser or logs." title="The token from Cloudflare Zero Trust. Daygle stores it in its protected SQLite settings store and never returns it to the browser or logs." tabindex="0" aria-label="Help: Cloudflare Tunnel token"></span></span>
+          <input name="token" type="password" placeholder="Paste cloudflared token" autocomplete="new-password" />
+        </label>
+        <label>
+          <span>Start automatically</span>
+          <select name="autostart">
+            <option value="false">Disabled</option>
+            <option value="true">Enabled</option>
+          </select>
+        </label>
+      </form>
+      <div id="cloudflareTunnelStatus" class="status-panel" aria-live="polite">Loading tunnel status…</div>
+      <p class="field-help">The server binds to <code>127.0.0.1</code> whenever a token is configured, so the tunnel is the only public path. Cloudflare Access can add an additional login layer; Android clients must send its <code>CF-Access-Client-Id</code> and <code>CF-Access-Client-Secret</code> headers on every request.</p>
+      <div class="button-row">
+        <button id="saveCloudflareTunnelBtn" type="submit" form="cloudflareTunnelForm">Save Tunnel Settings</button>
+        <button id="startCloudflareTunnelBtn" class="btn-info" type="button">Start</button>
+        <button id="stopCloudflareTunnelBtn" class="secondary" type="button">Stop</button>
+        <button id="restartCloudflareTunnelBtn" class="secondary" type="button">Restart</button>
+      </div>
+    </section>
+
     <section class="card" id="updateSection">
       <div class="settings-section-header">
         <div class="settings-section-icon" aria-hidden="true">🔄</div>

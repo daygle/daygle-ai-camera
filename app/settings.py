@@ -12,6 +12,7 @@ CONFIG_ENV_VAR = "DAYGLE_CONFIG"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "server": {"host": "0.0.0.0", "port": 8080},
+    "cloudflare_tunnel": {"binary": "cloudflared"},
     "ai": {
         "enabled": True,
         "backend": "onnx",

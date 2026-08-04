@@ -17,6 +17,11 @@ from app.email_alerts import EmailAlertService  # noqa: F401 -- tests monkeypatc
 from app.push_notifications import PushNotificationService  # noqa: F401 -- tests monkeypatch via main.PushNotificationService
 from app.recordings import RecordingService
 from app.settings import load_settings
+from app.cloudflare_tunnel import (
+    CloudflareTunnelManager,
+    CloudflareTunnelSecretStore,
+    resolve_cloudflare_tunnel_settings,
+)
 from app.storage import Storage
 
 from app.ai_settings import log_detector_initialization
@@ -124,6 +129,14 @@ def _startup() -> None:
         return
     database = EventDatabase(config['storage']['database'])
     _state.database = database
+    persisted_tunnel = database.get_setting('cloudflare_tunnel')
+    tunnel_store = CloudflareTunnelSecretStore(config['storage']['database'])
+    tunnel_settings = resolve_cloudflare_tunnel_settings(
+        config,
+        persisted_tunnel,
+        persisted_token=tunnel_store.read(),
+    )
+    _state.cloudflare_tunnel_manager = CloudflareTunnelManager(tunnel_settings)
     _state.camera_config = {}
     _state.cameras_config = []
     _state.camera_instances = {}
@@ -169,6 +182,12 @@ async def app_lifespan(_app: FastAPI):
         pass  # best-effort; failures are logged inside the helper
     start_live_alert_monitor()
     apply_sound_settings()
+    tunnel_manager = _state.cloudflare_tunnel_manager
+    if tunnel_manager is not None and tunnel_manager.autostart:
+        try:
+            tunnel_manager.start()
+        except Exception as exc:
+            _logger.warning('Cloudflare Tunnel startup failed; LAN service remains available: %s', exc)
     try:
         yield
     finally:
@@ -176,6 +195,8 @@ async def app_lifespan(_app: FastAPI):
         _state.recording_service.stop_all_continuous_recordings()
         stop_live_alert_monitor()
         stop_sound_monitor()
+        if _state.cloudflare_tunnel_manager is not None:
+            _state.cloudflare_tunnel_manager.stop()
 
 
 app = FastAPI(title='Daygle AI Camera', lifespan=app_lifespan)
@@ -229,6 +250,5 @@ app.middleware('http')(authentication_middleware)
 app.middleware('http')(app_navigation_middleware)
 
 if __name__ == '__main__':
-    import uvicorn
-    server_config = config.get('server', {})
-    uvicorn.run('app.main:app', host=server_config.get('host', '0.0.0.0'), port=int(server_config.get('port', 8080)), reload=False)
+    from app.server import main as run_server
+    run_server()

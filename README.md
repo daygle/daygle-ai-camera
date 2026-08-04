@@ -40,6 +40,7 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 - `sudo` or root access for installation
 - Network access for `apt` and `pip`
 - Optional: reverse proxy or VPN for public exposure
+- Optional remote access: `cloudflared` (installed by the Debian installer)
 
 ## Installation
 
@@ -88,7 +89,7 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 5. Start the application:
 
    ```bash
-   DAYGLE_CONFIG=config.yaml uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
+   DAYGLE_CONFIG=config.yaml python -m app.server
    ```
 
 6. Open <http://127.0.0.1:8080/> and complete the first-run setup.
@@ -191,6 +192,28 @@ Important bootstrap values:
 
 All other app settings are stored in SQLite and managed by the web UI.
 
+## Remote access with Cloudflare Tunnel
+
+Daygle can manage one Cloudflare Tunnel connector for secure public HTTPS access without port forwarding, an exposed LAN port, or a reverse-proxy configuration. Cloudflare provisions the public certificate automatically.
+
+1. Sign in to [Cloudflare Zero Trust](https://one.dash.cloudflare.com/).
+2. Open **Network → Tunnels → Create a Tunnel**.
+3. Choose **Cloudflared**, name the tunnel, and create it.
+4. On the connector setup screen, copy the tunnel token (the value after `--token`).
+5. In Daygle, open **Settings → System → Cloudflare Tunnel**, paste the token, choose whether it should start automatically, and save it. Daygle stores only non-secret tunnel metadata in SQLite; the token is kept in a protected `0600` file next to the database and is never returned by the status API or written to logs.
+6. In the tunnel's **Public Hostnames** configuration, map your hostname to `http://localhost:8080` (or the port configured in Daygle). Start the connector from Daygle, or let it start automatically on boot.
+7. Browse to the HTTPS hostname. No port forwarding or additional SSL/reverse-proxy setup is required.
+
+For headless/service deployments, set `DAYGLE_CLOUDFLARED_TOKEN` in the service environment (a protected systemd drop-in is recommended). That token takes precedence over the saved UI value and automatically starts `cloudflared` at application boot. Do not put a token in a shell command or a world-readable config file; Daygle passes it to cloudflared through the child environment rather than its command line. Changing the binding after a UI save takes effect on the next Daygle restart.
+
+When tunnel mode is active, Daygle binds Uvicorn to `127.0.0.1` and enables `--proxy-headers --forwarded-allow-ips=127.0.0.1`; this keeps the connector as the only ingress while preserving the client address supplied by the trusted local connector path for audit and login rate-limit handling.
+
+### Cloudflare Access
+
+Cloudflare Access is optional. If Access is enabled for the hostname, interactive browser logins are redirected to the Cloudflare Access page. The Android app cannot complete that browser flow automatically: configure it to send `CF-Access-Client-Id` and `CF-Access-Client-Secret` headers on every request (including API, image, and recording requests), as required by your Access application policy.
+
+If cloudflared cannot start or later exits, Daygle logs a clear warning and continues serving the LAN normally. Use **Start**, **Stop**, **Restart**, and the status readout in the same Settings panel to manage the connector.
+
 ## Running
 
 - `/setup` - initial admin creation
@@ -240,7 +263,7 @@ If the TFLite runtime is missing, install `ai-edge-litert` or `tflite-runtime`.
 git pull
 source .venv/bin/activate
 pip install -r requirements.txt
-python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8080
+python -m app.server
 ```
 
 ### Service update

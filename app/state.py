@@ -53,6 +53,8 @@ auth: Any = None            # AuthService instance
 recording_service: Any = None  # RecordingService instance
 detector: Any = None        # AI detector (OnnxDetector or stub)
 last_detector_error: str | None = None
+cloudflare_tunnel_manager: Any = None  # CloudflareTunnelManager, initialized at startup
+
 
 # ---------------------------------------------------------------------------
 # Startup-initialized config snapshots (populated by app.main at module load)

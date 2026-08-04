@@ -4,6 +4,11 @@
 # Service restart is handled separately by the caller (web API or manual).
 set -euo pipefail
 
+# The GUI invokes the updater version that was installed before the update.
+# After git pull, re-exec the freshly pulled script so newly added migration
+# steps (such as cloudflared/systemd provisioning) run on the first GUI update.
+POST_PULL="${1:-}"
+
 # ── Origin-URL allowlist ─────────────────────────────────────────────────────
 # Refuse to fetch from any remote other than the canonical daygle/daygle-ai-camera
 # repo. Without this guard a tampered .git/config (post any service-side breach
@@ -71,11 +76,17 @@ if [[ -z "${CURRENT_REMOTE}" ]] || ! printf '%s' "${CURRENT_REMOTE}" | grep -Eq 
 fi
 echo "Origin remote verified: ${CURRENT_REMOTE}"
 
-echo "Fetching latest changes from origin..."
-git fetch origin
+if [[ "${POST_PULL}" != "--post-pull" ]]; then
+  echo "Fetching latest changes from origin..."
+  git fetch origin
 
-echo "Pulling latest changes on ${CURRENT_BRANCH}..."
-git pull origin "${CURRENT_BRANCH}"
+  echo "Pulling latest changes on ${CURRENT_BRANCH}..."
+  git pull origin "${CURRENT_BRANCH}"
+
+  # The currently running script may be the pre-update version. Re-enter the
+  # freshly pulled script so its complete post-update migration path executes.
+  exec bash "${APP_DIR}/scripts/update.sh" --post-pull
+fi
 
 NEW_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 echo "Now at commit: ${NEW_COMMIT}"
@@ -88,6 +99,37 @@ elif [[ -f "${APP_DIR}/.venv/Scripts/python.exe" ]]; then
 else
   echo "Error: Virtual environment not found at ${APP_DIR}/.venv. Run the installer first." >&2
   exit 1
+fi
+
+echo ""
+echo "Installing optional Cloudflare Tunnel runtime..."
+if [[ "${EUID}" -eq 0 ]]; then
+  "${APP_DIR}/scripts/install_cloudflared.sh"
+else
+  echo "WARNING: not running as root; cloudflared/systemd migration requires the one-time command:"
+  echo "  sudo ${APP_DIR}/scripts/install_cloudflared.sh"
+fi
+
+# Existing installations used a direct ``uvicorn app.main:app`` command.
+# Install a narrow drop-in instead of replacing the administrator's unit,
+# preserving its paths, environment, user/group, hardening, and other drop-ins.
+SYSTEMD_DIR="/etc/systemd/system"
+DROPIN_DIR="${SYSTEMD_DIR}/daygle-ai-camera.service.d"
+DROPIN_FILE="${DROPIN_DIR}/20-daygle-launcher.conf"
+if [[ "${EUID}" -eq 0 ]] && command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files daygle-ai-camera.service >/dev/null 2>&1; then
+  mkdir -p "${DROPIN_DIR}"
+  cat > "${DROPIN_FILE}" <<EOF
+[Service]
+ExecStart=
+ExecStart=${APP_DIR}/.venv/bin/python -m app.server
+EOF
+  systemctl daemon-reload
+  echo "Systemd launcher migrated to app.server."
+elif [[ "${EUID}" -ne 0 ]]; then
+  echo "WARNING: not running as root; systemd launcher migration requires the one-time command:"
+  echo "  sudo ${APP_DIR}/scripts/update.sh"
+else
+  echo "WARNING: systemd was not detected; skipping launcher migration."
 fi
 
 echo ""

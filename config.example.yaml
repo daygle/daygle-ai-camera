@@ -5,6 +5,12 @@ server:
   host: 0.0.0.0
   port: 8080
 
+# Optional bootstrap settings for a headless Cloudflare Tunnel deployment.
+# Prefer DAYGLE_CLOUDFLARED_TOKEN or the Settings UI so the token is not
+# committed to this file.
+cloudflare_tunnel:
+  binary: cloudflared
+
 auth:
   enabled: true
 
