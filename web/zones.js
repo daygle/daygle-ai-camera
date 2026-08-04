@@ -11,7 +11,7 @@ let draftPolygon = null;
 let zoneDrag = null;
 let expandedZoneRules = new Set();
 
-// Update only the label text on the Draw Area button so its icon (a sibling
+// Update only the label text on the Add Zone button so its icon (a sibling
 // <svg>) survives. Setting button.textContent would replace all child nodes,
 // wiping the icon.
 function setAddZoneLabel(text) {
@@ -251,7 +251,7 @@ function renderZones() {
   liveEls.zoneOverlay.innerHTML = zones.map((zone, index) => (zone.enabled === false ? '' : renderZoneBox(zone, index))).join('');
   updateZonesStats();
   if (!zones.length) {
-    liveEls.zoneList.innerHTML = '<div class="empty">No Zone Areas yet. Click "Draw Area", place corner dots on the footage, then click the first dot to close the area.</div>';
+    liveEls.zoneList.innerHTML = '<div class="empty">No Zone Areas yet. Click "Add Zone", place corner dots on the footage, then click the first dot to close the area.</div>';
     renderObjectDetectionRules();
     return;
   }
@@ -588,7 +588,7 @@ function finishDraftPolygon() {
   normalizeZone(zones[selectedZoneIndex]);
   draftPolygon = null;
   drawingMode = false;
-  setAddZoneLabel('Draw Area');
+  setAddZoneLabel('Add Zone');
   renderZones();
   refreshFrame();
   markZoneUnsaved();
@@ -614,7 +614,7 @@ function addFullFrameZone() {
   draftPolygon = null;
   drawingMode = false;
   zoneDrag = null;
-  setAddZoneLabel('Draw Area');
+  setAddZoneLabel('Add Zone');
   normalizeZone(zones[selectedZoneIndex]);
   renderZones();
   refreshFrame();
@@ -692,7 +692,7 @@ function toggleDrawingMode() {
   drawingMode = !drawingMode;
   draftPolygon = null;
   zoneDrag = null;
-  setAddZoneLabel(drawingMode ? 'Cancel drawing' : 'Draw Area');
+  setAddZoneLabel(drawingMode ? 'Cancel drawing' : 'Add Zone');
   renderZones();
 }
 
@@ -757,7 +757,7 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && drawingMode) {
     drawingMode = false;
     draftPolygon = null;
-    setAddZoneLabel('Draw Area');
+    setAddZoneLabel('Add Zone');
     renderDraftPolygon();
   }
 });
