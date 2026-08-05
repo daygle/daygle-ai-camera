@@ -49,8 +49,6 @@ const {
   isMotionOnlyRecording,
   isMotionOnlyEvent,
   isMotionOnlyEventItem,
-  isMotionOnlyAlertGroup,
-  isMotionOnlyAlertItem,
   motionConfidenceFor,
   GENERIC_TRIGGER_LABELS,
   isSoundRecording,
@@ -297,32 +295,6 @@ test('isMotionOnlyEventItem: null/undefined → false', () => {
   assert.equal(isMotionOnlyEventItem(undefined), false);
 });
 
-// ─── isMotionOnlyAlertItem (merged dashboard activity item, type=alert) ───
-
-test('isMotionOnlyAlertItem: alert with only motion label → true', () => {
-  assert.equal(isMotionOnlyAlertItem({ type: 'alert', isSound: false, labels: ['motion'] }), true);
-});
-
-test('isMotionOnlyAlertItem: alert with concrete label → false', () => {
-  assert.equal(isMotionOnlyAlertItem({ type: 'alert', isSound: false, labels: ['person'] }), false);
-});
-
-test('isMotionOnlyAlertItem: alert with mixed motion + person → false', () => {
-  assert.equal(isMotionOnlyAlertItem({ type: 'alert', isSound: false, labels: ['motion', 'person'] }), false);
-});
-
-test('isMotionOnlyAlertItem: sound alert → false', () => {
-  assert.equal(isMotionOnlyAlertItem({ type: 'alert', isSound: true, labels: ['motion'] }), false);
-});
-
-test('isMotionOnlyAlertItem: empty labels → false', () => {
-  assert.equal(isMotionOnlyAlertItem({ type: 'alert', isSound: false, labels: [] }), false);
-});
-
-test('isMotionOnlyAlertItem: null → false', () => {
-  assert.equal(isMotionOnlyAlertItem(null), false);
-});
-
 // ─── isMotionOnlyEvent (raw /api/events payload, used by stat cards) ─────
 
 test('isMotionOnlyEvent: rtsp event with motion-only detections → true', () => {
@@ -354,33 +326,4 @@ test('isMotionOnlyEvent: event with no detections → false', () => {
 test('isMotionOnlyEvent: null → false', () => {
   assert.equal(isMotionOnlyEvent(null), false);
   assert.equal(isMotionOnlyEvent(undefined), false);
-});
-
-// ─── isMotionOnlyAlertGroup (raw grouped-alert shape, used by stat cards) ─
-
-test('isMotionOnlyAlertGroup: only motion labels → true', () => {
-  assert.equal(isMotionOnlyAlertGroup({ labels: ['motion'] }), true);
-});
-
-test('isMotionOnlyAlertGroup: motion + concrete → false', () => {
-  assert.equal(isMotionOnlyAlertGroup({ labels: ['motion', 'person'] }), false);
-});
-
-test('isMotionOnlyAlertGroup: motion + sound class → false (mixed alert treated as sound)', () => {
-  assert.equal(isMotionOnlyAlertGroup({ labels: ['motion', 'doorbell'] }), false);
-  assert.equal(isMotionOnlyAlertGroup({ labels: ['motion', 'cat_meow'] }), false);
-});
-
-test('isMotionOnlyAlertGroup: with Set labels → true', () => {
-  assert.equal(isMotionOnlyAlertGroup({ labels: new Set(['motion']) }), true);
-});
-
-test('isMotionOnlyAlertGroup: empty labels → false', () => {
-  assert.equal(isMotionOnlyAlertGroup({ labels: [] }), false);
-  assert.equal(isMotionOnlyAlertGroup(null), false);
-  assert.equal(isMotionOnlyAlertGroup(undefined), false);
-});
-
-test('isMotionOnlyAlertGroup: only sound-class labels → false', () => {
-  assert.equal(isMotionOnlyAlertGroup({ labels: ['doorbell'] }), false);
 });
