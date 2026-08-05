@@ -16,6 +16,7 @@ const autoScrollCheck = document.getElementById('autoScrollCheck');
 let eventSource = null;
 let activeLevel = '';
 let activeSearch = '';
+let connectTimeout = null;
 
 // Priority order for level filtering (highest severity first)
 const LEVEL_ORDER = ['EMERG', 'ALERT', 'CRIT', 'ERROR', 'WARNING', 'NOTICE', 'INFO', 'DEBUG'];
@@ -163,17 +164,39 @@ function setLiveActive(active) {
   liveBtn.textContent = active ? 'Live' : 'Resume';
 }
 
+function clearConnectTimeout() {
+  if (connectTimeout) {
+    clearTimeout(connectTimeout);
+    connectTimeout = null;
+  }
+}
+
 function connectStream() {
   if (eventSource) {
     eventSource.close();
     eventSource = null;
   }
+  clearConnectTimeout();
   liveStatus.textContent = 'Connecting…';
   setLiveActive(true);
 
   eventSource = new EventSource('/api/application-log/stream');
 
+  // Safety net: if onopen never fires within 8 seconds, treat as a failed
+  // connection.  Without this the UI stays stuck on "Connecting…" when the
+  // server accepts the TCP connection but never sends an HTTP response
+  // (e.g. journalctl hangs or a proxy buffers the headers).
+  connectTimeout = setTimeout(() => {
+    if (eventSource && liveStatus.textContent === 'Connecting…') {
+      eventSource.close();
+      eventSource = null;
+      liveStatus.textContent = 'Connection timed out';
+      setLiveActive(false);
+    }
+  }, 8000);
+
   eventSource.onopen = () => {
+    clearConnectTimeout();
     liveStatus.textContent = 'Live';
   };
 
@@ -181,6 +204,7 @@ function connectStream() {
     try {
       const entry = JSON.parse(e.data);
       if (entry.error) {
+        clearConnectTimeout();
         liveStatus.textContent = `Unavailable: ${entry.error}`;
         return;
       }
@@ -191,6 +215,7 @@ function connectStream() {
   };
 
   eventSource.onerror = () => {
+    clearConnectTimeout();
     liveStatus.textContent = 'Disconnected';
     setLiveActive(false);
     eventSource.close();
@@ -199,6 +224,7 @@ function connectStream() {
 }
 
 function disconnectStream() {
+  clearConnectTimeout();
   if (eventSource) {
     eventSource.close();
     eventSource = null;
