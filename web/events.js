@@ -7,7 +7,7 @@
 // recording spans many events (event.recording_id).
 //
 // isSoundLabel, GENERIC_TRIGGER_LABELS, detectionPill, motionPill, formatDate,
-// timeAgo, escapeHtml, titleCase, cameraLabel, daygleSinceParamForRange and
+// timeAgo, escapeHtml, cameraLabel, daygleSinceParamForRange and
 // api() are all provided by web/utils.js.
 
 const els = {
@@ -61,19 +61,9 @@ function eventKind(event) {
 }
 
 // ─── Row rendering ──────────────────────────────────────────────────────────
-function eventTitle(event) {
-  const kind = eventKind(event);
-  if (kind === 'sound') {
-    const meta = event.metadata || {};
-    const raw = meta.class_label || meta.label || (event.detections[0] && event.detections[0].label) || 'Sound';
-    return titleCase(String(raw).replace(/_/g, ' '));
-  }
-  if (kind === 'motion') return 'Motion';
-  const labels = concreteLabels(event);
-  if (!labels.length) return 'Detection';
-  return labels.map((label) => titleCase(label)).join(' · ');
-}
-
+// The Type cell shows the category pill (Object / Motion / Sound Event) with
+// the alert indicator beside it, and the event id underneath - the concrete
+// labels live in the Detections column as pills, so the ref line stays short.
 function eventPills(event) {
   const kind = eventKind(event);
   if (kind === 'sound') {
@@ -118,19 +108,21 @@ function renderEventRow(event) {
     : '';
   // Two per-event actions: open the annotated snapshot (green detection
   // boxes, as in alert emails) and/or open the recording the event belongs to.
+  // Distinct colours (green = snapshot, violet = recording) keep the two
+  // destinations readable at a glance.
   const actions = [];
   if (event.has_snapshot) {
-    actions.push(`<a class="secondary activity-item-action" href="/api/events/${encodeURIComponent(event.id)}/snapshot" target="_blank" rel="noopener" aria-label="Open snapshot for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg><span class="activity-action-label">Snapshot</span></a>`);
+    actions.push(`<a class="secondary activity-item-action activity-item-action-snapshot" href="/api/events/${encodeURIComponent(event.id)}/snapshot" target="_blank" rel="noopener" aria-label="Open snapshot for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg><span class="activity-action-label">Snapshot</span></a>`);
   }
   if (event.recording_id != null) {
-    actions.push(`<a class="secondary activity-item-action" href="/recordings/${encodeURIComponent(event.recording_id)}" aria-label="Open recording for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg><span class="activity-action-label">Recording</span></a>`);
+    actions.push(`<a class="secondary activity-item-action activity-item-action-recording" href="/recordings/${encodeURIComponent(event.recording_id)}" aria-label="Open recording for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg><span class="activity-action-label">Recording</span></a>`);
   }
   const recordingAction = actions.length ? actions.join('') : '<span class="muted">-</span>';
   return `
     <tr class="activity-table-row ${typeClass}" data-event-row="${escapeHtml(String(event.id))}">
-      <td class="activity-cell-type"><span class="activity-item-type">${escapeHtml(typeLabel)}</span><span class="activity-cell-ref">${escapeHtml(eventTitle(event))}</span></td>
+      <td class="activity-cell-type"><div class="activity-item-type-row"><span class="activity-item-type">${escapeHtml(typeLabel)}</span>${alertBadge}</div><span class="activity-cell-ref">Event #${escapeHtml(String(event.id))}</span></td>
       <td class="activity-cell-camera">${escapeHtml(camera)}</td>
-      <td class="activity-cell-detections"><div class="activity-item-badges">${eventPills(event)}${alertBadge}</div></td>
+      <td class="activity-cell-detections"><div class="activity-item-badges">${eventPills(event)}</div></td>
       <td class="activity-cell-when">
         <div class="activity-item-when">
           <div class="activity-item-when-relative">

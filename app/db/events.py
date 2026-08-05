@@ -307,6 +307,50 @@ class EventsMixin:
 
             return [self._event_with_detections(db, row) for row in rows]
 
+    def list_snapshots(self, limit: int = 10000, since: str | None = None) -> list[dict[str, Any]]:
+        """Events that captured a frame - the Snapshots library.
+
+        Sound events and frameless triggers store ``snapshot_path`` as NULL,
+        so the filter is simply "a non-empty snapshot_path on a non-dismissed
+        event". The ``since`` bound is normalised to canonical UTC ``+00:00``
+        exactly like ``search_events`` so the lexical ``created_at`` compare
+        lands on the right side of the boundary for timezones ahead of UTC.
+        """
+        since = _normalize_iso_to_utc(since) if since else None
+        with self.connect() as db:
+            since_clause = "AND e.created_at >= ?" if since else ""
+            params: tuple[Any, ...] = ((since,) if since else ()) + (limit,)
+            rows = db.execute(
+                f"""
+                SELECT * FROM events e
+                WHERE e.dismissed = 0
+                  AND e.snapshot_path IS NOT NULL
+                  AND e.snapshot_path != ''
+                  {since_clause}
+                ORDER BY e.created_at DESC, e.id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+            return [self._event_with_detections(db, row) for row in rows]
+
+    def clear_event_snapshot(self, event_id: int) -> bool:
+        """Detach a stored snapshot from its event (Snapshots-library delete).
+
+        Only clears the ``snapshot_path`` / ``thumbnail_path`` columns; the
+        router removes the image file itself via ``safe_storage_path``. The
+        event row (and any linked recording) is left intact, so after this the
+        event simply stops advertising ``has_snapshot`` and the snapshot
+        endpoint returns 404 - distinct from ``delete_event`` which removes
+        the whole event.
+        """
+        with self.connect() as db:
+            cursor = db.execute(
+                "UPDATE events SET snapshot_path = NULL, thumbnail_path = NULL WHERE id = ?",
+                (int(event_id),),
+            )
+            return cursor.rowcount > 0
+
     def get_event(self, event_id: int) -> dict[str, Any] | None:
         with self.connect() as db:
             row = db.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()

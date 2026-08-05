@@ -15,6 +15,7 @@ Routes:
 - GET  /events        -- events_page
 - GET  /search        -- dashboard_aliases
 - GET  /recordings    -- recordings_page
+- GET  /snapshots     -- snapshots_page
 - GET  /recordings/timeline -- recordings_timeline_page
 - GET  /onnx          -- onnx_page
 - GET  /ai            -- ai_settings_page (308 redirect)
@@ -244,6 +245,17 @@ def recordings_page(web_dir: Path = Depends(get_web_dir)):
     recordings_path = web_dir / 'recordings.html'
     if recordings_path.exists():
         return FileResponse(recordings_path)
+    return root(web_dir=web_dir)
+
+
+@router.get('/snapshots')
+def snapshots_page(web_dir: Path = Depends(get_web_dir)):
+    # The Snapshots library: every event that captured a frame, served to any
+    # authenticated user like /recordings and /events. The middleware enforces
+    # the session and /api/snapshots applies per-user recording scoping.
+    snapshots_path = web_dir / 'snapshots.html'
+    if snapshots_path.exists():
+        return FileResponse(snapshots_path)
     return root(web_dir=web_dir)
 
 

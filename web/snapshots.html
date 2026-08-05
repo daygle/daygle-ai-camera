@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<script>(function(){var t=localStorage.getItem("daygle.theme");if(t)document.documentElement.classList.add(t);})()</script>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Snapshots - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell page-stack">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Captured Frames</p>
+        <h1>Snapshots</h1>
+        <p class="muted">Every saved detection frame across all cameras. Snapshots sit alongside recordings and are flagged when they fired an alert.</p>
+      </div>
+    </header>
+
+    <section class="grid stats-grid">
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Total Snapshots</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+          </span>
+        </div>
+        <strong id="statTotalSnapshots" class="stat-card-value">0</strong>
+        <small class="muted stat-card-sub">Saved frames in range</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Cameras</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          </span>
+        </div>
+        <strong id="statCameraCount" class="stat-card-value">0</strong>
+        <small class="muted stat-card-sub">With at least one snapshot</small>
+      </article>
+      <article class="card stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Alerted</span>
+          <span class="stat-card-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+          </span>
+        </div>
+        <strong id="statAlertedCount" class="stat-card-value">0</strong>
+        <small class="muted stat-card-sub">Frames that fired an alert</small>
+      </article>
+    </section>
+
+    <section class="card activity-card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">📸</div>
+        <div>
+          <h2>Snapshot Library</h2>
+          <p class="settings-section-subtitle">Browse saved detection frames. Each card opens the annotated image; admins can delete a stored snapshot without touching the event or its recording.</p>
+        </div>
+      </div>
+
+      <div class="activity-filter-row">
+        <span id="listStatus" class="result-badge" aria-live="polite"></span>
+        <div class="activity-range-group" role="tablist" aria-label="Time range">
+          <button class="activity-filter-pill active" data-range="today" type="button" role="tab" aria-selected="true">Today</button>
+          <button class="activity-filter-pill" data-range="7d" type="button" role="tab" aria-selected="false">7d</button>
+          <button class="activity-filter-pill" data-range="30d" type="button" role="tab" aria-selected="false">30d</button>
+          <button class="activity-filter-pill" data-range="all" type="button" role="tab" aria-selected="false">All</button>
+        </div>
+      </div>
+
+      <div id="snapshotGallery" class="list snapshots-gallery" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <script src="/static/nav.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/snapshots.js"></script>
+</body>
+</html>

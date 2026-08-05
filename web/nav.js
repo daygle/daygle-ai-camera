@@ -256,6 +256,7 @@ window.daygleAuthReady = (async () => {
       admin: false,
       links: [
         { href: '/recordings', match: '/recordings', label: 'Recordings' },
+        { href: '/snapshots', match: '/snapshots', label: 'Snapshots' },
         { href: '/recordings/timeline', match: '/recordings/timeline', label: 'Timeline' },
       ],
     },

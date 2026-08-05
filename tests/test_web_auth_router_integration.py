@@ -21,7 +21,7 @@ These tests defend that public-surface contract:
    ``app.api.web_router.login_page`` -- the back-compat alias is wired.
 2. ``main.setup_page`` is the SAME function object as
    ``app.api.web_router.setup_page`` -- the back-compat alias is wired.
-3. ``web_router`` registers the expected 22 unique page-handler paths
+3. ``web_router`` registers the expected 23 unique page-handler paths
    (19 functions × 1 decorator + 1 function ``dashboard_aliases`` ×
    3 decorators).
 4. ``dashboard_aliases`` is the route handler for ``/alerts``,
@@ -121,23 +121,25 @@ def app_modules():
 
 
 # ---------------------------------------------------------------------------
-# 1. web_router registration: 22 unique paths.
+# 1. web_router registration: 23 unique paths.
 # ---------------------------------------------------------------------------
 
 
 def test_web_router_registers_expected_page_paths(app_modules):
-    """web_router should expose exactly 22 unique page-handler paths.
+    """web_router should expose exactly 23 unique page-handler paths.
 
-    Path count comes from 21 functions × 1 decorator each + 1 function
+    Path count comes from 22 functions × 1 decorator each + 1 function
     (``dashboard_aliases``) × 1 decorator (``/search``).
-    Total = 22 routes + 22 unique paths (every path is distinct). ``/events``
+    Total = 23 routes + 23 unique paths (every path is distinct). ``/events``
     is served by its own ``events_page`` function (the single activity feed).
+    ``/snapshots`` is the captured-frame library under the Clips menu.
     There is no separate ``/alerts`` page: an alert is a property of an event,
     surfaced as an indicator on the Events row.
 
-    The 22 paths are: ``/``, ``/favicon.ico``, ``/login``, ``/setup``,
+    The 23 paths are: ``/``, ``/favicon.ico``, ``/login``, ``/setup``,
     ``/live``, ``/zones``, ``/sounds``, ``/cameras``,
-    ``/events``, ``/search``, ``/recordings``, ``/recordings/timeline``,
+    ``/events``, ``/search``, ``/recordings``, ``/snapshots``,
+    ``/recordings/timeline``,
     ``/onnx``, ``/ai``, ``/yamnet-tflite``, ``/yamnet``, ``/profile``,
     ``/settings``, ``/users``, ``/audit``, ``/camera-log``,
     ``/application-log``.
@@ -154,6 +156,7 @@ def test_web_router_registers_expected_page_paths(app_modules):
         "/events",
         "/search",
         "/recordings",
+        "/snapshots",
         "/recordings/timeline",
         "/recordings/{recording_id}",
         "/onnx",

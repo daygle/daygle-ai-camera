@@ -215,6 +215,8 @@ from app.api.cameras_router import router as cameras_router
 app.include_router(cameras_router)
 from app.api.events_router import router as events_router
 app.include_router(events_router)
+from app.api.snapshots_router import router as snapshots_router
+app.include_router(snapshots_router)
 from app.api.alerts_router import router as alerts_router
 app.include_router(alerts_router)
 from app.api.users_router import router as users_router

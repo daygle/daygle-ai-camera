@@ -2656,6 +2656,23 @@ tr.drag-over {
 .cameras-table-wrap .rule-table.activity-table .activity-cell-type {
   white-space: nowrap;
 }
+/* Type cell row (events page): the category pill sits beside the alert
+   indicator, with the event reference underneath. Kept on one line (the
+   table already scrolls horizontally) so the alert badge never wraps
+   below the pill; the alert pill gets the same compact padding as the
+   detection pills in the Detections column. */
+.cameras-table-wrap .rule-table.activity-table .activity-item-type-row {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  gap: 6px;
+}
+.cameras-table-wrap .rule-table.activity-table .activity-cell-type .detection {
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 11px;
+}
 .cameras-table-wrap .rule-table.activity-table .activity-cell-ref {
   display: block;
   margin-top: 3px;
@@ -3570,6 +3587,119 @@ a.activity-item-action {
   text-decoration: none;
   white-space: nowrap;
 }
+
+/* Coloured row actions on the events page: Snapshot (green - matches the
+   annotated snapshot image) and Recording (violet). Element-prefixed
+   selectors keep the specificity above ``a.secondary`` so the tint wins. */
+a.activity-item-action.activity-item-action-snapshot,
+button.activity-item-action.activity-item-action-snapshot {
+  background: rgba(73, 230, 163, 0.10);
+  color: var(--success);
+  border: 1px solid rgba(73, 230, 163, 0.4);
+}
+a.activity-item-action.activity-item-action-snapshot:hover,
+button.activity-item-action.activity-item-action-snapshot:hover {
+  background: rgba(73, 230, 163, 0.18);
+  border-color: var(--success);
+}
+a.activity-item-action.activity-item-action-recording,
+button.activity-item-action.activity-item-action-recording {
+  background: rgba(168, 85, 247, 0.12);
+  color: #c9b8ff;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+}
+a.activity-item-action.activity-item-action-recording:hover,
+button.activity-item-action.activity-item-action-recording:hover {
+  background: rgba(168, 85, 247, 0.2);
+  border-color: #a855f7;
+}
+:root.light a.activity-item-action.activity-item-action-snapshot,
+:root.light button.activity-item-action.activity-item-action-snapshot {
+  background: rgba(5, 150, 105, 0.10);
+  color: #047857;
+  border-color: rgba(5, 150, 105, 0.35);
+}
+:root.light a.activity-item-action.activity-item-action-recording,
+:root.light button.activity-item-action.activity-item-action-recording {
+  background: rgba(124, 58, 237, 0.10);
+  color: #6d28d9;
+  border-color: rgba(124, 58, 237, 0.35);
+}
+
+/* ─── Snapshots library (snapshots.html) ──────────────────────────────────
+   The gallery card mirrors the recordings list chrome: a 16:9 frame on top
+   with camera / time / detection metadata and actions underneath. */
+.snapshots-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
+  gap: 16px;
+  max-height: none;
+}
+.snapshot-card {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: rgba(255,255,255,.04);
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.snapshot-card:hover {
+  border-color: rgba(71,214,255,.28);
+  transform: translateY(-2px);
+  box-shadow: 0 14px 40px rgba(0,0,0,.35);
+}
+:root.light .snapshot-card { background: rgba(255,255,255,.72); }
+.snapshot-thumb {
+  display: block;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  overflow: hidden;
+}
+.snapshot-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.snapshot-card-body {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px 16px;
+}
+.snapshot-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.snapshot-card-head .activity-item-type { font-size: 10px; }
+.snapshot-ref {
+  font-size: 12px;
+  font-weight: 850;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.snapshot-card-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.snapshot-camera { font-weight: 800; overflow-wrap: anywhere; }
+.snapshot-when { color: var(--muted); white-space: nowrap; }
+.snapshot-card .activity-item-badges .detection { margin: 0; }
+.snapshot-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+.snapshot-card-actions .activity-item-action { padding: 7px 11px; font-size: 12px; }
 
 /* Empty state (mirrors recordings-empty-state) */
 .activity-empty-state {
