@@ -12,7 +12,8 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 - Three-layer detection: pixel-diff motion gate, YOLO object detection, and per-zone motion rules
 - Monitoring zones, motion and object rules, per-label confidence and cooldowns
 - Continuous per-camera recording plus event clips with pre/post-event buffering
-- Email alerts and ntfy-compatible push notifications, including camera offline alerts
+- Email alerts and ntfy-compatible push notifications, including camera offline and recovery alerts
+- A single Events feed for object, motion, and sound detections, with alerted-event badges, linked recordings, and annotated snapshots
 - Recording, timeline playback, retention, and manual purge
 - User roles: `admin` and `viewer`
 - Audit log of admin actions, camera diagnostics, and an in-browser application log viewer
@@ -40,7 +41,7 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 - `sudo` or root access for installation
 - Network access for `apt` and `pip`
 - Optional: reverse proxy or VPN for public exposure
-- Optional remote access: `cloudflared` (installed by the Debian installer)
+- Optional remote access: `cloudflared` (installed by the Debian installer or updater)
 
 ## Installation
 
@@ -200,8 +201,8 @@ Daygle can manage one Cloudflare Tunnel connector for secure public HTTPS access
 2. Open **Network → Tunnels → Create a Tunnel**.
 3. Choose **Cloudflared**, name the tunnel, and create it.
 4. On the connector setup screen, copy the tunnel token (the value after `--token`).
-5. In Daygle, open **Settings → System → Cloudflare Tunnel**, paste the token, choose whether it should start automatically, and save it. Daygle stores only non-secret tunnel metadata in SQLite; the token is kept in a protected `0600` file next to the database and is never returned by the status API or written to logs.
-6. In the tunnel's **Public Hostnames** configuration, map your hostname to `http://localhost:8080` (or the port configured in Daygle). Start the connector from Daygle, or let it start automatically on boot.
+5. In Daygle, open **Settings → System → Cloudflare Tunnel**, paste the token, choose whether it should start automatically, and save it. The field is intentionally cleared after saving; the **Saved securely** indicator confirms that a token is present without revealing it. For tokens saved through the UI, Daygle stores only non-secret tunnel metadata in SQLite and keeps the token in a protected `0600` file next to the database; the token is never returned by the status API or written to logs.
+6. In the tunnel's **Public Hostnames** configuration, map your hostname to `http://localhost:8080` (or the port configured in Daygle). The card reports whether the connector is running, stopped, unconfigured, or needs attention. Start, stop, or restart it from the same card, or let it start automatically on boot.
 7. Browse to the HTTPS hostname. No port forwarding or additional SSL/reverse-proxy setup is required.
 
 For headless/service deployments, set `DAYGLE_CLOUDFLARED_TOKEN` in the service environment (a protected systemd drop-in is recommended). That token takes precedence over the saved UI value and automatically starts `cloudflared` at application boot. Do not put a token in a shell command or a world-readable config file; Daygle passes it to cloudflared through the child environment rather than its command line. Changing the binding after a UI save takes effect on the next Daygle restart.
@@ -212,7 +213,7 @@ When tunnel mode is active, Daygle binds Uvicorn to `127.0.0.1` and enables `--p
 
 Cloudflare Access is optional. If Access is enabled for the hostname, interactive browser logins are redirected to the Cloudflare Access page. The Android app cannot complete that browser flow automatically: configure it to send `CF-Access-Client-Id` and `CF-Access-Client-Secret` headers on every request (including API, image, and recording requests), as required by your Access application policy.
 
-If cloudflared cannot start or later exits, Daygle logs a clear warning and continues serving the LAN normally. Use **Start**, **Stop**, **Restart**, and the status readout in the same Settings panel to manage the connector.
+If cloudflared cannot start or later exits, Daygle logs a clear warning and continues serving the LAN normally. Use **Start Tunnel**, **Stop Tunnel**, **Restart Tunnel**, and the status readout in the same Settings panel to manage the connector. Status is refreshed periodically while the Settings page is open.
 
 ## Running
 
@@ -221,11 +222,10 @@ If cloudflared cannot start or later exits, Daygle logs a clear warning and cont
 - `/` - dashboard and event search
 - `/live` - live camera view with detection overlay
 - `/cameras` - camera management, recording, and PTZ
-- `/zones` - monitoring zone editor and object/motion rules
+- `/zones` - monitoring zone editor (use **Add Zone** to draw areas), visibility controls, and object/motion rules
 - `/sounds` - sound detection rules
 - `/onnx` - AI model library and detector settings
-- `/alerts` - alert history
-- `/settings` - detection, recording, notifications, retention, backup, and updates
+- `/settings` - detection, recording, notifications, retention, backup, Cloudflare Tunnel, and updates
 - `/users` - user management (admin)
 - `/profile` - change your own password
 - `/audit` - audit log
@@ -234,6 +234,14 @@ If cloudflared cannot start or later exits, Daygle logs a clear warning and cont
 - `/camera-log` - camera diagnostics
 - `/application-log` - in-browser application log viewer
 - `/yamnet-tflite` - sound detection backend status
+
+## Events, recordings, and alerts
+
+Daygle uses the **Events** page as its single activity feed; there is no separate Alerts page. Each row represents one object, motion, or sound detection. Events that triggered a notification show an alert badge, and event rows can link to the recording containing that scene and to an annotated snapshot with detection boxes when an image is available.
+
+One recording can contain multiple event rows. Use **Recordings** or **Recordings → Timeline** to review the complete clip, while the event row provides the specific detection context. Access-controlled viewers only see events and recordings they are allowed to view.
+
+Email and push notifications use the same alert title/body format. Configure the channels under **Settings → Notifications**, then enable email or push per zone/sound rule as needed. Camera offline and recovery notifications use the same channels when enabled.
 
 ## AI and sound detection
 
@@ -262,18 +270,23 @@ If the TFLite runtime is missing, install `ai-edge-litert` or `tflite-runtime`.
 ```bash
 git pull
 source .venv/bin/activate
-pip install -r requirements.txt
+./scripts/install_python_deps.sh python requirements.txt
 python -m app.server
 ```
 
 ### Service update
 
+For an installed Debian service, use the updater rather than reinstalling the application. The default install directory is `/opt/daygle-ai-camera`; if you set `DAYGLE_APP_DIR`, run the commands from that configured directory instead:
+
 ```bash
-./scripts/install_debian.sh
-systemctl restart daygle-ai-camera
+cd /opt/daygle-ai-camera
+sudo ./scripts/update.sh
+sudo systemctl restart daygle-ai-camera
 ```
 
-The web UI also exposes a software update flow under `/settings`.
+The updater verifies that the Git origin is the canonical `daygle/daygle-ai-camera` repository, refreshes Python dependencies, provisions the optional `cloudflared` binary, and migrates older systemd launchers to `python -m app.server` when it has the required privileges. It may fall back to installing `cloudflared` inside the application virtual environment when system-wide installation is unavailable.
+
+Admins can also use **Settings → System → Software Updates**. A successful browser-initiated service update schedules a restart when the installation permits it; otherwise restart the service manually.
 
 ## Tests
 

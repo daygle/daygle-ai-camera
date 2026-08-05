@@ -9,8 +9,12 @@ requireElements([
   'emailSettingsForm', 'testEmailRecipient', 'testEmailBtn',
   'pushSettingsForm', 'testPushBtn', 'startCleanBtn',
   'cloudflareTunnelForm', 'cloudflareTunnelStatus',
+  'cloudflareTunnelState', 'cloudflareTunnelDetail', 'cloudflareTunnelTokenSummary',
+  'cloudflareTunnelTokenIndicator',
 ]);
 const messageEl = document.getElementById('systemMessage');
+let cloudflareTunnelServerStatus = null;
+let cloudflareTunnelTokenDraftTouched = false;
 
 function titleCaseWords(value) {
   return String(value || '')
@@ -285,13 +289,87 @@ async function loadSettings() {
   messageEl.textContent = '';
 }
 
+function setCloudflareTokenIndicator(configured, hasDraft = false, source = '', willClear = false) {
+  const indicator = document.getElementById('cloudflareTunnelTokenIndicator');
+  if (!indicator) return;
+  indicator.className = 'cloudflare-token-indicator';
+  if (hasDraft) {
+    indicator.textContent = 'Unsaved token';
+    indicator.classList.add('cloudflare-token-indicator-draft');
+  } else if (willClear) {
+    indicator.textContent = 'Will be removed on save';
+    indicator.classList.add('cloudflare-token-indicator-draft');
+  } else if (configured && source === 'database') {
+    indicator.textContent = 'Saved securely';
+    indicator.classList.add('cloudflare-token-indicator-saved');
+  } else if (configured) {
+    indicator.textContent = 'Configured externally';
+    indicator.classList.add('cloudflare-token-indicator-external');
+  } else {
+    indicator.textContent = 'Not saved';
+    indicator.classList.add('cloudflare-token-indicator-empty');
+  }
+}
+
 function renderCloudflareTunnel(status) {
   const statusEl = document.getElementById('cloudflareTunnelStatus');
-  if (!statusEl) return;
-  const state = status?.running ? 'Running' : status?.configured ? 'Stopped' : 'Not configured';
-  statusEl.textContent = `${state}${status?.source ? ` · ${status.source}` : ''}${status?.error ? ` · ${status.error}` : ''}`;
+  const stateEl = document.getElementById('cloudflareTunnelState');
+  const detailEl = document.getElementById('cloudflareTunnelDetail');
+  const tokenSummaryEl = document.getElementById('cloudflareTunnelTokenSummary');
+  if (!statusEl || !stateEl || !detailEl || !tokenSummaryEl) return;
+
+  cloudflareTunnelServerStatus = status || null;
+  const configured = Boolean(status?.configured);
+  const running = Boolean(status?.running);
+  const error = String(status?.error || '').trim();
+  const source = String(status?.source || '');
+  const tokenDescription = source === 'database'
+    ? 'Token saved securely.'
+    : 'Token is configured outside this page.';
+  let state;
+  let detail;
+  let tone;
+  if (running) {
+    state = 'Tunnel is running';
+    detail = `cloudflared is running${status?.pid ? ` (process ${status.pid})` : ''}.`;
+    tone = 'status-ok';
+  } else if (!configured) {
+    state = 'Tunnel is not configured';
+    detail = 'Add a Cloudflare token and save it before starting the service.';
+    tone = 'status-warning';
+  } else if (error) {
+    state = 'Tunnel needs attention';
+    detail = `${tokenDescription} cloudflared is not running: ${error}`;
+    tone = 'status-error';
+  } else {
+    state = 'Tunnel is stopped';
+    detail = `${tokenDescription} Start the tunnel when you are ready to publish Daygle.`;
+    tone = 'status-warning';
+  }
+
+  statusEl.className = `status-panel cloudflare-tunnel-status ${tone}`;
+  stateEl.textContent = state;
+  detailEl.textContent = detail;
+  tokenSummaryEl.textContent = configured
+    ? (source === 'database' ? 'Token status: saved securely' : 'Token status: configured externally')
+    : 'Token status: not configured';
+  const draft = forms.cloudflareTunnel.elements.token.value.trim();
+  setCloudflareTokenIndicator(
+    configured,
+    Boolean(draft),
+    source,
+    cloudflareTunnelTokenDraftTouched && !draft && configured,
+  );
+
   const autostart = forms.cloudflareTunnel?.elements.autostart;
   if (autostart && status?.autostart != null) autostart.value = status.autostart ? 'true' : 'false';
+
+  const startBtn = document.getElementById('startCloudflareTunnelBtn');
+  const stopBtn = document.getElementById('stopCloudflareTunnelBtn');
+  const restartBtn = document.getElementById('restartCloudflareTunnelBtn');
+  if (startBtn) startBtn.disabled = !configured || running;
+  if (stopBtn) stopBtn.disabled = !running;
+  if (restartBtn) restartBtn.disabled = !configured;
 }
 
 async function refreshCloudflareTunnel() {
@@ -300,16 +378,52 @@ async function refreshCloudflareTunnel() {
   return status;
 }
 
+function renderCloudflareTunnelReadError(error) {
+  const statusEl = document.getElementById('cloudflareTunnelStatus');
+  const stateEl = document.getElementById('cloudflareTunnelState');
+  const detailEl = document.getElementById('cloudflareTunnelDetail');
+  if (!statusEl || !stateEl || !detailEl) return;
+  statusEl.className = 'status-panel cloudflare-tunnel-status status-error';
+  stateEl.textContent = 'Tunnel status unavailable';
+  detailEl.textContent = `Could not read the Cloudflare service status: ${error?.message || 'Unknown error'}`;
+  const tokenSummaryEl = document.getElementById('cloudflareTunnelTokenSummary');
+  if (tokenSummaryEl) tokenSummaryEl.textContent = 'Token status: unavailable';
+  setCloudflareTokenIndicator(false);
+  for (const id of ['startCloudflareTunnelBtn', 'stopCloudflareTunnelBtn', 'restartCloudflareTunnelBtn']) {
+    const button = document.getElementById(id);
+    if (button) button.disabled = true;
+  }
+}
+
+forms.cloudflareTunnel?.elements.token.addEventListener('input', () => {
+  cloudflareTunnelTokenDraftTouched = true;
+  const draft = forms.cloudflareTunnel.elements.token.value.trim();
+  const current = cloudflareTunnelServerStatus;
+  setCloudflareTokenIndicator(
+    Boolean(current?.configured),
+    Boolean(draft),
+    String(current?.source || ''),
+    !draft && Boolean(current?.configured),
+  );
+});
+
 forms.cloudflareTunnel?.addEventListener('submit', guard(async (event) => {
   event.preventDefault();
-  const data = payloadFor(forms.cloudflareTunnel);
-  const saved = await api('/api/settings/system/cloudflare-tunnel', {
-    method: 'PUT',
-    body: JSON.stringify(data),
-  });
-  forms.cloudflareTunnel.elements.token.value = '';
-  renderCloudflareTunnel(saved);
-  setMessage('Cloudflare Tunnel settings saved.');
+  const saveBtn = document.getElementById('saveCloudflareTunnelBtn');
+  if (saveBtn) saveBtn.disabled = true;
+  try {
+    const data = payloadFor(forms.cloudflareTunnel);
+    const saved = await api('/api/settings/system/cloudflare-tunnel', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+    forms.cloudflareTunnel.elements.token.value = '';
+    cloudflareTunnelTokenDraftTouched = false;
+    renderCloudflareTunnel(saved);
+    setMessage('Cloudflare Tunnel settings saved.');
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
 }));
 
 async function tunnelAction(action) {
@@ -552,4 +666,14 @@ startCleanBtn?.addEventListener('click', guard(async () => {
 // implementation (ARIA tabs pattern + URL-hash deep-linking) lives in
 // utils.js as initDaygleTabs() so the onnx page can reuse it.
 initDaygleTabs();
-refreshCloudflareTunnel().catch(() => {});
+
+function refreshCloudflareTunnelSafely() {
+  return refreshCloudflareTunnel().catch((error) => {
+    if (!window.daygleAuth?.redirecting) renderCloudflareTunnelReadError(error);
+  });
+}
+
+refreshCloudflareTunnelSafely();
+setInterval(() => {
+  if (!document.hidden) refreshCloudflareTunnelSafely();
+}, 15000);

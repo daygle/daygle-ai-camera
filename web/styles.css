@@ -712,6 +712,117 @@ input[type="file"] { padding: 10px; }
 .status-panel.status-ok { border: 1px solid rgba(73,230,163,.4); background: rgba(73,230,163,.07); border-radius: 10px; padding: 10px 14px; grid-template-columns: 1fr; }
 .status-panel.status-warning { border: 1px solid rgba(251,191,36,.4); background: rgba(251,191,36,.07); border-radius: 10px; padding: 10px 14px; grid-template-columns: 1fr; }
 .status-panel.status-error { border: 1px solid rgba(248,113,113,.4); background: rgba(248,113,113,.07); border-radius: 10px; padding: 10px 14px; grid-template-columns: 1fr; }
+
+/* Cloudflare Tunnel status card: keep the service state prominent while the
+   token itself remains write-only and is never echoed back into the form. */
+.cloudflare-tunnel-status,
+.cloudflare-tunnel-status.status-ok,
+.cloudflare-tunnel-status.status-warning,
+.cloudflare-tunnel-status.status-error {
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  padding: 14px 16px;
+}
+.cloudflare-tunnel-status > div.cloudflare-tunnel-status-main {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.cloudflare-tunnel-status-main > div {
+  min-width: 0;
+}
+.cloudflare-tunnel-status strong,
+.cloudflare-tunnel-status span {
+  margin: 0;
+}
+.cloudflare-tunnel-status strong {
+  display: block;
+  font-size: 14px;
+}
+.cloudflare-tunnel-status-detail,
+.cloudflare-tunnel-status-main > div > span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.cloudflare-tunnel-status-dot {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 11px;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 0 0 4px rgba(145,161,186,.12);
+}
+.cloudflare-tunnel-status.status-ok .cloudflare-tunnel-status-dot {
+  background: var(--success);
+  box-shadow: 0 0 0 4px rgba(73,230,163,.14);
+}
+.cloudflare-tunnel-status.status-warning .cloudflare-tunnel-status-dot {
+  background: #fbbf24;
+  box-shadow: 0 0 0 4px rgba(251,191,36,.14);
+}
+.cloudflare-tunnel-status.status-error .cloudflare-tunnel-status-dot {
+  background: var(--danger);
+  box-shadow: 0 0 0 4px rgba(248,113,113,.14);
+}
+.cloudflare-token-summary {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+}
+.cloudflare-token-indicator {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 5px;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .02em;
+  vertical-align: 1px;
+}
+.cloudflare-token-indicator-saved {
+  color: var(--success);
+  border-color: rgba(73,230,163,.32);
+  background: rgba(73,230,163,.08);
+}
+.cloudflare-token-indicator-draft {
+  color: #fbbf24;
+  border-color: rgba(251,191,36,.32);
+  background: rgba(251,191,36,.08);
+}
+.cloudflare-token-indicator-empty {
+  color: var(--muted);
+  background: rgba(255,255,255,.03);
+}
+.cloudflare-token-indicator-external {
+  color: var(--accent);
+  border-color: rgba(71,214,255,.32);
+  background: rgba(71,214,255,.08);
+}
+@media (max-width: 620px) {
+  .cloudflare-tunnel-status,
+  .cloudflare-tunnel-status.status-ok,
+  .cloudflare-tunnel-status.status-warning,
+  .cloudflare-tunnel-status.status-error {
+    grid-template-columns: 1fr;
+  }
+  .cloudflare-token-summary {
+    text-align: left;
+  }
+}
 /* YAMNet backend-status panel (yamnet-tflite.html #soundStatusPanel):
    5 short diagnostics fit one responsive auto-fit row on desktop (the old
    fixed 4-up grid no longer fits after the Detector Status trim), narrowing
