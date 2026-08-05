@@ -1665,26 +1665,31 @@ tr.drag-over {
   margin: 0;
   min-height: 1.2em;
 }
-.recordings-filter-grid {
+.recordings-filter-grid,
+.snapshots-filter-grid {
   margin-top: 0;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   align-items: end;
 }
-.recordings-filter-actions {
+.recordings-filter-actions,
+.snapshots-filter-actions {
   display: flex;
   align-items: end;
   grid-column: 1 / -1;
 }
-.recordings-filter-actions .button-row {
+.recordings-filter-actions .button-row,
+.snapshots-filter-actions .button-row {
   margin: 0;
   padding: 0;
   border-top: 0;
   justify-content: flex-start;
 }
-.recordings-filter-actions > span:first-child {
+.recordings-filter-actions > span:first-child,
+.snapshots-filter-actions > span:first-child {
   display: none;
 }
-.recordings-filter-actions::after {
+.recordings-filter-actions::after,
+.snapshots-filter-actions::after {
   display: none;
 }
 .recordings-list {
@@ -1736,7 +1741,8 @@ tr.drag-over {
 }
 
 @media (max-width: 760px) {
-  .recordings-filter-grid { grid-template-columns: 1fr; }
+  .recordings-filter-grid,
+  .snapshots-filter-grid { grid-template-columns: 1fr; }
   .recordings-list-card .settings-section-header { flex-wrap: wrap; }
   .recordings-toolbar-actions { width: 100%; justify-content: stretch; flex-wrap: wrap; }
   .recordings-toolbar-actions button { flex: 1; justify-content: center; }
@@ -3627,62 +3633,70 @@ button.activity-item-action.activity-item-action-recording:hover {
 }
 
 /* ─── Snapshots library (snapshots.html) ──────────────────────────────────
-   The gallery card mirrors the recordings list chrome: a 16:9 frame on top
-   with camera / time / detection metadata and actions underneath. */
+   The gallery mirrors the events feed chrome: one snapshot per row with a
+   16:9 thumbnail on the left, camera / time / detection metadata in the
+   middle, and actions on the right. Rows collapse to a stacked card on
+   narrow screens. */
 .snapshots-gallery {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
-  gap: 16px;
+  grid-template-columns: 1fr;
+  gap: 10px;
   max-height: none;
 }
-.snapshot-card {
+.snapshot-row {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 16px;
   margin: 0;
-  overflow: hidden;
+  padding: 12px;
   border: 1px solid var(--border);
   border-radius: 18px;
   background: rgba(255,255,255,.04);
-  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
-.snapshot-card:hover {
+.snapshot-row:hover {
   border-color: rgba(71,214,255,.28);
-  transform: translateY(-2px);
-  box-shadow: 0 14px 40px rgba(0,0,0,.35);
+  background: rgba(71,214,255,.05);
+  box-shadow: 0 10px 32px rgba(0,0,0,.28);
 }
-:root.light .snapshot-card { background: rgba(255,255,255,.72); }
-.snapshot-thumb {
+:root.light .snapshot-row { background: rgba(255,255,255,.72); }
+:root.light .snapshot-row:hover { background: rgba(255,255,255,.92); }
+.snapshot-row-thumb {
   display: block;
+  flex: 0 0 208px;
+  width: 208px;
   aspect-ratio: 16 / 9;
   background: #000;
+  border-radius: 12px;
   overflow: hidden;
 }
-.snapshot-thumb img {
+.snapshot-row-thumb img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
 }
-.snapshot-card-body {
+.snapshot-row-body {
+  flex: 1;
+  min-width: 0;
   display: grid;
-  gap: 10px;
-  padding: 14px 16px 16px;
+  gap: 8px;
 }
-.snapshot-card-head {
+.snapshot-row-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
 }
-.snapshot-card-head .activity-item-type { font-size: 10px; }
+.snapshot-row-head .activity-item-type { font-size: 10px; }
 .snapshot-ref {
   font-size: 12px;
   font-weight: 850;
   color: var(--muted);
   white-space: nowrap;
 }
-.snapshot-card-meta {
+.snapshot-row-meta {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -3692,14 +3706,35 @@ button.activity-item-action.activity-item-action-recording:hover {
 }
 .snapshot-camera { font-weight: 800; overflow-wrap: anywhere; }
 .snapshot-when { color: var(--muted); white-space: nowrap; }
-.snapshot-card .activity-item-badges .detection { margin: 0; }
-.snapshot-card-actions {
+.snapshot-row-badges .detection { margin: 0; }
+.snapshot-row-actions {
   display: flex;
+  flex-shrink: 0;
+  align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 2px;
 }
-.snapshot-card-actions .activity-item-action { padding: 7px 11px; font-size: 12px; }
+.snapshot-row-actions .activity-item-action {
+  padding: 7px 11px;
+  font-size: 12px;
+  justify-content: center;
+}
+@media (max-width: 640px) {
+  .snapshot-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .snapshot-row-thumb {
+    flex: none;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+  }
+  .snapshot-row-actions {
+    align-items: stretch;
+  }
+  .snapshot-row-actions .activity-item-action { flex: 1; min-width: 120px; }
+}
 
 /* Empty state (mirrors recordings-empty-state) */
 .activity-empty-state {

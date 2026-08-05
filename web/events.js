@@ -24,6 +24,72 @@ let allEvents = [];
 let activeFilter = 'all';
 let activeRange = 'today';
 
+// Click-to-sort column headers re-order the currently loaded list
+// client-side. `null` means the server order (newest first) applies;
+// clicking a column cycles asc → desc → back to the default. The sort
+// survives filter pill changes and the range-triggered reload (the new
+// list is simply re-sorted by the same key). Mirrors /recordings.
+let eventsSortState = null;
+
+function eventSortValue(event, key) {
+  switch (key) {
+    case 'type': {
+      const kind = eventKind(event);
+      if (kind === 'sound') return 2;
+      return kind === 'motion' ? 1 : 0;
+    }
+    case 'camera': return String(eventCameraLabel(event) || '').toLowerCase();
+    case 'detections': {
+      if (eventKind(event) === 'motion') return 0;
+      // Count distinct concrete labels (mirrors the recordings page's
+      // per-clip detection summary) so duplicate rows of the same object
+      // don't inflate the key.
+      return new Set(concreteLabels(event)).size;
+    }
+    case 'when': return Date.parse(event.created_at) || 0;
+    default: return 0;
+  }
+}
+
+function compareEvents(left, right) {
+  if (!eventsSortState) return 0;
+  const leftValue = eventSortValue(left, eventsSortState.key);
+  const rightValue = eventSortValue(right, eventsSortState.key);
+  let result;
+  if (typeof leftValue === 'number' && typeof rightValue === 'number') {
+    result = leftValue - rightValue;
+  } else {
+    result = String(leftValue).localeCompare(String(rightValue), undefined, { numeric: true, sensitivity: 'base' });
+  }
+  return eventsSortState.dir === 'asc' ? result : -result;
+}
+
+function renderSortHeader(label, key) {
+  const active = eventsSortState && eventsSortState.key === key;
+  const ariaSort = active ? (eventsSortState.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+  const glyph = active ? (eventsSortState.dir === 'asc' ? '▲' : '▼') : '⇅';
+  const cls = active ? 'table-sort-btn is-active' : 'table-sort-btn';
+  return `<th scope="col" aria-sort="${ariaSort}"><button type="button" class="${cls}" data-sort-key="${key}" aria-label="Sort by ${label}">${label}<span class="table-sort-glyph" aria-hidden="true">${glyph}</span></button></th>`;
+}
+
+function bindSortHeaders() {
+  document.querySelectorAll('#eventFeed [data-sort-key]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const key = button.dataset.sortKey;
+      if (eventsSortState && eventsSortState.key === key) {
+        eventsSortState = eventsSortState.dir === 'asc'
+          ? { key, dir: 'desc' }
+          : null;
+      } else {
+        // Date columns read newest-first by default so a single click lands on
+        // the familiar order; every other column starts ascending.
+        eventsSortState = { key, dir: key === 'when' ? 'desc' : 'asc' };
+      }
+      renderList();
+    });
+  });
+}
+
 function getSinceParam() {
   return daygleSinceParamForRange(activeRange);
 }
@@ -174,17 +240,21 @@ function renderList() {
       </div>`;
     return;
   }
+  const ordered = eventsSortState
+    ? events.slice().sort(compareEvents)
+    : events;
   els.eventFeed.innerHTML =
     '<div class="cameras-table-wrap"><table class="rule-table activity-table">' +
     '<thead><tr>' +
-      '<th scope="col">Type</th>' +
-      '<th scope="col">Camera</th>' +
-      '<th scope="col">Detections</th>' +
-      '<th scope="col">When</th>' +
+      renderSortHeader('Type', 'type') +
+      renderSortHeader('Camera', 'camera') +
+      renderSortHeader('Detections', 'detections') +
+      renderSortHeader('When', 'when') +
       '<th class="cell-center" scope="col">Actions</th>' +
     '</tr></thead>' +
-    '<tbody>' + events.map(renderEventRow).join('') + '</tbody>' +
+    '<tbody>' + ordered.map(renderEventRow).join('') + '</tbody>' +
     '</table></div>';
+  bindSortHeaders();
 }
 
 async function loadEvents() {
