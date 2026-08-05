@@ -294,19 +294,19 @@ function setCloudflareTokenIndicator(configured, hasDraft = false, source = '', 
   if (!indicator) return;
   indicator.className = 'cloudflare-token-indicator';
   if (hasDraft) {
-    indicator.textContent = 'Unsaved token';
+    indicator.textContent = 'Unsaved Token';
     indicator.classList.add('cloudflare-token-indicator-draft');
   } else if (willClear) {
-    indicator.textContent = 'Will be removed on save';
+    indicator.textContent = 'Will Be Removed on Save';
     indicator.classList.add('cloudflare-token-indicator-draft');
   } else if (configured && source === 'database') {
-    indicator.textContent = 'Saved securely';
+    indicator.textContent = 'Saved Securely';
     indicator.classList.add('cloudflare-token-indicator-saved');
   } else if (configured) {
-    indicator.textContent = 'Configured externally';
+    indicator.textContent = 'Configured Externally';
     indicator.classList.add('cloudflare-token-indicator-external');
   } else {
-    indicator.textContent = 'Not saved';
+    indicator.textContent = 'Not Saved';
     indicator.classList.add('cloudflare-token-indicator-empty');
   }
 }
@@ -324,26 +324,26 @@ function renderCloudflareTunnel(status) {
   const error = String(status?.error || '').trim();
   const source = String(status?.source || '');
   const tokenDescription = source === 'database'
-    ? 'Token saved securely.'
-    : 'Token is configured outside this page.';
+    ? 'Token Saved Securely.'
+    : 'Token Is Configured Outside This Page.';
   let state;
   let detail;
   let tone;
   if (running) {
-    state = 'Tunnel is running';
-    detail = `cloudflared is running${status?.pid ? ` (process ${status.pid})` : ''}.`;
+    state = 'Tunnel Is Running';
+    detail = `Cloudflared Is Running${status?.pid ? ` (process ${status.pid})` : ''}.`;
     tone = 'status-ok';
   } else if (!configured) {
-    state = 'Tunnel is not configured';
-    detail = 'Add a Cloudflare token and save it before starting the service.';
+    state = 'Tunnel Is Not Configured';
+    detail = 'Add a Cloudflare Token and Save It Before Starting the Service.';
     tone = 'status-warning';
   } else if (error) {
-    state = 'Tunnel needs attention';
-    detail = `${tokenDescription} cloudflared is not running: ${error}`;
+    state = 'Tunnel Needs Attention';
+    detail = `${tokenDescription} Cloudflared Is Not Running: ${error}`;
     tone = 'status-error';
   } else {
-    state = 'Tunnel is stopped';
-    detail = `${tokenDescription} Start the tunnel when you are ready to publish Daygle.`;
+    state = 'Tunnel Is Stopped';
+    detail = `${tokenDescription} Start the Tunnel When You Are Ready to Publish Daygle.`;
     tone = 'status-warning';
   }
 
@@ -351,8 +351,8 @@ function renderCloudflareTunnel(status) {
   stateEl.textContent = state;
   detailEl.textContent = detail;
   tokenSummaryEl.textContent = configured
-    ? (source === 'database' ? 'Token status: saved securely' : 'Token status: configured externally')
-    : 'Token status: not configured';
+    ? (source === 'database' ? 'Token Status: Saved Securely' : 'Token Status: Configured Externally')
+    : 'Token Status: Not Configured';
   const draft = forms.cloudflareTunnel.elements.token.value.trim();
   setCloudflareTokenIndicator(
     configured,
@@ -384,10 +384,10 @@ function renderCloudflareTunnelReadError(error) {
   const detailEl = document.getElementById('cloudflareTunnelDetail');
   if (!statusEl || !stateEl || !detailEl) return;
   statusEl.className = 'status-panel cloudflare-tunnel-status status-error';
-  stateEl.textContent = 'Tunnel status unavailable';
-  detailEl.textContent = `Could not read the Cloudflare service status: ${error?.message || 'Unknown error'}`;
+  stateEl.textContent = 'Tunnel Status Unavailable';
+  detailEl.textContent = `Could Not Read the Cloudflare Service Status: ${error?.message || 'Unknown Error'}`;
   const tokenSummaryEl = document.getElementById('cloudflareTunnelTokenSummary');
-  if (tokenSummaryEl) tokenSummaryEl.textContent = 'Token status: unavailable';
+  if (tokenSummaryEl) tokenSummaryEl.textContent = 'Token Status: Unavailable';
   setCloudflareTokenIndicator(false);
   for (const id of ['startCloudflareTunnelBtn', 'stopCloudflareTunnelBtn', 'restartCloudflareTunnelBtn']) {
     const button = document.getElementById(id);

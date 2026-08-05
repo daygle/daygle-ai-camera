@@ -344,10 +344,10 @@
       <form id="cloudflareTunnelForm" class="form-grid">
         <label>
           <span>Tunnel Token <span class="info-tip" data-tip="The token from Cloudflare Zero Trust. Daygle stores it in its protected SQLite settings store and never returns it to the browser or logs." title="The token from Cloudflare Zero Trust. Daygle stores it in its protected SQLite settings store and never returns it to the browser or logs." tabindex="0" aria-label="Help: Cloudflare Tunnel token"></span> <span id="cloudflareTunnelTokenIndicator" class="cloudflare-token-indicator" aria-live="polite">Checking…</span></span>
-          <input name="token" type="password" placeholder="Paste cloudflared token" autocomplete="new-password" aria-describedby="cloudflareTunnelTokenIndicator" />
+          <input name="token" type="password" placeholder="Paste Cloudflared Token" autocomplete="new-password" aria-describedby="cloudflareTunnelTokenIndicator" />
         </label>
         <label>
-          <span>Start automatically</span>
+          <span>Start Automatically</span>
           <select name="autostart">
             <option value="false">Disabled</option>
             <option value="true">Enabled</option>
@@ -358,11 +358,11 @@
         <div class="cloudflare-tunnel-status-main">
           <span class="cloudflare-tunnel-status-dot" aria-hidden="true"></span>
           <div>
-            <strong id="cloudflareTunnelState">Checking service…</strong>
-            <span id="cloudflareTunnelDetail">Checking the Cloudflare service status.</span>
+            <strong id="cloudflareTunnelState">Checking Service…</strong>
+            <span id="cloudflareTunnelDetail">Checking the Cloudflare Service Status.</span>
           </div>
         </div>
-        <span id="cloudflareTunnelTokenSummary" class="cloudflare-token-summary">Token status: checking…</span>
+        <span id="cloudflareTunnelTokenSummary" class="cloudflare-token-summary">Token Status: Checking…</span>
       </div>
       <p class="field-help">The server binds to <code>127.0.0.1</code> whenever a token is configured, so the tunnel is the only public path. Cloudflare Access can add an additional login layer; Android clients must send its <code>CF-Access-Client-Id</code> and <code>CF-Access-Client-Secret</code> headers on every request.</p>
       <div class="button-row">
