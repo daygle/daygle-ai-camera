@@ -90,7 +90,7 @@ function snapshotCard(event) {
   const typeLabel = kind === 'sound' ? 'Sound Event'
     : kind === 'motion' ? 'Motion Event'
     : 'Object Event';
-  const alerted = Boolean(event.alert) || Boolean(event.alert_triggered);
+  const alerted = Boolean(event.alert);
   const alertBadge = alerted
     ? '<span class="detection detection-alert" title="An alert notification was fired for this event">🔔 Alert</span>'
     : '';
@@ -127,7 +127,7 @@ function renderStats() {
   const cameras = new Set(allSnapshots.map((event) => snapshotCameraLabel(event)).filter(Boolean));
   let alerted = 0;
   for (const event of allSnapshots) {
-    if (event.alert || event.alert_triggered) alerted += 1;
+    if (event.alert) alerted += 1;
   }
   if (els.statTotal) els.statTotal.textContent = String(allSnapshots.length);
   if (els.statCameras) els.statCameras.textContent = String(cameras.size);

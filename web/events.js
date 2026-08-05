@@ -102,7 +102,7 @@ function renderEventRow(event) {
   const typeLabel = kind === 'sound' ? 'Sound Event'
     : kind === 'motion' ? 'Motion Event'
     : 'Object Event';
-  const alerted = Boolean(event.alert) || Boolean(event.alert_triggered);
+  const alerted = Boolean(event.alert);
   const alertBadge = alerted
     ? '<span class="detection detection-alert" title="An alert notification was fired for this event">🔔 Alert</span>'
     : '';
