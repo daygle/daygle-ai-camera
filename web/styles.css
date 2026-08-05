@@ -137,7 +137,6 @@
 :root.light .activity-item-type { background: rgba(71,214,255,.12); color: var(--accent); font-weight: 700; border: 1px solid rgba(71,214,255,.3); }
 :root.light .activity-item-sound .activity-item-type { background: rgba(124,58,237,.15); color: #6d28d9; border: 1px solid rgba(124,58,237,.25); }
 :root.light .activity-item-motion .activity-item-type { background: rgba(5,150,105,.12); color: #047857; border: 1px solid rgba(5,150,105,.2); }
-:root.light .activity-item-alert .activity-item-type { background: rgba(71,214,255,.12); color: var(--accent); border: 1px solid rgba(71,214,255,.3); }
 :root.light .zone-object-rule { background: rgba(0,0,0,.025); }
 :root.light .live-status,
 :root.light .live-status-pill.has-unsaved {
@@ -3535,11 +3534,6 @@ tr.drag-over {
   text-transform: uppercase;
   border: 1px solid rgba(71, 214, 255, 0.3);
   flex-shrink: 0;
-}
-.activity-item-alert .activity-item-type {
-  background: rgba(71, 214, 255, 0.12);
-  color: var(--accent);
-  border-color: rgba(71, 214, 255, 0.3);
 }
 
 .activity-item-sound .activity-item-type {

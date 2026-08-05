@@ -449,15 +449,15 @@ function motionConfidenceFor(recording) {
 // pin behaviour at every layer without re-implementing the logic.
 //
 // "Motion-only" means:
-//   * it isn't a sound recording / event / alert (sound source or sound
-//     class label), AND
+//   * it isn't a sound recording / event (sound source or sound class
+//     label), AND
 //   * every detection / label sits inside GENERIC_TRIGGER_LABELS (motion,
 //     alert, human, object, none, off, continuous) - i.e. no concrete
 //     object or sound class labels.
 //
-// Edge cases: events / alerts / recordings with zero detections / labels
-// are NOT classified as motion-only - they're just under-recorded samples
-// and shouldn't pull the counts.
+// Edge cases: events / recordings with zero detections / labels are NOT
+// classified as motion-only - they're just under-recorded samples and
+// shouldn't pull the counts.
 // ---------------------------------------------------------------------------
 function _hasOnlyGenericLabels(labels) {
   const normalized = (Array.isArray(labels) ? labels : []).map((entry) => {
@@ -477,20 +477,6 @@ function isMotionOnlyEvent(event) {
 function isMotionOnlyEventItem(item) {
   if (!item || item.isSound) return false;
   return _hasOnlyGenericLabels(item.detections);
-}
-
-function isMotionOnlyAlertGroup(group) {
-  if (!group) return false;
-  // Alert groups carry a labels Set (or array) - include the sound-class
-  // check so a single mixed alert (motion + doorbell) is treated as sound.
-  const raw = Array.isArray(group.labels) ? group.labels : Array.from(group.labels || []);
-  if (raw.some(isSoundLabel)) return false;
-  return _hasOnlyGenericLabels(raw);
-}
-
-function isMotionOnlyAlertItem(item) {
-  if (!item || item.isSound) return false;
-  return _hasOnlyGenericLabels(item.labels);
 }
 
 // ─── Shared recording helpers (recordings list + timeline) ────────────────
@@ -1077,7 +1063,7 @@ window.daygleUi = {
   detectionPill, motionPill, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, MOTION_RUNNING_ROW_ICON,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,
   isMotionOnlyRecording, motionConfidenceFor,
-  isMotionOnlyEvent, isMotionOnlyEventItem, isMotionOnlyAlertGroup, isMotionOnlyAlertItem,
+  isMotionOnlyEvent, isMotionOnlyEventItem,
   // Shared recording readers (recordings list + timeline).
   isSoundRecording, recordingTriggerType, recordingTriggerLabel, recordingZoneNames, recordingDetectionSummary, cameraLabel,
   renderTimeSelect, timeSelectValue, setTimeSelectValue,
