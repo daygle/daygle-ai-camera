@@ -23,6 +23,7 @@ from app.camera_health import _check_cameras_health
 from app.camera_instance import read_ingest_frame
 from app.config_facades import effective_ai_config, effective_email_alert_settings, effective_live_config
 from app.detection_state import (
+    confirm_object_detections,
     detect_frame_motion,
     detection_label_set,
     record_live_detection_history,
@@ -177,6 +178,9 @@ def _prune_frame_motion_state() -> None:
         _state._periodic_scan_last_ts.pop(cid, None)
         _state._frame_motion_error_cameras.discard(cid)
     if stale:
+        with _state.live_detection_confirm_lock:
+            for cid in stale:
+                _state.live_detection_confirm_history.pop(cid, None)
         logger.debug('Pruned stale motion state for cameras: %s', stale)
 
 def live_alert_monitor_loop() -> None:
@@ -355,6 +359,18 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     detections = normalize_detection_boxes_for_frame(detections, frame)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     object_detections = filter_detections_for_camera(detections, settings)
+    # Temporal confirmation gate: require an object label to persist across
+    # several detection cycles before it can raise an alert or a recording.
+    # Default required=1 is a pass-through no-op, so cameras that don't opt in
+    # behave exactly as before. Applied to the zone/label-filtered detections so
+    # the window only counts objects this camera actually cares about, and only
+    # to the object axis -- motion is already gated separately.
+    _confirm_frames = live_settings.get('detection_confirm_frames', 1)
+    _confirm_window = live_settings.get('detection_confirm_window', _confirm_frames)
+    object_detections = confirm_object_detections(
+        camera_id, object_detections,
+        required_frames=_confirm_frames, window_frames=_confirm_window,
+    )
     zone_rules = zone_object_alert_rules(settings)
     has_object_zone_rules = any((zone.get('enabled', True) and zone.get('monitor_objects', True) and any((rule.get('enabled', True) and str(rule.get('label') or '').strip() for rule in zone.get('object_rules') or [])) for zone in (settings.get('detection') or {}).get('zones', [])))
     object_alert_detections = zone_alert_detections(settings, object_detections) if has_object_zone_rules else list(object_detections)

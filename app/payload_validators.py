@@ -486,8 +486,15 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if not 0.001 <= motion_background_alpha <= 0.5:
         raise HTTPException(status_code=400, detail='motion_background_alpha must be between 0.001 and 0.5.')
     periodic_scan_interval_seconds = _int_field(merged, 'periodic_scan_interval_seconds', 0, 0, 3600)
+    detection_confirm_frames = _int_field(merged, 'detection_confirm_frames', 1, 1, 10)
+    detection_confirm_window = _int_field(merged, 'detection_confirm_window', 3, 1, 30)
+    # A window smaller than the requirement can never confirm; clamp it up so
+    # "N of the last M" is always satisfiable rather than silently blocking
+    # every detection.
+    if detection_confirm_window < detection_confirm_frames:
+        detection_confirm_window = detection_confirm_frames
     motion_frame_width = _int_field(merged, 'motion_frame_width', 160, 40, 640)
     motion_frame_height = _int_field(merged, 'motion_frame_height', 120, 30, 480)
     ingest_frame_fps = _int_field(merged, 'ingest_frame_fps', 4, 1, 30)
     snapshot_quality = _int_field(merged, 'snapshot_quality', 2, 2, 31)
-    return {'snapshot_refresh_ms': snapshot_refresh_ms, 'detection_status_refresh_ms': detection_status_refresh_ms, 'detection_interval_seconds': detection_interval_seconds, 'event_debounce_seconds': event_debounce_seconds, 'background_detection_enabled': background_detection_enabled, 'detection_history_minutes': detection_history_minutes, 'motion_pixel_threshold': motion_pixel_threshold, 'motion_gate_fraction': round(motion_gate_fraction, 6), 'motion_scale_fraction': round(motion_scale_fraction, 4), 'motion_background_alpha': round(motion_background_alpha, 4), 'motion_frame_width': motion_frame_width, 'motion_frame_height': motion_frame_height, 'ingest_frame_fps': ingest_frame_fps, 'snapshot_quality': snapshot_quality, 'periodic_scan_interval_seconds': periodic_scan_interval_seconds}
+    return {'snapshot_refresh_ms': snapshot_refresh_ms, 'detection_status_refresh_ms': detection_status_refresh_ms, 'detection_interval_seconds': detection_interval_seconds, 'event_debounce_seconds': event_debounce_seconds, 'background_detection_enabled': background_detection_enabled, 'detection_history_minutes': detection_history_minutes, 'motion_pixel_threshold': motion_pixel_threshold, 'motion_gate_fraction': round(motion_gate_fraction, 6), 'motion_scale_fraction': round(motion_scale_fraction, 4), 'motion_background_alpha': round(motion_background_alpha, 4), 'motion_frame_width': motion_frame_width, 'motion_frame_height': motion_frame_height, 'ingest_frame_fps': ingest_frame_fps, 'snapshot_quality': snapshot_quality, 'periodic_scan_interval_seconds': periodic_scan_interval_seconds, 'detection_confirm_frames': detection_confirm_frames, 'detection_confirm_window': detection_confirm_window}

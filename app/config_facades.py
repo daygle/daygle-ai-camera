@@ -68,6 +68,12 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     'detection_status_refresh_ms': 2000,
     'detection_interval_seconds': 0.5,
     'event_debounce_seconds': 10.0,
+    # Temporal confirmation gate (all object labels). ``1`` = disabled
+    # (single-frame behavior); higher requires the label to persist across
+    # ``detection_confirm_frames`` of the last ``detection_confirm_window``
+    # detection cycles before it can alert or record.
+    'detection_confirm_frames': 1,
+    'detection_confirm_window': 3,
     'background_detection_enabled': True,
     'detection_history_minutes': 10,
     'motion_pixel_threshold': 30,

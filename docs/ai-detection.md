@@ -73,6 +73,24 @@ Models are stored under `models/` alongside the label file `models/coco.names`
 The **Loaded Labels** section lists the object classes the current detector can
 identify, loaded from `models/coco.names`.
 
+### Umbrella group labels
+
+Besides the individual model classes, object rules and zone allow-lists accept
+two **group** labels that match any of several related classes with a single
+rule:
+
+- **animal** - matches `bird`, `cat`, `dog`, `horse`, `sheep`, `cow`,
+  `elephant`, `bear`, `zebra`, and `giraffe`.
+- **pet** - matches `cat`, `dog`, and `bird`.
+
+Groups are useful when a subject is easily confused between neighbouring
+classes - for example, an IR-lit cat at night is frequently misclassified as a
+`dog`, so an `animal` (or `pet`) rule still fires where a strict `cat` rule
+would miss it. Groups only expand on the configured side: a rule for a concrete
+class such as `cat` continues to match `cat` only, so adding a group never
+changes the behavior of your existing per-class rules. Pick a group from the
+**Add Object…** dropdown on the Zones page, under the **Groups** heading.
+
 ---
 
 ## Settings tab

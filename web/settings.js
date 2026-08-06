@@ -51,6 +51,8 @@ const FIELD_LABELS = {
   detection_status_refresh_ms: 'Detection Status Refresh (ms)',
   detection_interval_seconds: 'Detection Interval (s)',
   event_debounce_seconds: 'Event Merge Window (s)',
+  detection_confirm_frames: 'Confirm Frames',
+  detection_confirm_window: 'Confirm Window',
   detection_history_minutes: 'Detection History (min)',
   background_detection_enabled: 'Background Detection',
   periodic_scan_interval_seconds: 'Periodic Scan Interval (s)',
@@ -201,6 +203,7 @@ const FIELD_TYPES = {
     'detection_status_refresh_ms', 'motion_pixel_threshold',
     'periodic_scan_interval_seconds', 'motion_frame_width', 'motion_frame_height',
     'ingest_frame_fps', 'snapshot_quality', 'offline_delay_minutes',
+    'detection_confirm_frames', 'detection_confirm_window',
   ]),
   number: new Set([
     'detection_interval_seconds', 'event_debounce_seconds', 'detection_history_minutes',

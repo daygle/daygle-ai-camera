@@ -7,6 +7,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import app.state as _state
+from app.zone_schema import label_matches
 
 ALERT_DATETIME_PREFS_TTL_SECONDS = 30.0
 _alert_datetime_prefs_cache: tuple[tuple[str, str, str], float] | None = None
@@ -115,7 +116,12 @@ class AlertEngine:
                 if not self._is_active_now(rule):
                     continue
 
-                if self._normalize_object_label(rule.get('object')) != label_key:
+                # ``label_matches`` expands an umbrella group rule
+                # (``animal``/``pet``) to its member labels while still
+                # honouring the ``human``->``person`` aliases, so a group rule
+                # fires the alert for a matching concrete detection. A concrete
+                # rule (``cat``) continues to match only its own label.
+                if not label_matches(label_key, rule.get('object')):
                     continue
 
                 rule_zone_id = str(rule.get('zone_id') or '').strip()

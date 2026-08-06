@@ -184,7 +184,14 @@ from app.config_facades import get_camera_config
 # don't flood logs on every frame. Cleared on success to allow self-healing.
 _zone_pixel_motion_errors: set[str] = set()
 from app.utils import normalize_email_recipients
-from app.zone_schema import _LABEL_ALIASES, normalize_label_list, zone_motion_max_confidence, zone_motion_min_confidence
+from app.zone_schema import (
+    canonical_label,
+    detection_label_in_allowed,
+    label_matches,
+    normalize_label_list,
+    zone_motion_max_confidence,
+    zone_motion_min_confidence,
+)
 
 
 def get_camera_instance(camera_id: str | None = None):
@@ -390,8 +397,11 @@ def detection_label_allowed_for_zone(detection: dict[str, Any], zone: dict[str, 
     allowed_labels = zone_labels or camera_labels
     if not allowed_labels:
         return True
-    label = str(detection.get('label') or '').strip().lower()
-    return _LABEL_ALIASES.get(label, label) in allowed_labels
+    # ``detection_label_in_allowed`` canonicalizes the detection label AND
+    # expands any umbrella group in the allow-list (e.g. ``animal`` matches a
+    # ``cat`` detection), so a group configured on a zone/camera works the same
+    # way a concrete label does.
+    return detection_label_in_allowed(detection.get('label'), allowed_labels)
 
 
 def filter_detections_for_camera_zones(
@@ -415,10 +425,7 @@ def filter_detections_for_camera_zones(
             return [
                 detection
                 for detection in detections
-                if _LABEL_ALIASES.get(
-                    str(detection.get('label') or '').strip().lower(),
-                    str(detection.get('label') or '').strip().lower(),
-                ) in camera_labels
+                if detection_label_in_allowed(detection.get('label'), camera_labels)
             ]
         # No zones and no camera labels: keep legacy "accept all" behavior so a
         # camera with object detection enabled but unconfigured still records
@@ -449,8 +456,7 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
         raise ValueError(f"action must be 'alert' or 'record', got {action!r}")
     detection_settings = settings.get('detection') or {}
     zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
-    label = str(detection.get('label') or '').strip().lower()
-    label = _LABEL_ALIASES.get(label, label)
+    label = canonical_label(detection.get('label'))
     if not label:
         return []
     matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
@@ -464,14 +470,13 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
                 continue
             if action == 'record' and (not rule.get('record_on_detect', True)):
                 continue
-            # Canonicalise the rule label through the same alias map as the
-            # detection label, so a rule configured as ``human``/``people``/
-            # ``pedestrian`` matches a ``person`` detection. The recording
-            # path (``detection_has_matching_record_rule``) and the
-            # AlertEngine both alias both sides; without this the alert
-            # pre-filter silently dropped aliased rules.
-            rule_label = str(rule.get('label') or '').strip().lower()
-            if _LABEL_ALIASES.get(rule_label, rule_label) != label:
+            # ``label_matches`` canonicalizes the rule label the same way the
+            # detection label is (so ``human``/``people``/``pedestrian`` all
+            # match a ``person`` detection) AND expands umbrella group rules
+            # (an ``animal``/``pet`` rule matches a ``cat`` detection). The
+            # recording path (``detection_has_matching_record_rule``) and the
+            # AlertEngine apply the same matcher, so all three agree.
+            if not label_matches(label, rule.get('label')):
                 continue
             # Per-rule confidence window: the detection must sit inside
             # ``[min_confidence, max_confidence]``. ``max_confidence`` defaults
@@ -613,17 +618,17 @@ def detection_has_matching_record_rule(detection: dict[str, Any], rules: list[di
     Cooldown and time-window are intentionally ignored so a recording is created on every
     matching detection, not only when a new alert notification is emitted.
     """
-    label = str(detection.get('label') or '').strip().lower()
-    label = _LABEL_ALIASES.get(label, label)
+    label = canonical_label(detection.get('label'))
     if not label:
         return False
     confidence = float(detection.get('confidence') or 0)
     for rule in rules:
         if not rule.get('enabled', True):
             continue
-        rule_object = str(rule.get('object') or '').strip().lower()
-        rule_object = _LABEL_ALIASES.get(rule_object, rule_object)
-        if rule_object != label:
+        # ``label_matches`` expands an umbrella group rule (``animal``/``pet``)
+        # to its member labels, so a group record rule captures a ``cat`` the
+        # same way the alert path does.
+        if not label_matches(label, rule.get('object')):
             continue
         try:
             min_conf = float(rule.get('min_confidence', 0.0 if label == 'motion' else 0.5))
