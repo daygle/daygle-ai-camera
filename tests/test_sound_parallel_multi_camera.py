@@ -105,7 +105,6 @@ class _ConcurrencyTrackingBackend:
 
 def test_two_cameras_detect_in_parallel(tmp_path, monkeypatch):
     import app.sound_detector as sd
-    from app.sound_detector import SoundDetector
 
     fake = _ConcurrencyTrackingBackend({"cat_meow": 0.99})
     monkeypatch.setattr(sd, "_yamnet", fake)
@@ -140,11 +139,11 @@ def test_two_cameras_detect_in_parallel(tmp_path, monkeypatch):
             return [(seg, seg.stat().st_mtime + 1000)]
         return _provider
 
-    det_a = SoundDetector(
+    det_a = sd.SoundDetector(
         on_detect=make_cb("A"), rules=rules, source="ingest",
         sample_duration_seconds=1.0, audio_segment_provider=make_provider(seg_a),
     )
-    det_b = SoundDetector(
+    det_b = sd.SoundDetector(
         on_detect=make_cb("B"), rules=rules, source="ingest",
         sample_duration_seconds=1.0, audio_segment_provider=make_provider(seg_b),
     )
@@ -276,13 +275,13 @@ def test_shared_yamnet_backend_is_concurrency_safe():
     from app.sound_detector import _yamnet
 
     results: list[object] = []
-    errors: list[BaseException] = []
+    errors: list[Exception] = []
     audio = np.zeros(SAMPLE_RATE, dtype=np.float32)
 
     def worker():
         try:
             results.append(_yamnet.score_all(audio))
-        except BaseException as exc:  # noqa: BLE001 - we assert none occur
+        except Exception as exc:  # noqa: BLE001 - we assert none occur
             errors.append(exc)
 
     threads = [threading.Thread(target=worker) for _ in range(8)]
