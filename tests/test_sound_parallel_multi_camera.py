@@ -270,8 +270,13 @@ def test_apply_sound_settings_records_per_camera_in_parallel(monkeypatch):
 
 def test_shared_yamnet_backend_is_concurrency_safe():
     """Many threads hammering the real singleton's ``score_all`` at once must
-    not crash or deadlock. With no model loaded it short-circuits to ``{}``;
-    the point is that concurrent entry is serialized safely by its lock."""
+    not crash or deadlock; the shared lock around the TFLite ``invoke`` must
+    serialize them safely and every caller must get a result back.
+
+    This is environment-agnostic: when the model is available (as in CI) each
+    call runs a real inference and returns per-class scores; when it isn't (no
+    TFLite runtime / model) ``score_all`` short-circuits to ``{}``. Either way
+    the contract is the same - a dict per caller, no exception, no hang."""
     import app.sound_detector as sd
 
     results: list[object] = []
@@ -292,5 +297,7 @@ def test_shared_yamnet_backend_is_concurrency_safe():
 
     assert not errors, f"concurrent score_all raised: {errors}"
     assert len(results) == 8, "not every concurrent caller returned"
-    # Model isn't loaded in the test env, so each call cleanly returns {}.
-    assert all(r == {} for r in results)
+    # score_all always returns a dict: {} when the model is unavailable, or
+    # {class_id: confidence} when it ran. The point of this test is that
+    # concurrent entry is safe, not what the scores are.
+    assert all(isinstance(r, dict) for r in results)
