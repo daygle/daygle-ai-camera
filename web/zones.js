@@ -195,8 +195,8 @@ function updateSelectionStyles() {
 // app/zone_schema.py::_LABEL_GROUPS on the backend. Useful when a subject is
 // easily mislabeled between related classes (e.g. an IR-lit cat read as a dog).
 const OBJECT_GROUP_LABELS = [
-  { value: 'animal', label: 'Any animal (cat, dog, bird…)' },
-  { value: 'pet', label: 'Pet (cat / dog / bird)' },
+  { value: 'animal', label: 'Animal (Cat, Dog, Bird…)' },
+  { value: 'pet', label: 'Pet (Cat / Dog / Bird)' },
 ];
 
 function objectRuleOptions(selectedLabel) {
