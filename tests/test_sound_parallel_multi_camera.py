@@ -272,7 +272,7 @@ def test_shared_yamnet_backend_is_concurrency_safe():
     """Many threads hammering the real singleton's ``score_all`` at once must
     not crash or deadlock. With no model loaded it short-circuits to ``{}``;
     the point is that concurrent entry is serialized safely by its lock."""
-    from app.sound_detector import _yamnet
+    import app.sound_detector as sd
 
     results: list[object] = []
     errors: list[Exception] = []
@@ -280,7 +280,7 @@ def test_shared_yamnet_backend_is_concurrency_safe():
 
     def worker():
         try:
-            results.append(_yamnet.score_all(audio))
+            results.append(sd._yamnet.score_all(audio))
         except Exception as exc:  # noqa: BLE001 - we assert none occur
             errors.append(exc)
 
