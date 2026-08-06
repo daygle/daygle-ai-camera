@@ -80,6 +80,14 @@ _camera_instances_lock: threading.Lock = threading.Lock()
 live_detection_history_lock: threading.Lock = threading.Lock()
 live_detection_history: dict = {}
 
+# Rolling per-camera window of the object labels seen in each recent detection
+# cycle, used by the temporal N-of-M confirmation gate
+# (``app.detection_state.confirm_object_detections``). Kept separate from
+# ``live_detection_history`` (which feeds recording-playback overlays) so the
+# confirmation window can size itself independently.
+live_detection_confirm_lock: threading.Lock = threading.Lock()
+live_detection_confirm_history: dict = {}
+
 live_detection_status_lock: threading.Lock = threading.Lock()
 live_detection_status: dict = {}
 

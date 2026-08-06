@@ -83,6 +83,36 @@ Default: `0.5`
 
 ---
 
+### Confirm Frames / Confirm Window
+
+A temporal "N of the last M" gate that suppresses an object until it has been
+seen in several consecutive detection cycles. It reduces single-frame false
+positives (a flicker briefly misread as a `cat`, a `person`, or any other
+class) without raising your confidence thresholds, so you can keep a lower
+per-label confidence and still avoid noise.
+
+- **Confirm Frames** is *N* - how many recent detection cycles must contain the
+  object's label before it can alert or record. `1` disables the gate (react on
+  the first frame, the historical behavior).
+- **Confirm Window** is *M* - how many recent cycles the count looks back over.
+  Only applies when Confirm Frames is above `1`, and is automatically clamped up
+  to at least Confirm Frames.
+
+The gate applies to every object label uniformly, and counts only cycles that
+actually ran YOLO (a quiet frame with no motion is skipped and does not count).
+It runs *after* zone/label filtering, so the window only tracks objects the
+camera is configured to care about. Motion rules are gated separately and are
+unaffected.
+
+**Tuning tip:** If a distant or low-confidence subject flickers in and out of
+detection, try Confirm Frames `2` with Confirm Window `3`. Raising Confirm
+Frames adds a small latency (the object must persist for N cycles before the
+first alert), so keep it low - `2` or `3` is usually enough.
+
+Defaults: `1` (off) / `3`
+
+---
+
 ### Periodic Scan Interval (s)
 
 How often a full YOLO scan runs regardless of pixel-diff motion. Set to `0` to disable.

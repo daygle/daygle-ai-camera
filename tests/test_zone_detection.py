@@ -1056,3 +1056,63 @@ def test_get_camera_instance_missing_raises_404(monkeypatch, zd):
         zd.get_camera_instance('cam-99')
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail == 'Camera not found'
+
+
+# ---------------------------------------------------------------------------
+# Umbrella label groups end-to-end through the zone matching pipeline
+# ---------------------------------------------------------------------------
+
+def test_detection_label_allowed_for_zone_group_matches_member(zd):
+    zone = {'object_labels': ['animal']}
+    assert zd.detection_label_allowed_for_zone({'label': 'cat'}, zone, set()) is True
+    assert zd.detection_label_allowed_for_zone({'label': 'dog'}, zone, set()) is True
+    # person is not in the animal group
+    assert zd.detection_label_allowed_for_zone({'label': 'person'}, zone, set()) is False
+
+
+def test_detection_label_allowed_for_zone_concrete_label_still_exclusive(zd):
+    # Regression: a concrete 'cat' allow-list must not leak to 'dog'.
+    zone = {'object_labels': ['cat']}
+    assert zd.detection_label_allowed_for_zone({'label': 'cat'}, zone, set()) is True
+    assert zd.detection_label_allowed_for_zone({'label': 'dog'}, zone, set()) is False
+
+
+def test_filter_for_camera_zones_group_camera_label_fallback(zd):
+    settings = {'id': 'cam-1', 'detection': {'object_labels': ['pet']}}
+    detections = [
+        {'label': 'cat', 'box': {'x': 0, 'y': 0, 'width': 0.1, 'height': 0.1}},
+        {'label': 'dog', 'box': {'x': 0, 'y': 0, 'width': 0.1, 'height': 0.1}},
+        {'label': 'car', 'box': {'x': 0, 'y': 0, 'width': 0.1, 'height': 0.1}},
+    ]
+    filtered = zd.filter_detections_for_camera_zones(
+        detections, settings, zone_monitor_key='monitor_objects'
+    )
+    assert sorted(d['label'] for d in filtered) == ['cat', 'dog']
+
+
+def test_zone_object_rule_matches_group_rule_matches_member(zd):
+    settings = {
+        'id': 'cam-1',
+        'detection': {
+            'zones': [
+                {
+                    'enabled': True, 'monitor_objects': True,
+                    'x': 0, 'y': 0, 'width': 1, 'height': 1,
+                    'object_rules': [{'label': 'animal', 'enabled': True, 'email_enabled': True, 'min_confidence': 0.3}],
+                },
+            ],
+        },
+    }
+    box = {'x': 0.4, 'y': 0.4, 'width': 0.1, 'height': 0.1}
+    assert len(zd.zone_object_rule_matches(settings, {'label': 'cat', 'confidence': 0.8, 'box': box}, action='alert')) == 1
+    assert len(zd.zone_object_rule_matches(settings, {'label': 'dog', 'confidence': 0.8, 'box': box}, action='alert')) == 1
+    # person is outside the animal group -> no match
+    assert zd.zone_object_rule_matches(settings, {'label': 'person', 'confidence': 0.8, 'box': box}, action='alert') == []
+
+
+def test_detection_has_matching_record_rule_group_rule(zd):
+    rules = [{'enabled': True, 'object': 'pet', 'min_confidence': 0.3}]
+    assert zd.detection_has_matching_record_rule({'label': 'cat', 'confidence': 0.8}, rules) is True
+    assert zd.detection_has_matching_record_rule({'label': 'dog', 'confidence': 0.8}, rules) is True
+    # horse is an animal but not a 'pet'
+    assert zd.detection_has_matching_record_rule({'label': 'horse', 'confidence': 0.8}, rules) is False

@@ -191,14 +191,26 @@ function updateSelectionStyles() {
   });
 }
 
+// Umbrella group labels: a single rule that matches ANY member class. Mirrors
+// app/zone_schema.py::_LABEL_GROUPS on the backend. Useful when a subject is
+// easily mislabeled between related classes (e.g. an IR-lit cat read as a dog).
+const OBJECT_GROUP_LABELS = [
+  { value: 'animal', label: 'Any animal (cat, dog, bird…)' },
+  { value: 'pet', label: 'Pet (cat / dog / bird)' },
+];
+
 function objectRuleOptions(selectedLabel) {
-  const labels = [...new Set([...availableLabels, selectedLabel].filter((l) => Boolean(l) && l !== 'motion'))];
+  const groupValues = new Set(OBJECT_GROUP_LABELS.map((group) => group.value));
+  // Group names are rendered as dedicated options below, so keep them out of the
+  // per-class list even when one is the currently selected value.
+  const labels = [...new Set([...availableLabels, selectedLabel].filter((l) => Boolean(l) && l !== 'motion' && !groupValues.has(l)))];
   // Display labels in title case for readability; the value attribute stays
   // raw lowercase because rule.label is the canonical lookup key used by
   // defaultObjectRule, normalizeObjectRules, and backend filters.
   const coco = labels.map((label) => `<option value="${escapeHtml(label)}" ${label === selectedLabel ? 'selected' : ''}>${escapeHtml(titleCase(label))}</option>`).join('');
+  const groups = OBJECT_GROUP_LABELS.map((group) => `<option value="${escapeHtml(group.value)}" ${group.value === selectedLabel ? 'selected' : ''}>${escapeHtml(group.label)}</option>`).join('');
   const motionSelected = selectedLabel === 'motion';
-  return `<option value="">Add Object...</option><option value="motion" ${motionSelected ? 'selected' : ''}>Motion</option>${coco}`;
+  return `<option value="">Add Object...</option><option value="motion" ${motionSelected ? 'selected' : ''}>Motion</option><optgroup label="Groups">${groups}</optgroup>${coco}`;
 }
 
 function renderObjectRules(zone, zoneIndex) {

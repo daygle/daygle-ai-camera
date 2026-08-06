@@ -123,6 +123,74 @@ _LABEL_ALIASES: dict[str, str] = {
 }
 
 
+# Umbrella / group labels: a single configurable label that matches ANY of a
+# set of concrete detector labels. Unlike ``_LABEL_ALIASES`` (a one-to-one
+# canonicalization that rewrites a label to its single canonical form), a group
+# is one-to-many *expansion* used only when the label appears on the CONFIGURED
+# side (a zone's ``object_labels`` allow-list or an object rule's label).
+#
+# This keeps every individual label working exactly as before: a rule or
+# allow-list for ``cat`` still matches only ``cat``. A user who instead
+# configures ``animal`` (or ``pet``) opts into the umbrella -- e.g. at night an
+# IR-lit cat is frequently misclassified as ``dog``, so an ``animal``/``pet``
+# rule still fires. The member sets are the COCO animal classes; extend here if
+# a custom model adds labels.
+_LABEL_GROUPS: dict[str, frozenset[str]] = {
+    'animal': frozenset({
+        'bird', 'cat', 'dog', 'horse', 'sheep', 'cow',
+        'elephant', 'bear', 'zebra', 'giraffe',
+    }),
+    'pet': frozenset({'cat', 'dog', 'bird'}),
+}
+
+
+def canonical_label(value: Any) -> str:
+    """Lowercase, strip, and apply ``_LABEL_ALIASES`` to a single label."""
+    text = str(value or '').strip().lower()
+    return _LABEL_ALIASES.get(text, text)
+
+
+def label_matches(detection_label: Any, configured_label: Any) -> bool:
+    """Return True when a detection label satisfies a configured label.
+
+    ``detection_label`` is what the detector produced (always a concrete label
+    such as ``cat``); ``configured_label`` is what an operator set on a zone
+    allow-list or object rule and MAY be an umbrella group name (``animal`` /
+    ``pet``). The match succeeds when the two canonicalize to the same label OR
+    the configured label is a group whose members include the detection label.
+    Group expansion is intentionally one-directional -- a rule for ``cat`` never
+    matches ``dog`` -- so non-group labels behave exactly as before.
+    """
+    detection = canonical_label(detection_label)
+    configured = canonical_label(configured_label)
+    if not detection or not configured:
+        return False
+    if detection == configured:
+        return True
+    members = _LABEL_GROUPS.get(configured)
+    return bool(members and detection in members)
+
+
+def detection_label_in_allowed(detection_label: Any, allowed_labels: set[str]) -> bool:
+    """Return True when a detection label is covered by an allow-list.
+
+    ``allowed_labels`` is a set of already-canonicalized configured labels
+    (from ``normalize_label_list``) that may contain umbrella group names. A
+    detection matches when its canonical label is listed directly or falls
+    inside any configured group's member set.
+    """
+    detection = canonical_label(detection_label)
+    if not detection:
+        return False
+    if detection in allowed_labels:
+        return True
+    return any(
+        detection in members
+        for members in (_LABEL_GROUPS.get(label) for label in allowed_labels)
+        if members
+    )
+
+
 def normalize_label_list(value: Any) -> list[str]:
     if isinstance(value, str):
         raw_labels = value.split(',')

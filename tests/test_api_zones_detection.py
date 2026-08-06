@@ -798,6 +798,34 @@ def test_alert_engine_respects_rule_max_confidence_upper_bound():
     assert len(engine.process([over], rules=[no_cap])) == 1
 
 
+def test_alert_engine_group_rule_matches_member_labels():
+    """An umbrella group rule (``animal``/``pet``) fires for any member label
+    while a concrete rule still matches only its own label -- so adding groups
+    never changes the behavior of existing per-label rules."""
+    from app.alerts import AlertEngine
+
+    engine = AlertEngine([])
+    animal_rule = {
+        'name': 'Garden / Full Frame / animal',
+        'object': 'animal',
+        'zone_id': 'full-frame',
+        'min_confidence': 0.3,
+        'cooldown_seconds': 0,
+        'enabled': True,
+    }
+    # A cat and a dog both satisfy the ``animal`` group rule...
+    assert len(engine.process([{'label': 'cat', 'confidence': 0.8, 'zone_id': 'full-frame'}], rules=[animal_rule])) == 1
+    assert len(engine.process([{'label': 'dog', 'confidence': 0.8, 'zone_id': 'full-frame'}], rules=[animal_rule])) == 1
+    # ...but a person (not in the animal group) does not.
+    assert engine.process([{'label': 'person', 'confidence': 0.8, 'zone_id': 'full-frame'}], rules=[animal_rule]) == []
+
+    # A concrete ``cat`` rule must NOT fire for a dog (regression guard: group
+    # expansion is one-directional, only when the CONFIGURED label is a group).
+    cat_rule = {**animal_rule, 'name': 'Garden / Full Frame / cat', 'object': 'cat'}
+    assert engine.process([{'label': 'dog', 'confidence': 0.9, 'zone_id': 'full-frame'}], rules=[cat_rule]) == []
+    assert len(engine.process([{'label': 'cat', 'confidence': 0.9, 'zone_id': 'full-frame'}], rules=[cat_rule])) == 1
+
+
 def test_coco_labels_load_person_and_cat_at_correct_indices(tmp_path):
     """Verify coco.names resolves COCO class IDs 0→'person' and 15→'cat'."""
     from app.detector import load_labels

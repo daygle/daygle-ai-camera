@@ -139,6 +139,78 @@ def detection_label_set(detections: list[dict[str, Any]]) -> set[str]:
     return {str(detection.get('label') or '').strip().lower() for detection in detections if str(detection.get('label') or '').strip()}
 
 
+def confirm_object_detections(
+    camera_id: str,
+    detections: list[dict[str, Any]],
+    *,
+    required_frames: Any,
+    window_frames: Any,
+) -> list[dict[str, Any]]:
+    """Temporal N-of-M confirmation gate for object detections.
+
+    Suppresses a detection until its label has appeared in at least
+    ``required_frames`` of the last ``window_frames`` detection *cycles* for
+    this camera. This filters transient single-frame false positives (a
+    flicker misread as a ``cat``) while letting a genuinely present object -- of
+    any label -- through once it has persisted, so it applies uniformly to
+    ``person``, ``car``, ``cat``, and every other class.
+
+    The gate is a pass-through no-op when ``required_frames <= 1`` (the default),
+    preserving the historical single-frame behavior and touching no per-camera
+    state. The window counts detection cycles that actually ran inference (a
+    quiet frame with no motion is skipped upstream and never reaches here), not
+    wall-clock frames.
+
+    Labels are compared case-insensitively on the raw detector label, matching
+    what the downstream zone/alert pipeline consumes.
+    """
+    try:
+        required = int(required_frames)
+    except (TypeError, ValueError):
+        required = 1
+    if required <= 1:
+        # Feature disabled: do not accumulate state or allocate, so a camera
+        # that never enables confirmation carries no per-camera history.
+        return detections
+    try:
+        window = int(window_frames)
+    except (TypeError, ValueError):
+        window = required
+    # A window smaller than the requirement can never confirm anything; clamp it
+    # up so ``required`` of ``window`` is always satisfiable.
+    window = max(required, window)
+
+    labels_now = {
+        str(detection.get('label') or '').strip().lower()
+        for detection in detections
+        if str(detection.get('label') or '').strip()
+    }
+    with _state.live_detection_confirm_lock:
+        history = _state.live_detection_confirm_history.get(camera_id)
+        if history is None or history.maxlen != window:
+            # Preserve recent cycles when the operator resizes the window so a
+            # setting change doesn't reset every camera's confirmation state.
+            history = deque(history or [], maxlen=window)
+            _state.live_detection_confirm_history[camera_id] = history
+        history.append(labels_now)
+        counts: dict[str, int] = {}
+        for cycle_labels in history:
+            for label in cycle_labels:
+                counts[label] = counts.get(label, 0) + 1
+    confirmed = {label for label, count in counts.items() if count >= required}
+    if labels_now and not confirmed:
+        logger.debug(
+            'Confirmation gate for camera %s holding %d detection(s) '
+            '(need %d of last %d cycles): %s',
+            camera_id, len(detections), required, window, sorted(labels_now),
+        )
+    return [
+        detection
+        for detection in detections
+        if str(detection.get('label') or '').strip().lower() in confirmed
+    ]
+
+
 def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | None=None, gate_fraction: float | None=None, scale_fraction: float | None=None, background_alpha: float | None=None) -> tuple[bool, float, Any]:
     """Adaptive-background motion gate. Returns (has_motion, confidence 0-1, diff_mask).
 

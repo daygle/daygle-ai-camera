@@ -520,3 +520,51 @@ def test_normalize_monitoring_zones_derives_monitor_motion_from_enabled_rule(mon
         'object_rules': [{'label': 'motion', 'enabled': False}],
     }])
     assert zones[0]['monitor_motion'] is False
+
+
+# ---------------------------------------------------------------------------
+# Umbrella label groups: canonical_label / label_matches / detection_label_in_allowed
+# ---------------------------------------------------------------------------
+
+def test_canonical_label_applies_aliases_and_lowercases(zs):
+    assert zs.canonical_label('  Human ') == 'person'
+    assert zs.canonical_label('CAT') == 'cat'
+    assert zs.canonical_label(None) == ''
+
+
+def test_label_matches_direct_and_alias(zs):
+    assert zs.label_matches('cat', 'cat') is True
+    assert zs.label_matches('human', 'person') is True
+    assert zs.label_matches('cat', 'dog') is False
+
+
+def test_label_matches_group_expands_only_on_configured_side(zs):
+    # 'animal'/'pet' groups match member detections...
+    assert zs.label_matches('cat', 'animal') is True
+    assert zs.label_matches('dog', 'animal') is True
+    assert zs.label_matches('bird', 'pet') is True
+    # ...but a person is not an animal.
+    assert zs.label_matches('person', 'animal') is False
+    # Group expansion is one-directional: a detection that happens to be named
+    # like a group never matches a concrete configured label.
+    assert zs.label_matches('animal', 'cat') is False
+
+
+def test_label_matches_empty_inputs_are_false(zs):
+    assert zs.label_matches('', 'cat') is False
+    assert zs.label_matches('cat', '') is False
+
+
+def test_detection_label_in_allowed_direct_group_and_miss(zs):
+    assert zs.detection_label_in_allowed('cat', {'cat', 'car'}) is True
+    assert zs.detection_label_in_allowed('cat', {'animal'}) is True
+    assert zs.detection_label_in_allowed('dog', {'pet'}) is True
+    assert zs.detection_label_in_allowed('person', {'animal', 'pet'}) is False
+    assert zs.detection_label_in_allowed('', {'animal'}) is False
+
+
+def test_normalize_label_list_preserves_group_names(zs):
+    # Group names are not aliases, so they pass through normalization unchanged
+    # and can be stored on a zone/rule like any other configured label.
+    assert 'animal' in zs.normalize_label_list('animal, cat')
+    assert 'pet' in zs.normalize_label_list(['Pet'])
