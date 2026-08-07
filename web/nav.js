@@ -565,9 +565,35 @@ window.daygleAuthReady = (async () => {
   }
 
   async function refreshCountdownFromServer() {
+    let response;
     try {
-      const response = await fetch('/api/auth/session-remaining');
-      if (!response.ok) { updateCountdown(); return; }
+      response = await fetch('/api/auth/session-remaining');
+    } catch {
+      // Fall back to client-side tick on network error; keep the ticker
+      // running so the countdown resumes when connectivity returns.
+      updateCountdown();
+      return;
+    }
+    // A 401 means the server-side session is gone - expired, revoked, or
+    // wiped by a server restart - while this tab is still open with cached
+    // auth. Without this branch the ticker keeps polling the dead session
+    // every ~90 s indefinitely, which is exactly the "GET
+    // /api/auth/session-remaining 401 Unauthorized" line repeating in the
+    // server logs. Stop the ticker and route through the shared
+    // session-loss path so the user is redirected to login, matching how
+    // the /api/auth/me fetches above already handle a 401.
+    if (response.status === 401) {
+      stopCountdownTicker();
+      const el = document.getElementById('sessionCountdown');
+      if (el) el.hidden = true;
+      if (typeof window.daygleUi?.handleSessionLoss === 'function'
+          && !window.daygleAuth?.redirecting) {
+        window.daygleUi.handleSessionLoss('Session expired - please sign in again');
+      }
+      return;
+    }
+    if (!response.ok) { updateCountdown(); return; }
+    try {
       const data = await response.json();
       if (data && Number.isFinite(data.remaining_seconds)) {
         // Sync the cached expiresAt so the local ticker stays accurate.
@@ -587,7 +613,7 @@ window.daygleAuthReady = (async () => {
         updateCountdown();
       }
     } catch {
-      // Fall back to client-side tick on network error.
+      // Malformed JSON body: fall back to the client-side tick.
       updateCountdown();
     }
   }
