@@ -1753,6 +1753,41 @@ class RecordingService:
             readable.append(item)
         return readable
 
+    @staticmethod
+    def _stage_audio_segments(
+        segments: list[tuple[Path, float, float]],
+        staging_dir: Path,
+    ) -> list[tuple[Path, float, float]]:
+        """Copy selected sidecars to stable paths before starting the mux.
+
+        The ingest worker prunes ``.audio`` while an event clip is being
+        finalized. Passing the live paths directly to ffmpeg leaves a
+        check-then-use race: a WAV can pass the readability probe and still be
+        deleted before ffmpeg opens it. A staged copy keeps the mux input alive
+        for the duration of the subprocess. Files that disappear during the
+        copy are skipped; any surviving segments still contribute audio.
+        """
+        staged: list[tuple[Path, float, float]] = []
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        for index, (segment, segment_start, segment_end) in enumerate(segments):
+            staged_path = staging_dir / f'audio-{index:04d}.wav'
+            try:
+                # Opening/copying the file also closes the gap between the
+                # readability probe and ffmpeg input construction. On POSIX an
+                # already-open file remains readable if the pruner unlinks its
+                # directory entry; on Windows the pruner cannot unlink it until
+                # this short copy is complete.
+                shutil.copyfile(segment, staged_path)
+            except (OSError, shutil.Error):
+                logger.info(
+                    'Audio sidecar disappeared before mux; skipping %s',
+                    segment,
+                )
+                staged_path.unlink(missing_ok=True)
+                continue
+            staged.append((staged_path, segment_start, segment_end))
+        return staged
+
     def _mux_prebuffer_audio(self, camera_key: str, video_path: Path, start_ts: float, duration_seconds: float) -> bool:
         ffmpeg = shutil.which('ffmpeg')
         if not ffmpeg or duration_seconds <= 0:
@@ -1776,77 +1811,104 @@ class RecordingService:
         selected_audio = self._readable_audio_segments(selected_audio)
         if not selected_audio:
             return False
-        muxed_path = video_path.with_name(f'{video_path.stem}.audio{video_path.suffix}')
-        if muxed_path.exists():
-            muxed_path.unlink(missing_ok=True)
 
-        # Feed every WAV as its own input and delay it to its wall-clock position.
-        # A concat demuxer would collapse any missing WAV segment, making audio
-        # catch up to video after an ingest restart. Separate delayed inputs keep
-        # both the initial offset and all gaps in the audio timeline.
-        filter_parts: list[str] = []
-        audio_labels: list[str] = []
-        for index, (_segment, segment_start, _segment_end) in enumerate(selected_audio):
-            delay_seconds = max(0.0, segment_start - start_ts)
-            operations = []
-            if index == 0 and segment_start < start_ts:
-                # The first WAV overlaps the beginning of the video. Remove only
-                # its leading overlap; dropping the whole segment would move audio
-                # late. Later segments retain their absolute wall-clock delays.
-                operations.append(f'atrim=start={start_ts - segment_start:.6f}')
-            operations.append('asetpts=PTS-STARTPTS')
-            if delay_seconds > 0.001:
-                # adelay accepts integer milliseconds across supported FFmpeg builds.
-                operations.append(f'adelay={max(1, round(delay_seconds * 1000))}:all=1')
-            label = f'a{index}'
-            filter_parts.append(f'[{index + 1}:a]' + ','.join(operations) + f'[{label}]')
-            audio_labels.append(f'[{label}]')
-        filter_parts.append(
-            ''.join(audio_labels)
-            + f'amix=inputs={len(audio_labels)}:duration=longest:dropout_transition=0:normalize=0'
-            + ',aresample=async=1,apad[aout]'
-        )
-        filter_complex = ';'.join(filter_parts)
-
-        command = [ffmpeg, '-y', '-i', str(video_path)]
-        for segment, _segment_start, _segment_end in selected_audio:
-            command.extend(['-i', str(segment)])
-        command.extend([
-            '-filter_complex',
-            filter_complex,
-            '-map',
-            '0:v:0',
-            '-map',
-            '[aout]',
-            '-c:v',
-            'copy',
-            '-c:a',
-            'aac',
-            '-b:a',
-            '128k',
-            # Keep the audio and video clocks aligned even when the camera's
-            # audio/video packet clocks drift slightly. The filter preserves
-            # gaps between sidecar segments, resamples small clock differences,
-            # and pads trailing silence; -shortest/-t bound the output to video.
-            '-shortest',
-            '-t',
-            f'{float(duration_seconds):.3f}',
-            '-movflags',
-            '+faststart',
-            str(muxed_path),
-        ])
+        # The ingest worker can prune a sidecar after the readability probe but
+        # before ffmpeg opens its input. Stage the selected files first and use
+        # only those copies for the mux; the temporary directory is kept until
+        # the subprocess exits and is removed in the final cleanup block below.
+        staging_dir = Path(tempfile.mkdtemp(prefix='daygle-audio-mux-'))
         try:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=max(30, int(duration_seconds) + 20), check=False)
-        except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
-            result = None
+            selected_audio = self._stage_audio_segments(selected_audio, staging_dir)
+            if not selected_audio:
+                logger.info(
+                    'No audio sidecars remained available for %s before mux; keeping silent video clip.',
+                    camera_key,
+                )
+                return False
+            # A source sidecar may have been mid-write while it was copied.
+            # Validate the stable copies too, so a truncated staged WAV is
+            # discarded without risking the entire mux.
+            selected_audio = self._readable_audio_segments(selected_audio)
+            if not selected_audio:
+                logger.info(
+                    'Staged audio sidecars were not readable for %s; keeping silent video clip.',
+                    camera_key,
+                )
+                return False
 
-        if result is None or result.returncode != 0 or not muxed_path.exists() or not self.clip_has_video_stream(muxed_path):
-            muxed_path.unlink(missing_ok=True)
-            if result is not None:
-                logger.warning('Failed to mux prebuffer audio for %s; keeping silent video clip: %s', camera_key, self.redact_stream_credentials((result.stderr or '')[-500:]))
-            return False
-        muxed_path.replace(video_path)
-        return True
+            muxed_path = video_path.with_name(f'{video_path.stem}.audio{video_path.suffix}')
+            if muxed_path.exists():
+                muxed_path.unlink(missing_ok=True)
+
+            # Feed every WAV as its own input and delay it to its wall-clock position.
+            # A concat demuxer would collapse any missing WAV segment, making audio
+            # catch up to video after an ingest restart. Separate delayed inputs keep
+            # both the initial offset and all gaps in the audio timeline.
+            filter_parts: list[str] = []
+            audio_labels: list[str] = []
+            for index, (_segment, segment_start, _segment_end) in enumerate(selected_audio):
+                delay_seconds = max(0.0, segment_start - start_ts)
+                operations = []
+                if index == 0 and segment_start < start_ts:
+                    # The first WAV overlaps the beginning of the video. Remove only
+                    # its leading overlap; dropping the whole segment would move audio
+                    # late. Later segments retain their absolute wall-clock delays.
+                    operations.append(f'atrim=start={start_ts - segment_start:.6f}')
+                operations.append('asetpts=PTS-STARTPTS')
+                if delay_seconds > 0.001:
+                    # adelay accepts integer milliseconds across supported FFmpeg builds.
+                    operations.append(f'adelay={max(1, round(delay_seconds * 1000))}:all=1')
+                label = f'a{index}'
+                filter_parts.append(f'[{index + 1}:a]' + ','.join(operations) + f'[{label}]')
+                audio_labels.append(f'[{label}]')
+            filter_parts.append(
+                ''.join(audio_labels)
+                + f'amix=inputs={len(audio_labels)}:duration=longest:dropout_transition=0:normalize=0'
+                + ',aresample=async=1,apad[aout]'
+            )
+            filter_complex = ';'.join(filter_parts)
+
+            command = [ffmpeg, '-y', '-i', str(video_path)]
+            for segment, _segment_start, _segment_end in selected_audio:
+                command.extend(['-i', str(segment)])
+            command.extend([
+                '-filter_complex',
+                filter_complex,
+                '-map',
+                '0:v:0',
+                '-map',
+                '[aout]',
+                '-c:v',
+                'copy',
+                '-c:a',
+                'aac',
+                '-b:a',
+                '128k',
+                # Keep the audio and video clocks aligned even when the camera's
+                # audio/video packet clocks drift slightly. The filter preserves
+                # gaps between sidecar segments, resamples small clock differences,
+                # and pads trailing silence; -shortest/-t bound the output to video.
+                '-shortest',
+                '-t',
+                f'{float(duration_seconds):.3f}',
+                '-movflags',
+                '+faststart',
+                str(muxed_path),
+            ])
+            try:
+                result = subprocess.run(command, capture_output=True, text=True, timeout=max(30, int(duration_seconds) + 20), check=False)
+            except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+                result = None
+
+            if result is None or result.returncode != 0 or not muxed_path.exists() or not self.clip_has_video_stream(muxed_path):
+                muxed_path.unlink(missing_ok=True)
+                if result is not None:
+                    logger.warning('Failed to mux prebuffer audio for %s; keeping silent video clip: %s', camera_key, self.redact_stream_credentials((result.stderr or '')[-500:]))
+                return False
+            muxed_path.replace(video_path)
+            return True
+        finally:
+            shutil.rmtree(staging_dir, ignore_errors=True)
 
     @staticmethod
     def grab_frame_from_url(stream_url: str, timeout_seconds: float = 8.0) -> bytes | None:

@@ -13,7 +13,10 @@ or corrupt segment costs at most a ~1s gap instead of all audio.
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -105,6 +108,86 @@ def test_readable_filter_without_ffprobe_falls_back_to_size(tmp_path, monkeypatc
     result = service._readable_audio_segments([_item(good, 0.0), _item(empty, 1.0)])
 
     assert [item[0] for item in result] == [good]
+
+
+def test_stage_audio_segments_skips_sidecars_that_disappear(tmp_path, caplog):
+    """A WAV removed after selection must not make the whole mux fail."""
+    service = _service(tmp_path)
+    staging_dir = tmp_path / 'staged'
+    missing = tmp_path / 'aud-missing.wav'
+    good = _wav(tmp_path / 'aud-good.wav', 4096)
+
+    staged = service._stage_audio_segments(
+        [_item(missing, 0.0), _item(good, 1.0)],
+        staging_dir,
+    )
+
+    assert len(staged) == 1
+    staged_path, start, end = staged[0]
+    assert staged_path.parent == staging_dir
+    assert staged_path.read_bytes() == good.read_bytes()
+    assert (start, end) == (1.0, 2.0)
+    assert 'disappeared before mux' in caplog.text
+
+
+def test_mux_skips_sidecar_disappearing_after_probe(tmp_path, monkeypatch):
+    """A sidecar can vanish after probing but before the staging copy."""
+    service = _service(tmp_path)
+    audio_dir = service.audio_dir / 'camera-1'
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    source = _wav(audio_dir / 'aud-000.wav', 4096)
+    now = time.time()
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(service, '_segment_timeline', lambda *a, **k: [(source, now - 1, now)])
+    monkeypatch.setattr(service, '_readable_audio_segments', lambda segments: segments)
+
+    def disappear_before_copy(src, dst):
+        Path(src).unlink()
+        raise FileNotFoundError(src)
+
+    monkeypatch.setattr(recordings_module.shutil, 'copyfile', disappear_before_copy)
+    monkeypatch.setattr(
+        recordings_module.subprocess,
+        'run',
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError('ffmpeg must not run')),
+    )
+
+    assert service._mux_prebuffer_audio('camera-1', tmp_path / 'clip.mp4', now - 1, 1.0) is False
+
+
+def test_mux_uses_staged_audio_paths_and_cleans_them(tmp_path, monkeypatch):
+    """The mux must not hand live prunable sidecar paths to ffmpeg."""
+    service = _service(tmp_path)
+    audio_dir = service.audio_dir / 'camera-1'
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    source = _wav(audio_dir / 'aud-000.wav', 4096)
+    now = time.time()
+    os.utime(source, (now, now))
+
+    captured = {}
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(service, '_readable_audio_segments', lambda segments: segments)
+    monkeypatch.setattr(service, '_segment_timeline', lambda *a, **k: [(source, now - 1, now)])
+    monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _p: True))
+
+    def fake_run(command, *_args, **_kwargs):
+        input_indices = [index for index, value in enumerate(command) if value == '-i']
+        captured['audio_path'] = Path(command[input_indices[1] + 1])
+        assert captured['audio_path'].exists()
+        Path(command[-1]).write_bytes(b'muxed')
+        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+    video = tmp_path / 'clip.mp4'
+    video.write_bytes(b'video')
+
+    assert service._mux_prebuffer_audio('camera-1', video, now - 1, 1.0) is True
+    assert captured['audio_path'] != source
+    assert captured['audio_path'].parent != audio_dir
+    assert not captured['audio_path'].exists()
+    assert video.read_bytes() == b'muxed'
 
 
 def test_mux_returns_false_when_all_segments_unreadable(tmp_path, monkeypatch):
