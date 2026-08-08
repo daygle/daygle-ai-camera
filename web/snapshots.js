@@ -253,7 +253,15 @@ function snapshotRow(event) {
         </div>
         <div class="snapshot-row-meta">
           <span class="snapshot-camera">${escapeHtml(camera)}</span>
-          <span class="snapshot-when" title="${escapeHtml(formatDate(created))}">${escapeHtml(timeAgo(created))}</span>
+          <span class="snapshot-when" title="${escapeHtml(formatDate(created))}">
+            <span class="activity-item-when">
+              <span class="activity-item-when-relative">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                <span>${escapeHtml(timeAgo(created))}</span>
+              </span>
+              <span class="activity-item-when-absolute">${escapeHtml(formatDate(created))}</span>
+            </span>
+          </span>
         </div>
         <div class="activity-item-badges snapshot-row-badges">${snapshotPills(event)}${alertBadge}</div>
       </div>
