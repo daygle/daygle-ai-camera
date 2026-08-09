@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from app.auth_gates import require_user
@@ -13,6 +15,34 @@ from app.utils import build_stream_url
 from app.zone_detection import get_camera_instance
 
 router = APIRouter()
+
+
+def _queue_detection_snapshot(
+    selected_config: dict,
+    frame_bytes: bytes,
+    *,
+    captured_ts: float | None = None,
+    width: int | None = None,
+    height: int | None = None,
+) -> None:
+    """Feed live-page snapshots into the opt-in foreground detector path.
+
+    When background detection is disabled, the Live page is the intended source
+    of detection frames. Previously ``queue_live_stream_alerts`` had no
+    production caller, leaving the status (including the motion bar) at
+    ``Waiting`` even while snapshots visibly changed. The queue function keeps
+    its own setting/interval/worker guards, so this is a cheap no-op when the
+    background monitor is enabled and cannot duplicate active work.
+    """
+    from app.live_monitor import queue_live_stream_alerts
+
+    frame = {
+        'frame_number': 0,
+        'timestamp': float(captured_ts or time.time()),
+        'width': int(width or selected_config.get('width') or 1280),
+        'height': int(height or selected_config.get('height') or 720),
+    }
+    queue_live_stream_alerts(frame_bytes, frame, selected_config)
 
 
 @router.get('/api/live/detection-status')
@@ -50,6 +80,11 @@ def live_snapshot(request: Request, camera_id: str | None = None, stream: str = 
     if has_stream:
         sample = recording_service.latest_frame_jpeg(resolved_id)
         if sample is not None:
+            _queue_detection_snapshot(
+                selected_config,
+                sample[0],
+                captured_ts=sample[1],
+            )
             return Response(content=sample[0], media_type='image/jpeg')
     try:
         selected_camera = get_camera_instance(camera_id)
@@ -62,5 +97,12 @@ def live_snapshot(request: Request, camera_id: str | None = None, stream: str = 
             image_bytes, frame = selected_camera.read_jpeg()
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        _queue_detection_snapshot(
+            selected_config,
+            image_bytes,
+            captured_ts=frame.get('timestamp'),
+            width=frame.get('width'),
+            height=frame.get('height'),
+        )
         return Response(content=image_bytes, media_type='image/jpeg')
     raise HTTPException(status_code=503, detail='Live snapshots require an ONVIF/RTSP camera backend.')

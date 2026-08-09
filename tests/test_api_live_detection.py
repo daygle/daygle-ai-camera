@@ -7,6 +7,39 @@ tests/support.py.
 from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
 
 
+def test_live_snapshot_queues_foreground_detection_frame(monkeypatch):
+    """The live snapshot path supplies frames when background detection is off."""
+    import app.api.live_router as live_router
+    import app.live_monitor as live_monitor
+
+    captured = []
+    monkeypatch.setattr(
+        live_monitor,
+        'queue_live_stream_alerts',
+        lambda image, frame, settings: captured.append((image, frame, settings)),
+    )
+
+    settings = {'id': 'camera-1', 'width': 1920, 'height': 1080}
+    live_router._queue_detection_snapshot(
+        settings,
+        b'jpeg-frame',
+        captured_ts=123.5,
+        width=640,
+        height=360,
+    )
+
+    assert captured == [(
+        b'jpeg-frame',
+        {
+            'frame_number': 0,
+            'timestamp': 123.5,
+            'width': 640,
+            'height': 360,
+        },
+        settings,
+    )]
+
+
 def test_live_stream_detection_queue_runs_in_background_and_deduplicates(tmp_path, monkeypatch):
     _app, _database_path = _load_app(tmp_path, monkeypatch)
     import app.main as main
