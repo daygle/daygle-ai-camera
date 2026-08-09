@@ -95,6 +95,9 @@ _MOTION_FAIL_OPEN_CONFIDENCE = 0.5
 
 
 logger = logging.getLogger('daygle.ai')
+# Per-camera throttle for motion gate info logging (avoids flooding the log).
+_motion_log_last_at: dict[str, float] = {}
+_MOTION_LOG_INTERVAL = 5.0  # seconds
 
 
 def record_live_detection_history(camera_id: str, detections: list[dict[str, Any]], sample_ts: float | None=None, *, live_config: dict[str, Any] | None=None) -> None:
@@ -280,11 +283,15 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
                 return (False, 0.0, None, 0.0)
             diff_mask = np.abs(current - background) > pixel_threshold
             changed_fraction = float(np.mean(diff_mask))
-            logger.info(
-                'Motion gate %s: changed=%.4f gate=%.4f px_thresh=%d WxH=%dx%d',
-                camera_id, changed_fraction, gate_fraction, pixel_threshold,
-                _state._MOTION_FRAME_W, _state._MOTION_FRAME_H,
-            )
+            _now = time.monotonic()
+            _last = _motion_log_last_at.get(camera_id, 0.0)
+            if _now - _last >= _MOTION_LOG_INTERVAL:
+                _motion_log_last_at[camera_id] = _now
+                logger.info(
+                    'Motion gate %s: changed=%.4f gate=%.4f px_thresh=%d WxH=%dx%d',
+                    camera_id, changed_fraction, gate_fraction, pixel_threshold,
+                    _state._MOTION_FRAME_W, _state._MOTION_FRAME_H,
+                )
             # Only adapt the background when no motion is detected. Freezing the
             # background during motion keeps moving subjects visible indefinitely
             # instead of being absorbed into the background model within seconds.
