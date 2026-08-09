@@ -360,6 +360,12 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         force_scan = True
         _state._periodic_scan_last_ts[camera_id] = now
     frame_has_motion, frame_motion_confidence, diff_mask, raw_motion_fraction = detect_frame_motion(camera_id, image, pixel_threshold=_pixel_threshold, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, background_alpha=_background_alpha)
+    # A motion-gate error is not evidence of motion, but it must not suppress
+    # the independent object-detection path: some callers provide detector-
+    # compatible input that the optional motion decoder cannot parse. Keep the
+    # zero-confidence motion result and let object inference decide normally.
+    with _state._frame_motion_lock:
+        motion_gate_error = camera_id in _state._frame_motion_error_cameras
     # Publish the measurement immediately, before any ONNX work or downstream
     # zone/alert filtering. The live page is a motion diagnostic, so it must
     # still show the measured pixel change when object inference is slow, fails,
@@ -388,7 +394,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             diff_mask = None
     # Per-zone motion rules score independently of the frame-wide gate.
     motion_detections = zone_motion_detections(settings, frame_motion_confidence, diff_mask=diff_mask, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction)
-    if not frame_has_motion and (not force_scan) and (not motion_detections):
+    if not frame_has_motion and (not motion_gate_error) and (not force_scan) and (not motion_detections):
         update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[], motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         return None
     detector_method_available = hasattr(

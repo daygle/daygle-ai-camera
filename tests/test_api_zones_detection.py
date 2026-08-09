@@ -29,11 +29,9 @@ def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypat
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main._state.live_detection_last_checked.clear()
     # The 'jpeg-frame' bytes below are not a decodable image, so the adaptive
-    # background gate cannot measure them and would fail open. Pin the gate to
-    # a deterministic low-confidence (0.4) motion read instead: this test
-    # exercises the motion-rule min_confidence filter itself, and the fail-open
-    # constant is deliberately >= the default 0.45 rule threshold (so motion-only
-    # alerts survive gate-error windows) -- it is not what this test asserts.
+    # background gate cannot measure them. Pin the gate to a deterministic
+    # low-confidence (0.4) motion read instead: this test exercises the
+    # motion-rule min_confidence filter itself, not image decoding.
     monkeypatch.setattr(
         mods.live_monitor,
         'detect_frame_motion',
@@ -96,6 +94,53 @@ def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypat
     event = main.database.get_event(allowed_event_id)
     assert event is not None
     assert any(detection['label'] == 'motion' for detection in event['detections'])
+
+
+def test_invalid_motion_frame_does_not_create_recording(tmp_path, monkeypatch):
+    """A motion-gate decode failure must not synthesize a motion recording."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    mods = _m()
+
+    class EmptyDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _image_bytes, confidence=None):
+            return []
+
+    monkeypatch.setattr(main._state, 'detector', EmptyDetector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+
+    settings = {
+        'id': 'camera-1',
+        'name': 'Front Door',
+        'detection': {
+            'zones': [{
+                'id': 'motion-zone',
+                'name': 'Motion Zone',
+                'x': 0, 'y': 0, 'width': 1, 'height': 1,
+                'monitor_motion': True,
+                'monitor_objects': False,
+                'object_rules': [{
+                    'label': 'motion',
+                    'min_confidence': 0.45,
+                    'record_on_detect': True,
+                }],
+            }],
+        },
+        'recording': {'continuous': False},
+    }
+
+    event_id = mods.live_monitor.process_live_stream_alerts(
+        b'not-a-valid-jpeg',
+        {'timestamp': time.time(), 'width': 1280, 'height': 720},
+        settings,
+        enforce_interval=False,
+    )
+
+    assert event_id is None
 
 
 def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path, monkeypatch):

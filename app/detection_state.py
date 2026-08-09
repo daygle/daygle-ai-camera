@@ -88,12 +88,10 @@ except Exception:
 
 _EXPECTED_MOTION_ERRORS = (ValueError, TypeError, MemoryError, OSError) + _CV2_ERROR
 
-# Confidence reported when the motion gate fails open. Chosen above the default
-# motion-rule min_confidence (0.45, see app.zone_schema.zone_motion_min_confidence)
-# so motion-only zones keep firing during a gate-error window instead of going
-# silently quiet; object rules alert either way. High enough to clear default
-# rules, low enough that aggressively-thresholded rules still gate.
-_MOTION_FAIL_OPEN_CONFIDENCE = 0.5
+# Motion errors fail closed. A decode/processing failure is not evidence of
+# movement: returning synthetic motion here lets a default motion rule pass and
+# can create a recording of a static scene. The warning below identifies the
+# bad-frame condition so the camera source can be repaired separately.
 
 
 logger = logging.getLogger('daygle.ai')
@@ -359,12 +357,22 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
     except _EXPECTED_MOTION_ERRORS as exc:
         with _state._frame_motion_lock:
             if camera_id not in _state._frame_motion_error_cameras:
-                logger.warning('Motion gate unavailable for camera %s: %s; failing open', camera_id, exc)
+                logger.warning(
+                    'Motion gate unavailable for camera %s: %s; suppressing motion until a valid frame is available',
+                    camera_id,
+                    exc,
+                )
                 _state._frame_motion_error_cameras.add(camera_id)
-        return (True, _MOTION_FAIL_OPEN_CONFIDENCE, None, 0.0)
+        # A failed decode or motion calculation cannot establish that pixels
+        # changed. Fail closed so a broken/stale frame cannot satisfy a motion
+        # rule and create a recording of a static scene.
+        return (False, 0.0, None, 0.0)
     except Exception:
         with _state._frame_motion_lock:
             if camera_id not in _state._frame_motion_error_cameras:
-                logger.exception('Unexpected motion gate failure for camera %s; failing open', camera_id)
+                logger.exception(
+                    'Unexpected motion gate failure for camera %s; suppressing motion until a valid frame is available',
+                    camera_id,
+                )
                 _state._frame_motion_error_cameras.add(camera_id)
-        return (True, _MOTION_FAIL_OPEN_CONFIDENCE, None, 0.0)
+        return (False, 0.0, None, 0.0)

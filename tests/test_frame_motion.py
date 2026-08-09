@@ -41,6 +41,29 @@ def test_detect_frame_motion_returns_four_tuple():
     assert isinstance(confidence, float)
 
 
+def test_invalid_image_fails_closed_instead_of_synthetic_motion():
+    """A bad JPEG must not become a fake motion event.
+
+    The old fail-open result (True, 0.5, ...) cleared the default 0.45 motion
+    rule and could create recordings while the camera frame was undecodable.
+    """
+    cam = "motion-invalid-image"
+    st._frame_motion_prev.pop(cam, None)
+    st._frame_motion_last_frame.pop(cam, None)
+    st._frame_motion_last_gray.pop(cam, None)
+    st._frame_motion_error_cameras.discard(cam)
+
+    has_motion, confidence, diff_mask, fraction = ds.detect_frame_motion(
+        cam,
+        b"not-a-valid-jpeg",
+    )
+
+    assert has_motion is False
+    assert confidence == 0.0
+    assert diff_mask is None
+    assert fraction == 0.0
+
+
 def test_sub_gate_motion_keeps_confidence_zero_but_records_changes():
     """A few changed pixels (below the alert gate) must NOT alert, but the
     diff_mask should still reflect the changed pixels."""
