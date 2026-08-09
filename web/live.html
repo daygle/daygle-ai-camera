@@ -147,6 +147,16 @@
             <div class="sense-lane-body" id="liveVisionBody" aria-live="polite"></div>
             <p class="sense-lane-note" id="liveDetectionStatus" hidden></p>
           </div>
+          <div class="sense-lane sense-motion" id="liveMotionLane">
+            <div class="sense-lane-head">
+              <span class="sense-lane-name"><span class="sense-lane-glyph" aria-hidden="true">🏃</span>Motion</span>
+              <span class="sense-badge sense-badge-idle" id="liveMotionState">Waiting</span>
+            </div>
+            <div class="motion-bar-wrap">
+              <div class="motion-bar" id="liveMotionBar" style="width: 0%"></div>
+            </div>
+            <span class="motion-bar-value" id="liveMotionValue">0%</span>
+          </div>
           <div class="sense-lane sense-hearing" id="liveHearingLane">
             <div class="sense-lane-head">
               <span class="sense-lane-name"><span class="sense-lane-glyph" aria-hidden="true">🔊</span>Hearing</span>

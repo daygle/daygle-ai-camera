@@ -4402,7 +4402,34 @@ button.activity-item-action.activity-item-action-recording:hover {
 .sense-lane-note-warn { color: var(--a-fg); }
 .sense-lane-note[hidden] { display: none; }
 
+/* Motion bar */
+.sense-motion { }
+.motion-bar-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--sense-track);
+  overflow: hidden;
+  margin: 8px 0;
+}
+.motion-bar {
+  height: 100%;
+  border-radius: 12px;
+  background: linear-gradient(90deg, #4ade80, #22c55e);
+  transition: width 0.2s ease;
+  min-width: 2px;
+}
+.motion-bar-value {
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  text-align: center;
+}
 @media (max-width: 760px) {
+
   .live-frame { height: 50vh; min-height: 280px; }
   .live-controls-row { gap: 14px; }
   .live-control-camera { flex-basis: 100%; }

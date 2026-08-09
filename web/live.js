@@ -19,6 +19,10 @@ const liveEls = {
   visionLane: document.getElementById('liveVisionLane'),
   visionBody: document.getElementById('liveVisionBody'),
   hearingBody: document.getElementById('liveHearingBody'),
+  motionLane: document.getElementById('liveMotionLane'),
+  motionState: document.getElementById('liveMotionState'),
+  motionBar: document.getElementById('liveMotionBar'),
+  motionValue: document.getElementById('liveMotionValue'),
   monitorPill: document.getElementById('liveMonitorPill'),
   monitorPillText: document.getElementById('liveMonitorPillText'),
   // Zones-page stats (null on live page - harmless)
@@ -435,15 +439,12 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
     const parts = [`Alert triggered - ${alerts}`];
     if (labelStr) parts.push(`detected ${labelStr}`);
     if (payload.recording_state) parts.push(`recording ${payload.recording_state}${payload.recording_id ? ` #${payload.recording_id}` : ''}`);
-    return { state: 'alerted', stateLabel: 'Alerted', chips, ...sound, message: parts.join('; ') + '.' };
+    return { state: 'alerted', stateLabel: 'Alerted', chips, ...sound, message: parts.join('; ') + '.', motion_confidence: payload.motion_confidence };
   }
 
   if (payload.state === 'checked') {
     if (!labelStr) {
-      // 'monitoring' (not the generic 'idle') marks a real empty check: an
-      // inference cycle ran and found nothing. The renderer relies on this to
-      // show "Clear" only here, and never for waiting/skipped/error/all-cameras.
-      return { state: 'monitoring', stateLabel: 'Monitoring', chips, ...sound, message: '' };
+      return { state: 'monitoring', stateLabel: 'Monitoring', chips, ...sound, message: '', motion_confidence: payload.motion_confidence };
     }
     const reason = String(payload.reason || '');
     let suffix;
@@ -452,7 +453,7 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
     else if (/no alert rule|no matching|no new alert/i.test(reason)) suffix = 'no matching alert rule';
     else if (/no detections matched/i.test(reason)) suffix = 'outside monitored zones';
     else suffix = reason || 'no alert triggered';
-    return { state: 'detected', stateLabel: 'Detected', chips, ...sound, message: `Detected ${labelStr} - ${suffix}.` };
+    return { state: 'detected', stateLabel: 'Detected', chips, ...sound, message: `Detected ${labelStr} - ${suffix}.`, motion_confidence: payload.motion_confidence };
   }
 
   const fallback = String(payload.reason || payload.ai_error || 'waiting for frames');
@@ -462,6 +463,7 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
     chips,
     ...sound,
     message: `Live AI: ${payload.state || 'waiting'} - ${fallback}`,
+    motion_confidence: payload.motion_confidence,
   };
 }
 
@@ -588,6 +590,21 @@ function renderDetectionStatus(summary) {
   if (liveEls.soundStatus) {
     liveEls.soundStatus.textContent = summary.soundMessage || '';
     liveEls.soundStatus.hidden = !summary.soundMessage;
+  }
+
+  // ── Motion lane ─────────────────────────────────────────────
+  const motionConf = summary.motion_confidence != null ? summary.motion_confidence : null;
+  if (liveEls.motionBar) {
+    const pct = motionConf != null ? Math.round(motionConf * 100) : 0;
+    liveEls.motionBar.style.width = pct + '%';
+    if (liveEls.motionValue) liveEls.motionValue.textContent = pct + '%';
+  }
+  if (liveEls.motionState) {
+    const motionActive = motionConf != null && motionConf > 0;
+    liveEls.motionState.textContent = motionActive ? 'Active' : 'Waiting';
+    liveEls.motionState.className = 'sense-badge ' + (
+      motionActive ? 'sense-badge-detected' : 'sense-badge-idle'
+    );
   }
 }
 

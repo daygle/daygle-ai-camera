@@ -344,7 +344,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # Per-zone motion rules score independently of the frame-wide gate.
     motion_detections = zone_motion_detections(settings, frame_motion_confidence, diff_mask=diff_mask, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction)
     if not frame_has_motion and (not force_scan) and (not motion_detections):
-        update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[])
+        update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[], motion_confidence=frame_motion_confidence)
         return None
     min_conf = compute_minimum_rule_confidence(camera_settings=settings)
     try:
@@ -354,7 +354,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             detections = _state.detector.detect_image(image, confidence=min_conf)
     except (DetectorUnavailableError, ValueError) as exc:
         logger.warning('Live detection skipped for camera %s: %s', camera_id, exc)
-        update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state, detections=[])
+        update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state, detections=[], motion_confidence=frame_motion_confidence)
         return None
     detections = normalize_detection_boxes_for_frame(detections, frame)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
