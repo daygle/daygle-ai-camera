@@ -329,7 +329,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     if periodic_scan_interval > 0 and now - _state._periodic_scan_last_ts.get(camera_id, 0) >= periodic_scan_interval:
         force_scan = True
         _state._periodic_scan_last_ts[camera_id] = now
-    frame_has_motion, frame_motion_confidence, diff_mask = detect_frame_motion(camera_id, image, pixel_threshold=_pixel_threshold, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, background_alpha=_background_alpha)
+    frame_has_motion, frame_motion_confidence, diff_mask, raw_motion_fraction = detect_frame_motion(camera_id, image, pixel_threshold=_pixel_threshold, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, background_alpha=_background_alpha)
     if not frame_has_motion:
         frame_motion_confidence = 0.0
         # A periodic scan bypasses the gate but measured no pixel motion, so
@@ -344,7 +344,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # Per-zone motion rules score independently of the frame-wide gate.
     motion_detections = zone_motion_detections(settings, frame_motion_confidence, diff_mask=diff_mask, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction)
     if not frame_has_motion and (not force_scan) and (not motion_detections):
-        update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[], motion_confidence=frame_motion_confidence)
+        update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[], motion_confidence=raw_motion_fraction)
         return None
     min_conf = compute_minimum_rule_confidence(camera_settings=settings)
     try:
@@ -354,7 +354,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             detections = _state.detector.detect_image(image, confidence=min_conf)
     except (DetectorUnavailableError, ValueError) as exc:
         logger.warning('Live detection skipped for camera %s: %s', camera_id, exc)
-        update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state, detections=[], motion_confidence=frame_motion_confidence)
+        update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state, detections=[], motion_confidence=raw_motion_fraction)
         return None
     detections = normalize_detection_boxes_for_frame(detections, frame)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]

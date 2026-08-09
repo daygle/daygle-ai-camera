@@ -211,7 +211,7 @@ def confirm_object_detections(
     ]
 
 
-def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | None=None, gate_fraction: float | None=None, scale_fraction: float | None=None, background_alpha: float | None=None) -> tuple[bool, float, Any]:
+def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | None=None, gate_fraction: float | None=None, scale_fraction: float | None=None, background_alpha: float | None=None) -> tuple[bool, float, Any, float]:
     """Adaptive-background motion gate. Returns (has_motion, confidence 0-1, diff_mask).
 
     ``image`` may be a BGR numpy array (from ``read_frame``) or JPEG bytes
@@ -236,13 +236,14 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
     ``app.main``. The ``None`` default is deliberate, matching
     :mod:`app.zone_detection`'s ``zone_motion_detections`` signature.
 
-    Returns ``(has_motion, frame_confidence, diff_mask)`` where
+    Returns ``(has_motion, frame_confidence, diff_mask, raw_fraction)`` where
     ``diff_mask`` is a boolean (H×W) numpy array indicating which thumbnail
     pixels changed by more than ``pixel_threshold``.  Callers can slice
     ``diff_mask`` to compute per-zone confidence scores instead of using the
     frame-wide value.  ``diff_mask`` is ``None`` on the first frame or when an
     error occurs.  ``frame_confidence`` is gated to ``0.0`` below
-    ``gate_fraction`` (so alert logic ignores noise).
+    ``gate_fraction`` (so alert logic ignores noise).  ``raw_fraction`` is the
+    ungated changed-pixel fraction (0.0–1.0) for UI diagnostics.
     """
     if pixel_threshold is None:
         pixel_threshold = _state._MOTION_PIXEL_THRESHOLD
@@ -276,7 +277,7 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
             if background is None or background.shape != current.shape:
                 _state._frame_motion_prev[camera_id] = current
                 _state._frame_motion_error_cameras.discard(camera_id)
-                return (False, 0.0, None)
+                return (False, 0.0, None, 0.0)
             diff_mask = np.abs(current - background) > pixel_threshold
             changed_fraction = float(np.mean(diff_mask))
             # Only adapt the background when no motion is detected. Freezing the
@@ -290,8 +291,8 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
         # returned confidence is forced to 0.0; otherwise it equals this value.
         confidence = round(min(1.0, changed_fraction / max(scale_fraction, 1e-9)), 3)
         if changed_fraction < gate_fraction:
-            return (False, 0.0, diff_mask)
-        return (True, confidence, diff_mask)
+            return (False, 0.0, diff_mask, round(changed_fraction, 6))
+        return (True, confidence, diff_mask, round(changed_fraction, 6))
     except _EXPECTED_MOTION_ERRORS as exc:
         with _state._frame_motion_lock:
             if camera_id not in _state._frame_motion_error_cameras:

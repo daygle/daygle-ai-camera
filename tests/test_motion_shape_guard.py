@@ -39,7 +39,7 @@ def test_shape_mismatch_resets_instead_of_failing_open(monkeypatch):
     # Seed a background at 30x40 (HxW).
     monkeypatch.setattr(_state, "_MOTION_FRAME_W", 40)
     monkeypatch.setattr(_state, "_MOTION_FRAME_H", 30)
-    has_motion, conf, mask = detect_frame_motion(cam, _img(100, 120))
+    has_motion, conf, mask, _frac = detect_frame_motion(cam, _img(100, 120))
     assert has_motion is False and mask is None  # first frame seeds background
     assert _state._frame_motion_prev[cam].shape == (30, 40)
 
@@ -47,7 +47,7 @@ def test_shape_mismatch_resets_instead_of_failing_open(monkeypatch):
     # guard defends against. The next frame decodes to the NEW size.
     monkeypatch.setattr(_state, "_MOTION_FRAME_W", 60)
     monkeypatch.setattr(_state, "_MOTION_FRAME_H", 45)
-    has_motion, conf, mask = detect_frame_motion(cam, _img(100, 120))
+    has_motion, conf, mask, _frac = detect_frame_motion(cam, _img(100, 120))
 
     # Self-heal: reported as a fresh (no-motion) frame, background re-seeded at the
     # new size -- NOT the fail-open (True, 0.5) the except path would produce.
