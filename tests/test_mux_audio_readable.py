@@ -13,6 +13,7 @@ or corrupt segment costs at most a ~1s gap instead of all audio.
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
@@ -111,11 +112,17 @@ def test_readable_filter_without_ffprobe_falls_back_to_size(tmp_path, monkeypatc
 
 
 def test_stage_audio_segments_skips_sidecars_that_disappear(tmp_path, caplog):
-    """A WAV removed after selection must not make the whole mux fail."""
+    """A WAV removed after selection must not make the whole mux fail.
+
+    Missing sidecars are summarized in a single INFO line rather than one
+    line per missing second, so a fully-pruned audio window (e.g. after an
+    ingest stall) cannot flood the log with dozens of near-identical lines.
+    """
     service = _service(tmp_path)
     staging_dir = tmp_path / 'staged'
     missing = tmp_path / 'aud-missing.wav'
     good = _wav(tmp_path / 'aud-good.wav', 4096)
+    caplog.set_level(logging.INFO)
 
     staged = service._stage_audio_segments(
         [_item(missing, 0.0), _item(good, 1.0)],
@@ -128,6 +135,8 @@ def test_stage_audio_segments_skips_sidecars_that_disappear(tmp_path, caplog):
     assert staged_path.read_bytes() == good.read_bytes()
     assert (start, end) == (1.0, 2.0)
     assert 'disappeared before mux' in caplog.text
+    # The summary line reports the loss without per-file spam at INFO level.
+    assert 'aud-missing.wav' not in caplog.text
 
 
 def test_mux_skips_sidecar_disappearing_after_probe(tmp_path, monkeypatch):

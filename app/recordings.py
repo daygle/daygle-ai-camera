@@ -1772,6 +1772,7 @@ class RecordingService:
         """
         staged: list[tuple[Path, float, float]] = []
         staging_dir.mkdir(parents=True, exist_ok=True)
+        skipped = 0
         for index, (segment, segment_start, segment_end) in enumerate(segments):
             staged_path = staging_dir / f'audio-{index:04d}.wav'
             try:
@@ -1782,13 +1783,27 @@ class RecordingService:
                 # this short copy is complete.
                 shutil.copyfile(segment, staged_path)
             except (OSError, shutil.Error):
-                logger.info(
+                # A whole window can go stale when the audio segmenter stalls
+                # or the ingest restarts: the rolling pruner deletes the
+                # aged-out WAVs while the clip is being finalized, so each
+                # missing 1-second sidecar would otherwise flood INFO with one
+                # line per second. Keep the per-file detail at DEBUG and
+                # summarize the loss in a single INFO line instead.
+                logger.debug(
                     'Audio sidecar disappeared before mux; skipping %s',
                     segment,
                 )
+                skipped += 1
                 staged_path.unlink(missing_ok=True)
                 continue
             staged.append((staged_path, segment_start, segment_end))
+        if skipped:
+            logger.info(
+                'Audio sidecars disappeared before mux; skipping %d of %d for this clip '
+                '(audio may be silent or partial)',
+                skipped,
+                len(segments),
+            )
         return staged
 
     def _mux_prebuffer_audio(self, camera_key: str, video_path: Path, start_ts: float, duration_seconds: float) -> bool:
