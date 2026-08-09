@@ -5951,6 +5951,86 @@ button.secondary:disabled, a.secondary:disabled {
 .zone-object-rules-header { margin: 12px 0 9px; justify-content: space-between; }
 .zone-object-rules-header::before { content: 'What should this area watch for?'; color: var(--muted); font-size: 12px; font-weight: 700; }
 .zone-object-rules-header select { max-width: 230px; min-height: 40px; border-radius: 11px; }
+/* Motion is its own card with a single toggle -- it is not an object class,
+   so it lives above the object table instead of in it. */
+.zone-motion-card {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: rgba(255,255,255,.018);
+}
+.zone-motion-card.is-enabled { border-color: rgba(73,230,163,.3); }
+.zone-motion-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.zone-motion-title {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+.zone-motion-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(71,214,255,.35);
+  border-radius: 9px;
+  background: rgba(71,214,255,.08);
+  color: var(--accent);
+  font-size: 17px;
+  line-height: 1;
+}
+.zone-motion-card.is-enabled .zone-motion-icon {
+  border-color: rgba(73,230,163,.4);
+  background: rgba(73,230,163,.1);
+  color: var(--success);
+}
+.zone-motion-title strong { display: block; color: var(--text); font-size: 13px; font-weight: 850; line-height: 1.25; }
+.zone-motion-title > div > span { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; line-height: 1.35; }
+.zone-motion-toggle { flex: 0 0 auto; padding: 7px 13px; font-size: 12px; }
+.zone-motion-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 18px;
+  align-items: end;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.zone-motion-field { display: grid; gap: 5px; min-width: 0; }
+.zone-motion-field > span { color: var(--muted); font-size: 10px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
+.zone-motion-field input[type="checkbox"] { width: auto; justify-self: start; }
+.zone-motion-sensitivity-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.zone-motion-sensitivity-row input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--accent); }
+.zone-motion-sensitivity-value {
+  flex: 0 0 auto;
+  min-width: 3.4rem;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: rgba(255,255,255,.05);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+.zone-motion-secondary { display: flex; align-items: end; gap: 14px; }
+.zone-motion-advanced { min-height: 40px; border-radius: 11px; gap: 6px; padding: .45rem .7rem; }
+.zone-motion-advanced-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+:root.light .zone-motion-card { background: rgba(255,255,255,.7); }
 .cameras-table-wrap { border: 1px solid var(--border); border-radius: 13px; background: rgba(0,0,0,.08); }
 .cameras-table-wrap .rule-table th { background: rgba(255,255,255,.035); }
 .cameras-table-wrap .rule-table tbody tr:hover td { background: rgba(71,214,255,.035); }
@@ -5987,6 +6067,11 @@ button.secondary:disabled, a.secondary:disabled {
   .zone-object-rules-header { align-items: stretch; flex-direction: column; }
   .zone-object-rules-header::before { order: 0; }
   .zone-object-rules-header select { max-width: none; width: 100%; }
+  .zone-motion-body { grid-template-columns: 1fr; align-items: stretch; }
+  .zone-motion-secondary { flex-wrap: wrap; }
+  .zone-motion-advanced { justify-self: start; }
+  .zone-motion-head { align-items: stretch; flex-direction: column; }
+  .zone-motion-toggle { justify-content: center; width: 100%; }
   .zones-save-copy { flex: 1 1 100%; margin: 0; }
   .zone-editor-footer button { width: 100%; }
 }

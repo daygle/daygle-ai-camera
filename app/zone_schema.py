@@ -232,10 +232,17 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
         if label in seen:
             continue
         seen.add(label)
+        # Motion is a pixel-diff axis, not an object class, so its canonical
+        # confidence default is 0.45 (see zone_motion_min_confidence / the
+        # frontend's defaultObjectRule) rather than the 0.5 object-class
+        # default. Keeping the two defaults distinct here matters: a persisted
+        # motion rule that omits min_confidence must gate at the same 0.45 the
+        # detection / recording / alerting axes fall back to, or those axes
+        # silently disagree about what fires.
         try:
-            min_confidence = float(rule.get('min_confidence', 0.5))
+            min_confidence = float(rule.get('min_confidence', 0.45 if label == 'motion' else 0.5))
         except (TypeError, ValueError):
-            min_confidence = 0.5
+            min_confidence = 0.45 if label == 'motion' else 0.5
         try:
             cooldown_seconds = int(rule.get('cooldown_seconds', 60))
         except (TypeError, ValueError):

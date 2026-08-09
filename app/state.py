@@ -23,8 +23,8 @@ from typing import Any
 
 # Motion-detection frame geometry and thresholds (used as function default-arg
 # values in app.zone_detection and app.detection_state at import time).
-_MOTION_FRAME_W: int = 160
-_MOTION_FRAME_H: int = 120
+_MOTION_FRAME_W: int = 320
+_MOTION_FRAME_H: int = 240
 _MOTION_PIXEL_THRESHOLD: int = 30
 _MOTION_GATE_FRACTION: float = 0.003
 _MOTION_SCALE_FRACTION: float = 0.03

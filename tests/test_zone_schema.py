@@ -394,6 +394,28 @@ def test_normalize_zone_object_rules_clamps_min_confidence_and_cooldown(monkeypa
     assert rules[1]['cooldown_seconds'] == 60
 
 
+def test_normalize_zone_object_rules_motion_defaults_to_045_not_05(monkeypatch, zs):
+    """A motion rule without ``min_confidence`` defaults to 0.45 (its
+    canonical pixel-diff threshold, matching ``zone_motion_min_confidence``
+    and the frontend default), while object classes keep the 0.5 default.
+    All three axes (detection / recording / alerting) must gate a motion
+    rule at the same number, so the schema default has to agree with the
+    runtime fallbacks."""
+    _install_zone_dependencies(monkeypatch)
+    zone = {'object_rules': [
+        {'label': 'motion'},
+        {'label': 'person'},
+        {'label': 'motion', 'min_confidence': 'oops'},
+    ]}
+    rules = zs.normalize_zone_object_rules(zone)
+    by_label = {rule['label']: rule for rule in rules}
+    assert by_label['motion']['min_confidence'] == 0.45
+    assert by_label['person']['min_confidence'] == 0.5
+    # 'motion' dedupes to a single rule, and its bad value still falls back
+    # to the motion default.
+    assert len([r for r in rules if r['label'] == 'motion']) == 1
+
+
 def test_normalize_zone_object_rules_max_confidence_defaults_and_clamps(monkeypatch, zs):
     """``max_confidence`` defaults to 1.0 (no upper limit), clamps to [0, 1],
     falls back to 1.0 on bad input, and is never allowed below

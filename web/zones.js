@@ -65,6 +65,24 @@ function defaultObjectRule(label = '') {
   };
 }
 
+// Motion is stored as a plain object rule (label 'motion') on the backend so
+// the runtime gating (confidence window, record, cooldown, alerts, schedule)
+// stays identical, but the GUI presents it as its own card with a single
+// toggle instead of a row in the object table. These helpers locate or
+// materialize the underlying rule.
+function motionRuleOf(zone) {
+  if (!zone || !Array.isArray(zone.object_rules)) return null;
+  return zone.object_rules.find((rule) => String(rule.label || '').trim().toLowerCase() === 'motion') || null;
+}
+
+function ensureMotionRule(zone) {
+  const existing = motionRuleOf(zone);
+  if (existing) return existing;
+  const rule = defaultObjectRule('motion');
+  zone.object_rules.push(rule);
+  return rule;
+}
+
 function normalizeObjectRules(zone) {
   if (Array.isArray(zone.object_rules) && zone.object_rules.length) {
     const seen = new Set();
@@ -209,14 +227,22 @@ function objectRuleOptions(selectedLabel) {
   // defaultObjectRule, normalizeObjectRules, and backend filters.
   const coco = labels.map((label) => `<option value="${escapeHtml(label)}" ${label === selectedLabel ? 'selected' : ''}>${escapeHtml(titleCase(label))}</option>`).join('');
   const groups = OBJECT_GROUP_LABELS.map((group) => `<option value="${escapeHtml(group.value)}" ${group.value === selectedLabel ? 'selected' : ''}>${escapeHtml(group.label)}</option>`).join('');
-  const motionSelected = selectedLabel === 'motion';
-  return `<option value="">Add Object...</option><option value="motion" ${motionSelected ? 'selected' : ''}>Motion</option><optgroup label="Groups">${groups}</optgroup>${coco}`;
+  // Motion is not an object class: it gets its own dedicated per-zone card
+  // (renderMotionCard) with a single toggle, so it stays out of this list.
+  return `<option value="">Add Object...</option><optgroup label="Groups">${groups}</optgroup>${coco}`;
 }
 
 function renderObjectRules(zone, zoneIndex) {
   zone.object_rules = normalizeObjectRules(zone);
-  if (!zone.object_rules.length) {
-    return '<div class="empty compact-empty">No object rules yet. Choose an object above to add detection settings for this zone.</div>';
+  // Motion has its own card (renderMotionCard), so the object table lists
+  // only object-class rules. Rule keys keep the rule's REAL index in
+  // object_rules so parseZoneRuleKey / drag-reorder address the right rule
+  // even when the motion rule sits elsewhere in the array.
+  const rules = zone.object_rules
+    .map((rule, ruleIndex) => ({ rule, ruleIndex }))
+    .filter(({ rule }) => String(rule.label || '').trim().toLowerCase() !== 'motion');
+  if (!rules.length) {
+    return '<div class="empty compact-empty">No object rules yet. Choose an object below to add detection settings for this area.</div>';
   }
   return `<div class="cameras-table-wrap"><table class="rule-table" data-zone-rules-table="${zoneIndex}">
     <thead><tr>
@@ -231,7 +257,7 @@ function renderObjectRules(zone, zoneIndex) {
       <th>Cooldown (s)</th>
       <th></th>
     </tr></thead>
-    <tbody>${zone.object_rules.map((rule, ruleIndex) => {
+    <tbody>${rules.map(({ rule, ruleIndex }) => {
       const key = `${zoneIndex}:${ruleIndex}`;
       const label = escapeHtml(titleCase(rule.label));
       const expanded = expandedZoneRules.has(key);
@@ -253,6 +279,56 @@ function renderObjectRules(zone, zoneIndex) {
         ${renderRuleExpandRow('zone-rule', key, rule, expanded)}`;
     }).join('')}</tbody>
   </table></div>`;
+}
+
+function renderMotionCard(zone, zoneIndex) {
+  const rule = motionRuleOf(zone);
+  const enabled = Boolean(rule && rule.enabled !== false);
+  const key = `motion:${zoneIndex}`;
+  const expanded = expandedZoneRules.has(key);
+  const zoneLabel = escapeHtml(zone.name || `Zone ${zoneIndex + 1}`);
+  return `
+    <div class="zone-motion-card${enabled ? ' is-enabled' : ''}" data-zone-motion-for="${zoneIndex}">
+      <div class="zone-motion-head">
+        <div class="zone-motion-title">
+          <span class="zone-motion-icon" aria-hidden="true">⟳</span>
+          <div>
+            <strong>Motion detection</strong>
+            <span>Detect any movement in this area</span>
+          </div>
+        </div>
+        <label class="toggle-control zone-motion-toggle" title="Enable or disable motion detection for this area">
+          <input type="checkbox" data-zone-motion-toggle="${zoneIndex}" ${enabled ? 'checked' : ''} aria-label="Toggle motion detection for ${zoneLabel}" />
+          <span>${enabled ? 'On' : 'Off'}</span>
+        </label>
+      </div>
+      ${enabled ? `
+      <div class="zone-motion-body">
+        <label class="zone-motion-field zone-motion-sensitivity" title="Sensitivity: only motion with at least this confidence counts (0-1). Drag left for more sensitive, right for less.">
+          <span>Sensitivity</span>
+          <span class="zone-motion-sensitivity-row">
+            <input type="range" data-zone-motion-confidence="${zoneIndex}" min="0" max="1" step="0.05" value="${escapeHtml(rule.min_confidence)}" />
+            <output class="zone-motion-sensitivity-value" data-zone-motion-confidence-value="${zoneIndex}">${escapeHtml(rule.min_confidence)}</output>
+          </span>
+        </label>
+        <div class="zone-motion-secondary">
+          <label class="zone-motion-field" title="Record a clip whenever motion is detected in this area.">
+            <span>Record on motion</span>
+            <input type="checkbox" data-zone-motion-record="${zoneIndex}" ${rule.record_on_detect !== false ? 'checked' : ''} />
+          </label>
+          <button class="secondary rule-expand-btn zone-motion-advanced" type="button" data-expand-zone-motion="${zoneIndex}" aria-expanded="${expanded}">
+            ${expanded ? ICONS.chevronUp : ICONS.email}<span>${expanded ? 'Hide advanced' : 'Advanced'}</span>
+          </button>
+        </div>
+      </div>
+      <div class="zone-motion-advanced-body" ${expanded ? '' : 'hidden'}>
+        <label class="sound-rule-field" title="Cooldown: minimum seconds between motion events and alerts for this area. Default 60.">
+          <span>Cooldown (s)</span>
+          <input type="number" data-zone-motion-cooldown="${zoneIndex}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" />
+        </label>
+        ${renderRuleExpandFields('zone-motion', zoneIndex, rule)}
+      </div>` : ''}
+    </div>`;
 }
 
 function renderZones() {
@@ -299,12 +375,16 @@ function renderObjectDetectionRules() {
     zone.object_rules = normalizeObjectRules(zone);
     const zoneName = escapeHtml(zone.name || `Zone ${zoneIndex + 1}`);
     const addOptions = objectRuleOptions('');
-    const rulesHtml = zone.object_rules.length
+    // Motion lives in its own card above; the object table only lists
+    // object-class rules.
+    const objectRuleCount = zone.object_rules.filter((rule) => String(rule.label || '').trim().toLowerCase() !== 'motion').length;
+    const rulesHtml = objectRuleCount
       ? renderObjectRules(zone, zoneIndex)
-      : '<p class="muted empty-message">No rules yet. Add an object below.</p>';
+      : '<p class="muted empty-message">No object rules yet. Choose an object below to add detection settings for this area.</p>';
     return `
       <div class="zone-object-rules" data-zone-rules-for="${zoneIndex}">
         <div class="zone-name-card"><span class="zone-name-kicker">Area</span><strong>${zoneName}</strong></div>
+        ${renderMotionCard(zone, zoneIndex)}
         <div class="zone-object-rules-header">
           <select data-add-zone-rule="${zoneIndex}" class="rule-add-select">${addOptions}</select>
         </div>
@@ -374,6 +454,7 @@ function bindObjectRuleControls() {
       markZoneUnsaved();
     });
   });
+  bindMotionControls();
   document.querySelectorAll('[data-delete-zone-rule]').forEach((button) => {
     button.addEventListener('click', () => {
       const zones = cameraDetection().zones;
@@ -405,6 +486,93 @@ function bindObjectRuleControls() {
     });
   });
   bindRuleFields();
+}
+
+// Motion card controls: a single on/off toggle plus the essentials
+// (record, sensitivity) and the advanced fields (email recipients + time
+// windows) that reuse the shared renderRuleExpandFields markup. Data
+// attributes carry the bare zone index; the motion rule itself is looked up
+// by label so reordering object rules never breaks these bindings.
+function bindMotionControls() {
+  document.querySelectorAll('[data-zone-motion-toggle]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const zone = cameraDetection().zones[Number(cb.dataset.zoneMotionToggle)];
+      if (!zone) return;
+      const rule = motionRuleOf(zone);
+      if (cb.checked) ensureMotionRule(zone).enabled = true;
+      else if (rule) rule.enabled = false;
+      // Keep the legacy flag in sync immediately; normalizeZone() also
+      // derives it from the enabled motion rule on every render/save.
+      zone.monitor_motion = cb.checked;
+      zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion').map((r) => r.label);
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+  document.querySelectorAll('[data-zone-motion-record]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const rule = motionRuleOf(cameraDetection().zones[Number(cb.dataset.zoneMotionRecord)]);
+      if (!rule) return;
+      rule.record_on_detect = cb.checked;
+      markZoneUnsaved();
+    });
+  });
+  // Sensitivity slider: `input` updates the live readout only, `change`
+  // (released) commits the value to the rule.
+  document.querySelectorAll('[data-zone-motion-confidence]').forEach((inp) => {
+    inp.addEventListener('input', () => {
+      const readout = document.querySelector(`[data-zone-motion-confidence-value="${inp.dataset.zoneMotionConfidence}"]`);
+      if (readout) readout.textContent = inp.value;
+    });
+    inp.addEventListener('change', () => {
+      const rule = motionRuleOf(cameraDetection().zones[Number(inp.dataset.zoneMotionConfidence)]);
+      if (!rule) return;
+      rule.min_confidence = clamp(Number(inp.value || 0.45), 0, 1);
+      markZoneUnsaved();
+    });
+  });
+  document.querySelectorAll('[data-zone-motion-cooldown]').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      const rule = motionRuleOf(cameraDetection().zones[Number(inp.dataset.zoneMotionCooldown)]);
+      if (!rule) return;
+      rule.cooldown_seconds = Math.max(0, Number.parseInt(inp.value || 0, 10) || 0);
+      markZoneUnsaved();
+    });
+  });
+  document.querySelectorAll('[data-expand-zone-motion]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const key = `motion:${btn.dataset.expandZoneMotion}`;
+      if (expandedZoneRules.has(key)) expandedZoneRules.delete(key);
+      else expandedZoneRules.add(key);
+      renderObjectDetectionRules();
+    });
+  });
+  document.querySelectorAll('[data-zone-motion-email-recipients]').forEach((input) => {
+    input.addEventListener('change', () => {
+      const rule = motionRuleOf(cameraDetection().zones[Number(input.dataset.zoneMotionEmailRecipients)]);
+      if (!rule) return;
+      rule.email_recipients = normalizeEmailList(input.value);
+      markZoneUnsaved();
+    });
+  });
+  [
+    ['zoneMotionActiveStart', 'active_start'],
+    ['zoneMotionActiveEnd', 'active_end'],
+    ['zoneMotionNotifyStart', 'notify_start'],
+    ['zoneMotionNotifyEnd', 'notify_end'],
+  ].forEach(([datasetKey, ruleKey]) => {
+    const attr = `data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}`;
+    document.querySelectorAll(`[${attr}]`).forEach((wrap) => {
+      wrap.querySelectorAll('select').forEach((sel) => {
+        sel.addEventListener('change', () => {
+          const rule = motionRuleOf(cameraDetection().zones[Number(wrap.dataset[datasetKey])]);
+          if (!rule) return;
+          rule[ruleKey] = timeSelectValue(wrap);
+          markZoneUnsaved();
+        });
+      });
+    });
+  });
 }
 
 function parseZoneRuleKey(value) {

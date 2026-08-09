@@ -10,7 +10,7 @@ Every frame from every camera passes through three layers in order. Each layer b
 
 ### Layer 1 - Pixel-diff motion gate
 
-This runs on every single frame and is deliberately cheap. It shrinks the image to a small thumbnail (160×120 pixels), converts it to greyscale, and compares it to a learned background model of what the camera normally sees.
+This runs on every single frame and is deliberately cheap. It shrinks the image to a small thumbnail (320×240 pixels), converts it to greyscale, and compares it to a learned background model of what the camera normally sees.
 
 If enough pixels have changed enough, it declares motion and passes the frame on. If nothing significant changed at the whole-frame level, YOLO is not run from this gate alone - but per-zone motion rules (Layer 3) are still scored from the diff mask first, so motion confined to a small monitored zone can fire that zone's rule without ever opening the frame-wide gate.
 
@@ -32,7 +32,7 @@ These results are then matched against your zone rules. If a zone covers the are
 
 This is an optional alert that fires from Layer 1's pixel-diff result, without caring what YOLO found.
 
-You configure it by adding a rule with the label **motion** to a zone. When that zone's pixel-diff confidence reaches the rule's minimum threshold, the alert fires immediately - even before YOLO has identified any specific object. The system normally computes this confidence from the changed pixels inside the zone's own rectangle, so motion elsewhere in the camera view does not raise this zone's score.
+You configure it on the **Zones** page: each area has its own **Motion detection** card with a single toggle. Flip it on and the motion rule is created with sensible defaults; use the **Sensitivity** field to set the minimum confidence, and the **Advanced** expander for cooldown, email/push, and time windows. When a zone's pixel-diff confidence reaches the sensitivity threshold, the alert fires immediately - even before YOLO has identified any specific object. The system normally computes this confidence from the changed pixels inside the zone's own rectangle, so motion elsewhere in the camera view does not raise this zone's score.
 
 Use this when you want to be notified any time *anything* moves in an area, regardless of what it is.
 
@@ -179,7 +179,7 @@ The size in pixels of the thumbnail used for the Layer 1 pixel-diff. Larger dime
 
 **Important:** changing either value resets every camera's background model, so the gate re-learns the scene on the next few frames.
 
-Defaults: `160` × `120`
+Defaults: `320` × `240`
 
 ---
 
@@ -286,7 +286,7 @@ You can combine both on the same zone - the motion rule fires first (fast), and 
 
 Motion confidence is computed independently for each zone by slicing the pixel-diff mask to that zone's bounding rectangle. Movement in Zone A does not inflate Zone B's confidence score.
 
-This per-zone path requires the internal diff mask - a 120×160 boolean array produced by the background comparison. In rare error conditions (first frame after startup, numpy exception), the diff mask is unavailable and the system falls back to the frame-wide confidence score for all zones. The fallback is temporary and resolves on the next frame.
+This per-zone path requires the internal diff mask - a 240×320 boolean array produced by the background comparison. In rare error conditions (first frame after startup, numpy exception), the diff mask is unavailable and the system falls back to the frame-wide confidence score for all zones. The fallback is temporary and resolves on the next frame.
 
 ### Shadows and light reflections
 

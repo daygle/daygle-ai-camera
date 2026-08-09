@@ -185,8 +185,10 @@ def test_detection_matches_zone_polygon_center_only(zd):
 
 def test_zone_pixel_motion_fraction_with_rect(zd):
     np = pytest.importorskip('numpy')
-    mask = np.zeros((120, 160), dtype=bool)
-    mask[60:120, 80:160] = True  # Half is changed in the bottom-right quadrant
+    # Mask matches the default thumbnail geometry (240 rows x 320 cols, the
+    # 320x240 motion frame).
+    mask = np.zeros((240, 320), dtype=bool)
+    mask[120:240, 160:320] = True  # Half is changed in the bottom-right quadrant
     # zone covers the bottom-right half -- bounds [0.5..1, 0.5..1]
     zone = {'x': 0.5, 'y': 0.5, 'width': 0.5, 'height': 0.5}
     fraction = zd._zone_pixel_motion_fraction(mask, zone)
@@ -195,12 +197,12 @@ def test_zone_pixel_motion_fraction_with_rect(zd):
 
 def test_zone_pixel_motion_fraction_uses_points_when_rect_missing(zd):
     np = pytest.importorskip('numpy')
-    mask = np.zeros((120, 160), dtype=bool)
-    mask[40:80, 40:80] = True  # Changed center
+    mask = np.zeros((240, 320), dtype=bool)
+    mask[80:160, 80:160] = True  # Changed center
     zone_with_points = {
         'points': [{'x': 0.1, 'y': 0.1}, {'x': 0.5, 'y': 0.1}, {'x': 0.5, 'y': 0.5}, {'x': 0.1, 'y': 0.5}],
     }
-    # mask covers (40..80, 40..80) which corresponds to normalized (0.25..0.5, 0.33..0.66)
+    # mask covers (80..160, 80..160) which corresponds to normalized (0.25..0.5, 0.33..0.66)
     fraction = zd._zone_pixel_motion_fraction(mask, zone_with_points)
     assert 0.0 < fraction <= 1.0
 
@@ -369,8 +371,8 @@ def test_zone_motion_detections_default_gate_fraction_resolves_via_state(
             ],
         },
     }
-    mask = np.zeros((120, 160), dtype=bool)
-    mask[10:110, 10:150] = True  # ~73% of pixels changed
+    mask = np.zeros((240, 320), dtype=bool)
+    mask[20:220, 20:300] = True  # ~73% of pixels changed
 
     # Default resolution: gate is _state._MOTION_GATE_FRACTION (0.003) -> zone fires.
     original = _state._MOTION_GATE_FRACTION

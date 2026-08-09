@@ -97,7 +97,8 @@ _MOTION_FAIL_OPEN_CONFIDENCE = 0.5
 
 
 logger = logging.getLogger('daygle.ai')
-# Per-camera throttle for motion gate info logging (avoids flooding the log).
+# Per-camera throttle for the motion-gate diagnostic line below (keeps a
+# debug run from flooding the log at ~4 Hz per camera).
 _motion_log_last_at: dict[str, float] = {}
 _MOTION_LOG_INTERVAL = 5.0  # seconds
 
@@ -331,9 +332,13 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
             _state._frame_motion_last_gray[camera_id] = full_gray
             _now = time.monotonic()
             _last = _motion_log_last_at.get(camera_id, 0.0)
+            # Threshold-tuning diagnostic (changed vs gate + pixel threshold):
+            # originally a debug line promoted to INFO, it just floods the
+            # application log in steady state, so it lives at DEBUG again and
+            # only appears when the root logger is lowered below INFO.
             if _now - _last >= _MOTION_LOG_INTERVAL:
                 _motion_log_last_at[camera_id] = _now
-                logger.info(
+                logger.debug(
                     'Motion gate %s: changed=%.4f gate=%.4f px_thresh=%d WxH=%dx%d',
                     camera_id, changed_fraction, gate_fraction, pixel_threshold,
                     _state._MOTION_FRAME_W, _state._MOTION_FRAME_H,

@@ -856,31 +856,42 @@ function daygleSinceParamForRange(range) {
 // but the HTML structure is byte-identical. Consolidating here keeps
 // the two page scripts in sync so future tweaks to the time-picker
 // layout land in one place.
+//
+// renderRuleExpandFields is the shared field set (email recipients + four
+// time pickers). renderRuleExpandRow wraps it in a table row for the
+// object/sound rule tables; the zones page Motion card embeds the same
+// fields directly in a div so Motion's advanced settings match the object
+// rules without living in the table.
+function renderRuleExpandFields(prefix, key, rule) {
+  return `
+    <label class="sound-rule-field sound-rule-email-field">
+      <span>Email recipients</span>
+      <input type="email" data-${prefix}-email-recipients="${escapeHtml(key)}" value="${escapeHtml(normalizeEmailList(rule.email_recipients).join(', '))}" placeholder="alerts@example.com" multiple autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore />
+    </label>
+    <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
+      <span>Active from</span>
+      ${renderTimeSelect(rule.active_start, `data-${prefix}-active-start`, key)}
+    </label>
+    <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
+      <span>Active to</span>
+      ${renderTimeSelect(rule.active_end, `data-${prefix}-active-end`, key)}
+    </label>
+    <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
+      <span>Email/Push from</span>
+      ${renderTimeSelect(rule.notify_start, `data-${prefix}-notify-start`, key)}
+    </label>
+    <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
+      <span>Email/Push to</span>
+      ${renderTimeSelect(rule.notify_end, `data-${prefix}-notify-end`, key)}
+    </label>`;
+}
+
 function renderRuleExpandRow(prefix, key, rule, expanded) {
   return `
     <tr class="rule-expand-row" ${expanded ? '' : 'hidden'}>
       <td colspan="9">
         <div class="rule-expand-body">
-          <label class="sound-rule-field sound-rule-email-field">
-            <span>Email recipients</span>
-            <input type="email" data-${prefix}-email-recipients="${escapeHtml(key)}" value="${escapeHtml(normalizeEmailList(rule.email_recipients).join(', '))}" placeholder="alerts@example.com" multiple autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore />
-          </label>
-          <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
-            <span>Active from</span>
-            ${renderTimeSelect(rule.active_start, `data-${prefix}-active-start`, key)}
-          </label>
-          <label class="sound-rule-field" title="Detection window: this rule only detects, records and raises alerts between these times. Leave blank to run all day. Wraps past midnight, e.g. 22:00 to 05:00.">
-            <span>Active to</span>
-            ${renderTimeSelect(rule.active_end, `data-${prefix}-active-end`, key)}
-          </label>
-          <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
-            <span>Email/Push from</span>
-            ${renderTimeSelect(rule.notify_start, `data-${prefix}-notify-start`, key)}
-          </label>
-          <label class="sound-rule-field" title="Email/Push window: only send email and push notifications between these times. Outside it you still get on-site alerts and recordings. Leave blank to notify whenever the rule is active. Wraps past midnight, e.g. 22:00 to 05:00.">
-            <span>Email/Push to</span>
-            ${renderTimeSelect(rule.notify_end, `data-${prefix}-notify-end`, key)}
-          </label>
+          ${renderRuleExpandFields(prefix, key, rule)}
         </div>
       </td>
     </tr>`;

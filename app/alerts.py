@@ -166,7 +166,11 @@ class AlertEngine:
                 continue
             if not self._is_active_now(rule):
                 continue
-            if confidence < float(rule.get('min_confidence', 0.0)):
+            # 0.45 is the canonical motion confidence default (matches
+            # zone_motion_min_confidence and the detection axis), so an alert
+            # rule missing min_confidence agrees with the detection that
+            # produced it instead of silently gating higher.
+            if confidence < float(rule.get('min_confidence', 0.45)):
                 continue
             if confidence > float(rule.get('max_confidence', 1.0)):
                 continue

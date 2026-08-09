@@ -531,7 +531,12 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
                 'cooldown_key': f'{camera_key}::{zone_id}::{label}',
                 'object': label,
                 'zone_id': zone_id,
-                'min_confidence': rule.get('min_confidence', 0.5),
+                # Motion's canonical confidence default is 0.45 (see
+                # zone_motion_min_confidence); object classes default to 0.5.
+                # Matching the detection axis here keeps a rule missing
+                # min_confidence gating alerts at the same threshold that
+                # produced the detection in the first place.
+                'min_confidence': rule.get('min_confidence', 0.45 if label == 'motion' else 0.5),
                 'max_confidence': rule.get('max_confidence', 1.0),
                 'cooldown_seconds': rule.get('cooldown_seconds', 60),
                 'enabled': True,
