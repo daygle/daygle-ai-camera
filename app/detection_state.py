@@ -280,6 +280,11 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
                 return (False, 0.0, None, 0.0)
             diff_mask = np.abs(current - background) > pixel_threshold
             changed_fraction = float(np.mean(diff_mask))
+            logger.debug(
+                'Motion gate %s: changed=%.4f gate=%.4f px_thresh=%d WxH=%dx%d',
+                camera_id, changed_fraction, gate_fraction, pixel_threshold,
+                _state._MOTION_FRAME_W, _state._MOTION_FRAME_H,
+            )
             # Only adapt the background when no motion is detected. Freezing the
             # background during motion keeps moving subjects visible indefinitely
             # instead of being absorbed into the background model within seconds.
