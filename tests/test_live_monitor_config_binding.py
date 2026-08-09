@@ -38,6 +38,46 @@ class _CapturingThread:
         _CapturingThread.captured.append(self._target)
 
 
+def test_direct_camera_without_ingest_stream_is_monitored(monkeypatch):
+    """A camera that has a direct frame source but no constructible RTSP URL
+    must still feed the live monitor and motion status path."""
+    import cv2
+    import numpy as np
+
+    _CapturingThread.captured = []
+    recorded: list[tuple[str, str]] = []
+    ok, encoded = cv2.imencode('.jpg', np.zeros((8, 8, 3), dtype=np.uint8))
+    assert ok
+
+    class _DirectCamera:
+        def read_jpeg(self):
+            return encoded.tobytes(), {'timestamp': time.time(), 'width': 8, 'height': 8}
+
+    monkeypatch.setattr(live_monitor.threading, 'Thread', _CapturingThread)
+    monkeypatch.setattr(live_monitor, '_camera_has_live_alert_stream', lambda _cfg: False)
+    monkeypatch.setattr(live_monitor, 'build_stream_url', lambda _cfg: '')
+    monkeypatch.setattr(live_monitor, 'read_ingest_frame', lambda _cid: None)
+    monkeypatch.setattr(_state, 'camera_event_recording_config', lambda _cfg: {}, raising=False)
+    monkeypatch.setattr(_state, 'camera_instances', {'cam-direct': _DirectCamera()})
+    monkeypatch.setattr(_state, 'cameras_config', [{'id': 'cam-direct', 'name': 'Direct'}])
+    monkeypatch.setattr(_state, 'active_live_detection_cameras', set())
+    monkeypatch.setattr(_state, 'live_detection_last_checked', {})
+    monkeypatch.setattr(_state, 'live_detection_retry_after', {})
+
+    def _fake_process(image, frame, settings, *, enforce_interval=True):
+        recorded.append((str(settings.get('id')), str(frame.get('width'))))
+
+    monkeypatch.setattr(live_monitor, 'process_live_stream_alerts', _fake_process)
+
+    live_monitor.run_live_alert_monitor_once(
+        {'background_detection_enabled': True, 'detection_interval_seconds': 0}
+    )
+
+    assert len(_CapturingThread.captured) == 1
+    _CapturingThread.captured[0]()
+    assert recorded == [('cam-direct', '8')]
+
+
 def test_each_detection_thread_uses_its_own_camera_config(monkeypatch):
     _CapturingThread.captured = []
     recorded: list[tuple[str, str]] = []

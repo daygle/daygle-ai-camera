@@ -87,6 +87,19 @@ def _no_object_match_reason(
     return 'No detections matched this camera and its zone areas.'
 
 
+def _camera_has_direct_frame_source(camera_id: str) -> bool:
+    """Return True when the configured camera can provide a frame directly.
+
+    The background monitor normally reads the shared RTSP ingest. ONVIF/direct
+    camera configurations may not have a URL that ``build_stream_url`` can
+    construct, but their camera instance can still provide ``read_jpeg``. Those
+    cameras must not be skipped before the monitor gets a chance to use that
+    source.
+    """
+    instance = _state.camera_instances.get(camera_id)
+    return instance is not None and callable(getattr(instance, 'read_jpeg', None))
+
+
 def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> int:
     if live_settings is None:
         live_settings = effective_live_config()
@@ -96,13 +109,15 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
         camera_id = str(selected_config.get('id') or 'camera')
         if selected_config.get('enabled') is False:
             continue
-        if not _camera_has_live_alert_stream(selected_config):
+        has_ingest_stream = _camera_has_live_alert_stream(selected_config)
+        has_direct_source = _camera_has_direct_frame_source(camera_id)
+        if not has_ingest_stream and not has_direct_source:
             continue
         now = time.time()
         stream_url = build_stream_url(selected_config)
         recording_stream_url = build_recording_stream_url(selected_config)
         cam_rec_config = _state.camera_event_recording_config(selected_config)
-        if stream_url:
+        if has_ingest_stream and stream_url:
             _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=cam_rec_config, recording_stream_path=recording_stream_url)
             if cam_rec_config.get('continuous'):
                 # Continuous recordings must use the optional high-resolution
@@ -137,10 +152,13 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
             try:
                 sample = read_ingest_frame(cid)
                 if sample is None:
-                    if not _state.recording_service.ingest_has_produced_frame(cid):
-                        return
+                    # Prefer a direct camera frame when the shared ingest has
+                    # not produced one yet. The previous early return here made
+                    # this fallback unreachable for ONVIF/direct cameras, which
+                    # left their live status stuck at Waiting and prevented both
+                    # motion telemetry and alerts from running.
                     cam_instance = _state.camera_instances.get(cid)
-                    if cam_instance is not None and hasattr(cam_instance, 'read_jpeg'):
+                    if cam_instance is not None and callable(getattr(cam_instance, 'read_jpeg', None)):
                         try:
                             import cv2
                             import numpy as np
@@ -149,9 +167,11 @@ def run_live_alert_monitor_once(live_settings: dict[str, Any] | None=None) -> in
                             if img is not None:
                                 h, w = img.shape[:2]
                                 sample = (img, {'frame_number': 0, 'timestamp': time.time(), 'width': w, 'height': h})
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.debug('Direct frame fallback failed for camera %s: %s', cid, exc)
                     if sample is None:
+                        if not _state.recording_service.ingest_has_produced_frame(cid):
+                            return
                         schedule_live_camera_backoff(cid, 'No fresh frame available from the camera ingest.')
                         return
                 image, frame = sample
