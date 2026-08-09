@@ -396,6 +396,69 @@ def test_zone_motion_detections_default_gate_fraction_resolves_via_state(
         monkeypatch.setattr(_state, '_MOTION_GATE_FRACTION', original)
 
 
+def test_zone_motion_detections_box_tightens_to_changed_pixels(zd):
+    """When a diff mask is available the motion detection's box is the
+    bounding box of the changed pixels inside the zone, not the zone's full
+    rectangle -- so the green overlay square points at where movement
+    happened instead of covering the whole area."""
+    np = pytest.importorskip('numpy')
+    settings = {
+        'id': 'cam-1',
+        'name': 'Cam 1',
+        'detection': {
+            'zones': [
+                {
+                    'id': 'z',
+                    'enabled': True,
+                    'monitor_motion': True,
+                    'x': 0,
+                    'y': 0,
+                    'width': 1,
+                    'height': 1,
+                    'object_rules': [{'label': 'motion', 'min_confidence': 0.0}],
+                },
+            ],
+        },
+    }
+    # Changed pixels confined to the top-left quarter of the 240x320 mask.
+    mask = np.zeros((240, 320), dtype=bool)
+    mask[0:120, 0:160] = True
+    result = zd.zone_motion_detections(settings, 0.5, diff_mask=mask)
+    assert len(result) == 1
+    box = result[0]['box']
+    assert box['x'] == 0.0
+    assert box['y'] == 0.0
+    assert box['width'] == pytest.approx(0.5, abs=0.01)
+    assert box['height'] == pytest.approx(0.5, abs=0.01)
+
+
+def test_zone_motion_detections_box_uses_zone_rect_without_mask(zd):
+    """Without a diff mask (first frame, fail-open, forced scan) the box
+    falls back to the zone's full rectangle, preserving the historical
+    behavior for every downstream overlay."""
+    settings = {
+        'id': 'cam-1',
+        'name': 'Cam 1',
+        'detection': {
+            'zones': [
+                {
+                    'id': 'z',
+                    'enabled': True,
+                    'monitor_motion': True,
+                    'x': 0.1,
+                    'y': 0.2,
+                    'width': 0.5,
+                    'height': 0.4,
+                    'object_rules': [{'label': 'motion', 'min_confidence': 0.0}],
+                },
+            ],
+        },
+    }
+    result = zd.zone_motion_detections(settings, 0.9, diff_mask=None)
+    assert len(result) == 1
+    assert result[0]['box'] == {'x': 0.1, 'y': 0.2, 'width': 0.5, 'height': 0.4}
+
+
 # ---------------------------------------------------------------------------
 # detection_label_allowed_for_zone -- zone allow-list vs camera allow-list
 # ---------------------------------------------------------------------------

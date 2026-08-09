@@ -286,6 +286,8 @@ You can combine both on the same zone - the motion rule fires first (fast), and 
 
 Motion confidence is computed independently for each zone by slicing the pixel-diff mask to that zone's bounding rectangle. Movement in Zone A does not inflate Zone B's confidence score.
 
+When a zone fires, the green overlay box on snapshots / playback is the bounding box of the changed pixels *inside* that zone (not the whole zone), so the overlay points at where the movement happened. Without a diff mask (first frame, fail-open, forced scan) the box falls back to the zone's full rectangle.
+
 This per-zone path requires the internal diff mask - a 240×320 boolean array produced by the background comparison. In rare error conditions (first frame after startup, numpy exception), the diff mask is unavailable and the system falls back to the frame-wide confidence score for all zones. The fallback is temporary and resolves on the next frame.
 
 ### Shadows and light reflections

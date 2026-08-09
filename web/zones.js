@@ -326,6 +326,14 @@ function renderMotionCard(zone, zoneIndex) {
           <span>Cooldown (s)</span>
           <input type="number" data-zone-motion-cooldown="${zoneIndex}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" />
         </label>
+        <label class="sound-rule-field" title="Send an email when motion is detected in this area. Add recipients in the Email recipients field below.">
+          <span>Email alerts</span>
+          <input type="checkbox" data-zone-motion-email="${zoneIndex}" ${rule.email_enabled === true ? 'checked' : ''} />
+        </label>
+        <label class="sound-rule-field" title="Send a push notification when motion is detected in this area.">
+          <span>Push alerts</span>
+          <input type="checkbox" data-zone-motion-push="${zoneIndex}" ${rule.push_enabled === true ? 'checked' : ''} />
+        </label>
         ${renderRuleExpandFields('zone-motion', zoneIndex, rule)}
       </div>` : ''}
     </div>`;
@@ -537,6 +545,20 @@ function bindMotionControls() {
       if (!rule) return;
       rule.cooldown_seconds = Math.max(0, Number.parseInt(inp.value || 0, 10) || 0);
       markZoneUnsaved();
+    });
+  });
+  [
+    ['zoneMotionEmail', 'email_enabled'],
+    ['zoneMotionPush', 'push_enabled'],
+  ].forEach(([datasetKey, ruleKey]) => {
+    const attr = `input[type="checkbox"][data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`;
+    document.querySelectorAll(attr).forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const rule = motionRuleOf(cameraDetection().zones[Number(cb.dataset[datasetKey])]);
+        if (!rule) return;
+        rule[ruleKey] = cb.checked;
+        markZoneUnsaved();
+      });
     });
   });
   document.querySelectorAll('[data-expand-zone-motion]').forEach((btn) => {

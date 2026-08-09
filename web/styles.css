@@ -6030,6 +6030,9 @@ button.secondary:disabled, a.secondary:disabled {
   padding-top: 12px;
   border-top: 1px solid var(--border);
 }
+/* Checkbox toggles inside the advanced body must not stretch full-width
+   like the global ``input`` chrome (width: 100%). */
+.zone-motion-advanced-body .sound-rule-field input[type="checkbox"] { width: auto; }
 :root.light .zone-motion-card { background: rgba(255,255,255,.7); }
 .cameras-table-wrap { border: 1px solid var(--border); border-radius: 13px; background: rgba(0,0,0,.08); }
 .cameras-table-wrap .rule-table th { background: rgba(255,255,255,.035); }

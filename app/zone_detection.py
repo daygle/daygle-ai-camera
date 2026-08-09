@@ -282,12 +282,14 @@ def detection_matches_zone(detection: dict[str, Any], zone: dict[str, Any], *, m
     return detection_overlap_ratio_with_zone_rect(detection, zone) >= min_overlap_ratio
 
 
-def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
-    """Return the fraction of pixels inside a zone's bounding box that changed.
+def _zone_pixel_bounds(diff_mask: Any, zone: dict[str, Any]) -> tuple[int, int, int, int] | None:
+    """Return the zone's pixel slice ``(px1, py1, px2, py2)`` inside the
+    motion thumbnail (``main._MOTION_FRAME_W × main._MOTION_FRAME_H``), or
+    ``None`` when the zone geometry cannot be resolved.
 
-    ``diff_mask`` is the boolean (H×W) array from ``detect_frame_motion`` at
-    ``main._MOTION_FRAME_H × main._MOTION_FRAME_W`` resolution.  Zone coordinates are
-    normalised (0-1) and are converted to pixel indices before slicing.
+    Zone coordinates are normalised (0-1) and are converted to pixel indices
+    before slicing, falling back to ``zone.points`` when the rectangle fields
+    are missing (same fallback as the fraction / bounds helpers).
     """
     zone_id = str(zone.get('id') or zone.get('name') or id(zone))
     try:
@@ -312,6 +314,65 @@ def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
         py1 = max(0, int(y * _state._MOTION_FRAME_H))
         px2 = min(_state._MOTION_FRAME_W, max(px1 + 1, int(round((x + w) * _state._MOTION_FRAME_W))))
         py2 = min(_state._MOTION_FRAME_H, max(py1 + 1, int(round((y + h) * _state._MOTION_FRAME_H))))
+        return (px1, py1, px2, py2)
+    except (TypeError, ValueError) as exc:
+        logger.debug('Expected error resolving pixel bounds for zone %r: %s', zone_id, exc)
+        return None
+
+
+def _zone_motion_pixel_box(diff_mask: Any, zone: dict[str, Any]) -> dict[str, float] | None:
+    """Return the tight normalised bounding box of the changed pixels inside
+    a zone, or ``None`` when the mask/geometry can't produce one.
+
+    Motion pseudo-detections used to carry the zone's FULL rectangle as their
+    box, so every green overlay box (annotated snapshots, recording fallback
+    clips, playback overlays) covered the whole area even when movement was
+    confined to one corner. With the diff mask available, the box is shrunk to
+    the actual changed region so the overlay points at where motion happened.
+    """
+    zone_id = str(zone.get('id') or zone.get('name') or id(zone))
+    try:
+        bounds = _zone_pixel_bounds(diff_mask, zone)
+        if bounds is None:
+            return None
+        px1, py1, px2, py2 = bounds
+        changed = np.where(diff_mask[py1:py2, px1:px2])
+        if not changed[0].size:
+            return None
+        x0 = int(changed[1].min()) + px1
+        y0 = int(changed[0].min()) + py1
+        x1 = int(changed[1].max()) + px1
+        y1 = int(changed[0].max()) + py1
+        frame_w = max(1, int(_state._MOTION_FRAME_W))
+        frame_h = max(1, int(_state._MOTION_FRAME_H))
+        return {
+            'x': round(max(0.0, min(1.0, x0 / frame_w)), 4),
+            'y': round(max(0.0, min(1.0, y0 / frame_h)), 4),
+            'width': round(max(0.001, min(1.0, (x1 - x0 + 1) / frame_w)), 4),
+            'height': round(max(0.001, min(1.0, (y1 - y0 + 1) / frame_h)), 4),
+        }
+    except (TypeError, ValueError, IndexError, AttributeError) as exc:
+        logger.debug('Expected error computing motion pixel box for zone %r: %s', zone_id, exc)
+        return None
+    except Exception as exc:
+        if zone_id not in _zone_pixel_motion_errors:
+            logger.warning('Unexpected error computing motion pixel box for zone %r: %s', zone_id, exc)
+            _zone_pixel_motion_errors.add(zone_id)
+        return None
+
+
+def _zone_pixel_motion_fraction(diff_mask: Any, zone: dict[str, Any]) -> float:
+    """Return the fraction of pixels inside a zone's bounding box that changed.
+
+    ``diff_mask`` is the boolean (H×W) array from ``detect_frame_motion`` at
+    ``main._MOTION_FRAME_H × main._MOTION_FRAME_W`` resolution.
+    """
+    zone_id = str(zone.get('id') or zone.get('name') or id(zone))
+    try:
+        bounds = _zone_pixel_bounds(diff_mask, zone)
+        if bounds is None:
+            return 0.0
+        px1, py1, px2, py2 = bounds
         result = float(np.mean(diff_mask[py1:py2, px1:px2]))
         _zone_pixel_motion_errors.discard(zone_id)
         return result
@@ -378,11 +439,18 @@ def zone_motion_detections(
             )
             continue
         seen_zones.add(zone_id)
+        # Shrink the box to the changed-pixel region when the diff mask is
+        # available so overlays point at where movement actually happened;
+        # fall back to the zone rectangle (first frame, fail-open, forced
+        # scan) exactly as before.
+        box = None
+        if diff_mask is not None:
+            box = _zone_motion_pixel_box(diff_mask, zone)
         result.append({
             'confidence': zone_confidence,
             'zone_id': zone_id,
             'zone_name': zone.get('name') or zone_id,
-            'box': {
+            'box': box or {
                 'x': float(zone.get('x', 0)),
                 'y': float(zone.get('y', 0)),
                 'width': float(zone.get('width', 1)),
