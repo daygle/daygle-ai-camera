@@ -142,7 +142,7 @@ def test_process_live_stream_alerts_proceeds_when_ai_enabled(monkeypatch):
     )
     # Empty motion -> 'No motion detected' branch returns before ONNX.
     monkeypatch.setattr(live_monitor, 'detect_frame_motion',
-                        lambda cid, image, **kw: (False, 0.0, None))
+                        lambda cid, image, **kw: (False, 0.0, None, 0.0))
     monkeypatch.setattr(live_monitor, 'zone_motion_detections',
                         lambda settings, conf, **kw: [])
     monkeypatch.setattr(_state, 'detector', _ExplodingDetector())

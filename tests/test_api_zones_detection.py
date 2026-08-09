@@ -37,7 +37,7 @@ def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypat
     monkeypatch.setattr(
         mods.live_monitor,
         'detect_frame_motion',
-        lambda camera_id, image, **_kwargs: (True, 0.4, None),
+        lambda camera_id, image, **_kwargs: (True, 0.4, None, 0.04),
     )
 
     strict_settings = {

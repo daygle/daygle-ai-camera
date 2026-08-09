@@ -195,7 +195,7 @@ def test_motion_alert_does_not_record_when_record_off(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
-    monkeypatch.setattr(_lm, 'detect_frame_motion', lambda *a, **k: (False, 0.0, None))
+    monkeypatch.setattr(_lm, 'detect_frame_motion', lambda *a, **k: (False, 0.0, None, 0.0))
 
     def _motion_zone_settings(record_on_detect: bool) -> dict:
         return {
