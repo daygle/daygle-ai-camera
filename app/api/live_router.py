@@ -42,7 +42,12 @@ def _queue_detection_snapshot(
         'width': int(width or selected_config.get('width') or 1280),
         'height': int(height or selected_config.get('height') or 720),
     }
-    queue_live_stream_alerts(frame_bytes, frame, selected_config)
+    queue_live_stream_alerts(
+        frame_bytes,
+        frame,
+        selected_config,
+        allow_when_background_enabled=True,
+    )
 
 
 @router.get('/api/live/detection-status')

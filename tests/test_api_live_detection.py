@@ -16,7 +16,7 @@ def test_live_snapshot_queues_foreground_detection_frame(monkeypatch):
     monkeypatch.setattr(
         live_monitor,
         'queue_live_stream_alerts',
-        lambda image, frame, settings: captured.append((image, frame, settings)),
+        lambda image, frame, settings, **kwargs: captured.append((image, frame, settings, kwargs)),
     )
 
     settings = {'id': 'camera-1', 'width': 1920, 'height': 1080}
@@ -37,6 +37,7 @@ def test_live_snapshot_queues_foreground_detection_frame(monkeypatch):
             'height': 360,
         },
         settings,
+        {'allow_when_background_enabled': True},
     )]
 
 

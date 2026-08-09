@@ -246,14 +246,28 @@ def _encode_frame_jpeg(image: Any) -> bytes:
     return buffer.tobytes()
 
 
-def queue_live_stream_alerts(image_bytes: bytes, frame: dict[str, Any], settings: dict[str, Any]) -> None:
+def queue_live_stream_alerts(
+    image_bytes: bytes,
+    frame: dict[str, Any],
+    settings: dict[str, Any],
+    *,
+    allow_when_background_enabled: bool = False,
+) -> None:
+    """Queue a foreground frame, optionally as a live-page fallback.
+
+    The background monitor remains the normal source. The Live page can opt
+    into this same guarded worker path when the monitor has not produced a
+    status for an ONVIF camera; ``live_detection_last_checked`` and the worker
+    lock ensure the two sources do not run duplicate inference cycles.
+    """
     camera_id = str(settings.get('id') or 'camera')
+    live_cfg = effective_live_config()
+    background_enabled = normalize_bool_setting(live_cfg.get('background_detection_enabled'), True)
+    if background_enabled and not allow_when_background_enabled:
+        return
     stream_url = build_stream_url(settings)
     if stream_url:
         _state.recording_service.prime_rtsp_prebuffer(stream_url=stream_url, camera_id=camera_id, recording_config=_state.camera_event_recording_config(settings), recording_stream_path=build_recording_stream_url(settings))
-    live_cfg = effective_live_config()
-    if normalize_bool_setting(live_cfg.get('background_detection_enabled'), True):
-        return
     detection_interval_seconds = float(live_cfg.get('detection_interval_seconds', 0.5))
     now = time.time()
     with _state.live_detection_worker_lock:
