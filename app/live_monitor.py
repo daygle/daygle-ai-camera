@@ -195,6 +195,7 @@ def _prune_frame_motion_state() -> None:
         for cid in stale:
             del _state._frame_motion_prev[cid]
             _state._frame_motion_last_frame.pop(cid, None)
+            _state._frame_motion_last_gray.pop(cid, None)
     for cid in stale:
         _state._periodic_scan_last_ts.pop(cid, None)
         _state._frame_motion_error_cameras.discard(cid)
@@ -288,9 +289,6 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     if not normalize_bool_setting(ai_config.get('enabled'), True):
         update_live_detection_status(camera_id, state='skipped', reason='AI detection is disabled.', detections=[])
         return None
-    if not hasattr(_state.detector, 'detect_image'):
-        update_live_detection_status(camera_id, state='skipped', reason='Live stream alerts require ONNX AI mode.', detections=[])
-        return None
     if enforce_interval:
         now = time.time()
         with _state.live_detection_worker_lock:
@@ -298,9 +296,6 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
                 return None
             _state.live_detection_last_checked[camera_id] = now
     ai_state = ai_status_payload()
-    if not ai_state['detector_loaded']:
-        update_live_detection_status(camera_id, state='skipped', reason=ai_state['last_detector_error'] or 'ONNX detector is not loaded.', ai=ai_state, detections=[])
-        return None
     frame_is_numpy = hasattr(image, 'shape') and hasattr(image, 'dtype')
     now = time.time()
     try:
@@ -379,12 +374,38 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     if not frame_has_motion and (not force_scan) and (not motion_detections):
         update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[], motion_confidence=raw_motion_fraction)
         return None
+    detector_method_available = hasattr(
+        _state.detector,
+        'detect_frame' if frame_is_numpy else 'detect_image',
+    )
+    detector_ready = bool(ai_state['detector_loaded'] and detector_method_available)
+    if not detector_ready and not motion_detections:
+        detector_reason = (
+            ai_state['last_detector_error']
+            or 'Live object detector is not loaded; motion-only rules can still run.'
+        )
+        update_live_detection_status(
+            camera_id,
+            state='skipped',
+            reason=detector_reason,
+            ai=ai_state,
+            detections=[],
+            motion_confidence=raw_motion_fraction,
+        )
+        return None
+
+    # Motion-only rules are independent of ONNX. If the object detector is
+    # unavailable but a motion zone fired, continue with an empty object list
+    # so the motion event/recording path still runs. When ONNX is ready, this
+    # branch is identical to the existing object-detection path.
     min_conf = compute_minimum_rule_confidence(camera_settings=settings)
     try:
-        if frame_is_numpy and hasattr(_state.detector, 'detect_frame'):
+        if detector_ready and frame_is_numpy and hasattr(_state.detector, 'detect_frame'):
             detections = _state.detector.detect_frame(image, confidence=min_conf)
-        else:
+        elif detector_ready:
             detections = _state.detector.detect_image(image, confidence=min_conf)
+        else:
+            detections = []
     except (DetectorUnavailableError, ValueError) as exc:
         logger.warning('Live detection skipped for camera %s: %s', camera_id, exc)
         update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state, detections=[], motion_confidence=raw_motion_fraction)

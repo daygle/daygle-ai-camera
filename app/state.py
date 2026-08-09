@@ -117,6 +117,9 @@ _frame_motion_prev: dict = {}
 # moving subjects that occupy too few pixels to clear the adaptive-background
 # gate on any single sample (especially when the ingest repeats a frame).
 _frame_motion_last_frame: dict = {}
+# Full-resolution grayscale predecessor used to recover thin/high-frequency
+# movement (tree leaves, wires, distant limbs) lost by thumbnail resizing.
+_frame_motion_last_gray: dict = {}
 _frame_motion_error_cameras: set = set()
 
 # ---------------------------------------------------------------------------

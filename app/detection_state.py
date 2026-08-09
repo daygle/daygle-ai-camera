@@ -42,6 +42,7 @@ working unchanged:
 - ``main._frame_motion_lock`` - ``detect_frame_motion``
 - ``main._frame_motion_prev`` - ``detect_frame_motion``
 - ``main._frame_motion_last_frame`` - ``detect_frame_motion``
+- ``main._frame_motion_last_gray`` - ``detect_frame_motion``
 - ``main._frame_motion_error_cameras`` - ``detect_frame_motion``
 - ``main._MOTION_FRAME_W`` / ``main._MOTION_FRAME_H`` -
   ``detect_frame_motion``
@@ -261,19 +262,22 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
     if background_alpha is None:
         background_alpha = _state._MOTION_BACKGROUND_ALPHA
     try:
+        import cv2
         import numpy as np
         if hasattr(image, 'shape') and hasattr(image, 'dtype'):
-            import cv2
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            resized = cv2.resize(gray, (_state._MOTION_FRAME_W, _state._MOTION_FRAME_H), interpolation=cv2.INTER_NEAREST)
+            full_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            resized = cv2.resize(full_gray, (_state._MOTION_FRAME_W, _state._MOTION_FRAME_H), interpolation=cv2.INTER_NEAREST)
             current = resized.astype(np.float32)
         else:
             from PIL import Image as _Image
-            img = _Image.open(io.BytesIO(image)).convert('L').resize((_state._MOTION_FRAME_W, _state._MOTION_FRAME_H), _Image.NEAREST)
-            current = np.array(img, dtype=np.float32)
+            full_image = _Image.open(io.BytesIO(image)).convert('L')
+            full_gray = np.array(full_image, dtype=np.uint8)
+            resized = full_image.resize((_state._MOTION_FRAME_W, _state._MOTION_FRAME_H), _Image.NEAREST)
+            current = np.array(resized, dtype=np.float32)
         with _state._frame_motion_lock:
             background = _state._frame_motion_prev.get(camera_id)
             previous_frame = _state._frame_motion_last_frame.get(camera_id)
+            previous_gray = _state._frame_motion_last_gray.get(camera_id)
             # Reset on a first frame OR a shape mismatch. ``_MOTION_FRAME_W/H``
             # are global and read outside this lock, so a concurrent live-settings
             # frame-size change (which clears all backgrounds) can race with a
@@ -286,9 +290,11 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
                 background is None
                 or background.shape != current.shape
                 or (previous_frame is not None and previous_frame.shape != current.shape)
+                or (previous_gray is not None and previous_gray.shape != full_gray.shape)
             ):
                 _state._frame_motion_prev[camera_id] = current
                 _state._frame_motion_last_frame[camera_id] = current
+                _state._frame_motion_last_gray[camera_id] = full_gray
                 _state._frame_motion_error_cameras.discard(camera_id)
                 return (False, 0.0, None, 0.0)
             background_diff = np.abs(current - background) > pixel_threshold
@@ -302,9 +308,27 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
                 if previous_frame is not None
                 else False
             )
-            diff_mask = background_diff | temporal_diff
+            # Preserve fine movement before thumbnail reduction. A single leaf
+            # or wire can disappear when nearest-neighbour resizing selects a
+            # different source pixel; reducing a full-resolution binary mask
+            # with area interpolation retains those changed regions in the
+            # motion thumbnail without changing the ONNX input or detections.
+            if previous_gray is not None:
+                full_temporal_diff = (
+                    np.abs(full_gray.astype(np.int16) - previous_gray.astype(np.int16))
+                    > pixel_threshold
+                ).astype(np.uint8)
+                fine_temporal_diff = cv2.resize(
+                    full_temporal_diff,
+                    (_state._MOTION_FRAME_W, _state._MOTION_FRAME_H),
+                    interpolation=cv2.INTER_AREA,
+                ) > 0
+            else:
+                fine_temporal_diff = False
+            diff_mask = background_diff | temporal_diff | fine_temporal_diff
             changed_fraction = float(np.mean(diff_mask))
             _state._frame_motion_last_frame[camera_id] = current
+            _state._frame_motion_last_gray[camera_id] = full_gray
             _now = time.monotonic()
             _last = _motion_log_last_at.get(camera_id, 0.0)
             if _now - _last >= _MOTION_LOG_INTERVAL:

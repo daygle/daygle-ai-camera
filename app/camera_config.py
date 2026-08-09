@@ -147,6 +147,10 @@ def _migrate_camera_id(old_id: str, new_id: str) -> None:
             _state._frame_motion_last_frame[new_id] = (
                 _state._frame_motion_last_frame.pop(old_id)
             )
+        if old_id in _state._frame_motion_last_gray:
+            _state._frame_motion_last_gray[new_id] = (
+                _state._frame_motion_last_gray.pop(old_id)
+            )
     with _state._apply_settings_lock:
         service = _state.recording_service
         if service is not None:
