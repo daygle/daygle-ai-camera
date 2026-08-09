@@ -268,7 +268,10 @@ function renderObjectRules(zone, zoneIndex) {
           <td class="cell-center"><input type="checkbox" data-zone-rule-record="${key}" ${rule.record_on_detect !== false ? 'checked' : ''} /></td>
           <td class="cell-center"><input type="checkbox" data-zone-rule-email="${key}" ${rule.email_enabled === true ? 'checked' : ''} /></td>
           <td class="cell-center"><input type="checkbox" data-zone-rule-push="${key}" ${rule.push_enabled === true ? 'checked' : ''} /></td>
-          <td><input type="number" data-zone-rule-confidence="${key}" value="${escapeHtml(rule.min_confidence)}" min="0" max="1" step="0.05" title="Minimum confidence (0-1). Overrides the global ONNX slider for this object in this zone." /></td>
+          <td><span class="conf-slider" title="Minimum confidence (0-1). Overrides the global ONNX slider for this object in this zone.">
+            <input type="range" data-zone-rule-confidence="${key}" min="0" max="1" step="0.05" value="${escapeHtml(rule.min_confidence)}" />
+            <output data-zone-rule-confidence-value="${key}">${escapeHtml(rule.min_confidence)}</output>
+          </span></td>
           <td><input type="number" data-zone-rule-max-confidence="${key}" value="${escapeHtml(rule.max_confidence ?? 1)}" min="0" max="1" step="0.05" title="Maximum confidence (0-1). Detections above this are ignored for this rule. 1 = no upper limit." /></td>
           <td><input type="number" data-zone-rule-cooldown="${key}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" /></td>
           <td><div class="cell-actions">
@@ -666,8 +669,22 @@ function bindRuleFields() {
       });
     });
   });
+  // Min-confidence slider: `input` updates the cell readout live, `change`
+  // (released) commits the value -- same pattern as the Motion card.
+  document.querySelectorAll('input[type="range"][data-zone-rule-confidence]').forEach((inp) => {
+    inp.addEventListener('input', () => {
+      const readout = document.querySelector(`[data-zone-rule-confidence-value="${inp.dataset.zoneRuleConfidence}"]`);
+      if (readout) readout.textContent = inp.value;
+    });
+    inp.addEventListener('change', () => {
+      const { zoneIndex, rule } = parseZoneRuleKey(inp.dataset.zoneRuleConfidence);
+      if (!rule) return;
+      rule.min_confidence = clamp(Number(inp.value || 0), 0, 1);
+      cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
+      markZoneUnsaved();
+    });
+  });
   const numberBindings = [
-    ['zoneRuleConfidence', 'min_confidence', (value) => clamp(Number(value || 0), 0, 1)],
     // Stored as-typed in [0, 1]; normalizeObjectRules re-clamps max >= min on
     // the next render, and the server does the same on save. A CLEARED field
     // arrives as '' (not nullish), so map empty back to the documented default

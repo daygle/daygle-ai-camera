@@ -6007,7 +6007,15 @@ button.secondary:disabled, a.secondary:disabled {
 .zone-motion-field > span { color: var(--muted); font-size: 10px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
 .zone-motion-field input[type="checkbox"] { width: auto; justify-self: start; }
 .zone-motion-sensitivity-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.zone-motion-sensitivity-row input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--accent); }
+.zone-motion-sensitivity-row input[type="range"] {
+  flex: 1;
+  min-width: 120px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  accent-color: var(--accent);
+}
 .zone-motion-sensitivity-value {
   flex: 0 0 auto;
   min-width: 3.4rem;
@@ -6033,6 +6041,37 @@ button.secondary:disabled, a.secondary:disabled {
 /* Checkbox toggles inside the advanced body must not stretch full-width
    like the global ``input`` chrome (width: 100%). */
 .zone-motion-advanced-body .sound-rule-field input[type="checkbox"] { width: auto; }
+
+/* Compact confidence sliders (object-rules table, sounds table). Native
+   range inputs get the same reset as the Motion card so the global ``input``
+   chrome (padding / border / full-width / background) never boxes them. */
+.conf-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.conf-slider input[type="range"] {
+  width: 84px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  accent-color: var(--accent);
+}
+.conf-slider output {
+  min-width: 34px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: rgba(255,255,255,.05);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 :root.light .zone-motion-card { background: rgba(255,255,255,.7); }
 .cameras-table-wrap { border: 1px solid var(--border); border-radius: 13px; background: rgba(0,0,0,.08); }
 .cameras-table-wrap .rule-table th { background: rgba(255,255,255,.035); }

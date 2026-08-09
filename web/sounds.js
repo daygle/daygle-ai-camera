@@ -225,7 +225,13 @@ function renderRules() {
   rulesWrap.querySelectorAll('[data-rule-record]').forEach((input) => {
     input.addEventListener('change', () => updateRule(input.dataset.ruleRecord, 'record_on_detect', input.checked));
   });
-  rulesWrap.querySelectorAll('[data-rule-threshold]').forEach((input) => {
+  // Threshold slider: `input` updates the cell readout live, `change`
+  // (released) commits the value -- same pattern as the Motion card.
+  rulesWrap.querySelectorAll('input[type="range"][data-rule-threshold]').forEach((input) => {
+    input.addEventListener('input', () => {
+      const readout = rulesWrap.querySelector(`[data-rule-threshold-value="${input.dataset.ruleThreshold}"]`);
+      if (readout) readout.textContent = input.value;
+    });
     input.addEventListener('change', () => updateRule(input.dataset.ruleThreshold, 'confidence_threshold', Math.max(0.1, Math.min(1.0, Number(input.value) || 0.35))));
   });
   rulesWrap.querySelectorAll('[data-rule-cooldown]').forEach((input) => {
@@ -280,7 +286,10 @@ function buildSoundRuleRow(rule, ruleIndex, rules) {
       <td class="cell-center"><input type="checkbox" data-rule-record="${id}" ${rule.record_on_detect !== false ? 'checked' : ''} /></td>
       <td class="cell-center"><input type="checkbox" data-rule-email="${id}" ${rule.email_enabled ? 'checked' : ''} /></td>
       <td class="cell-center"><input type="checkbox" data-rule-push="${id}" ${rule.push_enabled ? 'checked' : ''} /></td>
-      <td><input type="number" data-rule-threshold="${id}" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" min="0.1" max="1.0" step="0.05" /></td>
+      <td><span class="conf-slider" title="Detection threshold (0.1-1.0): how confident the model must be before this sound counts.">
+        <input type="range" data-rule-threshold="${id}" min="0.1" max="1.0" step="0.05" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" />
+        <output data-rule-threshold-value="${id}">${escapeHtml(String(rule.confidence_threshold ?? 0.35))}</output>
+      </span></td>
       <td><input type="number" data-rule-cooldown="${id}" value="${escapeHtml(String(rule.cooldown_seconds ?? 30))}" min="5" max="3600" step="5" /></td>
       <td><div class="cell-actions">
         <button class="rule-expand-btn secondary" type="button" data-expand-rule="${id}">${expanded ? ICONS.chevronUp : ICONS.email}</button>
