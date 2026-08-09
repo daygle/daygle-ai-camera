@@ -23,6 +23,8 @@ const liveEls = {
   motionState: document.getElementById('liveMotionState'),
   motionBar: document.getElementById('liveMotionBar'),
   motionValue: document.getElementById('liveMotionValue'),
+  motionTriggerTick: document.getElementById('liveMotionTriggerTick'),
+  motionCaption: document.getElementById('liveMotionCaption'),
   monitorPill: document.getElementById('liveMonitorPill'),
   monitorPillText: document.getElementById('liveMonitorPillText'),
   // Zones-page stats (null on live page - harmless)
@@ -65,6 +67,9 @@ let detectionStatusRefreshMs = DEFAULT_DETECTION_STATUS_REFRESH_MS;
 let cameras = [];
 let availableLabels = [];
 let selectedCamera = null;
+// Motion-lane trigger reference: the lowest Sensitivity (%) among the
+// selected camera's enabled motion zones — the "fires above" tick on the bar.
+let motionTriggerSensitivityPct = 0;
 // Runtime stream metadata is populated from /api/status. Camera configuration
 // may intentionally leave FPS on Auto, so never render the old 15 FPS fallback
 // when the backend has a better source-rate value.
@@ -593,14 +598,36 @@ function renderDetectionStatus(summary) {
   }
 
   // ── Motion lane ─────────────────────────────────────────────
-  // motion_confidence is the raw changed-pixel fraction (0.0–1.0).
-  // Scale the bar: 0→0%, 0.01→50%, 0.02→100% so small motion is visible.
+  // motion_confidence is the zone-gate level (0.0–1.0) computed as
+  // changed-fraction / motion-scale-fraction — the SAME scale the per-zone
+  // Sensitivity slider uses — so the readout compares directly to the
+  // "fires above" tick on the bar. motion_fraction is the raw changed-pixel
+  // fraction of the frame, shown in the caption for context.
   const motionConf = summary.motion_confidence != null ? summary.motion_confidence : null;
+  const motionFraction = summary.motion_fraction != null ? summary.motion_fraction : null;
   if (liveEls.motionBar) {
-    const barPct = motionConf != null ? Math.min(100, Math.round((motionConf / 0.02) * 100)) : 0;
+    const barPct = motionConf != null ? Math.round(Math.min(1, motionConf) * 100) : 0;
     liveEls.motionBar.style.width = barPct + '%';
-    const displayPct = motionConf != null ? (motionConf * 100).toFixed(2) : '0.00';
-    if (liveEls.motionValue) liveEls.motionValue.textContent = displayPct + '%';
+    if (liveEls.motionValue) {
+      liveEls.motionValue.textContent = (motionConf != null ? Math.round(motionConf * 100) : 0) + '%';
+    }
+  }
+  // Trigger tick + caption: anchored to the camera's easiest motion zone
+  // (lowest Sensitivity), so "fill past the tick" = a motion zone fires.
+  if (liveEls.motionTriggerTick) {
+    const showTrigger = !isAllCameraMode() && motionTriggerSensitivityPct > 0;
+    liveEls.motionTriggerTick.hidden = !showTrigger;
+    if (showTrigger) liveEls.motionTriggerTick.style.left = Math.min(99, motionTriggerSensitivityPct) + '%';
+  }
+  if (liveEls.motionCaption) {
+    const parts = [];
+    if (motionFraction != null) parts.push(`${Math.round(motionFraction * 100)}% of frame pixels`);
+    if (!isAllCameraMode() && motionTriggerSensitivityPct > 0) {
+      parts.push(`fires above ${motionTriggerSensitivityPct}% sensitivity`);
+    } else if (!isAllCameraMode()) {
+      parts.push('no motion zones configured');
+    }
+    liveEls.motionCaption.textContent = parts.join(' · ');
   }
   if (liveEls.motionState) {
     const motionActive = motionConf != null && motionConf > 0;
@@ -691,9 +718,28 @@ async function refreshDetectionStatus() {
   }
 }
 
+// Lowest Sensitivity among a camera's enabled motion zones (mirrors the
+// backend's zone_motion_min_confidence, which defaults to 0.45 per zone).
+// The live lane is frame-wide, so this is the "easiest" trigger point.
+function motionTriggerSensitivity(camera) {
+  const zones = (camera && camera.detection && camera.detection.zones) || [];
+  let min = null;
+  for (const zone of zones) {
+    if (zone.enabled === false || zone.monitor_motion === false) continue;
+    const rule = (zone.object_rules || []).find((r) => (
+      String(r.label || '').trim().toLowerCase() === 'motion' && r.enabled !== false
+    ));
+    const sens = rule != null ? Number(rule.min_confidence ?? 0.45) : 0.45;
+    if (min == null || sens < min) min = sens;
+  }
+  return min;
+}
+
 function setSelectedCamera(cameraId) {
   selectedCamera = cameras.find((camera) => camera.id === cameraId) || cameras[0];
   if (!selectedCamera) return;
+  const sens = motionTriggerSensitivity(selectedCamera);
+  motionTriggerSensitivityPct = sens != null ? Math.round(sens * 100) : 0;
   rebuildConfiguredLabels();
   liveAiTrackDetections = null;
   liveAiTrackPrevDetections = null;
