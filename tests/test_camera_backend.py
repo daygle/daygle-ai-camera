@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import subprocess
 
+import pytest
+
 from app.camera_backend import OpenCvStreamCamera
 
 
@@ -114,3 +116,103 @@ def test_probe_ignores_unusable_ffprobe_rate(monkeypatch) -> None:
     assert camera.detected_fps is None
     assert camera.effective_fps == 15.0
     assert camera.fps_source == 'fallback'
+
+
+def test_empty_retrieve_releases_capture_and_reconnects(monkeypatch) -> None:
+    """A decoder reset must not publish an empty picture or reuse the broken
+    capture object; the next capture should be opened only after release."""
+    camera = OpenCvStreamCamera('rtsp://example/stream', stale_frame_grabs=1)
+    opened = []
+
+    class FakeImage:
+        size = 6
+        shape = (2, 3, 1)
+
+    class EmptyCapture:
+        def __init__(self):
+            self.grabs = 0
+            self.released = False
+
+        def grab(self):
+            self.grabs += 1
+            return self.grabs == 1
+
+        def retrieve(self):
+            return True, None
+
+        def read(self):
+            return False, None
+
+        def release(self):
+            self.released = True
+
+    class GoodCapture:
+        def __init__(self):
+            self.grabs = 0
+            self.released = False
+
+        def grab(self):
+            self.grabs += 1
+            return self.grabs == 1
+
+        def retrieve(self):
+            return True, FakeImage()
+
+        def read(self):
+            return False, None
+
+        def release(self):
+            self.released = True
+
+    captures = [EmptyCapture(), GoodCapture()]
+
+    def open_capture():
+        capture = captures.pop(0)
+        camera._capture = capture
+        opened.append(capture)
+        return capture
+
+    monkeypatch.setattr(camera, '_open_capture', open_capture)
+    monkeypatch.setattr('app.camera_backend.time.sleep', lambda _seconds: None)
+
+    image, frame = camera.read_frame()
+
+    assert image.shape == (2, 3, 1)
+    assert frame['width'] == 3
+    assert frame['height'] == 2
+    assert opened[0].released is True
+    assert len(opened) == 2
+    assert camera._consecutive_read_failures == 0
+    assert camera.last_error is None
+
+
+def test_repeated_empty_frames_set_retry_error(monkeypatch) -> None:
+    camera = OpenCvStreamCamera('rtsp://example/stream', stale_frame_grabs=0)
+    opened = []
+
+    class EmptyCapture:
+        def __init__(self):
+            self.released = False
+
+        def read(self):
+            return True, None
+
+        def release(self):
+            self.released = True
+
+    def open_capture():
+        capture = EmptyCapture()
+        camera._capture = capture
+        opened.append(capture)
+        return capture
+
+    monkeypatch.setattr(camera, '_open_capture', open_capture)
+    monkeypatch.setattr('app.camera_backend.time.sleep', lambda _seconds: None)
+
+    with pytest.raises(RuntimeError, match='Unable to read a frame'):
+        camera.read_frame()
+
+    assert len(opened) == 3
+    assert all(capture.released for capture in opened)
+    assert camera._consecutive_read_failures == 3
+    assert camera.last_error == 'Unable to read a frame from the ONVIF/RTSP stream.'

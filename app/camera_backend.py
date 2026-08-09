@@ -14,6 +14,17 @@ from typing import Any
 
 
 logger = logging.getLogger('daygle.ai')
+
+
+# A failed ``VideoCapture.read``/``retrieve`` is recoverable for RTSP streams:
+# FFmpeg can briefly return an empty decoded picture while the network session
+# is being torn down or re-established. Keep retries bounded so a dead camera
+# does not block a request indefinitely or spin in a tight reconnect loop.
+CAPTURE_READ_ATTEMPTS = 3
+CAPTURE_RETRY_BASE_SECONDS = 0.25
+CAPTURE_RETRY_MAX_SECONDS = 2.0
+CAPTURE_FAILURE_LOG_INTERVAL_SECONDS = 15.0
+
 # Cached library handles discovered on first VideoCapture open.
 _avutil_libs: list[Any] = []
 _avutil_libs_searched = False
@@ -136,6 +147,9 @@ class OpenCvStreamCamera:
         self._fps_probe_lock = threading.Lock()
         self._fps_probe_thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        self._consecutive_read_failures = 0
+        self._last_capture_failure_log_at = 0.0
+        self._next_capture_retry_at = 0.0
 
     @property
     def backend(self) -> str:
@@ -289,27 +303,99 @@ class OpenCvStreamCamera:
             self._capture.release()
             self._capture = None
 
-    def _acquire_raw_frame(self) -> tuple[Any, dict[str, Any]]:
-        """Open capture, read with one reconnect retry, update dimensions and frame counter.
+    @staticmethod
+    def _frame_contains_data(image: Any) -> bool:
+        """Return whether a decoded OpenCV image is usable.
 
-        Must be called while ``self._lock`` is held.
+        FFmpeg/OpenCV may report ``ok=True`` while returning ``None`` or an
+        empty array when the decoder has no picture after an RTSP interruption.
+        Never let that value reach detection or JPEG encoding.
         """
+        if image is None:
+            return False
+        try:
+            return int(getattr(image, 'size', 1)) > 0
+        except (TypeError, ValueError):
+            return True
+
+    def _record_capture_failure(self, reason: str) -> None:
+        self._consecutive_read_failures += 1
+        now = time.monotonic()
+        if (
+            self._consecutive_read_failures == 1
+            or now - self._last_capture_failure_log_at >= CAPTURE_FAILURE_LOG_INTERVAL_SECONDS
+        ):
+            logger.warning(
+                'RTSP capture returned no usable frame (%s consecutive failure%s); '
+                'reconnecting capture.',
+                self._consecutive_read_failures,
+                '' if self._consecutive_read_failures == 1 else 's',
+            )
+            self._last_capture_failure_log_at = now
+
+    def _record_capture_success(self) -> None:
+        if self._consecutive_read_failures:
+            logger.info(
+                'RTSP capture recovered after %s consecutive empty-frame failure%s.',
+                self._consecutive_read_failures,
+                '' if self._consecutive_read_failures == 1 else 's',
+            )
+        self._consecutive_read_failures = 0
+        self._next_capture_retry_at = 0.0
+
+    def _capture_retry_delay(self, attempt: int) -> float:
+        """Return a bounded exponential delay before the next reconnect."""
+        return min(
+            CAPTURE_RETRY_MAX_SECONDS,
+            CAPTURE_RETRY_BASE_SECONDS * (2 ** max(0, attempt - 1)),
+        )
+
+    def _acquire_raw_frame(self) -> tuple[Any, dict[str, Any]]:
+        """Reconnect and read a frame with bounded retries.
+
+        A failed ``retrieve``/``read`` closes the old capture before a new
+        ``VideoCapture`` is opened. This ordering prevents a decoder teardown
+        racing a new read on the same object, which is the common source of
+        repeated ``Picture does not contain data`` messages. Must be called
+        while ``self._lock`` is held.
+        """
+        retry_delay = self._next_capture_retry_at - time.monotonic()
+        if retry_delay > 0:
+            time.sleep(min(retry_delay, CAPTURE_RETRY_MAX_SECONDS))
+
         stale_grabs = self._stale_frame_grabs()
-        capture = self._open_capture()
-        ok, image, capture_ts = self._read_latest_frame(capture, stale_grabs, self.fps)
-        if not ok or image is None:
+        last_failure: str | None = None
+        for attempt in range(CAPTURE_READ_ATTEMPTS):
+            if attempt:
+                self._release_capture()
+                time.sleep(self._capture_retry_delay(attempt))
+            try:
+                capture = self._open_capture()
+                ok, image, capture_ts = self._read_latest_frame(capture, stale_grabs, self.fps)
+            except Exception as exc:  # cv2 can raise during decoder teardown
+                ok, image, capture_ts = False, None, time.time()
+                last_failure = type(exc).__name__
+
+            if ok and self._frame_contains_data(image):
+                self._record_capture_success()
+                height, width = image.shape[:2]
+                self.width = int(width)
+                self.height = int(height)
+                self.frame_number += 1
+                return image, self.get_frame(capture_ts)
+
+            last_failure = last_failure or ('empty_frame' if ok else 'read_failed')
+            self._record_capture_failure(last_failure)
+            # Release before retrying, including when retrieve returned
+            # ``ok=True`` with no decoded picture.
             self._release_capture()
-            capture = self._open_capture()
-            ok, image, capture_ts = self._read_latest_frame(capture, stale_grabs, self.fps)
-        if not ok or image is None:
-            self._release_capture()
-            self.last_error = "Unable to read a frame from the ONVIF/RTSP stream."
-            raise RuntimeError(self.last_error)
-        height, width = image.shape[:2]
-        self.width = int(width)
-        self.height = int(height)
-        self.frame_number += 1
-        return image, self.get_frame(capture_ts)
+
+        self.last_error = "Unable to read a frame from the ONVIF/RTSP stream."
+        self._next_capture_retry_at = time.monotonic() + min(
+            CAPTURE_RETRY_MAX_SECONDS,
+            self._capture_retry_delay(self._consecutive_read_failures),
+        )
+        raise RuntimeError(self.last_error)
 
     def read_frame(self) -> tuple[Any, dict[str, Any]]:
         """Read the latest frame as a raw BGR numpy array, skipping JPEG encoding.

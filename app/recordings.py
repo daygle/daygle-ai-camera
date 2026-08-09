@@ -1265,6 +1265,7 @@ class RecordingService:
             ffmpeg_started_at = time.time()
             process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=stderr_file)
             stderr_file.close()
+            restart_reason = 'process_exit'
             try:
                 last_segment_ts = time.time()
                 while process.poll() is None and not stop_event.is_set():
@@ -1285,7 +1286,8 @@ class RecordingService:
                         pass
                     stall_seconds = max(self.PREBUFFER_SEGMENT_SECONDS * 5, 20)
                     if time.time() - last_segment_ts > stall_seconds:
-                        logger.info('Prebuffer ingest for %s stalled (no segment in %.0fs); restarting.', camera_key, stall_seconds)
+                        restart_reason = 'segment_stall'
+                        logger.warning('Prebuffer ingest for %s stalled (no segment in %.0fs); restarting.', camera_key, stall_seconds)
                         # SIGKILL rather than SIGTERM: the stream is already dead so
                         # graceful cleanup is pointless, and ffmpeg can segfault in its
                         # RTSP teardown path when the connection is in a broken state.
@@ -1352,12 +1354,13 @@ class RecordingService:
                     self._emit_diagnostic(
                         camera_id,
                         'ingest_restart',
-                        f'Camera ingest process exited (code {return_code}) after {uptime:.0f}s - '
-                        'reconnecting. If this happens frequently the pre-event buffer may be empty '
-                        'when recordings are triggered.',
+                        f'Camera ingest process exited (code {return_code}) after {uptime:.0f}s '
+                        f'(reason: {restart_reason}) - reconnecting. If this happens frequently '
+                        'the pre-event buffer may be empty when recordings are triggered.',
                         severity='warning',
                         details={
                             'return_code': return_code,
+                            'restart_reason': restart_reason,
                             'uptime_seconds': round(uptime, 1),
                             'stderr_tail': stderr_tail,
                         },
