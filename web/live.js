@@ -68,7 +68,7 @@ let cameras = [];
 let availableLabels = [];
 let selectedCamera = null;
 // Motion-lane trigger reference: the lowest Sensitivity (%) among the
-// selected camera's enabled motion zones — the "fires above" tick on the bar.
+// selected camera's enabled motion zones - the "fires above" tick on the bar.
 let motionTriggerSensitivityPct = 0;
 // Runtime stream metadata is populated from /api/status. Camera configuration
 // may intentionally leave FPS on Auto, so never render the old 15 FPS fallback
@@ -598,9 +598,9 @@ function renderDetectionStatus(summary) {
   }
 
   // ── Motion lane ─────────────────────────────────────────────
-  // motion_confidence is the zone-gate level (0.0–1.0) computed as
-  // changed-fraction / motion-scale-fraction — the SAME scale the per-zone
-  // Sensitivity slider uses — so the readout compares directly to the
+  // motion_confidence is the zone-gate level (0.0-1.0) computed as
+  // changed-fraction / motion-scale-fraction - the SAME scale the per-zone
+  // Sensitivity slider uses - so the readout compares directly to the
   // "fires above" tick on the bar. motion_fraction is the raw changed-pixel
   // fraction of the frame, shown in the caption for context.
   const motionConf = summary.motion_confidence != null ? summary.motion_confidence : null;

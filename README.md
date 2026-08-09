@@ -146,7 +146,7 @@ from the installed environment:
 
 A healthy GPU installation should list `CUDAExecutionProvider`, but note that
 `get_available_providers()` reflects what ONNX Runtime was *built* with, not
-what can actually load — it can list the provider even when its CUDA/cuDNN
+what can actually load - it can list the provider even when its CUDA/cuDNN
 dependencies are missing. For a definitive check, and for the full CUDA
 userspace install (the pinned CUDA 12.4 + cuDNN 9.x wheels and loader setup
 that `install_debian.sh` does not manage), see

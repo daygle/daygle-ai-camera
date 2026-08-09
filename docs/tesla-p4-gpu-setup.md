@@ -3,8 +3,8 @@
 This runbook captures the full working GPU inference setup for a **Tesla P4**
 (Pascal, compute capability 6.1) so it can be rebuilt from scratch. The CUDA
 userspace libraries it installs are **not** managed by `install_debian.sh` or
-`install_python_deps.sh` — those deliberately stay out of the driver/CUDA
-layer — so without this document the working configuration exists only on the
+`install_python_deps.sh` - those deliberately stay out of the driver/CUDA
+layer - so without this document the working configuration exists only on the
 running box.
 
 Follow it end to end after a rebuild, a fresh `install_debian.sh` run, or any
@@ -28,14 +28,14 @@ proceeding.
 
 `onnxruntime-gpu`'s `CUDAExecutionProvider` (`libonnxruntime_providers_cuda.so`)
 dynamically loads CUDA 12.x + cuDNN 9.x at session-create time. Nothing on a
-stock Debian system provides those — and Debian does not package cuDNN at all —
+stock Debian system provides those - and Debian does not package cuDNN at all -
 so they are installed as pip wheels **into the same virtualenv** as
 onnxruntime-gpu.
 
 > **`get_available_providers()` is not proof of a working GPU.** It lists what
 > ONNX Runtime was *built* with, not what can actually load. It will show
 > `CUDAExecutionProvider` even when every CUDA dependency is missing. The real
-> checks are `ldd` on the provider `.so` and actually loading it — both below.
+> checks are `ldd` on the provider `.so` and actually loading it - both below.
 
 ## 1. Install the CUDA userspace wheels
 
@@ -108,20 +108,20 @@ journalctl -u daygle-ai-camera -f
 Then at `http://<server-ip>:8080/onnx`: **Device = CUDA (GPU)**, **Precision =
 FP32**, **GPU memory limit = 0**. Save, then **Reload detector → Check model →
 Test detector**. In a second shell, `nvidia-smi` should show the Python process
-holding GPU memory during the test — that is the definitive confirmation, more
+holding GPU memory during the test - that is the definitive confirmation, more
 than any log line.
 
 ## Gotchas
 
 - **Ignore `TensorrtExecutionProvider`.** It is listed because the wheel is
   built with it, but the TensorRT libraries are not installed and should not be
-  — TensorRT is where Pascal support gets actively hostile. Leave the device
+  - TensorRT is where Pascal support gets actively hostile. Leave the device
   set to CUDA.
 - **First inference is slow.** With no `sm_61` cubin match in some kernels, CUDA
   JIT-compiles them at load; it caches afterward. A first `Test detector` taking
   30+ seconds is this, not a failure.
 - **If it still falls back to CPU**, grab the ONNX Runtime warning that starts
-  `Failed to create CUDAExecutionProvider` from the journal — it names the exact
+  `Failed to create CUDAExecutionProvider` from the journal - it names the exact
   library or capability that failed.
 
 ## Version ceilings to hold
@@ -130,9 +130,9 @@ These are enforced in `requirements.txt` (and documented in
 `.github/dependabot.yml`) so Dependabot cannot silently propose a
 Pascal-breaking or Python-incompatible bump:
 
-- `onnxruntime` / `onnxruntime-gpu` **< 1.21** — stays on the CUDA 11/12-era
+- `onnxruntime` / `onnxruntime-gpu` **< 1.21** - stays on the CUDA 11/12-era
   line that supports Pascal. Newer ORT moves to a CUDA stack that drops it.
-- `numpy` **< 2.3** — numpy 2.3 requires Python 3.11 and 2.5 requires 3.12; the
+- `numpy` **< 2.3** - numpy 2.3 requires Python 3.11 and 2.5 requires 3.12; the
   project still targets Python 3.10.
-- The `nvidia-*-cu12` pins in `requirements-gpu-pascal.txt` — bump only after
+- The `nvidia-*-cu12` pins in `requirements-gpu-pascal.txt` - bump only after
   re-running the verification in section 3 and confirming `sm_61` support.

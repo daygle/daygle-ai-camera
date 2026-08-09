@@ -252,7 +252,7 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
     ``diff_mask`` is ``None`` on the first frame or when an error occurs.
     ``frame_confidence`` is gated to ``0.0`` below ``gate_fraction`` (so alert
     logic ignores noise). ``raw_fraction`` is the ungated changed-pixel
-    fraction (0.0–1.0) for UI diagnostics.
+    fraction (0.0-1.0) for UI diagnostics.
     """
     if pixel_threshold is None:
         pixel_threshold = _state._MOTION_PIXEL_THRESHOLD
