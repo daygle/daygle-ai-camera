@@ -616,11 +616,24 @@ def test_opencv_stream_camera_reuses_rtsp_capture(monkeypatch):
 def test_opencv_stream_camera_applies_ffmpeg_log_level_after_each_videocapture(monkeypatch):
     """_configure_ffmpeg_log_level must be called after every VideoCapture
     construction - including on reconnect - so FFmpeg's own init cannot reset
-    the quiet level back to a noisy default."""
+    the quiet level back to a noisy default.
+
+    Background monitor threads from earlier tests in the suite keep polling
+    cameras (``live_alert_monitor_loop``) while this test runs, and those polls
+    construct ``VideoCapture`` through the same fake ``cv2`` - the shared
+    ``instances`` list is therefore cross-thread state and cannot be used for
+    exact-count assertions. Reconnect behaviour is keyed by stream URL so other
+    cameras cannot flip this camera's first-read failure, and constructions /
+    ``_configure_ffmpeg_log_level`` calls are paired only on the test thread.
+    """
+    import threading
+
     import app.camera_backend as camera_backend
     from app.camera_backend import OpenCvStreamCamera
 
-    log_level_call_counts = []  # records len(FakeCapture.instances) at each call
+    main_tid = threading.get_ident()
+    constructs: list[int] = []       # len(FakeCapture.instances) per test-thread construction
+    configure_snaps: list[int] = []  # len(FakeCapture.instances) per test-thread configure call
 
     class FakeImage:
         shape = (720, 1280, 3)
@@ -631,11 +644,14 @@ def test_opencv_stream_camera_applies_ffmpeg_log_level_after_each_videocapture(m
 
     class FakeCapture:
         instances: list = []
-        failed_first_read = False
+        failed_urls: set = set()
 
-        def __init__(self, _stream_url):
+        def __init__(self, stream_url):
             FakeCapture.instances.append(self)
+            self._stream_url = stream_url
             self._reads = 0
+            if threading.get_ident() == main_tid:
+                constructs.append(len(FakeCapture.instances))
 
         def set(self, _prop, _value):
             pass
@@ -648,10 +664,12 @@ def test_opencv_stream_camera_applies_ffmpeg_log_level_after_each_videocapture(m
 
         def read(self):
             self._reads += 1
-            # First capture fails its first read to trigger a reconnect.
-            if not FakeCapture.failed_first_read and self._reads <= 2:
+            # Each camera's first capture fails its first reads to trigger a
+            # reconnect; later captures for the same URL succeed. Keying on the
+            # URL isolates this camera from background monitors' captures.
+            if self._stream_url not in FakeCapture.failed_urls and self._reads <= 2:
                 if self._reads == 2:
-                    FakeCapture.failed_first_read = True
+                    FakeCapture.failed_urls.add(self._stream_url)
                 return False, None
             return True, FakeImage()
 
@@ -674,32 +692,34 @@ def test_opencv_stream_camera_applies_ffmpeg_log_level_after_each_videocapture(m
 
     monkeypatch.setitem(sys.modules, 'cv2', FakeCv2)
     monkeypatch.delenv('OPENCV_FFMPEG_CAPTURE_OPTIONS', raising=False)
-    monkeypatch.setattr(
-        camera_backend,
-        '_configure_ffmpeg_log_level',
-        lambda: log_level_call_counts.append(len(FakeCapture.instances)),
-    )
+
+    def trace_configure():
+        if threading.get_ident() == main_tid:
+            configure_snaps.append(len(FakeCapture.instances))
+
+    monkeypatch.setattr(camera_backend, '_configure_ffmpeg_log_level', trace_configure)
 
     camera = OpenCvStreamCamera('rtsp://example/stream')
     FakeCapture.instances.clear()
     camera.read_jpeg()
 
-    # The fake's first capture fails its reads, so read_jpeg must have
-    # reconnected at least once. The exact count is not pinned: the bounded
-    # retry loop in _acquire_raw_frame may reconnect more than once, and other
-    # tests' background monitor threads can add captures through the same fake.
-    assert len(FakeCapture.instances) >= 2, "expected a reconnect to create another VideoCapture"
+    # The fake fails this camera's first capture, so read_jpeg must have
+    # reconnected at least once (two test-thread constructions). Background
+    # monitor threads may construct extra captures through the same fake, so
+    # only the test thread's own constructions are counted here.
+    assert len(constructs) >= 2, "expected a reconnect to create another VideoCapture"
     # _configure_ffmpeg_log_level must have been called exactly once per
-    # VideoCapture construction.
-    assert len(log_level_call_counts) == len(FakeCapture.instances), (
-        f"expected one log-level call per VideoCapture, got {len(log_level_call_counts)} "
-        f"calls for {len(FakeCapture.instances)} captures"
+    # VideoCapture construction, on the thread that built it.
+    assert len(configure_snaps) == len(constructs), (
+        f"expected one log-level call per VideoCapture, got {len(configure_snaps)} "
+        f"calls for {len(constructs)} constructions"
     )
     # Each call must have happened *after* its own VideoCapture was built: the
-    # recorded instance count strictly increases by 1 in construction order.
-    assert log_level_call_counts == list(range(1, len(FakeCapture.instances) + 1)), (
+    # instance count it observes is at least the count at construction time
+    # (background threads can only raise it further).
+    assert all(snap >= cnt for snap, cnt in zip(configure_snaps, constructs)), (
         "each _configure_ffmpeg_log_level call must run after its own VideoCapture "
-        f"was built (got {log_level_call_counts})"
+        f"was built (constructs={constructs}, configures={configure_snaps})"
     )
 
 
