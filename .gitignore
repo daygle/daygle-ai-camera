@@ -10,6 +10,7 @@ config.yaml
 models/*.onnx
 models/*.pt
 models/*.tflite
+models/*.tflite.download
 models/*.csv
 models/*.json
 models/*/
