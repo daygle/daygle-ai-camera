@@ -374,7 +374,7 @@ def test_zone_motion_detections_default_gate_fraction_resolves_via_state(
     mask = np.zeros((240, 320), dtype=bool)
     mask[20:220, 20:300] = True  # ~73% of pixels changed
 
-    # Default resolution: gate is _state._MOTION_GATE_FRACTION (0.003) -> zone fires.
+    # Default resolution: gate is _state._MOTION_GATE_FRACTION (0.005) -> zone fires.
     original = _state._MOTION_GATE_FRACTION
     try:
         result_default = zd.zone_motion_detections(settings, 0.5, diff_mask=mask)

@@ -138,12 +138,12 @@ Default: `30`
 
 ### Motion Gate Fraction
 
-The minimum fraction of pixels that must change before motion is declared. `0.003` means 0.3% of the thumbnail pixels must exceed the pixel threshold.
+The minimum fraction of pixels that must change before motion is declared. `0.005` means 0.5% of the thumbnail pixels must exceed the pixel threshold.
 
 - **Too low:** A flickering light in one corner of the frame triggers the gate constantly
 - **Too high:** Small or distant subjects (a person at the far end of a long driveway) are missed
 
-Default: `0.003`
+Default: `0.005`
 
 **Tuning tip:** If you have a scene with a tree or flag in the corner that constantly triggers alerts, raise this to `0.008` or `0.01`.
 
@@ -190,7 +190,7 @@ Defaults: `320` × `240`
 Symptom: YOLO runs constantly, live detection status shows "motion detected" on every quiet frame.
 
 1. Raise **Motion Pixel Threshold** from `30` to `50`
-2. If still triggering, raise **Motion Gate Fraction** from `0.003` to `0.008`
+2. If still triggering, raise **Motion Gate Fraction** from `0.005` to `0.008`
 3. Save and watch the detection status - it should settle to "no motion detected" during quiet periods
 
 ---
@@ -199,7 +199,7 @@ Symptom: YOLO runs constantly, live detection status shows "motion detected" on 
 
 Symptom: A person at the far end of the driveway isn't triggering alerts.
 
-1. Lower **Motion Gate Fraction** from `0.003` to `0.001` - fewer pixels need to change
+1. Lower **Motion Gate Fraction** from `0.005` to `0.001` - fewer pixels need to change
 2. Lower **Motion Pixel Threshold** from `30` to `15` - subtler pixel changes count
 3. Consider also lowering the object rule's **min confidence** in zone settings
 

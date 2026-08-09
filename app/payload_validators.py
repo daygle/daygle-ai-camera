@@ -468,7 +468,7 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail='detection_history_minutes must be between 1 and 120.')
     motion_pixel_threshold = _int_field(merged, 'motion_pixel_threshold', 30, 1, 255)
     try:
-        motion_gate_fraction = float(merged.get('motion_gate_fraction', 0.003))
+        motion_gate_fraction = float(merged.get('motion_gate_fraction', 0.005))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail='motion_gate_fraction must be a number.') from exc
     if not 0.0001 <= motion_gate_fraction <= 0.5:

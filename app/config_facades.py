@@ -77,7 +77,7 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     'background_detection_enabled': True,
     'detection_history_minutes': 10,
     'motion_pixel_threshold': 30,
-    'motion_gate_fraction': 0.003,
+    'motion_gate_fraction': 0.005,
     'motion_scale_fraction': 0.03,
     'motion_background_alpha': 0.05,
     'motion_frame_width': 320,
