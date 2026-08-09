@@ -6048,11 +6048,12 @@ button.secondary:disabled, a.secondary:disabled {
 .conf-slider {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
+  white-space: nowrap;
 }
 .conf-slider input[type="range"] {
-  width: 84px;
+  width: 62px;
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -6061,13 +6062,13 @@ button.secondary:disabled, a.secondary:disabled {
   accent-color: var(--accent);
 }
 .conf-slider output {
-  min-width: 34px;
-  padding: 3px 6px;
+  min-width: 30px;
+  padding: 2px 5px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 6px;
   background: rgba(255,255,255,.05);
   color: var(--text);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 800;
   text-align: center;
   font-variant-numeric: tabular-nums;

@@ -253,7 +253,6 @@ function renderObjectRules(zone, zoneIndex) {
       <th class="cell-center">Email</th>
       <th class="cell-center">Push</th>
       <th>Min Conf</th>
-      <th>Max Conf</th>
       <th>Cooldown (s)</th>
       <th></th>
     </tr></thead>
@@ -272,7 +271,6 @@ function renderObjectRules(zone, zoneIndex) {
             <input type="range" data-zone-rule-confidence="${key}" min="0" max="1" step="0.05" value="${escapeHtml(rule.min_confidence)}" />
             <output data-zone-rule-confidence-value="${key}">${escapeHtml(rule.min_confidence)}</output>
           </span></td>
-          <td><input type="number" data-zone-rule-max-confidence="${key}" value="${escapeHtml(rule.max_confidence ?? 1)}" min="0" max="1" step="0.05" title="Maximum confidence (0-1). Detections above this are ignored for this rule. 1 = no upper limit." /></td>
           <td><input type="number" data-zone-rule-cooldown="${key}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" /></td>
           <td><div class="cell-actions">
             <button class="rule-expand-btn secondary" type="button" data-expand-zone-rule="${key}">${expanded ? ICONS.chevronUp : ICONS.email}</button>
@@ -685,17 +683,12 @@ function bindRuleFields() {
     });
   });
   const numberBindings = [
-    // Stored as-typed in [0, 1]; normalizeObjectRules re-clamps max >= min on
-    // the next render, and the server does the same on save. A CLEARED field
-    // arrives as '' (not nullish), so map empty back to the documented default
-    // of 1 (no cap) -- otherwise Number('') would be 0 and clear-and-save would
-    // collapse the rule to a [min, min] window that suppresses everything.
-    ['zoneRuleMaxConfidence', 'max_confidence', (value) => {
-      const text = String(value ?? '').trim();
-      return text === '' ? 1 : clamp(Number(text), 0, 1);
-    }],
     ['zoneRuleCooldown', 'cooldown_seconds', (value) => Math.max(0, Number.parseInt(value || 0, 10) || 0)],
   ];
+  // Note: ``max_confidence`` is intentionally not exposed in the GUI -- the
+  // frontend always writes the 1.0 (no upper limit) default so rules keep
+  // their legacy behavior. The backend still normalizes and honors the field
+  // (and the AlertEngine gates on it) for any config that sets it via API.
   numberBindings.forEach(([datasetKey, ruleKey, transform]) => {
     document.querySelectorAll(`input[type="number"][data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((inp) => {
       inp.addEventListener('change', () => {
