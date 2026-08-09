@@ -593,11 +593,14 @@ function renderDetectionStatus(summary) {
   }
 
   // ── Motion lane ─────────────────────────────────────────────
+  // motion_confidence is the raw changed-pixel fraction (0.0–1.0).
+  // Scale the bar: 0→0%, 0.01→50%, 0.02→100% so small motion is visible.
   const motionConf = summary.motion_confidence != null ? summary.motion_confidence : null;
   if (liveEls.motionBar) {
-    const pct = motionConf != null ? Math.round(motionConf * 100) : 0;
-    liveEls.motionBar.style.width = pct + '%';
-    if (liveEls.motionValue) liveEls.motionValue.textContent = pct + '%';
+    const barPct = motionConf != null ? Math.min(100, Math.round((motionConf / 0.02) * 100)) : 0;
+    liveEls.motionBar.style.width = barPct + '%';
+    const displayPct = motionConf != null ? (motionConf * 100).toFixed(2) : '0.00';
+    if (liveEls.motionValue) liveEls.motionValue.textContent = displayPct + '%';
   }
   if (liveEls.motionState) {
     const motionActive = motionConf != null && motionConf > 0;

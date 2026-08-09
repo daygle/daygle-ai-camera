@@ -386,7 +386,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             if z.get('enabled', True) and z.get('monitor_objects', True)
         ]
         reason = _no_object_match_reason(detections, raw_labels, _monitored_zones)
-        update_live_detection_status(camera_id, state='checked', reason=reason, detected_labels=raw_labels, matched_labels=[], detections=list(detections))
+        update_live_detection_status(camera_id, state='checked', reason=reason, detected_labels=raw_labels, matched_labels=[], detections=list(detections), motion_confidence=raw_motion_fraction)
         return None
     triggered = _state.alerts.process(alert_detections, rules=zone_rules)
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
@@ -468,7 +468,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         debounce_seconds = max(resolved_cooldowns.values())
         extended_recording_id = extend_active_rtsp_recording(camera_id=camera_id, event_time=frame_capture_time, recording_config=camera_recording_config, detections=recording_detections)
         remember_live_event(camera_id, debounced_labels, merge=True)
-        update_live_detection_status(camera_id, state='checked', reason=f'Ongoing detection extended active recording and suppressed duplicate event for {debounce_seconds:.1f}s debounce window.' if extended_recording_id is not None else f'Ongoing detection suppressed for {debounce_seconds:.1f}s debounce window.', detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, recording_id=extended_recording_id)
+        update_live_detection_status(camera_id, state='checked', reason=f'Ongoing detection extended active recording and suppressed duplicate event for {debounce_seconds:.1f}s debounce window.' if extended_recording_id is not None else f'Ongoing detection suppressed for {debounce_seconds:.1f}s debounce window.', detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, recording_id=extended_recording_id, motion_confidence=raw_motion_fraction)
         return None
     event_time = frame_capture_time
     if frame_is_numpy:
@@ -496,6 +496,5 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             _state._notification_threads[:] = [thread for thread in _state._notification_threads if thread.is_alive()]
             _state._notification_threads.append(notify_thread)
     email_rules = [rule for rule in zone_rules if rule.get('enabled', True) and rule.get('email_enabled') and _rule_notify_active_now(rule) and (str(rule.get('name') or '') in {str(alert.get('rule_name') or '') for alert in triggered})]
-    email_recipients = sorted({recipient for rule in email_rules for recipient in rule.get('email_recipients', [])})
-    update_live_detection_status(camera_id, state='alerted' if triggered else 'checked', reason='Alert matched.' if triggered else 'Detections found. No new alert event was created because no alert rule matched, or a matching rule is still in cooldown.', detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, triggered_alerts=triggered, event_id=event_id, recording_id=recording_id, recording_state='linked' if recording_id is not None else 'skipped', recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(recording_detections, _state.camera_event_recording_config(settings)), email_enabled_rules=len(email_rules), email_recipients=email_recipients, email_attempted=bool(triggered and email_recipients and effective_email_alert_settings().get('enabled')))
+    email_recipients = sorted({recipient for rule in email_rules for recipient in rule.get('email_recipients', [])})        update_live_detection_status(camera_id, state='alerted' if triggered else 'checked', reason='Alert matched.' if triggered else 'Detections found. No new alert event was created because no alert rule matched, or a matching rule is still in cooldown.', detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, triggered_alerts=triggered, event_id=event_id, recording_id=recording_id, recording_state='linked' if recording_id is not None else 'skipped', recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(recording_detections, _state.camera_event_recording_config(settings)), email_enabled_rules=len(email_rules), email_recipients=email_recipients, email_attempted=bool(triggered and email_recipients and effective_email_alert_settings().get('enabled')), motion_confidence=raw_motion_fraction)
     return event_id
