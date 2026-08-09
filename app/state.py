@@ -113,6 +113,10 @@ _periodic_scan_last_ts: dict = {}
 
 _frame_motion_lock: threading.Lock = threading.Lock()
 _frame_motion_prev: dict = {}
+# Last analyzed thumbnail per camera. Comparing consecutive thumbnails catches
+# moving subjects that occupy too few pixels to clear the adaptive-background
+# gate on any single sample (especially when the ingest repeats a frame).
+_frame_motion_last_frame: dict = {}
 _frame_motion_error_cameras: set = set()
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@ models/*.pt
 models/*.tflite
 models/*.csv
 models/*.json
+models/*/
 data/*
 !data/
 .claude/

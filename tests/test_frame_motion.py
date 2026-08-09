@@ -31,7 +31,7 @@ def _seed_background(camera_id: str, image: np.ndarray) -> None:
     assert has_motion is False
 
 
-def test_detect_frame_motion_returns_three_tuple():
+def test_detect_frame_motion_returns_four_tuple():
     cam = "motion-shape"
     base = np.full((120, 160, 3), 100, dtype=np.uint8)
     result = ds.detect_frame_motion(cam, base)
@@ -57,6 +57,30 @@ def test_sub_gate_motion_keeps_confidence_zero_but_records_changes():
     assert has_motion is False
     assert confidence == 0.0  # alert path still ignores noise
     assert diff_mask is not None and np.any(diff_mask)  # but the mask shows real activity
+
+
+def test_temporal_diff_catches_subject_moving_between_sub_gate_frames():
+    """Movement between samples remains visible even when each new silhouette
+    is too small to clear the background gate by itself."""
+    cam = "motion-temporal"
+    base = np.full((120, 160, 3), 100, dtype=np.uint8)
+    _seed_background(cam, base)
+
+    first = base.copy()
+    first[20:28, 20:25] = 255  # 40 pixels: below the 0.3% frame gate
+    has_motion, _confidence, _mask, _fraction = ds.detect_frame_motion(
+        cam, first, gate_fraction=0.003, pixel_threshold=15,
+    )
+    assert has_motion is False
+
+    moved = base.copy()
+    moved[20:28, 25:30] = 255  # the subject moved five thumbnail pixels
+    has_motion, confidence, mask, fraction = ds.detect_frame_motion(
+        cam, moved, gate_fraction=0.003, pixel_threshold=15,
+    )
+    assert has_motion is True
+    assert confidence > 0.0
+    assert mask is not None and fraction > 0.003
 
 
 def test_above_gate_motion_reports_positive_confidence():

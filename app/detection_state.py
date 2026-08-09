@@ -6,7 +6,7 @@ in-memory bookkeeping** that runs once per active camera:
 - the per-camera detection-history deques (``live_detection_history`` +
   ``live_detection_history_lock``) under Phase-26 ownership,
 - the per-camera adaptive-background motion model
-  (``_frame_motion_prev`` + ``_frame_motion_lock`` + ``_frame_motion_error_cameras``)
+  (``_frame_motion_prev`` + ``_frame_motion_last_frame`` + ``_frame_motion_lock`` + ``_frame_motion_error_cameras``)
   + the four tuning constants (``_MOTION_PIXEL_THRESHOLD`` /
   ``_MOTION_GATE_FRACTION`` / ``_MOTION_SCALE_FRACTION`` /
   ``_MOTION_BACKGROUND_ALPHA``) and the two frame-size constants
@@ -41,6 +41,7 @@ working unchanged:
 - ``main.live_detection_history`` - same two
 - ``main._frame_motion_lock`` - ``detect_frame_motion``
 - ``main._frame_motion_prev`` - ``detect_frame_motion``
+- ``main._frame_motion_last_frame`` - ``detect_frame_motion``
 - ``main._frame_motion_error_cameras`` - ``detect_frame_motion``
 - ``main._MOTION_FRAME_W`` / ``main._MOTION_FRAME_H`` -
   ``detect_frame_motion``
@@ -241,12 +242,15 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
 
     Returns ``(has_motion, frame_confidence, diff_mask, raw_fraction)`` where
     ``diff_mask`` is a boolean (H×W) numpy array indicating which thumbnail
-    pixels changed by more than ``pixel_threshold``.  Callers can slice
-    ``diff_mask`` to compute per-zone confidence scores instead of using the
-    frame-wide value.  ``diff_mask`` is ``None`` on the first frame or when an
-    error occurs.  ``frame_confidence`` is gated to ``0.0`` below
-    ``gate_fraction`` (so alert logic ignores noise).  ``raw_fraction`` is the
-    ungated changed-pixel fraction (0.0–1.0) for UI diagnostics.
+    pixels changed by more than ``pixel_threshold``. The mask combines change
+    against the adaptive background with change since the previous analyzed
+    frame, so a moving subject is not lost merely because it is small or the
+    ingest repeated a frame. Callers can slice ``diff_mask`` to compute
+    per-zone confidence scores instead of using the frame-wide value.
+    ``diff_mask`` is ``None`` on the first frame or when an error occurs.
+    ``frame_confidence`` is gated to ``0.0`` below ``gate_fraction`` (so alert
+    logic ignores noise). ``raw_fraction`` is the ungated changed-pixel
+    fraction (0.0–1.0) for UI diagnostics.
     """
     if pixel_threshold is None:
         pixel_threshold = _state._MOTION_PIXEL_THRESHOLD
@@ -269,6 +273,7 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
             current = np.array(img, dtype=np.float32)
         with _state._frame_motion_lock:
             background = _state._frame_motion_prev.get(camera_id)
+            previous_frame = _state._frame_motion_last_frame.get(camera_id)
             # Reset on a first frame OR a shape mismatch. ``_MOTION_FRAME_W/H``
             # are global and read outside this lock, so a concurrent live-settings
             # frame-size change (which clears all backgrounds) can race with a
@@ -277,12 +282,29 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
             # every frame and the ``except`` (which never resets the background)
             # would pin the camera to fail-open motion=True forever. Treating a
             # mismatch like a first frame self-heals it in one cycle.
-            if background is None or background.shape != current.shape:
+            if (
+                background is None
+                or background.shape != current.shape
+                or (previous_frame is not None and previous_frame.shape != current.shape)
+            ):
                 _state._frame_motion_prev[camera_id] = current
+                _state._frame_motion_last_frame[camera_id] = current
                 _state._frame_motion_error_cameras.discard(camera_id)
                 return (False, 0.0, None, 0.0)
-            diff_mask = np.abs(current - background) > pixel_threshold
+            background_diff = np.abs(current - background) > pixel_threshold
+            # A subject can move only a small distance between sampled frames.
+            # In that case its per-frame silhouette may be below the global gate
+            # even though it is genuinely moving. Unioning the temporal diff
+            # with the background diff catches both first appearance and motion
+            # while leaving the object detector and its filtering untouched.
+            temporal_diff = (
+                np.abs(current - previous_frame) > pixel_threshold
+                if previous_frame is not None
+                else False
+            )
+            diff_mask = background_diff | temporal_diff
             changed_fraction = float(np.mean(diff_mask))
+            _state._frame_motion_last_frame[camera_id] = current
             _now = time.monotonic()
             _last = _motion_log_last_at.get(camera_id, 0.0)
             if _now - _last >= _MOTION_LOG_INTERVAL:
@@ -310,10 +332,10 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
             if camera_id not in _state._frame_motion_error_cameras:
                 logger.warning('Motion gate unavailable for camera %s: %s; failing open', camera_id, exc)
                 _state._frame_motion_error_cameras.add(camera_id)
-        return (True, _MOTION_FAIL_OPEN_CONFIDENCE, None)
+        return (True, _MOTION_FAIL_OPEN_CONFIDENCE, None, 0.0)
     except Exception:
         with _state._frame_motion_lock:
             if camera_id not in _state._frame_motion_error_cameras:
                 logger.exception('Unexpected motion gate failure for camera %s; failing open', camera_id)
                 _state._frame_motion_error_cameras.add(camera_id)
-        return (True, _MOTION_FAIL_OPEN_CONFIDENCE, None)
+        return (True, _MOTION_FAIL_OPEN_CONFIDENCE, None, 0.0)

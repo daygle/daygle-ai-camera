@@ -174,6 +174,7 @@ def _prune_frame_motion_state() -> None:
         stale = [cid for cid in _state._frame_motion_prev if cid not in active_ids]
         for cid in stale:
             del _state._frame_motion_prev[cid]
+            _state._frame_motion_last_frame.pop(cid, None)
     for cid in stale:
         _state._periodic_scan_last_ts.pop(cid, None)
         _state._frame_motion_error_cameras.discard(cid)
@@ -330,6 +331,18 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         force_scan = True
         _state._periodic_scan_last_ts[camera_id] = now
     frame_has_motion, frame_motion_confidence, diff_mask, raw_motion_fraction = detect_frame_motion(camera_id, image, pixel_threshold=_pixel_threshold, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, background_alpha=_background_alpha)
+    # Publish the measurement immediately, before any ONNX work or downstream
+    # zone/alert filtering. The live page is a motion diagnostic, so it must
+    # still show the measured pixel change when object inference is slow, fails,
+    # or the result is later rejected by a rule. This status-only update does
+    # not alter detections, alerts, recordings, or detector inputs.
+    update_live_detection_status(
+        camera_id,
+        state='checked',
+        reason='Motion sample measured.',
+        detections=[],
+        motion_confidence=raw_motion_fraction,
+    )
     if not frame_has_motion:
         frame_motion_confidence = 0.0
         # A periodic scan bypasses the gate but measured no pixel motion, so
