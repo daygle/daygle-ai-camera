@@ -545,7 +545,7 @@ function renderDetectionStatus(summary) {
       liveEls.visionBody.innerHTML = objChips.map((c) => detectionRowHtml(c.label, c.confidence, { alerted })).join('');
     } else if (summary.state === 'monitoring') {
       // Confirmed empty check - the only case that earns the affirmative "Clear".
-      liveEls.visionBody.innerHTML = senseEmptyHtml('Clear - nothing in frame', { tick: true });
+      liveEls.visionBody.innerHTML = senseEmptyHtml('Clear', { tick: true });
     } else if (summary.state === 'waiting') {
       liveEls.visionBody.innerHTML = senseEmptyHtml('Waiting for first detection…');
     } else if (summary.state === 'skipped' || summary.state === 'error') {
@@ -576,7 +576,7 @@ function renderDetectionStatus(summary) {
     } else if (soundState.state === 'disabled') {
       liveEls.hearingBody.innerHTML = senseEmptyHtml('Sound detection disabled');
     } else {
-      liveEls.hearingBody.innerHTML = senseEmptyHtml('Quiet - listening', { tick: true });
+      liveEls.hearingBody.innerHTML = senseEmptyHtml('Quiet', { tick: true });
     }
   }
 
