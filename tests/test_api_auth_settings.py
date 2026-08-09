@@ -684,13 +684,23 @@ def test_opencv_stream_camera_applies_ffmpeg_log_level_after_each_videocapture(m
     FakeCapture.instances.clear()
     camera.read_jpeg()
 
-    # Initial open + reconnect should each create one VideoCapture.
-    assert len(FakeCapture.instances) == 2, "expected reconnect to create a second VideoCapture"
-    # _configure_ffmpeg_log_level must have been called once per VideoCapture.
-    assert len(log_level_call_counts) == 2, f"expected 2 calls, got {len(log_level_call_counts)}"
-    # Each call must have happened *after* the corresponding VideoCapture was built.
-    assert log_level_call_counts[0] == 1, "first call must see 1 VideoCapture instance"
-    assert log_level_call_counts[1] == 2, "second call must see 2 VideoCapture instances"
+    # The fake's first capture fails its reads, so read_jpeg must have
+    # reconnected at least once. The exact count is not pinned: the bounded
+    # retry loop in _acquire_raw_frame may reconnect more than once, and other
+    # tests' background monitor threads can add captures through the same fake.
+    assert len(FakeCapture.instances) >= 2, "expected a reconnect to create another VideoCapture"
+    # _configure_ffmpeg_log_level must have been called exactly once per
+    # VideoCapture construction.
+    assert len(log_level_call_counts) == len(FakeCapture.instances), (
+        f"expected one log-level call per VideoCapture, got {len(log_level_call_counts)} "
+        f"calls for {len(FakeCapture.instances)} captures"
+    )
+    # Each call must have happened *after* its own VideoCapture was built: the
+    # recorded instance count strictly increases by 1 in construction order.
+    assert log_level_call_counts == list(range(1, len(FakeCapture.instances) + 1)), (
+        "each _configure_ffmpeg_log_level call must run after its own VideoCapture "
+        f"was built (got {log_level_call_counts})"
+    )
 
 
 def test_onvif_camera_settings_require_stream_source(tmp_path, monkeypatch):
