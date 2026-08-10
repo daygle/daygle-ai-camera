@@ -173,6 +173,13 @@ ai:
   backend: onnx
   confidence: 0.45
 {extra_ai}
+live:
+  # Integration tests feed a single detection frame and assert an event fires
+  # immediately, which predates temporal confirmation. The product default is
+  # now 2-of-3 (see DEFAULT_LIVE_CONFIG); pin single-frame here so these
+  # plumbing tests stay deterministic. Confirmation itself is covered by
+  # tests/test_detection_confirmation.py.
+  detection_confirm_frames: 1
 storage:
   data_dir: {tmp_path / 'data'}
   database: {database_path}

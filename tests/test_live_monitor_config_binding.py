@@ -212,9 +212,14 @@ def test_process_live_stream_alerts_gates_on_ai_disabled(monkeypatch):
 def test_process_live_stream_alerts_proceeds_when_ai_enabled(monkeypatch):
     """With ``ai.enabled`` unset (default True), the gate does NOT fire --
     the function proceeds into the normal pipeline (motion detection path).
-    The status must not be marked as disabled."""
+    The status must not be marked as disabled. Pinned to the CPU-saving motion
+    gate (``always_run_object_detection=False``) because this test exercises the
+    no-motion-skip branch specifically; the always-on path is covered by
+    ``test_always_run_object_detection_bypasses_motion_gate``."""
     recorded: list[tuple[str, dict]] = []
     monkeypatch.setattr(live_monitor, 'effective_ai_config', lambda: {})
+    monkeypatch.setattr(live_monitor, 'effective_live_config',
+                        lambda: {'detection_interval_seconds': 0.5, 'always_run_object_detection': False})
     monkeypatch.setattr(
         live_monitor,
         'update_live_detection_status',
@@ -283,6 +288,10 @@ def test_motion_status_exposes_sub_gate_signal_for_live_bar(monkeypatch):
             'motion_scale_fraction': 0.03,
             'motion_background_alpha': 0.05,
             'periodic_scan_interval_seconds': 0,
+            # This test asserts the pre-inference motion telemetry on a sub-gate
+            # frame; keep it on the motion-gate path so it doesn't fall through
+            # to object inference.
+            'always_run_object_detection': False,
         },
     )
     monkeypatch.setattr(

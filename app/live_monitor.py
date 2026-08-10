@@ -445,7 +445,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # motion, so a still/slow/low-contrast subject is never hidden from the
     # detector. Motion detection itself is unchanged -- it still runs above and
     # feeds motion-only zones/alerts. Default off keeps the CPU-saving gate.
-    always_run_object_detection = normalize_bool_setting(live_settings.get('always_run_object_detection'), False)
+    always_run_object_detection = normalize_bool_setting(live_settings.get('always_run_object_detection'), True)
     if not frame_has_motion and (not motion_gate_error) and (not force_scan) and (not motion_detections) and (not always_run_object_detection):
         update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[], motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         return None
@@ -490,11 +490,12 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     object_detections = filter_detections_for_camera(detections, settings)
     # Temporal confirmation gate: require an object label to persist across
     # several detection cycles before it can raise an alert or a recording.
-    # Default required=1 is a pass-through no-op, so cameras that don't opt in
-    # behave exactly as before. Applied to the zone/label-filtered detections so
-    # the window only counts objects this camera actually cares about, and only
-    # to the object axis -- motion is already gated separately.
-    _confirm_frames = live_settings.get('detection_confirm_frames', 1)
+    # Defaults to 2 (2-of-3), pairing with the always-on detector to filter
+    # one-frame false positives; set to 1 for single-frame (pass-through)
+    # behavior. Applied to the zone/label-filtered detections so the window only
+    # counts objects this camera actually cares about, and only to the object
+    # axis -- motion is already gated separately.
+    _confirm_frames = live_settings.get('detection_confirm_frames', 2)
     _confirm_window = live_settings.get('detection_confirm_window', _confirm_frames)
     object_detections = confirm_object_detections(
         camera_id, object_detections,

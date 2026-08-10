@@ -71,16 +71,21 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     # Temporal confirmation gate (all object labels). ``1`` = disabled
     # (single-frame behavior); higher requires the label to persist across
     # ``detection_confirm_frames`` of the last ``detection_confirm_window``
-    # detection cycles before it can alert or record.
-    'detection_confirm_frames': 1,
+    # detection cycles before it can alert or record. Defaults to 2-of-3: it
+    # pairs with the always-on object detector (below) to suppress the one-frame
+    # false positives that running YOLO every cycle on a static scene can
+    # produce. Set to 1 for instant single-frame alerts (lower latency, more
+    # false positives).
+    'detection_confirm_frames': 2,
     'detection_confirm_window': 3,
     'background_detection_enabled': True,
-    # When True, object (YOLO) inference runs every detection cycle regardless of
-    # the motion gate -- maximum recall (a still/slow/low-contrast subject is
-    # never hidden from the detector) at the cost of running YOLO continuously.
-    # Default False keeps the CPU-saving motion gate. Motion detection is a
-    # separate, always-on signal either way.
-    'always_run_object_detection': False,
+    # When True (default), object (YOLO) inference runs every detection cycle
+    # regardless of the motion gate -- maximum recall (a still/slow/low-contrast
+    # subject is never hidden from the detector). Set False to restore the
+    # CPU-saving motion gate (object inference only when motion fires) on
+    # hardware without the headroom to run YOLO continuously. Motion detection is
+    # a separate, always-on signal either way.
+    'always_run_object_detection': True,
     'detection_history_minutes': 10,
     # Background-subtraction engine: 'mog2' (default, Gaussian-mixture with
     # shadow rejection) or 'diff' (legacy single-frame adaptive diff / automatic

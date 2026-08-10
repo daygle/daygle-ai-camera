@@ -470,7 +470,7 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
     snapshot_refresh_ms = _int_field(merged, 'snapshot_refresh_ms', 500, 150, 5000)
     detection_status_refresh_ms = _int_field(merged, 'detection_status_refresh_ms', 2000, 100, 15000)
     background_detection_enabled = normalize_bool_setting(merged.get('background_detection_enabled'), True)
-    always_run_object_detection = normalize_bool_setting(merged.get('always_run_object_detection'), False)
+    always_run_object_detection = normalize_bool_setting(merged.get('always_run_object_detection'), True)
     try:
         detection_interval_seconds = float(merged.get('detection_interval_seconds', 0.5))
     except (TypeError, ValueError) as exc:
@@ -509,7 +509,7 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if not 0.001 <= motion_background_alpha <= 0.5:
         raise HTTPException(status_code=400, detail='motion_background_alpha must be between 0.001 and 0.5.')
     periodic_scan_interval_seconds = _int_field(merged, 'periodic_scan_interval_seconds', 0, 0, 3600)
-    detection_confirm_frames = _int_field(merged, 'detection_confirm_frames', 1, 1, 10)
+    detection_confirm_frames = _int_field(merged, 'detection_confirm_frames', 2, 1, 10)
     detection_confirm_window = _int_field(merged, 'detection_confirm_window', 3, 1, 30)
     # A window smaller than the requirement can never confirm; clamp it up so
     # "N of the last M" is always satisfiable rather than silently blocking

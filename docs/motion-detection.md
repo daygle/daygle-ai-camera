@@ -46,15 +46,13 @@ Use this when you want to be notified any time *anything* moves in an area, rega
 
 ## Recommended setup for maximum reliability
 
-By default, Layer 2 (object detection) only runs when Layer 1 detects motion. That coupling is a **CPU optimization** - it skips YOLO on frames where nothing appears to be moving. It trades a small amount of recall for a large CPU saving: a subject that does not trip the motion gate (standing still, moving slowly, distant, or low-contrast at night) can be missed by the object detector.
+Out of the box, Daygle runs object detection on **every** cycle, decoupled from motion (the [Always Run Object Detection](#always-run-object-detection) default) - the configuration that gives the most reliable object recall. This is worth understanding because it shapes how the layers interact:
 
-**If CPU/GPU headroom is not a concern, decouple object detection from motion:**
+1. **[Always Run Object Detection](#always-run-object-detection) is on by default.** YOLO runs every cycle regardless of motion, so an object is never hidden from the detector because the pixel-diff was quiet. This eliminates the "person stands still and disappears" gap, the slow/distant-subject gap, and the first-frames-after-reconnect gap. With it on, the **Periodic Scan** setting below is redundant (leave it at `0`).
+2. **Pair it with [Confirm Frames](#confirm-frames--confirm-window) = `2`** (Confirm Window `3`) to suppress the occasional one-frame false positive that running YOLO on every static-scene frame can produce, while keeping latency low.
+3. **MOG2 motion keeps running** as an independent signal for motion-only zones and "any movement" alerts - it is simply no longer *gating* the object detector.
 
-1. **Enable [Always Run Object Detection](#always-run-object-detection).** YOLO then runs every cycle regardless of motion, so an object is never hidden from the detector because the pixel-diff was quiet. This alone eliminates the "person stands still and disappears" gap, the slow/distant-subject gap, and the first-frames-after-reconnect gap.
-2. **Set [Confirm Frames](#confirm-frames--confirm-window) to `2`** (with Confirm Window `3`). Running YOLO on every frame slightly raises the chance of a one-frame false positive on a static scene; requiring an object to persist across 2 of the last 3 cycles suppresses those while keeping latency low.
-3. **Keep MOG2 motion running** (the default). Motion is still valuable as an independent signal for motion-only zones and "any movement" alerts - it is simply no longer *gating* the object detector.
-
-With object detection decoupled, the **Periodic Scan** setting below becomes redundant (leave it at `0`) - its whole purpose was to periodically force YOLO past the motion gate, which "Always Run Object Detection" now does every cycle.
+**On low-power hardware** (a Raspberry Pi or similar) that cannot run YOLO continuously, **disable Always Run Object Detection** to restore the CPU-saving motion gate: object detection then runs only when Layer 1 detects motion or a periodic scan is due. On that path, the trade is a small amount of recall (a subject that does not trip the motion gate - standing still, slow, distant, or low-contrast at night - can be missed) for a large CPU saving, and the **Periodic Scan** setting becomes the mitigation for stationary subjects.
 
 ---
 
@@ -115,9 +113,9 @@ Default: `Enabled`
 
 ### Always Run Object Detection
 
-By default, YOLO object detection only runs when the motion gate fires (or a periodic scan is due) - a CPU optimization. Enable this to run object detection on **every** detection cycle regardless of motion, so a still, slow, or low-contrast subject is never hidden from the detector. This is the recommended setting when CPU/GPU headroom is not a concern (see [Recommended setup for maximum reliability](#recommended-setup-for-maximum-reliability)). Motion detection continues to run independently either way.
+When enabled (the default), YOLO object detection runs on **every** detection cycle regardless of motion, so a still, slow, or low-contrast subject is never hidden from the detector (see [Recommended setup for maximum reliability](#recommended-setup-for-maximum-reliability)). Disable it to restore the CPU-saving motion gate - object detection then only runs when the motion gate fires (or a periodic scan is due) - on low-power hardware that cannot run YOLO continuously. Motion detection continues to run independently either way.
 
-Default: `Disabled`
+Default: `Enabled`
 
 ### Detection Interval (s)
 
@@ -148,12 +146,14 @@ It runs *after* zone/label filtering, so the window only tracks objects the
 camera is configured to care about. Motion rules are gated separately and are
 unaffected.
 
-**Tuning tip:** If a distant or low-confidence subject flickers in and out of
-detection, try Confirm Frames `2` with Confirm Window `3`. Raising Confirm
-Frames adds a small latency (the object must persist for N cycles before the
-first alert), so keep it low - `2` or `3` is usually enough.
+**Default: `2` / `3`** (2-of-3). This pairs with the always-on object detector
+so a one-frame false positive on a static scene is filtered out. The cost is a
+small latency - an object must persist for 2 cycles (~0.5-1s at the default
+detection interval) before the first alert or recording. Set Confirm Frames to
+`1` if you want instant single-frame alerts and can tolerate more noise; raise
+it to `3` for very noisy scenes.
 
-Defaults: `1` (off) / `3`
+Defaults: `2` / `3`
 
 ---
 
