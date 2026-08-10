@@ -310,8 +310,16 @@ def _zone_pixel_bounds(diff_mask: Any, zone: dict[str, Any]) -> tuple[int, int, 
         y = float(y if y is not None else 0)
         w = float(w if w is not None else 1)
         h = float(h if h is not None else 1)
-        px1 = max(0, int(x * _state._MOTION_FRAME_W))
-        py1 = max(0, int(y * _state._MOTION_FRAME_H))
+        # Clamp the start index to at most W-1 / H-1 so a degenerate zone at the
+        # far edge (x=1.0 or y=1.0, e.g. a zero-width rectangle) can never
+        # produce ``px1 == W`` and an empty ``[W:W]`` slice. An empty slice makes
+        # ``np.mean`` return NaN, and NaN survives every ``<``/``>`` gate in
+        # ``zone_motion_detections`` -- emitting a spurious motion detection with
+        # NaN confidence that later serialises to invalid JSON. The ``max(px1+1,
+        # ...)`` below then guarantees ``px2 > px1`` (and ``py2 > py1``), so the
+        # slice is always at least 1px and the fraction is always finite.
+        px1 = max(0, min(_state._MOTION_FRAME_W - 1, int(x * _state._MOTION_FRAME_W)))
+        py1 = max(0, min(_state._MOTION_FRAME_H - 1, int(y * _state._MOTION_FRAME_H)))
         px2 = min(_state._MOTION_FRAME_W, max(px1 + 1, int(round((x + w) * _state._MOTION_FRAME_W))))
         py2 = min(_state._MOTION_FRAME_H, max(py1 + 1, int(round((y + h) * _state._MOTION_FRAME_H))))
         return (px1, py1, px2, py2)
