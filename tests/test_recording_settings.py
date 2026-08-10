@@ -280,7 +280,7 @@ def test_normalize_camera_sound_settings_collapses_non_dict_input(rs):
 def test_normalize_camera_sound_settings_filters_unknown_rule_classes(monkeypatch, rs):
     """Rules whose ``class`` isn't in ``main.SOUND_CLASSES`` are dropped --
     only known sound classes survive the rebuild."""
-    _rs, _bs, _er = _install_recording_dependencies(
+    _install_recording_dependencies(
         monkeypatch,
         sound_classes={'siren': {'label': 'Siren'}},
         default_rules=[{'class': 'siren', 'confidence_threshold': 0.7, 'cooldown_seconds': 30.0}],

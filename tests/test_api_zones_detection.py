@@ -412,7 +412,7 @@ def test_zone_object_alert_rules_are_scoped_to_matching_zone(tmp_path, monkeypat
 
 
 def test_camera_object_labels_filter_without_monitoring_zones(tmp_path, monkeypatch):
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    _load_app(tmp_path, monkeypatch)
     import app.zone_detection as _zd
     settings = {'detection': {'object_labels': ['person', 'cat'], 'zones': []}}
     detections = [
@@ -427,7 +427,7 @@ def test_camera_object_labels_filter_without_monitoring_zones(tmp_path, monkeypa
 
 def test_object_detection_enabled_flag_gates_object_detections(tmp_path, monkeypatch):
     """Setting object_detection_enabled=False must suppress all object detections."""
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    _load_app(tmp_path, monkeypatch)
     import app.zone_detection as _zd
 
     detections = [{'label': 'person', 'confidence': 0.9, 'box': {'x': 0.3, 'y': 0.3, 'width': 0.1, 'height': 0.1}}]
@@ -441,7 +441,7 @@ def test_object_detection_enabled_flag_gates_object_detections(tmp_path, monkeyp
 
 def test_zone_motion_rule_gates_motion_detections(tmp_path, monkeypatch):
     """Motion is gated per zone: a disabled zone motion rule suppresses motion detections."""
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    _load_app(tmp_path, monkeypatch)
     import app.zone_schema as _zs
     import app.zone_detection as _zd
 
@@ -463,7 +463,7 @@ def test_zone_motion_rule_gates_motion_detections(tmp_path, monkeypatch):
 def test_legacy_camera_motion_disabled_migrates_to_zone_rules(tmp_path, monkeypatch):
     """Cameras stored with the removed camera-level motion switch off must keep
     motion off after the upgrade by disabling each zone's motion rule."""
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    _load_app(tmp_path, monkeypatch)
     import app.camera_config as _cc
     import app.zone_detection as _zd
 
@@ -491,7 +491,7 @@ def test_legacy_camera_motion_disabled_migrates_to_zone_rules(tmp_path, monkeypa
 
 def test_zone_spatial_filtering_blocks_detections_outside_zone(tmp_path, monkeypatch):
     """Objects outside the configured zone area must not trigger alerts."""
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    _load_app(tmp_path, monkeypatch)
     import app.main as main
     import app.zone_schema as _zs
     import app.live_monitor as _lm
@@ -546,7 +546,7 @@ def test_zone_spatial_filtering_blocks_detections_outside_zone(tmp_path, monkeyp
 
 def test_zone_label_aliases_match_configured_rules(tmp_path, monkeypatch):
     """Detection labels that are aliases of a configured rule label should still match."""
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    _load_app(tmp_path, monkeypatch)
     import app.zone_schema as _zs
     import app.zone_detection as _zd
 
@@ -602,7 +602,7 @@ def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, m
     """Cat with record_on_detect=True but no email/push (record only) must not be silently
     dropped when another label has an alert rule (which makes zone_rules non-empty and triggers
     zone_alert_detections filtering)."""
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    _load_app(tmp_path, monkeypatch)
     import app.main as main
     import app.live_monitor as _lm
 
@@ -661,7 +661,7 @@ def test_record_only_zone_with_no_alert_rules_keeps_zone_name(tmp_path, monkeypa
     must still tag its detections with the zone name. Regression: zone-name
     annotation must key off the presence of object zones, not off whether any
     rule raises an alert."""
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    _load_app(tmp_path, monkeypatch)
     import app.main as main
     import app.live_monitor as _lm
 
