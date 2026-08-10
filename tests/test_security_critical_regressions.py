@@ -16,11 +16,11 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
-from unittest import TestCase, mock
+from unittest import mock
 
 from app.request_helpers import _redact_audit_details, write_audit_log
 from app.ptz import _safe_url_for_error, _sanitize_error_body, _soap
-class RedactAuditDetailsTests(TestCase):
+class RedactAuditDetailsTests(unittest.TestCase):
     """``_redact_audit_details`` must redact any sensitive key value at any depth."""
 
     def test_top_level_password_key(self):
@@ -141,7 +141,7 @@ class RedactAuditDetailsTests(TestCase):
 # ---------------------------------------------------------------------------
 
 
-class SafeUrlForErrorTests(TestCase):
+class SafeUrlForErrorTests(unittest.TestCase):
     """``_safe_url_for_error`` strips Basic-Auth userinfo while preserving the host."""
 
     def test_basic_auth_userinfo_stripped(self):
@@ -175,7 +175,7 @@ class SafeUrlForErrorTests(TestCase):
         self.assertIn('cam.local', sanitized)
 
 
-class SoapExceptionScrubbingTests(TestCase):
+class SoapExceptionScrubbingTests(unittest.TestCase):
     """``_soap`` must NEVER let the original URL or password appear in any raised exception.
 
     We mock ``urllib.request.urlopen`` to raise each exception class in turn,
@@ -250,7 +250,7 @@ class SoapExceptionScrubbingTests(TestCase):
         self._assert_clean(str(ctx.exception))
 
 
-class SanitizeErrorBodyTests(TestCase):
+class SanitizeErrorBodyTests(unittest.TestCase):
     """``_sanitize_error_body`` strips any embedded URL with userinfo."""
 
     def test_strips_userinfo_from_response_body(self):
