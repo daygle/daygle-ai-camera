@@ -214,6 +214,59 @@ def test_zone_pixel_motion_fraction_returns_zero_on_exception(zd):
     assert fraction == 0.0
 
 
+def test_zone_pixel_bounds_edge_zone_is_non_empty(zd):
+    """A degenerate zone at the far edge must not yield an empty slice.
+
+    x=1.0 (or y=1.0) with zero width used to map to px1==W, giving an empty
+    ``[W:W]`` slice whose ``np.mean`` is NaN -- and NaN passes every gate in
+    ``zone_motion_detections`` to emit a bogus NaN-confidence detection."""
+    np = pytest.importorskip('numpy')
+    mask = np.zeros((240, 320), dtype=bool)
+    for zone in (
+        {'x': 1.0, 'y': 0.0, 'width': 0.0, 'height': 1.0},
+        {'x': 0.0, 'y': 1.0, 'width': 1.0, 'height': 0.0},
+    ):
+        px1, py1, px2, py2 = zd._zone_pixel_bounds(mask, zone)
+        assert px2 > px1 and py2 > py1
+
+
+def test_zone_pixel_motion_fraction_edge_zone_is_finite(zd):
+    """The fraction for a far-edge zone stays finite (never NaN)."""
+    np = pytest.importorskip('numpy')
+    mask = np.zeros((240, 320), dtype=bool)
+    mask[10:20, 10:20] = True
+    for zone in (
+        {'x': 1.0, 'y': 0.0, 'width': 0.0, 'height': 1.0},
+        {'x': 0.0, 'y': 1.0, 'width': 1.0, 'height': 0.0},
+    ):
+        fraction = zd._zone_pixel_motion_fraction(mask, zone)
+        assert not np.isnan(fraction)
+        assert 0.0 <= fraction <= 1.0
+
+
+def test_zone_motion_detections_edge_zone_no_nan_confidence(zd):
+    """A far-edge motion zone must not emit a NaN-confidence pseudo-detection."""
+    np = pytest.importorskip('numpy')
+    mask = np.zeros((240, 320), dtype=bool)
+    mask[0:240, 315:320] = True  # activity in the far-right column
+    settings = {
+        'detection': {
+            'zones': [
+                {
+                    'id': 'edge',
+                    'name': 'Edge',
+                    'enabled': True,
+                    'monitor_motion': True,
+                    'x': 1.0, 'y': 0.0, 'width': 0.0, 'height': 1.0,
+                }
+            ]
+        }
+    }
+    result = zd.zone_motion_detections(settings, 0.9, diff_mask=mask)
+    for detection in result:
+        assert not np.isnan(float(detection['confidence']))
+
+
 # ---------------------------------------------------------------------------
 # zone_motion_detections -- default-args + filter
 # ---------------------------------------------------------------------------
