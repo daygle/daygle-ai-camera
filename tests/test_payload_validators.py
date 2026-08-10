@@ -85,7 +85,7 @@ if str(REPO_ROOT) not in sys.path:
 # Pool A rebind block imports from payload_validators, so loading
 # payload_validators first could still trigger a partial-load cycle.
 import app.main  # noqa: E402  -- must precede the import below  # lgtm[py/unused-import]
-import app.payload_validators as payload_validators  # noqa: E402  # lgtm[py/unused-import]
+import app.payload_validators  # noqa: E402  # lgtm[py/unused-import]
 
 
 # ---------------------------------------------------------------------------
