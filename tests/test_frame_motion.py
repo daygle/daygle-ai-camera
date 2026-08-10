@@ -113,11 +113,32 @@ def test_above_gate_motion_reports_positive_confidence():
     _seed_background(cam, base)
 
     loud = base.copy()
-    loud[:, :] = 250  # whole frame changes
+    loud[0:48, :] = 250  # localized 40% change; below the scene-reset guard
     has_motion, confidence, _diff_mask, _frac = ds.detect_frame_motion(cam, loud)
 
     assert has_motion is True
     assert confidence > 0.0
+
+
+def test_camera_wide_scene_change_reseeds_without_motion():
+    """An exposure/reconnect jump must not become a persistent motion event."""
+    cam = "motion-scene-reset"
+    base = np.full((120, 160, 3), 50, dtype=np.uint8)
+    _seed_background(cam, base)
+
+    shifted = np.full((120, 160, 3), 200, dtype=np.uint8)
+    has_motion, confidence, diff_mask, fraction = ds.detect_frame_motion(cam, shifted)
+
+    assert has_motion is False
+    assert confidence == 0.0
+    assert diff_mask is None
+    assert fraction == 0.0
+
+    # The new scene is now the background, so repeated static frames remain quiet.
+    has_motion, confidence, _mask, fraction = ds.detect_frame_motion(cam, shifted)
+    assert has_motion is False
+    assert confidence == 0.0
+    assert fraction == 0.0
 
 
 def test_background_freezes_during_motion():
@@ -134,7 +155,7 @@ def test_background_freezes_during_motion():
     _seed_background(cam, base)
 
     loud = base.copy()
-    loud[:, :] = 200  # large whole-frame change, well above the default gate
+    loud[0:48, :] = 200  # localized 40% change, well above the default gate
 
     _, first_conf, _, _ = ds.detect_frame_motion(cam, loud)
     assert first_conf > 0.0, "First motion frame must be detected"

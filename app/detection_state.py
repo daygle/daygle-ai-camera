@@ -328,6 +328,20 @@ def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | 
             changed_fraction = float(np.mean(diff_mask))
             _state._frame_motion_last_frame[camera_id] = current
             _state._frame_motion_last_gray[camera_id] = full_gray
+            # A large fraction changing at once is more consistent with an
+            # exposure jump, decoder reconnect, or camera-wide scene reset than
+            # with a localized moving subject. Do not freeze the old background
+            # on that transition: reseed it and suppress the transition so a
+            # static scene cannot become a persistent 100% motion recording.
+            if changed_fraction >= 0.5:
+                _state._frame_motion_prev[camera_id] = current
+                _state._frame_motion_error_cameras.discard(camera_id)
+                logger.debug(
+                    'Motion scene reset for camera %s: changed=%.4f; suppressing camera-wide transition',
+                    camera_id,
+                    changed_fraction,
+                )
+                return (False, 0.0, None, 0.0)
             _now = time.monotonic()
             _last = _motion_log_last_at.get(camera_id, 0.0)
             # Threshold-tuning diagnostic (changed vs gate + pixel threshold):
