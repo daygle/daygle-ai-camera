@@ -709,7 +709,7 @@ def test_recording_detail_track_backfill(tmp_path, monkeypatch, has_history_cove
     client = LocalClient(base_url)
     try:
         _setup_admin(client)
-        _csrf = _login(client)
+        _login(client)
         clip = tmp_path / 'data' / 'recordings' / ('event_backfill.mp4' if has_history_coverage else 'event_no_history.mp4')
         clip.parent.mkdir(parents=True, exist_ok=True)
         clip.write_bytes(b'not-decoded')

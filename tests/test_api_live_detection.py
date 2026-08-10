@@ -42,7 +42,7 @@ def test_live_snapshot_queues_foreground_detection_frame(monkeypatch):
 
 
 def test_live_stream_detection_queue_runs_in_background_and_deduplicates(tmp_path, monkeypatch):
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    _load_app(tmp_path, monkeypatch)
     import app.main as main
     mods = _m()
 
@@ -85,7 +85,7 @@ def test_live_stream_detection_queue_runs_in_background_and_deduplicates(tmp_pat
 
 
 def test_live_stream_detection_without_alert_rule_does_not_record_by_default(tmp_path, monkeypatch):
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    _load_app(tmp_path, monkeypatch)
     import app.main as main
     mods = _m()
 
@@ -132,7 +132,7 @@ def test_live_stream_detection_without_alert_rule_does_not_record_by_default(tmp
 
 
 def test_live_stream_detection_saves_only_allowed_zone_object_labels(tmp_path, monkeypatch):
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    _load_app(tmp_path, monkeypatch)
     import app.main as main
     mods = _m()
 
@@ -191,7 +191,7 @@ def test_live_stream_detection_saves_only_allowed_zone_object_labels(tmp_path, m
 
 
 def test_live_stream_camera_continuous_recording_records_without_alert_rule(tmp_path, monkeypatch):
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    _load_app(tmp_path, monkeypatch)
     import app.main as main
     mods = _m()
 

@@ -403,7 +403,6 @@ class _YamnetBackend:
                         except OSError as metadata_exc:
                             asset_rollback_failed = True
                             logger.error('Could not restore YAMNet metadata after post-commit reload failure: %s', metadata_exc)
-                        assets_committed = False
                     except OSError as restore_exc:
                         asset_rollback_failed = True
                         logger.error('Could not restore YAMNet assets after post-commit reload failure: %s', restore_exc)
