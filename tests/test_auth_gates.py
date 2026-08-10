@@ -23,7 +23,6 @@ if str(REPO_ROOT) not in sys.path:
 # Load app.main first to avoid the circular-import gate where auth_gates.py
 # does ``import app.main as main`` at module top.
 import app.main  # noqa: E402
-_APP_MAIN_LOADED = app.main
 
 
 # ---------------------------------------------------------------------------
