@@ -41,6 +41,23 @@ def test_detect_frame_motion_returns_four_tuple():
     assert isinstance(confidence, float)
 
 
+def test_motion_confirmation_requires_two_consecutive_zone_frames():
+    """A one-frame zone spike must not create a motion event or recording."""
+    cam = "motion-confirmation"
+    st._motion_confirm_streaks.pop(cam, None)
+    detection = {
+        'zone_id': 'driveway',
+        'zone_name': 'Driveway',
+        'confidence': 0.9,
+    }
+
+    assert ds.confirm_motion_detections(cam, [detection]) == []
+    assert ds.confirm_motion_detections(cam, [detection]) == [detection]
+    # Quiet frames reset the consecutive streak before the next motion burst.
+    assert ds.confirm_motion_detections(cam, []) == []
+    assert ds.confirm_motion_detections(cam, [detection]) == []
+
+
 def test_invalid_image_fails_closed_instead_of_synthetic_motion():
     """A bad JPEG must not become a fake motion event.
 

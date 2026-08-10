@@ -23,6 +23,7 @@ from app.camera_health import _check_cameras_health
 from app.camera_instance import read_ingest_frame
 from app.config_facades import effective_ai_config, effective_email_alert_settings, effective_live_config
 from app.detection_state import (
+    confirm_motion_detections,
     confirm_object_detections,
     detect_frame_motion,
     detection_label_set,
@@ -199,6 +200,8 @@ def _prune_frame_motion_state() -> None:
     for cid in stale:
         _state._periodic_scan_last_ts.pop(cid, None)
         _state._frame_motion_error_cameras.discard(cid)
+        with _state._motion_confirm_lock:
+            _state._motion_confirm_streaks.pop(cid, None)
     if stale:
         with _state.live_detection_confirm_lock:
             for cid in stale:
@@ -398,6 +401,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             diff_mask = None
     # Per-zone motion rules score independently of the frame-wide gate.
     motion_detections = zone_motion_detections(settings, frame_motion_confidence, diff_mask=diff_mask, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction)
+    # Require the same motion zone to be active in two analyzed frames before
+    # allowing it to create an event or recording. The raw motion telemetry and
+    # object-detection path remain immediate; only motion-zone actions wait for
+    # confirmation, filtering one-frame stream/exposure artifacts.
+    motion_detections = confirm_motion_detections(camera_id, motion_detections)
     if not frame_has_motion and (not motion_gate_error) and (not force_scan) and (not motion_detections):
         update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[], motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         return None

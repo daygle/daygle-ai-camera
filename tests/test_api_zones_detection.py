@@ -84,6 +84,13 @@ def test_motion_min_confidence_filters_low_confidence_motion(tmp_path, monkeypat
         },
     }
 
+    first_allowed_frame = mods.live_monitor.process_live_stream_alerts(
+        b'jpeg-frame',
+        {'width': 1280, 'height': 720},
+        relaxed_settings,
+        enforce_interval=False,
+    )
+    assert first_allowed_frame is None, 'the first motion frame must wait for confirmation'
     allowed_event_id = mods.live_monitor.process_live_stream_alerts(
         b'jpeg-frame',
         {'width': 1280, 'height': 720},

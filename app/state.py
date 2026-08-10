@@ -121,6 +121,11 @@ _frame_motion_last_frame: dict = {}
 # movement (tree leaves, wires, distant limbs) lost by thumbnail resizing.
 _frame_motion_last_gray: dict = {}
 _frame_motion_error_cameras: set = set()
+# Consecutive per-zone motion evidence used by the live alert monitor. A zone
+# must be present in two analyzed frames before motion can create an event or
+# recording, which filters one-frame stream/exposure artifacts.
+_motion_confirm_lock: threading.Lock = threading.Lock()
+_motion_confirm_streaks: dict = {}
 
 # ---------------------------------------------------------------------------
 # Active RTSP recordings

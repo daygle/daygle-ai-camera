@@ -215,6 +215,58 @@ def confirm_object_detections(
     ]
 
 
+def confirm_motion_detections(
+    camera_id: str,
+    detections: list[dict[str, Any]],
+    *,
+    required_frames: int = 2,
+) -> list[dict[str, Any]]:
+    """Require each motion zone to persist across consecutive frames.
+
+    Motion is sampled independently from object inference and can be raised by
+    a one-frame decoder or exposure artifact. Keeping the streak per zone means
+    a genuine subject moving through a zone is confirmed on the second sample,
+    while a transient zone diff never reaches the event/recording path.
+    """
+    try:
+        required = max(1, int(required_frames))
+    except (TypeError, ValueError):
+        required = 2
+    if required <= 1:
+        return detections
+
+    current_zone_ids = {
+        str(detection.get('zone_id') or detection.get('zone_name') or '').strip()
+        for detection in detections
+        if str(detection.get('zone_id') or detection.get('zone_name') or '').strip()
+    }
+    with _state._motion_confirm_lock:
+        previous = _state._motion_confirm_streaks.get(camera_id, {})
+        current = {
+            zone_id: min(required, int(previous.get(zone_id, 0)) + 1)
+            for zone_id in current_zone_ids
+        }
+        _state._motion_confirm_streaks[camera_id] = current
+
+    if detections and not current_zone_ids:
+        return []
+    confirmed_zone_ids = {
+        zone_id for zone_id, streak in current.items() if streak >= required
+    }
+    if detections and not confirmed_zone_ids:
+        logger.debug(
+            'Motion confirmation for camera %s holding %d zone(s) until the next frame',
+            camera_id,
+            len(current_zone_ids),
+        )
+    return [
+        detection
+        for detection in detections
+        if str(detection.get('zone_id') or detection.get('zone_name') or '').strip()
+        in confirmed_zone_ids
+    ]
+
+
 def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | None=None, gate_fraction: float | None=None, scale_fraction: float | None=None, background_alpha: float | None=None) -> tuple[bool, float, Any, float]:
     """Adaptive-background motion gate. Returns (has_motion, confidence 0-1, diff_mask).
 

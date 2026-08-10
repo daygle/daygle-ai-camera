@@ -233,12 +233,15 @@ def test_motion_alert_does_not_record_when_record_off(tmp_path, monkeypatch):
     def _reset_state() -> None:
         main._state.live_detection_last_checked.clear()
         main._state.live_event_last_emitted.clear()
+        main._state._motion_confirm_streaks.clear()
         main.alerts.last_triggered.clear()
         attached.clear()
 
     # Record OFF + Email ON: alert fires (event created, alert_matched) but NO recording.
     _reset_state()
     settings = _motion_zone_settings(record_on_detect=False)
+    first_motion = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    assert first_motion is None, 'the first motion frame must wait for confirmation'
     event_id = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
     assert event_id is not None
     assert len(attached) == 1
@@ -250,6 +253,8 @@ def test_motion_alert_does_not_record_when_record_off(tmp_path, monkeypatch):
     # Record ON + Email ON: the same motion now records.
     _reset_state()
     settings = _motion_zone_settings(record_on_detect=True)
+    first_motion = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    assert first_motion is None, 'the first motion frame must wait for confirmation'
     event_id = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
     assert event_id is not None
     assert len(attached) == 1
