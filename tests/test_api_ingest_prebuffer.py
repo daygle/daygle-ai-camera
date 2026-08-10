@@ -93,7 +93,7 @@ def test_clip_duration_seconds_reads_real_length(tmp_path, monkeypatch):
 
 def test_clip_duration_seconds_prefers_video_stream_duration(tmp_path, monkeypatch):
     import app.recordings as recordings_module
-    from app.recordings import RecordingService
+    RecordingService = recordings_module.RecordingService
 
     clip = tmp_path / 'video_short_audio_long.mp4'
     clip.write_bytes(b'not-empty')
@@ -180,7 +180,7 @@ def test_shared_ingest_worker_command_fans_out_three_outputs(tmp_path, monkeypat
     # a latest.jpg frame, and PCM-WAV audio segments. (The 3-output ffmpeg itself
     # is validated manually; here we assert the command the worker builds.)
     import app.recordings as recordings_module
-    from app.recordings import RecordingService
+    RecordingService = recordings_module.RecordingService
 
     service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'rec')}, 'recording': {}})
     stop = threading.Event()
@@ -230,7 +230,7 @@ def test_shared_ingest_worker_command_fans_out_three_outputs(tmp_path, monkeypat
 
 def test_prebuffer_window_change_updates_worker_without_restart(tmp_path, monkeypatch):
     import app.recordings as recordings_module
-    from app.recordings import RecordingService
+    RecordingService = recordings_module.RecordingService
 
     service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'rec')}, 'recording': {}})
     started: list[threading.Event] = []
@@ -369,7 +369,7 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
     to the capture deadline. The returned window must describe that media so
     the caller can align stored timing and the detection track with it."""
     import app.recordings as recordings_module
-    from app.recordings import RecordingService
+    RecordingService = recordings_module.RecordingService
 
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
@@ -450,7 +450,7 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
 
 def test_prebuffer_and_continuous_workers_do_not_start_without_ffmpeg(tmp_path, monkeypatch):
     import app.recordings as recordings_module
-    from app.recordings import RecordingService
+    RecordingService = recordings_module.RecordingService
 
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
@@ -475,7 +475,7 @@ def test_prebuffer_and_continuous_workers_do_not_start_without_ffmpeg(tmp_path, 
 
 def test_degenerate_prebuffer_render_keeps_partial_clip_instead_of_late_live_capture(tmp_path, monkeypatch):
     import app.recordings as recordings_module
-    from app.recordings import RecordingService
+    RecordingService = recordings_module.RecordingService
 
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
@@ -528,7 +528,7 @@ def test_degenerate_prebuffer_render_keeps_partial_clip_instead_of_late_live_cap
 
 def test_prebuffer_concat_list_uses_ffmpeg_safe_absolute_paths(tmp_path, monkeypatch):
     import app.recordings as recordings_module
-    from app.recordings import RecordingService
+    RecordingService = recordings_module.RecordingService
 
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},

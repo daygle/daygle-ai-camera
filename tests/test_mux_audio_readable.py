@@ -28,7 +28,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import app.recordings as recordings_module  # noqa: E402
-from app.recordings import RecordingService  # noqa: E402
+RecordingService = recordings_module.RecordingService
 
 
 def _service(tmp_path: Path) -> RecordingService:

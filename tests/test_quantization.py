@@ -190,7 +190,7 @@ def test_export_kwargs_fp16_auto_gpu_emits_half_true(monkeypatch):
     # ``app.quantization`` via an in-body ``from app.quantization import ...``;
     # re-fetch the live module here so the monkeypatch lands on the same object
     # production reads (otherwise ``onnxruntime_gpu_available`` stays unpatched).
-    import app.quantization as quantization
+    quantization = sys.modules['app.quantization']
 
     monkeypatch.setattr(mm, '_onnxsim_available', lambda: False)
     monkeypatch.setattr(quantization, 'onnxruntime_gpu_available', lambda: True)
@@ -202,7 +202,7 @@ def test_export_kwargs_fp16_auto_no_gpu_omits_half_true(monkeypatch):
     """On a CPU-only host under the default ``device=auto``, fp16 stays a
     silent no-op (no ``half=True``) so the export succeeds as FP32."""
     import app.model_management as mm
-    import app.quantization as quantization  # live module -- see fp16_auto_gpu test
+    quantization = sys.modules['app.quantization']  # live module -- see fp16_auto_gpu test
 
     monkeypatch.setattr(mm, '_onnxsim_available', lambda: False)
     monkeypatch.setattr(quantization, 'onnxruntime_gpu_available', lambda: False)
@@ -214,7 +214,7 @@ def test_export_kwargs_fp16_cpu_gpu_omits_half_true(monkeypatch):
     """Explicit ``device='cpu'`` never emits ``half=True`` even when
     onnxruntime-gpu is present -- FP16 is CUDA-only."""
     import app.model_management as mm
-    import app.quantization as quantization  # live module -- see fp16_auto_gpu test
+    quantization = sys.modules['app.quantization']  # live module -- see fp16_auto_gpu test
 
     monkeypatch.setattr(mm, '_onnxsim_available', lambda: False)
     monkeypatch.setattr(quantization, 'onnxruntime_gpu_available', lambda: True)
@@ -226,7 +226,7 @@ def test_export_kwargs_int8_never_emits_half_true(monkeypatch):
     """INT8 is a runtime concern -- the export kwargs must never carry
     ``half=True`` for any device / GPU combination."""
     import app.model_management as mm
-    import app.quantization as quantization  # live module -- see fp16_auto_gpu test
+    quantization = sys.modules['app.quantization']  # live module -- see fp16_auto_gpu test
 
     monkeypatch.setattr(mm, '_onnxsim_available', lambda: False)
     for device in ('auto', 'cuda', 'cpu'):

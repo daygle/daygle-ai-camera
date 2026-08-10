@@ -285,7 +285,7 @@ def test_pre_roll_not_clamped_when_events_well_separated(tmp_path, monkeypatch):
 
 def test_continuous_chunk_recording_maps_optional_audio_to_aac(tmp_path, monkeypatch):
     import app.recordings as recordings_module
-    from app.recordings import RecordingService
+    RecordingService = recordings_module.RecordingService
 
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
@@ -400,7 +400,7 @@ def test_write_rtsp_clip_rejects_videoless_output(tmp_path, monkeypatch):
     # file with no video stream. write_rtsp_clip must reject it (so the caller
     # falls back to a playable clip) rather than saving an unplayable recording.
     import app.recordings as recordings_module
-    from app.recordings import RecordingService
+    RecordingService = recordings_module.RecordingService
 
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
@@ -427,7 +427,7 @@ def test_write_rtsp_clip_rejects_videoless_output(tmp_path, monkeypatch):
 
 def test_clip_has_video_stream_rejects_declared_stream_with_zero_packets(tmp_path, monkeypatch):
     import app.recordings as recordings_module
-    from app.recordings import RecordingService
+    RecordingService = recordings_module.RecordingService
 
     clip = tmp_path / 'audio_only_with_video_header.mp4'
     clip.write_bytes(b'not-empty')
@@ -450,7 +450,7 @@ def test_clip_has_video_stream_rejects_declared_stream_with_zero_packets(tmp_pat
 
 def test_write_rtsp_clip_keeps_clip_with_video_stream(tmp_path, monkeypatch):
     import app.recordings as recordings_module
-    from app.recordings import RecordingService
+    RecordingService = recordings_module.RecordingService
 
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
@@ -474,7 +474,7 @@ def test_write_rtsp_clip_keeps_clip_with_video_stream(tmp_path, monkeypatch):
 
 def test_write_rtsp_clip_explicitly_records_optional_audio_as_aac(tmp_path, monkeypatch):
     import app.recordings as recordings_module
-    from app.recordings import RecordingService
+    RecordingService = recordings_module.RecordingService
 
     service = RecordingService({
         'storage': {'recordings_dir': str(tmp_path / 'recordings')},
