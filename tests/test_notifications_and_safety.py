@@ -160,7 +160,6 @@ class EmailAlertsCleanupSwallowTests(unittest.TestCase):
 
     def test_smtp_disconnect_recovery_logs_and_returns(self) -> None:
         import smtplib
-        _ea_mod = importlib.import_module('app.email_alerts')
         from app.email_alerts import EmailAlertService
         svc = EmailAlertService({
             'enabled': True,
