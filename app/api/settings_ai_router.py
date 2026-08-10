@@ -313,10 +313,10 @@ def test_ai_detector(request: Request, detector=Depends(get_detector)):
     else:
         try:
             detections = detector.detect_image(ONE_PIXEL_PNG)
-        except DetectorUnavailableError as exc:
-            ai_error = str(exc) or ai_state.get('last_detector_error') or 'Detector unavailable.'
+        except DetectorUnavailableError:
+            ai_error = 'Detector unavailable.'
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail='Invalid detector input.') from exc
     return {
         'ok': ai_error is None,
         'backend_used': ai_state['configured_backend'],

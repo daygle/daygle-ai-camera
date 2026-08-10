@@ -148,7 +148,7 @@ def recording_stream_path(file_path: Path) -> Path:
         try:
             failed_marker.write_bytes(b'')
         except OSError:
-            pass
+            pass  # A marker is only an optimization; keep the playable fallback.
         return file_path
     failed_marker.unlink(missing_ok=True)
     return playback_path if playback_path.exists() else file_path

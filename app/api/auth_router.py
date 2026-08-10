@@ -98,7 +98,15 @@ async def login(request: Request, db=Depends(get_database), auth=Depends(get_aut
             )
         except Exception as unexpected_exc:
             logger.warning('Unexpected error during login callback: %s', unexpected_exc)
-        return login_page(request, str(exc), auth=auth, auth_enabled=auth_enabled)
+        # Keep authentication internals out of the HTML response. Preserve
+        # only the two deliberate, user-safe login states; the audit entry
+        # retains the detailed reason for administrators.
+        safe_error = 'Invalid username or password.'
+        if str(exc) == 'Account is temporarily locked. Try again later.':
+            safe_error = 'Account is temporarily locked. Try again later.'
+        elif str(exc) == 'Too many failed login attempts. Try again later.':
+            safe_error = 'Too many failed login attempts. Try again later.'
+        return login_page(request, safe_error, auth=auth, auth_enabled=auth_enabled)
 
     login_limiter.record_success(ip)
     try:
@@ -176,8 +184,13 @@ async def setup(request: Request, auth=Depends(get_auth), auth_enabled=Depends(g
             last_name=data.get('last_name', ''),
             email=data.get('email', ''),
         )
-    except AuthError as exc:
-        return setup_page(request, str(exc), auth=auth, auth_enabled=auth_enabled)
+    except AuthError:
+        return setup_page(
+            request,
+            'Unable to create the administrator account. Check the submitted values.',
+            auth=auth,
+            auth_enabled=auth_enabled,
+        )
     return RedirectResponse('/login', status_code=303)
 
 

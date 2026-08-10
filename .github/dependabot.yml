@@ -32,7 +32,7 @@ updates:
       # Monday is the common Dependabot default; staggered from github-actions
       # to avoid two waves landing in the inbox at the same time.
       day: "monday"
-    # ~12 direct deps at weekly cadence -- 5 keeps the review queue
+    # 13 direct deps at weekly cadence -- 5 keeps the review queue
     # manageable when several ranges open up at once.
     open-pull-requests-limit: 5
     rebase-strategy: "auto"
@@ -64,11 +64,16 @@ updates:
       # docs/tesla-p4-gpu-setup.md, so ignore every version -- an exact pin does
       # not stop Dependabot from proposing 12.4.127 -> 12.9.x.
       - dependency-name: "nvidia-*-cu12"
-    # Exact-pinned entries (ultralytics==...) are deliberately left for manual
-    # review per the supply-chain notes in requirements.txt; the pin already
-    # prevents Dependabot from touching them. Tight ranges that stay below the
-    # newest release (e.g. bcrypt>=5.0,<6.0) still let Dependabot propose only
-    # safe interim bumps.
+    # Exact-pinned entries (e.g. ultralytics==8.4.113) still get Dependabot
+    # PRs -- an exact pin does not stop Dependabot on its own; it simply
+    # proposes a new pin at the latest release. That is intended here:
+    # requirements.txt pins ultralytics to a reviewed known-good release and
+    # says the pin is bumped only after checking the upstream release notes,
+    # so the Dependabot PR is the review trigger. If an exact pin must never
+    # be auto-bumped at all, it needs an `ignore` rule above (see the
+    # nvidia-*-cu12 entries). Tight ranges that stay below the newest release
+    # (e.g. bcrypt>=5.0,<6.0) still let Dependabot propose only safe interim
+    # bumps.
 
   # --- GitHub Actions ------------------------------------------------------
   - package-ecosystem: "github-actions"

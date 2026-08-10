@@ -270,7 +270,8 @@ class _YamnetBackend:
             new_sha = self._sha256_file(tmp_path)
             new_size = tmp_path.stat().st_size
         except Exception as exc:
-            return {'update_available': False, 'error': str(exc)}
+            logger.warning('YAMNet update check failed (%s).', type(exc).__name__)
+            return {'update_available': False, 'error': 'Unable to check for model updates.'}
         finally:
             # A failed download, hash, or stat must not leave a misleading
             # check artifact beside the installed model. In particular, a

@@ -48,7 +48,10 @@ def _wssec_header(username: str, password: str) -> str:
     nonce = os.urandom(16)
     created = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
     digest = base64.b64encode(
-        hashlib.sha1(nonce + created.encode() + password.encode()).digest()
+        # ONVIF UsernameToken PasswordDigest is specified as SHA-1 over
+        # nonce + created + password; this is protocol interoperability, not
+        # a general-purpose password hash. Keep the finding explicitly scoped.
+        hashlib.sha1(nonce + created.encode() + password.encode()).digest()  # lgtm[py/weak-cryptographic-algorithm]
     ).decode()
     nonce_b64 = base64.b64encode(nonce).decode()
     return (

@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import contextlib
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest  # noqa: E402  -- used by monkeypatch + fixtures below
@@ -135,7 +136,7 @@ class _LoggerStub:
 
 def _stub_main_with_camera_recording_renamer(monkeypatch):
     """Install a hermetic stand-in for the attributes that
-    ``_migrate_camera_id`` reaches: ``RecordingService`` (on cc module),
+    ``_migrate_camera_id`` reaches: ``camera_storage_key`` (on cc module),
     ``live_detection_history``, ``live_detection_history_lock``,
     ``_frame_motion_prev``, ``_frame_motion_lock``, ``recording_service``
     (on _state), and ``logger`` (on cc module).
@@ -146,23 +147,21 @@ def _stub_main_with_camera_recording_renamer(monkeypatch):
     import app.state as _state
     import app.camera_config as cc
 
-    class _RecordingServiceStub:
-        def __init__(self) -> None:
-            self.prebuffer_dir = _FakePath('/virtual/prebuffer')
-            self.frames_dir = _FakePath('/virtual/frames')
-            self.audio_dir = _FakePath('/virtual/audio')
-
-        @staticmethod
-        def _camera_key(camera_id: str) -> str:
-            return f'cam-{camera_id}'
-
     log: list[str] = []
-    monkeypatch.setattr(cc, 'RecordingService', _RecordingServiceStub)
+    monkeypatch.setattr(cc, 'camera_storage_key', lambda camera_id: f'cam-{camera_id}')
     monkeypatch.setattr(_state, 'live_detection_history_lock', _LockStub('history', log))
     monkeypatch.setattr(_state, 'live_detection_history', {'old': ['a', 'b']})
     monkeypatch.setattr(_state, '_frame_motion_lock', _LockStub('motion', log))
     monkeypatch.setattr(_state, '_frame_motion_prev', {'old': {'m': 1}})
-    monkeypatch.setattr(_state, 'recording_service', _RecordingServiceStub())
+    monkeypatch.setattr(
+        _state,
+        'recording_service',
+        SimpleNamespace(
+            prebuffer_dir=_FakePath('/virtual/prebuffer'),
+            frames_dir=_FakePath('/virtual/frames'),
+            audio_dir=_FakePath('/virtual/audio'),
+        ),
+    )
     monkeypatch.setattr(cc, 'logger', _LoggerStub(log))
     return _state, log
 

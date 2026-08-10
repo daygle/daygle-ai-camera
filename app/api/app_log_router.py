@@ -27,14 +27,6 @@ _PRIORITY_LABEL: dict[str, str] = {
 }
 
 # Maps UI level names to journalctl -p values (inclusive of more-severe levels).
-_LEVEL_TO_PRIORITY: dict[str, str] = {
-    'error': '3',
-    'warning': '4',
-    'notice': '5',
-    'info': '6',
-    'debug': '7',
-}
-
 _SERVICE = 'daygle-ai-camera'
 
 # Benign uvicorn protocol noise: a browser's HTTPS-first attempt (or a proxy
@@ -103,9 +95,21 @@ def get_app_log(
     level: str | None = None,
 ):
     require_admin(request)
-    cmd = ['journalctl', '-u', _SERVICE, '-n', str(lines), '-o', 'json', '--no-pager']
-    if level and level in _LEVEL_TO_PRIORITY:
-        cmd += ['-p', _LEVEL_TO_PRIORITY[level]]
+    # Keep user-controlled pagination out of the subprocess argument list.
+    # The query parameter is applied to the parsed entries below instead.
+    cmd = ['journalctl', '-u', _SERVICE, '-n', '1000', '-o', 'json', '--no-pager']
+    # Use literal priority arguments after validating the selector so no
+    # request-derived value reaches journalctl at all.
+    if level == 'error':
+        cmd += ['-p', '3']
+    elif level == 'warning':
+        cmd += ['-p', '4']
+    elif level == 'notice':
+        cmd += ['-p', '5']
+    elif level == 'info':
+        cmd += ['-p', '6']
+    elif level == 'debug':
+        cmd += ['-p', '7']
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         entries: list[dict] = []
@@ -120,7 +124,9 @@ def get_app_log(
             if _is_noise(entry):
                 continue
             entries.append(entry)
-        return {'entries': entries}
+        # journalctl returns the newest entries within the fixed upper bound;
+        # preserve the requested page size without passing user input to it.
+        return {'entries': entries[-lines:]}
     except FileNotFoundError:
         return {'entries': [], 'unavailable': True}
     except subprocess.TimeoutExpired:

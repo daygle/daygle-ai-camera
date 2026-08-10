@@ -67,6 +67,11 @@ def _current_version() -> str:
     return 'unknown'
 
 
+def utc_now() -> str:
+    """Return the current UTC time in the application's canonical ISO form."""
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _non_empty_setting(settings: dict[str, Any], key: str) -> str:
     return str(settings.get(key) or '').strip()
 

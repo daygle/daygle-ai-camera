@@ -338,25 +338,25 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         try:
             _pixel_threshold = float(_cam_pt)
         except (TypeError, ValueError):
-            pass
+            pass  # Keep the validated global pixel threshold.
     _cam_gf = settings.get('motion_gate_fraction') if settings.get('motion_gate_fraction') is not None else _cam_motion_nest.get('gate_fraction')
     if _cam_gf is not None:
         try:
             _gate_fraction = float(_cam_gf)
         except (TypeError, ValueError):
-            pass
+            pass  # Keep the validated global motion gate.
     _cam_sf = settings.get('motion_scale_fraction') if settings.get('motion_scale_fraction') is not None else _cam_motion_nest.get('scale_fraction')
     if _cam_sf is not None:
         try:
             _scale_fraction = float(_cam_sf)
         except (TypeError, ValueError):
-            pass
+            pass  # Keep the validated global motion scale.
     _cam_ba = settings.get('motion_background_alpha') if settings.get('motion_background_alpha') is not None else _cam_motion_nest.get('background_alpha')
     if _cam_ba is not None:
         try:
             _background_alpha = float(_cam_ba)
         except (TypeError, ValueError):
-            pass
+            pass  # Keep the validated global background alpha.
     periodic_scan_interval = float(live_settings.get('periodic_scan_interval_seconds', 0))
     force_scan = False
     if periodic_scan_interval > 0 and now - _state._periodic_scan_last_ts.get(camera_id, 0) >= periodic_scan_interval:

@@ -41,14 +41,13 @@ import logging
 from typing import Any
 
 import app.state as _state
-from app.camera_id import normalize_camera_id as normalize_camera_id  # noqa: PLC0414  re-export
+from app.camera_id import camera_storage_key, normalize_camera_id as normalize_camera_id  # noqa: PLC0414  re-export
 from app.recording_settings import (
     _migrate_legacy_camera_motion,
     _normalize_camera_sound_settings,
     normalize_camera_ptz_settings,
     normalize_camera_recording_settings,
 )
-from app.recordings import RecordingService
 from app.utils import camera_default_name, default_camera_detection_settings
 from app.zone_schema import normalize_label_list, normalize_monitoring_zones
 
@@ -131,8 +130,8 @@ def _migrate_camera_id(old_id: str, new_id: str) -> None:
     if the destination dir already exists (the latter guards against
     silently clobbering an unrelated camera's frames).
     """
-    old_key = RecordingService._camera_key(old_id)
-    new_key = RecordingService._camera_key(new_id)
+    old_key = camera_storage_key(old_id)
+    new_key = camera_storage_key(new_id)
     with _state.live_detection_history_lock:
         if old_id in _state.live_detection_history:
             _state.live_detection_history[new_id] = (

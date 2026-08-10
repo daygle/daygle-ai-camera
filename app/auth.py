@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from app.utils import _normalize_iso_to_utc, _parse_iso_datetime
+from app.utils import _normalize_iso_to_utc, _parse_iso_datetime, utc_now
 
 _bcrypt_spec = importlib.util.find_spec("bcrypt")
 bcrypt = importlib.import_module("bcrypt") if _bcrypt_spec else None
@@ -871,7 +871,3 @@ class AuthService:
             "time_format": row["time_format"],
             "theme": row["theme"],
         }
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

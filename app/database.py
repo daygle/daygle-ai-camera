@@ -91,15 +91,15 @@ class EventDatabase(
             try:
                 db.execute("ALTER TABLE alert_history ADD COLUMN recording_id INTEGER REFERENCES recordings(id) ON DELETE SET NULL")
             except sqlite3.OperationalError:
-                pass
+                pass  # Column already exists on upgrades from older schemas.
             try:
                 db.execute("ALTER TABLE events ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0")
             except sqlite3.OperationalError:
-                pass
+                pass  # Column already exists on upgrades from older schemas.
             try:
                 db.execute("ALTER TABLE alert_history ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0")
             except sqlite3.OperationalError:
-                pass
+                pass  # Column already exists on upgrades from older schemas.
             try:
                 db.execute("ALTER TABLE detections ADD COLUMN zone_name TEXT")
             except sqlite3.OperationalError:
@@ -113,7 +113,7 @@ class EventDatabase(
             try:
                 db.execute("ALTER TABLE events ADD COLUMN recording_id INTEGER REFERENCES recordings(id) ON DELETE SET NULL")
             except sqlite3.OperationalError:
-                pass
+                pass  # Column already exists on upgrades from older schemas.
             # Migration: track the best confidence seen for each recording label so
             # the recordings list can show a percentage for secondary objects that
             # were only detected after the trigger (their confidence otherwise lives
@@ -121,13 +121,13 @@ class EventDatabase(
             try:
                 db.execute("ALTER TABLE recording_labels ADD COLUMN confidence REAL")
             except sqlite3.OperationalError:
-                pass
+                pass  # Column already exists on upgrades from older schemas.
             # Migration: add the immutable column to existing databases.
             # The CREATE TABLE below already includes it for fresh installs.
             try:
                 db.execute("ALTER TABLE audit_log ADD COLUMN immutable INTEGER NOT NULL DEFAULT 1")
             except sqlite3.OperationalError:
-                pass
+                pass  # Column already exists on upgrades from older schemas.
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS events (

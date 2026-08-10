@@ -237,7 +237,7 @@ class EmailAlertService:
                     try:
                         active_smtp.quit()
                     except Exception:
-                        pass
+                        pass  # SMTP cleanup is best-effort after delivery completes.
         except EmailAlertError:
             # Session-level failure (connect / TLS / login / quit) -- propagate
             # so the outer ``deliver_email_alerts`` exception handler logs it.

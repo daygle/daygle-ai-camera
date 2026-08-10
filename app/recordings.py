@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import app.state as _state
+from app.camera_id import camera_storage_key
 
 
 logger = logging.getLogger('daygle.ai')
@@ -977,7 +978,9 @@ class RecordingService:
 
     @staticmethod
     def _camera_key(camera_id: str) -> str:
-        return re.sub(r'[^a-zA-Z0-9_-]+', '-', str(camera_id or '').strip().lower()).strip('-') or 'camera'
+        # Keep the legacy class-level API while sharing the pure key helper
+        # with camera configuration without importing this service there.
+        return camera_storage_key(camera_id)
 
     # Marker file written when the per-camera ingest learns the RTSP stream
     # has no audio track. The worker checks it on startup to skip the audio

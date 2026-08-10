@@ -21,3 +21,12 @@ def normalize_camera_id(value: Any, fallback: str = 'camera-1') -> str:
         str(value or '').strip().lower(),
     ).strip('-')
     return camera_id or fallback
+
+
+def camera_storage_key(value: Any) -> str:
+    """Return the filesystem-safe key used for per-camera runtime data."""
+    return re.sub(
+        r'[^a-zA-Z0-9_-]+',
+        '-',
+        str(value or '').strip().lower(),
+    ).strip('-') or 'camera'

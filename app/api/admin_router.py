@@ -151,11 +151,11 @@ async def detect_frame(request: Request, detector=Depends(get_detector)):
 
     try:
         detections = await asyncio.get_running_loop().run_in_executor(None, _run_detection)
-    except DetectorUnavailableError as exc:
+    except DetectorUnavailableError:
         detections = []
-        ai_error = str(exc) or ai_state.get('last_detector_error') or ai_state.get('error') or 'Detector unavailable.'
+        ai_error = 'Detector unavailable.'
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail='Invalid detector input.') from exc
     return {'detections': detections, 'count': len(detections), 'ai_backend': ai_state['active_backend'], 'ai_error': ai_error}
 
 

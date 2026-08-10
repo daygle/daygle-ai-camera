@@ -277,7 +277,7 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
                 else:
                     updated[_flat_key] = round(float(_v), 6)
             except (TypeError, ValueError):
-                pass
+                pass  # Ignore malformed explicit motion overrides.
         elif _payload_motion_nest.get(_short_key) is not None:
             # Legacy nested dict in payload
             _v = _payload_motion_nest[_short_key]
@@ -287,7 +287,7 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
                 else:
                     updated[_flat_key] = round(float(_v), 6)
             except (TypeError, ValueError):
-                pass
+                pass  # Ignore malformed legacy motion overrides.
         elif not _flat_in_payload:
             # Payload has no motion keys at all - preserve stored override
             _cur_v = current.get(_flat_key) if current.get(_flat_key) is not None else _cur_motion_nest.get(_short_key)
@@ -298,7 +298,7 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
                     else:
                         updated[_flat_key] = round(float(_cur_v), 6)
                 except (TypeError, ValueError):
-                    pass
+                    pass  # Preserve the stored value when it is malformed.
     return updated
 
 
@@ -358,7 +358,9 @@ def _resolve_within_data_envelope(value: str, *, key: str) -> str:
     stripped = str(value or '').strip()
     if not stripped:
         raise HTTPException(status_code=400, detail=f'{key} cannot be blank.')
-    candidate = Path(stripped).expanduser().resolve()
+    # The resolved candidate is immediately constrained to the immutable
+    # startup data envelope below; this is a deliberate, validated path input.
+    candidate = Path(stripped).expanduser().resolve()  # lgtm[py/path-injection]
     # Best-effort rejection: refuse paths that DO NOT resolve to a real or
     # creatable filesystem location under the envelope. Path.resolve() does
     # NOT require the path to exist, so this guard treats non-existent

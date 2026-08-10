@@ -36,7 +36,7 @@ from app.config_facades import (
     effective_storage_config,
 )
 from app.database import AUDIT_LOG_IMMUTABLE_TRIGGERS
-from app.recording_extension import delete_recording_files
+from app.recording_files import delete_recording_files
 from app.media_utils import safe_storage_path
 from app.utils import normalize_bool_setting
 

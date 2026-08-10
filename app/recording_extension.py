@@ -112,14 +112,14 @@ from pathlib import Path
 from typing import Any
 
 import app.state as _state
-from app.auth import utc_now
 from app.config_facades import effective_recording_config
+from app.utils import utc_now
 from app.detection_status import (
     GENERIC_TRIGGER_LABELS,
     detection_label_confidences,
     detection_label_strings,
 )
-from app.media_utils import recording_playback_sidecar_path, safe_storage_path
+from app.media_utils import safe_storage_path
 
 logger = logging.getLogger('daygle.ai')
 
@@ -261,20 +261,20 @@ def write_live_history_detection_track(
         return False
     track = build_track_from_live_history(camera_id, start_ts, end_ts)
     if track is None:
-        logger.debug(
-            'No live detection history covers recording %s (%s); no track written.',
-            recording_id, file_path.name,
-        )
+        logger.debug('No live detection history covers the recording; no track written.')
         return False
     try:
         write_recording_detection_track(file_path, track)
     except OSError as exc:
-        logger.warning('Could not write detection track for recording %s: %s', recording_id, exc)
+        logger.warning(
+            'Could not write detection track (error_type=%s).',
+            type(exc).__name__,
+        )
         return False
     localized = sum(1 for sample in track if sample.get('detections'))
     logger.debug(
-        'Saved detection track for recording %s from live history (%d samples, %d with detections).',
-        recording_id, len(track), localized,
+        'Saved detection track from live history (%d samples, %d with detections).',
+        len(track), localized,
     )
     return True
 
@@ -301,32 +301,16 @@ def _recording_capture_window(recording: dict[str, Any]) -> tuple[float, float] 
 
 
 def delete_recording_files(recordings: list[dict[str, Any]]) -> None:
-    """Delete recording media only when paths stay inside configured storage.
+    """Delete recording media using this module's patchable path resolver.
 
-    Recording rows can come from a restored SQLite backup and are therefore
-    untrusted. Invalid/out-of-tree paths are deliberately skipped rather than
-    allowing retention or an admin delete to unlink arbitrary host files.
+    The implementation lives in ``app.recording_files`` so backup retention
+    does not need to import this module. This compatibility wrapper preserves
+    the historical import location and keeps its path resolver patchable for
+    callers and tests.
     """
-    for recording in recordings:
-        file_path = safe_storage_path(recording.get('file_path'), roots=('recordings_dir',))
-        if file_path is not None:
-            if file_path.exists() and file_path.is_file():
-                file_path.unlink(missing_ok=True)
-            playback_paths = [
-                recording_playback_sidecar_path(file_path),
-                recording_track_sidecar_path(file_path),
-                file_path.with_name(f'{file_path.stem}.playback.failed'),
-                file_path.with_name(f'{file_path.stem}.h264.mp4'),
-                file_path.with_name(f'{file_path.stem}.browser.mp4'),
-                file_path.with_name(f'{file_path.stem}.playback.mp4'),
-                file_path.with_name(f'{file_path.name}.meta.json'),
-            ]
-            for playback_path in playback_paths:
-                if playback_path.exists() and playback_path.is_file():
-                    playback_path.unlink(missing_ok=True)
-        thumbnail = safe_storage_path(recording.get('thumbnail_path'), roots=('snapshots_dir',))
-        if thumbnail is not None and thumbnail.exists() and thumbnail.is_file():
-            thumbnail.unlink(missing_ok=True)
+    from app.recording_files import delete_recording_files as _delete_recording_files
+
+    _delete_recording_files(recordings, path_resolver=safe_storage_path)
 
 
 def _safe_rmtree_no_follow(target: Path) -> int:

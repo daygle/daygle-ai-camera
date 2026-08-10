@@ -282,7 +282,7 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
                             try:
                                 active_smtp.quit()
                             except Exception:
-                                pass
+                                pass  # SMTP cleanup is best-effort after notification delivery.
                 except Exception as exc:
                     # Session-level (connect / TLS / login) failure: record so
                     # operators see it, but do NOT block the flag stamp below.

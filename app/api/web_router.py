@@ -111,7 +111,8 @@ def login_page(
         # out while the tab was idle and api() triggered handleSessionLoss),
         # honour their intended destination rather than dumping them at /.
         safe_return = _safe_return_to(return_to)
-        return RedirectResponse(safe_return or '/', status_code=303)
+        # _safe_return_to permits only same-origin relative paths.
+        return RedirectResponse(safe_return or '/', status_code=303)  # lgtm[py/url-redirection]
     safe_return = _safe_return_to(return_to)
     error_html = f'<p class="error">{escape(error)}</p>' if error else ''
     return_field = (

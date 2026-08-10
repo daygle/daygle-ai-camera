@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import threading
 import time
@@ -22,6 +23,7 @@ from app.utils import _current_version
 GITHUB_REPO = 'daygle/daygle-ai-camera'
 
 router = APIRouter()
+logger = logging.getLogger('daygle.ai')
 
 
 @router.post('/api/update/check')
@@ -52,18 +54,20 @@ def check_update(request: Request):
             'update_available': update_available,
         }
     except urllib.error.HTTPError as exc:
+        logger.warning('Update check failed with HTTP status %s.', exc.code)
         return {
             'current_version': current_version,
             'latest_version': None,
             'update_available': False,
-            'error': f'GitHub API error {exc.code}: {exc.reason}',
+            'error': 'Unable to check for updates.',
         }
     except Exception as exc:
+        logger.warning('Update check failed (%s).', type(exc).__name__)
         return {
             'current_version': current_version,
             'latest_version': None,
             'update_available': False,
-            'error': str(exc),
+            'error': 'Unable to check for updates.',
         }
 
 
