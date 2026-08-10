@@ -103,7 +103,7 @@ class EventDatabase(
             try:
                 db.execute("ALTER TABLE detections ADD COLUMN zone_name TEXT")
             except sqlite3.OperationalError:
-                pass
+                pass  # Column already exists on upgrades from pre-zone-name schema
             # Migration: make "which clip this event belongs to" a first-class
             # link. A recording spans many events (a continuous clip accrues a
             # fresh event each time a new object/sound appears), so events carry
