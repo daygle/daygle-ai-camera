@@ -458,6 +458,33 @@ def test_validate_camera_settings_accepts_valid_flip(monkeypatch, pv):
     assert out['flip'] == 'both'
 
 
+def test_validate_camera_settings_clamps_per_camera_motion_overrides(monkeypatch, pv):
+    """Per-camera motion overrides must be clamped to the SAME ranges the
+    global validate_live_settings enforces, so an out-of-range API write
+    cannot destabilise the detector (e.g. background_alpha > 1.0 turns the
+    background update into an unstable extrapolation)."""
+    _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok')
+    out = pv.validate_camera_settings({
+        'stream_url': 'rtsp://ok',
+        'motion_pixel_threshold': 9999,     # -> 255
+        'motion_gate_fraction': 5.0,        # -> 0.5
+        'motion_scale_fraction': 0.0,       # -> 0.001
+        'motion_background_alpha': 10.0,    # -> 0.5 (would break bg math)
+    })
+    assert out['motion_pixel_threshold'] == 255
+    assert out['motion_gate_fraction'] == 0.5
+    assert out['motion_scale_fraction'] == 0.001
+    assert out['motion_background_alpha'] == 0.5
+
+    out_low = pv.validate_camera_settings({
+        'stream_url': 'rtsp://ok',
+        'motion_gate_fraction': 0.00000001,  # -> 0.0001
+        'motion_background_alpha': -1.0,      # -> 0.001
+    })
+    assert out_low['motion_gate_fraction'] == 0.0001
+    assert out_low['motion_background_alpha'] == 0.001
+
+
 def test_validate_camera_settings_clamps_dimensions_to_min_max(monkeypatch, pv):
     """Per-spec: width [160, 7680] / height [120, 4320] / fps [1, 120].
 
