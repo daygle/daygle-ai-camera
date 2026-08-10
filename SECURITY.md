@@ -31,7 +31,7 @@ as a patch is ready and to coordinate public disclosure with you.
 
 To help reproduce and triage the issue, please include:
 
-- The affected version — the git tag, or the output of
+- The affected version - the git tag, or the output of
   `git describe --tags --abbrev=0` / the version shown in Settings → System.
 - Deployment type: Debian service install, Docker-style/dev clone, or local
   development, and whether it is exposed via LAN, a reverse proxy, or Cloudflare
@@ -45,7 +45,7 @@ To help reproduce and triage the issue, please include:
 
 Security reports are welcome for the application code in this repository. Note
 that many findings on a self-hosted system are deployment issues rather than
-code bugs — for example exposing the dashboard without authentication or a
+code bugs - for example exposing the dashboard without authentication or a
 reverse proxy. When in doubt, report it anyway.
 
 ## Disclosure
