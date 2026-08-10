@@ -90,6 +90,7 @@ def main():
 def current_recording_settings():
     """Return the CURRENT ``app.recording_settings`` module instance.
     See the ``main`` fixture above for the leak rationale."""
+    _ = recording_settings  # keep preload import intentionally used
     return sys.modules["app.recording_settings"]
 
 
