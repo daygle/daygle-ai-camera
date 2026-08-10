@@ -253,3 +253,52 @@ def test_motion_status_exposes_sub_gate_signal_for_live_bar(monkeypatch):
     assert recorded[0]['motion_confidence'] == 0.0
     assert recorded[0]['motion_fraction'] == 0.003
     assert recorded[0]['motion_signal'] == 0.1
+
+
+def test_motion_frame_size_clamped_to_validated_bounds(monkeypatch):
+    """An oversized motion_frame_width/height (e.g. from an unvalidated
+    config.yaml ``live`` block) must be clamped to the same 40-640 x 30-480
+    range validate_live_settings enforces, so the hot path never allocates a
+    runaway motion thumbnail."""
+    monkeypatch.setattr(live_monitor, 'effective_ai_config', lambda: {})
+    monkeypatch.setattr(
+        live_monitor,
+        'ai_status_payload',
+        lambda: {
+            'detector_loaded': True,
+            'last_detector_error': None,
+            'configured_backend': 'onnx',
+            'active_backend': 'onnx',
+        },
+    )
+    monkeypatch.setattr(
+        live_monitor,
+        'effective_live_config',
+        lambda: {
+            'detection_interval_seconds': 0.5,
+            'motion_frame_width': 99999,   # absurd oversize
+            'motion_frame_height': 99999,
+        },
+    )
+    # Motion returns no activity so the flow bails right after the frame-size
+    # binding block -- we only care about the clamp side effect here.
+    monkeypatch.setattr(live_monitor, 'detect_frame_motion',
+                        lambda cid, image, **kw: (False, 0.0, None, 0.0))
+    monkeypatch.setattr(live_monitor, 'zone_motion_detections',
+                        lambda settings, conf, **kw: [])
+    monkeypatch.setattr(live_monitor, 'update_live_detection_status',
+                        lambda camera_id, **kwargs: None)
+    monkeypatch.setattr(_state, '_MOTION_FRAME_W', 320)
+    monkeypatch.setattr(_state, '_MOTION_FRAME_H', 240)
+    monkeypatch.setattr(_state, '_frame_motion_prev', {})
+    monkeypatch.setattr(_state, '_periodic_scan_last_ts', {})
+
+    live_monitor.process_live_stream_alerts(
+        b'jpeg-bytes',
+        {'timestamp': time.time(), 'width': 10, 'height': 10},
+        {'id': 'cam-1'},
+        enforce_interval=False,
+    )
+
+    assert _state._MOTION_FRAME_W == 640
+    assert _state._MOTION_FRAME_H == 480
