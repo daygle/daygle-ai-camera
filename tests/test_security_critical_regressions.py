@@ -14,11 +14,15 @@ DB context manager and ``urllib.request.urlopen``.
 
 from __future__ import annotations
 
+import base64
+import re
 from types import SimpleNamespace
 from unittest import TestCase, mock
 
 from app.request_helpers import _redact_audit_details, write_audit_log
-from app.ptz import _safe_url_for_error, _sanitize_error_body, _soap
+from app.ptz import _safe_url_for_error, _sanitize_error_body, _soap, _wssec_header
+
+
 class RedactAuditDetailsTests(TestCase):
     """``_redact_audit_details`` must redact any sensitive key value at any depth."""
 
@@ -266,6 +270,24 @@ class SanitizeErrorBodyTests(TestCase):
     def test_leaves_non_url_strings_intact(self):
         body = 'Camera returned 500: <detail>generic error</detail>'
         self.assertEqual(_sanitize_error_body(body), body)
+
+
+class WssecDigestTests(TestCase):
+    """The ONVIF legacy digest keeps its exact wire format while being explicit."""
+
+    def test_uses_protocol_sha1_without_changing_digest_inputs(self):
+        digest_result = mock.Mock()
+        digest_result.digest.return_value = b'expected-digest'
+        with mock.patch('app.ptz.os.urandom', return_value=b'n' * 16), \
+             mock.patch('app.ptz.hashlib.sha1', return_value=digest_result) as sha1:
+            header = _wssec_header('camera-user', 'camera-password')
+
+        created = re.search(r'<Created[^>]*>([^<]+)</Created>', header).group(1)
+        sha1.assert_called_once_with(
+            b'n' * 16 + created.encode() + b'camera-password',
+            usedforsecurity=False,
+        )
+        assert base64.b64encode(b'expected-digest').decode() in header
 
 
 if __name__ == '__main__':

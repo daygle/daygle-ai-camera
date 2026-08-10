@@ -358,20 +358,19 @@ def _resolve_within_data_envelope(value: str, *, key: str) -> str:
     stripped = str(value or '').strip()
     if not stripped:
         raise HTTPException(status_code=400, detail=f'{key} cannot be blank.')
-    # The resolved candidate is immediately constrained to the immutable
-    # startup data envelope below; this is a deliberate, validated path input.
-    # codeql[py/path-injection]
+    # Canonicalize before checking the immutable startup envelope. The direct
+    # ``is_relative_to`` guards below are recognized by CodeQL as the safety
+    # check for the normalized path; keep this validation adjacent to the
+    # normalization so no caller can use an unchecked candidate.
     candidate = Path(stripped).expanduser().resolve()
     # Best-effort rejection: refuse paths that DO NOT resolve to a real or
     # creatable filesystem location under the envelope. Path.resolve() does
     # NOT require the path to exist, so this guard treats non-existent
     # "future" paths the same as existing ones -- what matters is whether
     # the resolved location is within the captured envelope.
-    if candidate == _STARTUP_DATA_DIR or _is_within(candidate, _STARTUP_DATA_DIR):
+    if candidate.is_relative_to(_STARTUP_DATA_DIR):
         return str(candidate)
-    if _STARTUP_DATA_PARENT is not None and (
-        candidate == _STARTUP_DATA_PARENT or _is_within(candidate, _STARTUP_DATA_PARENT)
-    ):
+    if _STARTUP_DATA_PARENT is not None and candidate.is_relative_to(_STARTUP_DATA_PARENT):
         return str(candidate)
     raise HTTPException(
         status_code=400,
@@ -381,14 +380,6 @@ def _resolve_within_data_envelope(value: str, *, key: str) -> str:
             f'({_STARTUP_DATA_PARENT}). Got: {value!r}.'
         ),
     )
-
-
-def _is_within(candidate: Path, anchor: Path) -> bool:
-    try:
-        candidate.relative_to(anchor)
-        return True
-    except ValueError:
-        return False
 
 
 _STARTUP_DATA_DIR: Path = Path(

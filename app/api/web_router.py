@@ -70,11 +70,21 @@ def _safe_return_to(raw: str | None) -> str:
     loop or worse.
     """
     candidate = str(raw or '').strip()
-    if not candidate or not candidate.startswith('/') or candidate.startswith('//'):
+    if (
+        not candidate
+        or not candidate.startswith('/')
+        or candidate.startswith('//')
+        # Browsers can treat backslashes as URL separators; reject them rather
+        # than allowing ``\\\\evil.example`` to become an external target.
+        or '\\' in candidate
+    ):
         return '/'
     if any(candidate == prefix.rstrip('/') or candidate.startswith(prefix) for prefix in _LOGIN_DISALLOWED_REDIRECT_PREFIXES):
         return '/'
-    return candidate
+    # Rebuild the target with a constant origin-relative prefix. Besides making
+    # the invariant obvious to readers, this is the form CodeQL recognizes as
+    # a safe relative redirect: user input can only supply the path suffix.
+    return '/' + candidate[1:]
 
 
 @router.get('/')
@@ -111,8 +121,6 @@ def login_page(
         # out while the tab was idle and api() triggered handleSessionLoss),
         # honour their intended destination rather than dumping them at /.
         safe_return = _safe_return_to(return_to)
-        # _safe_return_to permits only same-origin relative paths.
-        # codeql[py/url-redirection]
         return RedirectResponse(safe_return or '/', status_code=303)
     safe_return = _safe_return_to(return_to)
     error_html = f'<p class="error">{escape(error)}</p>' if error else ''

@@ -18,6 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase, mock
 
+from app.api.web_router import _safe_return_to
 from app.auth import AuthService
 from app.middleware import _is_same_origin
 from app.recording_extension import clear_runtime_media_directory
@@ -444,6 +445,25 @@ class IsSameOriginTests(TestCase):
         req = _request_for('https://app.example.com/api/foo', headers={'Origin': ''})
         ok, reason = _is_same_origin(request=req)
         self.assertFalse(ok)
+
+
+class SafeReturnToTests(TestCase):
+    """Return-to targets must remain same-origin and origin-relative."""
+
+    def test_valid_path_is_rebuilt_with_a_constant_leading_slash(self):
+        self.assertEqual(_safe_return_to('/live?camera=front'), '/live?camera=front')
+
+    def test_external_and_protocol_relative_targets_fall_back(self):
+        for value in ('https://evil.example', '//evil.example', 'live'):
+            self.assertEqual(_safe_return_to(value), '/')
+
+    def test_backslash_target_falls_back(self):
+        # Browsers may normalize backslashes as URL separators.
+        self.assertEqual(_safe_return_to('/\\\\evil.example'), '/')
+
+    def test_auth_and_asset_routes_are_not_redirect_targets(self):
+        for value in ('/login', '/logout', '/setup', '/api/status', '/static/app.js'):
+            self.assertEqual(_safe_return_to(value), '/')
 
 
 if __name__ == '__main__':

@@ -50,9 +50,14 @@ def _wssec_header(username: str, password: str) -> str:
     digest = base64.b64encode(
         # ONVIF UsernameToken PasswordDigest is specified as SHA-1 over
         # nonce + created + password; this is protocol interoperability, not
-        # a general-purpose password hash. Keep the finding explicitly scoped.
+        # a general-purpose password hash. ``usedforsecurity=False`` makes
+        # that legacy-protocol exception explicit to hashlib and static
+        # analyzers; it must not be copied to password-storage code.
         # codeql[py/weak-sensitive-data-hashing]
-        hashlib.sha1(nonce + created.encode() + password.encode()).digest()
+        hashlib.sha1(
+            nonce + created.encode() + password.encode(),
+            usedforsecurity=False,
+        ).digest()
     ).decode()
     nonce_b64 = base64.b64encode(nonce).decode()
     return (
