@@ -40,7 +40,7 @@ def test_detection_backoff_keeps_prebuffer_warm(tmp_path, monkeypatch):
             threads_started.append(name)
 
             class _Noop:
-                def start(self_inner):
+                def start(self):
                     return None
 
             return _Noop()

@@ -684,7 +684,7 @@ def test_lock_discipline_concurrent_updates_no_corruption(ch, main_module):
         try:
             for _ in range(50):
                 ch._update_camera_health('race-cam', value)
-        except BaseException as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             errors.append(exc)
 
     with ThreadPoolExecutor(max_workers=8) as pool:
@@ -713,7 +713,7 @@ def test_lock_discipline_concurrent_mark_no_key_error(ch, main_module):
             for _ in range(100):
                 ch._mark_camera_offline_notified('mark-cam')
                 ch._mark_camera_recovery_notified('mark-cam')
-        except BaseException as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             errors.append(exc)
 
     threads = [threading.Thread(target=run_marks) for _ in range(8)]

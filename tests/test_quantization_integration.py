@@ -17,6 +17,7 @@ them).
 """
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 
@@ -34,7 +35,7 @@ from onnx import TensorProto, helper  # noqa: E402
 
 import numpy as np  # noqa: E402
 
-import app.quantization as quantization  # noqa: E402
+quantization = importlib.import_module('app.quantization')  # noqa: E402
 from app.quantization import int8_cache_path, quantize_int8  # noqa: E402
 
 

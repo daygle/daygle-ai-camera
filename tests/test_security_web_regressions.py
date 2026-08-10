@@ -13,11 +13,10 @@ import shutil
 import sqlite3
 import subprocess
 import tempfile
-import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest import mock
+from unittest import TestCase, mock
 
 from app.auth import AuthService
 from app.middleware import _is_same_origin
@@ -46,7 +45,7 @@ def _hermetic_git_env():
 # H1 ---------------------------------------------------------------------
 
 
-class UpdateScriptOriginGuardTests(unittest.TestCase):
+class UpdateScriptOriginGuardTests(TestCase):
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix='daygle_test_origin_')
@@ -146,7 +145,7 @@ class UpdateScriptOriginGuardTests(unittest.TestCase):
 # H2 ---------------------------------------------------------------------
 
 
-class AuthServiceAbsoluteExpiryTests(unittest.TestCase):
+class AuthServiceAbsoluteExpiryTests(TestCase):
 
     PASSWORD = 'Hunter2hunter2!'
 
@@ -291,7 +290,7 @@ class AuthServiceAbsoluteExpiryTests(unittest.TestCase):
 # H3 ---------------------------------------------------------------------
 
 
-class ClearRuntimeMediaDirectorySymlinkTests(unittest.TestCase):
+class ClearRuntimeMediaDirectorySymlinkTests(TestCase):
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix='daygle_test_clear_')
@@ -390,7 +389,7 @@ def _request_for(url, headers=None):
     return SimpleNamespace(headers=hdr, url=url_obj)
 
 
-class IsSameOriginTests(unittest.TestCase):
+class IsSameOriginTests(TestCase):
 
     def test_match_origin_only(self):
         req = _request_for('https://app.example.com/api/foo', headers={'Origin': 'https://app.example.com'})
