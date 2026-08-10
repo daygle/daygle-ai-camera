@@ -64,7 +64,7 @@ if str(REPO_ROOT) not in sys.path:
 # ``import app.main as main`` returns the cached module rather than
 # triggering a recursive fresh-load chain.
 import app.main  # noqa: E402  -- must precede the import below  # lgtm[py/unused-import]
-import app.camera_config  # noqa: E402  # lgtm[py/unused-import]
+import app.camera_config as camera_config  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +88,7 @@ def current_camera_config():
     """Return the CURRENT ``app.camera_config`` module instance. See
     the ``main`` fixture above for the leak rationale.
     """
-    return sys.modules["app.camera_config"]
+    return camera_config
 
 
 @pytest.fixture
