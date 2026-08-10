@@ -46,7 +46,9 @@ function requireElements(ids) {
   const missing = ids.filter((id) => !document.getElementById(id));
   if (!missing.length) return;
   const pageTitle = String(document.title || document.URL || 'current page').trim() || 'current page';
-  console.error(`[${pageTitle}] missing required element ids:`, missing);
+  // pageTitle is derived from document.title (potentially page-controlled), so
+  // pass it as an argument rather than interpolating it into the format string.
+  console.error('[%s] missing required element ids:', pageTitle, missing);
   throw new Error('This page is missing required DOM elements; check the HTML for matching ids.');
 }
 

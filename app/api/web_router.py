@@ -112,7 +112,8 @@ def login_page(
         # honour their intended destination rather than dumping them at /.
         safe_return = _safe_return_to(return_to)
         # _safe_return_to permits only same-origin relative paths.
-        return RedirectResponse(safe_return or '/', status_code=303)  # lgtm[py/url-redirection]
+        # codeql[py/url-redirection]
+        return RedirectResponse(safe_return or '/', status_code=303)
     safe_return = _safe_return_to(return_to)
     error_html = f'<p class="error">{escape(error)}</p>' if error else ''
     return_field = (

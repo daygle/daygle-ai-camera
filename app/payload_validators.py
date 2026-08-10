@@ -360,7 +360,8 @@ def _resolve_within_data_envelope(value: str, *, key: str) -> str:
         raise HTTPException(status_code=400, detail=f'{key} cannot be blank.')
     # The resolved candidate is immediately constrained to the immutable
     # startup data envelope below; this is a deliberate, validated path input.
-    candidate = Path(stripped).expanduser().resolve()  # lgtm[py/path-injection]
+    # codeql[py/path-injection]
+    candidate = Path(stripped).expanduser().resolve()
     # Best-effort rejection: refuse paths that DO NOT resolve to a real or
     # creatable filesystem location under the envelope. Path.resolve() does
     # NOT require the path to exist, so this guard treats non-existent

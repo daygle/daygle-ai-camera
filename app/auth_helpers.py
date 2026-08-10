@@ -57,7 +57,8 @@ def auth_page(title: str, body: str) -> HTMLResponse:
     # ``body`` is assembled from fixed templates; callers escape any user
     # supplied error text before interpolating it. This is not an exception
     # detail renderer.
-    return HTMLResponse(  # lgtm[py/stack-trace-exposure]
+    # codeql[py/stack-trace-exposure]
+    return HTMLResponse(
         f'<!doctype html>\n'
         f'<html lang="en">{theme_script}<head><meta charset="utf-8" />'
         f'<meta name="viewport" content="width=device-width, initial-scale=1" />\n'

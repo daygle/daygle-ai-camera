@@ -51,7 +51,8 @@ def _wssec_header(username: str, password: str) -> str:
         # ONVIF UsernameToken PasswordDigest is specified as SHA-1 over
         # nonce + created + password; this is protocol interoperability, not
         # a general-purpose password hash. Keep the finding explicitly scoped.
-        hashlib.sha1(nonce + created.encode() + password.encode()).digest()  # lgtm[py/weak-cryptographic-algorithm]
+        # codeql[py/weak-sensitive-data-hashing]
+        hashlib.sha1(nonce + created.encode() + password.encode()).digest()
     ).decode()
     nonce_b64 = base64.b64encode(nonce).decode()
     return (

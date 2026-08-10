@@ -128,7 +128,8 @@ _motion_confirm_lock: threading.Lock = threading.Lock()
 # Read/written from app/detection_state.py and app/live_monitor.py via
 # ``_state._motion_confirm_streaks``; CodeQL's unused-global-variable query
 # does not track these cross-module attribute accesses.
-_motion_confirm_streaks: dict = {}  # lgtm[py/unused-global-variable]
+# codeql[py/unused-global-variable]
+_motion_confirm_streaks: dict = {}
 
 # ---------------------------------------------------------------------------
 # Active RTSP recordings
