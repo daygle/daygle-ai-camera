@@ -267,8 +267,273 @@ def confirm_motion_detections(
     ]
 
 
-def detect_frame_motion(camera_id: str, image: Any, *, pixel_threshold: float | None=None, gate_fraction: float | None=None, scale_fraction: float | None=None, background_alpha: float | None=None) -> tuple[bool, float, Any, float]:
-    """Adaptive-background motion gate. Returns (has_motion, confidence 0-1, diff_mask).
+def _mog2_available() -> bool:
+    """Return True when the installed OpenCV build exposes MOG2.
+
+    Cached on the module after the first probe. When False (a headless build
+    compiled without ``bgsegm``/video), ``detect_frame_motion`` transparently
+    falls back to the legacy adaptive-diff engine so motion never goes dark.
+    """
+    global _MOG2_AVAILABLE
+    if _MOG2_AVAILABLE is not None:
+        return _MOG2_AVAILABLE
+    try:
+        import cv2
+        _MOG2_AVAILABLE = hasattr(cv2, 'createBackgroundSubtractorMOG2')
+    except Exception:
+        _MOG2_AVAILABLE = False
+    return _MOG2_AVAILABLE
+
+
+_MOG2_AVAILABLE: bool | None = None
+# MOG2 varThreshold is expressed on the squared Mahalanobis distance; keep it in
+# a sane band so an out-of-range pixel threshold cannot make the model match
+# everything (too high) or nothing (too low).
+_MOG2_VAR_THRESHOLD_MIN = 4.0
+_MOG2_VAR_THRESHOLD_MAX = 255.0
+
+
+def _to_motion_thumbnail_bgr(image: Any) -> Any:
+    """Decode ``image`` (BGR numpy array or JPEG/PNG bytes) to a BGR thumbnail
+    at the configured motion-frame size, using area interpolation so thin
+    features survive the downscale. Colour is preserved (not converted to
+    grayscale) because MOG2 shadow detection needs the chroma channels."""
+    import cv2
+    import numpy as np
+    if hasattr(image, 'shape') and hasattr(image, 'dtype'):
+        frame = image
+        if frame.ndim == 2:  # grayscale array -> promote to BGR
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+    else:
+        from PIL import Image as _Image
+        pil = _Image.open(io.BytesIO(image)).convert('RGB')
+        frame = cv2.cvtColor(np.array(pil, dtype=np.uint8), cv2.COLOR_RGB2BGR)
+    return cv2.resize(
+        frame,
+        (_state._MOTION_FRAME_W, _state._MOTION_FRAME_H),
+        interpolation=cv2.INTER_AREA,
+    )
+
+
+def _denoise_mask(mask: Any) -> Any:
+    """Morphologically open then close a boolean foreground mask.
+
+    Opening (erode->dilate) deletes isolated speckle -- single-pixel sensor
+    noise and JPEG blocking that the raw subtractor flags as motion -- while
+    closing (dilate->erode) refills the small interior gaps opening leaves in a
+    real subject, so a genuine blob stays connected. Returns a boolean array of
+    the same shape."""
+    import cv2
+    import numpy as np
+    kernel = np.ones((3, 3), np.uint8)
+    m = mask.astype(np.uint8)
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, kernel)
+    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, kernel)
+    return m.astype(bool)
+
+
+def _detect_frame_motion_mog2(
+    camera_id: str,
+    image: Any,
+    *,
+    pixel_threshold: float,
+    gate_fraction: float,
+    scale_fraction: float,
+    background_alpha: float,
+    denoise: bool,
+    shadow_suppression: bool,
+) -> tuple[bool, float, Any, float]:
+    """MOG2 (Gaussian-mixture) background-subtraction motion gate.
+
+    Returns ``(has_motion, confidence, diff_mask, raw_fraction)`` with exactly
+    the same contract as the legacy engine, so every downstream consumer (zone
+    pixel fraction, zone motion box, the confirmation gate) is unchanged.
+
+    Key behaviours preserved from the legacy engine:
+
+    - **Freeze-on-motion.** The mask is computed with ``learningRate=0`` (no
+      model update); the model only learns the frame when the change is below
+      the gate. A subject that stops moving is therefore NOT absorbed into the
+      background within seconds -- the reported "motion recording stops after
+      the first second" failure the legacy freeze also guarded against.
+    - **Scene-reset guard.** A change of >=50% of the frame (exposure jump,
+      reconnect, IR cut) rebuilds the model against the new scene and reports no
+      motion, so a camera-wide transition cannot become a persistent 100%
+      recording.
+    - **Fail-closed.** Handled by the caller's ``except`` wrapper.
+
+    Improvements over the legacy engine: multi-modal backgrounds (swaying
+    foliage, flickering screens) are modelled instead of smeared into one mean,
+    gradual illumination drift is tracked, and cast shadows are rejected when
+    ``shadow_suppression`` is set."""
+    import cv2
+    import numpy as np
+
+    resized = _to_motion_thumbnail_bgr(image)
+    var_threshold = float(
+        max(_MOG2_VAR_THRESHOLD_MIN, min(_MOG2_VAR_THRESHOLD_MAX, pixel_threshold))
+    )
+    history = max(1, int(getattr(_state, '_MOTION_MOG2_HISTORY', 250)))
+    # The parameters baked into a subtractor; a live change to any of them (frame
+    # size, sensitivity, shadow toggle) must rebuild it rather than silently keep
+    # the stale model.
+    signature = (
+        int(_state._MOTION_FRAME_W),
+        int(_state._MOTION_FRAME_H),
+        round(var_threshold, 3),
+        bool(shadow_suppression),
+        history,
+    )
+
+    def _new_subtractor() -> Any:
+        subtractor = cv2.createBackgroundSubtractorMOG2(
+            history=history,
+            varThreshold=var_threshold,
+            detectShadows=bool(shadow_suppression),
+        )
+        # Seed the model with the current frame so the first real comparison has
+        # a background to diff against instead of flagging the whole frame.
+        subtractor.apply(resized, learningRate=1.0)
+        return subtractor
+
+    with _state._frame_motion_lock:
+        subtractor = _state._frame_motion_mog2.get(camera_id)
+        meta = _state._frame_motion_mog2_meta.get(camera_id)
+        if subtractor is None or meta != signature:
+            # First frame for this camera, or a tuning/size change: (re)build the
+            # model and report no motion for this seed frame (mirrors the legacy
+            # first-frame contract).
+            _state._frame_motion_mog2[camera_id] = _new_subtractor()
+            _state._frame_motion_mog2_meta[camera_id] = signature
+            _state._frame_motion_error_cameras.discard(camera_id)
+            return (False, 0.0, None, 0.0)
+
+        # Compute the foreground WITHOUT updating the model (freeze-on-motion).
+        raw = subtractor.apply(resized, learningRate=0.0)
+        # MOG2 marks foreground as 255 and (when detectShadows) shadow as 127.
+        # Dropping 127 rejects cast shadows; including it treats them as motion.
+        mask = raw == 255 if shadow_suppression else raw >= 127
+        if denoise:
+            mask = _denoise_mask(mask)
+        changed_fraction = float(np.mean(mask))
+
+        if changed_fraction >= 0.5:
+            # Camera-wide transition: rebuild against the new scene and suppress.
+            _state._frame_motion_mog2[camera_id] = _new_subtractor()
+            _state._frame_motion_mog2_meta[camera_id] = signature
+            _state._frame_motion_error_cameras.discard(camera_id)
+            logger.debug(
+                'Motion scene reset for camera %s: changed=%.4f; rebuilding MOG2 model',
+                camera_id, changed_fraction,
+            )
+            return (False, 0.0, None, 0.0)
+
+        # Only adapt when the scene is quiet, so a lingering subject is not
+        # learned into the background while it is still being reported.
+        if changed_fraction < gate_fraction:
+            subtractor.apply(resized, learningRate=background_alpha)
+        _state._frame_motion_error_cameras.discard(camera_id)
+
+    _now = time.monotonic()
+    _last = _motion_log_last_at.get(camera_id, 0.0)
+    if _now - _last >= _MOTION_LOG_INTERVAL:
+        _motion_log_last_at[camera_id] = _now
+        logger.debug(
+            'Motion gate %s (mog2): changed=%.4f gate=%.4f var=%.1f shadow=%s denoise=%s WxH=%dx%d',
+            camera_id, changed_fraction, gate_fraction, var_threshold,
+            shadow_suppression, denoise, _state._MOTION_FRAME_W, _state._MOTION_FRAME_H,
+        )
+
+    confidence = round(min(1.0, changed_fraction / max(scale_fraction, 1e-9)), 3)
+    if changed_fraction < gate_fraction:
+        return (False, 0.0, mask, round(changed_fraction, 6))
+    return (True, confidence, mask, round(changed_fraction, 6))
+
+
+def detect_frame_motion(
+    camera_id: str,
+    image: Any,
+    *,
+    pixel_threshold: float | None = None,
+    gate_fraction: float | None = None,
+    scale_fraction: float | None = None,
+    background_alpha: float | None = None,
+    algorithm: str | None = None,
+    denoise: bool | None = None,
+    shadow_suppression: bool | None = None,
+) -> tuple[bool, float, Any, float]:
+    """Per-camera motion gate. Returns ``(has_motion, confidence, diff_mask, raw_fraction)``.
+
+    Dispatches to the MOG2 (Gaussian-mixture) engine by default and to the
+    legacy adaptive-diff engine when ``algorithm='diff'`` or the OpenCV build
+    lacks MOG2. All tuning parameters default to the module-level ``_MOTION_*``
+    constants on :mod:`app.state`, resolved at call time (the same lazy-default
+    pattern the diff engine uses), so callers that pass explicit kwargs -- the
+    live monitor -- are unaffected.
+
+    ``diff_mask`` is a boolean ``(H×W)`` array of changed thumbnail pixels (or
+    ``None`` on the first frame / an error). Callers slice it for per-zone
+    scores. On any decode/processing error the gate fails closed -- a broken
+    frame is not evidence of motion and must not satisfy a motion rule."""
+    if pixel_threshold is None:
+        pixel_threshold = _state._MOTION_PIXEL_THRESHOLD
+    if gate_fraction is None:
+        gate_fraction = _state._MOTION_GATE_FRACTION
+    if scale_fraction is None:
+        scale_fraction = _state._MOTION_SCALE_FRACTION
+    if background_alpha is None:
+        background_alpha = _state._MOTION_BACKGROUND_ALPHA
+    if algorithm is None:
+        algorithm = getattr(_state, '_MOTION_ALGORITHM', 'mog2')
+    if denoise is None:
+        denoise = getattr(_state, '_MOTION_DENOISE', True)
+    if shadow_suppression is None:
+        shadow_suppression = getattr(_state, '_MOTION_SHADOW_SUPPRESSION', True)
+
+    use_mog2 = str(algorithm or 'mog2').strip().lower() != 'diff' and _mog2_available()
+    if use_mog2:
+        try:
+            return _detect_frame_motion_mog2(
+                camera_id,
+                image,
+                pixel_threshold=pixel_threshold,
+                gate_fraction=gate_fraction,
+                scale_fraction=scale_fraction,
+                background_alpha=background_alpha,
+                denoise=bool(denoise),
+                shadow_suppression=bool(shadow_suppression),
+            )
+        except _EXPECTED_MOTION_ERRORS as exc:
+            with _state._frame_motion_lock:
+                if camera_id not in _state._frame_motion_error_cameras:
+                    logger.warning(
+                        'MOG2 motion gate unavailable for camera %s: %s; suppressing motion until a valid frame is available',
+                        camera_id, exc,
+                    )
+                    _state._frame_motion_error_cameras.add(camera_id)
+            return (False, 0.0, None, 0.0)
+        except Exception:
+            with _state._frame_motion_lock:
+                if camera_id not in _state._frame_motion_error_cameras:
+                    logger.exception(
+                        'Unexpected MOG2 motion gate failure for camera %s; suppressing motion until a valid frame is available',
+                        camera_id,
+                    )
+                    _state._frame_motion_error_cameras.add(camera_id)
+            return (False, 0.0, None, 0.0)
+
+    return _detect_frame_motion_diff(
+        camera_id,
+        image,
+        pixel_threshold=pixel_threshold,
+        gate_fraction=gate_fraction,
+        scale_fraction=scale_fraction,
+        background_alpha=background_alpha,
+    )
+
+
+def _detect_frame_motion_diff(camera_id: str, image: Any, *, pixel_threshold: float | None=None, gate_fraction: float | None=None, scale_fraction: float | None=None, background_alpha: float | None=None) -> tuple[bool, float, Any, float]:
+    """Legacy single-frame adaptive-background motion gate. Returns (has_motion, confidence 0-1, diff_mask).
 
     ``image`` may be a BGR numpy array (from ``read_frame``) or JPEG bytes
     (legacy callers).  When a numpy array is provided the PIL decode is

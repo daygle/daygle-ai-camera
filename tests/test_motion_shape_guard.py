@@ -32,6 +32,11 @@ def _img(h: int, w: int) -> np.ndarray:
 
 
 def test_shape_mismatch_resets_instead_of_failing_open(monkeypatch):
+    """Legacy diff engine: a stale-sized background self-heals on the next frame.
+
+    Pinned to ``algorithm='diff'`` because this guard is an internal of the diff
+    engine (``_frame_motion_prev``); the MOG2 engine handles a size change via
+    its parameter signature, covered by the test below."""
     cam = "shape-guard-cam"
     _state._frame_motion_prev.pop(cam, None)
     _state._frame_motion_error_cameras.discard(cam)
@@ -39,7 +44,7 @@ def test_shape_mismatch_resets_instead_of_failing_open(monkeypatch):
     # Seed a background at 30x40 (HxW).
     monkeypatch.setattr(_state, "_MOTION_FRAME_W", 40)
     monkeypatch.setattr(_state, "_MOTION_FRAME_H", 30)
-    has_motion, conf, mask, _frac = detect_frame_motion(cam, _img(100, 120))
+    has_motion, conf, mask, _frac = detect_frame_motion(cam, _img(100, 120), algorithm='diff')
     assert has_motion is False and mask is None  # first frame seeds background
     assert _state._frame_motion_prev[cam].shape == (30, 40)
 
@@ -47,7 +52,7 @@ def test_shape_mismatch_resets_instead_of_failing_open(monkeypatch):
     # guard defends against. The next frame decodes to the NEW size.
     monkeypatch.setattr(_state, "_MOTION_FRAME_W", 60)
     monkeypatch.setattr(_state, "_MOTION_FRAME_H", 45)
-    has_motion, conf, mask, _frac = detect_frame_motion(cam, _img(100, 120))
+    has_motion, conf, mask, _frac = detect_frame_motion(cam, _img(100, 120), algorithm='diff')
 
     # Self-heal: reported as a fresh (no-motion) frame, background re-seeded at the
     # new size -- NOT the fail-open (True, 0.5) the except path would produce.
@@ -57,3 +62,31 @@ def test_shape_mismatch_resets_instead_of_failing_open(monkeypatch):
     assert cam not in _state._frame_motion_error_cameras
 
     _state._frame_motion_prev.pop(cam, None)
+
+
+def test_mog2_rebuilds_model_on_frame_size_change(monkeypatch):
+    """MOG2 engine: a live frame-size change rebuilds the per-camera model (via
+    its parameter signature) and reports the resized frame as a fresh no-motion
+    seed rather than raising on the mismatched mask shape."""
+    cam = "mog2-shape-cam"
+    _state._frame_motion_mog2.pop(cam, None)
+    _state._frame_motion_mog2_meta.pop(cam, None)
+    _state._frame_motion_error_cameras.discard(cam)
+
+    monkeypatch.setattr(_state, "_MOTION_FRAME_W", 40)
+    monkeypatch.setattr(_state, "_MOTION_FRAME_H", 30)
+    has_motion, conf, mask, _frac = detect_frame_motion(cam, _img(100, 120), algorithm='mog2')
+    assert has_motion is False and mask is None  # seed frame
+    assert _state._frame_motion_mog2_meta[cam][:2] == (40, 30)
+
+    # Grow the motion frame; the signature no longer matches so the model is
+    # rebuilt and this frame is a fresh seed (no motion, no error).
+    monkeypatch.setattr(_state, "_MOTION_FRAME_W", 60)
+    monkeypatch.setattr(_state, "_MOTION_FRAME_H", 45)
+    has_motion, conf, mask, _frac = detect_frame_motion(cam, _img(100, 120), algorithm='mog2')
+    assert has_motion is False and conf == 0.0 and mask is None
+    assert _state._frame_motion_mog2_meta[cam][:2] == (60, 45)
+    assert cam not in _state._frame_motion_error_cameras
+
+    _state._frame_motion_mog2.pop(cam, None)
+    _state._frame_motion_mog2_meta.pop(cam, None)

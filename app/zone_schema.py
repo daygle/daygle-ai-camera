@@ -144,6 +144,21 @@ _LABEL_GROUPS: dict[str, frozenset[str]] = {
 }
 
 
+def _optional_fraction(value: Any, low: float, high: float) -> float | None:
+    """Coerce ``value`` to a float clamped to ``[low, high]``, or ``None``.
+
+    ``None`` / ``''`` / non-numeric input all resolve to ``None`` ("inherit the
+    camera/global value") so an unset per-zone override never forces a value.
+    Used for the optional per-zone motion ``gate_fraction`` / ``scale_fraction``.
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    try:
+        return round(max(low, min(high, float(value))), 6)
+    except (TypeError, ValueError):
+        return None
+
+
 def canonical_label(value: Any) -> str:
     """Lowercase, strip, and apply ``_LABEL_ALIASES`` to a single label."""
     text = str(value or '').strip().lower()
@@ -260,12 +275,25 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
         except (TypeError, ValueError):
             max_confidence = 1.0
         max_confidence = max(min_confidence, min(1.0, max_confidence))
+        # Optional per-zone motion sensitivity overrides. When set on a motion
+        # rule they replace the camera/global gate + scale for THIS zone only, so
+        # a sensitive doorway and a noisy tree-line can coexist on one camera.
+        # ``None`` means "inherit". Clamped to the same ranges the global live
+        # settings enforce. Ignored for non-motion (object) rules.
+        gate_fraction = _optional_fraction(
+            rule.get('gate_fraction'), 0.0001, 0.5,
+        ) if label == 'motion' else None
+        scale_fraction = _optional_fraction(
+            rule.get('scale_fraction'), 0.001, 1.0,
+        ) if label == 'motion' else None
         rules.append({
             'label': label,
             'enabled': normalize_bool_setting(rule.get('enabled'), True),
             'record_on_detect': normalize_bool_setting(rule.get('record_on_detect'), True),
             'min_confidence': min_confidence,
             'max_confidence': max_confidence,
+            'gate_fraction': gate_fraction,
+            'scale_fraction': scale_fraction,
             'cooldown_seconds': max(0, cooldown_seconds),
             'email_enabled': normalize_bool_setting(rule.get('email_enabled'), False),
             'email_recipients': normalize_email_recipients(rule.get('email_recipients', [])),
@@ -324,6 +352,30 @@ def zone_motion_min_confidence(zone: dict[str, Any]) -> float:
             except (TypeError, ValueError):
                 return 0.45
     return 0.45
+
+
+def zone_motion_gate_fraction(zone: dict[str, Any]) -> float | None:
+    """Return the enabled motion rule's per-zone ``gate_fraction`` override, or
+    ``None`` when the zone inherits the camera/global gate."""
+    for rule in zone.get('object_rules', []):
+        if (
+            str(rule.get('label') or '').strip().lower() == 'motion'
+            and rule.get('enabled', True)
+        ):
+            return _optional_fraction(rule.get('gate_fraction'), 0.0001, 0.5)
+    return None
+
+
+def zone_motion_scale_fraction(zone: dict[str, Any]) -> float | None:
+    """Return the enabled motion rule's per-zone ``scale_fraction`` override, or
+    ``None`` when the zone inherits the camera/global scale."""
+    for rule in zone.get('object_rules', []):
+        if (
+            str(rule.get('label') or '').strip().lower() == 'motion'
+            and rule.get('enabled', True)
+        ):
+            return _optional_fraction(rule.get('scale_fraction'), 0.001, 1.0)
+    return None
 
 
 def zone_motion_max_confidence(zone: dict[str, Any]) -> float:
@@ -392,6 +444,8 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
                 'record_on_detect': True,
                 'min_confidence': 0.45,
                 'max_confidence': 1.0,
+                'gate_fraction': None,
+                'scale_fraction': None,
                 'cooldown_seconds': 60,
                 'email_enabled': False,
                 'email_recipients': [],

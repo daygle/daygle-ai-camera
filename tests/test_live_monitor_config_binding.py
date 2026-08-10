@@ -129,6 +129,58 @@ class _ExplodingDetector:
         raise AssertionError('ONNX inference must not run when AI is disabled')
 
 
+class _RecordingDetector:
+    """Records how many times inference ran (returns no detections)."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def detect_frame(self, image, confidence=None):
+        self.calls += 1
+        return []
+
+    def detect_image(self, image_bytes, confidence=None):
+        self.calls += 1
+        return []
+
+
+def test_always_run_object_detection_bypasses_motion_gate(monkeypatch):
+    """With ``always_run_object_detection`` on, YOLO runs even when the motion
+    gate reports NO motion and no motion zone fires -- the decoupled A-class
+    setup. With it off (default) the same no-motion frame skips inference."""
+    import numpy as np
+    det = _RecordingDetector()
+    monkeypatch.setattr(live_monitor, 'effective_ai_config', lambda: {})
+    monkeypatch.setattr(
+        live_monitor, 'ai_status_payload',
+        lambda: {'detector_loaded': True, 'last_detector_error': None,
+                 'configured_backend': 'onnx', 'active_backend': 'onnx'},
+    )
+    monkeypatch.setattr(live_monitor, 'detect_frame_motion',
+                        lambda cid, image, **kw: (False, 0.0, None, 0.0))
+    monkeypatch.setattr(live_monitor, 'zone_motion_detections',
+                        lambda settings, conf, **kw: [])
+    monkeypatch.setattr(live_monitor, 'update_live_detection_status',
+                        lambda camera_id, **kwargs: None)
+    monkeypatch.setattr(_state, 'detector', det)
+
+    img = np.zeros((10, 10, 3), dtype=np.uint8)
+    frame = {'timestamp': time.time(), 'width': 10, 'height': 10}
+    cam = {'id': 'cam-1', 'detection': {'zones': []}}
+
+    # Toggle OFF: no motion -> inference skipped.
+    monkeypatch.setattr(live_monitor, 'effective_live_config',
+                        lambda: {'detection_interval_seconds': 0.5, 'always_run_object_detection': False})
+    live_monitor.process_live_stream_alerts(img, frame, cam, enforce_interval=False)
+    assert det.calls == 0
+
+    # Toggle ON: no motion -> inference STILL runs.
+    monkeypatch.setattr(live_monitor, 'effective_live_config',
+                        lambda: {'detection_interval_seconds': 0.5, 'always_run_object_detection': True})
+    live_monitor.process_live_stream_alerts(img, frame, cam, enforce_interval=False)
+    assert det.calls == 1
+
+
 def test_process_live_stream_alerts_gates_on_ai_disabled(monkeypatch):
     """The master AI toggle (``ai.enabled=False``) short-circuits
     ``process_live_stream_alerts`` before any motion or ONNX inference work:
@@ -160,9 +212,14 @@ def test_process_live_stream_alerts_gates_on_ai_disabled(monkeypatch):
 def test_process_live_stream_alerts_proceeds_when_ai_enabled(monkeypatch):
     """With ``ai.enabled`` unset (default True), the gate does NOT fire --
     the function proceeds into the normal pipeline (motion detection path).
-    The status must not be marked as disabled."""
+    The status must not be marked as disabled. Pinned to the CPU-saving motion
+    gate (``always_run_object_detection=False``) because this test exercises the
+    no-motion-skip branch specifically; the always-on path is covered by
+    ``test_always_run_object_detection_bypasses_motion_gate``."""
     recorded: list[tuple[str, dict]] = []
     monkeypatch.setattr(live_monitor, 'effective_ai_config', lambda: {})
+    monkeypatch.setattr(live_monitor, 'effective_live_config',
+                        lambda: {'detection_interval_seconds': 0.5, 'always_run_object_detection': False})
     monkeypatch.setattr(
         live_monitor,
         'update_live_detection_status',
@@ -231,6 +288,10 @@ def test_motion_status_exposes_sub_gate_signal_for_live_bar(monkeypatch):
             'motion_scale_fraction': 0.03,
             'motion_background_alpha': 0.05,
             'periodic_scan_interval_seconds': 0,
+            # This test asserts the pre-inference motion telemetry on a sub-gate
+            # frame; keep it on the motion-gate path so it doesn't fall through
+            # to object inference.
+            'always_run_object_detection': False,
         },
     )
     monkeypatch.setattr(
@@ -253,3 +314,52 @@ def test_motion_status_exposes_sub_gate_signal_for_live_bar(monkeypatch):
     assert recorded[0]['motion_confidence'] == 0.0
     assert recorded[0]['motion_fraction'] == 0.003
     assert recorded[0]['motion_signal'] == 0.1
+
+
+def test_motion_frame_size_clamped_to_validated_bounds(monkeypatch):
+    """An oversized motion_frame_width/height (e.g. from an unvalidated
+    config.yaml ``live`` block) must be clamped to the same 40-640 x 30-480
+    range validate_live_settings enforces, so the hot path never allocates a
+    runaway motion thumbnail."""
+    monkeypatch.setattr(live_monitor, 'effective_ai_config', lambda: {})
+    monkeypatch.setattr(
+        live_monitor,
+        'ai_status_payload',
+        lambda: {
+            'detector_loaded': True,
+            'last_detector_error': None,
+            'configured_backend': 'onnx',
+            'active_backend': 'onnx',
+        },
+    )
+    monkeypatch.setattr(
+        live_monitor,
+        'effective_live_config',
+        lambda: {
+            'detection_interval_seconds': 0.5,
+            'motion_frame_width': 99999,   # absurd oversize
+            'motion_frame_height': 99999,
+        },
+    )
+    # Motion returns no activity so the flow bails right after the frame-size
+    # binding block -- we only care about the clamp side effect here.
+    monkeypatch.setattr(live_monitor, 'detect_frame_motion',
+                        lambda cid, image, **kw: (False, 0.0, None, 0.0))
+    monkeypatch.setattr(live_monitor, 'zone_motion_detections',
+                        lambda settings, conf, **kw: [])
+    monkeypatch.setattr(live_monitor, 'update_live_detection_status',
+                        lambda camera_id, **kwargs: None)
+    monkeypatch.setattr(_state, '_MOTION_FRAME_W', 320)
+    monkeypatch.setattr(_state, '_MOTION_FRAME_H', 240)
+    monkeypatch.setattr(_state, '_frame_motion_prev', {})
+    monkeypatch.setattr(_state, '_periodic_scan_last_ts', {})
+
+    live_monitor.process_live_stream_alerts(
+        b'jpeg-bytes',
+        {'timestamp': time.time(), 'width': 10, 'height': 10},
+        {'id': 'cam-1'},
+        enforce_interval=False,
+    )
+
+    assert _state._MOTION_FRAME_W == 640
+    assert _state._MOTION_FRAME_H == 480

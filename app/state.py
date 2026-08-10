@@ -29,6 +29,22 @@ _MOTION_PIXEL_THRESHOLD: int = 30
 _MOTION_GATE_FRACTION: float = 0.005
 _MOTION_SCALE_FRACTION: float = 0.03
 _MOTION_BACKGROUND_ALPHA: float = 0.05
+# Motion background engine. ``mog2`` is the default OpenCV Gaussian-mixture
+# background subtractor (handles gradual light changes, swaying foliage, and
+# shadow rejection); ``diff`` selects the legacy single-frame adaptive-diff
+# fallback (also used automatically when the OpenCV build lacks MOG2).
+_MOTION_ALGORITHM: str = 'mog2'
+# Morphological open+close on the foreground mask to erase isolated sensor
+# noise (a major false-positive source on IR/night cameras) and consolidate
+# motion into coherent blobs.
+_MOTION_DENOISE: bool = True
+# MOG2 shadow rejection: cast shadows are classified separately and dropped so
+# a moving shadow does not register as motion. Disable on very dark / IR scenes
+# where genuine subjects can be misread as shadow.
+_MOTION_SHADOW_SUPPRESSION: bool = True
+# MOG2 history length (number of recent frames the mixture model blends). Not
+# operator-exposed; the per-frame learning rate is driven by background_alpha.
+_MOTION_MOG2_HISTORY: int = 250
 
 # Middleware / auth constants (moved from app.main so app.middleware can
 # import them at module top-level without a circular import).
@@ -121,6 +137,13 @@ _frame_motion_last_frame: dict = {}
 # movement (tree leaves, wires, distant limbs) lost by thumbnail resizing.
 _frame_motion_last_gray: dict = {}
 _frame_motion_error_cameras: set = set()
+# Per-camera OpenCV MOG2 background subtractor + the geometry/params it was
+# built with (so a live frame-size or threshold change rebuilds it). Populated
+# and mutated only under ``_frame_motion_lock`` from app/detection_state.py.
+# codeql[py/unused-global-variable]
+_frame_motion_mog2: dict = {}
+# codeql[py/unused-global-variable]
+_frame_motion_mog2_meta: dict = {}
 # Consecutive per-zone motion evidence used by the live alert monitor. A zone
 # must be present in two analyzed frames before motion can create an event or
 # recording, which filters one-frame stream/exposure artifacts.

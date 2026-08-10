@@ -53,14 +53,20 @@
             <span>Event Merge Window (s) <span class="info-tip" data-tip="Merges detections within this window into one event. Per-object cooldowns on the Zones page override this. Default: 10s" title="Merges detections within this window into one event. Per-object cooldowns on the Zones page override this. Default: 10s" tabindex="0" aria-label="Help: Merges detections within this window into one event. Per-object cooldowns on the..."></span></span>
             <input name="event_debounce_seconds" type="number" min="0" max="300" step="1" placeholder="10" /></label>
           <label>
-            <span>Confirm Frames <span class="info-tip" data-tip="Require an object to be seen in this many recent detection cycles before it can alert or record. 1 = off (react on the first frame). Raise to 2-3 to suppress single-frame false positives. Default: 1" title="Require an object to be seen in this many recent detection cycles before it can alert or record. 1 = off (react on the first frame). Raise to 2-3 to suppress single-frame false positives. Default: 1" tabindex="0" aria-label="Help: Require an object to be seen in this many recent detection cycles before it can alert or record. 1 = off. Default: 1"></span></span>
-            <input name="detection_confirm_frames" type="number" min="1" max="10" step="1" placeholder="1" /></label>
+            <span>Confirm Frames <span class="info-tip" data-tip="Require an object to be seen in this many recent detection cycles before it can alert or record. 1 = off (react on the first frame). 2-3 suppresses single-frame false positives (recommended with Always Run Object Detection). Default: 2" title="Require an object to be seen in this many recent detection cycles before it can alert or record. 1 = off (react on the first frame). 2-3 suppresses single-frame false positives (recommended with Always Run Object Detection). Default: 2" tabindex="0" aria-label="Help: Require an object to be seen in this many recent detection cycles before it can alert or record. 1 = off. Default: 2"></span></span>
+            <input name="detection_confirm_frames" type="number" min="1" max="10" step="1" placeholder="2" /></label>
           <label>
             <span>Confirm Window <span class="info-tip" data-tip="How many recent detection cycles the Confirm Frames count looks back over (the M in 'N of the last M'). Only applies when Confirm Frames is above 1. Default: 3" title="How many recent detection cycles the Confirm Frames count looks back over (the M in 'N of the last M'). Only applies when Confirm Frames is above 1. Default: 3" tabindex="0" aria-label="Help: How many recent detection cycles the Confirm Frames count looks back over. Default: 3"></span></span>
             <input name="detection_confirm_window" type="number" min="1" max="30" step="1" placeholder="3" /></label>
           <label>
             <span>Background Detection <span class="info-tip" data-tip="Keep running detection (alerts, recordings, and snapshots) even when no Live Cameras page is open. Default: Enabled" title="Keep running detection (alerts, recordings, and snapshots) even when no Live Cameras page is open. Default: Enabled" tabindex="0" aria-label="Help: Keep running detection (alerts, recordings, and snapshots) even when no Live Cameras page is open. Default: Enabled"></span></span>
             <select name="background_detection_enabled">
+              <option value="true">Enabled</option>
+              <option value="false">Disabled</option>
+            </select></label>
+          <label>
+            <span>Always Run Object Detection <span class="info-tip" data-tip="Run YOLO object detection on every cycle regardless of motion. Maximum recall - a still, slow, or low-contrast subject is never hidden from the detector. Disable to restore the CPU-saving motion gate (object detection only when motion fires) on low-power hardware. Pair with Confirm Frames = 2 to suppress false positives. Motion detection still runs independently. Default: Enabled" title="Run YOLO object detection on every cycle regardless of motion. Maximum recall. Disable to restore the CPU-saving motion gate. Pair with Confirm Frames = 2. Default: Enabled" tabindex="0" aria-label="Help: Run object detection every cycle regardless of motion. Maximum recall. Disable for the CPU-saving motion gate. Default: Enabled"></span></span>
+            <select name="always_run_object_detection">
               <option value="true">Enabled</option>
               <option value="false">Disabled</option>
             </select></label>
@@ -78,6 +84,24 @@
           <summary>Advanced Motion Tuning</summary>
           <p class="settings-advanced-hint">Low-level motion-detector internals - the defaults suit most cameras. Changing Motion Frame Width or Height resets every camera's background model.</p>
           <div class="form-grid">
+            <label>
+              <span>Motion Engine <span class="info-tip" data-tip="MOG2 (recommended) is an adaptive Gaussian-mixture background model that handles gradual light changes, swaying foliage, and cast shadows. Diff is the legacy single-frame background model. Default: MOG2" title="MOG2 (recommended) is an adaptive Gaussian-mixture background model that handles gradual light changes, swaying foliage, and cast shadows. Diff is the legacy single-frame background model. Default: MOG2" tabindex="0" aria-label="Help: Motion background engine. MOG2 (recommended) handles gradual light changes, foliage, and shadows. Default: MOG2"></span></span>
+              <select name="motion_algorithm">
+                <option value="mog2">MOG2 (recommended)</option>
+                <option value="diff">Diff (legacy)</option>
+              </select></label>
+            <label>
+              <span>Denoise <span class="info-tip" data-tip="Morphologically clean the motion mask to erase single-pixel sensor noise (a common false-positive source on IR/night cameras) and consolidate motion into solid regions. Default: Enabled" title="Morphologically clean the motion mask to erase single-pixel sensor noise (a common false-positive source on IR/night cameras) and consolidate motion into solid regions. Default: Enabled" tabindex="0" aria-label="Help: Clean the motion mask to erase single-pixel sensor noise. Default: Enabled"></span></span>
+              <select name="motion_denoise">
+                <option value="true">Enabled</option>
+                <option value="false">Disabled</option>
+              </select></label>
+            <label>
+              <span>Shadow Suppression <span class="info-tip" data-tip="Reject cast shadows (MOG2 only) so a moving shadow does not register as motion. Disable on very dark or IR scenes where genuine subjects can be misread as shadow. Default: Enabled" title="Reject cast shadows (MOG2 only) so a moving shadow does not register as motion. Disable on very dark or IR scenes where genuine subjects can be misread as shadow. Default: Enabled" tabindex="0" aria-label="Help: Reject cast shadows so a moving shadow does not register as motion (MOG2 only). Default: Enabled"></span></span>
+              <select name="motion_shadow_suppression">
+                <option value="true">Enabled</option>
+                <option value="false">Disabled</option>
+              </select></label>
             <label>
               <span>Periodic Scan Interval (s) <span class="info-tip" data-tip="Run a full YOLO scan this often even when no pixel motion is detected. Catches stationary subjects that have settled into the background. 0 = disabled. Default: 0" title="Run a full YOLO scan this often even when no pixel motion is detected. Catches stationary subjects that have settled into the background. 0 = disabled. Default: 0" tabindex="0" aria-label="Help: Run a full YOLO scan this often even when no pixel motion is detected. Catches s..."></span></span>
               <input name="periodic_scan_interval_seconds" type="number" min="0" max="3600" step="1" placeholder="0" /></label>

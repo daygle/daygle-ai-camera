@@ -137,6 +137,36 @@ def _int_field(payload: dict[str, Any], field: str, default: int, minimum: int, 
     return value
 
 
+# Per-camera motion override bounds. These MUST match the ranges enforced by
+# ``validate_live_settings`` for the corresponding global settings so a
+# per-camera override can never push the motion gate outside the range the
+# global slider (and the runtime) treat as valid. Clamping (rather than
+# rejecting) mirrors how the per-camera pixel threshold is handled and keeps a
+# scripted/out-of-range API write from destabilising the detector -- e.g. a
+# ``motion_background_alpha`` above 1.0 makes the background update
+# ``(1-alpha)*bg + alpha*current`` an unstable extrapolation instead of a
+# convex blend.
+_CAMERA_MOTION_FRACTION_BOUNDS: dict[str, tuple[float, float]] = {
+    'motion_gate_fraction': (0.0001, 0.5),
+    'motion_scale_fraction': (0.001, 1.0),
+    'motion_background_alpha': (0.001, 0.5),
+}
+
+
+def _coerce_camera_motion_override(flat_key: str, value: Any) -> int | float:
+    """Coerce and clamp one per-camera motion override to its validated range.
+
+    ``motion_pixel_threshold`` is an int in ``[1, 255]``; the fraction/alpha
+    keys are floats clamped to :data:`_CAMERA_MOTION_FRACTION_BOUNDS` and
+    rounded to 6 dp. Raises ``TypeError``/``ValueError`` on malformed input so
+    callers keep their existing "ignore malformed override" behaviour.
+    """
+    if flat_key == 'motion_pixel_threshold':
+        return max(1, min(255, int(value)))
+    low, high = _CAMERA_MOTION_FRACTION_BOUNDS[flat_key]
+    return round(max(low, min(high, float(value))), 6)
+
+
 def validate_alert_email_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_email_alert_settings()
     allowed = {'enabled', 'host', 'port', 'username', 'password', 'from_address', 'use_tls', 'use_ssl'}
@@ -273,20 +303,14 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
             if _v is None:
                 continue  # cleared - omit from updated
             try:
-                if _flat_key == 'motion_pixel_threshold':
-                    updated[_flat_key] = max(1, min(255, int(_v)))
-                else:
-                    updated[_flat_key] = round(float(_v), 6)
+                updated[_flat_key] = _coerce_camera_motion_override(_flat_key, _v)
             except (TypeError, ValueError):
                 pass  # Ignore malformed explicit motion overrides.
         elif _payload_motion_nest.get(_short_key) is not None:
             # Legacy nested dict in payload
             _v = _payload_motion_nest[_short_key]
             try:
-                if _flat_key == 'motion_pixel_threshold':
-                    updated[_flat_key] = max(1, min(255, int(_v)))
-                else:
-                    updated[_flat_key] = round(float(_v), 6)
+                updated[_flat_key] = _coerce_camera_motion_override(_flat_key, _v)
             except (TypeError, ValueError):
                 pass  # Ignore malformed legacy motion overrides.
         elif not _flat_in_payload:
@@ -294,10 +318,7 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
             _cur_v = current.get(_flat_key) if current.get(_flat_key) is not None else _cur_motion_nest.get(_short_key)
             if _cur_v is not None:
                 try:
-                    if _flat_key == 'motion_pixel_threshold':
-                        updated[_flat_key] = max(1, min(255, int(_cur_v)))
-                    else:
-                        updated[_flat_key] = round(float(_cur_v), 6)
+                    updated[_flat_key] = _coerce_camera_motion_override(_flat_key, _cur_v)
                 except (TypeError, ValueError):
                     pass  # Preserve the stored value when it is malformed.
     return updated
@@ -449,6 +470,7 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
     snapshot_refresh_ms = _int_field(merged, 'snapshot_refresh_ms', 500, 150, 5000)
     detection_status_refresh_ms = _int_field(merged, 'detection_status_refresh_ms', 2000, 100, 15000)
     background_detection_enabled = normalize_bool_setting(merged.get('background_detection_enabled'), True)
+    always_run_object_detection = normalize_bool_setting(merged.get('always_run_object_detection'), True)
     try:
         detection_interval_seconds = float(merged.get('detection_interval_seconds', 0.5))
     except (TypeError, ValueError) as exc:
@@ -487,7 +509,7 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if not 0.001 <= motion_background_alpha <= 0.5:
         raise HTTPException(status_code=400, detail='motion_background_alpha must be between 0.001 and 0.5.')
     periodic_scan_interval_seconds = _int_field(merged, 'periodic_scan_interval_seconds', 0, 0, 3600)
-    detection_confirm_frames = _int_field(merged, 'detection_confirm_frames', 1, 1, 10)
+    detection_confirm_frames = _int_field(merged, 'detection_confirm_frames', 2, 1, 10)
     detection_confirm_window = _int_field(merged, 'detection_confirm_window', 3, 1, 30)
     # A window smaller than the requirement can never confirm; clamp it up so
     # "N of the last M" is always satisfiable rather than silently blocking
@@ -498,4 +520,11 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
     motion_frame_height = _int_field(merged, 'motion_frame_height', 240, 30, 480)
     ingest_frame_fps = _int_field(merged, 'ingest_frame_fps', 4, 1, 30)
     snapshot_quality = _int_field(merged, 'snapshot_quality', 2, 2, 31)
-    return {'snapshot_refresh_ms': snapshot_refresh_ms, 'detection_status_refresh_ms': detection_status_refresh_ms, 'detection_interval_seconds': detection_interval_seconds, 'event_debounce_seconds': event_debounce_seconds, 'background_detection_enabled': background_detection_enabled, 'detection_history_minutes': detection_history_minutes, 'motion_pixel_threshold': motion_pixel_threshold, 'motion_gate_fraction': round(motion_gate_fraction, 6), 'motion_scale_fraction': round(motion_scale_fraction, 4), 'motion_background_alpha': round(motion_background_alpha, 4), 'motion_frame_width': motion_frame_width, 'motion_frame_height': motion_frame_height, 'ingest_frame_fps': ingest_frame_fps, 'snapshot_quality': snapshot_quality, 'periodic_scan_interval_seconds': periodic_scan_interval_seconds, 'detection_confirm_frames': detection_confirm_frames, 'detection_confirm_window': detection_confirm_window}
+    # Background engine selector: unknown values normalise to 'mog2' (the
+    # default) so a stale/misspelled config can't disable motion.
+    motion_algorithm = str(merged.get('motion_algorithm', 'mog2') or 'mog2').strip().lower()
+    if motion_algorithm not in {'mog2', 'diff'}:
+        motion_algorithm = 'mog2'
+    motion_denoise = normalize_bool_setting(merged.get('motion_denoise'), True)
+    motion_shadow_suppression = normalize_bool_setting(merged.get('motion_shadow_suppression'), True)
+    return {'snapshot_refresh_ms': snapshot_refresh_ms, 'detection_status_refresh_ms': detection_status_refresh_ms, 'detection_interval_seconds': detection_interval_seconds, 'event_debounce_seconds': event_debounce_seconds, 'background_detection_enabled': background_detection_enabled, 'always_run_object_detection': always_run_object_detection, 'detection_history_minutes': detection_history_minutes, 'motion_algorithm': motion_algorithm, 'motion_denoise': motion_denoise, 'motion_shadow_suppression': motion_shadow_suppression, 'motion_pixel_threshold': motion_pixel_threshold, 'motion_gate_fraction': round(motion_gate_fraction, 6), 'motion_scale_fraction': round(motion_scale_fraction, 4), 'motion_background_alpha': round(motion_background_alpha, 4), 'motion_frame_width': motion_frame_width, 'motion_frame_height': motion_frame_height, 'ingest_frame_fps': ingest_frame_fps, 'snapshot_quality': snapshot_quality, 'periodic_scan_interval_seconds': periodic_scan_interval_seconds, 'detection_confirm_frames': detection_confirm_frames, 'detection_confirm_window': detection_confirm_window}

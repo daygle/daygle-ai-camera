@@ -8,9 +8,13 @@ This guide explains how Daygle AI Camera detects motion and objects, what each s
 
 Every frame from every camera passes through three layers in order. Each layer builds on the previous one.
 
-### Layer 1 - Pixel-diff motion gate
+### Layer 1 - Background-subtraction motion gate
 
-This runs on every single frame and is deliberately cheap. It shrinks the image to a small thumbnail (320×240 pixels), converts it to greyscale, and compares it to a learned background model of what the camera normally sees.
+This runs on every single frame and is deliberately cheap. It shrinks the image to a small thumbnail (320×240 pixels) and compares it to a learned background model of what the camera normally sees.
+
+**Motion Engine.** The default engine is **MOG2** - an adaptive Gaussian-mixture background model (OpenCV `BackgroundSubtractorMOG2`). Unlike a single averaged background, it models each pixel as a mixture of recent states, so it tolerates gradual light changes, swaying foliage, and flickering screens far better, and it can classify **cast shadows** separately so a moving shadow does not register as motion. A legacy single-frame **Diff** engine remains selectable (and is used automatically if your OpenCV build lacks MOG2).
+
+**Denoise.** After the background comparison, the raw changed-pixel mask is morphologically cleaned (open then close) to erase isolated single-pixel sensor noise - a major false-positive source on IR/night cameras - and to consolidate real motion into solid blobs. This is on by default and can be disabled per install.
 
 If enough pixels have changed enough, it declares motion and passes the frame on. If nothing significant changed at the whole-frame level, YOLO is not run from this gate alone - but per-zone motion rules (Layer 3) are still scored from the diff mask first, so motion confined to a small monitored zone can fire that zone's rule without ever opening the frame-wide gate.
 
@@ -32,17 +36,31 @@ These results are then matched against your zone rules. If a zone covers the are
 
 This is an optional alert that fires from Layer 1's pixel-diff result, without caring what YOLO found.
 
-You configure it on the **Zones** page: each area has its own **Motion detection** card with a single toggle. Flip it on and the motion rule is created with sensible defaults; use the **Sensitivity** field to set the minimum confidence, and the **Advanced** expander for cooldown, email/push, and time windows. When a zone's pixel-diff confidence reaches the sensitivity threshold, the alert fires immediately - even before YOLO has identified any specific object. The system normally computes this confidence from the changed pixels inside the zone's own rectangle, so motion elsewhere in the camera view does not raise this zone's score.
+You configure it on the **Zones** page: each area has its own **Motion detection** card with a single toggle. Flip it on and the motion rule is created with sensible defaults; use the **Sensitivity** field to set the minimum confidence, and the **Advanced** expander for cooldown, email/push, time windows, and the per-zone **Gate override** / **Scale override**. When a zone's pixel-diff confidence reaches the sensitivity threshold, the alert fires immediately - even before YOLO has identified any specific object. The system normally computes this confidence from the changed pixels inside the zone's own rectangle, so motion elsewhere in the camera view does not raise this zone's score.
+
+**Per-zone sensitivity.** The **Gate override** and **Scale override** fields (under a motion card's **Advanced** expander) let one zone use a different pixel-diff sensitivity than the rest of the camera. Leave them blank to inherit the camera/global values. This is what lets a sensitive doorway (low gate) and a noisy tree-line (high gate) coexist on a single camera - the whole-camera **Motion Gate Fraction** / **Motion Scale Fraction** no longer have to be a compromise. The live hint under the Sensitivity slider shows the resulting "approx. X% of this zone's pixels must change", and marks the zone as a *per-zone override* when either field is set.
 
 Use this when you want to be notified any time *anything* moves in an area, regardless of what it is.
 
 ---
 
+## Recommended setup for maximum reliability
+
+Out of the box, Daygle runs object detection on **every** cycle, decoupled from motion (the [Always Run Object Detection](#always-run-object-detection) default) - the configuration that gives the most reliable object recall. This is worth understanding because it shapes how the layers interact:
+
+1. **[Always Run Object Detection](#always-run-object-detection) is on by default.** YOLO runs every cycle regardless of motion, so an object is never hidden from the detector because the pixel-diff was quiet. This eliminates the "person stands still and disappears" gap, the slow/distant-subject gap, and the first-frames-after-reconnect gap. With it on, the **Periodic Scan** setting below is redundant (leave it at `0`).
+2. **Pair it with [Confirm Frames](#confirm-frames--confirm-window) = `2`** (Confirm Window `3`) to suppress the occasional one-frame false positive that running YOLO on every static-scene frame can produce, while keeping latency low.
+3. **MOG2 motion keeps running** as an independent signal for motion-only zones and "any movement" alerts - it is simply no longer *gating* the object detector.
+
+**On low-power hardware** (a Raspberry Pi or similar) that cannot run YOLO continuously, **disable Always Run Object Detection** to restore the CPU-saving motion gate: object detection then runs only when Layer 1 detects motion or a periodic scan is due. On that path, the trade is a small amount of recall (a subject that does not trip the motion gate - standing still, slow, distant, or low-contrast at night - can be missed) for a large CPU saving, and the **Periodic Scan** setting becomes the mitigation for stationary subjects.
+
+---
+
 ## The background model
 
-Layer 1 compares each frame against a learned background - a model of what the camera sees when nothing is happening. The background slowly adapts over time using an exponential moving average, controlled by **Motion Background Alpha**.
+Layer 1 compares each frame against a learned background - a model of what the camera sees when nothing is happening. With the default **MOG2** engine each pixel is modelled as a mixture of Gaussians; with the legacy **Diff** engine it is a single exponential moving average. Either way, the adaptation speed is controlled by **Motion Background Alpha**.
 
-**Important behaviour:** The background only updates when *no motion is detected*. This means:
+**Important behaviour:** The background only updates when *no motion is detected* (the model is frozen while motion is above the gate). This means:
 
 - A person actively moving in frame keeps the background frozen. They stay visible indefinitely.
 - Once a person stands completely still, the pixel diff drops to zero, the gate closes, and the background slowly starts adapting toward the new scene (including the stationary person).
@@ -71,9 +89,33 @@ This solves the standing-still problem: even if a person has been absorbed into 
 
 ## Settings reference
 
-All of these live under **Settings → Detection & Live → Live Performance**. The **Periodic Scan Interval** and the low-level motion tuning values (**Motion Pixel Threshold**, **Motion Gate Fraction**, **Motion Scale Fraction**, **Motion Background Alpha**, **Motion Frame Width**, and **Motion Frame Height**) are grouped under the **Advanced Motion Tuning** disclosure on that card.
+All of these live under **Settings → Detection & Live → Live Performance**. The **Motion Engine**, **Denoise**, **Shadow Suppression**, **Periodic Scan Interval**, and the low-level motion tuning values (**Motion Pixel Threshold**, **Motion Gate Fraction**, **Motion Scale Fraction**, **Motion Background Alpha**, **Motion Frame Width**, and **Motion Frame Height**) are grouped under the **Advanced Motion Tuning** disclosure on that card.
 
 These are global defaults. You can override the four motion gate tuning values - **Motion Pixel Threshold**, **Motion Gate Fraction**, **Motion Scale Fraction**, and **Motion Background Alpha** - for an individual camera from **Cameras → Edit Camera → Advanced → Motion Detection Overrides**. Blank override fields use the global Live Performance value.
+
+### Motion Engine
+
+Selects the background-subtraction algorithm. **MOG2** (default, recommended) is an adaptive Gaussian-mixture model that handles gradual light changes, swaying foliage, and cast shadows. **Diff** is the legacy single-frame adaptive-background model; it is also used automatically when the OpenCV build lacks MOG2.
+
+Default: `MOG2`
+
+### Denoise
+
+Morphologically cleans the changed-pixel mask (open then close) to remove isolated single-pixel sensor noise and consolidate motion into solid regions. Leave enabled unless you are deliberately trying to catch sub-pixel-scale changes.
+
+Default: `Enabled`
+
+### Shadow Suppression
+
+Rejects MOG2-classified cast shadows so a moving shadow does not register as motion. **MOG2 only** (has no effect with the Diff engine). Disable on very dark or IR scenes where a genuine subject can be misread as a shadow and dropped.
+
+Default: `Enabled`
+
+### Always Run Object Detection
+
+When enabled (the default), YOLO object detection runs on **every** detection cycle regardless of motion, so a still, slow, or low-contrast subject is never hidden from the detector (see [Recommended setup for maximum reliability](#recommended-setup-for-maximum-reliability)). Disable it to restore the CPU-saving motion gate - object detection then only runs when the motion gate fires (or a periodic scan is due) - on low-power hardware that cannot run YOLO continuously. Motion detection continues to run independently either way.
+
+Default: `Enabled`
 
 ### Detection Interval (s)
 
@@ -104,12 +146,14 @@ It runs *after* zone/label filtering, so the window only tracks objects the
 camera is configured to care about. Motion rules are gated separately and are
 unaffected.
 
-**Tuning tip:** If a distant or low-confidence subject flickers in and out of
-detection, try Confirm Frames `2` with Confirm Window `3`. Raising Confirm
-Frames adds a small latency (the object must persist for N cycles before the
-first alert), so keep it low - `2` or `3` is usually enough.
+**Default: `2` / `3`** (2-of-3). This pairs with the always-on object detector
+so a one-frame false positive on a static scene is filtered out. The cost is a
+small latency - an object must persist for 2 cycles (~0.5-1s at the default
+detection interval) before the first alert or recording. Set Confirm Frames to
+`1` if you want instant single-frame alerts and can tolerate more noise; raise
+it to `3` for very noisy scenes.
 
-Defaults: `1` (off) / `3`
+Defaults: `2` / `3`
 
 ---
 
@@ -292,9 +336,9 @@ This per-zone path requires the internal diff mask - a 240×320 boolean array pr
 
 ### Shadows and light reflections
 
-Pixel-diff cannot distinguish a person's shadow from the person themselves, or a car headlight sweeping across a wall from an actual intruder. These register as pixel changes and can trigger Layer 1.
+With the default **MOG2** engine and **Shadow Suppression** on, cast shadows are classified separately and dropped, so a person's moving shadow no longer triggers Layer 1 by itself. This is not perfect - a hard-edged shadow or a headlight sweeping a wall can still be misread, and on very dark/IR scenes shadow suppression can occasionally drop a genuine subject (disable it there).
 
-**Workaround:** Raise **Motion Pixel Threshold** to filter minor brightness changes, and use zone geometry to avoid placing motion zones in areas prone to shadows or reflections. Using object rules (person/car) instead of motion rules also avoids this, since YOLO has semantic understanding that pixel-diff does not.
+**Workaround:** Keep **Shadow Suppression** on for daytime/colour scenes; raise **Motion Pixel Threshold** to filter minor brightness changes; and use zone geometry to avoid placing motion zones in areas prone to shadows or reflections. Using object rules (person/car) instead of motion rules also avoids this, since YOLO has semantic understanding that pixel-diff does not.
 
 ### First frame after startup or camera reconnect
 

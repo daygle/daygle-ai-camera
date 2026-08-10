@@ -289,6 +289,39 @@ def test_zone_motion_detections_disabled_zone_skipped(zd):
     assert zd.zone_motion_detections(settings, 0.9, diff_mask=None) == []
 
 
+def test_zone_motion_detections_per_zone_gate_override():
+    """A zone's own gate_fraction override wins over the camera/global gate, so
+    a sensitive zone can fire even when the camera gate is set insensitive (and
+    vice versa)."""
+    np = pytest.importorskip('numpy')
+    from app import zone_detection as zd
+    import app.state as st
+    mask = np.zeros((st._MOTION_FRAME_H, st._MOTION_FRAME_W), dtype=bool)
+    # Change ~10% of the RIGHT-HALF zone: a thin band of columns inside it, so
+    # the zone fraction (~0.1) sits between the two gate values under test.
+    half = st._MOTION_FRAME_W // 2
+    band = max(1, int(0.1 * (st._MOTION_FRAME_W - half)))
+    mask[:, half:half + band] = True
+    base_rule = {'label': 'motion', 'enabled': True, 'min_confidence': 0.01}
+    settings = {
+        'detection': {'zones': [{
+            'id': 'z', 'name': 'Z', 'enabled': True, 'monitor_motion': True,
+            'x': 0.5, 'y': 0.0, 'width': 0.5, 'height': 1.0,
+            'object_rules': [dict(base_rule)],
+        }]},
+    }
+    zone = settings['detection']['zones'][0]
+
+    # Insensitive per-zone gate (0.5) suppresses even with a low camera gate.
+    zone['object_rules'][0]['gate_fraction'] = 0.5
+    assert zd.zone_motion_detections(settings, 0.9, diff_mask=mask, gate_fraction=0.005, scale_fraction=0.03) == []
+
+    # Sensitive per-zone gate fires even with an insensitive camera gate (0.9).
+    zone['object_rules'][0]['gate_fraction'] = 0.0005
+    fired = zd.zone_motion_detections(settings, 0.9, diff_mask=mask, gate_fraction=0.9, scale_fraction=0.03)
+    assert len(fired) == 1
+
+
 def test_zone_motion_detections_threshold_filters_low_confidence():
     from app import zone_detection as zd
     settings = {
