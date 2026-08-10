@@ -97,6 +97,7 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -346,7 +347,8 @@ def _resolve_within_data_envelope(value: str, *, key: str) -> str:
     the data parent) is rejected with HTTP 400.
 
     The resolver also collapses ``..``, ``~``, and symlink hops via
-    ``Path.resolve()`` so a payload like ``data/../../../etc/cron.d`` does
+    ``os.path.realpath`` (the CodeQL-recognized normalization for
+    py/path-injection) so a payload like ``data/../../../etc/cron.d`` does
     not pass the descendant check.
 
     The anchor is captured at module load (``_STARTUP_DATA_DIR`` /
@@ -358,20 +360,25 @@ def _resolve_within_data_envelope(value: str, *, key: str) -> str:
     stripped = str(value or '').strip()
     if not stripped:
         raise HTTPException(status_code=400, detail=f'{key} cannot be blank.')
-    # Canonicalize before checking the immutable startup envelope. The direct
-    # ``is_relative_to`` guards below are recognized by CodeQL as the safety
-    # check for the normalized path; keep this validation adjacent to the
-    # normalization so no caller can use an unchecked candidate.
-    candidate = Path(stripped).expanduser().resolve()
+    # Canonicalize the RAW STRING -- expand ``~``, collapse ``..``, follow
+    # symlinks via realpath -- BEFORE it is ever used to build a path. The
+    # containment check below then runs on the plain normalized string, so
+    # the user-controlled value never reaches a pathlib.Path constructor:
+    # this is the normalize -> verify prefix -> use pattern CodeQL accepts
+    # as sanitization for py/path-injection.
+    normalized = os.path.realpath(os.path.expanduser(stripped))
     # Best-effort rejection: refuse paths that DO NOT resolve to a real or
-    # creatable filesystem location under the envelope. Path.resolve() does
-    # NOT require the path to exist, so this guard treats non-existent
-    # "future" paths the same as existing ones -- what matters is whether
-    # the resolved location is within the captured envelope.
-    if candidate.is_relative_to(_STARTUP_DATA_DIR):
-        return str(candidate)
-    if _STARTUP_DATA_PARENT is not None and candidate.is_relative_to(_STARTUP_DATA_PARENT):
-        return str(candidate)
+    # creatable filesystem location under the envelope. realpath() does NOT
+    # require the path to exist, so this guard treats non-existent "future"
+    # paths the same as existing ones -- what matters is whether the
+    # resolved location is within the captured envelope.
+    data_dir = str(_STARTUP_DATA_DIR)
+    if normalized == data_dir or normalized.startswith(data_dir + os.sep):
+        return normalized
+    if _STARTUP_DATA_PARENT is not None:
+        parent = str(_STARTUP_DATA_PARENT)
+        if normalized == parent or normalized.startswith(parent + os.sep):
+            return normalized
     raise HTTPException(
         status_code=400,
         detail=(
