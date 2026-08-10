@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import re
 from types import SimpleNamespace
+import unittest
 from unittest import TestCase, mock
 
 from app.request_helpers import _redact_audit_details, write_audit_log
@@ -259,7 +260,7 @@ class SanitizeErrorBodyTests(TestCase):
     def test_strips_userinfo_from_response_body(self):
         body = (
             'Camera returned 500: <detail>see request log at '
-            f'http://admin:hunter2@192.168.1.50/onvif for details</detail>'
+            'http://admin:hunter2@192.168.1.50/onvif for details</detail>'
         )
         sanitized = _sanitize_error_body(body)
         self.assertNotIn('hunter2', sanitized)
