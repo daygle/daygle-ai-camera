@@ -66,8 +66,8 @@ if str(REPO_ROOT) not in sys.path:
 # populates ``sys.modules['app.main']`` so ``app.recording_settings``'s own
 # ``import app.main as main`` returns the cached module rather than
 # triggering a recursive fresh-load chain.
-import app.main  # noqa: E402  -- must precede the import below
-import app.recording_settings as recording_settings  # noqa: E402
+import app.main as app_main  # noqa: E402  -- must precede the import below
+import app.recording_settings as recording_settings  # noqa: E402  # lgtm[py/unused-import]
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +83,7 @@ def main():
     docstring for why we cannot rely on the test file's module-level
     globals directly. Centralised as fixtures so the rationale lives
     in one comment rather than copy-pasted into 4 tests."""
+    _ = app_main  # keep preload import intentionally used
     return sys.modules["app.main"]
 
 
@@ -90,6 +91,7 @@ def main():
 def current_recording_settings():
     """Return the CURRENT ``app.recording_settings`` module instance.
     See the ``main`` fixture above for the leak rationale."""
+    _ = recording_settings  # keep preload import intentionally used
     return sys.modules["app.recording_settings"]
 
 

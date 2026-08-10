@@ -84,8 +84,9 @@ if str(REPO_ROOT) not in sys.path:
 # validate_storage_settings). The preload is kept for safety: app.main's
 # Pool A rebind block imports from payload_validators, so loading
 # payload_validators first could still trigger a partial-load cycle.
-import app.main  # noqa: E402  -- must precede the import below
+import app.main as app_main  # noqa: E402  -- must precede the import below
 import app.payload_validators as payload_validators  # noqa: E402
+assert app_main is sys.modules["app.main"]
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +109,7 @@ def main():
 def current_payload_validators():
     """Return the CURRENT ``app.payload_validators`` module instance.
     See the ``main`` fixture above for the leak rationale."""
+    assert payload_validators is not None
     return sys.modules["app.payload_validators"]
 
 
@@ -116,6 +118,7 @@ def pv():
     """Convenience alias for ``current_payload_validators`` -- used by
     the behavior tests below to call ``pv.validate_camera_settings(...)``
     etc. without ``import app.payload_validators as pv`` boilerplate."""
+    assert payload_validators is not None
     return sys.modules["app.payload_validators"]
 
 
