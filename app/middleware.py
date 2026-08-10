@@ -98,7 +98,10 @@ import app.state as _state
 from app.auth import CSRF_HEADER
 from app.config_facades import effective_auth_config
 from app.rate_limiter import admin_limiter
-from app.state import ADMIN_PATHS, MUTATING_METHODS, PUBLIC_PATHS, PUBLIC_PREFIXES
+ADMIN_PATHS = _state.ADMIN_PATHS
+MUTATING_METHODS = _state.MUTATING_METHODS
+PUBLIC_PATHS = _state.PUBLIC_PATHS
+PUBLIC_PREFIXES = _state.PUBLIC_PREFIXES
 
 # Module-level logger so the origin-check warning path doesn't need to
 # re-instantiate on every request. Same logging tree as ``daygle.ai``

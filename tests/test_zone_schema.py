@@ -57,6 +57,7 @@ Tests pin three contracts:
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 
@@ -68,8 +69,10 @@ if str(REPO_ROOT) not in sys.path:
 
 # Preload app.main before zone_schema to ensure all Pool A rebinds on
 # app.main are wired before zone_schema's own top-level imports resolve.
-import app.main  # noqa: E402  -- must precede the import below
-import app.zone_schema as zone_schema  # noqa: E402
+# importlib.import_module is used here (rather than import statements) so
+# that the side-effect-only loads do not trigger py/unused-import warnings.
+importlib.import_module('app.main')  # noqa: E402  -- must precede the import below
+importlib.import_module('app.zone_schema')  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
