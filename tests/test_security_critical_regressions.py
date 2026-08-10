@@ -279,11 +279,12 @@ class WssecDigestTests(TestCase):
         digest_result = mock.Mock()
         digest_result.digest.return_value = b'expected-digest'
         with mock.patch('app.ptz.os.urandom', return_value=b'n' * 16), \
-             mock.patch('app.ptz.hashlib.sha1', return_value=digest_result) as sha1:
+             mock.patch('app.ptz.hashlib.new', return_value=digest_result) as sha1_new:
             header = _wssec_header('camera-user', 'camera-password')
 
         created = re.search(r'<Created[^>]*>([^<]+)</Created>', header).group(1)
-        sha1.assert_called_once_with(
+        sha1_new.assert_called_once_with(
+            'sha1',
             b'n' * 16 + created.encode() + b'camera-password',
             usedforsecurity=False,
         )
