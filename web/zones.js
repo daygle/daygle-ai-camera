@@ -11,6 +11,36 @@ let draftPolygon = null;
 let zoneDrag = null;
 let expandedZoneRules = new Set();
 
+const DEFAULT_MOTION_GATE_FRACTION = 0.005;
+const DEFAULT_MOTION_SCALE_FRACTION = 0.03;
+
+function effectiveZoneMotionTuning() {
+  const live = window.daygleLiveConfig || {};
+  const numberOr = (value, fallback) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  };
+  return {
+    gateFraction: numberOr(selectedCamera?.motion_gate_fraction, numberOr(live.motion_gate_fraction, DEFAULT_MOTION_GATE_FRACTION)),
+    scaleFraction: numberOr(selectedCamera?.motion_scale_fraction, numberOr(live.motion_scale_fraction, DEFAULT_MOTION_SCALE_FRACTION)),
+  };
+}
+
+function formatMotionPercent(fraction) {
+  const percent = Math.max(0, Number(fraction) || 0) * 100;
+  if (percent >= 10) return `${percent.toFixed(1)}%`;
+  if (percent >= 1) return `${percent.toFixed(2)}%`;
+  return `${percent.toFixed(3)}%`;
+}
+
+function motionPixelThresholdText(rule) {
+  const { gateFraction, scaleFraction } = effectiveZoneMotionTuning();
+  const sensitivity = clamp(Number(rule?.min_confidence ?? 0.45), 0, 1);
+  const sensitivityFraction = sensitivity * scaleFraction;
+  const requiredFraction = Math.max(gateFraction, sensitivityFraction);
+  return `Approx. ${formatMotionPercent(requiredFraction)} of this zone's pixels must change (${Math.round(sensitivity * 100)}% sensitivity × ${formatMotionPercent(scaleFraction)} scale; ${formatMotionPercent(gateFraction)} minimum gate).`;
+}
+
 // Update only the label text on the Add Zone button so its icon (a sibling
 // <svg>) survives. Setting button.textContent would replace all child nodes,
 // wiping the icon.
@@ -311,6 +341,7 @@ function renderMotionCard(zone, zoneIndex) {
             <input type="range" data-zone-motion-confidence="${zoneIndex}" min="0" max="1" step="0.05" value="${escapeHtml(rule.min_confidence)}" />
             <output class="zone-motion-sensitivity-value" data-zone-motion-confidence-value="${zoneIndex}">${escapeHtml(rule.min_confidence)}</output>
           </span>
+          <small class="form-help muted zone-motion-pixel-help" data-zone-motion-pixel-help="${zoneIndex}">${escapeHtml(motionPixelThresholdText(rule))}</small>
         </label>
         <div class="zone-motion-secondary">
           <label class="zone-motion-field" title="Record a clip whenever motion is detected in this area.">
@@ -530,8 +561,12 @@ function bindMotionControls() {
   // (released) commits the value to the rule.
   document.querySelectorAll('[data-zone-motion-confidence]').forEach((inp) => {
     inp.addEventListener('input', () => {
-      const readout = document.querySelector(`[data-zone-motion-confidence-value="${inp.dataset.zoneMotionConfidence}"]`);
+      const zoneIndex = Number(inp.dataset.zoneMotionConfidence);
+      const readout = document.querySelector(`[data-zone-motion-confidence-value="${zoneIndex}"]`);
       if (readout) readout.textContent = inp.value;
+      const help = document.querySelector(`[data-zone-motion-pixel-help="${zoneIndex}"]`);
+      const rule = motionRuleOf(cameraDetection().zones[zoneIndex]);
+      if (help && rule) help.textContent = motionPixelThresholdText({ ...rule, min_confidence: Number(inp.value) });
     });
     inp.addEventListener('change', () => {
       const rule = motionRuleOf(cameraDetection().zones[Number(inp.dataset.zoneMotionConfidence)]);

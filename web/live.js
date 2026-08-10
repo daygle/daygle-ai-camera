@@ -67,9 +67,9 @@ let detectionStatusRefreshMs = DEFAULT_DETECTION_STATUS_REFRESH_MS;
 let cameras = [];
 let availableLabels = [];
 let selectedCamera = null;
-// Motion-lane trigger reference: the lowest Sensitivity (%) among the
-// selected camera's enabled motion zones - the "fires above" tick on the bar.
-let motionTriggerSensitivityPct = 0;
+// Motion-lane trigger reference: the minimum changed-pixel percentage needed
+// by the selected camera's easiest enabled motion zone.
+let motionTriggerPixelPct = 0;
 // Runtime stream metadata is populated from /api/status. Camera configuration
 // may intentionally leave FPS on Auto, so never render the old 15 FPS fallback
 // when the backend has a better source-rate value.
@@ -604,40 +604,41 @@ function renderDetectionStatus(summary) {
   }
 
   // ── Motion lane ─────────────────────────────────────────────
-  // motion_confidence is the alert-gated level: it remains zero below the
-  // frame gate so the bar's trigger reference still describes alertability.
-  // motion_signal is the ungated changed-fraction / scale-fraction level, so
-  // the diagnostic bar can show a real but sub-threshold movement. Older
-  // payloads fall back to the gated value until the backend is updated.
-  const motionConf = summary.motion_confidence != null ? summary.motion_confidence : null;
+  // The bar is deliberately on the raw changed-pixel scale: 1% means 1% of
+  // the measured frame pixels changed. motion_confidence and motion_signal
+  // remain available for alert diagnostics, but neither is used to stretch the
+  // bar to the scale-fraction cap.
   const motionFraction = summary.motion_fraction != null ? summary.motion_fraction : null;
-  const motionSignal = summary.motion_signal != null ? summary.motion_signal : motionConf;
+  const motionSignal = summary.motion_signal != null
+    ? summary.motion_signal
+    : (summary.motion_confidence != null ? summary.motion_confidence : null);
+  const displayFraction = motionFraction != null ? motionFraction : (motionSignal != null ? motionSignal : null);
   if (liveEls.motionBar) {
-    const barPct = motionSignal != null ? Math.round(Math.min(1, motionSignal) * 100) : 0;
+    const barPct = displayFraction != null ? Math.min(1, displayFraction) * 100 : 0;
     liveEls.motionBar.style.width = barPct + '%';
     if (liveEls.motionValue) {
-      liveEls.motionValue.textContent = (motionSignal != null ? Math.round(motionSignal * 100) : 0) + '%';
+      liveEls.motionValue.textContent = displayFraction != null ? formatMotionPixelPercent(displayFraction) : '0%';
     }
   }
   // Trigger tick + caption: anchored to the camera's easiest motion zone
-  // (lowest Sensitivity), so "fill past the tick" = a motion zone fires.
+  // (lowest Sensitivity), expressed in the same changed-pixel scale as the bar.
   if (liveEls.motionTriggerTick) {
-    const showTrigger = !isAllCameraMode() && motionTriggerSensitivityPct > 0;
+    const showTrigger = !isAllCameraMode() && motionTriggerPixelPct > 0;
     liveEls.motionTriggerTick.hidden = !showTrigger;
-    if (showTrigger) liveEls.motionTriggerTick.style.left = Math.min(99, motionTriggerSensitivityPct) + '%';
+    if (showTrigger) liveEls.motionTriggerTick.style.left = Math.min(99, motionTriggerPixelPct) + '%';
   }
   if (liveEls.motionCaption) {
     const parts = [];
-    if (motionFraction != null) parts.push(`${Math.round(motionFraction * 100)}% of frame pixels`);
-    if (!isAllCameraMode() && motionTriggerSensitivityPct > 0) {
-      parts.push(`fires above ${motionTriggerSensitivityPct}% sensitivity`);
+    if (motionFraction != null) parts.push(`${formatMotionPixelPercent(motionFraction)} of frame pixels`);
+    if (!isAllCameraMode() && motionTriggerPixelPct > 0) {
+      parts.push(`fires above ${formatMotionPixelPercent(motionTriggerPixelPct / 100)} pixel change`);
     } else if (!isAllCameraMode()) {
       parts.push('no motion zones configured');
     }
     liveEls.motionCaption.textContent = parts.join(' · ');
   }
   if (liveEls.motionState) {
-    const motionActive = motionSignal != null && motionSignal > 0;
+    const motionActive = displayFraction != null && displayFraction > 0;
     liveEls.motionState.textContent = motionActive ? 'Active' : 'Waiting';
     liveEls.motionState.className = 'sense-badge ' + (
       motionActive ? 'sense-badge-detected' : 'sense-badge-idle'
@@ -725,28 +726,40 @@ async function refreshDetectionStatus() {
   }
 }
 
-// Lowest Sensitivity among a camera's enabled motion zones (mirrors the
-// backend's zone_motion_min_confidence, which defaults to 0.45 per zone).
-// The live lane is frame-wide, so this is the "easiest" trigger point.
-function motionTriggerSensitivity(camera) {
+function formatMotionPixelPercent(fraction) {
+  const percent = Math.max(0, Number(fraction) || 0) * 100;
+  if (percent >= 10) return `${percent.toFixed(1)}%`;
+  if (percent >= 1) return `${percent.toFixed(2)}%`;
+  return `${percent.toFixed(3)}%`;
+}
+
+// Minimum changed-pixel percentage among the selected camera's enabled motion
+// zones. This mirrors zone_detection.py: max(global gate, sensitivity * scale).
+function motionTriggerPixelPercent(camera) {
   const zones = (camera && camera.detection && camera.detection.zones) || [];
-  let min = null;
+  let minSensitivity = null;
   for (const zone of zones) {
     if (zone.enabled === false || zone.monitor_motion === false) continue;
     const rule = (zone.object_rules || []).find((r) => (
       String(r.label || '').trim().toLowerCase() === 'motion' && r.enabled !== false
     ));
-    const sens = rule != null ? Number(rule.min_confidence ?? 0.45) : 0.45;
-    if (min == null || sens < min) min = sens;
+    const sensitivity = rule != null ? Number(rule.min_confidence ?? 0.45) : 0.45;
+    if (minSensitivity == null || sensitivity < minSensitivity) minSensitivity = sensitivity;
   }
-  return min;
+  if (minSensitivity == null) return null;
+  const live = window.daygleLiveConfig || {};
+  const cameraMotion = camera?.motion || {};
+  const numberOr = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+  const gate = numberOr(camera?.motion_gate_fraction ?? cameraMotion.gate_fraction, numberOr(live.motion_gate_fraction, 0.005));
+  const scale = numberOr(camera?.motion_scale_fraction ?? cameraMotion.scale_fraction, numberOr(live.motion_scale_fraction, 0.03));
+  return Math.max(gate, minSensitivity * scale) * 100;
 }
 
 function setSelectedCamera(cameraId) {
   selectedCamera = cameras.find((camera) => camera.id === cameraId) || cameras[0];
   if (!selectedCamera) return;
-  const sens = motionTriggerSensitivity(selectedCamera);
-  motionTriggerSensitivityPct = sens != null ? Math.round(sens * 100) : 0;
+  const pixelThreshold = motionTriggerPixelPercent(selectedCamera);
+  motionTriggerPixelPct = pixelThreshold != null ? pixelThreshold : 0;
   rebuildConfiguredLabels();
   liveAiTrackDetections = null;
   liveAiTrackPrevDetections = null;
@@ -1002,6 +1015,9 @@ async function init() {
   try {
     const runtime = await api('/api/config');
     const live = runtime.live || {};
+    // Zones-page motion guidance reuses the same effective global tuning values
+    // that the live monitor uses. Per-camera overrides are applied by zones.js.
+    window.daygleLiveConfig = live;
     snapshotRefreshMs = Number.parseInt(live.snapshot_refresh_ms || DEFAULT_SNAPSHOT_REFRESH_MS, 10);
     detectionStatusRefreshMs = Number.parseInt(live.detection_status_refresh_ms || DEFAULT_DETECTION_STATUS_REFRESH_MS, 10);
   } catch {
