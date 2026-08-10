@@ -129,6 +129,58 @@ class _ExplodingDetector:
         raise AssertionError('ONNX inference must not run when AI is disabled')
 
 
+class _RecordingDetector:
+    """Records how many times inference ran (returns no detections)."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def detect_frame(self, image, confidence=None):
+        self.calls += 1
+        return []
+
+    def detect_image(self, image_bytes, confidence=None):
+        self.calls += 1
+        return []
+
+
+def test_always_run_object_detection_bypasses_motion_gate(monkeypatch):
+    """With ``always_run_object_detection`` on, YOLO runs even when the motion
+    gate reports NO motion and no motion zone fires -- the decoupled A-class
+    setup. With it off (default) the same no-motion frame skips inference."""
+    import numpy as np
+    det = _RecordingDetector()
+    monkeypatch.setattr(live_monitor, 'effective_ai_config', lambda: {})
+    monkeypatch.setattr(
+        live_monitor, 'ai_status_payload',
+        lambda: {'detector_loaded': True, 'last_detector_error': None,
+                 'configured_backend': 'onnx', 'active_backend': 'onnx'},
+    )
+    monkeypatch.setattr(live_monitor, 'detect_frame_motion',
+                        lambda cid, image, **kw: (False, 0.0, None, 0.0))
+    monkeypatch.setattr(live_monitor, 'zone_motion_detections',
+                        lambda settings, conf, **kw: [])
+    monkeypatch.setattr(live_monitor, 'update_live_detection_status',
+                        lambda camera_id, **kwargs: None)
+    monkeypatch.setattr(_state, 'detector', det)
+
+    img = np.zeros((10, 10, 3), dtype=np.uint8)
+    frame = {'timestamp': time.time(), 'width': 10, 'height': 10}
+    cam = {'id': 'cam-1', 'detection': {'zones': []}}
+
+    # Toggle OFF: no motion -> inference skipped.
+    monkeypatch.setattr(live_monitor, 'effective_live_config',
+                        lambda: {'detection_interval_seconds': 0.5, 'always_run_object_detection': False})
+    live_monitor.process_live_stream_alerts(img, frame, cam, enforce_interval=False)
+    assert det.calls == 0
+
+    # Toggle ON: no motion -> inference STILL runs.
+    monkeypatch.setattr(live_monitor, 'effective_live_config',
+                        lambda: {'detection_interval_seconds': 0.5, 'always_run_object_detection': True})
+    live_monitor.process_live_stream_alerts(img, frame, cam, enforce_interval=False)
+    assert det.calls == 1
+
+
 def test_process_live_stream_alerts_gates_on_ai_disabled(monkeypatch):
     """The master AI toggle (``ai.enabled=False``) short-circuits
     ``process_live_stream_alerts`` before any motion or ONNX inference work:

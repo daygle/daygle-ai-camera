@@ -194,7 +194,7 @@ function fillForm(form, values) {
 const FIELD_TYPES = {
   boolean: new Set([
     'enabled', 'continuous', 'auto_purge_enabled', 'background_detection_enabled',
-    'motion_denoise', 'motion_shadow_suppression',
+    'always_run_object_detection', 'motion_denoise', 'motion_shadow_suppression',
     'use_tls', 'use_ssl', 'autostart',
   ]),
   integer: new Set([

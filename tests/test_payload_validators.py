@@ -898,7 +898,8 @@ def test_validate_live_settings_returns_all_expected_fields(monkeypatch, pv):
     assert set(out.keys()) == {
         'snapshot_refresh_ms', 'detection_status_refresh_ms',
         'detection_interval_seconds', 'event_debounce_seconds',
-        'background_detection_enabled', 'detection_history_minutes',
+        'background_detection_enabled', 'always_run_object_detection',
+        'detection_history_minutes',
         'motion_algorithm', 'motion_denoise', 'motion_shadow_suppression',
         'motion_pixel_threshold', 'motion_gate_fraction',
         'motion_scale_fraction', 'motion_background_alpha',

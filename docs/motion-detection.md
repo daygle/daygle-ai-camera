@@ -44,6 +44,20 @@ Use this when you want to be notified any time *anything* moves in an area, rega
 
 ---
 
+## Recommended setup for maximum reliability
+
+By default, Layer 2 (object detection) only runs when Layer 1 detects motion. That coupling is a **CPU optimization** - it skips YOLO on frames where nothing appears to be moving. It trades a small amount of recall for a large CPU saving: a subject that does not trip the motion gate (standing still, moving slowly, distant, or low-contrast at night) can be missed by the object detector.
+
+**If CPU/GPU headroom is not a concern, decouple object detection from motion:**
+
+1. **Enable [Always Run Object Detection](#always-run-object-detection).** YOLO then runs every cycle regardless of motion, so an object is never hidden from the detector because the pixel-diff was quiet. This alone eliminates the "person stands still and disappears" gap, the slow/distant-subject gap, and the first-frames-after-reconnect gap.
+2. **Set [Confirm Frames](#confirm-frames--confirm-window) to `2`** (with Confirm Window `3`). Running YOLO on every frame slightly raises the chance of a one-frame false positive on a static scene; requiring an object to persist across 2 of the last 3 cycles suppresses those while keeping latency low.
+3. **Keep MOG2 motion running** (the default). Motion is still valuable as an independent signal for motion-only zones and "any movement" alerts - it is simply no longer *gating* the object detector.
+
+With object detection decoupled, the **Periodic Scan** setting below becomes redundant (leave it at `0`) - its whole purpose was to periodically force YOLO past the motion gate, which "Always Run Object Detection" now does every cycle.
+
+---
+
 ## The background model
 
 Layer 1 compares each frame against a learned background - a model of what the camera sees when nothing is happening. With the default **MOG2** engine each pixel is modelled as a mixture of Gaussians; with the legacy **Diff** engine it is a single exponential moving average. Either way, the adaptation speed is controlled by **Motion Background Alpha**.
@@ -98,6 +112,12 @@ Default: `Enabled`
 Rejects MOG2-classified cast shadows so a moving shadow does not register as motion. **MOG2 only** (has no effect with the Diff engine). Disable on very dark or IR scenes where a genuine subject can be misread as a shadow and dropped.
 
 Default: `Enabled`
+
+### Always Run Object Detection
+
+By default, YOLO object detection only runs when the motion gate fires (or a periodic scan is due) - a CPU optimization. Enable this to run object detection on **every** detection cycle regardless of motion, so a still, slow, or low-contrast subject is never hidden from the detector. This is the recommended setting when CPU/GPU headroom is not a concern (see [Recommended setup for maximum reliability](#recommended-setup-for-maximum-reliability)). Motion detection continues to run independently either way.
+
+Default: `Disabled`
 
 ### Detection Interval (s)
 

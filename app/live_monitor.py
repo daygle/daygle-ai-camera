@@ -440,7 +440,13 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # object-detection path remain immediate; only motion-zone actions wait for
     # confirmation, filtering one-frame stream/exposure artifacts.
     motion_detections = confirm_motion_detections(camera_id, motion_detections)
-    if not frame_has_motion and (not motion_gate_error) and (not force_scan) and (not motion_detections):
+    # ``always_run_object_detection`` decouples object (YOLO) inference from the
+    # motion gate: when set, inference runs every cycle regardless of pixel
+    # motion, so a still/slow/low-contrast subject is never hidden from the
+    # detector. Motion detection itself is unchanged -- it still runs above and
+    # feeds motion-only zones/alerts. Default off keeps the CPU-saving gate.
+    always_run_object_detection = normalize_bool_setting(live_settings.get('always_run_object_detection'), False)
+    if not frame_has_motion and (not motion_gate_error) and (not force_scan) and (not motion_detections) and (not always_run_object_detection):
         update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[], motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         return None
     detector_method_available = hasattr(

@@ -75,6 +75,12 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     'detection_confirm_frames': 1,
     'detection_confirm_window': 3,
     'background_detection_enabled': True,
+    # When True, object (YOLO) inference runs every detection cycle regardless of
+    # the motion gate -- maximum recall (a still/slow/low-contrast subject is
+    # never hidden from the detector) at the cost of running YOLO continuously.
+    # Default False keeps the CPU-saving motion gate. Motion detection is a
+    # separate, always-on signal either way.
+    'always_run_object_detection': False,
     'detection_history_minutes': 10,
     # Background-subtraction engine: 'mog2' (default, Gaussian-mixture with
     # shadow rejection) or 'diff' (legacy single-frame adaptive diff / automatic

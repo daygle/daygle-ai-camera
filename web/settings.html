@@ -65,6 +65,12 @@
               <option value="false">Disabled</option>
             </select></label>
           <label>
+            <span>Always Run Object Detection <span class="info-tip" data-tip="Run YOLO object detection on every cycle regardless of motion. Maximum recall - a still, slow, or low-contrast subject is never hidden from the detector - at the cost of running YOLO continuously (higher CPU/GPU). Pair with Confirm Frames = 2 to suppress false positives. Motion detection still runs independently. Default: Disabled" title="Run YOLO object detection on every cycle regardless of motion. Maximum recall at the cost of running YOLO continuously. Pair with Confirm Frames = 2. Default: Disabled" tabindex="0" aria-label="Help: Run object detection every cycle regardless of motion. Maximum recall, higher CPU. Default: Disabled"></span></span>
+            <select name="always_run_object_detection">
+              <option value="false">Disabled</option>
+              <option value="true">Enabled</option>
+            </select></label>
+          <label>
             <span>Detection History (min) <span class="info-tip" data-tip="How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min" title="How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min" tabindex="0" aria-label="Help: How many minutes of detection data to keep per camera for recording playback ove..."></span></span>
             <input name="detection_history_minutes" type="number" min="1" max="120" step="1" placeholder="10" /></label>
           <label>
