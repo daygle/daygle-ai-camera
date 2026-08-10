@@ -205,3 +205,51 @@ def test_process_live_stream_alerts_proceeds_when_ai_enabled(monkeypatch):
     assert result is None
     # No 'AI detection is disabled' entry -- the gate did not fire.
     assert all('disabled' not in str(reason) for _, kwargs in recorded for reason in [kwargs.get('reason', '')])
+
+
+def test_motion_status_exposes_sub_gate_signal_for_live_bar(monkeypatch):
+    """The bar shows real pixel changes even when alert confidence is gated to zero."""
+    recorded: list[dict] = []
+    monkeypatch.setattr(live_monitor, 'effective_ai_config', lambda: {})
+    monkeypatch.setattr(
+        live_monitor,
+        'ai_status_payload',
+        lambda: {
+            'detector_loaded': True,
+            'last_detector_error': None,
+            'configured_backend': 'onnx',
+            'active_backend': 'onnx',
+        },
+    )
+    monkeypatch.setattr(
+        live_monitor,
+        'effective_live_config',
+        lambda: {
+            'detection_interval_seconds': 0.5,
+            'motion_pixel_threshold': 30,
+            'motion_gate_fraction': 0.005,
+            'motion_scale_fraction': 0.03,
+            'motion_background_alpha': 0.05,
+            'periodic_scan_interval_seconds': 0,
+        },
+    )
+    monkeypatch.setattr(
+        live_monitor,
+        'detect_frame_motion',
+        lambda cid, image, **kwargs: (False, 0.0, None, 0.003),
+    )
+    monkeypatch.setattr(live_monitor, 'update_live_detection_status', lambda camera_id, **kwargs: recorded.append(kwargs))
+    _state._frame_motion_error_cameras.discard('cam-1')
+
+    result = live_monitor.process_live_stream_alerts(
+        b'jpeg-bytes',
+        {'timestamp': time.time(), 'width': 10, 'height': 10},
+        {'id': 'cam-1'},
+        enforce_interval=False,
+    )
+
+    assert result is None
+    assert recorded
+    assert recorded[0]['motion_confidence'] == 0.0
+    assert recorded[0]['motion_fraction'] == 0.003
+    assert recorded[0]['motion_signal'] == 0.1

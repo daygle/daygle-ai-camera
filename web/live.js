@@ -439,17 +439,23 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
     ? chips.map((c) => c.confidence > 0 ? `${sentenceCase(c.label)} (${Math.round(c.confidence * 100)}%)` : sentenceCase(c.label)).join(', ')
     : null;
 
+  const motionData = {
+    motion_confidence: payload.motion_confidence,
+    motion_fraction: payload.motion_fraction,
+    motion_signal: payload.motion_signal,
+  };
+
   if (payload.state === 'alerted') {
     const alerts = (payload.triggered_alerts || []).map((a) => a.rule_name).join(', ') || 'unknown rule';
     const parts = [`Alert triggered - ${alerts}`];
     if (labelStr) parts.push(`detected ${labelStr}`);
     if (payload.recording_state) parts.push(`recording ${payload.recording_state}${payload.recording_id ? ` #${payload.recording_id}` : ''}`);
-    return { state: 'alerted', stateLabel: 'Alerted', chips, ...sound, message: parts.join('; ') + '.', motion_confidence: payload.motion_confidence };
+    return { state: 'alerted', stateLabel: 'Alerted', chips, ...sound, message: parts.join('; ') + '.', ...motionData };
   }
 
   if (payload.state === 'checked') {
     if (!labelStr) {
-      return { state: 'monitoring', stateLabel: 'Monitoring', chips, ...sound, message: '', motion_confidence: payload.motion_confidence };
+      return { state: 'monitoring', stateLabel: 'Monitoring', chips, ...sound, message: '', ...motionData };
     }
     const reason = String(payload.reason || '');
     let suffix;
@@ -458,7 +464,7 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
     else if (/no alert rule|no matching|no new alert/i.test(reason)) suffix = 'no matching alert rule';
     else if (/no detections matched/i.test(reason)) suffix = 'outside monitored zones';
     else suffix = reason || 'no alert triggered';
-    return { state: 'detected', stateLabel: 'Detected', chips, ...sound, message: `Detected ${labelStr} - ${suffix}.`, motion_confidence: payload.motion_confidence };
+    return { state: 'detected', stateLabel: 'Detected', chips, ...sound, message: `Detected ${labelStr} - ${suffix}.`, ...motionData };
   }
 
   const fallback = String(payload.reason || payload.ai_error || 'waiting for frames');
@@ -468,7 +474,7 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
     chips,
     ...sound,
     message: `Live AI: ${payload.state || 'waiting'} - ${fallback}`,
-    motion_confidence: payload.motion_confidence,
+    ...motionData,
   };
 }
 
@@ -598,18 +604,19 @@ function renderDetectionStatus(summary) {
   }
 
   // ── Motion lane ─────────────────────────────────────────────
-  // motion_confidence is the zone-gate level (0.0-1.0) computed as
-  // changed-fraction / motion-scale-fraction - the SAME scale the per-zone
-  // Sensitivity slider uses - so the readout compares directly to the
-  // "fires above" tick on the bar. motion_fraction is the raw changed-pixel
-  // fraction of the frame, shown in the caption for context.
+  // motion_confidence is the alert-gated level: it remains zero below the
+  // frame gate so the bar's trigger reference still describes alertability.
+  // motion_signal is the ungated changed-fraction / scale-fraction level, so
+  // the diagnostic bar can show a real but sub-threshold movement. Older
+  // payloads fall back to the gated value until the backend is updated.
   const motionConf = summary.motion_confidence != null ? summary.motion_confidence : null;
   const motionFraction = summary.motion_fraction != null ? summary.motion_fraction : null;
+  const motionSignal = summary.motion_signal != null ? summary.motion_signal : motionConf;
   if (liveEls.motionBar) {
-    const barPct = motionConf != null ? Math.round(Math.min(1, motionConf) * 100) : 0;
+    const barPct = motionSignal != null ? Math.round(Math.min(1, motionSignal) * 100) : 0;
     liveEls.motionBar.style.width = barPct + '%';
     if (liveEls.motionValue) {
-      liveEls.motionValue.textContent = (motionConf != null ? Math.round(motionConf * 100) : 0) + '%';
+      liveEls.motionValue.textContent = (motionSignal != null ? Math.round(motionSignal * 100) : 0) + '%';
     }
   }
   // Trigger tick + caption: anchored to the camera's easiest motion zone
@@ -630,7 +637,7 @@ function renderDetectionStatus(summary) {
     liveEls.motionCaption.textContent = parts.join(' · ');
   }
   if (liveEls.motionState) {
-    const motionActive = motionConf != null && motionConf > 0;
+    const motionActive = motionSignal != null && motionSignal > 0;
     liveEls.motionState.textContent = motionActive ? 'Active' : 'Waiting';
     liveEls.motionState.className = 'sense-badge ' + (
       motionActive ? 'sense-badge-detected' : 'sense-badge-idle'

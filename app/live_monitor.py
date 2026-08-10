@@ -360,6 +360,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         force_scan = True
         _state._periodic_scan_last_ts[camera_id] = now
     frame_has_motion, frame_motion_confidence, diff_mask, raw_motion_fraction = detect_frame_motion(camera_id, image, pixel_threshold=_pixel_threshold, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, background_alpha=_background_alpha)
+    # Keep a diagnostic signal separate from the alert-gated confidence. The
+    # latter is intentionally zero below the motion gate; the former lets the
+    # live bar show real sub-gate pixel changes without making them alertable.
+    motion_signal = round(min(1.0, raw_motion_fraction / max(_scale_fraction, 1e-9)), 3)
     # A motion-gate error is not evidence of motion, but it must not suppress
     # the independent object-detection path: some callers provide detector-
     # compatible input that the optional motion decoder cannot parse. Keep the
@@ -379,7 +383,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         state='checked',
         reason='Motion sample measured.',
         detections=[],
-        motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction,
+        motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction, motion_signal=motion_signal,
     )
     if not frame_has_motion:
         frame_motion_confidence = 0.0
