@@ -30,8 +30,8 @@ if str(REPO_ROOT) not in sys.path:
 # modules are imported. This avoids the circular-import gate that fires when
 # a partial-load chain encounters camera_config → zone_schema → camera_id
 # before zone_schema or camera_config is fully initialized.
-import app.main  # noqa: E402  -- must precede the imports below
-import app.camera_id as camera_id  # noqa: E402
+import app.main  # noqa: E402  -- must precede the imports below  # lgtm[py/unused-import]
+import app.camera_id as camera_id  # noqa: E402  # lgtm[py/unused-import]
 
 
 @pytest.fixture

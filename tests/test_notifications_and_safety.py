@@ -29,7 +29,6 @@ L3 - ``escapeHtml`` defangs HTML payloads on the
 """
 from __future__ import annotations
 
-import logging
 import os
 import sys
 import unittest

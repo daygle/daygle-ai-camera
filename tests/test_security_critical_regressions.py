@@ -15,7 +15,6 @@ DB context manager and ``urllib.request.urlopen``.
 from __future__ import annotations
 
 import unittest
-from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest import mock
 

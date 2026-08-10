@@ -63,8 +63,8 @@ if str(REPO_ROOT) not in sys.path:
 # populates ``sys.modules['app.main']`` so ``app.camera_config``'s own
 # ``import app.main as main`` returns the cached module rather than
 # triggering a recursive fresh-load chain.
-import app.main  # noqa: E402  -- must precede the import below
-import app.camera_config as camera_config  # noqa: E402
+import app.main  # noqa: E402  -- must precede the import below  # lgtm[py/unused-import]
+import app.camera_config as camera_config  # noqa: E402  # lgtm[py/unused-import]
 
 
 # ---------------------------------------------------------------------------

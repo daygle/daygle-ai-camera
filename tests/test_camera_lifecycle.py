@@ -21,8 +21,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import app.main  # noqa: E402  -- must precede the import below
-import app.camera_lifecycle  # noqa: E402
+import app.main  # noqa: E402  -- must precede the import below  # lgtm[py/unused-import]
+import app.camera_lifecycle  # noqa: E402  # lgtm[py/unused-import]
 
 
 @pytest.fixture

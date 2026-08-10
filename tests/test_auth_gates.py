@@ -22,8 +22,8 @@ if str(REPO_ROOT) not in sys.path:
 
 # Load app.main first to avoid the circular-import gate where auth_gates.py
 # does ``import app.main as main`` at module top.
-import app.main  # noqa: E402  -- must precede the import below
-import app.auth_gates  # noqa: E402
+import app.main  # noqa: E402  -- must precede the import below  # lgtm[py/unused-import]
+import app.auth_gates  # noqa: E402  # lgtm[py/unused-import]
 
 
 # ---------------------------------------------------------------------------
