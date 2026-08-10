@@ -20,6 +20,7 @@ deterministic and does not flake on slow CI.
 
 from __future__ import annotations
 
+import importlib
 import threading
 import time
 
@@ -147,7 +148,7 @@ def test_ensure_prebuffer_worker_joins_old_thread_before_replacement(
     must call ``_stop_worker`` on the old worker AND observe ``join`` return
     BEFORE ``thread.start`` is called for the replacement. Recorded as an
     ordered event log so the assertion does not depend on timing."""
-    import app.recordings as recordings_module
+    recordings_module = importlib.import_module("app.recordings")
     from app.recordings import RecordingService
 
     service = RecordingService(
@@ -179,7 +180,7 @@ def test_ensure_prebuffer_worker_url_change_clears_marker_after_old_thread_exits
     cleared AFTER the old worker thread is fully joined, so a still-running
     old worker (which detected no-audio on the OLD URL) cannot re-touch the
     marker file and lock the new URL into permanent video-only mode."""
-    import app.recordings as recordings_module
+    recordings_module = importlib.import_module("app.recordings")
     from app.recordings import RecordingService
 
     service = RecordingService(
@@ -236,7 +237,7 @@ def test_ensure_continuous_chunk_worker_joins_old_thread_before_replacement(
     """Bug 2 regression for the continuous chunk worker (same pattern as
     prebuffer worker). Replacing a live chunk worker must join the old
     thread before starting the new one."""
-    import app.recordings as recordings_module
+    recordings_module = importlib.import_module("app.recordings")
     from app.recordings import RecordingService
 
     service = RecordingService(

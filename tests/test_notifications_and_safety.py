@@ -29,6 +29,8 @@ L3 - ``escapeHtml`` defangs HTML payloads on the
 """
 from __future__ import annotations
 
+import importlib
+import logging
 import os
 import sys
 import unittest
@@ -129,7 +131,7 @@ class EmailAlertsCleanupSwallowTests(unittest.TestCase):
         from app.email_alerts import EmailAlertService
         # Use the in-package module path that ``_create_smtp_session``
         # actually calls, so monkeypatching reaches the same call site.
-        import app.email_alerts as _ea_mod
+        _ea_mod = importlib.import_module('app.email_alerts')
         svc = EmailAlertService({
             'enabled': True,
             'host': 'smtp.example.invalid',
@@ -158,7 +160,6 @@ class EmailAlertsCleanupSwallowTests(unittest.TestCase):
 
     def test_smtp_disconnect_recovery_logs_and_returns(self) -> None:
         import smtplib
-        import app.email_alerts as _ea_mod
         from app.email_alerts import EmailAlertService
         svc = EmailAlertService({
             'enabled': True,

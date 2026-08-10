@@ -28,6 +28,7 @@ dict open without holding the lock).
 
 from __future__ import annotations
 
+import importlib
 import threading
 import time
 
@@ -182,7 +183,7 @@ def test_stop_continuous_chunk_recording_holds_lock_through_join(tmp_path, monke
          stall); its ``thread.start`` therefore fires BEFORE
          ``stop_worker_joined``. The assertion inverts.
     """
-    import app.recordings as recordings_module
+    recordings_module = importlib.import_module("app.recordings")
     from app.recordings import RecordingService
 
     service = RecordingService(
@@ -284,7 +285,7 @@ def test_stop_prebuffer_workers_holds_lock_through_join(tmp_path, monkeypatch):
     fire BEFORE stop's ``stop_worker_joined`` because the lock is free
     the moment the pop completes.
     """
-    import app.recordings as recordings_module
+    recordings_module = importlib.import_module("app.recordings")
     from app.recordings import RecordingService
 
     service = RecordingService(

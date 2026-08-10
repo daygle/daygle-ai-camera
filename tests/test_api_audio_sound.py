@@ -174,7 +174,7 @@ def test_mux_prebuffer_audio_pads_audio_to_video(tmp_path, monkeypatch):
     # small clock drift, and pad audio to the video length (-shortest) so the
     # player's buffered bar reaches the clip end.
     import app.recordings as recordings_module
-    from app.recordings import RecordingService
+    RecordingService = recordings_module.RecordingService
 
     service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'rec')}, 'recording': {}})
     audio_dir = service.audio_dir / 'cam'
@@ -218,7 +218,7 @@ def test_mux_prebuffer_audio_pads_audio_to_video(tmp_path, monkeypatch):
 
 def test_mux_prebuffer_audio_trims_audio_that_begins_before_video(tmp_path, monkeypatch):
     import app.recordings as recordings_module
-    from app.recordings import RecordingService
+    RecordingService = recordings_module.RecordingService
 
     service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'rec')}, 'recording': {}})
     audio_dir = service.audio_dir / 'cam'

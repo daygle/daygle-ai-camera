@@ -31,7 +31,7 @@ def test_continuous_chunk_worker_drains_final_chunk_after_graceful_shutdown(
     callback for the new entry.
     """
     import app.recordings as recordings_module
-    from app.recordings import RecordingService
+    RecordingService = recordings_module.RecordingService
 
     service = RecordingService(
         {

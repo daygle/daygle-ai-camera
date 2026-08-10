@@ -90,7 +90,6 @@ def _export_kwargs(nms_free: bool, precision: str = 'fp32', device: str = 'auto'
     elif precision == 'fp16' and device.lower() in ('cuda', 'auto'):
         # Keep the operator-visible warning for the fp16-without-GPU case so
         # the silent FP32 export is not hidden.
-        import logging
         logging.getLogger('daygle.ai').warning(
             'precision=fp16 requested but onnxruntime-gpu is not installed; '
             'exporting FP32. Install onnxruntime-gpu + CUDA drivers and re-export.',
