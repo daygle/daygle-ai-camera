@@ -27,7 +27,7 @@ import app.camera_lifecycle as cl_mod  # noqa: E402
 
 @pytest.fixture
 def main():
-    return sys.modules["app.main"]
+    return app.main
 
 
 @pytest.fixture
