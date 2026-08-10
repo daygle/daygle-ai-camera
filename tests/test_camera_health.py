@@ -576,7 +576,6 @@ def test_deliver_recovery_event_uses_online_title(ch, main_module, monkeypatch, 
 def test_deliver_push_failure_logs_warning_but_marks_still(ch, main_module, monkeypatch, stub_logger, stub_delivery_services):
     push_calls, _ = stub_delivery_services
     diagnostics, warnings = stub_logger
-    push_called = []
 
     class FailingPush:
         def __init__(self, settings):
@@ -610,10 +609,6 @@ def test_check_cameras_health_iterates_config_snapshot(ch, main_module, monkeypa
 
     # Monkey-patch the helpers to capture which camera_ids are processed.
     real_update = ch._update_camera_health
-    real_eligible_off = ch._camera_offline_notification_eligible
-    real_eligible_rec = ch._camera_recovery_notification_eligible
-    real_deliver = ch._deliver_camera_offline_notification
-
     def fake_update(camera_id, online):
         captured_iterations.append(camera_id)
         return real_update(camera_id, online)

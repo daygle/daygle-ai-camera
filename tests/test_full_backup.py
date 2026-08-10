@@ -134,7 +134,7 @@ def test_create_full_backup_skips_backups_dir_inside_recordings(tmp_path, monkey
     # A config where recordings_dir == data_dir means the backups directory (and
     # any archive written there) lives INSIDE the walked tree. It must be pruned
     # so the archive never contains itself or accumulated backups.
-    _db_path, _recordings, _snapshots = _configure(monkeypatch, tmp_path)
+    _configure(monkeypatch, tmp_path)
     data = tmp_path / "data"
     (data / "backups").mkdir(parents=True)
     (data / "clip.mp4").write_bytes(b"video")
