@@ -42,24 +42,6 @@ jobs:
 
       # Python is interpreted, so no build step is required (no autobuild).
       - name: Perform CodeQL Analysis
-        id: analyze
         uses: github/codeql-action/analyze@v4.37.6
         with:
           category: "/language:python"
-          output: sarif-results
-
-      # GitHub code scanning records SARIF suppressions (from ``codeql[rule-id]``
-      # comments) but does not change alert state on its own. This step converts
-      # those suppressions into real dismissals on the default branch: it reads
-      # the SARIF this job just uploaded, PATCHes matching open alerts to
-      # dismissed (reason: won't fix, comment: Suppressed via SARIF), and
-      # reopens any that no longer carry their suppression comment. It runs
-      # only on pushes to main so PR analysis never mutates alert state.
-      - name: Dismiss suppressed CodeQL alerts
-        if: github.ref == 'refs/heads/main'
-        uses: advanced-security/dismiss-alerts@v2.0.3
-        with:
-          sarif-id: ${{ steps.analyze.outputs.sarif-id }}
-          sarif-file: sarif-results/python.sarif
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
