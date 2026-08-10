@@ -31,7 +31,7 @@ if str(REPO_ROOT) not in sys.path:
 # a partial-load chain encounters camera_config → zone_schema → camera_id
 # before zone_schema or camera_config is fully initialized.
 import app.main as app_main  # noqa: E402  -- must precede the imports below
-import app.camera_id  # noqa: E402
+import app.camera_id as camera_id_module  # noqa: E402
 
 
 @pytest.fixture
@@ -41,7 +41,7 @@ def main():
 
 @pytest.fixture
 def ci():
-    return sys.modules["app.camera_id"]
+    return camera_id_module
 
 
 @pytest.fixture
