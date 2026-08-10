@@ -283,7 +283,7 @@ class TestApiUsersAdminGate:
             admin_csrf = _login(admin)
             self._create_viewer(admin_csrf, admin)
             viewer = LocalClient(base_url)
-            viewer_csrf = _login(viewer, 'viewer', 'Viewer123!')
+            _login(viewer, 'viewer', 'Viewer123!')
             status, _h, body = viewer.request('/api/users')
             assert status == 403, f'viewer should be 403, got {status}: {body}'
             assert isinstance(body, dict) and body.get('detail') == 'Admin access required'

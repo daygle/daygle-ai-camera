@@ -166,7 +166,6 @@ class LoginAttemptsPurgeTests(unittest.TestCase):
             from app import auth
             svc = self._build_authservice_with(db_path)
             self._seed_login_attempts(db_path)
-            fixed_now_str = '2026-07-25T00:00:00+00:00'  # round-7 frame
             with patch('app.auth.datetime') as mock_dt:
                 from datetime import datetime as _real_dt, timezone as _real_tz
                 mock_dt.now.return_value = _real_dt(2026, 7, 25, tzinfo=_real_tz.utc)

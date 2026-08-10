@@ -125,7 +125,10 @@ _frame_motion_error_cameras: set = set()
 # must be present in two analyzed frames before motion can create an event or
 # recording, which filters one-frame stream/exposure artifacts.
 _motion_confirm_lock: threading.Lock = threading.Lock()
-_motion_confirm_streaks: dict = {}
+# Read/written from app/detection_state.py and app/live_monitor.py via
+# ``_state._motion_confirm_streaks``; CodeQL's unused-global-variable query
+# does not track these cross-module attribute accesses.
+_motion_confirm_streaks: dict = {}  # lgtm[py/unused-global-variable]
 
 # ---------------------------------------------------------------------------
 # Active RTSP recordings

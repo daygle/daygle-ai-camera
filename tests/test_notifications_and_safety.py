@@ -30,7 +30,6 @@ L3 - ``escapeHtml`` defangs HTML payloads on the
 from __future__ import annotations
 
 import importlib
-import logging
 import os
 import sys
 import unittest

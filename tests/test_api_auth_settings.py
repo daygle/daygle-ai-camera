@@ -629,7 +629,6 @@ def test_opencv_stream_camera_applies_ffmpeg_log_level_after_each_videocapture(m
     import threading
 
     import app.camera_backend as camera_backend
-    from app.camera_backend import OpenCvStreamCamera
 
     main_tid = threading.get_ident()
     constructs: list[int] = []       # len(FakeCapture.instances) per test-thread construction
@@ -699,7 +698,7 @@ def test_opencv_stream_camera_applies_ffmpeg_log_level_after_each_videocapture(m
 
     monkeypatch.setattr(camera_backend, '_configure_ffmpeg_log_level', trace_configure)
 
-    camera = OpenCvStreamCamera('rtsp://example/stream')
+    camera = camera_backend.OpenCvStreamCamera('rtsp://example/stream')
     FakeCapture.instances.clear()
     camera.read_jpeg()
 

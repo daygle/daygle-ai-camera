@@ -67,8 +67,10 @@ if str(REPO_ROOT) not in sys.path:
 # Preloading ``app.main`` fully first populates ``sys.modules['app.main']``
 # so ``app.ai_settings``'s own ``import app.main as main`` returns the
 # cached module rather than triggering a recursive fresh-load chain.
-import app.main  # noqa: E402  -- must precede the import below
+import app.main as app_main  # noqa: E402  -- must precede the import below
 import app.ai_settings as ai_settings  # noqa: E402
+assert app_main is sys.modules["app.main"]
+assert ai_settings is not None
 
 
 # ---------------------------------------------------------------------------

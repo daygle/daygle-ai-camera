@@ -39,7 +39,8 @@ if str(REPO_ROOT) not in sys.path:
 # Top-level preload to break the Phase-N circular-import gate (same pattern as
 # tests/test_ai_settings.py): populating sys.modules['app.main'] first lets
 # sibling app modules resolve their own ``import app.main`` from the cache.
-import app.main  # noqa: E402,F401  -- must precede the imports below
+import app.main as app_main  # noqa: E402  -- must precede the imports below
+assert app_main is sys.modules["app.main"]
 import app.alert_dispatch as _ad  # noqa: E402
 import app.event_debounce as _ed  # noqa: E402
 import app.state as _state  # noqa: E402
