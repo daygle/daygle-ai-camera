@@ -53,11 +53,12 @@ def _wssec_header(username: str, password: str) -> str:
         # a general-purpose password hash. ``usedforsecurity=False`` makes
         # that legacy-protocol exception explicit to hashlib and static
         # analyzers; it must not be copied to password-storage code.
+        # The suppression comment must sit on the line directly above the
+        # flagged expression (the sensitive-data argument), so the call and
+        # its argument stay on one line; keep the codeql[rule-id] form code
+        # scanning recognizes on the line immediately above it.
         # codeql[py/weak-sensitive-data-hashing]
-        hashlib.sha1(
-            nonce + created.encode() + password.encode(),
-            usedforsecurity=False,
-        ).digest()
+        hashlib.sha1(nonce + created.encode() + password.encode(), usedforsecurity=False).digest()
     ).decode()
     nonce_b64 = base64.b64encode(nonce).decode()
     return (
