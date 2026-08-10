@@ -43,8 +43,9 @@ if str(REPO_ROOT) not in sys.path:
 # fully first populates ``sys.modules['app.main']`` so ``app.config_facades``'s
 # own ``import app.main as main`` at module top returns the cached module
 # rather than triggering a recursive fresh-load chain.
-import app.main  # noqa: E402  -- must precede the import below  # lgtm[py/unused-import]
-import app.config_facades as config_facades  # noqa: E402  # lgtm[py/unused-import]
+import app.main as app_main  # noqa: E402  -- must precede the import below
+import app.config_facades as config_facades  # noqa: E402
+assert app_main is sys.modules["app.main"]
 
 
 @pytest.fixture(autouse=True)

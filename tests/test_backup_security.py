@@ -34,7 +34,8 @@ if str(REPO_ROOT) not in sys.path:
 
 # Preload app.main so ``app.backup``'s reach via ``app.state`` resolves
 # (the same preload pattern used by the rest of the test suite).
-import app.main  # noqa: E402  -- intentional preload  # lgtm[py/unused-import]
+import app.main as app_main  # noqa: E402  -- intentional preload
+assert app_main is sys.modules["app.main"]
 import app.state as _state  # noqa: E402
 import app.backup as backup_module  # noqa: E402
 

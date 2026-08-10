@@ -36,12 +36,14 @@ import app.camera_id as camera_id_module  # noqa: E402
 
 @pytest.fixture
 def main():
-    return app_main
+    assert app_main is not None
+    return sys.modules["app.main"]
 
 
 @pytest.fixture
 def ci():
-    return camera_id_module
+    assert camera_id_module is not None
+    return sys.modules["app.camera_id"]
 
 
 @pytest.fixture
