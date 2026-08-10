@@ -22,6 +22,7 @@ The diagnostic must carry enough detail to triage the hang:
 
 from __future__ import annotations
 
+import importlib
 import sys
 import threading
 import time
@@ -294,7 +295,7 @@ def test_prebuffer_worker_dict_carries_diagnostic_metadata_for_later_stop(tmp_pa
     routes through ``_stop_worker``) can emit a useful diagnostic on hang.
     We don't actually stop here - just verify the dict shape so we know
     ``_stop_worker`` will see the right context."""
-    import app.recordings as recordings_module
+    recordings_module = importlib.import_module("app.recordings")
     from app.recordings import RecordingService
 
     service = RecordingService(
@@ -342,7 +343,7 @@ def test_continuous_worker_dict_carries_diagnostic_metadata_for_later_stop(tmp_p
     """Same as the prebuffer test but for ``_ensure_continuous_chunk_worker``.
     The continuous worker dict previously didn't include ``camera_id``;
     ``_stop_worker`` needs it to populate the diagnostic."""
-    import app.recordings as recordings_module
+    recordings_module = importlib.import_module("app.recordings")
     from app.recordings import RecordingService
 
     service = RecordingService(

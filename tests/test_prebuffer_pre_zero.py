@@ -13,6 +13,7 @@ buffer genuinely holds no usable segments.
 
 from __future__ import annotations
 
+import importlib
 import sys
 import time
 from datetime import datetime, timezone
@@ -24,7 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import app.recordings as recordings_module  # noqa: E402
+recordings_module = importlib.import_module('app.recordings')  # noqa: E402
 from app.recordings import RecordingService  # noqa: E402
 
 

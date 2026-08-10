@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -64,7 +65,7 @@ def test_continuous_recording_uses_high_resolution_stream(tmp_path, monkeypatch)
 
 def test_dedicated_recording_stream_does_not_downgrade_to_detection_buffer(tmp_path, monkeypatch):
     from app.recordings import RecordingService
-    import app.recordings as recordings_module
+    recordings_module = importlib.import_module('app.recordings')
 
     service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'recordings')}, 'recording': {}})
     ensured: list[str] = []
@@ -101,7 +102,7 @@ def test_dedicated_recording_stream_does_not_downgrade_to_detection_buffer(tmp_p
 
 
 def test_continuous_chunk_command_preserves_recording_source_video(monkeypatch, tmp_path):
-    import app.recordings as recordings_module
+    recordings_module = importlib.import_module('app.recordings')
     from app.recordings import RecordingService
 
     service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'recordings')}, 'recording': {}})

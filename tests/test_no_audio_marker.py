@@ -19,6 +19,7 @@ without an installed ffmpeg.
 
 from __future__ import annotations
 
+import importlib
 import threading
 import time
 from pathlib import Path
@@ -32,7 +33,7 @@ import pytest
 
 
 def test_prebuffer_worker_disables_audio_when_stream_lacks_it(tmp_path, monkeypatch):
-    import app.recordings as recordings_module
+    recordings_module = importlib.import_module("app.recordings")
     from app.recordings import RecordingService
 
     service = RecordingService(
@@ -131,7 +132,7 @@ def test_prebuffer_worker_disables_audio_when_stream_lacks_it(tmp_path, monkeypa
 
 
 def test_prebuffer_worker_skips_audio_when_marker_already_present(tmp_path, monkeypatch):
-    import app.recordings as recordings_module
+    recordings_module = importlib.import_module("app.recordings")
     from app.recordings import RecordingService
 
     service = RecordingService(

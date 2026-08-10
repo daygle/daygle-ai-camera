@@ -24,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import app.quantization as quantization  # noqa: E402
+quantization = importlib.import_module('app.quantization')  # noqa: E402
 from app.quantization import (  # noqa: E402
     _INT8_CACHE_FORMAT,
     _int8_cache_metadata_path,
