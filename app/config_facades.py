@@ -76,6 +76,14 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     'detection_confirm_window': 3,
     'background_detection_enabled': True,
     'detection_history_minutes': 10,
+    # Background-subtraction engine: 'mog2' (default, Gaussian-mixture with
+    # shadow rejection) or 'diff' (legacy single-frame adaptive diff / automatic
+    # fallback when the OpenCV build lacks MOG2).
+    'motion_algorithm': 'mog2',
+    # Morphological denoise of the foreground mask (removes single-pixel noise).
+    'motion_denoise': True,
+    # Reject MOG2-classified cast shadows so a moving shadow is not motion.
+    'motion_shadow_suppression': True,
     'motion_pixel_threshold': 30,
     'motion_gate_fraction': 0.005,
     'motion_scale_fraction': 0.03,

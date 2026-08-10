@@ -14,6 +14,16 @@ let expandedZoneRules = new Set();
 const DEFAULT_MOTION_GATE_FRACTION = 0.005;
 const DEFAULT_MOTION_SCALE_FRACTION = 0.03;
 
+// Coerce a per-zone motion override to a clamped number, or null ("inherit").
+// Blank/empty/non-numeric all become null so clearing the field drops the
+// override rather than sending 0. Mirrors the backend _optional_fraction.
+function optionalFraction(value, min, max) {
+  if (value == null || value === '') return null;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return Math.round(Math.max(min, Math.min(max, number)) * 1e6) / 1e6;
+}
+
 function effectiveZoneMotionTuning() {
   const live = window.daygleLiveConfig || {};
   const numberOr = (value, fallback) => {
@@ -35,10 +45,16 @@ function formatMotionPercent(fraction) {
 
 function motionPixelThresholdText(rule) {
   const { gateFraction, scaleFraction } = effectiveZoneMotionTuning();
+  // Per-zone gate/scale overrides win over the camera/global values when set.
+  const ruleGate = Number(rule?.gate_fraction);
+  const ruleScale = Number(rule?.scale_fraction);
+  const gate = rule?.gate_fraction != null && Number.isFinite(ruleGate) ? ruleGate : gateFraction;
+  const scale = rule?.scale_fraction != null && Number.isFinite(ruleScale) ? ruleScale : scaleFraction;
   const sensitivity = clamp(Number(rule?.min_confidence ?? 0.45), 0, 1);
-  const sensitivityFraction = sensitivity * scaleFraction;
-  const requiredFraction = Math.max(gateFraction, sensitivityFraction);
-  return `Approx. ${formatMotionPercent(requiredFraction)} of this zone's pixels must change (${Math.round(sensitivity * 100)}% sensitivity × ${formatMotionPercent(scaleFraction)} scale; ${formatMotionPercent(gateFraction)} minimum gate).`;
+  const sensitivityFraction = sensitivity * scale;
+  const requiredFraction = Math.max(gate, sensitivityFraction);
+  const overridden = (rule?.gate_fraction != null && Number.isFinite(ruleGate)) || (rule?.scale_fraction != null && Number.isFinite(ruleScale));
+  return `Approx. ${formatMotionPercent(requiredFraction)} of this zone's pixels must change (${Math.round(sensitivity * 100)}% sensitivity × ${formatMotionPercent(scale)} scale; ${formatMotionPercent(gate)} minimum gate)${overridden ? ' — per-zone override' : ''}.`;
 }
 
 // Update only the label text on the Add Zone button so its icon (a sibling
@@ -84,6 +100,10 @@ function defaultObjectRule(label = '') {
     record_on_detect: true,
     min_confidence: isMotion ? 0.45 : 0.5,
     max_confidence: 1,
+    // Optional per-zone motion sensitivity overrides (motion rule only). null =
+    // inherit the camera/global gate/scale.
+    gate_fraction: null,
+    scale_fraction: null,
     cooldown_seconds: 60,
     email_enabled: false,
     email_recipients: [],
@@ -129,6 +149,12 @@ function normalizeObjectRules(zone) {
           clamp(Number(rule.min_confidence ?? 0.5), 0, 1),
           clamp(Number(rule.max_confidence ?? 1), 0, 1),
         ),
+        // Per-zone motion gate/scale overrides: clamp to the backend ranges when
+        // set (motion rules only), else null so the zone inherits camera/global.
+        gate_fraction: String(rule.label || '').trim().toLowerCase() === 'motion'
+          ? optionalFraction(rule.gate_fraction, 0.0001, 0.5) : null,
+        scale_fraction: String(rule.label || '').trim().toLowerCase() === 'motion'
+          ? optionalFraction(rule.scale_fraction, 0.001, 1.0) : null,
         cooldown_seconds: Math.max(0, Number.parseInt(rule.cooldown_seconds ?? 60, 10) || 0),
         email_enabled: rule.email_enabled === true,
         email_recipients: normalizeEmailList(rule.email_recipients),
@@ -358,6 +384,14 @@ function renderMotionCard(zone, zoneIndex) {
           <span>Cooldown (s)</span>
           <input type="number" data-zone-motion-cooldown="${zoneIndex}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" />
         </label>
+        <label class="sound-rule-field" title="Per-zone gate: minimum fraction of THIS zone's pixels that must change before motion counts. Leave blank to use the camera/global gate. Lower = more sensitive for this zone only.">
+          <span>Gate override</span>
+          <input type="number" data-zone-motion-gate="${zoneIndex}" value="${rule.gate_fraction != null ? escapeHtml(rule.gate_fraction) : ''}" min="0.0001" max="0.5" step="0.0001" placeholder="Inherit" />
+        </label>
+        <label class="sound-rule-field" title="Per-zone scale: pixel-change fraction in THIS zone that maps to 100% motion confidence. Leave blank to use the camera/global scale. Lower = stronger confidence for small motion in this zone.">
+          <span>Scale override</span>
+          <input type="number" data-zone-motion-scale="${zoneIndex}" value="${rule.scale_fraction != null ? escapeHtml(rule.scale_fraction) : ''}" min="0.001" max="1.0" step="0.001" placeholder="Inherit" />
+        </label>
         <label class="sound-rule-field" title="Send an email when motion is detected in this area. Add recipients in the Email recipients field below.">
           <span>Email alerts</span>
           <input type="checkbox" data-zone-motion-email="${zoneIndex}" ${rule.email_enabled === true ? 'checked' : ''} />
@@ -581,6 +615,25 @@ function bindMotionControls() {
       if (!rule) return;
       rule.cooldown_seconds = Math.max(0, Number.parseInt(inp.value || 0, 10) || 0);
       markZoneUnsaved();
+    });
+  });
+  // Per-zone motion gate/scale overrides. Blank clears the override (inherit).
+  [
+    ['zoneMotionGate', 'gate_fraction', 0.0001, 0.5],
+    ['zoneMotionScale', 'scale_fraction', 0.001, 1.0],
+  ].forEach(([datasetKey, ruleKey, min, max]) => {
+    const attr = `input[data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`;
+    document.querySelectorAll(attr).forEach((inp) => {
+      inp.addEventListener('change', () => {
+        const zoneIndex = Number(inp.dataset[datasetKey]);
+        const rule = motionRuleOf(cameraDetection().zones[zoneIndex]);
+        if (!rule) return;
+        rule[ruleKey] = optionalFraction(inp.value, min, max);
+        // Refresh the "% of pixels must change" hint so it reflects the override.
+        const help = document.querySelector(`[data-zone-motion-pixel-help="${zoneIndex}"]`);
+        if (help) help.textContent = motionPixelThresholdText(rule);
+        markZoneUnsaved();
+      });
     });
   });
   [

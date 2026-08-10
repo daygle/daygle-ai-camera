@@ -189,8 +189,10 @@ from app.zone_schema import (
     detection_label_in_allowed,
     label_matches,
     normalize_label_list,
+    zone_motion_gate_fraction,
     zone_motion_max_confidence,
     zone_motion_min_confidence,
+    zone_motion_scale_fraction,
 )
 
 
@@ -417,19 +419,28 @@ def zone_motion_detections(
         zone_id = str(zone.get('id') or zone.get('name') or id(zone))
         if zone_id in seen_zones:
             continue
+        # Per-zone sensitivity: a zone may override the camera/global gate and
+        # scale on its motion rule so a sensitive doorway and a noisy tree-line
+        # can coexist on one camera. ``None`` inherits the passed-in value.
+        zone_gate = zone_motion_gate_fraction(zone)
+        if zone_gate is None:
+            zone_gate = gate_fraction
+        zone_scale = zone_motion_scale_fraction(zone)
+        if zone_scale is None:
+            zone_scale = scale_fraction
         zone_fraction = -1.0
         if diff_mask is not None:
             zone_fraction = _zone_pixel_motion_fraction(diff_mask, zone)
-            if zone_fraction < gate_fraction:
+            if zone_fraction < zone_gate:
                 continue
-            zone_confidence = round(min(1.0, zone_fraction / max(scale_fraction, 1e-09)), 3)
+            zone_confidence = round(min(1.0, zone_fraction / max(zone_scale, 1e-09)), 3)
         else:
             zone_confidence = frame_motion_confidence
         conf_threshold = zone_motion_min_confidence(zone)
         if zone_confidence < conf_threshold:
             logger.debug(
                 'Motion zone %r: zone_fraction=%.4f zone_confidence=%.3f below conf_threshold=%.3f (scale_fraction=%.4f)',
-                zone_id, zone_fraction, zone_confidence, conf_threshold, scale_fraction,
+                zone_id, zone_fraction, zone_confidence, conf_threshold, zone_scale,
             )
             continue
         # Upper bound of the motion rule's [min, max] window. Dropping the

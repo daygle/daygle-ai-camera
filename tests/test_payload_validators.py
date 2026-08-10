@@ -899,12 +899,42 @@ def test_validate_live_settings_returns_all_expected_fields(monkeypatch, pv):
         'snapshot_refresh_ms', 'detection_status_refresh_ms',
         'detection_interval_seconds', 'event_debounce_seconds',
         'background_detection_enabled', 'detection_history_minutes',
+        'motion_algorithm', 'motion_denoise', 'motion_shadow_suppression',
         'motion_pixel_threshold', 'motion_gate_fraction',
         'motion_scale_fraction', 'motion_background_alpha',
         'motion_frame_width', 'motion_frame_height', 'ingest_frame_fps',
         'snapshot_quality', 'periodic_scan_interval_seconds',
         'detection_confirm_frames', 'detection_confirm_window',
     }
+
+
+def test_validate_live_settings_defaults_motion_engine(monkeypatch, pv):
+    """The new background-engine controls default to the recommended values."""
+    _install_validator_dependencies(monkeypatch)
+    out = pv.validate_live_settings({})
+    assert out['motion_algorithm'] == 'mog2'
+    assert out['motion_denoise'] is True
+    assert out['motion_shadow_suppression'] is True
+
+
+def test_validate_live_settings_normalises_motion_engine(monkeypatch, pv):
+    """An unknown engine falls back to mog2 (never disables motion); the
+    boolean toggles accept HTML-form strings and real bools alike."""
+    # Use the real bool coercion so the HTML-form 'false' string is parsed the
+    # way production does (the default stub is a naive bool()).
+    from app.utils import normalize_bool_setting as real_bool
+    _install_validator_dependencies(monkeypatch, normalize_bool_setting=real_bool)
+    out = pv.validate_live_settings({
+        'motion_algorithm': 'DIFF',
+        'motion_denoise': 'false',
+        'motion_shadow_suppression': False,
+    })
+    assert out['motion_algorithm'] == 'diff'
+    assert out['motion_denoise'] is False
+    assert out['motion_shadow_suppression'] is False
+
+    bad = pv.validate_live_settings({'motion_algorithm': 'wavelet-magic'})
+    assert bad['motion_algorithm'] == 'mog2'
 
 
 def test_validate_live_settings_defaults_snapshot_quality(monkeypatch, pv):

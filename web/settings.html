@@ -79,6 +79,24 @@
           <p class="settings-advanced-hint">Low-level motion-detector internals - the defaults suit most cameras. Changing Motion Frame Width or Height resets every camera's background model.</p>
           <div class="form-grid">
             <label>
+              <span>Motion Engine <span class="info-tip" data-tip="MOG2 (recommended) is an adaptive Gaussian-mixture background model that handles gradual light changes, swaying foliage, and cast shadows. Diff is the legacy single-frame background model. Default: MOG2" title="MOG2 (recommended) is an adaptive Gaussian-mixture background model that handles gradual light changes, swaying foliage, and cast shadows. Diff is the legacy single-frame background model. Default: MOG2" tabindex="0" aria-label="Help: Motion background engine. MOG2 (recommended) handles gradual light changes, foliage, and shadows. Default: MOG2"></span></span>
+              <select name="motion_algorithm">
+                <option value="mog2">MOG2 (recommended)</option>
+                <option value="diff">Diff (legacy)</option>
+              </select></label>
+            <label>
+              <span>Denoise <span class="info-tip" data-tip="Morphologically clean the motion mask to erase single-pixel sensor noise (a common false-positive source on IR/night cameras) and consolidate motion into solid regions. Default: Enabled" title="Morphologically clean the motion mask to erase single-pixel sensor noise (a common false-positive source on IR/night cameras) and consolidate motion into solid regions. Default: Enabled" tabindex="0" aria-label="Help: Clean the motion mask to erase single-pixel sensor noise. Default: Enabled"></span></span>
+              <select name="motion_denoise">
+                <option value="true">Enabled</option>
+                <option value="false">Disabled</option>
+              </select></label>
+            <label>
+              <span>Shadow Suppression <span class="info-tip" data-tip="Reject cast shadows (MOG2 only) so a moving shadow does not register as motion. Disable on very dark or IR scenes where genuine subjects can be misread as shadow. Default: Enabled" title="Reject cast shadows (MOG2 only) so a moving shadow does not register as motion. Disable on very dark or IR scenes where genuine subjects can be misread as shadow. Default: Enabled" tabindex="0" aria-label="Help: Reject cast shadows so a moving shadow does not register as motion (MOG2 only). Default: Enabled"></span></span>
+              <select name="motion_shadow_suppression">
+                <option value="true">Enabled</option>
+                <option value="false">Disabled</option>
+              </select></label>
+            <label>
               <span>Periodic Scan Interval (s) <span class="info-tip" data-tip="Run a full YOLO scan this often even when no pixel motion is detected. Catches stationary subjects that have settled into the background. 0 = disabled. Default: 0" title="Run a full YOLO scan this often even when no pixel motion is detected. Catches stationary subjects that have settled into the background. 0 = disabled. Default: 0" tabindex="0" aria-label="Help: Run a full YOLO scan this often even when no pixel motion is detected. Catches s..."></span></span>
               <input name="periodic_scan_interval_seconds" type="number" min="0" max="3600" step="1" placeholder="0" /></label>
             <label>

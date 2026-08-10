@@ -349,6 +349,41 @@ def test_zone_motion_max_confidence_defaults_clamps_and_skips_disabled(zs):
     assert zs.zone_motion_max_confidence({'object_rules': [{'label': 'motion', 'max_confidence': 'oops', 'enabled': True}]}) == 1.0
 
 
+def test_zone_motion_gate_and_scale_overrides(zs):
+    """Per-zone gate/scale overrides read the enabled motion rule, clamp to the
+    validated ranges, and return None (inherit) when absent/blank/disabled."""
+    # Inherit when the motion rule has no override.
+    assert zs.zone_motion_gate_fraction({'object_rules': [{'label': 'motion', 'enabled': True}]}) is None
+    assert zs.zone_motion_scale_fraction({'object_rules': [{'label': 'motion', 'enabled': True}]}) is None
+    # Present + in range -> used.
+    z = {'object_rules': [{'label': 'motion', 'enabled': True, 'gate_fraction': 0.02, 'scale_fraction': 0.1}]}
+    assert zs.zone_motion_gate_fraction(z) == 0.02
+    assert zs.zone_motion_scale_fraction(z) == 0.1
+    # Out of range clamps to the bounds.
+    hi = {'object_rules': [{'label': 'motion', 'enabled': True, 'gate_fraction': 9.0, 'scale_fraction': 9.0}]}
+    assert zs.zone_motion_gate_fraction(hi) == 0.5
+    assert zs.zone_motion_scale_fraction(hi) == 1.0
+    # Disabled motion rule -> inherit.
+    off = {'object_rules': [{'label': 'motion', 'enabled': False, 'gate_fraction': 0.02}]}
+    assert zs.zone_motion_gate_fraction(off) is None
+
+
+def test_normalize_zone_object_rules_carries_motion_gate_scale(monkeypatch, zs):
+    """normalize_zone_object_rules stores clamped gate/scale on a motion rule and
+    forces them to None on non-motion (object) rules."""
+    monkeypatch.setattr(zs, 'normalize_bool_setting', lambda value, default=False: default if value is None else bool(value))
+    monkeypatch.setattr(zs, 'normalize_email_recipients', lambda value: [])
+    zone = {'object_rules': [
+        {'label': 'motion', 'gate_fraction': 0.9, 'scale_fraction': 0.0005},
+        {'label': 'person', 'gate_fraction': 0.02, 'scale_fraction': 0.1},
+    ]}
+    rules = {r['label']: r for r in zs.normalize_zone_object_rules(zone)}
+    assert rules['motion']['gate_fraction'] == 0.5      # clamped from 0.9
+    assert rules['motion']['scale_fraction'] == 0.001   # clamped from 0.0005
+    assert rules['person']['gate_fraction'] is None     # object rules never carry it
+    assert rules['person']['scale_fraction'] is None
+
+
 # -- normalize_zone_object_rules -------------------------------------------
 
 def test_normalize_zone_object_rules_seeds_from_object_rules_list(monkeypatch, zs):

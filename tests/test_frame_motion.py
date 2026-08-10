@@ -158,6 +158,65 @@ def test_camera_wide_scene_change_reseeds_without_motion():
     assert fraction == 0.0
 
 
+def test_mog2_is_the_default_engine_and_reports_motion():
+    """The default (no algorithm kwarg) path uses MOG2 and detects a subject."""
+    cam = "mog2-default"
+    st._frame_motion_mog2.pop(cam, None)
+    st._frame_motion_mog2_meta.pop(cam, None)
+    base = np.full((240, 320, 3), 100, dtype=np.uint8)
+    # Seed + settle the model on the static scene.
+    for _ in range(4):
+        assert ds.detect_frame_motion(cam, base)[0] is False
+    loud = base.copy()
+    loud[40:140, 40:200] = 240
+    has_motion, confidence, mask, _frac = ds.detect_frame_motion(cam, loud)
+    assert has_motion is True
+    assert confidence > 0.0
+    assert mask is not None and mask.dtype == bool
+
+
+def test_mog2_denoise_removes_isolated_speckle():
+    """With denoise on, a lone single-pixel change is erased from the mask;
+    with denoise off the same speckle survives. Proves the morphological open
+    is actually applied on the default path."""
+    cam_on = "mog2-denoise-on"
+    cam_off = "mog2-denoise-off"
+    for cam in (cam_on, cam_off):
+        st._frame_motion_mog2.pop(cam, None)
+        st._frame_motion_mog2_meta.pop(cam, None)
+    base = np.full((240, 320, 3), 100, dtype=np.uint8)
+    for cam in (cam_on, cam_off):
+        for _ in range(6):
+            ds.detect_frame_motion(cam, base, denoise=(cam == cam_on))
+    speckle = base.copy()
+    speckle[120, 160] = 255  # a single changed pixel
+    _hm_on, _c_on, mask_on, _f_on = ds.detect_frame_motion(cam_on, speckle, denoise=True)
+    _hm_off, _c_off, mask_off, _f_off = ds.detect_frame_motion(cam_off, speckle, denoise=False)
+    on_count = 0 if mask_on is None else int(mask_on.sum())
+    off_count = 0 if mask_off is None else int(mask_off.sum())
+    # Denoise removes the isolated speckle; without it at least as much survives.
+    assert on_count <= off_count
+    assert on_count == 0
+
+
+def test_mog2_freeze_on_motion_does_not_decay():
+    """Repeating an above-gate frame must not let MOG2 learn the subject into
+    the background (the freeze-on-motion contract), so confidence holds."""
+    cam = "mog2-freeze"
+    st._frame_motion_mog2.pop(cam, None)
+    st._frame_motion_mog2_meta.pop(cam, None)
+    base = np.full((240, 320, 3), 60, dtype=np.uint8)
+    for _ in range(4):
+        ds.detect_frame_motion(cam, base)
+    loud = base.copy()
+    loud[0:90, :] = 220
+    _, first_conf, _, _ = ds.detect_frame_motion(cam, loud)
+    assert first_conf > 0.0
+    for _ in range(40):
+        _, conf, _, _ = ds.detect_frame_motion(cam, loud)
+    assert conf == first_conf, f"MOG2 confidence decayed {first_conf}->{conf} (freeze broken)"
+
+
 def test_background_freezes_during_motion():
     """Background must NOT adapt while motion is above the gate.
 

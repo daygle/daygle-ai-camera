@@ -192,11 +192,19 @@ def _prune_frame_motion_state() -> None:
     """Remove background model and scan timestamp entries for cameras no longer in the active config."""
     active_ids = {str(cfg.get('id') or '') for cfg in _state.cameras_config if cfg.get('id')}
     with _state._frame_motion_lock:
-        stale = [cid for cid in _state._frame_motion_prev if cid not in active_ids]
+        # Union of every per-camera motion model so MOG2-only or diff-only
+        # cameras are both pruned (a camera lives in one engine's dict, not both).
+        tracked_ids = (
+            set(_state._frame_motion_prev)
+            | set(_state._frame_motion_mog2)
+        )
+        stale = [cid for cid in tracked_ids if cid not in active_ids]
         for cid in stale:
-            del _state._frame_motion_prev[cid]
+            _state._frame_motion_prev.pop(cid, None)
             _state._frame_motion_last_frame.pop(cid, None)
             _state._frame_motion_last_gray.pop(cid, None)
+            _state._frame_motion_mog2.pop(cid, None)
+            _state._frame_motion_mog2_meta.pop(cid, None)
     for cid in stale:
         _state._periodic_scan_last_ts.pop(cid, None)
         _state._frame_motion_error_cameras.discard(cid)
@@ -325,6 +333,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     _gate_fraction = float(live_settings.get('motion_gate_fraction', _state._MOTION_GATE_FRACTION))
     _scale_fraction = float(live_settings.get('motion_scale_fraction', _state._MOTION_SCALE_FRACTION))
     _background_alpha = float(live_settings.get('motion_background_alpha', _state._MOTION_BACKGROUND_ALPHA))
+    # Background engine + post-processing toggles (global defaults; per-camera
+    # override resolved below alongside the numeric thresholds).
+    _algorithm = str(live_settings.get('motion_algorithm', getattr(_state, '_MOTION_ALGORITHM', 'mog2')) or 'mog2').strip().lower()
+    _denoise = normalize_bool_setting(live_settings.get('motion_denoise'), getattr(_state, '_MOTION_DENOISE', True))
+    _shadow_suppression = normalize_bool_setting(live_settings.get('motion_shadow_suppression'), getattr(_state, '_MOTION_SHADOW_SUPPRESSION', True))
     # Clamp to the SAME bounds validate_live_settings enforces (40-640 x
     # 30-480). The UI path is already validated, but effective_live_config also
     # merges a raw ``live`` block from config.yaml that never passes through the
@@ -336,7 +349,13 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         with _state._frame_motion_lock:
             _state._MOTION_FRAME_W = _frame_w
             _state._MOTION_FRAME_H = _frame_h
+            # Both engines' models are sized to the old thumbnail; drop them so
+            # they rebuild at the new size on the next frame. (MOG2 also rebuilds
+            # via its parameter signature, but clearing here reclaims the memory
+            # immediately instead of on the next per-camera frame.)
             _state._frame_motion_prev.clear()
+            _state._frame_motion_mog2.clear()
+            _state._frame_motion_mog2_meta.clear()
     _cam_motion_nest = settings.get('motion') if isinstance(settings.get('motion'), dict) else {}
     _cam_pt = settings.get('motion_pixel_threshold') if settings.get('motion_pixel_threshold') is not None else _cam_motion_nest.get('pixel_threshold')
     if _cam_pt is not None:
@@ -362,12 +381,22 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             _background_alpha = float(_cam_ba)
         except (TypeError, ValueError):
             pass  # Keep the validated global background alpha.
+    # Per-camera engine / post-processing overrides (flat key, else legacy nested).
+    _cam_algo = settings.get('motion_algorithm') if settings.get('motion_algorithm') is not None else _cam_motion_nest.get('algorithm')
+    if _cam_algo is not None:
+        _algorithm = str(_cam_algo or 'mog2').strip().lower() or _algorithm
+    _cam_dn = settings.get('motion_denoise') if settings.get('motion_denoise') is not None else _cam_motion_nest.get('denoise')
+    if _cam_dn is not None:
+        _denoise = normalize_bool_setting(_cam_dn, _denoise)
+    _cam_ss = settings.get('motion_shadow_suppression') if settings.get('motion_shadow_suppression') is not None else _cam_motion_nest.get('shadow_suppression')
+    if _cam_ss is not None:
+        _shadow_suppression = normalize_bool_setting(_cam_ss, _shadow_suppression)
     periodic_scan_interval = float(live_settings.get('periodic_scan_interval_seconds', 0))
     force_scan = False
     if periodic_scan_interval > 0 and now - _state._periodic_scan_last_ts.get(camera_id, 0) >= periodic_scan_interval:
         force_scan = True
         _state._periodic_scan_last_ts[camera_id] = now
-    frame_has_motion, frame_motion_confidence, diff_mask, raw_motion_fraction = detect_frame_motion(camera_id, image, pixel_threshold=_pixel_threshold, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, background_alpha=_background_alpha)
+    frame_has_motion, frame_motion_confidence, diff_mask, raw_motion_fraction = detect_frame_motion(camera_id, image, pixel_threshold=_pixel_threshold, gate_fraction=_gate_fraction, scale_fraction=_scale_fraction, background_alpha=_background_alpha, algorithm=_algorithm, denoise=_denoise, shadow_suppression=_shadow_suppression)
     # Keep a diagnostic signal separate from the alert-gated confidence. The
     # latter is intentionally zero below the motion gate; the former lets the
     # live bar show real sub-gate pixel changes without making them alertable.
