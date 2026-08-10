@@ -192,7 +192,7 @@ def test_live_snapshot_jpeg_overlay_changes_frame_when_detections_exist(tmp_path
 
 
 def test_export_yolo_onnx_uses_ultralytics_export(tmp_path, monkeypatch):
-    app, _database_path = _load_app(tmp_path, monkeypatch)
+    _load_app(tmp_path, monkeypatch)
     main = sys.modules["app.main"]
     mods = _m()
     destination = tmp_path / "models" / "yolov8n.onnx"

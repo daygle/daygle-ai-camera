@@ -243,7 +243,6 @@ def test_prebuffer_window_change_updates_worker_without_restart(tmp_path, monkey
 
         def start(self):
             self.started = True
-            target = self.kwargs.get('target')
             args = self.kwargs.get('args') or ()
             started.append(args[2]['stop_event'])
 

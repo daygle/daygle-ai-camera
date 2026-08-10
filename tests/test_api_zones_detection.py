@@ -227,7 +227,7 @@ def test_multiple_cameras_have_per_camera_detection_settings_and_zones(tmp_path,
 
 
 def test_polygon_monitoring_zones_are_normalized_and_filter_by_shape(tmp_path, monkeypatch):
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    _load_app(tmp_path, monkeypatch)
     import app.zone_schema as _zs
     import app.zone_detection as _zd
     triangle = {
@@ -262,7 +262,7 @@ def test_polygon_monitoring_zones_are_normalized_and_filter_by_shape(tmp_path, m
 
 
 def test_monitoring_zones_filter_object_detections_by_label(tmp_path, monkeypatch):
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    _load_app(tmp_path, monkeypatch)
     import app.zone_schema as _zs
     import app.zone_detection as _zd
     zones = _zs.normalize_monitoring_zones([
@@ -290,7 +290,7 @@ def test_monitoring_zones_filter_object_detections_by_label(tmp_path, monkeypatc
 
 
 def test_monitoring_zones_normalize_object_rules(tmp_path, monkeypatch):
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    _load_app(tmp_path, monkeypatch)
     import app.zone_schema as _zs
     zones = _zs.normalize_monitoring_zones([
         {
@@ -335,7 +335,7 @@ def test_monitoring_zones_normalize_object_rules(tmp_path, monkeypatch):
 def test_rule_notify_active_now_window(tmp_path, monkeypatch):
     """The email/push window gates only when set, supports midnight wrap, and is
     evaluated in the admin's local timezone."""
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    _load_app(tmp_path, monkeypatch)
     import app.alert_dispatch as _ad
     # `_rule_notify_active_now` reads `_alert_datetime_prefs` from
     # ``app.alert_dispatch``'s module-global namespace, NOT via main.
@@ -365,7 +365,7 @@ def test_rule_notify_active_now_window(tmp_path, monkeypatch):
 
 
 def test_zone_object_alert_rules_are_scoped_to_matching_zone(tmp_path, monkeypatch):
-    _app, _database_path = _load_app(tmp_path, monkeypatch)
+    _load_app(tmp_path, monkeypatch)
     import app.zone_schema as _zs
     import app.zone_detection as _zd
     from app.alerts import AlertEngine
