@@ -20,10 +20,13 @@ def test_events_and_snapshots_keep_motion_pill_with_object_pills():
 
 def test_recordings_keep_motion_pill_on_mixed_object_clips():
     source = read_web("recordings.js")
+    html = read_web("recordings.html")
     assert "window.daygleUi.recordingHasMotion(recording)" in source
     assert "const motionBadge = !isSound && hasRecordingMotion(recording)" in source
     assert "const objectBadges = detections.map((d) => detectionPill" in source
     assert "motionConfidenceFor(recording) !== null" in source
+    assert "/static/utils.js?v=recordings-motion-fallback-1" in html
+    assert "/static/recordings.js?v=recordings-motion-fallback-1" in html
 
 
 def test_timeline_has_a_separate_motion_only_card_and_partition():

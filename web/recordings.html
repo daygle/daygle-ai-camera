@@ -136,8 +136,10 @@
   </main>
 
   <script src="/static/nav.js"></script>
-  <script src="/static/utils.js"></script>
+  <!-- Versioned after the motion-helper fallback so stale browser caches cannot
+       re-run the pre-fix recordings bundle. -->
+  <script src="/static/utils.js?v=recordings-motion-fallback-1"></script>
   <script src="/static/overlay.js"></script>
-  <script src="/static/recordings.js"></script>
+  <script src="/static/recordings.js?v=recordings-motion-fallback-1"></script>
 </body>
 </html>
