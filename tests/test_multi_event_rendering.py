@@ -29,6 +29,13 @@ def test_recordings_keep_motion_pill_on_mixed_object_clips():
     assert "/static/recordings.js?v=recordings-motion-fallback-1" in html
 
 
+def test_shared_ui_registry_preserves_nav_helpers_when_utils_loads_after_nav():
+    utils_source = read_web("utils.js")
+    nav_source = read_web("nav.js")
+    assert "...(window.daygleUi || {})," in utils_source
+    assert "window.daygleUi = Object.assign(window.daygleUi || {}," in nav_source
+
+
 def test_timeline_has_a_separate_motion_only_card_and_partition():
     html = read_web("timeline.html")
     source = read_web("timeline.js")

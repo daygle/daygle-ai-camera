@@ -1078,6 +1078,10 @@ function getDaygleDatePrefs() {
 }
 
 window.daygleUi = {
+  // Preserve methods registered by nav.js, which loads before this shared
+  // utility bundle. The registry is intentionally additive so loading utils
+  // cannot silently discard nav-specific helpers such as the auth countdown.
+  ...(window.daygleUi || {}),
   // API + auth
   api, setApiAuth, getApiAuth, refreshDaygleAuth, scheduleNextAuthRefresh,
   handleSessionLoss, defaultReturnTo,
