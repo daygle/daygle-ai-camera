@@ -321,6 +321,32 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
                     updated[_flat_key] = _coerce_camera_motion_override(_flat_key, _cur_v)
                 except (TypeError, ValueError):
                     pass  # Preserve the stored value when it is malformed.
+
+    # Per-camera background-engine overrides (motion_algorithm / motion_denoise /
+    # motion_shadow_suppression). These newer keys have no legacy nested form.
+    # Semantics per key: present with a value -> set; present but empty/None ->
+    # clear (omit, inherit global); absent -> preserve any stored override.
+    def _is_clear(_value: Any) -> bool:
+        return _value is None or (isinstance(_value, str) and not _value.strip())
+
+    if 'motion_algorithm' in payload:
+        _algo = payload['motion_algorithm']
+        if not _is_clear(_algo):
+            _algo = str(_algo).strip().lower()
+            if _algo in {'mog2', 'diff'}:
+                updated['motion_algorithm'] = _algo
+        # empty/unknown -> cleared (omit)
+    elif str(current.get('motion_algorithm') or '').strip().lower() in {'mog2', 'diff'}:
+        updated['motion_algorithm'] = str(current['motion_algorithm']).strip().lower()
+
+    for _bkey in ('motion_denoise', 'motion_shadow_suppression'):
+        if _bkey in payload:
+            _bval = payload[_bkey]
+            if not _is_clear(_bval):
+                updated[_bkey] = normalize_bool_setting(_bval, False)
+            # empty/None -> cleared (omit)
+        elif isinstance(current.get(_bkey), bool):
+            updated[_bkey] = current[_bkey]
     return updated
 
 

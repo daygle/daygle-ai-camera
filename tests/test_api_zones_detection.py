@@ -746,6 +746,44 @@ def test_zone_detection_creates_alert_and_recording(tmp_path, monkeypatch, label
     assert any(a['label'] == label for a in alerts)
 
 
+def test_confirmation_gate_holds_first_frame_then_alerts_on_second(tmp_path, monkeypatch):
+    """End-to-end 2-of-3 confirmation: with detection_confirm_frames=2, the first
+    frame's detection is held (no event), and the second consecutive frame
+    confirms it and creates the event + alert. Covers the confirm>=2 path through
+    the full pipeline (the shared harness otherwise pins single-frame)."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    import app.live_monitor as _lm
+
+    class FakeDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_image(self, _bytes, **kwargs):
+            return [{'label': 'person', 'confidence': 0.9,
+                     'box': {'x': 0.4, 'y': 0.4, 'width': 0.2, 'height': 0.2}}]
+
+    monkeypatch.setattr(main._state, 'detector', FakeDetector())
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    # Enable 2-of-3 confirmation (the harness default pins single-frame).
+    main.database.set_setting('live', {'detection_confirm_frames': 2, 'detection_confirm_window': 3}, main.utc_now())
+    main._state.live_detection_last_checked.clear()
+    main.alerts.last_triggered.clear()
+
+    settings = _zone_camera_settings([
+        {'label': 'person', 'record_on_detect': True, 'email_enabled': True, 'min_confidence': 0.5, 'cooldown_seconds': 0},
+    ])
+
+    first = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    assert first is None, 'first frame must be held by the 2-of-3 confirmation gate'
+
+    second = _lm.process_live_stream_alerts(b'frame', {'width': 1280, 'height': 720}, settings, enforce_interval=False)
+    assert second is not None, 'second consecutive frame must confirm and create an event'
+    event = main.database.get_event(second)
+    assert any(d['label'] == 'person' for d in event['detections'])
+
+
 def test_person_and_cat_in_zone_each_create_independent_events(tmp_path, monkeypatch):
     """Two successive detections - first person, then cat - in the same zone each produce
     their own event and recording when both have zero cooldown."""

@@ -180,6 +180,21 @@ function buildEditFormHtml(camera, index) {
             '<label><span>Gate Fraction <span class="info-tip" data-tip="Minimum fraction of pixels that must change before motion is declared." title="Minimum fraction of pixels that must change before motion is declared." tabindex="0" aria-label="Help: Minimum fraction of pixels that must change before motion is declared."></span></span><input name="motion_gate_fraction" type="number" min="0.0001" max="0.5" step="0.0001" placeholder="Global default (0.005)" value="' + (camera.motion_gate_fraction != null ? camera.motion_gate_fraction : '') + '" /></label>' +
             '<label><span>Scale Fraction <span class="info-tip" data-tip="Pixel change fraction that maps to 100% motion confidence." title="Pixel change fraction that maps to 100% motion confidence." tabindex="0" aria-label="Help: Pixel change fraction that maps to 100% motion confidence."></span></span><input name="motion_scale_fraction" type="number" min="0.001" max="1.0" step="0.001" placeholder="Global default (0.03)" value="' + (camera.motion_scale_fraction != null ? camera.motion_scale_fraction : '') + '" /></label>' +
             '<label><span>Background Alpha <span class="info-tip" data-tip="How fast the background model adapts when no motion is detected." title="How fast the background model adapts when no motion is detected." tabindex="0" aria-label="Help: How fast the background model adapts when no motion is detected."></span></span><input name="motion_background_alpha" type="number" min="0.001" max="0.5" step="0.001" placeholder="Global default (0.05)" value="' + (camera.motion_background_alpha != null ? camera.motion_background_alpha : '') + '" /></label>' +
+            '<label><span>Motion Engine <span class="info-tip" data-tip="Background-subtraction engine for this camera. Leave on Global default unless this camera needs a different engine." title="Background-subtraction engine for this camera. Leave on Global default unless this camera needs a different engine." tabindex="0" aria-label="Help: Per-camera motion engine override."></span></span><select name="motion_algorithm">' +
+              '<option value=""' + (camera.motion_algorithm == null ? ' selected' : '') + '>Global default</option>' +
+              '<option value="mog2"' + (camera.motion_algorithm === 'mog2' ? ' selected' : '') + '>MOG2</option>' +
+              '<option value="diff"' + (camera.motion_algorithm === 'diff' ? ' selected' : '') + '>Diff (legacy)</option>' +
+            '</select></label>' +
+            '<label><span>Denoise <span class="info-tip" data-tip="Morphological denoise of the motion mask for this camera. Leave on Global default to follow the global setting." title="Morphological denoise of the motion mask for this camera. Leave on Global default to follow the global setting." tabindex="0" aria-label="Help: Per-camera denoise override."></span></span><select name="motion_denoise">' +
+              '<option value=""' + (camera.motion_denoise == null ? ' selected' : '') + '>Global default</option>' +
+              '<option value="true"' + (camera.motion_denoise === true ? ' selected' : '') + '>Enabled</option>' +
+              '<option value="false"' + (camera.motion_denoise === false ? ' selected' : '') + '>Disabled</option>' +
+            '</select></label>' +
+            '<label><span>Shadow Suppression <span class="info-tip" data-tip="Reject cast shadows for this camera (MOG2 only). Disable on dark/IR scenes where subjects are misread as shadow. Leave on Global default to follow the global setting." title="Reject cast shadows for this camera (MOG2 only). Leave on Global default to follow the global setting." tabindex="0" aria-label="Help: Per-camera shadow suppression override."></span></span><select name="motion_shadow_suppression">' +
+              '<option value=""' + (camera.motion_shadow_suppression == null ? ' selected' : '') + '>Global default</option>' +
+              '<option value="true"' + (camera.motion_shadow_suppression === true ? ' selected' : '') + '>Enabled</option>' +
+              '<option value="false"' + (camera.motion_shadow_suppression === false ? ' selected' : '') + '>Disabled</option>' +
+            '</select></label>' +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -367,6 +382,9 @@ function collectFormData(form, index) {
     motion_gate_fraction: (function() { var v = getName('motion_gate_fraction'); return v !== '' ? Number(v) : null; })(),
     motion_scale_fraction: (function() { var v = getName('motion_scale_fraction'); return v !== '' ? Number(v) : null; })(),
     motion_background_alpha: (function() { var v = getName('motion_background_alpha'); return v !== '' ? Number(v) : null; })(),
+    motion_algorithm: (function() { var v = getName('motion_algorithm'); return v !== '' ? v : null; })(),
+    motion_denoise: (function() { var v = getName('motion_denoise'); return v !== '' ? (v === 'true') : null; })(),
+    motion_shadow_suppression: (function() { var v = getName('motion_shadow_suppression'); return v !== '' ? (v === 'true') : null; })(),
   };
 }
 

@@ -485,6 +485,44 @@ def test_validate_camera_settings_clamps_per_camera_motion_overrides(monkeypatch
     assert out_low['motion_background_alpha'] == 0.001
 
 
+def test_validate_camera_settings_persists_per_camera_engine_overrides(monkeypatch, pv):
+    """Per-camera Motion Engine / Denoise / Shadow overrides are persisted when
+    set, omitted (inherit) when cleared, and preserved when the payload doesn't
+    mention them."""
+    from app.utils import normalize_bool_setting as real_bool
+    _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok',
+                                    normalize_bool_setting=real_bool)
+    # Set all three.
+    out = pv.validate_camera_settings({
+        'stream_url': 'rtsp://ok',
+        'motion_algorithm': 'DIFF',          # normalised to lower
+        'motion_denoise': 'false',           # HTML-form string
+        'motion_shadow_suppression': True,
+    })
+    assert out['motion_algorithm'] == 'diff'
+    assert out['motion_denoise'] is False
+    assert out['motion_shadow_suppression'] is True
+
+    # Unknown engine is ignored (inherit), not stored.
+    out_bad = pv.validate_camera_settings({'stream_url': 'rtsp://ok', 'motion_algorithm': 'wavelet'})
+    assert 'motion_algorithm' not in out_bad
+
+    # Explicit clear ('' / None) omits the key so the camera inherits global.
+    out_clear = pv.validate_camera_settings({
+        'stream_url': 'rtsp://ok',
+        'motion_algorithm': '',
+        'motion_denoise': None,
+    })
+    assert 'motion_algorithm' not in out_clear
+    assert 'motion_denoise' not in out_clear
+
+    # Absent from payload -> stored override preserved.
+    current = {'id': 'cam-1', 'motion_algorithm': 'mog2', 'motion_shadow_suppression': False}
+    out_keep = pv.validate_camera_settings({'stream_url': 'rtsp://ok'}, current=current)
+    assert out_keep['motion_algorithm'] == 'mog2'
+    assert out_keep['motion_shadow_suppression'] is False
+
+
 def test_validate_camera_settings_clamps_dimensions_to_min_max(monkeypatch, pv):
     """Per-spec: width [160, 7680] / height [120, 4320] / fps [1, 120].
 
