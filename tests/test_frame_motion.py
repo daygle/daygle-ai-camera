@@ -138,18 +138,19 @@ def test_above_gate_motion_reports_positive_confidence():
 
 
 def test_camera_wide_scene_change_reseeds_without_motion():
-    """An exposure/reconnect jump must not become a persistent motion event."""
+    """A SUSTAINED camera-wide change (exposure/reconnect) must settle to no
+    motion within a few frames -- either reseeded by the persistence guard or
+    absorbed -- rather than becoming a persistent motion event. (A TRANSIENT
+    large change is a passing object and is covered by
+    ``test_mog2_transient_large_change_reports_motion``.)"""
     cam = "motion-scene-reset"
+    st._frame_motion_scene_streak.pop(cam, None)
     base = np.full((120, 160, 3), 50, dtype=np.uint8)
     _seed_background(cam, base)
 
-    shifted = np.full((120, 160, 3), 200, dtype=np.uint8)
-    has_motion, confidence, diff_mask, fraction = ds.detect_frame_motion(cam, shifted)
-
-    assert has_motion is False
-    assert confidence == 0.0
-    assert diff_mask is None
-    assert fraction == 0.0
+    shifted = np.full((120, 160, 3), 200, dtype=np.uint8)  # full-frame change
+    results = [ds.detect_frame_motion(cam, shifted)[0] for _ in range(8)]
+    assert results[-1] is False, f"sustained scene change must settle quiet, got {results}"
 
     # The new scene is now the background, so repeated static frames remain quiet.
     has_motion, confidence, _mask, fraction = ds.detect_frame_motion(cam, shifted)
@@ -213,50 +214,79 @@ def test_mog2_denoise_removes_isolated_speckle():
     assert on_count == 0
 
 
-def test_mog2_freeze_on_motion_does_not_decay():
-    """Repeating an above-gate frame must not let MOG2 learn the subject into
-    the background (the freeze-on-motion contract), so confidence holds."""
-    cam = "mog2-freeze"
-    st._frame_motion_mog2.pop(cam, None)
-    st._frame_motion_mog2_meta.pop(cam, None)
+def test_mog2_absorbs_stopped_subject_but_keeps_moving_one():
+    """MOG2's native behavior (freeze-on-motion removed):
+    - a subject that STOPS (identical frame repeated) is absorbed into the
+      background, so a parked car no longer pins the motion signal at ~30%
+      forever (the reported stuck-motion-bar bug);
+    - a subject that keeps MOVING (new position each frame) stays detected."""
+    # Stopped subject -> fades to background.
+    cam = "mog2-stop"
+    for d in (st._frame_motion_mog2, st._frame_motion_mog2_meta, st._frame_motion_scene_streak):
+        d.pop(cam, None)
     base = np.full((240, 320, 3), 60, dtype=np.uint8)
     for _ in range(4):
         ds.detect_frame_motion(cam, base)
-    loud = base.copy()
-    loud[0:90, :] = 220
-    _, first_conf, _, _ = ds.detect_frame_motion(cam, loud)
-    assert first_conf > 0.0
+    parked = base.copy()
+    parked[60:200, 60:180] = 210  # a static "parked car" (~24% of the frame)
+    _, first_conf, _, _ = ds.detect_frame_motion(cam, parked)
+    assert first_conf > 0.0, "the car must register when it first appears"
     for _ in range(40):
-        _, conf, _, _ = ds.detect_frame_motion(cam, loud)
-    assert conf == first_conf, f"MOG2 confidence decayed {first_conf}->{conf} (freeze broken)"
+        _, _c, _m, frac = ds.detect_frame_motion(cam, parked)
+    assert frac < 0.02, f"a stopped subject must be absorbed, still at {frac}"
+
+    # Moving subject -> keeps firing across frames.
+    cam2 = "mog2-move"
+    for d in (st._frame_motion_mog2, st._frame_motion_mog2_meta, st._frame_motion_scene_streak):
+        d.pop(cam2, None)
+    for _ in range(4):
+        ds.detect_frame_motion(cam2, base)
+    detected = 0
+    for i in range(20):
+        frame = base.copy()
+        x = 20 + i * 12  # a block sweeping across the frame
+        frame[100:160, x:x + 40] = 210
+        if ds.detect_frame_motion(cam2, frame)[0]:
+            detected += 1
+    assert detected >= 15, f"a moving subject must keep firing motion, only {detected}/20"
 
 
-def test_background_freezes_during_motion():
-    """Background must NOT adapt while motion is above the gate.
+def test_mog2_transient_large_change_reports_motion():
+    """A big object sweeping >50% of the frame for a frame or two is reported as
+    motion, NOT silently suppressed as a scene reset -- the passing-car fix."""
+    cam = "mog2-transient-big"
+    for d in (st._frame_motion_mog2, st._frame_motion_mog2_meta, st._frame_motion_scene_streak):
+        d.pop(cam, None)
+    base = np.full((240, 320, 3), 100, dtype=np.uint8)
+    for _ in range(5):
+        ds.detect_frame_motion(cam, base)
+    big = np.full((240, 320, 3), 240, dtype=np.uint8)  # whole-frame (>50%) change
+    has_motion, confidence, _m, _f = ds.detect_frame_motion(cam, big)
+    assert has_motion is True and confidence > 0.0, "a transient >50% change must report motion"
 
-    If the background learns the moving subject, the pixel diff shrinks on
-    each successive frame and motion detection silently stops -- the reported
-    bug where motion-only recording produced nothing after the first second.
-    After many frames of identical above-gate motion the confidence should be
-    unchanged, not decayed.
+
+def test_diff_engine_background_freezes_during_motion():
+    """The LEGACY diff engine still freezes its single running-average background
+    while motion is above the gate (pinned to algorithm='diff'). MOG2 no longer
+    does -- it absorbs a stopped subject natively, covered by
+    ``test_mog2_absorbs_stopped_subject_but_keeps_moving_one``.
     """
-    cam = "motion-freeze"
+    cam = "motion-freeze-diff"
+    st._frame_motion_prev.pop(cam, None)
     base = np.full((120, 160, 3), 50, dtype=np.uint8)
-    _seed_background(cam, base)
+    ds.detect_frame_motion(cam, base, algorithm='diff')  # seed the background
 
     loud = base.copy()
-    loud[0:48, :] = 200  # localized 40% change, well above the default gate
+    loud[0:48, :] = 200  # localized 40% change, above gate but below scene-reset
 
-    _, first_conf, _, _ = ds.detect_frame_motion(cam, loud)
+    _, first_conf, _, _ = ds.detect_frame_motion(cam, loud, algorithm='diff')
     assert first_conf > 0.0, "First motion frame must be detected"
 
-    # Feed the same "motion" frame many more times. If the background were
-    # updating during motion, the diff would shrink toward zero; with the
-    # freeze the diff should stay constant and confidence should not decay.
-    for _ in range(40):  # 40 frames ≈ 10 s at 4 Hz
-        _, conf, _, _ = ds.detect_frame_motion(cam, loud)
+    # The diff engine freezes its background during motion, so the diff does not
+    # shrink and confidence does not decay across repeated identical frames.
+    for _ in range(40):
+        _, conf, _, _ = ds.detect_frame_motion(cam, loud, algorithm='diff')
 
     assert conf == first_conf, (
-        f"Confidence decayed from {first_conf} to {conf} -- "
-        "background is adapting during motion (freeze-on-motion bug)"
+        f"Diff-engine confidence decayed {first_conf}->{conf} -- freeze broken"
     )

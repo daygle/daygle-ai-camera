@@ -91,13 +91,13 @@ Out of the box, Daygle runs object detection on **every** cycle, decoupled from 
 
 Layer 1 compares each frame against a learned background - a model of what the camera sees when nothing is happening. With the default **MOG2** engine each pixel is modelled as a mixture of Gaussians; with the legacy **Diff** engine it is a single exponential moving average. Either way, the adaptation speed is controlled by **Motion Background Alpha**.
 
-**Important behaviour:** The background only updates when *no motion is detected* (the model is frozen while motion is above the gate). This means:
+**Important behaviour (MOG2):** the model adapts every frame at **Motion Background Alpha**, and MOG2 distinguishes a moving subject from a stopped one by how long each pixel stays changed:
 
-- A person actively moving in frame keeps the background frozen. They stay visible indefinitely.
-- Once a person stands completely still, the pixel diff drops to zero, the gate closes, and the background slowly starts adapting toward the new scene (including the stationary person).
-- After enough still frames, the person is absorbed into the background and becomes invisible to Layer 1.
+- A subject that keeps **moving** lands on new pixels each frame, so no pixel is ever learned — it stays visible as motion the whole time it moves.
+- A subject that **stops** (a car that parks, a person who stands still) sits on the same pixels, so it is gradually absorbed into the background over roughly `1 / Motion Background Alpha` frames, and the motion signal returns to its baseline. This is why a parked car does **not** pin the motion bar at ~30% forever — it fades within seconds. (An earlier "freeze during motion" behaviour caused exactly that stuck-bar bug and has been removed; the legacy **Diff** engine still freezes and can show the old behaviour.)
+- Recording continuity for a subject that stops is handled by **Minimum Post-Event Seconds** / **Keep Recording After Motion**, not by holding the motion signal.
 
-This is where the **Periodic Scan** setting comes in.
+Because a stopped subject fades from *motion*, catching it while it's still there is the job of object detection (Always-On, or the **Periodic Scan** below).
 
 ---
 

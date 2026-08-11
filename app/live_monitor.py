@@ -212,6 +212,7 @@ def _prune_frame_motion_state() -> None:
             _state._frame_motion_last_gray.pop(cid, None)
             _state._frame_motion_mog2.pop(cid, None)
             _state._frame_motion_mog2_meta.pop(cid, None)
+            _state._frame_motion_scene_streak.pop(cid, None)
     for cid in stale:
         _state._periodic_scan_last_ts.pop(cid, None)
         _state._frame_motion_error_cameras.discard(cid)
