@@ -31,6 +31,7 @@ from app.detection_state import (
 )
 from app.detection_status import _camera_has_live_alert_stream, update_live_detection_status
 from app.object_tracking import update_object_tracks
+from app.region_detection import detect_with_region_boost, region_boost_enabled
 from app.detector import DetectorUnavailableError
 from app.event_debounce import (
     clear_live_camera_backoff,
@@ -482,6 +483,15 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     try:
         if detector_ready and frame_is_numpy and hasattr(_state.detector, 'detect_frame'):
             detections = _state.detector.detect_frame(image, confidence=min_conf)
+            # Motion-region high-res boost (opt-in): re-run the detector zoomed
+            # into the moving regions so small/distant subjects that vanish in
+            # the full-frame downscale are recovered, then merge + de-dup. Safe
+            # to call unconditionally -- it returns the base list when disabled,
+            # when there is no diff mask, or when no region qualifies.
+            if diff_mask is not None and region_boost_enabled(live_settings):
+                detections = detect_with_region_boost(
+                    _state.detector, image, diff_mask, detections, confidence=min_conf,
+                )
         elif detector_ready:
             detections = _state.detector.detect_image(image, confidence=min_conf)
         else:

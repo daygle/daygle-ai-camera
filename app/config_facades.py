@@ -86,6 +86,12 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     # hardware without the headroom to run YOLO continuously. Motion detection is
     # a separate, always-on signal either way.
     'always_run_object_detection': True,
+    # When True, after the full-frame YOLO pass the detector is re-run zoomed
+    # into the moving regions (from the motion diff mask) so small/distant
+    # subjects are recovered, then merged + de-duplicated. Off by default: it
+    # multiplies inference cost by the number of motion regions and is best
+    # enabled per deployment after validating on real footage.
+    'object_detection_region_boost': False,
     'detection_history_minutes': 10,
     # Background-subtraction engine: 'mog2' (default, Gaussian-mixture with
     # shadow rejection) or 'diff' (legacy single-frame adaptive diff / automatic

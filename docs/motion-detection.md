@@ -146,6 +146,23 @@ Rejects MOG2-classified cast shadows so a moving shadow does not register as mot
 
 Default: `On`
 
+### Motion-Region Boost
+
+Full-frame YOLO downscales the whole image to the model's input size, so a
+subject that is only a few pixels far from the camera can fall below the
+detector's resolution. With this enabled, after the full-frame pass the detector
+is **re-run zoomed into each moving region** (derived from the motion diff mask),
+and the crop detections are mapped back and merged (de-duplicated by IoU). A
+distant person in one corner is then detected at much higher effective
+resolution.
+
+Cost scales with the number of motion regions per frame (a few extra inferences),
+so it's off by default; enable it on cameras watching a large area where
+subjects appear small, ideally after checking the benefit with
+`scripts/evaluate_detection.py`.
+
+Default: `Disabled`
+
 ### Always Run Object Detection
 
 When enabled (the default), YOLO object detection runs on **every** detection cycle regardless of motion, so a still, slow, or low-contrast subject is never hidden from the detector (see [Recommended setup for maximum reliability](#recommended-setup-for-maximum-reliability)). Disable it to restore the CPU-saving motion gate - object detection then only runs when the motion gate fires (or a periodic scan is due) - on low-power hardware that cannot run YOLO continuously. Motion detection continues to run independently either way.
