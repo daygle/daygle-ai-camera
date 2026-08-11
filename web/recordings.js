@@ -674,7 +674,11 @@ function renderClipTimeline() {
     return;
   }
   const first = Math.max(0, Math.min(bounds.first, duration));
-  const last = Math.min(Math.max(bounds.last, first), duration);
+  // A motion clip can contain only one localized sample when movement starts
+  // just before the next capture/extension cycle. Keep that real trigger visible
+  // instead of collapsing the green event segment to zero width.
+  const minimumEventSpan = Math.min(1, duration);
+  const last = Math.min(Math.max(bounds.last, first + minimumEventSpan), duration);
   const pct = (value) => `${Math.max(0, Math.min(100, (value / duration) * 100))}%`;
 
   const segments = [
