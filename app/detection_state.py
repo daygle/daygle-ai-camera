@@ -434,8 +434,17 @@ def _detect_frame_motion_mog2(
             _state._frame_motion_error_cameras.discard(camera_id)
             return (False, 0.0, None, 0.0)
 
-        # Compute the foreground WITHOUT updating the model (freeze-on-motion).
-        raw = subtractor.apply(resized, learningRate=0.0)
+        # Compute the foreground AND adapt the model at background_alpha every
+        # frame. MOG2 keeps a genuinely MOVING subject as foreground (it lands on
+        # new pixels each frame, so no single pixel is ever learned) while
+        # gradually absorbing one that has STOPPED: a car that parks fades back
+        # into the background over ~1/background_alpha frames instead of pinning
+        # the motion signal to its silhouette forever. The previous
+        # learningRate=0 "freeze during motion" is exactly what left a parked car
+        # stuck at ~30% motion indefinitely; recording continuity for a subject
+        # that stops is handled by the post-event / keep-recording-after-motion
+        # settings, not by freezing the motion signal.
+        raw = subtractor.apply(resized, learningRate=background_alpha)
         # MOG2 marks foreground as 255 and (when detectShadows) shadow as 127.
         # Dropping 127 rejects cast shadows; including it treats them as motion.
         mask = raw == 255 if shadow_on else raw >= 127
@@ -443,21 +452,34 @@ def _detect_frame_motion_mog2(
             mask = _denoise_mask(mask)
         changed_fraction = float(np.mean(mask))
 
+        # A single >=50% frame is AMBIGUOUS: it could be a camera-wide light
+        # change (exposure jump / IR cut / reconnect) OR a large object sweeping
+        # close past the camera (a passing car). The former persists; the latter
+        # is transient. Only treat it as a scene reset once the >=50% change has
+        # held for several consecutive frames -- otherwise report it as the real
+        # motion it is, so a big/close car is no longer silently dropped.
+        scene_reset_frames = max(1, int(getattr(_state, '_MOTION_SCENE_RESET_FRAMES', 4)))
         if changed_fraction >= 0.5:
-            # Camera-wide transition: rebuild against the new scene and suppress.
-            _state._frame_motion_mog2[camera_id] = _new_subtractor()
-            _state._frame_motion_mog2_meta[camera_id] = signature
-            _state._frame_motion_error_cameras.discard(camera_id)
-            logger.debug(
-                'Motion scene reset for camera %s: changed=%.4f; rebuilding MOG2 model',
-                camera_id, changed_fraction,
-            )
-            return (False, 0.0, None, 0.0)
-
-        # Only adapt when the scene is quiet, so a lingering subject is not
-        # learned into the background while it is still being reported.
-        if changed_fraction < gate_fraction:
-            subtractor.apply(resized, learningRate=background_alpha)
+            streak = _state._frame_motion_scene_streak.get(camera_id, 0) + 1
+            _state._frame_motion_scene_streak[camera_id] = streak
+            if streak >= scene_reset_frames:
+                # Sustained camera-wide change: rebuild against the new scene and
+                # suppress, so a real light change cannot become a persistent
+                # 100%-motion recording.
+                _state._frame_motion_mog2[camera_id] = _new_subtractor()
+                _state._frame_motion_mog2_meta[camera_id] = signature
+                _state._frame_motion_scene_streak[camera_id] = 0
+                _state._frame_motion_error_cameras.discard(camera_id)
+                logger.debug(
+                    'Motion scene reset for camera %s: changed=%.4f sustained %d frames; rebuilding MOG2 model',
+                    camera_id, changed_fraction, streak,
+                )
+                return (False, 0.0, None, 0.0)
+            # Transient large change -> a big moving object; fall through and
+            # report it as the motion it is. It is not learned into the
+            # background in a frame or two because it is moving across pixels.
+        else:
+            _state._frame_motion_scene_streak[camera_id] = 0
         _state._frame_motion_error_cameras.discard(camera_id)
 
     _now = time.monotonic()
@@ -672,20 +694,32 @@ def _detect_frame_motion_diff(camera_id: str, image: Any, *, pixel_threshold: fl
             changed_fraction = float(np.mean(diff_mask))
             _state._frame_motion_last_frame[camera_id] = current
             _state._frame_motion_last_gray[camera_id] = full_gray
-            # A large fraction changing at once is more consistent with an
-            # exposure jump, decoder reconnect, or camera-wide scene reset than
-            # with a localized moving subject. Do not freeze the old background
-            # on that transition: reseed it and suppress the transition so a
-            # static scene cannot become a persistent 100% motion recording.
+            # A large fraction changing at once is AMBIGUOUS: a camera-wide light
+            # change (exposure jump / reconnect) OR a large object sweeping close
+            # past the camera (a passing car). The former persists; the latter is
+            # transient. Only reseed + suppress once the >=50% change has held for
+            # several consecutive frames, so a big/close car is reported as the
+            # real motion it is instead of being silently dropped. A genuine light
+            # change still persists and reseeds after the short delay, so a static
+            # scene cannot become a persistent 100% motion recording.
+            scene_reset_frames = max(1, int(getattr(_state, '_MOTION_SCENE_RESET_FRAMES', 4)))
             if changed_fraction >= 0.5:
-                _state._frame_motion_prev[camera_id] = current
-                _state._frame_motion_error_cameras.discard(camera_id)
-                logger.debug(
-                    'Motion scene reset for camera %s: changed=%.4f; suppressing camera-wide transition',
-                    camera_id,
-                    changed_fraction,
-                )
-                return (False, 0.0, None, 0.0)
+                streak = _state._frame_motion_scene_streak.get(camera_id, 0) + 1
+                _state._frame_motion_scene_streak[camera_id] = streak
+                if streak >= scene_reset_frames:
+                    _state._frame_motion_prev[camera_id] = current
+                    _state._frame_motion_scene_streak[camera_id] = 0
+                    _state._frame_motion_error_cameras.discard(camera_id)
+                    logger.debug(
+                        'Motion scene reset for camera %s: changed=%.4f sustained %d frames; suppressing camera-wide transition',
+                        camera_id, changed_fraction, streak,
+                    )
+                    return (False, 0.0, None, 0.0)
+                # Transient large change -> a big moving object; report it as
+                # motion. The background is NOT updated below (change is above the
+                # gate), so the object is not learned in while it is still moving.
+            else:
+                _state._frame_motion_scene_streak[camera_id] = 0
             _now = time.monotonic()
             _last = _motion_log_last_at.get(camera_id, 0.0)
             # Threshold-tuning diagnostic (changed vs gate + pixel threshold):

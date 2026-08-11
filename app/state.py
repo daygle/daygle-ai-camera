@@ -51,6 +51,13 @@ _MOTION_NIGHT_BRIGHTNESS: float = 50.0
 # MOG2 history length (number of recent frames the mixture model blends). Not
 # operator-exposed; the per-frame learning rate is driven by background_alpha.
 _MOTION_MOG2_HISTORY: int = 250
+# A single frame changing >= 50% is treated as a camera-wide transition
+# (exposure jump / IR cut / reconnect) ONLY once it has persisted for this many
+# consecutive analyzed frames. A large moving object (a car sweeping close past
+# the camera) also changes >= 50% but is transient - a frame or two - and must
+# be reported as motion, not suppressed. A genuine light change persists, so it
+# still reseeds the background after this short delay.
+_MOTION_SCENE_RESET_FRAMES: int = 4
 
 # Middleware / auth constants (moved from app.main so app.middleware can
 # import them at module top-level without a circular import).
@@ -150,6 +157,11 @@ _frame_motion_error_cameras: set = set()
 _frame_motion_mog2: dict = {}
 # codeql[py/unused-global-variable]
 _frame_motion_mog2_meta: dict = {}
+# Per-camera count of consecutive frames whose change was >= 50%. Used to tell a
+# transient large moving object (a passing car) from a sustained camera-wide
+# scene change; see ``_MOTION_SCENE_RESET_FRAMES``.
+# codeql[py/unused-global-variable]
+_frame_motion_scene_streak: dict = {}
 # Per-camera lightweight IoU object-tracker state (app/object_tracking.py):
 # {camera_id: {'tracks': [...], 'next_id': int}}. Gives each detected object a
 # stable track id across detection cycles.
