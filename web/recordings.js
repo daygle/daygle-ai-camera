@@ -94,6 +94,19 @@ let configuredLabels = null; // null = no filter loaded yet
 // The yamnet-tflite page keeps its own local cameraLabel(camera) because
 // it receives camera config objects (not recordings) with a different shape.
 
+// `recordingHasMotion` was added to the shared utility bundle after older
+// recordings-page assets may already have been cached. Prefer the shared
+// implementation, but keep this page safe when the two bundles are briefly
+// out of sync during a deployment.
+function hasRecordingMotion(recording) {
+  if (typeof window.daygleUi?.recordingHasMotion === 'function') {
+    return window.daygleUi.recordingHasMotion(recording);
+  }
+  return motionConfidenceFor(recording) !== null
+    || (recording?.detections || []).some((d) => String(d?.label || '').trim().toLowerCase() === 'motion')
+    || (recording?.track || []).some((sample) => (sample?.detections || []).some((d) => String(d?.label || '').trim().toLowerCase() === 'motion'));
+}
+
 function recordingDetectionLabels(recording) {
   // Prefer the server-side `labels` array (one row per unique object detected
   // inside the recording, joined via recording_labels). Fall back to deriving
@@ -385,7 +398,7 @@ function renderRecordings(recordings) {
       // A clip can contain both frame motion and a recognised object. Keep it
       // as an Object Recording, but show the motion intensity separately so
       // the list does not lose one of the event types.
-      const motionBadge = !isSound && recordingHasMotion(recording)
+      const motionBadge = !isSound && hasRecordingMotion(recording)
         ? motionPill(motionConfidenceFor(recording))
         : '';
       badges = `${motionBadge}${summaryBadges}` || '<span class="muted">No detections</span>';
@@ -455,7 +468,7 @@ function renderRecordingDetails(recording) {
       : 'none';
   } else {
     detectionLabel = 'Detections';
-    const motionBadge = recordingHasMotion(recording)
+    const motionBadge = hasRecordingMotion(recording)
       ? motionPill(motionConfidenceFor(recording))
       : '';
     const objectBadges = detections.map((d) => detectionPill(d.label, d.confidence)).join(' ');
