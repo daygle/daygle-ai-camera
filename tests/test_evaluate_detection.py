@@ -43,6 +43,7 @@ def _args(**overrides):
         input_size=640, algorithm="mog2", denoise=True, shadow="on",
         pixel_threshold=30.0, gate_fraction=0.005, scale_fraction=0.03,
         frame_width=320, frame_height=240, gated=False, limit=None, annotate=None,
+        tiling=None,
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)

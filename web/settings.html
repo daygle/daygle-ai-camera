@@ -77,6 +77,14 @@
               <option value="true">Enabled</option>
             </select></label>
           <label>
+            <span>Tiled Inference <span class="info-tip" data-tip="Also run object detection on a grid of overlapping tiles covering the whole frame every cycle, so small subjects anywhere - including stationary ones - are detected at higher resolution. Costs one inference per tile (e.g. 3x3 = 9x). Best on cameras covering a large or deep area (driveways, yards, lots). Off for tight/doorway views. Default: Off" title="Run object detection on a grid of overlapping tiles to catch small/stationary subjects anywhere. Costs one inference per tile. Default: Off" tabindex="0" aria-label="Help: Tiled inference runs detection on a grid of tiles to catch small subjects anywhere. Higher CPU. Default: Off"></span></span>
+            <select name="object_detection_tiling">
+              <option value="off">Off</option>
+              <option value="2x2">2 × 2 (4 tiles)</option>
+              <option value="3x3">3 × 3 (9 tiles)</option>
+              <option value="4x4">4 × 4 (16 tiles)</option>
+            </select></label>
+          <label>
             <span>Detection History (min) <span class="info-tip" data-tip="How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min" title="How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min" tabindex="0" aria-label="Help: How many minutes of detection data to keep per camera for recording playback ove..."></span></span>
             <input name="detection_history_minutes" type="number" min="1" max="120" step="1" placeholder="10" /></label>
           <label>

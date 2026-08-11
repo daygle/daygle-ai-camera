@@ -155,6 +155,14 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         if detector is not None and (has_motion or not args.gated):
             t1 = time.perf_counter()
             detections = detector.detect_frame(frame, confidence=args.confidence)
+            if args.tiling:
+                from app.region_detection import detect_with_tiling, parse_tile_grid
+                grid = parse_tile_grid(args.tiling)
+                if grid is not None:
+                    detections = detect_with_tiling(
+                        detector, frame, detections, cols=grid[0], rows=grid[1],
+                        confidence=args.confidence,
+                    )
             detect_ms.append((time.perf_counter() - t1) * 1000.0)
             if detections:
                 frames_with_detection += 1
@@ -249,6 +257,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scale-fraction", type=float, default=0.03)
     parser.add_argument("--frame-width", type=int, default=320)
     parser.add_argument("--frame-height", type=int, default=240)
+    parser.add_argument("--tiling", help="Tiled inference grid, e.g. '3x3' (off when omitted). "
+                                         "Runs the detector on a grid of tiles to recover small subjects anywhere.")
     parser.add_argument("--gated", action="store_true",
                         help="Only run object detection on motion frames (the legacy CPU-saving gate). "
                              "Default runs it every frame, matching the always-on live default.")

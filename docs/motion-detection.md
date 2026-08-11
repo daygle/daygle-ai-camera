@@ -163,6 +163,29 @@ subjects appear small, ideally after checking the benefit with
 
 Default: `Disabled`
 
+### Tiled Inference
+
+Motion-Region Boost only zooms into regions that **moved**, so it can't help a
+small subject that is **stationary** (a person standing still far down a
+driveway, someone crouched behind a parked car). Tiled inference closes that
+gap: it splits the whole frame into an overlapping grid (**2×2**, **3×3**, or
+**4×4**) and runs the detector on **every tile each cycle, regardless of
+motion**, so a distant subject in any tile is detected at that tile's higher
+resolution — moving or not. Tile detections are mapped back and merged with the
+full-frame pass (IoU de-dup); tile detections that come out large are dropped
+(a big object is already caught full-frame, and this avoids fragmenting it).
+
+Cost is one inference per tile (3×3 = 9× per cycle), so it's off by default and
+best on cameras covering a **large or deep area**. On a tight/doorway view where
+subjects are already large, leave it off — Motion-Region Boost (or nothing) is
+enough. Validate the recall gain against the cost on a real clip first:
+
+```
+python scripts/evaluate_detection.py --input clip.mp4 --model models/yolo11n.onnx --tiling 3x3
+```
+
+Default: `Off`
+
 ### Always Run Object Detection
 
 When enabled (the default), YOLO object detection runs on **every** detection cycle regardless of motion, so a still, slow, or low-contrast subject is never hidden from the detector (see [Recommended setup for maximum reliability](#recommended-setup-for-maximum-reliability)). Disable it to restore the CPU-saving motion gate - object detection then only runs when the motion gate fires (or a periodic scan is due) - on low-power hardware that cannot run YOLO continuously. Motion detection continues to run independently either way.

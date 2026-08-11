@@ -31,7 +31,12 @@ from app.detection_state import (
 )
 from app.detection_status import _camera_has_live_alert_stream, update_live_detection_status
 from app.object_tracking import update_object_tracks
-from app.region_detection import detect_with_region_boost, region_boost_enabled
+from app.region_detection import (
+    detect_with_region_boost,
+    detect_with_tiling,
+    region_boost_enabled,
+    tiling_grid,
+)
 from app.detector import DetectorUnavailableError
 from app.event_debounce import (
     clear_live_camera_backoff,
@@ -491,6 +496,17 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             if diff_mask is not None and region_boost_enabled(live_settings):
                 detections = detect_with_region_boost(
                     _state.detector, image, diff_mask, detections, confidence=min_conf,
+                )
+            # Tiled / sliced inference (opt-in): re-run the detector on a grid of
+            # overlapping tiles covering the WHOLE frame every cycle, recovering
+            # small subjects anywhere -- including stationary ones the
+            # motion-region boost never sees. Composes with region boost; the
+            # shared IoU de-dup collapses any overlap.
+            _tile_grid = tiling_grid(live_settings)
+            if _tile_grid is not None:
+                detections = detect_with_tiling(
+                    _state.detector, image, detections,
+                    cols=_tile_grid[0], rows=_tile_grid[1], confidence=min_conf,
                 )
         elif detector_ready:
             detections = _state.detector.detect_image(image, confidence=min_conf)
