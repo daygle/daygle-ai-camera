@@ -32,6 +32,18 @@ These results are then matched against your zone rules. If a zone covers the are
 
 ---
 
+### Object tracking
+
+Every confirmed object detection is stamped with a **stable track id** so the
+same person/car keeps one identity across detection cycles instead of being a
+fresh anonymous box each frame. The tracker is a lightweight greedy IoU matcher
+(same-label only) — no extra dependencies — and is additive: it annotates each
+detection with `track_id`, `track_age` (cycles seen), and `track_new` (first
+sighting) without changing which alerts or recordings fire. These ids flow into
+the detection history and recording rows, giving the playback overlay continuity
+and providing the foundation for de-duplicated events, dwell-time, and
+line-crossing.
+
 ### Layer 3 - Motion zone rules
 
 This is an optional alert that fires from Layer 1's pixel-diff result, without caring what YOLO found.
@@ -43,6 +55,25 @@ You configure it on the **Zones** page: each area has its own **Motion detection
 Use this when you want to be notified any time *anything* moves in an area, regardless of what it is.
 
 ---
+
+## Tuning with your own footage
+
+The defaults are generic. To tune them with evidence from *your* cameras, replay
+a saved clip (or a folder of frames) through the same motion + object detectors
+the live monitor uses:
+
+```
+python scripts/evaluate_detection.py --input clip.mp4 \
+    --model models/yolo11n.onnx --labels models/coco.names --shadow auto
+```
+
+It reports the motion rate, changed-pixel-fraction distribution, per-label
+detection counts and mean confidence, and per-frame timing - so you can pick
+**Motion Gate Fraction**, **Motion Scale Fraction**, and the object
+**confidence** floor from real numbers instead of guessing. Pass `--annotate
+<dir>` to write frames with the detection boxes drawn on, `--gated` to measure
+the legacy motion-gated path, or `--json` for machine-readable output. It only
+reads frames - nothing is written to the app database or config.
 
 ## Recommended setup for maximum reliability
 
@@ -107,9 +138,30 @@ Default: `Enabled`
 
 ### Shadow Suppression
 
-Rejects MOG2-classified cast shadows so a moving shadow does not register as motion. **MOG2 only** (has no effect with the Diff engine). Disable on very dark or IR scenes where a genuine subject can be misread as a shadow and dropped.
+Rejects MOG2-classified cast shadows so a moving shadow does not register as motion. **MOG2 only** (has no effect with the Diff engine). Tri-state:
 
-Default: `Enabled`
+- **On** (default) — always reject shadows.
+- **Off** — never reject; use on very dark or IR scenes where a genuine subject can be misread as a shadow and dropped.
+- **Auto (day only)** — reject shadows only while the scene is bright, and automatically stop at night/IR (when the frame's mean brightness drops below the night threshold). Best for a camera that runs colour by day and IR by night without manual switching.
+
+Default: `On`
+
+### Motion-Region Boost
+
+Full-frame YOLO downscales the whole image to the model's input size, so a
+subject that is only a few pixels far from the camera can fall below the
+detector's resolution. With this enabled, after the full-frame pass the detector
+is **re-run zoomed into each moving region** (derived from the motion diff mask),
+and the crop detections are mapped back and merged (de-duplicated by IoU). A
+distant person in one corner is then detected at much higher effective
+resolution.
+
+Cost scales with the number of motion regions per frame (a few extra inferences),
+so it's off by default; enable it on cameras watching a large area where
+subjects appear small, ideally after checking the benefit with
+`scripts/evaluate_detection.py`.
+
+Default: `Disabled`
 
 ### Always Run Object Detection
 

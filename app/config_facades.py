@@ -86,6 +86,12 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     # hardware without the headroom to run YOLO continuously. Motion detection is
     # a separate, always-on signal either way.
     'always_run_object_detection': True,
+    # When True, after the full-frame YOLO pass the detector is re-run zoomed
+    # into the moving regions (from the motion diff mask) so small/distant
+    # subjects are recovered, then merged + de-duplicated. Off by default: it
+    # multiplies inference cost by the number of motion regions and is best
+    # enabled per deployment after validating on real footage.
+    'object_detection_region_boost': False,
     'detection_history_minutes': 10,
     # Background-subtraction engine: 'mog2' (default, Gaussian-mixture with
     # shadow rejection) or 'diff' (legacy single-frame adaptive diff / automatic
@@ -94,7 +100,9 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     # Morphological denoise of the foreground mask (removes single-pixel noise).
     'motion_denoise': True,
     # Reject MOG2-classified cast shadows so a moving shadow is not motion.
-    'motion_shadow_suppression': True,
+    # Tri-state: 'on' (always), 'off' (never), 'auto' (only while the scene is
+    # bright; disabled at night/IR so real subjects are not read as shadow).
+    'motion_shadow_suppression': 'on',
     'motion_pixel_threshold': 30,
     'motion_gate_fraction': 0.005,
     'motion_scale_fraction': 0.03,

@@ -190,10 +190,11 @@ function buildEditFormHtml(camera, index) {
               '<option value="true"' + (camera.motion_denoise === true ? ' selected' : '') + '>Enabled</option>' +
               '<option value="false"' + (camera.motion_denoise === false ? ' selected' : '') + '>Disabled</option>' +
             '</select></label>' +
-            '<label><span>Shadow Suppression <span class="info-tip" data-tip="Reject cast shadows for this camera (MOG2 only). Disable on dark/IR scenes where subjects are misread as shadow. Leave on Global default to follow the global setting." title="Reject cast shadows for this camera (MOG2 only). Leave on Global default to follow the global setting." tabindex="0" aria-label="Help: Per-camera shadow suppression override."></span></span><select name="motion_shadow_suppression">' +
+            '<label><span>Shadow Suppression <span class="info-tip" data-tip="Reject cast shadows for this camera (MOG2 only). On = always; Off = never (dark/IR scenes); Auto = only while bright. Leave on Global default to follow the global setting." title="Reject cast shadows for this camera (MOG2 only). On / Off / Auto. Leave on Global default to follow the global setting." tabindex="0" aria-label="Help: Per-camera shadow suppression override (on/off/auto)."></span></span><select name="motion_shadow_suppression">' +
               '<option value=""' + (camera.motion_shadow_suppression == null ? ' selected' : '') + '>Global default</option>' +
-              '<option value="true"' + (camera.motion_shadow_suppression === true ? ' selected' : '') + '>Enabled</option>' +
-              '<option value="false"' + (camera.motion_shadow_suppression === false ? ' selected' : '') + '>Disabled</option>' +
+              '<option value="on"' + (camera.motion_shadow_suppression === 'on' ? ' selected' : '') + '>On</option>' +
+              '<option value="off"' + (camera.motion_shadow_suppression === 'off' ? ' selected' : '') + '>Off</option>' +
+              '<option value="auto"' + (camera.motion_shadow_suppression === 'auto' ? ' selected' : '') + '>Auto (day only)</option>' +
             '</select></label>' +
           '</div>' +
         '</div>' +
@@ -384,7 +385,7 @@ function collectFormData(form, index) {
     motion_background_alpha: (function() { var v = getName('motion_background_alpha'); return v !== '' ? Number(v) : null; })(),
     motion_algorithm: (function() { var v = getName('motion_algorithm'); return v !== '' ? v : null; })(),
     motion_denoise: (function() { var v = getName('motion_denoise'); return v !== '' ? (v === 'true') : null; })(),
-    motion_shadow_suppression: (function() { var v = getName('motion_shadow_suppression'); return v !== '' ? (v === 'true') : null; })(),
+    motion_shadow_suppression: (function() { var v = getName('motion_shadow_suppression'); return v !== '' ? v : null; })(),
   };
 }
 

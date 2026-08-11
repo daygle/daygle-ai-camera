@@ -71,6 +71,12 @@
               <option value="false">Disabled</option>
             </select></label>
           <label>
+            <span>Motion-Region Boost <span class="info-tip" data-tip="After the full-frame scan, re-run object detection zoomed into the moving regions so small or distant subjects (a person far from the camera) are detected at higher resolution. Higher CPU/GPU (extra inference per motion region). Best enabled after validating on your footage. Default: Disabled" title="Re-run object detection zoomed into moving regions to catch small/distant subjects. Higher CPU. Default: Disabled" tabindex="0" aria-label="Help: Re-run detection zoomed into moving regions for small/distant subjects. Higher CPU. Default: Disabled"></span></span>
+            <select name="object_detection_region_boost">
+              <option value="false">Disabled</option>
+              <option value="true">Enabled</option>
+            </select></label>
+          <label>
             <span>Detection History (min) <span class="info-tip" data-tip="How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min" title="How many minutes of detection data to keep per camera for recording playback overlays. Default: 10 min" tabindex="0" aria-label="Help: How many minutes of detection data to keep per camera for recording playback ove..."></span></span>
             <input name="detection_history_minutes" type="number" min="1" max="120" step="1" placeholder="10" /></label>
           <label>
@@ -97,10 +103,11 @@
                 <option value="false">Disabled</option>
               </select></label>
             <label>
-              <span>Shadow Suppression <span class="info-tip" data-tip="Reject cast shadows (MOG2 only) so a moving shadow does not register as motion. Disable on very dark or IR scenes where genuine subjects can be misread as shadow. Default: Enabled" title="Reject cast shadows (MOG2 only) so a moving shadow does not register as motion. Disable on very dark or IR scenes where genuine subjects can be misread as shadow. Default: Enabled" tabindex="0" aria-label="Help: Reject cast shadows so a moving shadow does not register as motion (MOG2 only). Default: Enabled"></span></span>
+              <span>Shadow Suppression <span class="info-tip" data-tip="Reject cast shadows (MOG2 only) so a moving shadow does not register as motion. On = always; Off = never (use on very dark/IR scenes where subjects are misread as shadow); Auto = reject only while the scene is bright and stop at night. Default: On" title="Reject cast shadows (MOG2 only). On = always; Off = never; Auto = only while bright, off at night. Default: On" tabindex="0" aria-label="Help: Reject cast shadows (MOG2 only). On / Off / Auto (bright only). Default: On"></span></span>
               <select name="motion_shadow_suppression">
-                <option value="true">Enabled</option>
-                <option value="false">Disabled</option>
+                <option value="on">On</option>
+                <option value="off">Off</option>
+                <option value="auto">Auto (day only)</option>
               </select></label>
             <label>
               <span>Periodic Scan Interval (s) <span class="info-tip" data-tip="Run a full YOLO scan this often even when no pixel motion is detected. Catches stationary subjects that have settled into the background. 0 = disabled. Default: 0" title="Run a full YOLO scan this often even when no pixel motion is detected. Catches stationary subjects that have settled into the background. 0 = disabled. Default: 0" tabindex="0" aria-label="Help: Run a full YOLO scan this often even when no pixel motion is detected. Catches s..."></span></span>

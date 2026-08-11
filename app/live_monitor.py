@@ -30,6 +30,8 @@ from app.detection_state import (
     record_live_detection_history,
 )
 from app.detection_status import _camera_has_live_alert_stream, update_live_detection_status
+from app.object_tracking import update_object_tracks
+from app.region_detection import detect_with_region_boost, region_boost_enabled
 from app.detector import DetectorUnavailableError
 from app.event_debounce import (
     clear_live_camera_backoff,
@@ -210,6 +212,8 @@ def _prune_frame_motion_state() -> None:
         _state._frame_motion_error_cameras.discard(cid)
         with _state._motion_confirm_lock:
             _state._motion_confirm_streaks.pop(cid, None)
+        with _state._object_tracks_lock:
+            _state._object_tracks.pop(cid, None)
     if stale:
         with _state.live_detection_confirm_lock:
             for cid in stale:
@@ -337,7 +341,9 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # override resolved below alongside the numeric thresholds).
     _algorithm = str(live_settings.get('motion_algorithm', getattr(_state, '_MOTION_ALGORITHM', 'mog2')) or 'mog2').strip().lower()
     _denoise = normalize_bool_setting(live_settings.get('motion_denoise'), getattr(_state, '_MOTION_DENOISE', True))
-    _shadow_suppression = normalize_bool_setting(live_settings.get('motion_shadow_suppression'), getattr(_state, '_MOTION_SHADOW_SUPPRESSION', True))
+    # Tri-state ('on'/'off'/'auto', legacy bool tolerated) resolved per-frame in
+    # the engine, so pass the raw value through rather than coercing to a bool.
+    _shadow_suppression = live_settings.get('motion_shadow_suppression', getattr(_state, '_MOTION_SHADOW_SUPPRESSION', 'on'))
     # Clamp to the SAME bounds validate_live_settings enforces (40-640 x
     # 30-480). The UI path is already validated, but effective_live_config also
     # merges a raw ``live`` block from config.yaml that never passes through the
@@ -390,7 +396,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         _denoise = normalize_bool_setting(_cam_dn, _denoise)
     _cam_ss = settings.get('motion_shadow_suppression') if settings.get('motion_shadow_suppression') is not None else _cam_motion_nest.get('shadow_suppression')
     if _cam_ss is not None:
-        _shadow_suppression = normalize_bool_setting(_cam_ss, _shadow_suppression)
+        _shadow_suppression = _cam_ss  # raw tri-state; resolved in the engine
     periodic_scan_interval = float(live_settings.get('periodic_scan_interval_seconds', 0))
     force_scan = False
     if periodic_scan_interval > 0 and now - _state._periodic_scan_last_ts.get(camera_id, 0) >= periodic_scan_interval:
@@ -477,6 +483,15 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     try:
         if detector_ready and frame_is_numpy and hasattr(_state.detector, 'detect_frame'):
             detections = _state.detector.detect_frame(image, confidence=min_conf)
+            # Motion-region high-res boost (opt-in): re-run the detector zoomed
+            # into the moving regions so small/distant subjects that vanish in
+            # the full-frame downscale are recovered, then merge + de-dup. Safe
+            # to call unconditionally -- it returns the base list when disabled,
+            # when there is no diff mask, or when no region qualifies.
+            if diff_mask is not None and region_boost_enabled(live_settings):
+                detections = detect_with_region_boost(
+                    _state.detector, image, diff_mask, detections, confidence=min_conf,
+                )
         elif detector_ready:
             detections = _state.detector.detect_image(image, confidence=min_conf)
         else:
@@ -501,6 +516,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         camera_id, object_detections,
         required_frames=_confirm_frames, window_frames=_confirm_window,
     )
+    # Stamp a stable track id on each confirmed detection so the same object
+    # keeps one identity across cycles (foundation for de-dup / dwell / overlay
+    # continuity). Additive: it only annotates the dicts, so alerts/recordings
+    # are unchanged, and the ids thread through to the history + recording rows.
+    object_detections = update_object_tracks(camera_id, object_detections)
     zone_rules = zone_object_alert_rules(settings)
     has_object_zone_rules = any((zone.get('enabled', True) and zone.get('monitor_objects', True) and any((rule.get('enabled', True) and str(rule.get('label') or '').strip() for rule in zone.get('object_rules') or [])) for zone in (settings.get('detection') or {}).get('zones', [])))
     object_alert_detections = zone_alert_detections(settings, object_detections) if has_object_zone_rules else list(object_detections)

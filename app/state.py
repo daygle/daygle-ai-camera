@@ -39,9 +39,15 @@ _MOTION_ALGORITHM: str = 'mog2'
 # motion into coherent blobs.
 _MOTION_DENOISE: bool = True
 # MOG2 shadow rejection: cast shadows are classified separately and dropped so
-# a moving shadow does not register as motion. Disable on very dark / IR scenes
-# where genuine subjects can be misread as shadow.
-_MOTION_SHADOW_SUPPRESSION: bool = True
+# a moving shadow does not register as motion. Tri-state: 'on' (default) always
+# rejects shadows, 'off' never does, 'auto' rejects them only while the scene is
+# bright (day) and disables rejection when the frame goes dark (night/IR), where
+# a genuine subject is otherwise easily misread as a shadow and dropped. Legacy
+# bool values (True/False) are still honoured as on/off.
+_MOTION_SHADOW_SUPPRESSION: str = 'on'
+# Mean-brightness threshold (0-255) below which 'auto' shadow suppression treats
+# the scene as night and stops rejecting shadows.
+_MOTION_NIGHT_BRIGHTNESS: float = 50.0
 # MOG2 history length (number of recent frames the mixture model blends). Not
 # operator-exposed; the per-frame learning rate is driven by background_alpha.
 _MOTION_MOG2_HISTORY: int = 250
@@ -144,6 +150,12 @@ _frame_motion_error_cameras: set = set()
 _frame_motion_mog2: dict = {}
 # codeql[py/unused-global-variable]
 _frame_motion_mog2_meta: dict = {}
+# Per-camera lightweight IoU object-tracker state (app/object_tracking.py):
+# {camera_id: {'tracks': [...], 'next_id': int}}. Gives each detected object a
+# stable track id across detection cycles.
+_object_tracks_lock: threading.Lock = threading.Lock()
+# codeql[py/unused-global-variable]
+_object_tracks: dict = {}
 # Consecutive per-zone motion evidence used by the live alert monitor. A zone
 # must be present in two analyzed frames before motion can create an event or
 # recording, which filters one-frame stream/exposure artifacts.

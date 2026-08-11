@@ -332,6 +332,26 @@ def _denoise_mask(mask: Any) -> Any:
     return m.astype(bool)
 
 
+def _resolve_shadow_suppression(value: Any, thumbnail: Any) -> bool:
+    """Resolve the tri-state shadow setting to a concrete on/off for one frame.
+
+    - ``'auto'`` -> reject shadows only while the scene is bright (day). The
+      decision uses the mean brightness of the BGR ``thumbnail`` against
+      ``_MOTION_NIGHT_BRIGHTNESS``; a dark (night/IR) frame disables shadow
+      rejection so MOG2's shadow class does not swallow a genuine subject.
+    - ``'on'`` / ``'off'`` (and legacy ``True`` / ``False``) -> honoured directly.
+    """
+    if isinstance(value, str) and value.strip().lower() == 'auto':
+        try:
+            import numpy as np
+            brightness = float(np.asarray(thumbnail).mean())
+        except Exception:
+            return True  # brightness unavailable -> default to rejecting shadows
+        return brightness >= float(getattr(_state, '_MOTION_NIGHT_BRIGHTNESS', 50.0))
+    from app.utils import normalize_bool_setting
+    return normalize_bool_setting(value, True)
+
+
 def _detect_frame_motion_mog2(
     camera_id: str,
     image: Any,
@@ -341,7 +361,7 @@ def _detect_frame_motion_mog2(
     scale_fraction: float,
     background_alpha: float,
     denoise: bool,
-    shadow_suppression: bool,
+    shadow_suppression: Any,
 ) -> tuple[bool, float, Any, float]:
     """MOG2 (Gaussian-mixture) background-subtraction motion gate.
 
@@ -370,18 +390,24 @@ def _detect_frame_motion_mog2(
     import numpy as np
 
     resized = _to_motion_thumbnail_bgr(image)
+    # Resolve the tri-state shadow setting to a concrete on/off for this frame.
+    # 'auto' rejects shadows only while the scene is bright (day); once the frame
+    # darkens (night/IR) it stops, because MOG2's shadow class then swallows real
+    # subjects. 'on'/'off' (and legacy True/False) are honoured directly.
+    shadow_on = _resolve_shadow_suppression(shadow_suppression, resized)
     var_threshold = float(
         max(_MOG2_VAR_THRESHOLD_MIN, min(_MOG2_VAR_THRESHOLD_MAX, pixel_threshold))
     )
     history = max(1, int(getattr(_state, '_MOTION_MOG2_HISTORY', 250)))
     # The parameters baked into a subtractor; a live change to any of them (frame
-    # size, sensitivity, shadow toggle) must rebuild it rather than silently keep
-    # the stale model.
+    # size, sensitivity, resolved shadow state) must rebuild it rather than
+    # silently keep the stale model. Using the RESOLVED shadow bool means an
+    # 'auto' day->night transition rebuilds the model with detectShadows flipped.
     signature = (
         int(_state._MOTION_FRAME_W),
         int(_state._MOTION_FRAME_H),
         round(var_threshold, 3),
-        bool(shadow_suppression),
+        bool(shadow_on),
         history,
     )
 
@@ -389,7 +415,7 @@ def _detect_frame_motion_mog2(
         subtractor = cv2.createBackgroundSubtractorMOG2(
             history=history,
             varThreshold=var_threshold,
-            detectShadows=bool(shadow_suppression),
+            detectShadows=bool(shadow_on),
         )
         # Seed the model with the current frame so the first real comparison has
         # a background to diff against instead of flagging the whole frame.
@@ -412,7 +438,7 @@ def _detect_frame_motion_mog2(
         raw = subtractor.apply(resized, learningRate=0.0)
         # MOG2 marks foreground as 255 and (when detectShadows) shadow as 127.
         # Dropping 127 rejects cast shadows; including it treats them as motion.
-        mask = raw == 255 if shadow_suppression else raw >= 127
+        mask = raw == 255 if shadow_on else raw >= 127
         if denoise:
             mask = _denoise_mask(mask)
         changed_fraction = float(np.mean(mask))
@@ -439,9 +465,10 @@ def _detect_frame_motion_mog2(
     if _now - _last >= _MOTION_LOG_INTERVAL:
         _motion_log_last_at[camera_id] = _now
         logger.debug(
-            'Motion gate %s (mog2): changed=%.4f gate=%.4f var=%.1f shadow=%s denoise=%s WxH=%dx%d',
+            'Motion gate %s (mog2): changed=%.4f gate=%.4f var=%.1f shadow=%s(%s) denoise=%s WxH=%dx%d',
             camera_id, changed_fraction, gate_fraction, var_threshold,
-            shadow_suppression, denoise, _state._MOTION_FRAME_W, _state._MOTION_FRAME_H,
+            shadow_suppression, 'on' if shadow_on else 'off', denoise,
+            _state._MOTION_FRAME_W, _state._MOTION_FRAME_H,
         )
 
     confidence = round(min(1.0, changed_fraction / max(scale_fraction, 1e-9)), 3)
@@ -460,7 +487,7 @@ def detect_frame_motion(
     background_alpha: float | None = None,
     algorithm: str | None = None,
     denoise: bool | None = None,
-    shadow_suppression: bool | None = None,
+    shadow_suppression: Any = None,
 ) -> tuple[bool, float, Any, float]:
     """Per-camera motion gate. Returns ``(has_motion, confidence, diff_mask, raw_fraction)``.
 
@@ -488,7 +515,7 @@ def detect_frame_motion(
     if denoise is None:
         denoise = getattr(_state, '_MOTION_DENOISE', True)
     if shadow_suppression is None:
-        shadow_suppression = getattr(_state, '_MOTION_SHADOW_SUPPRESSION', True)
+        shadow_suppression = getattr(_state, '_MOTION_SHADOW_SUPPRESSION', 'on')
 
     use_mog2 = str(algorithm or 'mog2').strip().lower() != 'diff' and _mog2_available()
     if use_mog2:
@@ -501,7 +528,7 @@ def detect_frame_motion(
                 scale_fraction=scale_fraction,
                 background_alpha=background_alpha,
                 denoise=bool(denoise),
-                shadow_suppression=bool(shadow_suppression),
+                shadow_suppression=shadow_suppression,
             )
         except _EXPECTED_MOTION_ERRORS as exc:
             with _state._frame_motion_lock:

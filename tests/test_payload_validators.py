@@ -497,11 +497,11 @@ def test_validate_camera_settings_persists_per_camera_engine_overrides(monkeypat
         'stream_url': 'rtsp://ok',
         'motion_algorithm': 'DIFF',          # normalised to lower
         'motion_denoise': 'false',           # HTML-form string
-        'motion_shadow_suppression': True,
+        'motion_shadow_suppression': 'auto', # tri-state
     })
     assert out['motion_algorithm'] == 'diff'
     assert out['motion_denoise'] is False
-    assert out['motion_shadow_suppression'] is True
+    assert out['motion_shadow_suppression'] == 'auto'
 
     # Unknown engine is ignored (inherit), not stored.
     out_bad = pv.validate_camera_settings({'stream_url': 'rtsp://ok', 'motion_algorithm': 'wavelet'})
@@ -520,7 +520,7 @@ def test_validate_camera_settings_persists_per_camera_engine_overrides(monkeypat
     current = {'id': 'cam-1', 'motion_algorithm': 'mog2', 'motion_shadow_suppression': False}
     out_keep = pv.validate_camera_settings({'stream_url': 'rtsp://ok'}, current=current)
     assert out_keep['motion_algorithm'] == 'mog2'
-    assert out_keep['motion_shadow_suppression'] is False
+    assert out_keep['motion_shadow_suppression'] == 'off'  # legacy bool migrates on preserve
 
 
 def test_validate_camera_settings_clamps_dimensions_to_min_max(monkeypatch, pv):
@@ -937,7 +937,7 @@ def test_validate_live_settings_returns_all_expected_fields(monkeypatch, pv):
         'snapshot_refresh_ms', 'detection_status_refresh_ms',
         'detection_interval_seconds', 'event_debounce_seconds',
         'background_detection_enabled', 'always_run_object_detection',
-        'detection_history_minutes',
+        'object_detection_region_boost', 'detection_history_minutes',
         'motion_algorithm', 'motion_denoise', 'motion_shadow_suppression',
         'motion_pixel_threshold', 'motion_gate_fraction',
         'motion_scale_fraction', 'motion_background_alpha',
@@ -953,7 +953,7 @@ def test_validate_live_settings_defaults_motion_engine(monkeypatch, pv):
     out = pv.validate_live_settings({})
     assert out['motion_algorithm'] == 'mog2'
     assert out['motion_denoise'] is True
-    assert out['motion_shadow_suppression'] is True
+    assert out['motion_shadow_suppression'] == 'on'
 
 
 def test_validate_live_settings_normalises_motion_engine(monkeypatch, pv):
@@ -966,11 +966,13 @@ def test_validate_live_settings_normalises_motion_engine(monkeypatch, pv):
     out = pv.validate_live_settings({
         'motion_algorithm': 'DIFF',
         'motion_denoise': 'false',
-        'motion_shadow_suppression': False,
+        'motion_shadow_suppression': False,  # legacy bool migrates to 'off'
     })
     assert out['motion_algorithm'] == 'diff'
     assert out['motion_denoise'] is False
-    assert out['motion_shadow_suppression'] is False
+    assert out['motion_shadow_suppression'] == 'off'
+    # 'auto' is accepted and preserved.
+    assert pv.validate_live_settings({'motion_shadow_suppression': 'auto'})['motion_shadow_suppression'] == 'auto'
 
     bad = pv.validate_live_settings({'motion_algorithm': 'wavelet-magic'})
     assert bad['motion_algorithm'] == 'mog2'
