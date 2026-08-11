@@ -5,6 +5,7 @@ from __future__ import annotations
 import secrets
 import sqlite3
 import threading
+import zipfile
 from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
@@ -41,6 +42,8 @@ from app.backup import (
     create_full_backup,
     overwrite_database_from_file,
     refresh_runtime_after_database_restore,
+    restore_full_backup,
+    validate_full_backup,
     validate_restore_database,
 )
 from app.auth import SESSION_COOKIE
@@ -96,7 +99,7 @@ async def restore_database(request: Request, file: UploadFile=File(...), db=Depe
     require_admin(request)
     filename = Path(file.filename or '').name
     if not filename:
-        raise HTTPException(status_code=400, detail='Choose a SQLite database backup file to restore.')
+        raise HTTPException(status_code=400, detail='Choose a SQLite database or full ZIP backup file to restore.')
     if not DATABASE_RESTORE_LOCK.acquire(blocking=False):
         raise HTTPException(status_code=409, detail='Another database restore is already in progress.')
     restore_temp = db.database_path.parent / f'.restore-{secrets.token_hex(8)}.sqlite3'
@@ -108,16 +111,27 @@ async def restore_database(request: Request, file: UploadFile=File(...), db=Depe
                     break
                 handle.write(chunk)
         if restore_temp.stat().st_size == 0:
-            raise HTTPException(status_code=400, detail='Uploaded database backup is empty.')
-        await run_in_threadpool(validate_restore_database, restore_temp)
-        safety_backup = await run_in_threadpool(create_database_backup, 'pre-restore-daygle-database')
+            raise HTTPException(status_code=400, detail='Uploaded backup is empty.')
+        is_full_backup = zipfile.is_zipfile(restore_temp)
+        if is_full_backup:
+            await run_in_threadpool(validate_full_backup, restore_temp)
+            safety_backup = await run_in_threadpool(create_full_backup, 'pre-restore-daygle-full')
+        else:
+            await run_in_threadpool(validate_restore_database, restore_temp)
+            safety_backup = await run_in_threadpool(create_database_backup, 'pre-restore-daygle-database')
         try:
-            await run_in_threadpool(overwrite_database_from_file, restore_temp)
+            if is_full_backup:
+                restore_result = await run_in_threadpool(restore_full_backup, restore_temp)
+            else:
+                await run_in_threadpool(overwrite_database_from_file, restore_temp)
+                restore_result = None
         except sqlite3.Error as exc:
-            raise HTTPException(status_code=500, detail=f'Database restore failed: {exc}') from exc
+            raise HTTPException(status_code=500, detail=f'Backup restore failed: {exc}') from exc
         await run_in_threadpool(refresh_runtime_after_database_restore)
-        write_audit_log(request, db, 'restore', 'database', details={'source_filename': filename, 'safety_backup': str(safety_backup)})
-        return {'ok': True, 'message': 'Database restored successfully.', 'source_filename': filename, 'safety_backup': str(safety_backup)}
+        resource = 'database.full' if is_full_backup else 'database'
+        write_audit_log(request, db, 'restore', resource, details={'source_filename': filename, 'safety_backup': str(safety_backup)})
+        message = 'Full backup restored successfully (database, media, and models).' if is_full_backup else 'Database restored successfully.'
+        return {'ok': True, 'message': message, 'source_filename': filename, 'safety_backup': str(safety_backup), 'restore': restore_result}
     finally:
         DATABASE_RESTORE_LOCK.release()
         restore_temp.unlink(missing_ok=True)

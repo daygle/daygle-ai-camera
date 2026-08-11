@@ -106,9 +106,18 @@ function snapshotPills(event) {
       .reduce((best, d) => (d && d.confidence > (best ? best.confidence : -1) ? d : best), null);
     return motionPill(strongest ? strongest.confidence : null);
   }
-  const objectDetections = (event.detections || [])
+  const detections = event.detections || [];
+  const objectDetections = detections
     .filter((d) => d && d.label && !GENERIC_TRIGGER_LABELS.has(String(d.label).trim().toLowerCase()));
-  return objectDetections.map((d) => detectionPill(d.label, d.confidence)).join('') || '<span class="muted">No detections</span>';
+  const motionDetections = detections
+    .filter((d) => String(d && d.label || '').trim().toLowerCase() === 'motion');
+  const strongestMotion = motionDetections.reduce(
+    (best, d) => (d && Number(d.confidence) > (best ? Number(best.confidence) : -1) ? d : best),
+    null,
+  );
+  const motionBadge = motionDetections.length ? motionPill(strongestMotion?.confidence ?? null) : '';
+  return `${motionBadge}${objectDetections.map((d) => detectionPill(d.label, d.confidence)).join('')}`
+    || '<span class="muted">No detections</span>';
 }
 
 function snapshotCameraLabel(event) {

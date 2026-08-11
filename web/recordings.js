@@ -380,7 +380,15 @@ function renderRecordings(recordings) {
       // and sound recordings without falling back to "No detections".
       badges = motionPill(motionConfidenceFor(recording));
     } else {
-      badges = recordingDetectionSummary(recording).map((d) => detectionPill(d.label, d.confidence, isSound)).join('') || '<span class="muted">No detections</span>';
+      const summaryBadges = recordingDetectionSummary(recording)
+        .map((d) => detectionPill(d.label, d.confidence, isSound)).join('');
+      // A clip can contain both frame motion and a recognised object. Keep it
+      // as an Object Recording, but show the motion intensity separately so
+      // the list does not lose one of the event types.
+      const motionBadge = !isSound && recordingHasMotion(recording)
+        ? motionPill(motionConfidenceFor(recording))
+        : '';
+      badges = `${motionBadge}${summaryBadges}` || '<span class="muted">No detections</span>';
     }
     // A recording spans many events - surface the count so it reads as one
     // clip containing several detections rather than looking duplicated.
@@ -447,9 +455,11 @@ function renderRecordingDetails(recording) {
       : 'none';
   } else {
     detectionLabel = 'Detections';
-    detectionBadges = detections.length
-      ? detections.map((d) => detectionPill(d.label, d.confidence)).join(' ')
-      : 'none';
+    const motionBadge = recordingHasMotion(recording)
+      ? motionPill(motionConfidenceFor(recording))
+      : '';
+    const objectBadges = detections.map((d) => detectionPill(d.label, d.confidence)).join(' ');
+    detectionBadges = `${motionBadge}${objectBadges}` || 'none';
   }
   const zones = recordingZoneNames(recording);
   // Build the label/value rows via the shared ``safeHtml`` tagged template

@@ -5,8 +5,8 @@ const els = {
   toTime: null,   // populated by renderTimelineTimeSelects() below
   filterSelect: document.getElementById('timelineFilterSelect'),
   timelineLoadBtn: document.getElementById('timelineLoadBtn'),
-  // The timeline visualisation now renders into two parallel cards
-  // (Objects + Sounds). Their per-card DOM refs live on TIMELINE_CARDS
+  // The timeline visualisation now renders into three parallel cards
+  // (Objects + Motion + Sounds). Their per-card DOM refs live on TIMELINE_CARDS
   // (populated by initTimelineCards() further down) so a single render
   // call can fan out to both tracks without scattering element IDs
   // through this map. Segment clicks also stream through document-level
@@ -67,9 +67,9 @@ function renderTimelineTimeSelects() {
 
 renderTimelineTimeSelects();
 
-// ── Two-card timeline ────────────────────────────────────────────────────
-// /timeline now renders two parallel cards: an Objects track (motion +
-// detected objects) and a Sounds track. Both cards share the same Camera /
+// ── Three-card timeline ──────────────────────────────────────────────────
+// /timeline now renders three parallel cards: an Objects track, a
+// motion-only track, and a Sounds track. All cards share the same Camera /
 // Day / Filter / From / To selectors above so they always represent the
 // same selected day in sync, and the page-level API call
 // (/api/recordings/timeline) returns the union of both. initTimelineCards()
@@ -78,6 +78,7 @@ renderTimelineTimeSelects();
 // one card without the other knowing about it.
 const TIMELINE_CARDS = [
   { kind: 'object', root: null, hours: null, grid: null, rows: null, status: null, statusChip: null, key: null },
+  { kind: 'motion', root: null, hours: null, grid: null, rows: null, status: null, statusChip: null, key: null },
   { kind: 'sound',  root: null, hours: null, grid: null, rows: null, status: null, statusChip: null, key: null },
 ];
 
@@ -604,7 +605,7 @@ function matchesRecordingFilter(recording, filterValue) {
   const normalized = String(filterValue || '').trim().toLowerCase();
   if (!normalized) return true;
   if (normalized === '__sound__') return isSoundRecording(recording);
-  if (normalized === '__object__') return !isSoundRecording(recording);
+  if (normalized === '__object__') return !isSoundRecording(recording) && !isMotionOnlyRecording(recording);
   if (normalized === 'motion') {
     // Tightened to motion-only recordings now that motion is a real
     // category on its own. The previous "trigger type != placeholder"
@@ -715,11 +716,13 @@ function populateFilterOptions(recordings) {
   });
 
   const soundCount = recordings.filter(isSoundRecording).length;
-  const objectCount = recordings.length - soundCount;
+  const motionCount = recordings.filter((recording) => !isSoundRecording(recording) && isMotionOnlyRecording(recording)).length;
+  const objectCount = recordings.length - soundCount - motionCount;
   const options = [{ value: '', label: `All recordings${recordings.length ? ` (${recordings.length})` : ''}` }];
   if (soundCount > 0) options.push({ value: '__sound__', label: `Sound (${soundCount})` });
+  if (motionCount > 0) options.push({ value: 'motion', label: `Motion (${motionCount})` });
   if (objectCount > 0) options.push({ value: '__object__', label: `Object (${objectCount})` });
-  const seen = new Set(['', '__sound__', '__object__']);
+  const seen = new Set(['', '__sound__', '__object__', 'motion']);
   const addOption = (value) => {
     const normalized = String(value || '').trim().toLowerCase();
     if (!normalized || seen.has(normalized)) return;
@@ -764,13 +767,16 @@ function renderSummary(payload, totalRecordingCount) {
   const totalSeconds = recordings.reduce((sum, recording) => sum + Number(recording.timeline_duration_seconds || recording.duration_seconds || 0), 0);
   const clipLabel = totalRecordingCount > recordings.length ? `${recordings.length} of ${totalRecordingCount}` : `${recordings.length}`;
 
-  // Separate object vs sound trigger counts
+  // Separate object, motion-only and sound trigger counts.
   const objectTriggers = new Set();
+  const motionTriggers = new Set();
   const soundTriggers = new Set();
   recordings.forEach((recording) => {
     const label = recordingTypeLabel(recording).toLowerCase();
     if (isSoundRecording(recording)) {
       soundTriggers.add(label);
+    } else if (isMotionOnlyRecording(recording)) {
+      motionTriggers.add(label);
     } else {
       objectTriggers.add(label);
     }
@@ -786,7 +792,7 @@ function renderSummary(payload, totalRecordingCount) {
       <div><span>Day</span><strong>${escapeHtml(formatUserDate(payload.day || ''))}</strong></div>
       <div><span>Clips</span><strong>${escapeHtml(clipLabel)}</strong></div>
       <div><span>Coverage</span><strong>${escapeHtml(formatDuration(totalSeconds))}</strong></div>
-      <div class="wide"><span>Triggers</span><strong>${recordings.length ? `${objectTriggers.size} objects / ${soundTriggers.size} sounds` : 'none'}</strong></div>
+      <div class="wide"><span>Triggers</span><strong>${recordings.length ? `${objectTriggers.size} objects / ${motionTriggers.size} motion / ${soundTriggers.size} sounds` : 'none'}</strong></div>
     `;
   }
   // Also feed the top stats grid.
@@ -806,7 +812,7 @@ function renderSummary(payload, totalRecordingCount) {
     els.statCoverage.textContent = formatDuration(totalSeconds);
   }
   if (els.statTriggers) {
-    els.statTriggers.textContent = `${objectTriggers.size}/${soundTriggers.size}`;
+    els.statTriggers.textContent = `${objectTriggers.size}/${motionTriggers.size}/${soundTriggers.size}`;
   }
   if (els.statCamera) {
     els.statCamera.textContent = payload.camera?.name || payload.camera?.id || 'Unknown';
@@ -843,7 +849,7 @@ function reportTimelineError(message) {
   });
 }
 
-// Single source of truth for the timeline colour-key partition. Both the
+// Single source of truth for the timeline colour-key partition. All three
 // - now-test-only - global renderLegend() and the per-card renderCardKey()
 // consume the same { objectChips, soundChips } data so any future regression
 // fix (Dog Bark duplicates, motion vs object, sound-class labels on
@@ -852,6 +858,7 @@ function reportTimelineError(message) {
 // strip) consume the same shape without re-deriving the icon from a tag.
 function partitionRecordingsForKeys(recordings) {
   const objectChips = [];
+  const motionChips = [];
   const soundChips = [];
   const seen = new Set();
   const add = (group, dedupKey, chip) => {
@@ -861,7 +868,7 @@ function partitionRecordingsForKeys(recordings) {
   };
   recordings.forEach((recording) => {
     if (isMotionOnlyRecording(recording)) {
-      add(objectChips, '__motion__', { label: 'Motion', color: colorForKey('__motion__'), icon: DETECTION_MOTION_ICON });
+      add(motionChips, '__motion__', { label: 'Motion', color: colorForKey('__motion__'), icon: DETECTION_MOTION_ICON });
       return;
     }
     const isSound = isSoundRecording(recording);
@@ -896,7 +903,7 @@ function partitionRecordingsForKeys(recordings) {
       }
     });
   });
-  return { objectChips, soundChips };
+  return { objectChips, motionChips, soundChips };
 }
 
 function buildTimelineLayout(recordings, preEventSeconds = 0) {
@@ -930,8 +937,8 @@ function renderCardKey(card, cardRecordings) {
   // persists across renders, so this function must flip it on every
   // pass (not just the first) to keep a populated card unhidden after a
   // brief filter-driven empty state.
-  const { objectChips, soundChips } = partitionRecordingsForKeys(cardRecordings);
-  const chips = card.kind === 'object' ? objectChips : soundChips;
+  const { objectChips, motionChips, soundChips } = partitionRecordingsForKeys(cardRecordings);
+  const chips = card.kind === 'motion' ? motionChips : card.kind === 'object' ? objectChips : soundChips;
   if (!chips.length) {
     // Empty in-card key: clear chips AND mark the landmark aria-hidden so
     // screen readers don't announce "Objects colour key" on a filter that
@@ -998,7 +1005,7 @@ function renderTimelineForCard(card, viewPayload, cardRecordings, totalRecording
   `).join('');
   card.rows.style.height = `${Math.max(46, rowCount * TIMELINE_ROW_HEIGHT)}px`;
 
-  const kindWord = card.kind === 'sound' ? 'sound' : 'object';
+  const kindWord = card.kind === 'sound' ? 'sound' : card.kind === 'motion' ? 'motion-only' : 'object';
   const cameraName = viewPayload.camera?.name || viewPayload.camera?.id || 'this camera';
   const formattedDay = formatUserDate(viewPayload.day);
 
@@ -1012,7 +1019,7 @@ function renderTimelineForCard(card, viewPayload, cardRecordings, totalRecording
     // Different chip labels per kind ("No object matches" / "No sound
     // matches") so users glancing at the chip row can tell which card
     // ran out without reading the row text below it.
-    const reasonPrefix = kindWord === 'sound' ? 'sound' : 'object';
+    const reasonPrefix = kindWord === 'sound' ? 'sound' : kindWord === 'motion-only' ? 'motion' : 'object';
     if (reason === 'no-data') {
       return {
         chipKind: 'empty',
@@ -1035,7 +1042,7 @@ function renderTimelineForCard(card, viewPayload, cardRecordings, totalRecording
       // The chip and the empty-state blurb already convey the time-range
       // situation ("Time Range" + "in the selected time window"), so
       // there's no need to repeat "{{kind}} Time Range" - the card
-      // header above already names the kind (Objects / Sounds).
+      // header above already names the kind (Objects / Motion / Sounds).
       chipKind: 'filtered',
       chipLabel: 'Time Range',
       statusText: `No ${kindWord} recordings in the visible time window.`,
@@ -1228,19 +1235,21 @@ async function renderFilteredTimeline({ preserveSelection = true } = {}) {
   renderSummary(viewPayload, allRecordings.length);
 
   // Partition the filtered set so each card sees only its own slice.
-  // isSoundRecording() is the canonical predicate - any sound-detected
-  // clip and any clip whose primary label is a sound class routes to
-  // the Sounds card; everything else (motion + detected objects) lands
-  // in the Objects card. renderLegend() is intentionally not called
+  // Sound clips route to Sounds, motion-only clips route to Motion, and
+  // mixed motion/object clips remain on Objects so one recording is not
+  // duplicated across timeline tracks. renderLegend() is intentionally not called
   // here: the cards themselves now split the day visually, so a
   // standalone eyebrow row above them would be redundant. The function
   // stays defined so tests/test_timeline_legend_js.test.js keeps
   // passing unchanged.
-  const objectRecordings = recordings.filter((r) => !isSoundRecording(r));
+  const motionRecordings = recordings.filter((r) => !isSoundRecording(r) && isMotionOnlyRecording(r));
+  const objectRecordings = recordings.filter((r) => !isSoundRecording(r) && !isMotionOnlyRecording(r));
   const soundRecordings = recordings.filter((r) => isSoundRecording(r));
 
   TIMELINE_CARDS.forEach((card) => {
-    const cardRecordings = card.kind === 'object' ? objectRecordings : soundRecordings;
+    const cardRecordings = card.kind === 'motion'
+      ? motionRecordings
+      : card.kind === 'object' ? objectRecordings : soundRecordings;
     renderTimelineForCard(card, viewPayload, cardRecordings, allRecordings.length);
   });
 

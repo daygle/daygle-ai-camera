@@ -7,6 +7,8 @@ Cluster membership:
 - ``safe_backup_timestamp()`` - UTC timestamp string for backup filenames
 - ``create_database_backup(prefix)`` - SQLite online-backup to a timestamped file
 - ``validate_restore_database(path)`` - integrity-check an uploaded database file
+- ``validate_full_backup(path)`` - validate a full-backup ZIP manifest and members
+- ``restore_full_backup(path)`` - restore database, media, and model artifacts
 - ``overwrite_database_from_file(restore_source)`` - hot-swap the live database
 - ``refresh_runtime_after_database_restore()`` - re-init singletons after restore
 - ``purge_recordings_by_policy(*, force)`` - age-out old recordings + disk files
@@ -18,12 +20,17 @@ Pool-C reach (resolved lazily via lazy imports inside function bodies):
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 import secrets
+import shutil
 import sqlite3
+import tempfile
 import threading
+import zipfile
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from fastapi import HTTPException
@@ -44,6 +51,11 @@ logger = logging.getLogger('daygle.ai')
 
 DATABASE_RESTORE_REQUIRED_TABLES: set[str] = {'events', 'detections', 'app_settings', 'users'}
 DATABASE_RESTORE_LOCK: threading.Lock = threading.Lock()
+FULL_BACKUP_FORMAT = 'daygle-full-backup'
+FULL_BACKUP_VERSION = 2
+SUPPORTED_FULL_BACKUP_VERSIONS = {1, FULL_BACKUP_VERSION}
+FULL_BACKUP_MAX_MEMBERS = 200_000
+FULL_BACKUP_MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024 * 1024
 
 
 def _normalize_ddl(sql: str | None) -> str:
@@ -205,6 +217,14 @@ def _archive_directory(
     return manifest_section
 
 
+def _resolve_storage_root(storage_config: dict[str, Any], key: str) -> Path:
+    raw = storage_config.get(key)
+    root = Path(str(raw)).expanduser() if raw else Path.cwd()
+    if not root.is_absolute():
+        root = Path.cwd() / root
+    return root.resolve(strict=False)
+
+
 def create_full_backup(prefix: str = 'daygle-full') -> Path:
     """Create a downloadable zip containing the database, recordings, and snapshots.
 
@@ -217,26 +237,20 @@ def create_full_backup(prefix: str = 'daygle-full') -> Path:
       ``.prebuffer`` / ``.frames`` / ``.audio`` ingest state is EXCLUDED - it
       is regenerated continuously and would only bloat the archive).
     * ``snapshots/`` - saved event snapshots.
+    * ``events/`` - legacy event artifacts, when present.
+    * ``models/`` - installed detection and sound-model assets.
     * ``manifest.json`` - format marker, timestamp, and per-section file
       counts/sizes for restore-time verification.
 
     Returns the archive path; the caller is responsible for deleting it once
     served. The temporary database snapshot is always cleaned up here.
     """
-    import json
-    import zipfile
-
     storage_config = effective_storage_config()
 
-    def resolve_root(key: str) -> Path:
-        raw = storage_config.get(key)
-        root = Path(str(raw)).expanduser() if raw else Path.cwd()
-        if not root.is_absolute():
-            root = Path.cwd() / root
-        return root.resolve(strict=False)
-
-    recordings_root = resolve_root('recordings_dir')
-    snapshots_root = resolve_root('snapshots_dir')
+    recordings_root = _resolve_storage_root(storage_config, 'recordings_dir')
+    snapshots_root = _resolve_storage_root(storage_config, 'snapshots_dir')
+    events_root = _resolve_storage_root(storage_config, 'events_dir')
+    models_root = (Path(__file__).resolve().parent.parent / 'models').resolve(strict=False)
     archive_path = backup_directory() / f'{prefix}-{safe_backup_timestamp()}-{secrets.token_hex(4)}.zip'
     db_filename = Path(str(_state.database.database_path)).name
     db_snapshot = Path(str(_state.database.database_path)).parent / f'.full-backup-{secrets.token_hex(4)}.sqlite3'
@@ -264,9 +278,17 @@ def create_full_backup(prefix: str = 'daygle-full') -> Path:
                 archive, snapshots_root, 'snapshots',
                 excluded_abs=excluded_abs, excluded_names=excluded_names,
             )
+            included['events'] = _archive_directory(
+                archive, events_root, 'events',
+                excluded_abs=excluded_abs, excluded_names=excluded_names,
+            )
+            included['models'] = _archive_directory(
+                archive, models_root, 'models',
+                excluded_abs=excluded_abs, excluded_names=frozenset(),
+            )
             manifest = {
-                'format': 'daygle-full-backup',
-                'version': 1,
+                'format': FULL_BACKUP_FORMAT,
+                'version': FULL_BACKUP_VERSION,
                 'created_at': datetime.now(timezone.utc).isoformat(),
                 'database_filename': db_filename,
                 'storage': {
@@ -276,7 +298,9 @@ def create_full_backup(prefix: str = 'daygle-full') -> Path:
                     # future restore remap them accurately.
                     'recordings_dir': str(recordings_root),
                     'snapshots_dir': str(snapshots_root),
+                    'events_dir': str(events_root),
                     'database': str(Path(str(_state.database.database_path)).resolve(strict=False)),
+                    'models_dir': str(models_root),
                 },
                 'included': included,
             }
@@ -291,6 +315,221 @@ def create_full_backup(prefix: str = 'daygle-full') -> Path:
     finally:
         db_snapshot.unlink(missing_ok=True)
     return archive_path
+
+
+def _normalise_archive_member(name: str) -> str:
+    if not name or '\x00' in name or '\\' in name:
+        raise HTTPException(status_code=400, detail='Full backup contains an invalid archive path.')
+    path = PurePosixPath(name)
+    if path.is_absolute() or any(part in {'', '.', '..'} for part in path.parts):
+        raise HTTPException(status_code=400, detail='Full backup contains an unsafe archive path.')
+    return path.as_posix()
+
+
+def _validate_full_backup_archive(path: Path) -> tuple[dict[str, Any], str]:
+    try:
+        archive = zipfile.ZipFile(path)
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise HTTPException(status_code=400, detail='Uploaded full backup is not a valid ZIP archive.') from exc
+    try:
+        infos = archive.infolist()
+        if len(infos) > FULL_BACKUP_MAX_MEMBERS:
+            raise HTTPException(status_code=400, detail='Full backup contains too many files.')
+        total_size = 0
+        names: set[str] = set()
+        allowed_roots = {'database', 'recordings', 'snapshots', 'events', 'models'}
+        database_members: list[str] = []
+        for info in infos:
+            name = _normalise_archive_member(info.filename)
+            if name in names:
+                raise HTTPException(status_code=400, detail='Full backup contains duplicate archive paths.')
+            names.add(name)
+            mode = (info.external_attr >> 16) & 0o170000
+            if mode == 0o120000:
+                raise HTTPException(status_code=400, detail='Full backup contains a symbolic link.')
+            if name != 'manifest.json':
+                root = name.split('/', 1)[0]
+                if root not in allowed_roots:
+                    raise HTTPException(status_code=400, detail='Full backup contains an unexpected archive section.')
+                if root == 'database' and not info.is_dir():
+                    database_members.append(name)
+            total_size += max(0, int(info.file_size))
+            if total_size > FULL_BACKUP_MAX_UNCOMPRESSED_BYTES:
+                raise HTTPException(status_code=400, detail='Full backup is too large to restore safely.')
+        if 'manifest.json' not in names:
+            raise HTTPException(status_code=400, detail='Full backup is missing manifest.json.')
+        try:
+            manifest = json.loads(archive.read('manifest.json'))
+        except (OSError, ValueError, UnicodeDecodeError) as exc:
+            raise HTTPException(status_code=400, detail='Full backup manifest is invalid.') from exc
+        if not isinstance(manifest, dict) or manifest.get('format') != FULL_BACKUP_FORMAT:
+            raise HTTPException(status_code=400, detail='Uploaded ZIP is not a Daygle full backup.')
+        try:
+            version = int(manifest.get('version', 0))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail='Full backup manifest version is invalid.') from exc
+        if version not in SUPPORTED_FULL_BACKUP_VERSIONS:
+            raise HTTPException(status_code=400, detail='This full backup version is not supported by the installed application.')
+        if len(database_members) != 1 or not database_members[0].lower().endswith('.sqlite3'):
+            raise HTTPException(status_code=400, detail='Full backup must contain exactly one SQLite database.')
+        return manifest, database_members[0]
+    finally:
+        archive.close()
+
+
+def validate_full_backup(path: Path) -> dict[str, Any]:
+    """Validate a full-backup container without extracting or changing state."""
+    manifest, _database_member = _validate_full_backup_archive(path)
+    return manifest
+
+
+def _extract_full_backup(path: Path, destination: Path) -> tuple[dict[str, Any], Path]:
+    manifest, database_member = _validate_full_backup_archive(path)
+    destination.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path) as archive:
+        for info in archive.infolist():
+            name = _normalise_archive_member(info.filename)
+            if info.is_dir():
+                continue
+            target = (destination / name).resolve(strict=False)
+            if not target.is_relative_to(destination.resolve(strict=False)):
+                raise HTTPException(status_code=400, detail='Full backup extraction escaped its staging directory.')
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(info, 'r') as source, target.open('wb') as output:
+                shutil.copyfileobj(source, output, length=1024 * 1024)
+    return manifest, destination / database_member
+
+
+def _portable_relative_path(raw_path: Any, source_root: Any) -> Path | None:
+    raw = str(raw_path or '').strip().replace('\\', '/')
+    source = str(source_root or '').strip().replace('\\', '/').rstrip('/')
+    if not raw or not source:
+        return None
+    raw_cmp = raw.casefold()
+    source_cmp = source.casefold()
+    prefix = source_cmp + '/'
+    if raw_cmp.startswith(prefix):
+        relative = raw[len(source) + 1:]
+    elif not raw.startswith('/') and not (len(raw) > 1 and raw[1] == ':'):
+        relative = raw
+    else:
+        return None
+    relative_path = PurePosixPath(relative)
+    if not relative or relative_path.is_absolute() or any(part in {'', '.', '..'} for part in relative_path.parts):
+        return None
+    return Path(*relative_path.parts)
+
+
+def _remap_restored_database(database_path: Path, manifest: dict[str, Any], target_storage: dict[str, Any]) -> None:
+    source_storage = manifest.get('storage') if isinstance(manifest.get('storage'), dict) else {}
+    mappings = (
+        ('recordings_dir', 'recordings_dir', ('recordings', 'file_path')),
+        ('snapshots_dir', 'snapshots_dir', ('events', 'snapshot_path')),
+        ('snapshots_dir', 'snapshots_dir', ('events', 'thumbnail_path')),
+        ('snapshots_dir', 'snapshots_dir', ('recordings', 'thumbnail_path')),
+        ('events_dir', 'events_dir', ('events', 'snapshot_path')),
+    )
+    conn = sqlite3.connect(str(database_path))
+    try:
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        for source_key, target_key, (table, column) in mappings:
+            if table not in tables:
+                continue
+            columns = {row[1] for row in conn.execute(f'PRAGMA table_info("{table}")')}
+            if column not in columns:
+                continue
+            source_root = source_storage.get(source_key)
+            target_root = _resolve_storage_root(target_storage, target_key)
+            rows = conn.execute(f'SELECT rowid, "{column}" FROM "{table}" WHERE "{column}" IS NOT NULL').fetchall()
+            for rowid, raw_value in rows:
+                relative = _portable_relative_path(raw_value, source_root)
+                if relative is not None:
+                    conn.execute(
+                        f'UPDATE "{table}" SET "{column}" = ? WHERE rowid = ?',
+                        (str(target_root / relative), rowid),
+                    )
+        if 'app_settings' in tables:
+            row = conn.execute("SELECT value FROM app_settings WHERE key = 'storage'").fetchone()
+            if row:
+                try:
+                    storage_override = json.loads(row[0])
+                except (TypeError, ValueError):
+                    storage_override = None
+                if isinstance(storage_override, dict):
+                    for key in ('data_dir', 'snapshots_dir', 'events_dir', 'recordings_dir'):
+                        if target_storage.get(key):
+                            storage_override[key] = str(_resolve_storage_root(target_storage, key))
+                    storage_override['database'] = str(Path(str(_state.database.database_path)).resolve(strict=False))
+                    conn.execute(
+                        "UPDATE app_settings SET value = ?, updated_at = ? WHERE key = 'storage'",
+                        (json.dumps(storage_override), datetime.now(timezone.utc).isoformat()),
+                    )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _copy_restored_tree(source: Path, target: Path) -> int:
+    if not source.exists():
+        return 0
+    if target.exists() and target.is_symlink():
+        raise HTTPException(status_code=400, detail='Configured restore directory is a symbolic link.')
+    target.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for dirpath, dirnames, filenames in os.walk(source, followlinks=False):
+        current = Path(dirpath)
+        dirnames[:] = [name for name in dirnames if not (current / name).is_symlink()]
+        for name in filenames:
+            source_file = current / name
+            if source_file.is_symlink():
+                raise HTTPException(status_code=400, detail='Full backup contains a symbolic link.')
+            relative = source_file.relative_to(source)
+            current_target = target
+            for part in relative.parts[:-1]:
+                current_target = current_target / part
+                if current_target.exists() and current_target.is_symlink():
+                    raise HTTPException(status_code=400, detail='Configured restore directory contains a symbolic link.')
+            raw_target_file = target / relative
+            if raw_target_file.exists() and raw_target_file.is_symlink():
+                raise HTTPException(status_code=400, detail='Configured restore directory contains a symbolic link.')
+            target_file = raw_target_file.resolve(strict=False)
+            if not target_file.is_relative_to(target.resolve(strict=False)):
+                raise HTTPException(status_code=400, detail='Full backup media path is unsafe.')
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_file, target_file)
+            copied += 1
+    return copied
+
+
+def restore_full_backup(path: Path) -> dict[str, Any]:
+    """Restore a full backup's database, media, and model artifacts.
+
+    The archive is extracted into a private staging directory first. Database
+    media paths and the persisted storage override are rewritten from the
+    source machine's roots to the current installation's roots before the
+    validated database is installed. Secrets from environment variables and
+    the protected Cloudflare token file are intentionally not imported.
+    """
+    target_storage = effective_storage_config()
+    database_parent = Path(str(_state.database.database_path)).resolve(strict=False).parent
+    with tempfile.TemporaryDirectory(prefix='.full-restore-', dir=str(database_parent)) as staging_name:
+        staging = Path(staging_name)
+        manifest, staged_database = _extract_full_backup(path, staging)
+        validate_restore_database(staged_database)
+        _remap_restored_database(staged_database, manifest, target_storage)
+        validate_restore_database(staged_database)
+        overwrite_database_from_file(staged_database)
+        storage_targets = {
+            'recordings': _resolve_storage_root(target_storage, 'recordings_dir'),
+            'snapshots': _resolve_storage_root(target_storage, 'snapshots_dir'),
+            'events': _resolve_storage_root(target_storage, 'events_dir'),
+            'models': (Path(__file__).resolve().parent.parent / 'models').resolve(strict=False),
+        }
+        copied = {
+            section: _copy_restored_tree(staging / section, target)
+            for section, target in storage_targets.items()
+        }
+    return {'version': manifest.get('version'), 'copied': copied}
 
 
 def validate_restore_database(path: Path) -> None:

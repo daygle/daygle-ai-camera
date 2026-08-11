@@ -443,6 +443,16 @@ function motionConfidenceFor(recording) {
   return best;
 }
 
+// Mixed recordings keep their object classification, but still need a
+// separate Motion pill anywhere their saved event/track contains frame motion.
+// Keeping this reader beside motionConfidenceFor prevents Events, Recordings,
+// Snapshots and the timeline from drifting on multi-event clips.
+function recordingHasMotion(recording) {
+  return motionConfidenceFor(recording) !== null
+    || (recording?.detections || []).some((d) => String(d?.label || '').trim().toLowerCase() === 'motion')
+    || (recording?.track || []).some((sample) => (sample?.detections || []).some((d) => String(d?.label || '').trim().toLowerCase() === 'motion'));
+}
+
 // ---------------------------------------------------------------------------
 // Motion-vs-object boundary helpers - shared by every page that renders a
 // motion / object / sound split (recordings, recordings modal, timeline,
@@ -1075,7 +1085,7 @@ window.daygleUi = {
   showToast, escapeHtml, safeHtml, titleCase, normalizeEmailList, requireElements, initDaygleTabs,
   detectionPill, motionPill, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, MOTION_RUNNING_ROW_ICON,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,
-  isMotionOnlyRecording, motionConfidenceFor,
+  isMotionOnlyRecording, motionConfidenceFor, recordingHasMotion,
   isMotionOnlyEvent, isMotionOnlyEventItem,
   // Shared recording readers (recordings list + timeline).
   isSoundRecording, recordingTriggerType, recordingTriggerLabel, recordingZoneNames, recordingDetectionSummary, cameraLabel,

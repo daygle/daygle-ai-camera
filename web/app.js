@@ -107,7 +107,9 @@ function detectionBadges(detections = [], { isSound = false } = {}) {
   if (!best.size) return `<span class="muted">${emptyText}</span>`;
   return Array.from(best.entries())
     .sort((a, b) => (b[1] ?? -1) - (a[1] ?? -1))
-    .map(([label, conf]) => detectionPill(label, conf, isSound))
+    .map(([label, conf]) => String(label).toLowerCase() === 'motion'
+      ? motionPill(conf)
+      : detectionPill(label, conf, isSound))
     .join('');
 }
 

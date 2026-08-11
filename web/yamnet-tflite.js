@@ -1,6 +1,7 @@
 const messageEl = document.getElementById('yamnetMessage');
 const statusPanel = document.getElementById('soundStatusPanel');
-const cameraList = document.getElementById('soundCameraStatusList');
+// Per-camera detector status now lives on /sounds. This page only owns the
+// backend and model diagnostics.
 const refreshBtn = document.getElementById('refreshSoundStatusBtn');
 const yamnetModelInfo = document.getElementById('yamnetModelInfo');
 const checkYamnetUpdateBtn = document.getElementById('checkYamnetUpdateBtn');
@@ -136,47 +137,6 @@ function renderOverall(status, enabledCameras) {
   `;
 }
 
-function renderCameraStatuses(rows) {
-  if (!rows.length) {
-    cameraList.innerHTML = '<p class="muted empty-message">No cameras are configured.</p>';
-    return;
-  }
-  cameraList.innerHTML = `
-    <div style="overflow-x:auto">
-      <table class="rule-table">
-        <thead>
-          <tr>
-            <th>Camera</th>
-            <th>Configured</th>
-            <th>Rules</th>
-            <th>Backend</th>
-            <th>Running</th>
-            <th>Status</th>
-            <th>Last Sound</th>
-            <th>Recent Scores</th>
-            <th>Detail</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map(({ camera, status }) => `
-            <tr class="${escapeHtml(cameraSoundClass(camera, status))}">
-              <td class="cell-label">${escapeHtml(cameraLabel(camera))}</td>
-              <td>${escapeHtml(yesNo(soundConfigured(camera)))}</td>
-              <td>${escapeHtml(enabledSoundRules(camera).length)}</td>
-              <td>${escapeHtml(displayValue(status.backend, 'None'))}</td>
-              <td>${escapeHtml(yesNo(status.running))}</td>
-              <td>${escapeHtml(cameraSoundReason(camera, status))}</td>
-              <td>${escapeHtml(status.last_class_label || displayValue(status.last_class, 'None'))}</td>
-              <td>${escapeHtml(formatConfidenceMap(status.last_confidences))}</td>
-              <td>${escapeHtml(status.backend_reason || '')}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>
-  `;
-}
-
 async function loadSoundStatus() {
   await window.daygleAuthReady;
   messageEl.textContent = '';
@@ -188,25 +148,14 @@ async function loadSoundStatus() {
     ]);
     const cameras = settings.cameras || (settings.camera ? [settings.camera] : []);
     const enabledCameras = cameras.filter(soundEnabled);
-    const rows = await Promise.all(cameras.map(async (camera) => ({
-      camera,
-      status: await api(`/api/sound/status?camera_id=${encodeURIComponent(camera.id)}`).catch(() => ({
-        state: 'unavailable',
-        detector_status: 'unavailable',
-        running: false,
-        backend: null,
-        last_confidences: {},
-      })),
-    })));
     renderOverall(overall, enabledCameras);
-    renderCameraStatuses(rows);
   } catch (error) {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
     messageEl.textContent = error.message;
     statusPanel.className = 'status-panel yamnet-status-grid status-error';
     statusPanel.innerHTML = `<div><span>Status</span><strong>${escapeHtml(error.message)}</strong></div>`;
-    cameraList.innerHTML = '';
+    // Camera-by-camera diagnostics are rendered on /sounds.
   } finally {
     refreshBtn.disabled = false;
   }

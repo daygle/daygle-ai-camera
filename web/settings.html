@@ -423,13 +423,13 @@
         <div class="settings-section-icon" aria-hidden="true">💾</div>
         <div>
           <h2>Database Backup &amp; Restore</h2>
-          <p class="settings-section-subtitle">Download your database, a full backup that also includes recordings and snapshots, or restore from a previous backup. A safety backup is automatically created before every restore.</p>
+          <p class="settings-section-subtitle">Download a database-only backup or a full backup containing database, recordings, snapshots, and models. Restore either file type; a safety backup is automatically created first.</p>
         </div>
       </div>
       <form id="databaseRestoreForm" class="form-grid">
         <label>
-          <span>Restore backup file <span class="info-tip" data-tip="Select a previously downloaded .sqlite backup file to restore. Restores replace events, users, settings, alert rules, and sessions with the backup contents." title="Select a previously downloaded .sqlite backup file to restore. Restores replace events, users, settings, alert rules, and sessions with the backup contents." tabindex="0" aria-label="Help: Select a previously downloaded .sqlite backup file to restore. Restores replace ..."></span></span>
-          <input name="file" type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3,application/x-sqlite3" required /></label>
+          <span>Restore Backup File <span class="info-tip" data-tip="Select a previously downloaded .sqlite database backup or .zip full backup. Full backups restore database records, recordings, snapshots, and installed model assets. Secrets supplied through environment variables or protected secret files must be configured again." title="Select a previously downloaded .sqlite database backup or .zip full backup. Full backups restore database records, recordings, snapshots, and installed model assets. Secrets supplied through environment variables or protected secret files must be configured again." tabindex="0" aria-label="Help: Select a database or full ZIP backup. Full backups restore database, media, and models; external secrets must be configured again."></span></span>
+          <input name="file" type="file" accept=".sqlite,.sqlite3,.db,.zip,application/vnd.sqlite3,application/x-sqlite3,application/zip" required /></label>
       </form>
       <div class="button-row">
         <button class="btn-info daygle-icon-button" type="submit" form="databaseRestoreForm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg>Restore Database</button>

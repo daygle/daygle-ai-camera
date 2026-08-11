@@ -28,6 +28,110 @@ const statSoundRules = document.getElementById('statSoundRules');
 const statActiveRules = document.getElementById('statActiveRules');
 const statDetection = document.getElementById('statDetection');
 const statCamera = document.getElementById('statCamera');
+const soundCameraStatusList = document.getElementById('soundCameraStatusList');
+
+function detectorSoundConfig(camera) {
+  return camera?.detection?.sound || {};
+}
+
+function detectorEnabledRules(camera) {
+  return (detectorSoundConfig(camera).rules || []).filter((rule) => rule.enabled === true);
+}
+
+function detectorSoundConfigured(camera) {
+  return detectorSoundConfig(camera).enabled === true;
+}
+
+function detectorHasRtspConfig(camera) {
+  return Boolean(camera?.stream_url || camera?.rtsp_url || camera?.host);
+}
+
+function detectorCameraLabel(camera) {
+  const name = String(camera?.name || '').trim();
+  const id = String(camera?.id || '').trim();
+  if (name && id) return `${name} (${id})`;
+  return name || id || 'Unknown camera';
+}
+
+function detectorStatusReason(camera, status) {
+  if (!detectorSoundConfigured(camera)) return 'Sound disabled';
+  if (!detectorEnabledRules(camera).length) return 'No enabled sound rules';
+  if (!detectorHasRtspConfig(camera)) return 'No RTSP stream configured';
+  if (status.running) return 'Running';
+  return titleCase(String(status.detector_status || status.state || 'Not running'));
+}
+
+function detectorStatusClass(camera, status) {
+  if (status.running) return 'status-ok';
+  const reason = detectorStatusReason(camera, status).toLowerCase();
+  if (reason.includes('loading')) return 'status-warning';
+  if (reason === 'sound disabled' || reason === 'no enabled sound rules') return '';
+  return 'status-error';
+}
+
+function detectorConfidenceMap(confidences = {}) {
+  const entries = Object.entries(confidences || {})
+    .filter(([, value]) => Number.isFinite(Number(value)))
+    .sort((left, right) => Number(right[1]) - Number(left[1]))
+    .slice(0, 4);
+  if (!entries.length) return 'None';
+  return entries
+    .map(([label, value]) => `${titleCase(String(label).replace(/[_-]+/g, ' '))} ${Math.round(Number(value) * 100)}%`)
+    .join(', ');
+}
+
+function renderDetectorStatuses(rows) {
+  if (!soundCameraStatusList) return;
+  if (!rows.length) {
+    soundCameraStatusList.innerHTML = '<p class="muted empty-message">No cameras are configured.</p>';
+    return;
+  }
+  const rowsHtml = rows.map(({ camera, status }) => `
+    <tr class="${escapeHtml(detectorStatusClass(camera, status))}">
+      <td class="cell-label">${escapeHtml(detectorCameraLabel(camera))}</td>
+      <td>${escapeHtml(detectorSoundConfigured(camera) ? 'Yes' : 'No')}</td>
+      <td>${escapeHtml(detectorEnabledRules(camera).length)}</td>
+      <td>${escapeHtml(titleCase(String(status.backend || 'None').replace(/[_-]+/g, ' ')))}</td>
+      <td>${escapeHtml(status.running ? 'Yes' : 'No')}</td>
+      <td>${escapeHtml(detectorStatusReason(camera, status))}</td>
+      <td>${escapeHtml(status.last_class_label || titleCase(String(status.last_class || 'None').replace(/[_-]+/g, ' ')))}</td>
+      <td>${escapeHtml(detectorConfidenceMap(status.last_confidences))}</td>
+      <td>${escapeHtml(status.backend_reason || '')}</td>
+    </tr>
+  `).join('');
+  soundCameraStatusList.innerHTML = `
+    <div style="overflow-x:auto">
+      <table class="rule-table">
+        <thead><tr>
+          <th>Camera</th><th>Configured</th><th>Rules</th><th>Backend</th>
+          <th>Running</th><th>Status</th><th>Last Sound</th>
+          <th>Recent Scores</th><th>Detail</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  `;
+  soundCameraStatusList.querySelector('tbody').insertAdjacentHTML('beforeend', rowsHtml);
+}
+
+async function refreshDetectorStatuses() {
+  if (!soundCameraStatusList) return;
+  if (!cameras.length) {
+    renderDetectorStatuses([]);
+    return;
+  }
+  const rows = await Promise.all(cameras.map(async (camera) => ({
+    camera,
+    status: await api(`/api/sound/status?camera_id=${encodeURIComponent(camera.id || '')}`).catch(() => ({
+      state: 'unavailable',
+      detector_status: 'unavailable',
+      running: false,
+      backend: null,
+      last_confidences: {},
+    })),
+  })));
+  renderDetectorStatuses(rows);
+}
 
 function setMessage(text, isError = false) {
   messageEl.textContent = text || '';

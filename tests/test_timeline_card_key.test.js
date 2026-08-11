@@ -1,6 +1,6 @@
 // Regression test for the timeline per-card colour key.
 //
-// /timeline renders two parallel cards (Objects + Sounds). Each card
+// /timeline renders three parallel cards (Objects + Motion + Sounds). Each card
 // shows its own colour-key strip via renderCardKey(), which consumes
 // partitionRecordingsForKeys() - the single source of truth for the
 // per-kind chip partition. The interesting regression guard is the
@@ -143,10 +143,30 @@ const personIcons = partitionFor([objectRecordingWithLabel('person')]);
 const dogIcons = partitionFor([objectRecordingWithLabel('dog bark')]);
 const OBJECT_CHIP_ICON = personIcons.objectChips[0]?.icon || '';
 const SOUND_CHIP_ICON = dogIcons.soundChips[0]?.icon || '';
+const MOTION_CHIP_ICON = partitionFor([{
+  trigger_type: 'motion',
+  labels: ['motion'],
+  detections: [{ label: 'motion', confidence: 0.42 }],
+}]).motionChips[0]?.icon || '';
 assert.ok(OBJECT_CHIP_ICON.length > 0,
   'partition should produce a non-empty icon string for object chips');
 assert.ok(SOUND_CHIP_ICON.length > 0,
   'partition should produce a non-empty icon string for sound chips');
+
+test('card key: motion-only recordings route exclusively to the Motion card', () => {
+  const motionRecording = {
+    trigger_type: 'motion',
+    labels: ['motion'],
+    detections: [{ label: 'motion', confidence: 0.42 }],
+  };
+  const objectCard = cardKeyHtmlFor('object', [motionRecording]);
+  const motionCard = cardKeyHtmlFor('motion', [motionRecording]);
+  const soundCard = cardKeyHtmlFor('sound', [motionRecording]);
+  assert.equal(objectCard.html, '', 'Objects card must not contain motion-only clips');
+  assert.equal(soundCard.html, '', 'Sounds card must not contain motion-only clips');
+  assert.equal(motionCard.html.split('Motion').length - 1, 1, 'Motion card shows one Motion chip');
+  assert.ok(motionCard.html.includes(MOTION_CHIP_ICON), 'Motion card uses the motion icon');
+});
 
 test('card key: sound-class label on an object recording routes exclusively to the Sounds card', () => {
   // The Dog-Bark-on-object-source regression guard: a recording whose

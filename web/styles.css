@@ -5156,8 +5156,8 @@ button.activity-item-action.activity-item-action-recording:hover {
      item defaulting to `min-width: auto`, so that 680px min-content leaked up
      and stretched the whole page (header included) into a horizontal scroll.
      Let the card and wrapper shrink so the overflow stays confined. */
-  .yamnet-cameras-card { min-width: 0; }
-  .yamnet-cameras-card #soundCameraStatusList > div { min-width: 0; }
+  .sound-detectors-card { min-width: 0; }
+  .sound-detectors-card #soundCameraStatusList > div { min-width: 0; }
 }
 @media (max-width: 600px) {
   /* Hide less-critical columns (Configured, Rules, Last Sound, Recent Scores, Detail)

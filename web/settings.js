@@ -609,12 +609,12 @@ fullBackupLink?.addEventListener('click', () => {
   // Full backups zip the database plus every recording/snapshot file, so they
   // can take a while to assemble on large libraries. Keep the user informed
   // while the browser waits for the archive to be generated.
-  setMessage('Generating full backup (database + recordings + snapshots)...');
+  setMessage('Generating full backup (database + recordings + snapshots + models)...');
 });
 
 forms.databaseRestore.addEventListener('submit', guard(async (event) => {
   event.preventDefault();
-  if (!window.confirm('Restore this database backup? This will replace current events, users, settings, alert rules, and sessions.')) return;
+  if (!window.confirm('Restore this backup? A database backup replaces site data. A full ZIP backup also restores recordings, snapshots, and model assets. The current state is saved to a safety backup first.')) return;
   const formData = new FormData(forms.databaseRestore);
   const result = await api('/api/settings/system/database/restore', { method: 'POST', body: formData });
   forms.databaseRestore.reset();

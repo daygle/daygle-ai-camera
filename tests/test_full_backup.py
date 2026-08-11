@@ -86,7 +86,10 @@ def test_create_full_backup_includes_database_recordings_and_snapshots(tmp_path,
             assert manifest["storage"]["snapshots_dir"] == str(snapshots)
             assert manifest["included"]["recordings"]["files"] == 1
             assert manifest["included"]["snapshots"]["files"] == 1
+            assert "events" in manifest["included"]
+            assert "models" in manifest["included"]
             assert manifest["included"]["database"]["files"] == 1
+            assert manifest["version"] == backup_module.FULL_BACKUP_VERSION
 
             # The embedded database must be a valid SQLite file that survived the zip.
             embedded = zf.read(db_entries[0])

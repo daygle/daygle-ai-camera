@@ -67,8 +67,9 @@ Open **YAMNet TFLite** (`/yamnet-tflite`) to confirm whether the sound detection
 
 - Application logs are written to `data/logs/app.log` with rotation.
 - SQLite backups can be downloaded from **Settings → System → Database Backup & Restore → Download Database Backup**.
-- **Download Full Backup** in the same section produces a zip with the database, recordings, and snapshots. The database-only backup does **not** contain video; back up the `recordings/` and `snapshots/` directories separately (or use the full backup) if you need the media itself.
-- Restores accept a previously downloaded `.sqlite` backup and create a safety backup of the current database before replacing it.
+- **Download Full Backup** in the same section produces a zip with the database, recordings, snapshots, legacy event artifacts, and installed model assets. The database-only backup does **not** contain media; use the full backup when you need a portable recovery bundle.
+- Restores accept either a previously downloaded `.sqlite` database backup or a `.zip` full backup. Full restores validate the archive, protect against traversal and symbolic links, remap media paths to the current storage directories, restore media/models, and create a full safety backup first.
+- Configuration supplied through environment variables, external `config.yaml` files, protected secret files (including the Cloudflare Tunnel token), and external service credentials must be configured separately after recovery. These are intentionally not copied into a downloadable archive.
 
 ## Update checks
 
