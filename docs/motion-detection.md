@@ -37,7 +37,7 @@ These results are then matched against your zone rules. If a zone covers the are
 Every confirmed object detection is stamped with a **stable track id** so the
 same person/car keeps one identity across detection cycles instead of being a
 fresh anonymous box each frame. The tracker is a lightweight greedy IoU matcher
-(same-label only) — no extra dependencies — and is additive: it annotates each
+(same-label only) - no extra dependencies - and is additive: it annotates each
 detection with `track_id`, `track_age` (cycles seen), and `track_new` (first
 sighting) without changing which alerts or recordings fire. These ids flow into
 the detection history and recording rows, giving the playback overlay continuity
@@ -93,8 +93,8 @@ Layer 1 compares each frame against a learned background - a model of what the c
 
 **Important behaviour (MOG2):** the model adapts every frame at **Motion Background Alpha**, and MOG2 distinguishes a moving subject from a stopped one by how long each pixel stays changed:
 
-- A subject that keeps **moving** lands on new pixels each frame, so no pixel is ever learned — it stays visible as motion the whole time it moves.
-- A subject that **stops** (a car that parks, a person who stands still) sits on the same pixels, so it is gradually absorbed into the background over roughly `1 / Motion Background Alpha` frames, and the motion signal returns to its baseline. This is why a parked car does **not** pin the motion bar at ~30% forever — it fades within seconds. (An earlier "freeze during motion" behaviour caused exactly that stuck-bar bug and has been removed; the legacy **Diff** engine still freezes and can show the old behaviour.)
+- A subject that keeps **moving** lands on new pixels each frame, so no pixel is ever learned - it stays visible as motion the whole time it moves.
+- A subject that **stops** (a car that parks, a person who stands still) sits on the same pixels, so it is gradually absorbed into the background over roughly `1 / Motion Background Alpha` frames, and the motion signal returns to its baseline. This is why a parked car does **not** pin the motion bar at ~30% forever - it fades within seconds. (An earlier "freeze during motion" behaviour caused exactly that stuck-bar bug and has been removed; the legacy **Diff** engine still freezes and can show the old behaviour.)
 - Recording continuity for a subject that stops is handled by **Minimum Post-Event Seconds** / **Keep Recording After Motion**, not by holding the motion signal.
 
 Because a stopped subject fades from *motion*, catching it while it's still there is the job of object detection (Always-On, or the **Periodic Scan** below).
@@ -140,9 +140,9 @@ Default: `Enabled`
 
 Rejects MOG2-classified cast shadows so a moving shadow does not register as motion. **MOG2 only** (has no effect with the Diff engine). Tri-state:
 
-- **On** (default) — always reject shadows.
-- **Off** — never reject; use on very dark or IR scenes where a genuine subject can be misread as a shadow and dropped.
-- **Auto (day only)** — reject shadows only while the scene is bright, and automatically stop at night/IR (when the frame's mean brightness drops below the night threshold). Best for a camera that runs colour by day and IR by night without manual switching.
+- **On** (default) - always reject shadows.
+- **Off** - never reject; use on very dark or IR scenes where a genuine subject can be misread as a shadow and dropped.
+- **Auto (day only)** - reject shadows only while the scene is bright, and automatically stop at night/IR (when the frame's mean brightness drops below the night threshold). Best for a camera that runs colour by day and IR by night without manual switching.
 
 Default: `On`
 
@@ -171,13 +171,13 @@ driveway, someone crouched behind a parked car). Tiled inference closes that
 gap: it splits the whole frame into an overlapping grid (**2×2**, **3×3**, or
 **4×4**) and runs the detector on **every tile each cycle, regardless of
 motion**, so a distant subject in any tile is detected at that tile's higher
-resolution — moving or not. Tile detections are mapped back and merged with the
+resolution - moving or not. Tile detections are mapped back and merged with the
 full-frame pass (IoU de-dup); tile detections that come out large are dropped
 (a big object is already caught full-frame, and this avoids fragmenting it).
 
 Cost is one inference per tile (3×3 = 9× per cycle), so it's off by default and
 best on cameras covering a **large or deep area**. On a tight/doorway view where
-subjects are already large, leave it off — Motion-Region Boost (or nothing) is
+subjects are already large, leave it off - Motion-Region Boost (or nothing) is
 enough. Validate the recall gain against the cost on a real clip first:
 
 ```

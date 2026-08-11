@@ -14,7 +14,6 @@ const stats = {
   total: document.getElementById('statTotalCameras'),
   online: document.getElementById('statOnlineCameras'),
   offline: document.getElementById('statOfflineCameras'),
-  ptz: document.getElementById('statPtzCameras'),
 };
 const filter = {
   text: document.getElementById('cameraFilter'),
@@ -674,7 +673,6 @@ function renderGrid() {
 
 function updateStats() {
   if (stats.total) stats.total.textContent = String(cameras.length);
-  if (stats.ptz) stats.ptz.textContent = String(cameras.filter(function(c) { return c.ptz?.enabled === true; }).length);
 }
 
 // ─── Delete modal ─────────────────────────────────────────────────────────────

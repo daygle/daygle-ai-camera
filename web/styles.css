@@ -3355,14 +3355,6 @@ tr.drag-over {
   color: var(--accent);
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
-/* Motion stat cards pick up the teal/green accent used by motion pills on
-   the recordings/timeline pages so the running-man icon in the corner reads
-   as the same category without needing a colour-coded label. */
-.stat-card-icon-motion {
-  border-color: rgba(45, 212, 191, 0.4);
-  background: rgba(45, 212, 191, 0.08);
-  color: #2dd4bf;
-}
 .stat-card-value {
   display: block;
   font-size: 30px;

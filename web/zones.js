@@ -54,7 +54,7 @@ function motionPixelThresholdText(rule) {
   const sensitivityFraction = sensitivity * scale;
   const requiredFraction = Math.max(gate, sensitivityFraction);
   const overridden = (rule?.gate_fraction != null && Number.isFinite(ruleGate)) || (rule?.scale_fraction != null && Number.isFinite(ruleScale));
-  return `Approx. ${formatMotionPercent(requiredFraction)} of this zone's pixels must change (${Math.round(sensitivity * 100)}% sensitivity × ${formatMotionPercent(scale)} scale; ${formatMotionPercent(gate)} minimum gate)${overridden ? ' — per-zone override' : ''}.`;
+  return `Approx. ${formatMotionPercent(requiredFraction)} of this zone's pixels must change (${Math.round(sensitivity * 100)}% sensitivity × ${formatMotionPercent(scale)} scale; ${formatMotionPercent(gate)} minimum gate)${overridden ? ' - per-zone override' : ''}.`;
 }
 
 // Update only the label text on the Add Zone button so its icon (a sibling

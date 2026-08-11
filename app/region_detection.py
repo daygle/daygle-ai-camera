@@ -11,7 +11,7 @@ The crop detections are mapped back to full-frame coordinates and merged with
 the full-frame pass, de-duplicated by class-aware IoU.
 
 Cost scales with the number of motion regions (capped), so this is opt-in
-(``object_detection_region_boost``) — most valuable on cameras watching a large
+(``object_detection_region_boost``) - most valuable on cameras watching a large
 area where subjects appear small.
 """
 from __future__ import annotations
@@ -29,7 +29,7 @@ def _motion_region_boxes(
     """Return up to ``max_regions`` padded, normalized ``(x, y, w, h)`` boxes
     around the connected motion blobs in ``diff_mask`` (largest first).
 
-    Regions covering more than half the frame are skipped — they gain nothing
+    Regions covering more than half the frame are skipped - they gain nothing
     from cropping (they are already ~full-frame) and would just double the cost.
     """
     import cv2
@@ -113,7 +113,7 @@ def detect_with_region_boost(
     zoomed-in crops around motion, merged and de-duplicated.
 
     Falls back to ``base_detections`` unchanged when there is no usable mask,
-    no detector ``detect_frame`` method, or no qualifying motion region — so it
+    no detector ``detect_frame`` method, or no qualifying motion region - so it
     is always safe to call. Never raises out; a per-crop failure is skipped."""
     if diff_mask is None or frame is None or not hasattr(detector, "detect_frame"):
         return base_detections

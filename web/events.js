@@ -15,7 +15,7 @@ const els = {
   listStatus: document.getElementById('listStatus'),
   filterPills: document.querySelectorAll('[data-filter]'),
   rangeBtns: document.querySelectorAll('[data-range]'),
-  statTotalEvents: document.getElementById('statTotalEvents'),
+  statMotionEvents: document.getElementById('statMotionEvents'),
   statObjectEvents: document.getElementById('statObjectEvents'),
   statSoundEvents: document.getElementById('statSoundEvents'),
 };
@@ -219,13 +219,15 @@ function visibleEvents() {
 
 function renderStats() {
   let object = 0;
+  let motion = 0;
   let sound = 0;
   for (const event of allEvents) {
     const kind = eventKind(event);
     if (kind === 'sound') sound += 1;
+    else if (kind === 'motion') motion += 1;
     else if (kind === 'object') object += 1;
   }
-  if (els.statTotalEvents) els.statTotalEvents.textContent = String(allEvents.length);
+  if (els.statMotionEvents) els.statMotionEvents.textContent = String(motion);
   if (els.statObjectEvents) els.statObjectEvents.textContent = String(object);
   if (els.statSoundEvents) els.statSoundEvents.textContent = String(sound);
 }
