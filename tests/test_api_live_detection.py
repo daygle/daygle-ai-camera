@@ -7,6 +7,52 @@ tests/support.py.
 from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
 
 
+def test_live_status_preserves_best_object_confidence_for_vision_card(tmp_path, monkeypatch):
+    """Live status keeps confidence available even when the UI falls back to labels."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    import app.detection_status as detection_status
+
+    main._state.live_detection_status.clear()
+    detection_status.update_live_detection_status(
+        'camera-1',
+        state='checked',
+        detected_labels=['person'],
+        detections=[
+            {'label': 'person', 'confidence': 0.71},
+            {'label': 'person', 'confidence': 0.86},
+        ],
+    )
+
+    payload = detection_status.live_detection_status_payload('camera-1')
+    assert payload['detection_confidences'] == {'person': 0.86}
+
+
+def test_live_object_status_reports_below_threshold_reason(tmp_path, monkeypatch):
+    _load_app(tmp_path, monkeypatch)
+    from app.live_monitor import _below_threshold_object_reason
+
+    reason = _below_threshold_object_reason(
+        [{'label': 'person', 'confidence': 0.42, 'box': {'x': 0.2, 'y': 0.2, 'width': 0.2, 'height': 0.2}}],
+        [{
+            'id': 'porch',
+            'x': 0,
+            'y': 0,
+            'width': 1,
+            'height': 1,
+            'monitor_objects': True,
+            'object_rules': [{'label': 'person', 'min_confidence': 0.5, 'enabled': True}],
+        }],
+    )
+
+    assert reason == {
+        'code': 'below_threshold',
+        'label': 'person',
+        'confidence': 0.42,
+        'threshold': 0.5,
+    }
+
+
 def test_live_snapshot_queues_foreground_detection_frame(monkeypatch):
     """The live snapshot path supplies frames when background detection is off."""
     import app.api.live_router as live_router

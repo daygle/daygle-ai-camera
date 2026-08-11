@@ -418,25 +418,36 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
   }
 
   // Build a highest-confidence map of detected labels (filtered to active rules).
+  // Object confidence normally arrives on each detection, while the backend's
+  // status map preserves it for transitions that only carry detected_labels.
   const confMap = new Map();
+  const confidenceFor = (value) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? Math.max(0, Math.min(1, numeric)) : null;
+  };
+  const confidenceHints = payload.detection_confidences || {};
   for (const d of (payload.detections || [])) {
     const label = String(d.label || '').trim().toLowerCase();
-    const conf = Number(d.confidence || 0);
+    const conf = confidenceFor(d.confidence) ?? confidenceFor(confidenceHints[label]);
     if (!label) continue;
     if (configuredLabels && !configuredLabels.has(label)) continue;
-    if (!confMap.has(label) || conf > confMap.get(label)) confMap.set(label, conf);
+    if (!confMap.has(label) || (conf != null && (confMap.get(label) == null || conf > confMap.get(label)))) {
+      confMap.set(label, conf);
+    }
   }
-  if (confMap.size === 0) {
-    for (const label of (payload.detected_labels || [])) {
-      const l = String(label || '').trim().toLowerCase();
-      if (l && (!configuredLabels || configuredLabels.has(l))) confMap.set(l, 0);
+  for (const label of (payload.detected_labels || [])) {
+    const l = String(label || '').trim().toLowerCase();
+    const hinted = confidenceFor(confidenceHints[l]);
+    if (l && (!configuredLabels || configuredLabels.has(l))
+      && (!confMap.has(l) || (hinted != null && (confMap.get(l) == null || hinted > confMap.get(l))))) {
+      confMap.set(l, hinted);
     }
   }
   const chips = Array.from(confMap.entries())
     .sort((a, b) => b[1] - a[1])
     .map(([label, confidence]) => ({ label, confidence, isSound: false }));
   const labelStr = chips.length
-    ? chips.map((c) => c.confidence > 0 ? `${sentenceCase(c.label)} (${Math.round(c.confidence * 100)}%)` : sentenceCase(c.label)).join(', ')
+    ? chips.map((c) => c.confidence != null ? `${sentenceCase(c.label)} (${Math.round(c.confidence * 100)}%)` : sentenceCase(c.label)).join(', ')
     : null;
 
   const motionData = {
@@ -449,6 +460,10 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
     const alerts = (payload.triggered_alerts || []).map((a) => a.rule_name).join(', ') || 'unknown rule';
     const parts = [`Alert triggered - ${alerts}`];
     if (labelStr) parts.push(`detected ${labelStr}`);
+    if (payload.object_reason?.code === 'below_threshold') {
+      const threshold = confidenceFor(payload.object_reason.threshold);
+      parts.push(`${sentenceCase(payload.object_reason.label || 'Object')} below alert threshold${threshold != null ? ` (${Math.round(threshold * 100)}%)` : ''}`);
+    }
     if (payload.recording_state) parts.push(`recording ${payload.recording_state}${payload.recording_id ? ` #${payload.recording_id}` : ''}`);
     return { state: 'alerted', stateLabel: 'Alerted', chips, ...sound, message: parts.join('; ') + '.', ...motionData };
   }
@@ -458,8 +473,12 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
       return { state: 'monitoring', stateLabel: 'Monitoring', chips, ...sound, message: '', ...motionData };
     }
     const reason = String(payload.reason || '');
+    const objectReason = payload.object_reason;
     let suffix;
-    if (/debounce|suppressed/i.test(reason)) suffix = 'event suppressed (debounce active)';
+    if (objectReason?.code === 'below_threshold') {
+      const threshold = confidenceFor(objectReason.threshold);
+      suffix = `below alert threshold${threshold != null ? ` (${Math.round(threshold * 100)}%)` : ''}`;
+    } else if (/debounce|suppressed/i.test(reason)) suffix = 'event suppressed (debounce active)';
     else if (/cooldown/i.test(reason)) suffix = 'alert rule in cooldown';
     else if (/no alert rule|no matching|no new alert/i.test(reason)) suffix = 'no matching alert rule';
     else if (/no detections matched/i.test(reason)) suffix = 'outside monitored zones';
@@ -487,12 +506,13 @@ function sentenceCase(value) {
 }
 
 // Build one "detected item" row for a sense lane: label, a confidence meter,
-// and the percent. Zero-confidence readings (label known but no score, e.g.
-// from `detected_labels`) show the label alone with no meter.
+// and the percent. Labels without a score (e.g. an un-enriched
+// `detected_labels` fallback) show the label alone with no meter.
 function detectionRowHtml(label, confidence, { faint = false, alerted = false } = {}) {
-  const conf = Number(confidence || 0);
-  const hasPct = conf > 0;
-  const pct = Math.round(conf * 100);
+  const numericConfidence = Number(confidence);
+  const conf = Number.isFinite(numericConfidence) ? Math.max(0, Math.min(1, numericConfidence)) : null;
+  const hasPct = conf != null;
+  const pct = Math.round((conf || 0) * 100);
   const classes = 'sense-det' + (faint ? ' sense-det-faint' : '') + (alerted ? ' sense-det-alert' : '');
   const pctHtml = hasPct ? `<span class="sense-det-pct">${pct}%</span>` : '';
   const meterHtml = hasPct ? `<span class="sense-meter"><i style="width:${pct}%"></i></span>` : '';
@@ -515,22 +535,11 @@ function renderDetectionStatus(summary) {
   const soundChips = summary.soundChips || [];
   const alerted = summary.state === 'alerted';
 
-  // Subtitle: summarise what is actively seen/heard, or fall back to the default description.
+  // Keep the card subtitle explanatory only. Current detections belong in the
+  // dedicated Vision and Hearing lanes below, so repeating them here makes the
+  // status card feel duplicated whenever an item is detected.
   if (liveEls.detectionSubtitle) {
-    const objParts = objChips.slice(0, 3).map((c) =>
-      c.confidence > 0 ? `${titleCase(c.label)} (${Math.round(c.confidence * 100)}%)` : titleCase(c.label)
-    );
-    const sndParts = soundChips.filter((c) => !c.isBelowThreshold).slice(0, 2).map((c) =>
-      c.confidence > 0 ? `${titleCase(c.label)} (${Math.round(c.confidence * 100)}%)` : titleCase(c.label)
-    );
-    if (objParts.length || sndParts.length) {
-      const parts = [];
-      if (objParts.length) parts.push(`Seeing: ${objParts.join(', ')}`);
-      if (sndParts.length) parts.push(`Hearing: ${sndParts.join(', ')}`);
-      liveEls.detectionSubtitle.textContent = parts.join(' · ');
-    } else {
-      liveEls.detectionSubtitle.textContent = 'What the AI is currently seeing and hearing on the live feed.';
-    }
+    liveEls.detectionSubtitle.textContent = 'What the AI is currently seeing and hearing on the live feed.';
   }
 
   // Monitor pill: a "live" affordance that dims when the status feed is down.

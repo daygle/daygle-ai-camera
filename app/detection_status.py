@@ -116,6 +116,26 @@ GENERIC_TRIGGER_LABELS: frozenset[str] = frozenset({
 
 
 def update_live_detection_status(camera_id: str, **updates: Any) -> None:
+    # Keep a best-confidence map alongside the raw detections. The live page
+    # normally receives confidence through ``detections``, but some status
+    # transitions carry only ``detected_labels``; preserving this map lets the
+    # Vision lane render percentages using the same confidence source as the
+    # Hearing lane instead of silently dropping the score.
+    if 'detections' in updates:
+        best_confidences: dict[str, float] = {}
+        for detection in updates.get('detections') or []:
+            if not isinstance(detection, dict):
+                continue
+            label = str(detection.get('label') or '').strip().lower()
+            if not label:
+                continue
+            try:
+                confidence = float(detection.get('confidence'))
+            except (TypeError, ValueError):
+                continue
+            if label not in best_confidences or confidence > best_confidences[label]:
+                best_confidences[label] = confidence
+        updates['detection_confidences'] = best_confidences
     with _state.live_detection_status_lock:
         _state.live_detection_status[camera_id] = {
             **_state.live_detection_status.get(camera_id, {}),

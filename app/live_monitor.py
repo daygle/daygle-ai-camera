@@ -52,6 +52,7 @@ from app.recording_extension import (
 )
 from app.backup import purge_camera_diagnostics_by_policy
 from app.utils import build_stream_url, build_recording_stream_url, normalize_bool_setting
+from app.zone_schema import label_matches
 from app.zone_detection import (
     detection_matches_zone,
     filter_detections_for_camera,
@@ -93,6 +94,49 @@ def _no_object_match_reason(
     if raw_labels:
         return 'outside your zone areas'
     return 'No detections matched this camera and its zone areas.'
+
+
+def _below_threshold_object_reason(
+    detections: list[dict[str, Any]],
+    monitored_zones: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Return a sound-style diagnostic for an object below its zone threshold."""
+    candidates: list[dict[str, Any]] = []
+    for detection in detections:
+        label = str(detection.get('label') or '').strip().lower()
+        if not label:
+            continue
+        try:
+            confidence = float(detection.get('confidence'))
+        except (TypeError, ValueError):
+            continue
+        for zone in monitored_zones:
+            if not detection_matches_zone(detection, zone):
+                continue
+            matching_rules = [
+                rule for rule in zone.get('object_rules') or []
+                if rule.get('enabled', True)
+                and str(rule.get('label') or '').strip().lower() != 'motion'
+                and label_matches(label, rule.get('label'))
+            ]
+            if not matching_rules:
+                continue
+            thresholds: list[float] = []
+            for rule in matching_rules:
+                try:
+                    thresholds.append(float(rule.get('min_confidence', 0.5) or 0.5))
+                except (TypeError, ValueError):
+                    thresholds.append(0.5)
+            if thresholds and not any(confidence >= threshold for threshold in thresholds):
+                candidates.append({
+                    'code': 'below_threshold',
+                    'label': label,
+                    'confidence': round(max(0.0, confidence), 3),
+                    'threshold': round(min(thresholds), 3),
+                })
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item['confidence'])
 
 
 def _camera_has_direct_frame_source(camera_id: str) -> bool:
@@ -542,18 +586,30 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     has_object_zone_rules = any((zone.get('enabled', True) and zone.get('monitor_objects', True) and any((rule.get('enabled', True) and str(rule.get('label') or '').strip() for rule in zone.get('object_rules') or [])) for zone in (settings.get('detection') or {}).get('zones', [])))
     object_alert_detections = zone_alert_detections(settings, object_detections) if has_object_zone_rules else list(object_detections)
     record_only_detections = [d for d in object_detections if zone_record_on_detect(d, settings) and (not zone_object_rule_matches(settings, d, action='alert'))] if has_object_zone_rules else []
-    strongest_motion = max(motion_detections, key=lambda d: float(d.get('confidence', 0))) if motion_detections else None
-    record_live_detection_history(camera_id, list(object_alert_detections) + record_only_detections + ([{**strongest_motion, 'label': 'motion', 'motion_event': True}] if strongest_motion is not None else []), sample_ts=frame_capture_ts, live_config=live_settings)
+    # Keep every firing motion zone in the playback track. Retaining only the
+    # strongest zone made multi-zone motion clips show a box for one region while
+    # silently omitting movement elsewhere in the same frame.
+    motion_history_detections = [
+        {**motion, 'label': 'motion', 'motion_event': True}
+        for motion in motion_detections
+    ]
+    record_live_detection_history(
+        camera_id,
+        list(object_alert_detections) + record_only_detections + motion_history_detections,
+        sample_ts=frame_capture_ts,
+        live_config=live_settings,
+    )
     alert_detections = list(object_alert_detections) + record_only_detections
     for _mot in motion_detections:
         alert_detections.append({**_mot, 'label': 'motion', 'motion_event': True})
+    _monitored_zones = [
+        z for z in (settings.get('detection') or {}).get('zones', [])
+        if z.get('enabled', True) and z.get('monitor_objects', True)
+    ]
+    object_reason = _below_threshold_object_reason(detections, _monitored_zones)
     if not alert_detections:
-        _monitored_zones = [
-            z for z in (settings.get('detection') or {}).get('zones', [])
-            if z.get('enabled', True) and z.get('monitor_objects', True)
-        ]
         reason = _no_object_match_reason(detections, raw_labels, _monitored_zones)
-        update_live_detection_status(camera_id, state='checked', reason=reason, detected_labels=raw_labels, matched_labels=[], detections=list(detections), motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
+        update_live_detection_status(camera_id, state='checked', reason=reason, object_reason=object_reason, detected_labels=raw_labels, matched_labels=[], detections=list(detections), motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         return None
     triggered = _state.alerts.process(alert_detections, rules=zone_rules)
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
@@ -635,7 +691,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         debounce_seconds = max(resolved_cooldowns.values())
         extended_recording_id = extend_active_rtsp_recording(camera_id=camera_id, event_time=frame_capture_time, recording_config=camera_recording_config, detections=recording_detections)
         remember_live_event(camera_id, debounced_labels, merge=True)
-        update_live_detection_status(camera_id, state='checked', reason=f'Ongoing detection extended active recording and suppressed duplicate event for {debounce_seconds:.1f}s debounce window.' if extended_recording_id is not None else f'Ongoing detection suppressed for {debounce_seconds:.1f}s debounce window.', detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, recording_id=extended_recording_id, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
+        update_live_detection_status(camera_id, state='checked', reason=f'Ongoing detection extended active recording and suppressed duplicate event for {debounce_seconds:.1f}s debounce window.' if extended_recording_id is not None else f'Ongoing detection suppressed for {debounce_seconds:.1f}s debounce window.', object_reason=object_reason, detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, recording_id=extended_recording_id, motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         return None
     event_time = frame_capture_time
     if frame_is_numpy:
@@ -664,5 +720,5 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             _state._notification_threads.append(notify_thread)
     email_rules = [rule for rule in zone_rules if rule.get('enabled', True) and rule.get('email_enabled') and _rule_notify_active_now(rule) and (str(rule.get('name') or '') in {str(alert.get('rule_name') or '') for alert in triggered})]
     email_recipients = sorted({recipient for rule in email_rules for recipient in rule.get('email_recipients', [])})
-    update_live_detection_status(camera_id, state='alerted' if triggered else 'checked', reason='Alert matched.' if triggered else 'Detections found. No new alert event was created because no alert rule matched, or a matching rule is still in cooldown.', detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, triggered_alerts=triggered, event_id=event_id, recording_id=recording_id, recording_state='linked' if recording_id is not None else 'skipped', recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(recording_detections, _state.camera_event_recording_config(settings)), email_enabled_rules=len(email_rules), email_recipients=email_recipients, email_attempted=bool(triggered and email_recipients and effective_email_alert_settings().get('enabled')), motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
+    update_live_detection_status(camera_id, state='alerted' if triggered else 'checked', reason='Alert matched.' if triggered else 'Detections found. No new alert event was created because no alert rule matched, or a matching rule is still in cooldown.', object_reason=object_reason, detected_labels=raw_labels, matched_labels=matched_labels, detections=recording_detections, triggered_alerts=triggered, event_id=event_id, recording_id=recording_id, recording_state='linked' if recording_id is not None else 'skipped', recording_reason='Recording linked.' if recording_id is not None else recording_skip_reason(recording_detections, _state.camera_event_recording_config(settings)), email_enabled_rules=len(email_rules), email_recipients=email_recipients, email_attempted=bool(triggered and email_recipients and effective_email_alert_settings().get('enabled')), motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
     return event_id

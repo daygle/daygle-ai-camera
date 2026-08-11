@@ -17,6 +17,17 @@ const _textWidthCache = new Map();
 // normal movement between samples but rejects unrelated/reacquired boxes.
 const MAX_MATCH_CENTER_DISTANCE = 0.25;
 const MAX_MATCH_CENTER_DISTANCE_SQ = MAX_MATCH_CENTER_DISTANCE * MAX_MATCH_CENTER_DISTANCE;
+const MOTION_OVERLAY_COLOR = '#49e6a3';
+const OBJECT_OVERLAY_COLOR = '#47d6ff';
+const OVERLAY_BOX_ALPHA = 0.78;
+const OVERLAY_LABEL_BACKGROUND = 'rgba(7, 11, 19, 0.58)';
+
+function overlayColorForDetection(detection) {
+  const label = String(detection?.label || '').trim().toLowerCase();
+  return detection?.motion_event === true || label === 'motion'
+    ? MOTION_OVERLAY_COLOR
+    : OBJECT_OVERLAY_COLOR;
+}
 
 function _getCachedContext(canvas) {
   let ctx = _ctxCache.get(canvas);
@@ -312,8 +323,12 @@ function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
     const dh = h * renderHeight;
     if (dw < 2 || dh < 2) continue;
 
-    ctx.strokeStyle = '#49e6a3';
+    const overlayColor = overlayColorForDetection(detection);
+    const previousAlpha = ctx.globalAlpha;
+    ctx.globalAlpha = OVERLAY_BOX_ALPHA;
+    ctx.strokeStyle = overlayColor;
     ctx.strokeRect(dx, dy, dw, dh);
+    ctx.globalAlpha = previousAlpha;
 
     const confidence = Math.round(Number(detection.confidence || 0) * 100);
     // Labels are stored lowercase (e.g. "person", "traffic light") for matching;
@@ -331,9 +346,9 @@ function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
     const labelHeight = 20;
     const labelWidth = textWidth + 12;
     const labelY = dy > labelHeight + 4 ? dy - labelHeight - 4 : dy + 4;
-    ctx.fillStyle = 'rgba(7, 11, 19, 0.86)';
+    ctx.fillStyle = OVERLAY_LABEL_BACKGROUND;
     ctx.fillRect(dx, labelY, labelWidth, labelHeight);
-    ctx.fillStyle = '#49e6a3';
+    ctx.fillStyle = overlayColor;
     ctx.fillText(label, dx + 6, labelY + labelHeight / 2);
   }
 }

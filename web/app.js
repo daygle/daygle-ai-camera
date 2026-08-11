@@ -484,6 +484,20 @@ function filterByConfiguredLabels(detections) {
   });
 }
 
+function detectionAnchorSeconds(recording) {
+  const startedAt = Date.parse(recording?.started_at || '');
+  const eventAt = Date.parse(recording?.event?.created_at || '');
+  if (!Number.isFinite(startedAt) || !Number.isFinite(eventAt)) return null;
+  const seconds = (eventAt - startedAt) / 1000;
+  return Number.isFinite(seconds) ? Math.max(0, seconds) : null;
+}
+
+function shouldRenderOverlayForTime(recording, playerTimeSeconds) {
+  const anchorSeconds = detectionAnchorSeconds(recording);
+  if (anchorSeconds === null) return true;
+  return playerTimeSeconds >= anchorSeconds;
+}
+
 function clearClipOverlay() {
   if (!els.clipOverlay) return;
   const context = els.clipOverlay.getContext('2d');
@@ -571,10 +585,17 @@ function drawClipOverlay(vfcMediaTime) {
     if (tracked.length) drawDetectionBoxesOnCanvas(els.clipOverlay, tracked, els.clipPlayer);
     return;
   }
-  if (activeRecording && !activeRecording.detections?.length) return;
+  // Static event boxes describe the trigger moment, which sits after the
+  // clip's pre-roll; never paint them over footage from before the event.
+  if (!shouldRenderOverlayForTime(activeRecording, playerTime)) return;
   const allEventDetections = Array.isArray(activeRecording?.detections) ? activeRecording.detections : [];
   if (!allEventDetections.length) return;
-  const eventDetections = filterByConfiguredLabels(allEventDetections);
+  const hasSpecificEvent = allEventDetections.some((d) => !GENERIC_TRIGGER_LABELS.has(String(d.label || '').toLowerCase()));
+  const eventDetections = filterByConfiguredLabels(
+    hasSpecificEvent
+      ? allEventDetections.filter((d) => !GENERIC_TRIGGER_LABELS.has(String(d.label || '').toLowerCase()))
+      : allEventDetections
+  );
   if (!eventDetections.length) return;
   drawDetectionBoxesOnCanvas(els.clipOverlay, eventDetections, els.clipPlayer);
 }
