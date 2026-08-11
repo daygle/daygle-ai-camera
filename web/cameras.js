@@ -190,11 +190,11 @@ function buildEditFormHtml(camera, index) {
               '<option value="true"' + (camera.motion_denoise === true ? ' selected' : '') + '>Enabled</option>' +
               '<option value="false"' + (camera.motion_denoise === false ? ' selected' : '') + '>Disabled</option>' +
             '</select></label>' +
-            '<label><span>Shadow Suppression <span class="info-tip" data-tip="Reject cast shadows for this camera (MOG2 only). On = always; Off = never (dark/IR scenes); Auto = only while bright. Leave on Global default to follow the global setting." title="Reject cast shadows for this camera (MOG2 only). On / Off / Auto. Leave on Global default to follow the global setting." tabindex="0" aria-label="Help: Per-camera shadow suppression override (on/off/auto)."></span></span><select name="motion_shadow_suppression">' +
+            '<label><span>Shadow Suppression <span class="info-tip" data-tip="Reject cast shadows for this camera (MOG2 only). On = always; Off = never (dark/IR scenes); Automatic = only while bright. Leave on Global default to follow the global setting." title="Reject cast shadows for this camera (MOG2 only). On / Off / Automatic. Leave on Global default to follow the global setting." tabindex="0" aria-label="Help: Per-camera shadow suppression override (on/off/automatic)."></span></span><select name="motion_shadow_suppression">' +
               '<option value=""' + (camera.motion_shadow_suppression == null ? ' selected' : '') + '>Global default</option>' +
               '<option value="on"' + (camera.motion_shadow_suppression === 'on' ? ' selected' : '') + '>On</option>' +
               '<option value="off"' + (camera.motion_shadow_suppression === 'off' ? ' selected' : '') + '>Off</option>' +
-              '<option value="auto"' + (camera.motion_shadow_suppression === 'auto' ? ' selected' : '') + '>Auto (day only)</option>' +
+              '<option value="auto"' + (camera.motion_shadow_suppression === 'auto' ? ' selected' : '') + '>Automatic (Day Only)</option>' +
             '</select></label>' +
           '</div>' +
         '</div>' +

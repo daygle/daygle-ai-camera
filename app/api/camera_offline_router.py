@@ -9,6 +9,7 @@ from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.camera_health import effective_camera_offline_alert_settings
 from app.deps import get_database
+from app.utils import normalize_bool_setting
 
 router = APIRouter()
 
@@ -24,7 +25,7 @@ async def update_camera_offline_alert_settings(request: Request, db=Depends(get_
     payload = await request.json()
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail='Invalid settings payload')
-    validated = {'enabled': bool(payload.get('enabled', False))}
+    validated = {'enabled': normalize_bool_setting(payload.get('enabled', False), False)}
     try:
         validated['offline_delay_minutes'] = max(1, int(payload.get('offline_delay_minutes', 1)))
     except (TypeError, ValueError):

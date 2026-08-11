@@ -114,9 +114,22 @@ logger = logging.getLogger('daygle.ai')
 
 def effective_camera_offline_alert_settings() -> dict[str, Any]:
     settings = {'enabled': False, 'offline_delay_minutes': 1, 'recipients': []}
-    override = _state.database.get_setting('camera_offline_alert')
+    db = _state.database
+    override = db.get_setting('camera_offline_alert') if db is not None else None
     if isinstance(override, dict):
         settings.update(override)
+
+    raw_enabled = settings.get('enabled', False)
+    if isinstance(raw_enabled, str):
+        settings['enabled'] = raw_enabled.strip().lower() in {'1', 'true', 'yes', 'on'}
+    else:
+        settings['enabled'] = bool(raw_enabled)
+    try:
+        settings['offline_delay_minutes'] = max(1, int(settings.get('offline_delay_minutes', 1)))
+    except (TypeError, ValueError):
+        settings['offline_delay_minutes'] = 1
+    if not isinstance(settings.get('recipients'), list):
+        settings['recipients'] = []
     return settings
 
 

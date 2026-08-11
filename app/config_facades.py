@@ -42,6 +42,7 @@ from fastapi import HTTPException
 
 import app.state as _state
 from app.camera_config import normalize_camera_id, normalize_camera_settings
+from app.settings import DEFAULT_CONFIG
 
 
 def _database_setting(key: str) -> Any:
@@ -63,6 +64,21 @@ def _database_setting(key: str) -> Any:
 # default-set under the extract's responsibility; promoting it out of
 # the function body makes it greppable + trivially overridable in a
 # future Phase-17+ test.
+def _normalize_shadow_suppression(value: Any) -> str:
+    """Return the canonical persisted value for the tri-state shadow setting."""
+    if isinstance(value, bool):
+        return 'on' if value else 'off'
+    normalized = str(value or '').strip().lower()
+    return normalized if normalized in {'on', 'off', 'auto'} else 'on'
+
+
+DEFAULT_RECORDING_CONFIG: dict[str, Any] = copy.deepcopy(DEFAULT_CONFIG['recording'])
+DEFAULT_STORAGE_CONFIG: dict[str, Any] = copy.deepcopy(DEFAULT_CONFIG['storage'])
+DEFAULT_AUTH_CONFIG: dict[str, Any] = copy.deepcopy(DEFAULT_CONFIG['auth'])
+DEFAULT_EMAIL_ALERT_SETTINGS: dict[str, Any] = copy.deepcopy(DEFAULT_CONFIG['alerts']['email'])
+DEFAULT_PUSH_NOTIFICATION_SETTINGS: dict[str, Any] = copy.deepcopy(DEFAULT_CONFIG['alerts']['push_notification'])
+
+
 DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     'snapshot_refresh_ms': 500,
     'detection_status_refresh_ms': 2000,
@@ -130,7 +146,10 @@ def effective_ai_config() -> dict[str, Any]:
 
 
 def effective_recording_config() -> dict[str, Any]:
-    settings = copy.deepcopy(_state.config.get('recording', {}))
+    settings = copy.deepcopy(DEFAULT_RECORDING_CONFIG)
+    config_recording = _state.config.get('recording', {})
+    if isinstance(config_recording, dict):
+        settings.update(config_recording)
     override = _database_setting('recording')
     if isinstance(override, dict):
         settings.update(override)
@@ -145,11 +164,20 @@ def effective_live_config() -> dict[str, Any]:
     override = _database_setting('live')
     if isinstance(override, dict):
         settings.update(override)
+    # Keep the value returned to the settings page canonical. This preserves
+    # the tri-state 'auto' choice and migrates older boolean rows without
+    # allowing a malformed config value to appear as a blank/select fallback.
+    settings['motion_shadow_suppression'] = _normalize_shadow_suppression(
+        settings.get('motion_shadow_suppression')
+    )
     return settings
 
 
 def effective_storage_config() -> dict[str, Any]:
-    settings = copy.deepcopy(_state.config.get('storage', {}))
+    settings = copy.deepcopy(DEFAULT_STORAGE_CONFIG)
+    config_storage = _state.config.get('storage', {})
+    if isinstance(config_storage, dict):
+        settings.update(config_storage)
     override = _database_setting('storage')
     if isinstance(override, dict):
         database_path = settings.get('database')
@@ -162,7 +190,15 @@ def effective_storage_config() -> dict[str, Any]:
 
 
 def effective_auth_config() -> dict[str, Any]:
-    settings = copy.deepcopy(_state.auth_config)
+    settings = copy.deepcopy(DEFAULT_AUTH_CONFIG)
+    config_auth = _state.config.get('auth', {})
+    if isinstance(config_auth, dict):
+        settings.update(config_auth)
+    # ``auth_config`` is kept as a startup snapshot for compatibility with
+    # callers that inspect it directly; include it here as a final startup
+    # layer in case a test or embedding host populates it independently.
+    if isinstance(_state.auth_config, dict):
+        settings.update(_state.auth_config)
     override = _database_setting('auth')
     if isinstance(override, dict):
         settings.update(override)
@@ -170,7 +206,10 @@ def effective_auth_config() -> dict[str, Any]:
 
 
 def effective_email_alert_settings() -> dict[str, Any]:
-    settings = copy.deepcopy(_state.config.get('alerts', {}).get('email', {}))
+    settings = copy.deepcopy(DEFAULT_EMAIL_ALERT_SETTINGS)
+    config_alerts = _state.config.get('alerts', {})
+    if isinstance(config_alerts, dict) and isinstance(config_alerts.get('email'), dict):
+        settings.update(config_alerts['email'])
     override = _database_setting('alert_email')
     if isinstance(override, dict):
         settings.update(override)
@@ -178,7 +217,10 @@ def effective_email_alert_settings() -> dict[str, Any]:
 
 
 def effective_push_notification_settings() -> dict[str, Any]:
-    settings = copy.deepcopy(_state.config.get('alerts', {}).get('push_notification', {}))
+    settings = copy.deepcopy(DEFAULT_PUSH_NOTIFICATION_SETTINGS)
+    config_alerts = _state.config.get('alerts', {})
+    if isinstance(config_alerts, dict) and isinstance(config_alerts.get('push_notification'), dict):
+        settings.update(config_alerts['push_notification'])
     override = _database_setting('alert_push')
     if isinstance(override, dict):
         settings.update(override)

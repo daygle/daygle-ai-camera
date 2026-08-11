@@ -165,6 +165,24 @@ def test_default_live_config_calls_do_not_mutate_constant():
     )
 
 
+def test_settings_facades_supply_defaults_when_startup_config_is_partial(monkeypatch):
+    """Every settings read path must return selectable values even when a
+    minimal/legacy startup config and an empty database are present."""
+    import app.state as _state
+    import app.config_facades as cf
+
+    monkeypatch.setattr(_state, 'config', {})
+    monkeypatch.setattr(_state, 'auth_config', {})
+    monkeypatch.setattr(_state, 'database', _FakeDb({}))
+
+    assert cf.effective_recording_config()['pre_event_seconds'] == 10
+    assert cf.effective_storage_config()['data_dir'] == 'data'
+    assert cf.effective_auth_config()['session_timeout_hours'] == 12
+    assert cf.effective_email_alert_settings()['enabled'] is False
+    assert cf.effective_push_notification_settings()['server_url'] == 'https://ntfy.sh'
+    assert cf.effective_live_config()['motion_shadow_suppression'] == 'on'
+
+
 # ---------------------------------------------------------------------------
 # 3. Behavior of each facade (monkeypatch on main.<attr> dependencies).
 # ---------------------------------------------------------------------------
@@ -245,6 +263,21 @@ def test_effective_live_config_layered_order_defaults_then_config_then_db(monkey
     assert layered['detection_interval_seconds'] == 0.55
     assert layered['motion_pixel_threshold'] == 99
     assert layered['background_detection_enabled'] is True
+
+
+def test_effective_live_config_preserves_auto_shadow_suppression(monkeypatch):
+    """The settings API must return the tri-state value unchanged after save."""
+    import app.state as _state
+    import app.config_facades as cf
+
+    monkeypatch.setattr(_state, 'config', {})
+    monkeypatch.setattr(_state, 'database', _FakeDb({'live': {'motion_shadow_suppression': 'auto'}}))
+    assert cf.effective_live_config()['motion_shadow_suppression'] == 'auto'
+
+    # Legacy boolean rows are migrated to their explicit equivalent rather
+    # than leaking a non-option value into the HTML select.
+    monkeypatch.setattr(_state, 'database', _FakeDb({'live': {'motion_shadow_suppression': False}}))
+    assert cf.effective_live_config()['motion_shadow_suppression'] == 'off'
 
 
 def test_effective_cameras_config_normalizes_via_main_helper(monkeypatch):

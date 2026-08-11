@@ -182,9 +182,97 @@ function guard(fn) {
   };
 }
 
-function fillForm(form, values) {
-  for (const [key, value] of Object.entries(values || {})) {
-    if (form.elements[key]) form.elements[key].value = String(value ?? '');
+function normalizeShadowSuppression(value) {
+  if (typeof value === 'boolean') return value ? 'on' : 'off';
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return ['on', 'off', 'auto'].includes(normalized) ? normalized : 'on';
+}
+
+// Keep the form usable with a partial/legacy API response as well as a fresh
+// install. The backend owns persistence and validation; these values only
+// prevent a missing key from leaving a number blank or a select on the wrong
+// first option.
+const FORM_DEFAULTS = {
+  live: {
+    snapshot_refresh_ms: 500,
+    detection_status_refresh_ms: 2000,
+    detection_interval_seconds: 0.5,
+    event_debounce_seconds: 10,
+    detection_confirm_frames: 2,
+    detection_confirm_window: 3,
+    background_detection_enabled: 'true',
+    always_run_object_detection: 'true',
+    object_detection_region_boost: 'false',
+    object_detection_tiling: 'off',
+    detection_history_minutes: 10,
+    ingest_frame_fps: 4,
+    snapshot_quality: 2,
+    motion_algorithm: 'mog2',
+    motion_denoise: 'true',
+    motion_shadow_suppression: 'on',
+    periodic_scan_interval_seconds: 0,
+    motion_pixel_threshold: 30,
+    motion_gate_fraction: 0.005,
+    motion_scale_fraction: 0.03,
+    motion_background_alpha: 0.05,
+    motion_frame_width: 320,
+    motion_frame_height: 240,
+  },
+  recording: {
+    pre_event_seconds: 10,
+    post_event_seconds: 15,
+    extension_step_seconds: 45,
+    max_clip_seconds: 300,
+    retention_days: 14,
+    max_storage_gb: 20,
+    auto_purge_enabled: 'true',
+  },
+  storage: {
+    data_dir: 'data',
+    snapshots_dir: 'data/snapshots',
+    events_dir: 'data/events',
+    recordings_dir: 'data/recordings',
+  },
+  auth: {
+    session_timeout_hours: 12,
+    max_login_attempts: 5,
+    lockout_minutes: 15,
+  },
+  email: {
+    enabled: 'false',
+    host: '',
+    port: 587,
+    username: '',
+    password: '',
+    from_address: '',
+    use_tls: 'true',
+    use_ssl: 'false',
+  },
+  push: {
+    enabled: 'false',
+    server_url: 'https://ntfy.sh',
+    topic: '',
+    priority: 'default',
+    username: '',
+    password: '',
+  },
+  cameraOffline: {
+    enabled: 'false',
+    offline_delay_minutes: 1,
+  },
+};
+
+function fillForm(form, values, defaults = {}) {
+  if (!form) return;
+  const source = values || {};
+  const keys = new Set([...Object.keys(defaults), ...Object.keys(source)]);
+  for (const key of keys) {
+    const field = form.elements[key];
+    if (!field) continue;
+    const value = source[key] ?? defaults[key] ?? '';
+    field.value = key === 'motion_shadow_suppression'
+      ? normalizeShadowSuppression(value)
+      : String(value ?? '');
   }
 }
 
@@ -212,6 +300,7 @@ const FIELD_TYPES = {
     'session_timeout_hours',
   ]),
   csv: new Set(['vehicle_labels']),
+  triState: new Set(['motion_shadow_suppression']),
 };
 
 // Coerce a raw FormData object into the typed payload the API expects.
@@ -220,6 +309,7 @@ const FIELD_TYPES = {
 function coercePayload(data) {
   for (const [key, value] of Object.entries(data)) {
     if (FIELD_TYPES.boolean.has(key)) data[key] = value === 'true';
+    else if (FIELD_TYPES.triState.has(key)) data[key] = normalizeShadowSuppression(value);
     else if (FIELD_TYPES.csv.has(key)) data[key] = String(value).split(',').map((item) => item.trim()).filter(Boolean);
     else if (value === '') continue;
     else if (FIELD_TYPES.integer.has(key)) data[key] = Number.parseInt(value, 10);
@@ -238,11 +328,8 @@ function emailPayload(form) {
 
 function renderEmail(settings) {
   if (!emailForm) return;
-  for (const [key, value] of Object.entries(settings || {})) {
-    if (emailForm.elements[key]) emailForm.elements[key].value = String(value ?? '');
-  }
-  if (!emailForm.elements.port.value) emailForm.elements.port.value = '587';
-  if (testEmailRecipient && !testEmailRecipient.value) testEmailRecipient.value = settings.from_address || '';
+  fillForm(emailForm, settings, FORM_DEFAULTS.email);
+  if (testEmailRecipient && !testEmailRecipient.value) testEmailRecipient.value = settings?.from_address || '';
 }
 
 function pushPayload(form) {
@@ -251,19 +338,12 @@ function pushPayload(form) {
 
 function renderPush(settings) {
   if (!pushForm) return;
-  for (const [key, value] of Object.entries(settings || {})) {
-    if (pushForm.elements[key]) pushForm.elements[key].value = String(value ?? '');
-  }
-  if (!pushForm.elements.server_url.value) pushForm.elements.server_url.value = 'https://ntfy.sh';
-  if (!pushForm.elements.priority.value) pushForm.elements.priority.value = 'default';
+  fillForm(pushForm, settings, FORM_DEFAULTS.push);
 }
 
 function renderCameraOffline(settings) {
   const form = document.getElementById('cameraOfflineForm');
-  if (!form) return;
-  for (const [key, value] of Object.entries(settings || {})) {
-    if (form.elements[key]) form.elements[key].value = String(value ?? '');
-  }
+  fillForm(form, settings, FORM_DEFAULTS.cameraOffline);
 }
 
 
@@ -280,11 +360,11 @@ async function loadSettings() {
   ]);
   const versionEl = document.getElementById('currentVersion');
   if (versionEl && settings.version) versionEl.textContent = settings.version;
-  fillForm(forms.live, settings.live);
-  fillForm(forms.recording, settings.recording);
-  fillForm(forms.retention, settings.recording);
-  fillForm(forms.storage, settings.storage);
-  fillForm(forms.auth, settings.auth);
+  fillForm(forms.live, settings.live, FORM_DEFAULTS.live);
+  fillForm(forms.recording, settings.recording, FORM_DEFAULTS.recording);
+  fillForm(forms.retention, settings.recording, FORM_DEFAULTS.recording);
+  fillForm(forms.storage, settings.storage, FORM_DEFAULTS.storage);
+  fillForm(forms.auth, settings.auth, FORM_DEFAULTS.auth);
   renderEmail(emailSettings);
   renderPush(pushSettings);
   renderCameraOffline(cameraOfflineSettings);
@@ -447,7 +527,8 @@ function bindForm(name, label, endpointName = name) {
     if (btn) btn.disabled = true;
     try {
       const updated = await api(`/api/settings/system/${endpointName}`, { method: 'PUT', body: JSON.stringify(payloadFor(forms[name])) });
-      fillForm(forms[name], updated);
+      const defaults = name === 'retention' ? FORM_DEFAULTS.recording : FORM_DEFAULTS[name];
+      fillForm(forms[name], updated, defaults);
       setMessage(`${label} settings saved.`);
     } finally {
       if (btn) btn.disabled = false;
@@ -479,7 +560,8 @@ document.getElementById('cameraOfflineForm')?.addEventListener('submit', guard(a
   const data = payloadFor(form);
   // Offline delay must be a positive integer; fall back to 1 when left blank.
   if (!Number.isFinite(data.offline_delay_minutes)) data.offline_delay_minutes = 1;
-  await api('/api/settings/camera-offline', { method: 'PUT', body: JSON.stringify(data) });
+  const updated = await api('/api/settings/camera-offline', { method: 'PUT', body: JSON.stringify(data) });
+  renderCameraOffline(updated);
   setMessage('Camera offline alert settings saved.');
 }));
 
