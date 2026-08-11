@@ -937,7 +937,8 @@ def test_validate_live_settings_returns_all_expected_fields(monkeypatch, pv):
         'snapshot_refresh_ms', 'detection_status_refresh_ms',
         'detection_interval_seconds', 'event_debounce_seconds',
         'background_detection_enabled', 'always_run_object_detection',
-        'object_detection_region_boost', 'detection_history_minutes',
+        'object_detection_region_boost', 'object_detection_tiling',
+        'detection_history_minutes',
         'motion_algorithm', 'motion_denoise', 'motion_shadow_suppression',
         'motion_pixel_threshold', 'motion_gate_fraction',
         'motion_scale_fraction', 'motion_background_alpha',
@@ -976,6 +977,16 @@ def test_validate_live_settings_normalises_motion_engine(monkeypatch, pv):
 
     bad = pv.validate_live_settings({'motion_algorithm': 'wavelet-magic'})
     assert bad['motion_algorithm'] == 'mog2'
+
+
+def test_validate_live_settings_normalises_tiling_grid(monkeypatch, pv):
+    """object_detection_tiling accepts 'off'/'CxR'; junk falls back to 'off'."""
+    _install_validator_dependencies(monkeypatch)
+    assert pv.validate_live_settings({})['object_detection_tiling'] == 'off'
+    assert pv.validate_live_settings({'object_detection_tiling': '3x3'})['object_detection_tiling'] == '3x3'
+    assert pv.validate_live_settings({'object_detection_tiling': '3x2'})['object_detection_tiling'] == '3x2'
+    assert pv.validate_live_settings({'object_detection_tiling': 'nonsense'})['object_detection_tiling'] == 'off'
+    assert pv.validate_live_settings({'object_detection_tiling': '99x99'})['object_detection_tiling'] == 'off'
 
 
 def test_validate_live_settings_defaults_snapshot_quality(monkeypatch, pv):

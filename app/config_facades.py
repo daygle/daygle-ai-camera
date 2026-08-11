@@ -92,6 +92,12 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     # multiplies inference cost by the number of motion regions and is best
     # enabled per deployment after validating on real footage.
     'object_detection_region_boost': False,
+    # Tiled / sliced inference: 'off' (default), or a grid like '2x2' / '3x3' /
+    # '4x4'. When set, the detector is additionally run on every overlapping tile
+    # of the grid each cycle, recovering SMALL subjects anywhere in frame --
+    # including stationary ones the motion-region boost never sees -- at the cost
+    # of one inference per tile. Best on cameras covering a large/deep area.
+    'object_detection_tiling': 'off',
     'detection_history_minutes': 10,
     # Background-subtraction engine: 'mog2' (default, Gaussian-mixture with
     # shadow rejection) or 'diff' (legacy single-frame adaptive diff / automatic

@@ -159,3 +159,117 @@ def region_boost_enabled(live_settings: dict[str, Any]) -> bool:
     """Resolve the ``object_detection_region_boost`` toggle (default off)."""
     from app.utils import normalize_bool_setting
     return normalize_bool_setting(live_settings.get("object_detection_region_boost"), False)
+
+
+# --- Tiled / sliced inference (SAHI-style) --------------------------------
+# Overlap between adjacent tiles (fraction of a tile), so a subject straddling a
+# tile boundary still lands whole inside at least one tile.
+_TILE_OVERLAP = 0.2
+# Tile detections larger than this fraction of the frame are dropped: tiling
+# exists to recover SMALL subjects, and a large object is already caught by the
+# full-frame pass -- keeping big tile boxes would just fragment/duplicate it.
+_MAX_TILE_DET_AREA_FRAC = 0.1
+
+
+def parse_tile_grid(value: Any) -> tuple[int, int] | None:
+    """Parse the ``object_detection_tiling`` setting to ``(cols, rows)`` or None.
+
+    Accepts ``'off'`` / '' / falsy -> None (disabled), ``'CxR'`` (e.g. ``'3x3'``,
+    ``'3x2'``) -> ``(C, R)`` clamped to 1..6 with at least one axis > 1, and a
+    legacy bool ``True`` -> ``(2, 2)``. Anything unrecognised -> None.
+    """
+    if value is True:
+        return (2, 2)
+    text = str(value if value is not None else "").strip().lower()
+    if text in {"", "off", "false", "0", "none", "disabled"}:
+        return None
+    if "x" in text:
+        try:
+            cols_s, rows_s = text.split("x", 1)
+            cols, rows = int(cols_s), int(rows_s)
+        except ValueError:
+            return None
+        if 1 <= cols <= 6 and 1 <= rows <= 6 and (cols > 1 or rows > 1):
+            return (cols, rows)
+    return None
+
+
+def tiling_grid(live_settings: dict[str, Any]) -> tuple[int, int] | None:
+    """Resolve the configured tiling grid, or None when tiling is off."""
+    return parse_tile_grid(live_settings.get("object_detection_tiling"))
+
+
+def _tile_boxes(cols: int, rows: int, overlap: float) -> list[tuple[float, float, float, float]]:
+    """Normalized ``(x, y, w, h)`` tiles covering the frame in a ``cols x rows``
+    grid, each expanded by ``overlap`` on every side and clamped to [0, 1]."""
+    tile_w = 1.0 / cols
+    tile_h = 1.0 / rows
+    over_x = tile_w * overlap
+    over_y = tile_h * overlap
+    boxes: list[tuple[float, float, float, float]] = []
+    for row in range(rows):
+        for col in range(cols):
+            x = max(0.0, col * tile_w - over_x)
+            y = max(0.0, row * tile_h - over_y)
+            w = min(1.0 - x, tile_w + 2.0 * over_x)
+            h = min(1.0 - y, tile_h + 2.0 * over_y)
+            boxes.append((x, y, w, h))
+    return boxes
+
+
+def detect_with_tiling(
+    detector: Any,
+    frame: Any,
+    base_detections: list[dict[str, Any]],
+    *,
+    cols: int,
+    rows: int,
+    confidence: float | None = None,
+    overlap: float = _TILE_OVERLAP,
+    max_det_area_frac: float = _MAX_TILE_DET_AREA_FRAC,
+    iou_dedup: float = 0.5,
+) -> list[dict[str, Any]]:
+    """Run the detector on every tile of a ``cols x rows`` grid (regardless of
+    motion) and merge the small-object detections back into ``base_detections``.
+
+    Unlike the motion-region boost, this covers the WHOLE frame every cycle, so
+    it recovers small subjects that are stationary (or wherever motion never
+    fired). Large tile detections are dropped (see ``_MAX_TILE_DET_AREA_FRAC``)
+    to avoid fragmenting an object the full-frame pass already caught. Safe to
+    call unconditionally; a per-tile failure is skipped."""
+    if frame is None or not hasattr(detector, "detect_frame"):
+        return base_detections
+    if not (hasattr(frame, "shape") and getattr(frame, "ndim", 0) == 3):
+        return base_detections
+
+    frame_h, frame_w = frame.shape[:2]
+    merged = list(base_detections)
+    for tx, ty, tw, th in _tile_boxes(cols, rows, overlap):
+        x1 = int(tx * frame_w)
+        y1 = int(ty * frame_h)
+        x2 = int((tx + tw) * frame_w)
+        y2 = int((ty + th) * frame_h)
+        if x2 - x1 < 8 or y2 - y1 < 8:
+            continue
+        crop = frame[y1:y2, x1:x2]
+        try:
+            tile_detections = detector.detect_frame(crop, confidence=confidence)
+        except Exception:
+            continue
+        for det in tile_detections:
+            box = det.get("box") or {}
+            width = float(box.get("width") or 0) * tw
+            height = float(box.get("height") or 0) * th
+            if width * height > max_det_area_frac:
+                continue  # large object -> leave it to the full-frame pass
+            merged.append({
+                **det,
+                "box": {
+                    "x": round(tx + float(box.get("x") or 0) * tw, 4),
+                    "y": round(ty + float(box.get("y") or 0) * th, 4),
+                    "width": round(width, 4),
+                    "height": round(height, 4),
+                },
+                "tiled": True,
+            })
+    return _dedup_by_iou(merged, iou_dedup)
