@@ -94,7 +94,9 @@ DEFAULT_LIVE_CONFIG: dict[str, Any] = {
     # Morphological denoise of the foreground mask (removes single-pixel noise).
     'motion_denoise': True,
     # Reject MOG2-classified cast shadows so a moving shadow is not motion.
-    'motion_shadow_suppression': True,
+    # Tri-state: 'on' (always), 'off' (never), 'auto' (only while the scene is
+    # bright; disabled at night/IR so real subjects are not read as shadow).
+    'motion_shadow_suppression': 'on',
     'motion_pixel_threshold': 30,
     'motion_gate_fraction': 0.005,
     'motion_scale_fraction': 0.03,

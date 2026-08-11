@@ -337,7 +337,9 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # override resolved below alongside the numeric thresholds).
     _algorithm = str(live_settings.get('motion_algorithm', getattr(_state, '_MOTION_ALGORITHM', 'mog2')) or 'mog2').strip().lower()
     _denoise = normalize_bool_setting(live_settings.get('motion_denoise'), getattr(_state, '_MOTION_DENOISE', True))
-    _shadow_suppression = normalize_bool_setting(live_settings.get('motion_shadow_suppression'), getattr(_state, '_MOTION_SHADOW_SUPPRESSION', True))
+    # Tri-state ('on'/'off'/'auto', legacy bool tolerated) resolved per-frame in
+    # the engine, so pass the raw value through rather than coercing to a bool.
+    _shadow_suppression = live_settings.get('motion_shadow_suppression', getattr(_state, '_MOTION_SHADOW_SUPPRESSION', 'on'))
     # Clamp to the SAME bounds validate_live_settings enforces (40-640 x
     # 30-480). The UI path is already validated, but effective_live_config also
     # merges a raw ``live`` block from config.yaml that never passes through the
@@ -390,7 +392,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         _denoise = normalize_bool_setting(_cam_dn, _denoise)
     _cam_ss = settings.get('motion_shadow_suppression') if settings.get('motion_shadow_suppression') is not None else _cam_motion_nest.get('shadow_suppression')
     if _cam_ss is not None:
-        _shadow_suppression = normalize_bool_setting(_cam_ss, _shadow_suppression)
+        _shadow_suppression = _cam_ss  # raw tri-state; resolved in the engine
     periodic_scan_interval = float(live_settings.get('periodic_scan_interval_seconds', 0))
     force_scan = False
     if periodic_scan_interval > 0 and now - _state._periodic_scan_last_ts.get(camera_id, 0) >= periodic_scan_interval:

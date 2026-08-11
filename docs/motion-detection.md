@@ -107,9 +107,13 @@ Default: `Enabled`
 
 ### Shadow Suppression
 
-Rejects MOG2-classified cast shadows so a moving shadow does not register as motion. **MOG2 only** (has no effect with the Diff engine). Disable on very dark or IR scenes where a genuine subject can be misread as a shadow and dropped.
+Rejects MOG2-classified cast shadows so a moving shadow does not register as motion. **MOG2 only** (has no effect with the Diff engine). Tri-state:
 
-Default: `Enabled`
+- **On** (default) — always reject shadows.
+- **Off** — never reject; use on very dark or IR scenes where a genuine subject can be misread as a shadow and dropped.
+- **Auto (day only)** — reject shadows only while the scene is bright, and automatically stop at night/IR (when the frame's mean brightness drops below the night threshold). Best for a camera that runs colour by day and IR by night without manual switching.
+
+Default: `On`
 
 ### Always Run Object Detection
 

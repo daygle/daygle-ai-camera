@@ -158,6 +158,20 @@ def test_camera_wide_scene_change_reseeds_without_motion():
     assert fraction == 0.0
 
 
+def test_auto_shadow_suppression_follows_frame_brightness():
+    """'auto' rejects shadows on a bright (day) frame and stops on a dark
+    (night/IR) frame, resolved from the thumbnail's mean brightness."""
+    bright = np.full((30, 40, 3), 200, dtype=np.uint8)
+    dark = np.full((30, 40, 3), 10, dtype=np.uint8)
+    assert ds._resolve_shadow_suppression('auto', bright) is True
+    assert ds._resolve_shadow_suppression('auto', dark) is False
+    # Explicit + legacy values are honoured regardless of brightness.
+    assert ds._resolve_shadow_suppression('on', dark) is True
+    assert ds._resolve_shadow_suppression('off', bright) is False
+    assert ds._resolve_shadow_suppression(True, dark) is True
+    assert ds._resolve_shadow_suppression(False, bright) is False
+
+
 def test_mog2_is_the_default_engine_and_reports_motion():
     """The default (no algorithm kwarg) path uses MOG2 and detects a subject."""
     cam = "mog2-default"

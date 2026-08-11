@@ -153,6 +153,25 @@ _CAMERA_MOTION_FRACTION_BOUNDS: dict[str, tuple[float, float]] = {
 }
 
 
+def _normalize_shadow_suppression(value: Any, default: str = 'on') -> str:
+    """Normalize the tri-state shadow-suppression setting to 'on'/'off'/'auto'.
+
+    Legacy persisted bools migrate (True -> 'on', False -> 'off'); HTML-form
+    strings are lowercased; anything unrecognised falls back to ``default`` so a
+    stale value can never silently disable a valid mode.
+    """
+    if isinstance(value, bool):
+        return 'on' if value else 'off'
+    text = str(value if value is not None else '').strip().lower()
+    if text in {'on', 'off', 'auto'}:
+        return text
+    if text in {'true', '1', 'yes', 'enabled'}:
+        return 'on'
+    if text in {'false', '0', 'no', 'disabled'}:
+        return 'off'
+    return default
+
+
 def _coerce_camera_motion_override(flat_key: str, value: Any) -> int | float:
     """Coerce and clamp one per-camera motion override to its validated range.
 
@@ -339,14 +358,23 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
     elif str(current.get('motion_algorithm') or '').strip().lower() in {'mog2', 'diff'}:
         updated['motion_algorithm'] = str(current['motion_algorithm']).strip().lower()
 
-    for _bkey in ('motion_denoise', 'motion_shadow_suppression'):
-        if _bkey in payload:
-            _bval = payload[_bkey]
-            if not _is_clear(_bval):
-                updated[_bkey] = normalize_bool_setting(_bval, False)
-            # empty/None -> cleared (omit)
-        elif isinstance(current.get(_bkey), bool):
-            updated[_bkey] = current[_bkey]
+    # Denoise is a plain per-camera bool override.
+    if 'motion_denoise' in payload:
+        _dv = payload['motion_denoise']
+        if not _is_clear(_dv):
+            updated['motion_denoise'] = normalize_bool_setting(_dv, False)
+        # empty/None -> cleared (omit)
+    elif isinstance(current.get('motion_denoise'), bool):
+        updated['motion_denoise'] = current['motion_denoise']
+
+    # Shadow suppression is tri-state ('on'/'off'/'auto') like the global setting.
+    if 'motion_shadow_suppression' in payload:
+        _sv = payload['motion_shadow_suppression']
+        if not _is_clear(_sv):
+            updated['motion_shadow_suppression'] = _normalize_shadow_suppression(_sv)
+        # empty/None -> cleared (omit)
+    elif current.get('motion_shadow_suppression') is not None:
+        updated['motion_shadow_suppression'] = _normalize_shadow_suppression(current['motion_shadow_suppression'])
     return updated
 
 
@@ -552,5 +580,7 @@ def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if motion_algorithm not in {'mog2', 'diff'}:
         motion_algorithm = 'mog2'
     motion_denoise = normalize_bool_setting(merged.get('motion_denoise'), True)
-    motion_shadow_suppression = normalize_bool_setting(merged.get('motion_shadow_suppression'), True)
+    # Shadow suppression is tri-state ('on'/'off'/'auto'); legacy bool True/False
+    # is migrated to 'on'/'off'. Unknown values fall back to 'on'.
+    motion_shadow_suppression = _normalize_shadow_suppression(merged.get('motion_shadow_suppression'), 'on')
     return {'snapshot_refresh_ms': snapshot_refresh_ms, 'detection_status_refresh_ms': detection_status_refresh_ms, 'detection_interval_seconds': detection_interval_seconds, 'event_debounce_seconds': event_debounce_seconds, 'background_detection_enabled': background_detection_enabled, 'always_run_object_detection': always_run_object_detection, 'detection_history_minutes': detection_history_minutes, 'motion_algorithm': motion_algorithm, 'motion_denoise': motion_denoise, 'motion_shadow_suppression': motion_shadow_suppression, 'motion_pixel_threshold': motion_pixel_threshold, 'motion_gate_fraction': round(motion_gate_fraction, 6), 'motion_scale_fraction': round(motion_scale_fraction, 4), 'motion_background_alpha': round(motion_background_alpha, 4), 'motion_frame_width': motion_frame_width, 'motion_frame_height': motion_frame_height, 'ingest_frame_fps': ingest_frame_fps, 'snapshot_quality': snapshot_quality, 'periodic_scan_interval_seconds': periodic_scan_interval_seconds, 'detection_confirm_frames': detection_confirm_frames, 'detection_confirm_window': detection_confirm_window}
