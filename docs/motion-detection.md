@@ -44,6 +44,25 @@ Use this when you want to be notified any time *anything* moves in an area, rega
 
 ---
 
+## Tuning with your own footage
+
+The defaults are generic. To tune them with evidence from *your* cameras, replay
+a saved clip (or a folder of frames) through the same motion + object detectors
+the live monitor uses:
+
+```
+python scripts/evaluate_detection.py --input clip.mp4 \
+    --model models/yolo11n.onnx --labels models/coco.names --shadow auto
+```
+
+It reports the motion rate, changed-pixel-fraction distribution, per-label
+detection counts and mean confidence, and per-frame timing - so you can pick
+**Motion Gate Fraction**, **Motion Scale Fraction**, and the object
+**confidence** floor from real numbers instead of guessing. Pass `--annotate
+<dir>` to write frames with the detection boxes drawn on, `--gated` to measure
+the legacy motion-gated path, or `--json` for machine-readable output. It only
+reads frames - nothing is written to the app database or config.
+
 ## Recommended setup for maximum reliability
 
 Out of the box, Daygle runs object detection on **every** cycle, decoupled from motion (the [Always Run Object Detection](#always-run-object-detection) default) - the configuration that gives the most reliable object recall. This is worth understanding because it shapes how the layers interact:
