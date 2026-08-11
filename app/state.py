@@ -150,6 +150,12 @@ _frame_motion_error_cameras: set = set()
 _frame_motion_mog2: dict = {}
 # codeql[py/unused-global-variable]
 _frame_motion_mog2_meta: dict = {}
+# Per-camera lightweight IoU object-tracker state (app/object_tracking.py):
+# {camera_id: {'tracks': [...], 'next_id': int}}. Gives each detected object a
+# stable track id across detection cycles.
+_object_tracks_lock: threading.Lock = threading.Lock()
+# codeql[py/unused-global-variable]
+_object_tracks: dict = {}
 # Consecutive per-zone motion evidence used by the live alert monitor. A zone
 # must be present in two analyzed frames before motion can create an event or
 # recording, which filters one-frame stream/exposure artifacts.

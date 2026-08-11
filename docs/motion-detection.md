@@ -32,6 +32,18 @@ These results are then matched against your zone rules. If a zone covers the are
 
 ---
 
+### Object tracking
+
+Every confirmed object detection is stamped with a **stable track id** so the
+same person/car keeps one identity across detection cycles instead of being a
+fresh anonymous box each frame. The tracker is a lightweight greedy IoU matcher
+(same-label only) — no extra dependencies — and is additive: it annotates each
+detection with `track_id`, `track_age` (cycles seen), and `track_new` (first
+sighting) without changing which alerts or recordings fire. These ids flow into
+the detection history and recording rows, giving the playback overlay continuity
+and providing the foundation for de-duplicated events, dwell-time, and
+line-crossing.
+
 ### Layer 3 - Motion zone rules
 
 This is an optional alert that fires from Layer 1's pixel-diff result, without caring what YOLO found.

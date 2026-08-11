@@ -30,6 +30,7 @@ from app.detection_state import (
     record_live_detection_history,
 )
 from app.detection_status import _camera_has_live_alert_stream, update_live_detection_status
+from app.object_tracking import update_object_tracks
 from app.detector import DetectorUnavailableError
 from app.event_debounce import (
     clear_live_camera_backoff,
@@ -210,6 +211,8 @@ def _prune_frame_motion_state() -> None:
         _state._frame_motion_error_cameras.discard(cid)
         with _state._motion_confirm_lock:
             _state._motion_confirm_streaks.pop(cid, None)
+        with _state._object_tracks_lock:
+            _state._object_tracks.pop(cid, None)
     if stale:
         with _state.live_detection_confirm_lock:
             for cid in stale:
@@ -503,6 +506,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         camera_id, object_detections,
         required_frames=_confirm_frames, window_frames=_confirm_window,
     )
+    # Stamp a stable track id on each confirmed detection so the same object
+    # keeps one identity across cycles (foundation for de-dup / dwell / overlay
+    # continuity). Additive: it only annotates the dicts, so alerts/recordings
+    # are unchanged, and the ids thread through to the history + recording rows.
+    object_detections = update_object_tracks(camera_id, object_detections)
     zone_rules = zone_object_alert_rules(settings)
     has_object_zone_rules = any((zone.get('enabled', True) and zone.get('monitor_objects', True) and any((rule.get('enabled', True) and str(rule.get('label') or '').strip() for rule in zone.get('object_rules') or [])) for zone in (settings.get('detection') or {}).get('zones', [])))
     object_alert_detections = zone_alert_detections(settings, object_detections) if has_object_zone_rules else list(object_detections)
