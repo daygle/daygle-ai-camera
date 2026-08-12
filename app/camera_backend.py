@@ -143,6 +143,11 @@ class OpenCvStreamCamera:
         self.started_at = time.time()
         self.last_error: str | None = None
         self._capture: Any | None = None
+        # Set by ``close()`` so an in-flight blocking ``cv2.VideoCapture()``
+        # open can detect the close (after OpenCV eventually returns) and
+        # release the capture instead of leaving it dangling. Instances are
+        # never reopened after close.
+        self._closed = False
         self._fps_probe_attempted_at = 0.0
         self._fps_probe_lock = threading.Lock()
         self._fps_probe_thread: threading.Thread | None = None
@@ -263,6 +268,8 @@ class OpenCvStreamCamera:
     def _open_capture(self):
         if not self.stream_url:
             raise RuntimeError("ONVIF/RTSP stream URL is not configured.")
+        if self._closed:
+            raise RuntimeError('Camera closed.')
 
         # Prefer TCP for RTSP cameras. UDP packet loss and frequent reconnects
         # can make inexpensive ONVIF cameras fail during session setup.
@@ -271,7 +278,19 @@ class OpenCvStreamCamera:
         import cv2
 
         if self._capture is None:
+            # ``cv2.VideoCapture()`` against a dead RTSP URL blocks inside
+            # OpenCV for ~30s and neither stimeout nor
+            # CAP_PROP_OPEN_TIMEOUT_MSEC bounds it in current builds. We hold
+            # the instance lock across this call (see ``_acquire_raw_frame``),
+            # so ``close()`` only waits a short grace window and this in-flight
+            # open must detect the close once OpenCV returns.
             self._capture = cv2.VideoCapture(self.stream_url)
+            if self._closed:
+                # close() won the race while the blocking open was in flight;
+                # discard the late capture and bail so the caller cleans up.
+                self._capture.release()
+                self._capture = None
+                raise RuntimeError('Camera closed.')
             if hasattr(cv2, "CAP_PROP_BUFFERSIZE"):
                 self._capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             # Apply AFTER VideoCapture opens: FFmpeg's own init runs during
@@ -366,6 +385,9 @@ class OpenCvStreamCamera:
         stale_grabs = self._stale_frame_grabs()
         last_failure: str | None = None
         for attempt in range(CAPTURE_READ_ATTEMPTS):
+            if self._closed:
+                self._release_capture()
+                raise RuntimeError('Camera closed.')
             if attempt:
                 self._release_capture()
                 time.sleep(self._capture_retry_delay(attempt))
@@ -376,6 +398,9 @@ class OpenCvStreamCamera:
                 ok, image, capture_ts = False, None, time.time()
                 last_failure = type(exc).__name__
 
+            if self._closed:
+                self._release_capture()
+                raise RuntimeError('Camera closed.')
             if ok and self._frame_contains_data(image):
                 self._record_capture_success()
                 height, width = image.shape[:2]
@@ -480,5 +505,18 @@ class OpenCvStreamCamera:
         return frame
 
     def close(self) -> None:
-        with self._lock:
+        # Mark closed FIRST so an in-flight read bails out as soon as its
+        # blocking ``cv2.VideoCapture()`` open returns (see ``_open_capture``).
+        # Then release the capture if the lock is free within a short grace
+        # window. A capture open against a dead RTSP URL blocks inside OpenCV
+        # for ~30s and no timeout knob bounds it in current builds; settings
+        # applies and database restores call ``close()`` on every old camera
+        # instance, so they must not stall on a stuck reader. The bailing read
+        # releases the capture itself when the open finally returns.
+        self._closed = True
+        if not self._lock.acquire(timeout=5.0):
+            return
+        try:
             self._release_capture()
+        finally:
+            self._lock.release()
