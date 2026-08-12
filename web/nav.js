@@ -667,18 +667,19 @@ window.daygleAuthReady = (async () => {
   }
 
   /* ── Idle-refresh hooks (visibilitychange + focus) ──────────────────
-   * Thresholds:
-   *   1. Skip the refresh if the cached expires_at still has at least
-   *      ``AUTH_FOCUS_REFRESH_MARGIN_MS`` of runway. Rapidly Alt-Tabbing
-   *      between windows otherwise polls /api/auth/me once per focus.
-   *   2. visibilitychange -> visible is the cross-tab-aware trigger.
-   *      window.addEventListener('focus', ...) is a belt-and-braces
-   *      fallback for browsers that miss the visible transition.
-   *   3. The refresh result flows through setApiAuth -> CustomEvent ->
-   *      ``daygleUi.renderNavAccount`` via the listener at the bottom of
-   *      this file, so no inline render call is needed here.
+   * Refresh when a tab has been away for a short while, not only when the
+   * cached deadline is nearly reached. Browsers may throttle background
+   * timers, and the server can renew the session on the first foreground
+   * request; waiting until the cached deadline makes the account control
+   * briefly look logged out even though the page itself is still valid.
+   *
+   * The refresh result flows through setApiAuth -> CustomEvent ->
+   * ``daygleUi.renderNavAccount`` via the listener at the bottom of this
+   * file, so no inline render call is needed here.
    */
   const AUTH_FOCUS_REFRESH_MARGIN_MS = 5 * 60 * 1000;
+  const AUTH_IDLE_REFRESH_MS = 60 * 1000;
+  let lastForegroundAt = Date.now();
   function isFreshForRefresh() {
     const exp = window.daygleAuth?.expiresAt;
     if (!exp) return true;
@@ -686,9 +687,12 @@ window.daygleAuthReady = (async () => {
     return !Number.isFinite(ms) || ms > AUTH_FOCUS_REFRESH_MARGIN_MS;
   }
   function onReturnToForeground() {
+    const now = Date.now();
+    const wasIdle = now - lastForegroundAt >= AUTH_IDLE_REFRESH_MS;
+    lastForegroundAt = now;
     if (typeof window.refreshDaygleAuth !== 'function') return;
     if (!window.daygleAuth?.user) return; // handleSessionLoss already redirects on a 401 from any page's first request.
-    if (isFreshForRefresh()) return;
+    if (!wasIdle && isFreshForRefresh()) return;
     window.refreshDaygleAuth().catch(() => { /* keep last-known auth on transient network blips */ });
   }
   document.addEventListener('visibilitychange', () => {

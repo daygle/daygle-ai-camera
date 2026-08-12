@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date, timedelta
 from typing import Any
 
 from app.utils import _normalize_iso_to_utc
@@ -68,6 +69,8 @@ class CameraDiagnosticsMixin:
         camera_id: str | None,
         event_type: str | None,
         severity: str | None,
+        date_from: str | None = None,
+        date_to: str | None = None,
     ) -> tuple[str, list[Any]]:
         conditions: list[str] = []
         params: list[Any] = []
@@ -80,6 +83,13 @@ class CameraDiagnosticsMixin:
         if severity:
             conditions.append("severity = ?")
             params.append(severity)
+        if date_from:
+            conditions.append("created_at >= ?")
+            params.append(f'{date_from}T00:00:00+00:00')
+        if date_to:
+            conditions.append("created_at < ?")
+            next_day = date.fromisoformat(date_to) + timedelta(days=1)
+            params.append(f'{next_day.isoformat()}T00:00:00+00:00')
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         return where, params
 
@@ -91,8 +101,12 @@ class CameraDiagnosticsMixin:
         camera_id: str | None = None,
         event_type: str | None = None,
         severity: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
     ) -> list[dict[str, Any]]:
-        where, params = self._camera_diagnostics_filter(camera_id, event_type, severity)
+        where, params = self._camera_diagnostics_filter(
+            camera_id, event_type, severity, date_from, date_to,
+        )
         with self.connect() as db:
             rows = db.execute(
                 f"SELECT * FROM camera_diagnostics {where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
@@ -111,8 +125,12 @@ class CameraDiagnosticsMixin:
         camera_id: str | None = None,
         event_type: str | None = None,
         severity: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
     ) -> int:
-        where, params = self._camera_diagnostics_filter(camera_id, event_type, severity)
+        where, params = self._camera_diagnostics_filter(
+            camera_id, event_type, severity, date_from, date_to,
+        )
         with self.connect() as db:
             row = db.execute(f"SELECT COUNT(*) AS count FROM camera_diagnostics {where}", params).fetchone()
             return int(row['count'])

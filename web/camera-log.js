@@ -20,6 +20,8 @@ const nextBtn = document.getElementById('nextBtn');
 
 function getFilters() {
   return {
+    date_from: document.getElementById('filterDateFrom').value,
+    date_to: document.getElementById('filterDateTo').value,
     camera_id: document.getElementById('filterCamera').value.trim(),
     event_type: document.getElementById('filterEventType').value,
     severity: document.getElementById('filterSeverity').value,
@@ -29,6 +31,8 @@ function getFilters() {
 function buildQuery(offset) {
   const f = getFilters();
   const params = new URLSearchParams({ limit: LOG_PAGE_SIZE, offset });
+  if (f.date_from) params.set('date_from', f.date_from);
+  if (f.date_to) params.set('date_to', f.date_to);
   if (f.camera_id) params.set('camera_id', f.camera_id);
   if (f.event_type) params.set('event_type', f.event_type);
   if (f.severity) params.set('severity', f.severity);
@@ -60,6 +64,11 @@ async function loadAuth() {
 
 async function loadEntries(offset = 0) {
   currentOffset = offset;
+  const filters = getFilters();
+  if (filters.date_from && filters.date_to && filters.date_from > filters.date_to) {
+    window.showToast?.('From date must not be after To date.', true);
+    return;
+  }
   try {
     const data = await api(`/api/camera-log?${buildQuery(offset)}`);
     currentTotal = data.total || 0;
@@ -130,6 +139,8 @@ nextBtn.addEventListener('click', () => {
 
 document.getElementById('applyFiltersBtn').addEventListener('click', () => loadEntries(0));
 document.getElementById('clearFiltersBtn').addEventListener('click', () => {
+  document.getElementById('filterDateFrom').value = '';
+  document.getElementById('filterDateTo').value = '';
   document.getElementById('filterCamera').value = '';
   document.getElementById('filterEventType').value = '';
   document.getElementById('filterSeverity').value = '';

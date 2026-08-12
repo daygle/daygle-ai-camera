@@ -16,6 +16,8 @@ const autoScrollCheck = document.getElementById('autoScrollCheck');
 let eventSource = null;
 let activeLevel = '';
 let activeSearch = '';
+let activeDateFrom = '';
+let activeDateTo = '';
 let connectTimeout = null;
 
 // Priority order for level filtering (highest severity first)
@@ -58,6 +60,9 @@ function isRowVisible(tr) {
   const lvl = tr.dataset.level || 'INFO';
   if (activeLevel && !(LEVEL_SETS[activeLevel] || LEVEL_ORDER).includes(lvl)) return false;
   if (activeSearch && !(tr.dataset.msg || '').includes(activeSearch)) return false;
+  const dateKey = (tr.dataset.timestamp || '').slice(0, 10);
+  if (activeDateFrom && (!dateKey || dateKey < activeDateFrom)) return false;
+  if (activeDateTo && (!dateKey || dateKey > activeDateTo)) return false;
   return true;
 }
 
@@ -65,6 +70,7 @@ function makeRow(entry) {
   const tr = document.createElement('tr');
   tr.dataset.level = (entry.level || 'INFO').toUpperCase();
   tr.dataset.msg = (entry.message || '').toLowerCase();
+  tr.dataset.timestamp = entry.timestamp || '';
 
   const tdTime = document.createElement('td');
   tdTime.dataset.label = 'Time';
@@ -129,8 +135,16 @@ function appendEntry(entry) {
 
 async function loadEntries() {
   const level = document.getElementById('filterLevel').value;
+  const dateFrom = document.getElementById('filterDateFrom').value;
+  const dateTo = document.getElementById('filterDateTo').value;
+  if (dateFrom && dateTo && dateFrom > dateTo) {
+    window.showToast?.('From date must not be after To date.', true);
+    return;
+  }
   const params = new URLSearchParams({ lines: 200 });
   if (level) params.set('level', level);
+  if (dateFrom) params.set('date_from', dateFrom);
+  if (dateTo) params.set('date_to', dateTo);
   try {
     const data = await api(`/api/application-log?${params}`);
     applicationLogBody.innerHTML = '';
@@ -244,15 +258,25 @@ liveBtn.addEventListener('click', () => {
 document.getElementById('applyFiltersBtn').addEventListener('click', async () => {
   activeLevel = document.getElementById('filterLevel').value;
   activeSearch = document.getElementById('filterSearch').value.trim().toLowerCase();
+  activeDateFrom = document.getElementById('filterDateFrom').value;
+  activeDateTo = document.getElementById('filterDateTo').value;
+  if (activeDateFrom && activeDateTo && activeDateFrom > activeDateTo) {
+    window.showToast?.('From date must not be after To date.', true);
+    return;
+  }
   await loadEntries();
   if (!eventSource) connectStream();
 });
 
 document.getElementById('clearFiltersBtn').addEventListener('click', async () => {
+  document.getElementById('filterDateFrom').value = '';
+  document.getElementById('filterDateTo').value = '';
   document.getElementById('filterLevel').value = '';
   document.getElementById('filterSearch').value = '';
   activeLevel = '';
   activeSearch = '';
+  activeDateFrom = '';
+  activeDateTo = '';
   await loadEntries();
   if (!eventSource) connectStream();
 });
@@ -282,6 +306,8 @@ async function init() {
   await window.daygleAuthReady;
   activeLevel = document.getElementById('filterLevel').value;
   activeSearch = document.getElementById('filterSearch').value.trim().toLowerCase();
+  activeDateFrom = document.getElementById('filterDateFrom').value;
+  activeDateTo = document.getElementById('filterDateTo').value;
   await loadEntries();
   connectStream();
 }

@@ -28,6 +28,12 @@
       </div>
 
       <div class="audit-filters">
+        <label class="application-log-date-field">From
+          <input id="filterDateFrom" type="date" aria-label="From date" />
+        </label>
+        <label class="application-log-date-field">To
+          <input id="filterDateTo" type="date" aria-label="To date" />
+        </label>
         <input id="filterCamera" placeholder="Filter by camera id" />
         <select id="filterEventType">
           <option value="">All event types</option>
@@ -35,6 +41,7 @@
           <option value="prebuffer_short_preroll">Prebuffer Short Pre-roll</option>
           <option value="prebuffer_degenerate">Prebuffer Degenerate</option>
           <option value="prebuffer_restart">Prebuffer Restart</option>
+          <option value="audio_mux_disk_full">Audio Mux Disk Full</option>
           <option value="capture_failed">Capture Failed</option>
           <option value="detection_backoff">Detection Backoff</option>
           <option value="detection_recovered">Detection Recovered</option>

@@ -5246,6 +5246,20 @@ button.activity-item-action.activity-item-action-recording:hover {
 }
 
 /* ─── Application log page ───────────────────────────────────────────────── */
+.application-log-date-field {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1 1 180px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.application-log-date-field input {
+  min-width: 0;
+  flex: 1 1 auto;
+}
 .application-log-output-wrap {
   max-height: 60vh;
   min-height: 200px;
@@ -5348,6 +5362,7 @@ button.activity-item-action.activity-item-action-recording:hover {
     letter-spacing: .05em;
   }
   #applicationLogTable .status-badge { width: fit-content; max-width: 100%; }
+  .application-log-date-field { grid-column: 1 / -1; }
   .application-log-output-wrap { max-height: none; }
   .application-log-count { margin-left: 0; }
 }

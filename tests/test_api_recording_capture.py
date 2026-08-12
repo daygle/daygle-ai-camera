@@ -27,6 +27,8 @@ def test_camera_diagnostics_log_crud_and_retention(tmp_path, monkeypatch):
     assert db.count_camera_diagnostics() == 2
     assert db.count_camera_diagnostics(camera_id='front-yard') == 1
     assert db.count_camera_diagnostics(event_type='prebuffer_fallback') == 1
+    today = datetime.now(timezone.utc).date().isoformat()
+    assert db.count_camera_diagnostics(date_from=today, date_to=today) == 0
     front = db.list_camera_diagnostics(camera_id='front-yard')
     assert front[0]['details'] == {'reason': 'no_segments'}
     assert front[0]['camera_name'] == 'Front Yard'
@@ -40,7 +42,8 @@ def test_camera_diagnostics_log_crud_and_retention(tmp_path, monkeypatch):
     removed = db.purge_camera_diagnostics_older_than(cutoff)
     assert removed == 2
     assert db.count_camera_diagnostics() == 1
-    assert db.list_camera_diagnostics()[0]['event_type'] == 'detection_recovered'
+    assert db.count_camera_diagnostics(date_from=today, date_to=today) == 1
+    assert db.list_camera_diagnostics(date_from=today, date_to=today)[0]['event_type'] == 'detection_recovered'
 
 
 def test_camera_diagnostics_purge_follows_retention_days(tmp_path, monkeypatch):
