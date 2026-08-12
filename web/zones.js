@@ -324,8 +324,8 @@ function renderObjectRules(zone, zoneIndex) {
           <td class="cell-center"><input type="checkbox" data-zone-rule-email="${key}" ${rule.email_enabled === true ? 'checked' : ''} /></td>
           <td class="cell-center"><input type="checkbox" data-zone-rule-push="${key}" ${rule.push_enabled === true ? 'checked' : ''} /></td>
           <td><span class="conf-slider" title="Minimum confidence (0-1). Overrides the global ONNX slider for this object in this zone.">
-            <input type="range" data-zone-rule-confidence="${key}" min="0" max="1" step="0.05" value="${escapeHtml(rule.min_confidence)}" />
-            <output data-zone-rule-confidence-value="${key}">${escapeHtml(rule.min_confidence)}</output>
+            <input type="range" data-zone-rule-confidence="${key}" min="0" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" />
+            <input type="number" class="conf-slider-value" data-zone-rule-confidence-value="${key}" min="0" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" aria-label="Minimum confidence for ${label}" />
           </span></td>
           <td><input type="number" data-zone-rule-cooldown="${key}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" /></td>
           <td><div class="cell-actions">
@@ -755,20 +755,35 @@ function bindRuleFields() {
       });
     });
   });
-  // Min-confidence slider: `input` updates the cell readout live, `change`
-  // (released) commits the value -- same pattern as the Motion card.
+  // Min-confidence control: the slider and the editable value box stay in
+  // sync, and either one commits the value on release/change. Dragging the
+  // slider (or typing) live-updates the other, so the two never disagree.
   document.querySelectorAll('input[type="range"][data-zone-rule-confidence]').forEach((inp) => {
-    inp.addEventListener('input', () => {
-      const readout = document.querySelector(`[data-zone-rule-confidence-value="${inp.dataset.zoneRuleConfidence}"]`);
-      if (readout) readout.textContent = inp.value;
-    });
-    inp.addEventListener('change', () => {
-      const { zoneIndex, rule } = parseZoneRuleKey(inp.dataset.zoneRuleConfidence);
+    const key = inp.dataset.zoneRuleConfidence;
+    const box = document.querySelector(`input[data-zone-rule-confidence-value="${key}"]`);
+    const commit = (rawValue) => {
+      const { zoneIndex, rule } = parseZoneRuleKey(key);
       if (!rule) return;
-      rule.min_confidence = clamp(Number(inp.value || 0), 0, 1);
+      const value = clamp(Number(rawValue || 0), 0, 1);
+      rule.min_confidence = value;
+      // Normalise both controls to the committed value so a typed "0.4" and a
+      // dragged 0.40 read identically afterwards.
+      inp.value = value;
+      if (box) box.value = value;
       cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
       markZoneUnsaved();
-    });
+    };
+    inp.addEventListener('input', () => { if (box) box.value = inp.value; });
+    inp.addEventListener('change', () => commit(inp.value));
+    if (box) {
+      // While typing, follow the box with the slider but don't commit/clamp on
+      // every keystroke; commit (and normalise) once the field is left/changed.
+      box.addEventListener('input', () => {
+        const n = Number(box.value);
+        if (Number.isFinite(n)) inp.value = clamp(n, 0, 1);
+      });
+      box.addEventListener('change', () => commit(box.value));
+    }
   });
   const numberBindings = [
     ['zoneRuleCooldown', 'cooldown_seconds', (value) => Math.max(0, Number.parseInt(value || 0, 10) || 0)],

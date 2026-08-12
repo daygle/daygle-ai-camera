@@ -6080,7 +6080,7 @@ button.secondary:disabled, a.secondary:disabled {
   white-space: nowrap;
 }
 .conf-slider input[type="range"] {
-  width: 62px;
+  width: 130px;
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -6088,8 +6088,10 @@ button.secondary:disabled, a.secondary:disabled {
   background: none;
   accent-color: var(--accent);
 }
-.conf-slider output {
-  min-width: 30px;
+.conf-slider output,
+.conf-slider input.conf-slider-value {
+  width: 46px;
+  min-width: 46px;
   padding: 2px 5px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -6099,6 +6101,20 @@ button.secondary:disabled, a.secondary:disabled {
   font-weight: 800;
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+/* Editable confidence value box: keep the compact readout look, drop the
+   number-spinner chrome so it fits the cell (the slider handles coarse
+   adjustment; typing handles precise values). */
+.conf-slider input.conf-slider-value {
+  appearance: textfield;
+  -moz-appearance: textfield;
+  font-family: inherit;
+}
+.conf-slider input.conf-slider-value::-webkit-outer-spin-button,
+.conf-slider input.conf-slider-value::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
 }
 :root.light .zone-motion-card { background: rgba(255,255,255,.7); }
 .cameras-table-wrap { border: 1px solid var(--border); border-radius: 13px; background: rgba(0,0,0,.08); }

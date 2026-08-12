@@ -329,14 +329,27 @@ function renderRules() {
   rulesWrap.querySelectorAll('[data-rule-record]').forEach((input) => {
     input.addEventListener('change', () => updateRule(input.dataset.ruleRecord, 'record_on_detect', input.checked));
   });
-  // Threshold slider: `input` updates the cell readout live, `change`
-  // (released) commits the value -- same pattern as the Motion card.
+  // Threshold control: the slider and the editable value box stay in sync, and
+  // either one commits the value on release/change. Dragging the slider (or
+  // typing) live-updates the other, so the two never disagree.
   rulesWrap.querySelectorAll('input[type="range"][data-rule-threshold]').forEach((input) => {
-    input.addEventListener('input', () => {
-      const readout = rulesWrap.querySelector(`[data-rule-threshold-value="${input.dataset.ruleThreshold}"]`);
-      if (readout) readout.textContent = input.value;
-    });
-    input.addEventListener('change', () => updateRule(input.dataset.ruleThreshold, 'confidence_threshold', Math.max(0.1, Math.min(1.0, Number(input.value) || 0.35))));
+    const id = input.dataset.ruleThreshold;
+    const box = rulesWrap.querySelector(`input[data-rule-threshold-value="${id}"]`);
+    const commit = (rawValue) => {
+      const value = Math.max(0.1, Math.min(1.0, Number(rawValue) || 0.35));
+      input.value = value;
+      if (box) box.value = value;
+      updateRule(id, 'confidence_threshold', value);
+    };
+    input.addEventListener('input', () => { if (box) box.value = input.value; });
+    input.addEventListener('change', () => commit(input.value));
+    if (box) {
+      box.addEventListener('input', () => {
+        const n = Number(box.value);
+        if (Number.isFinite(n)) input.value = Math.max(0.1, Math.min(1.0, n));
+      });
+      box.addEventListener('change', () => commit(box.value));
+    }
   });
   rulesWrap.querySelectorAll('[data-rule-cooldown]').forEach((input) => {
     input.addEventListener('change', () => updateRule(input.dataset.ruleCooldown, 'cooldown_seconds', Math.max(5, Number.parseInt(input.value, 10) || 30)));
@@ -391,8 +404,8 @@ function buildSoundRuleRow(rule, ruleIndex, rules) {
       <td class="cell-center"><input type="checkbox" data-rule-email="${id}" ${rule.email_enabled ? 'checked' : ''} /></td>
       <td class="cell-center"><input type="checkbox" data-rule-push="${id}" ${rule.push_enabled ? 'checked' : ''} /></td>
       <td><span class="conf-slider" title="Detection threshold (0.1-1.0): how confident the model must be before this sound counts.">
-        <input type="range" data-rule-threshold="${id}" min="0.1" max="1.0" step="0.05" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" />
-        <output data-rule-threshold-value="${id}">${escapeHtml(String(rule.confidence_threshold ?? 0.35))}</output>
+        <input type="range" data-rule-threshold="${id}" min="0.1" max="1.0" step="0.01" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" />
+        <input type="number" class="conf-slider-value" data-rule-threshold-value="${id}" min="0.1" max="1.0" step="0.01" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" aria-label="Detection threshold for ${escapeHtml(label)}" />
       </span></td>
       <td><input type="number" data-rule-cooldown="${id}" value="${escapeHtml(String(rule.cooldown_seconds ?? 30))}" min="5" max="3600" step="5" /></td>
       <td><div class="cell-actions">
