@@ -161,6 +161,55 @@ def test_dispatch_handles_nms_free_when_flag_false():
     assert res[0]["box"]["y"] == pytest.approx(80 / OH, abs=0.01)
 
 
+# -- noise floor: a near-zero threshold must not flood with 0% detections ---
+
+def _stub_inference(det, output):
+    """Wire a detector so ``_run_inference`` reaches ``_postprocess`` against
+    ``output`` without a real ONNX session or image decode."""
+    det.input_width = det.input_height = 640
+    det._use_io_binding = False
+    det.input_name = "images"
+    det.output_names = ["output0"]
+    det.session = types.SimpleNamespace(run=lambda names, feed: [output])
+    det._preprocess = lambda image: (None, SCALE, PAD_X, PAD_Y, OW, OH)
+
+
+def test_run_inference_floors_zero_threshold_to_drop_noise():
+    """A caller-supplied threshold of ~0 must not surface background noise.
+
+    Reproduces the reported flood: one genuine object plus a spray of
+    essentially-zero-confidence boxes that render as "0%". The noise floor
+    drops the sub-1% predictions while keeping the real detection.
+    """
+    det = _detector(nms_free=True)
+    rows = [[270, 180, 370, 280, 0.90, 0]]  # genuine person @ 90%
+    # Background predictions well under 1% (render as 0%): pure noise.
+    for i in range(20):
+        rows.append([10 * i, 5 * i, 10 * i + 30, 5 * i + 30, 0.0009, 14])
+    _stub_inference(det, _nms_free_output(rows))
+
+    res = det._run_inference(object(), 0.0)
+
+    assert len(res) == 1
+    assert res[0]["label"] == "person"
+    assert res[0]["confidence"] == pytest.approx(0.90, abs=1e-3)
+
+
+def test_run_inference_preserves_real_low_threshold():
+    """A deliberate positive threshold (>=1%) is passed through untouched:
+    the floor only clamps a degenerate near-zero request."""
+    det = _detector(nms_free=True)
+    # Two non-overlapping boxes at 6% and 3% (both inside the letterbox
+    # content area, y>=pad) -- above the 1% floor and above a 2% request.
+    out = _nms_free_output([[270, 180, 370, 280, 0.06, 0],
+                            [80, 400, 180, 480, 0.03, 0]])
+    _stub_inference(det, out)
+
+    res = det._run_inference(object(), 0.02)
+
+    assert len(res) == 2
+
+
 # -- confidence_only_nms tri-state resolution ------------------------------
 
 @pytest.mark.parametrize("value,nms_free,expected", [
