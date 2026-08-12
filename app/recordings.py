@@ -1936,7 +1936,19 @@ class RecordingService:
         # before ffmpeg opens its input. Stage the selected files first and use
         # only those copies for the mux; the temporary directory is kept until
         # the subprocess exits and is removed in the final cleanup block below.
-        staging_dir = Path(tempfile.mkdtemp(prefix='daygle-audio-mux-'))
+        #
+        # Stage ON THE RECORDINGS VOLUME (under ``.prebuffer``), not the default
+        # ``$TMPDIR``. A bare ``mkdtemp()`` lands on ``/tmp``, which on appliance
+        # deployments is a RAM-backed tmpfs far smaller than the recordings
+        # drive: copying a long clip's worth of 1-second WAV sidecars (hundreds
+        # per event, times concurrent cameras) exhausts that tmpfs and raises
+        # ENOSPC, which this method reports as "the recordings disk is full"
+        # even when the recordings drive has ample space. Staging on the same
+        # filesystem as the mux output keeps that accounting honest and matches
+        # the ``dir=self.prebuffer_dir`` placement the ingest stderr logs already
+        # use. ``exist_ok`` guards the first mux after a fresh start.
+        self.prebuffer_dir.mkdir(parents=True, exist_ok=True)
+        staging_dir = Path(tempfile.mkdtemp(prefix='daygle-audio-mux-', dir=str(self.prebuffer_dir)))
         try:
             try:
                 selected_audio = self._stage_audio_segments(selected_audio, staging_dir)
