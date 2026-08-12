@@ -323,9 +323,9 @@ function renderObjectRules(zone, zoneIndex) {
           <td class="cell-center"><input type="checkbox" data-zone-rule-record="${key}" ${rule.record_on_detect !== false ? 'checked' : ''} /></td>
           <td class="cell-center"><input type="checkbox" data-zone-rule-email="${key}" ${rule.email_enabled === true ? 'checked' : ''} /></td>
           <td class="cell-center"><input type="checkbox" data-zone-rule-push="${key}" ${rule.push_enabled === true ? 'checked' : ''} /></td>
-          <td><span class="conf-slider" title="Minimum confidence (0-1). Overrides the global ONNX slider for this object in this zone.">
-            <input type="range" data-zone-rule-confidence="${key}" min="0" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" />
-            <input type="number" class="conf-slider-value" data-zone-rule-confidence-value="${key}" min="0" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" aria-label="Minimum confidence for ${label}" />
+          <td><span class="conf-slider" title="Minimum confidence (0.01-1). Overrides the global ONNX slider for this object in this zone. A value of 0 is disallowed: the detector never surfaces sub-1% detections, and a 0 threshold floods events with background noise.">
+            <input type="range" data-zone-rule-confidence="${key}" min="0.01" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" />
+            <input type="number" class="conf-slider-value" data-zone-rule-confidence-value="${key}" min="0.01" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" aria-label="Minimum confidence for ${label}" />
           </span></td>
           <td><input type="number" data-zone-rule-cooldown="${key}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" /></td>
           <td><div class="cell-actions">
@@ -761,10 +761,14 @@ function bindRuleFields() {
   document.querySelectorAll('input[type="range"][data-zone-rule-confidence]').forEach((inp) => {
     const key = inp.dataset.zoneRuleConfidence;
     const box = document.querySelector(`input[data-zone-rule-confidence-value="${key}"]`);
+    // Floor at 0.01: the detector never surfaces sub-1% detections (see
+    // _MIN_DETECTION_CONFIDENCE), so a 0 threshold is meaningless and floods
+    // events with background noise -- disallow it here to match the backend.
+    const MIN_CONF = 0.01;
     const commit = (rawValue) => {
       const { zoneIndex, rule } = parseZoneRuleKey(key);
       if (!rule) return;
-      const value = clamp(Number(rawValue || 0), 0, 1);
+      const value = clamp(Number(rawValue) || MIN_CONF, MIN_CONF, 1);
       rule.min_confidence = value;
       // Normalise both controls to the committed value so a typed "0.4" and a
       // dragged 0.40 read identically afterwards.
@@ -780,7 +784,7 @@ function bindRuleFields() {
       // every keystroke; commit (and normalise) once the field is left/changed.
       box.addEventListener('input', () => {
         const n = Number(box.value);
-        if (Number.isFinite(n)) inp.value = clamp(n, 0, 1);
+        if (Number.isFinite(n)) inp.value = clamp(n, MIN_CONF, 1);
       });
       box.addEventListener('change', () => commit(box.value));
     }
