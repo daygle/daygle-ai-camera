@@ -2823,7 +2823,6 @@ tr.drag-over {
   .cameras-table-wrap .rule-table.activity-table .activity-cell-actions .activity-action-label {
     display: none;
   }
-}
   /* Match the cameras table's mobile behaviour: keep the wrapped table a real
      table that scrolls inside the wrap, hide the drag column, and let the
      surrounding cards shrink so the min-width stays contained. */
@@ -2853,6 +2852,7 @@ tr.drag-over {
   .zone-rules-card,
   #objectDetectionRules,
   .zone-object-rules { min-width: 0; }
+}
 
 .cam-name {
   margin: 0;
