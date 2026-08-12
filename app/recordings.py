@@ -53,6 +53,17 @@ class RecordingService:
     # the full prebuffer window (pre + max_clip) so long event clips get audio
     # for their whole length; this is just the minimum when that window is tiny.
     AUDIO_SEGMENT_RETENTION_SECONDS = 20
+    # Extra audio retention beyond the video prebuffer window, to cover the gap
+    # between when a clip's oldest audio was captured and when the event clip is
+    # actually finalized. The video buffer window (``pre + max_clip + 5``) ends
+    # at the clip's last frame, but the mux runs only AFTER the post-event
+    # capture completes and the clip is rendered/faststart-rewritten -- on a slow
+    # appliance disk a long clip's render can take tens of seconds, during which
+    # the rolling pruner would otherwise delete the head of the clip's audio
+    # before the mux stages it (the "Audio sidecars disappeared before mux"
+    # partial-audio loss). Audio sidecars are tiny (~1s WAV each), so retaining a
+    # generous finalization margin is cheap insurance against that race.
+    AUDIO_MUX_FINALIZATION_HEADROOM_SECONDS = 120
     # Minimum effective pre-roll for RTSP *event* rendering. The per-camera
     # rolling prebuffer runs continuously for every RTSP camera (see
     # ``app.live_monitor.run_live_alert_monitor_once`` -> ``prime_rtsp_prebuffer``),
@@ -1559,12 +1570,20 @@ class RecordingService:
                 continue
 
     def _prune_audio_segments(self, audio_camera_dir: Path, keep_seconds: int | None = None) -> None:
-        # Retain audio for the SAME window as the video prebuffer (pre + max_clip)
-        # so long event clips have real audio for their whole length, not just
-        # the last AUDIO_SEGMENT_RETENTION_SECONDS. Audio shorter than the video
-        # made the player's buffered bar stop early (buffered = where all tracks
-        # exist). The constant is now just a floor.
-        retain = max(self.AUDIO_SEGMENT_RETENTION_SECONDS, int(keep_seconds or 0), 5)
+        # Retain audio for the video prebuffer window (pre + max_clip) PLUS a
+        # finalization margin so long event clips have real audio for their whole
+        # length, not just the last AUDIO_SEGMENT_RETENTION_SECONDS. Audio shorter
+        # than the video made the player's buffered bar stop early (buffered =
+        # where all tracks exist). The margin keeps the head of a clip's audio
+        # alive while the clip is still being rendered/finalized, so the mux is
+        # not racing the pruner (see AUDIO_MUX_FINALIZATION_HEADROOM_SECONDS). The
+        # 20s constant is now just a floor for tiny windows.
+        window = int(keep_seconds or 0)
+        retain = max(
+            self.AUDIO_SEGMENT_RETENTION_SECONDS,
+            window + self.AUDIO_MUX_FINALIZATION_HEADROOM_SECONDS,
+            5,
+        )
         cutoff = time.time() - retain
         for segment in audio_camera_dir.glob('aud-*.wav'):
             try:

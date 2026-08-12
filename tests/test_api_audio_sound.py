@@ -154,19 +154,50 @@ def test_audio_retention_follows_prebuffer_window(tmp_path):
     audio_dir = service.audio_dir / 'cam'
     audio_dir.mkdir(parents=True)
     now = time.time()
+    headroom = service.AUDIO_MUX_FINALIZATION_HEADROOM_SECONDS
     old = audio_dir / 'aud-old.wav'
     old.write_bytes(b'x')
-    os.utime(old, (now - 60, now - 60))  # 60s old
-
-    # Default floor (20s) prunes the 60s-old segment.
+    # Older than even the finalization headroom -> pruned with the default window.
+    os.utime(old, (now - headroom - 60, now - headroom - 60))
     service._prune_audio_segments(audio_dir)
     assert not old.exists()
 
     # With a large keep window (long max_clip), the same-age segment is retained.
     old.write_bytes(b'x')
-    os.utime(old, (now - 60, now - 60))
+    os.utime(old, (now - headroom - 60, now - headroom - 60))
     service._prune_audio_segments(audio_dir, keep_seconds=200)
     assert old.exists()
+
+
+def test_audio_retention_includes_finalization_headroom(tmp_path):
+    # The head of a clip's audio must survive while the clip is still being
+    # rendered/finalized: retention is the prebuffer window PLUS a finalization
+    # margin, so the mux is not racing the pruner (the "Audio sidecars
+    # disappeared before mux" partial-audio loss).
+    from app.recordings import RecordingService
+
+    service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'rec')}, 'recording': {}})
+    audio_dir = service.audio_dir / 'cam'
+    audio_dir.mkdir(parents=True)
+    now = time.time()
+    keep = 60  # e.g. pre + max_clip window
+    headroom = service.AUDIO_MUX_FINALIZATION_HEADROOM_SECONDS
+
+    # A segment older than the raw window but within window + headroom: this is
+    # the clip head that the render latency would otherwise let the pruner delete.
+    within = audio_dir / 'aud-within.wav'
+    within.write_bytes(b'x')
+    os.utime(within, (now - (keep + 30), now - (keep + 30)))
+
+    # A segment older than window + headroom: genuinely stale, must be pruned.
+    beyond = audio_dir / 'aud-beyond.wav'
+    beyond.write_bytes(b'x')
+    os.utime(beyond, (now - (keep + headroom + 30), now - (keep + headroom + 30)))
+
+    service._prune_audio_segments(audio_dir, keep_seconds=keep)
+
+    assert within.exists()
+    assert not beyond.exists()
 
 
 def test_mux_prebuffer_audio_pads_audio_to_video(tmp_path, monkeypatch):
