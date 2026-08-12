@@ -198,6 +198,52 @@ def test_mux_uses_staged_audio_paths_and_cleans_them(tmp_path, monkeypatch):
     assert video.read_bytes() == b'muxed'
 
 
+def test_mux_stages_audio_on_recordings_volume_not_system_temp(tmp_path, monkeypatch):
+    """Sidecars must be staged on the recordings volume (under ``.prebuffer``),
+    not the default ``$TMPDIR``.
+
+    On appliance deployments ``/tmp`` is a small RAM-backed tmpfs; staging a
+    long clip's worth of 1-second WAV sidecars there exhausts it and raises
+    ENOSPC, which the mux then mis-reports as "the recordings disk is full"
+    even though the recordings drive has ample space. Keeping the staging dir
+    on the same filesystem as the mux output makes that accounting honest.
+    """
+    service = _service(tmp_path)
+    audio_dir = service.audio_dir / 'camera-1'
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    source = _wav(audio_dir / 'aud-000.wav', 4096)
+    now = time.time()
+    os.utime(source, (now, now))
+
+    captured = {}
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(service, '_readable_audio_segments', lambda segments: segments)
+    monkeypatch.setattr(service, '_segment_timeline', lambda *a, **k: [(source, now - 1, now)])
+    monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _p: True))
+
+    def fake_run(command, *_args, **_kwargs):
+        input_indices = [index for index, value in enumerate(command) if value == '-i']
+        captured['audio_path'] = Path(command[input_indices[1] + 1])
+        Path(command[-1]).write_bytes(b'muxed')
+        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+    video = tmp_path / 'clip.mp4'
+    video.write_bytes(b'video')
+
+    assert service._mux_prebuffer_audio('camera-1', video, now - 1, 1.0) is True
+    staged = captured['audio_path'].resolve()
+    # Staged copy lives on the recordings volume, under its ``.prebuffer`` dir --
+    # NOT wherever the default ``tempfile`` location (``$TMPDIR``) would put it.
+    assert service.prebuffer_dir.resolve() in staged.parents
+    assert service.recordings_dir.resolve() in staged.parents
+    # Guard against a regression to a bare ``mkdtemp()``: the staging dir must be
+    # a child of ``.prebuffer``, so the default-temp base can't be an ancestor
+    # unless the recordings volume itself lives there.
+    assert staged.parent.parent == service.prebuffer_dir.resolve()
+
+
 def test_mux_returns_false_when_all_segments_unreadable(tmp_path, monkeypatch):
     """If every candidate segment is unreadable, the mux bails out (keeping the
     silent clip) instead of invoking ffmpeg with an invalid input set."""
