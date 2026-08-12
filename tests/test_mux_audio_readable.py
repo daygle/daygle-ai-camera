@@ -13,6 +13,7 @@ or corrupt segment costs at most a ~1s gap instead of all audio.
 
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import subprocess
@@ -219,3 +220,150 @@ def test_mux_returns_false_when_all_segments_unreadable(tmp_path, monkeypatch):
     monkeypatch.setattr(recordings_module.subprocess, 'run', boom)
 
     assert service._mux_prebuffer_audio('camera-1', tmp_path / 'clip.mp4', 0.0, 1.0) is False
+
+
+def test_mux_skips_upfront_when_recordings_disk_full(tmp_path, monkeypatch, caplog):
+    """With too little free space on the recordings filesystem the mux must
+    not waste CPU on a doomed ffmpeg run: it keeps the silent clip, logs a
+    clear warning, and emits a camera diagnostic."""
+    service = _service(tmp_path)
+    audio_dir = service.audio_dir / 'camera-1'
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    source = _wav(audio_dir / 'aud-000.wav', 4096)
+    now = time.time()
+    diagnostics = []
+    service.diagnostic_callback = lambda *a, **k: diagnostics.append((a, k))
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(service, '_segment_timeline', lambda *a, **k: [(source, now - 1, now)])
+    monkeypatch.setattr(service, '_readable_audio_segments', lambda segments: segments)
+    monkeypatch.setattr(
+        recordings_module.shutil,
+        'disk_usage',
+        lambda _path: types.SimpleNamespace(free=1_000),  # far below needed
+    )
+
+    # ffmpeg must never be invoked when the pre-flight check already knows the
+    # disk cannot hold the muxed output.
+    def boom(*a, **k):
+        raise AssertionError('ffmpeg must not run when the disk is full')
+
+    monkeypatch.setattr(recordings_module.subprocess, 'run', boom)
+
+    video = tmp_path / 'clip.mp4'
+    video.write_bytes(b'video' * 1000)
+    caplog.set_level(logging.WARNING)
+
+    assert service._mux_prebuffer_audio('camera-1', video, now - 1, 1.0) is False
+    assert video.exists(), 'the silent clip must be kept'
+    assert 'recordings disk is full' in caplog.text
+    assert diagnostics, 'a camera diagnostic must be emitted'
+    assert diagnostics[0][0][1] == 'audio_mux_disk_full'
+    assert diagnostics[0][1]['severity'] == 'warning'
+    assert diagnostics[0][1]['details']['stage'] == 'preflight'
+    assert diagnostics[0][1]['details']['free_bytes'] == 1_000
+    assert diagnostics[0][1]['details']['needed_bytes'] is not None
+
+
+def test_mux_detects_enospc_from_ffmpeg(tmp_path, monkeypatch, caplog):
+    """When ffmpeg itself fails with ENOSPC (disk filled between the pre-flight
+    check and the write, or the faststart second pass), the failure must be
+    surfaced as a clear disk-full warning + diagnostic instead of ffmpeg's raw
+    stderr."""
+    service = _service(tmp_path)
+    audio_dir = service.audio_dir / 'camera-1'
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    source = _wav(audio_dir / 'aud-000.wav', 4096)
+    now = time.time()
+    diagnostics = []
+    service.diagnostic_callback = lambda *a, **k: diagnostics.append((a, k))
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(service, '_segment_timeline', lambda *a, **k: [(source, now - 1, now)])
+    monkeypatch.setattr(service, '_readable_audio_segments', lambda segments: segments)
+
+    def fake_run(command, *_args, **_kwargs):
+        # Mimic the ffmpeg failure from the field: the whole encode ran, then
+        # the faststart second pass died with ENOSPC.
+        return subprocess.CompletedProcess(
+            command, -28,
+            stdout='',
+            stderr='[fc#0] Terminating thread with return code -28 (No space left on device)\nConversion failed!',
+        )
+
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+
+    video = tmp_path / 'clip.mp4'
+    video.write_bytes(b'video')
+    caplog.set_level(logging.WARNING)
+
+    assert service._mux_prebuffer_audio('camera-1', video, now - 1, 1.0) is False
+    assert video.exists(), 'the silent clip must be kept'
+    assert 'recordings disk is full' in caplog.text
+    assert 'No space left on device' not in caplog.text
+    assert diagnostics and diagnostics[0][0][1] == 'audio_mux_disk_full'
+    assert diagnostics[0][1]['details']['stage'] == 'mux'
+    assert 'No space left on device' in diagnostics[0][1]['details']['stderr_tail']
+
+
+def test_mux_disk_full_diagnostic_is_rate_limited(tmp_path, monkeypatch):
+    """While the disk stays full every finalized event re-hits the disk-full
+    path; the camera diagnostic must be emitted at most once per camera per
+    ``AUDIO_MUX_DISK_FULL_DIAGNOSTIC_MIN_SECONDS``."""
+    service = _service(tmp_path)
+    diagnostics = []
+    service.diagnostic_callback = lambda *a, **k: diagnostics.append((a, k))
+    fake_now = [1_000.0]
+    monkeypatch.setattr(recordings_module.time, 'time', lambda: fake_now[0])
+
+    def warn():
+        service._warn_audio_mux_disk_full(
+            'camera-1', 'camera-1', stage='preflight',
+            free_bytes=1, needed_bytes=10_000,
+        )
+
+    warn()
+    fake_now[0] += 60  # 1 minute later, disk still full
+    warn()
+    assert len(diagnostics) == 1, 'second emission within the window must be suppressed'
+
+    fake_now[0] += 1800  # window elapsed
+    warn()
+    assert len(diagnostics) == 2
+
+
+def test_mux_staging_enospc_surfaces_disk_full(tmp_path, monkeypatch, caplog):
+    """A full staging filesystem (ENOSPC while copying sidecars) must be
+    surfaced as a disk-full condition, not misread as "sidecar disappeared"."""
+    service = _service(tmp_path)
+    audio_dir = service.audio_dir / 'camera-1'
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    source = _wav(audio_dir / 'aud-000.wav', 4096)
+    now = time.time()
+    diagnostics = []
+    service.diagnostic_callback = lambda *a, **k: diagnostics.append((a, k))
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(service, '_segment_timeline', lambda *a, **k: [(source, now - 1, now)])
+    monkeypatch.setattr(service, '_readable_audio_segments', lambda segments: segments)
+
+    def enospc_copy(_src, _dst):
+        raise OSError(errno.ENOSPC, 'No space left on device')
+
+    monkeypatch.setattr(recordings_module.shutil, 'copyfile', enospc_copy)
+    monkeypatch.setattr(
+        recordings_module.subprocess,
+        'run',
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError('ffmpeg must not run')),
+    )
+
+    video = tmp_path / 'clip.mp4'
+    video.write_bytes(b'video')
+    caplog.set_level(logging.WARNING)
+
+    assert service._mux_prebuffer_audio('camera-1', video, now - 1, 1.0) is False
+    assert 'recordings disk is full' in caplog.text
+    assert diagnostics and diagnostics[0][0][1] == 'audio_mux_disk_full'
+    assert diagnostics[0][1]['details']['stage'] == 'staging'
+    # Not the misleading "sidecar disappeared" path.
+    assert 'disappeared before mux' not in caplog.text

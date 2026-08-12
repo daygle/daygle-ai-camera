@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import os
@@ -91,6 +92,20 @@ class RecordingService:
     # cycle. This debounce suppresses rapid toggles: a genuine admin-saved
     # URL change still restarts the worker once the window expires.
     PREBUFFER_RESTART_DEBOUNCE_SECONDS: float = 10.0
+    # The audio mux writes a second copy of the clip (video stream-copied,
+    # audio re-encoded) and ffmpeg's +faststart then rewrites the file to move
+    # the moov atom to the front, so it needs roughly the clip's size again in
+    # free space on the recordings filesystem. When the disk is nearly full the
+    # final faststart pass fails with ENOSPC *after* burning CPU through the
+    # whole encode (ffmpeg 'return code -28 (No space left on device)'), so we
+    # check free space up front and keep the silent clip instead. Margin beyond
+    # clip + sidecar bytes: a fraction plus a fixed floor for the rewrite.
+    AUDIO_MUX_DISK_HEADROOM_FRACTION: float = 0.15
+    AUDIO_MUX_DISK_HEADROOM_BYTES: int = 16 * 1024 * 1024
+    # Minimum interval between "recordings disk is full" camera diagnostics for
+    # the same camera. While the disk stays full, every finalized event would
+    # otherwise re-attempt the doomed mux and re-emit the diagnostic.
+    AUDIO_MUX_DISK_FULL_DIAGNOSTIC_MIN_SECONDS: float = 1800.0
 
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
@@ -126,6 +141,11 @@ class RecordingService:
         self._continuous_lock = threading.Lock()
         self._continuous_workers: dict[str, dict[str, Any]] = {}
         self._missing_ffmpeg_warnings: set[str] = set()
+        # Per-camera timestamp of the last "recordings disk is full" diagnostic,
+        # used to rate-limit repeated audio-mux disk-full warnings while the
+        # disk stays full (every finalized event would otherwise re-hit it).
+        self._disk_full_lock = threading.Lock()
+        self._disk_full_warned_at: dict[str, float] = {}
         # Optional hook the application sets to surface operational events
         # (e.g. prebuffer fallbacks) into the camera diagnostics log. Signature:
         # callback(camera_id, event_type, message, severity, details).
@@ -969,7 +989,7 @@ class RecordingService:
             )
 
         effective_seconds = rendered_seconds if rendered_seconds is not None else content_seconds
-        self._mux_prebuffer_audio(camera_key, tmp_path, content_start_ts, effective_seconds)
+        self._mux_prebuffer_audio(camera_key, tmp_path, content_start_ts, effective_seconds, camera_id=camera_id)
         tmp_path.replace(file_path)
         # Report the clip's real duration, not the requested window - keyframe
         # alignment and short source footage make them differ, and a mismatch
@@ -1785,13 +1805,27 @@ class RecordingService:
                 # directory entry; on Windows the pruner cannot unlink it until
                 # this short copy is complete.
                 shutil.copyfile(segment, staged_path)
-            except (OSError, shutil.Error):
+            except OSError as exc:
+                if getattr(exc, 'errno', None) == errno.ENOSPC:
+                    # A full staging filesystem (e.g. a tiny tmpfs TMPDIR) must
+                    # not be misread as "the sidecar disappeared" - surface it
+                    # as a disk-full condition. Re-raise so the mux caller can
+                    # keep the silent clip and emit the diagnostic.
+                    raise
                 # A whole window can go stale when the audio segmenter stalls
                 # or the ingest restarts: the rolling pruner deletes the
                 # aged-out WAVs while the clip is being finalized, so each
                 # missing 1-second sidecar would otherwise flood INFO with one
                 # line per second. Keep the per-file detail at DEBUG and
                 # summarize the loss in a single INFO line instead.
+                logger.debug(
+                    'Audio sidecar disappeared before mux; skipping %s',
+                    segment,
+                )
+                skipped += 1
+                staged_path.unlink(missing_ok=True)
+                continue
+            except shutil.Error:
                 logger.debug(
                     'Audio sidecar disappeared before mux; skipping %s',
                     segment,
@@ -1809,7 +1843,72 @@ class RecordingService:
             )
         return staged
 
-    def _mux_prebuffer_audio(self, camera_key: str, video_path: Path, start_ts: float, duration_seconds: float) -> bool:
+    def _warn_audio_mux_disk_full(
+        self,
+        camera_key: str,
+        camera_id: str | None,
+        *,
+        stage: str,
+        free_bytes: int | None = None,
+        needed_bytes: int | None = None,
+        stderr_tail: str = '',
+    ) -> None:
+        """Surface a recordings-disk-full condition that forced a silent clip.
+
+        Logs a clear warning for this clip and emits a rate-limited camera
+        diagnostic so operators see the real problem (a full recordings disk)
+        instead of ffmpeg's raw ``No space left on device`` stderr. While the
+        disk stays full every finalized event re-hits this path, so the
+        diagnostic is emitted at most once per camera per
+        ``AUDIO_MUX_DISK_FULL_DIAGNOSTIC_MIN_SECONDS``.
+        """
+        if free_bytes is not None and needed_bytes is not None:
+            space = (
+                f'free {free_bytes / (1024 ** 3):.2f} GiB, needs ~{needed_bytes / (1024 ** 3):.2f} GiB'
+            )
+        else:
+            space = 'the recordings filesystem is full'
+        logger.warning(
+            'Audio mux for %s was not completed because the recordings disk is full (%s); '
+            'keeping the silent video clip. Free up space on the recordings drive to restore event audio.',
+            camera_key,
+            space,
+        )
+        now = time.time()
+        with self._disk_full_lock:
+            last = self._disk_full_warned_at.get(camera_key)
+            # First emission is always allowed; later ones are suppressed while
+            # the disk stays full (keyed by ``last`` being set, not by an
+            # absolute epoch comparison, so the check holds regardless of the
+            # clock's origin).
+            if last is not None and now - last < self.AUDIO_MUX_DISK_FULL_DIAGNOSTIC_MIN_SECONDS:
+                return
+            self._disk_full_warned_at[camera_key] = now
+        details: dict[str, Any] = {
+            'stage': stage,
+            'free_bytes': free_bytes,
+            'needed_bytes': needed_bytes,
+        }
+        if stderr_tail:
+            details['stderr_tail'] = stderr_tail
+        self._emit_diagnostic(
+            camera_id or camera_key,
+            'audio_mux_disk_full',
+            f'Could not add audio to the event clip for {camera_id or camera_key} because the recordings '
+            'disk is full; the clip was saved without sound. Free space on the recordings drive to restore '
+            'event audio.',
+            severity='warning',
+            details=details,
+        )
+
+    def _mux_prebuffer_audio(
+        self,
+        camera_key: str,
+        video_path: Path,
+        start_ts: float,
+        duration_seconds: float,
+        camera_id: str | None = None,
+    ) -> bool:
         ffmpeg = shutil.which('ffmpeg')
         if not ffmpeg or duration_seconds <= 0:
             return False
@@ -1839,7 +1938,17 @@ class RecordingService:
         # the subprocess exits and is removed in the final cleanup block below.
         staging_dir = Path(tempfile.mkdtemp(prefix='daygle-audio-mux-'))
         try:
-            selected_audio = self._stage_audio_segments(selected_audio, staging_dir)
+            try:
+                selected_audio = self._stage_audio_segments(selected_audio, staging_dir)
+            except OSError as exc:
+                if getattr(exc, 'errno', None) == errno.ENOSPC:
+                    self._warn_audio_mux_disk_full(
+                        camera_key,
+                        camera_id,
+                        stage='staging',
+                    )
+                    return False
+                raise
             if not selected_audio:
                 logger.info(
                     'No audio sidecars remained available for %s before mux; keeping silent video clip.',
@@ -1854,6 +1963,40 @@ class RecordingService:
                 logger.info(
                     'Staged audio sidecars were not readable for %s; keeping silent video clip.',
                     camera_key,
+                )
+                return False
+
+            # The mux writes a second copy of the clip (video stream-copied,
+            # audio re-encoded) beside it and atomically replaces the silent
+            # clip, and ffmpeg's +faststart finishes by rewriting the file to
+            # move the moov atom to the front - roughly the clip's size again in
+            # free space on the recordings filesystem. When the disk is nearly
+            # full the faststart pass fails with ENOSPC *after* burning CPU
+            # through the whole encode, so check up front and keep the silent
+            # clip with a clear diagnostic instead.
+            try:
+                free_bytes = shutil.disk_usage(video_path.parent).free
+                needed_bytes = int(
+                    (
+                        video_path.stat().st_size
+                        + sum(segment.stat().st_size for segment, _start, _end in selected_audio)
+                    )
+                    * (1.0 + self.AUDIO_MUX_DISK_HEADROOM_FRACTION)
+                    + self.AUDIO_MUX_DISK_HEADROOM_BYTES
+                )
+            except OSError:
+                free_bytes = needed_bytes = None
+            if (
+                free_bytes is not None
+                and needed_bytes is not None
+                and free_bytes < needed_bytes
+            ):
+                self._warn_audio_mux_disk_full(
+                    camera_key,
+                    camera_id,
+                    stage='preflight',
+                    free_bytes=free_bytes,
+                    needed_bytes=needed_bytes,
                 )
                 return False
 
@@ -1924,7 +2067,16 @@ class RecordingService:
             if result is None or result.returncode != 0 or not muxed_path.exists() or not self.clip_has_video_stream(muxed_path):
                 muxed_path.unlink(missing_ok=True)
                 if result is not None:
-                    logger.warning('Failed to mux prebuffer audio for %s; keeping silent video clip: %s', camera_key, self.redact_stream_credentials((result.stderr or '')[-500:]))
+                    stderr_tail = self.redact_stream_credentials((result.stderr or '')[-500:])
+                    if result.returncode == -28 or 'No space left on device' in stderr_tail:
+                        self._warn_audio_mux_disk_full(
+                            camera_key,
+                            camera_id,
+                            stage='mux',
+                            stderr_tail=stderr_tail,
+                        )
+                    else:
+                        logger.warning('Failed to mux prebuffer audio for %s; keeping silent video clip: %s', camera_key, stderr_tail)
                 return False
             muxed_path.replace(video_path)
             return True
