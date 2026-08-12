@@ -281,5 +281,3 @@ def delete_runtime_data(
     }
     write_audit_log(request, db, 'delete_all', 'runtime_data', details=result['deleted'])
     return result
-
-

@@ -6,6 +6,8 @@ config.yaml
 .pytest_cache/
 .pytest-cache-local/
 .pytest-cache-local-api/
+.coverage
+htmlcov/
 .agents/
 models/*.onnx
 models/*.pt

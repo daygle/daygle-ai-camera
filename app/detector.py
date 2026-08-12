@@ -602,7 +602,7 @@ class OnnxYoloDetector:
         # ``io.get_outputs()`` returns a list in the order outputs were
         # bound; we convert each OrtValue back to host numpy for the
         # existing post-process pipeline (which only knows numpy).
-        return [ort_value.numpy() for ort_value in io.get_outputs()]     
+        return [ort_value.numpy() for ort_value in io.get_outputs()]
 
     def _decode_image(self, image_bytes: bytes) -> np.ndarray:
         np = _require_numpy()
@@ -741,7 +741,7 @@ class OnnxYoloDetector:
         confidence: float | None = None,
     ) -> list[dict[str, Any]]:
         """Postprocess YOLO26 NMS-free output (shape: [1, 300, 6]).
-        
+
         Output format: [x1, y1, x2, y2, confidence, class_id]
         Coordinates are in input-space (relative to model input size, e.g. 640x640)
         and need to be transformed to original image coordinates.
@@ -797,7 +797,7 @@ class OnnxYoloDetector:
             )
             filtered_boxes = filtered_boxes[keep]
             filtered_scores = filtered_scores[keep]
-            filtered_class_ids = filtered_class_ids[keep]     
+            filtered_class_ids = filtered_class_ids[keep]
 
         if filtered_boxes.shape[0] == 0:
             return []
@@ -855,7 +855,7 @@ class OnnxYoloDetector:
             )
             for i in range(n)
         ]
-        return [detection.to_dict() for detection in detections]     
+        return [detection.to_dict() for detection in detections]
 
     def _postprocess_nms(
         self,
@@ -961,7 +961,7 @@ def _int8_precision_supported_for_detector(nms_free: bool) -> bool:
 
 def _detect_model_type(model_path: str) -> bool:
     """Detect if a model uses NMS-free format based on filename.
-    
+
     YOLO26 models use NMS-free end-to-end detection.
     """
     filename = Path(model_path).name.lower()
@@ -981,7 +981,7 @@ def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
             return None
 
     model_path = ai_config.get("model_path", "models/model.onnx")
-    
+
     # Auto-detect NMS-free mode for YOLO26 models
     nms_free = ai_config.get("nms_free")
     if nms_free is None:
