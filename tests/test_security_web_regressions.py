@@ -229,6 +229,45 @@ class AuthServiceAbsoluteExpiryTests(TestCase):
         result = self.auth.get_session(token)
         self.assertIsNone(result)
 
+    def test_idle_session_renews_sliding_deadline_without_moving_absolute_cap(self):
+        self.auth.create_user('carol', self.PASSWORD, role='admin')
+        self.auth.apply_config({'session_timeout_hours': 1})
+        with mock.patch.object(self.auth, 'verify_password', return_value=True):
+            _public_user, token, _csrf, _expires_at = self.auth.authenticate(
+                'carol', self.PASSWORD, ip_address='127.0.0.1',
+            )
+        now = datetime.now(timezone.utc)
+        old_expires_at = (now + timedelta(minutes=4)).isoformat()
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                'UPDATE user_sessions SET expires_at = ? WHERE session_token = ?',
+                (old_expires_at, token),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        session = self.auth.get_session(token)
+
+        self.assertIsNotNone(session)
+        self.assertGreater(
+            datetime.fromisoformat(session['expires_at']),
+            datetime.fromisoformat(old_expires_at),
+        )
+        conn = sqlite3.connect(self.db_path)
+        try:
+            absolute_expires_at = conn.execute(
+                'SELECT absolute_expires_at FROM user_sessions WHERE session_token = ?',
+                (token,),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertLess(
+            datetime.fromisoformat(session['expires_at']),
+            datetime.fromisoformat(absolute_expires_at),
+        )
+
     def test_renew_session_does_not_extend_absolute_expires_at(self):
         self.auth.create_user('carol', self.PASSWORD, role='admin')
         with mock.patch.object(self.auth, 'verify_password', return_value=True):

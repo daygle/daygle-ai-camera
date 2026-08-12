@@ -23,7 +23,7 @@ def _session_cookie_name() -> str:
     return str(effective_auth_config().get('cookie_name', SESSION_COOKIE))
 
 
-def _get_cookie_domain() -> str | None:
+def _get_cookie_domain(config: dict | None = None) -> str | None:
     """Return the configured ``auth.cookie_domain`` (operator override) or
     ``None`` so the cookie binds to the response host.
 
@@ -34,7 +34,7 @@ def _get_cookie_domain() -> str | None:
     it here and the same value flows into BOTH the CSRF cookie and the
     session cookie so neither can be subdomain-tossed separately.
     """
-    raw = effective_auth_config().get('cookie_domain')
+    raw = (config if config is not None else effective_auth_config()).get('cookie_domain')
     if not raw:
         return None
     candidate = str(raw).strip()
@@ -101,11 +101,19 @@ def set_session_cookie(
     request: Request,
     token: str,
     expires_at: str,
+    *,
+    auth_config: dict | None = None,
 ) -> None:
-    """Set the session cookie on *response*."""
-    session_hours = float(effective_auth_config().get('session_timeout_hours', 12))
+    """Set the session cookie on *response*.
+
+    Callers that already resolved the live auth config can pass it to avoid a
+    second database read while a response is being finalized (notably during
+    backup/restore operations).
+    """
+    config = auth_config if auth_config is not None else effective_auth_config()
+    session_hours = float(config.get('session_timeout_hours', 12))
     response.set_cookie(
-        _session_cookie_name(), token,
+        str(config.get('cookie_name', SESSION_COOKIE)), token,
         httponly=True,
         secure=request.url.scheme == 'https',
         samesite='lax',
@@ -114,7 +122,7 @@ def set_session_cookie(
         # M1 (round-7): bound the cookie to an explicit host if the
         # operator has set ``auth.cookie_domain``. Same domain as the
         # CSRF cookie so neither can be subdomain-tossed separately.
-        domain=_get_cookie_domain(),
+        domain=_get_cookie_domain(config),
     )
 
 

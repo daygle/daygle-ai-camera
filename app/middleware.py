@@ -96,6 +96,7 @@ from starlette.responses import Response
 
 import app.state as _state
 from app.auth import CSRF_HEADER
+from app.auth_helpers import set_session_cookie
 from app.config_facades import effective_auth_config
 from app.rate_limiter import admin_limiter
 ADMIN_PATHS = _state.ADMIN_PATHS
@@ -192,7 +193,8 @@ def _is_same_origin(request: Request) -> tuple[bool, str]:
 
 
 async def authentication_middleware(request: Request, call_next):
-    if not effective_auth_config().get('enabled', True):
+    auth_config = effective_auth_config()
+    if not auth_config.get('enabled', True):
         return await call_next(request)
     path = request.url.path
     if path in PUBLIC_PATHS or any(
@@ -207,7 +209,7 @@ async def authentication_middleware(request: Request, call_next):
                 status_code=403,
             )
         return RedirectResponse('/setup', status_code=303)
-    _cookie_name = str(effective_auth_config().get('cookie_name', 'session'))
+    _cookie_name = str(auth_config.get('cookie_name', 'session'))
     session = _state.auth.get_session(request.cookies.get(_cookie_name))
     if session is None:
         if path.startswith('/api/'):
@@ -306,7 +308,21 @@ async def authentication_middleware(request: Request, call_next):
             return JSONResponse(
                 {'detail': 'CSRF token missing or invalid'}, status_code=403,
             )
-    return await call_next(request)
+    response = await call_next(request)
+    # ``expires_at`` is a sliding server-side deadline. Refresh the browser
+    # cookie as well, otherwise its fixed login-time expiry can discard an
+    # otherwise-renewed session after the first timeout window.
+    # Logout deliberately clears the cookie in its handler; do not append a
+    # fresh sliding-session cookie after that response has been generated.
+    if not (path == '/logout' and request.method == 'POST'):
+        set_session_cookie(
+            response,
+            request,
+            session['session_token'],
+            session['expires_at'],
+            auth_config=auth_config,
+        )
+    return response
 
 
 async def app_navigation_middleware(request: Request, call_next):
