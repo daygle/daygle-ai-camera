@@ -33,6 +33,26 @@ class DetectorUnavailableError(RuntimeError):
     """Raised when a configured detector backend cannot run inference."""
 
 
+# Noise floor for the effective inference threshold. The detector is run at the
+# *lowest* confidence across a camera's alert rules (see
+# ``compute_minimum_rule_confidence``) so a rule with a low threshold can still
+# fire; that raw list is also what gets stored on the event and drawn on the
+# overlay. A rule -- or the global AI confidence -- set at (or effectively at)
+# zero collapses that floor to ~0, at which point the model's abundant
+# background predictions leak through. On low-light / IR frames those weak
+# activations overwhelmingly land on a single COCO class (typically ``bird``),
+# flooding every event card and overlay with dozens of "bird 0%" boxes that
+# clear no alert rule.
+#
+# A prediction below this floor carries no usable signal -- it renders as 0% and
+# is indistinguishable from noise -- so it is never surfaced regardless of the
+# configured threshold. The clamp only bites when the requested threshold is
+# already degenerate (<1%): any genuine detection scores far above it (a real
+# cat/dog is tens of percent), and any deliberate positive threshold at or above
+# 1% is passed through unchanged.
+_MIN_DETECTION_CONFIDENCE = 0.01
+
+
 _BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -558,6 +578,13 @@ class OnnxYoloDetector:
 
     def _run_inference(self, image: Any, confidence: float | None) -> list[dict[str, Any]]:
         effective_confidence = confidence if confidence is not None else self.confidence
+        # Never run inference below the noise floor: a near-zero threshold
+        # (a rule or the global AI confidence set at ~0) would otherwise let
+        # the model's background predictions flood the event/overlay with
+        # meaningless "0%" detections. This only raises a degenerate <1%
+        # request; any real positive threshold passes through untouched.
+        if effective_confidence < _MIN_DETECTION_CONFIDENCE:
+            effective_confidence = _MIN_DETECTION_CONFIDENCE
         input_tensor, scale, pad_x, pad_y, original_width, original_height = self._preprocess(image)
         # Cap concurrent inferences so parallel callers (per-camera background
         # detection + live overlay) don't oversubscribe the CPU and slow each other.
