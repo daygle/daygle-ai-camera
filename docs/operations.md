@@ -88,7 +88,10 @@ apt-get install -y unattended-upgrades
 
 tee /etc/apt/apt.conf.d/20auto-upgrades >/dev/null <<'EOF'
 APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
 APT::Periodic::Unattended-Upgrade "1";
+// AutocleanInterval 7 = run `apt-get autoclean` weekly to trim the .deb cache.
+APT::Periodic::AutocleanInterval "7";
 EOF
 ```
 
@@ -115,6 +118,8 @@ Unattended-Upgrade::Remove-Unused-Dependencies "false";
 // Reboot automatically, but only when an update requires it, at this local time.
 Unattended-Upgrade::Automatic-Reboot "true";
 Unattended-Upgrade::Automatic-Reboot-Time "03:00";
+// Reboot even if a user is logged in (default true; false skips the reboot).
+Unattended-Upgrade::Automatic-Reboot-WithUsers "true";
 Unattended-Upgrade::AutoFixInterruptedDpkg "true";
 EOF
 ```
@@ -171,6 +176,24 @@ printf 'mailx test body\n' | mailx -s 'mailx test' admin@example.com
 ```
 
 `/var/log/msmtp.log` records every send.
+
+## Memory tuning
+
+The detector keeps model weights and frame buffers in RAM while ffmpeg streams
+recording buffers, so the default Debian `vm.swappiness` of 60 can swap out warm
+process memory under pressure, causing stutter or slower detection. Lower it so
+the kernel prefers keeping running processes in RAM:
+
+```bash
+printf 'vm.swappiness=10\nvm.vfs_cache_pressure=50\n' > /etc/sysctl.d/99-swappiness.conf
+sysctl --system
+```
+
+`vm.swappiness=10` swaps only under real memory pressure - avoid `0`, which can
+starve swap and trigger the OOM killer instead. `vm.vfs_cache_pressure=50` keeps
+the directory/inode cache slightly longer, which helps a filesystem that is
+constantly creating recording files. Verify with
+`cat /proc/sys/vm/swappiness` and `free -h`.
 
 ## Start Clean (Danger Zone)
 
