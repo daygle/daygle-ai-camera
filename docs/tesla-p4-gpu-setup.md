@@ -136,3 +136,60 @@ Pascal-breaking or Python-incompatible bump:
   project still targets Python 3.10.
 - The `nvidia-*-cu12` pins in `requirements-gpu-pascal.txt` - bump only after
   re-running the verification in section 3 and confirming `sm_61` support.
+
+## Pinning the kernel and driver against unattended upgrades
+
+The validated pairing (driver 550.163.01 + CUDA 12.4 wheels) breaks silently
+if the OS moves the kernel or the NVIDIA driver - `onnxruntime-gpu` falls back
+to CPU without a loud error. On a Debian host running `unattended-upgrades`
+(see [operations.md](operations.md)), pin both with `apt-mark hold` once GPU
+inference verifies. Holds are respected by `unattended-upgrades` and a manual
+`apt upgrade`, and they stop `autoremove` from pruning the previous fallback
+kernel. Commands below assume a root shell.
+
+### Verify the current stack first
+
+```bash
+uname -r                        # running kernel
+nvidia-smi                      # driver 550.163.01, CUDA 12.4, "Tesla P4"
+dkms status                     # nvidia-current/550.163.01, <kernel>: installed
+modinfo nvidia | grep vermagic  # must contain the exact `uname -r` string
+```
+
+The `dkms status` line for the running kernel must end in `installed` (not
+`built`), and `nvidia-smi` must enumerate the P4. The driver is the Debian
+`nvidia-*` package family; `nvidia-current` is only the DKMS source name, not
+an apt package.
+
+### Hold the kernel
+
+```bash
+apt-mark hold linux-image-amd64 linux-headers-amd64
+dpkg-query -W -f='${Package} ${Status}\n' 'linux-image-*' 'linux-headers-*' \
+  | awk '/install ok installed/{print $1}' | xargs -r apt-mark hold
+```
+
+### Hold the driver
+
+```bash
+dpkg -l 'nvidia-*' 'cuda-*' 2>/dev/null | grep '^ii' | awk '{print $2}' | xargs -r apt-mark hold
+```
+
+Confirm both with `apt-mark showhold` - the kernel image/header packages and
+the whole `nvidia-*` stack should be listed.
+
+### Periodic manual refresh
+
+Holding the kernel and driver also stops their security fixes (the driver is
+in Debian `non-free`, which receives no security updates anyway). Refresh them
+by hand on a schedule - roughly monthly to quarterly:
+
+```bash
+apt-mark unhold $(apt-mark showhold)
+apt update && apt upgrade
+reboot
+```
+
+After the reboot, re-run the verification above, then re-apply both hold
+commands. A failed DKMS rebuild shows up in `dkms status` as `built` without
+`installed`, `nvidia-smi` fails, and inference silently falls back to CPU.

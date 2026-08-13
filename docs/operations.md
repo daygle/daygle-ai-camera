@@ -76,7 +76,98 @@ Open **YAMNet TFLite** (`/yamnet-tflite`) to confirm whether the sound detection
 
 Admins can check for and apply application updates from **Settings → System → Software Updates**. The current version is shown at the top of the section. The updater verifies the canonical repository origin, refreshes Python dependencies, provisions `cloudflared`, and can migrate the systemd launcher to `python -m app.server`. Service installs schedule a restart after a successful browser-initiated update when permissions allow; otherwise restart the service manually.
 
-For manual service updates, run `sudo ./scripts/update.sh` from the configured application directory (the default is `/opt/daygle-ai-camera`), then restart `daygle-ai-camera` if it was not restarted automatically. The updater can install `cloudflared` system-wide or fall back to the application virtual environment for unprivileged GUI updates.
+For manual service updates, run `./scripts/update.sh` from the configured application directory (the default is `/opt/daygle-ai-camera`), then restart `daygle-ai-camera` if it was not restarted automatically. The updater can install `cloudflared` system-wide or fall back to the application virtual environment for unprivileged GUI updates.
+
+## Operating system updates
+
+The in-app updater only updates the application. The underlying Debian host should be patched separately with `unattended-upgrades`, which installs security and point-release package updates on a daily schedule. Commands below assume a root shell.
+
+```bash
+apt-get update
+apt-get install -y unattended-upgrades
+
+tee /etc/apt/apt.conf.d/20auto-upgrades >/dev/null <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+```
+
+Replace `/etc/apt/apt.conf.d/50unattended-upgrades` with a Debian-only origins pattern and conservative defaults:
+
+```bash
+tee /etc/apt/apt.conf.d/50unattended-upgrades >/dev/null <<'EOF'
+// Debian archives only - third-party/vendor repos are never auto-upgraded.
+Unattended-Upgrade::Origins-Pattern {
+    "origin=Debian,codename=${distro_codename},label=Debian";
+    "origin=Debian,codename=${distro_codename}-updates";
+    "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+};
+
+Unattended-Upgrade::Package-Blacklist {
+};
+
+Unattended-Upgrade::Mail "root";
+Unattended-Upgrade::MailReport "on-change";
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-New-Unused-Dependencies "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "false";
+Unattended-Upgrade::Automatic-Reboot "false";
+Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+EOF
+```
+
+Validate with `unattended-upgrade --dry-run --debug`.
+
+Packages that must never be auto-upgraded (on GPU boxes, the NVIDIA driver and the kernel - see [tesla-p4-gpu-setup.md](tesla-p4-gpu-setup.md)) are protected with `apt-mark hold`, which `unattended-upgrades` respects. A hold is stronger than a `Package-Blacklist` entry because it also blocks a manual `apt upgrade`.
+
+### Email upgrade reports via msmtp
+
+`Unattended-Upgrade::Mail` sends nothing unless the host can deliver mail. `msmtp` relays the report through your own SMTP server without a full MTA:
+
+```bash
+apt-get install -y --no-install-recommends msmtp msmtp-mta mailutils
+```
+
+Write `/etc/msmtprc` (mode `600`) with your server, credentials, and envelope sender (the `example.com` values below are placeholders):
+
+```bash
+tee /etc/msmtprc >/dev/null <<'EOF'
+defaults
+auth           on
+tls            on
+tls_starttls   on
+tls_trust_file /etc/ssl/certs/ca-certificates.crt
+logfile        /var/log/msmtp.log
+
+account        relay
+host           mail.example.com
+port           587
+from           notifications@example.com
+user           notifications@example.com
+password       REPLACE_WITH_PASSWORD_OR_APP_TOKEN
+
+account default : relay
+EOF
+
+chmod 600 /etc/msmtprc
+touch /var/log/msmtp.log && chmod 600 /var/log/msmtp.log
+```
+
+Adjust the TLS lines to the server: port 465 uses implicit TLS (`tls on`, `tls_starttls off`), a trusted-LAN relay uses `tls off`, and a self-signed certificate uses `tls_fingerprint <SHA256>`. Then set the visible `From:` header and point `unattended-upgrades` at the recipient:
+
+```bash
+sh -c 'echo "set from=notifications@example.com" > /etc/mail.rc'
+sed -i 's|^Unattended-Upgrade::Mail "root";|Unattended-Upgrade::Mail "admin@example.com";|' /etc/apt/apt.conf.d/50unattended-upgrades
+```
+
+Test the relay directly (`--debug` prints the SMTP conversation), then through the `mailx` path that `unattended-upgrades` uses:
+
+```bash
+printf 'Subject: unattended-upgrades test\n\nThis is a test.\n' | msmtp --debug admin@example.com
+printf 'mailx test body\n' | mailx -s 'mailx test' admin@example.com
+```
+
+`/var/log/msmtp.log` records every send.
 
 ## Start Clean (Danger Zone)
 
