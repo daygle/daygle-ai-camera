@@ -262,9 +262,18 @@ class AuthService:
             # long-lived sessions is the security-correct choice
             # (otherwise stolen cookies for sessions older than 14d
             # would quietly extend without bound).
+            # ``strftime('...+00:00', ...)`` -- NOT bare ``datetime(...)`` --
+            # so the backfilled value is a canonical tz-AWARE ISO string
+            # (``2026-08-27T02:18:14+00:00``). ``datetime(created_at,'+14
+            # days')`` returns a tz-NAIVE ``'2026-08-27 02:18:14'`` which
+            # then raised ``TypeError`` when ``get_session`` compared it
+            # against a tz-aware ``now`` -- force-logging-out legacy
+            # sessions on their next request. (``get_session`` now also
+            # tolerates naive values defensively, but keeping the stored
+            # form canonical avoids the round-trip entirely.)
             db.execute(
                 "UPDATE user_sessions "
-                "SET absolute_expires_at = datetime(created_at, '+14 days') "
+                "SET absolute_expires_at = strftime('%Y-%m-%dT%H:%M:%S+00:00', created_at, '+14 days') "
                 "WHERE absolute_expires_at IS NULL"
             )
             db.execute("DELETE FROM user_sessions WHERE expires_at <= ?", (utc_now(),))
@@ -717,9 +726,8 @@ class AuthService:
         greeted by "Session expired" because the very GET that woke it
         already extended the row.
         """
-        try:
-            current_exp_dt = datetime.fromisoformat(current_expires_at)
-        except (TypeError, ValueError):
+        current_exp_dt = _parse_iso_datetime(current_expires_at)
+        if current_exp_dt is None:
             return current_expires_at
         # If the row was last renewed < ``_SESSION_RENEWAL_INTERVAL`` ago we
         # leave it alone. ``-now_dt`` is the inverse delta - last renew time
@@ -778,7 +786,17 @@ class AuthService:
             ).fetchone()
             if row is None:
                 return None
-            if not row["is_active"] or datetime.fromisoformat(row["expires_at"]) <= now_dt:
+            # Normalise ``expires_at`` through ``_parse_iso_datetime`` rather
+            # than a bare ``datetime.fromisoformat``. A tz-NAIVE stored value
+            # (e.g. one written by SQLite's ``datetime()`` in a migration, or
+            # by external tooling) would otherwise raise ``TypeError`` on the
+            # ``<= now_dt`` comparison against the tz-aware ``now_dt`` -- the
+            # exact failure that force-deleted an otherwise-valid session and
+            # bounced an actively-signed-in user to the login screen. Naive
+            # values are interpreted as UTC (the storage contract); a truly
+            # unparseable value is treated as expired.
+            expires_dt = _parse_iso_datetime(row["expires_at"])
+            if not row["is_active"] or expires_dt is None or expires_dt <= now_dt:
                 db.execute("DELETE FROM user_sessions WHERE session_token = ?", (session_token,))
                 return None
             # H2 absolute-expiry guard: refuse any session whose hard cap has
@@ -788,12 +806,15 @@ class AuthService:
             # loses after ``absolute_session_lifetime`` from sign-in.
             absolute_expires_at_raw = row["absolute_expires_at"] if "absolute_expires_at" in row.keys() else None
             if absolute_expires_at_raw:
-                try:
-                    if datetime.fromisoformat(absolute_expires_at_raw) <= now_dt:
-                        db.execute("DELETE FROM user_sessions WHERE session_token = ?", (session_token,))
-                        return None
-                except (TypeError, ValueError):
-                    # Garbled legacy row: treat as expired -- refuse.
+                # Same tz-naive defence as ``expires_at`` above: the H2
+                # backfill historically wrote ``datetime(created_at,'+14
+                # days')`` which is tz-NAIVE, so a bare comparison raised
+                # ``TypeError`` here and force-logged-out every legacy
+                # session on its next request. ``_parse_iso_datetime``
+                # coerces naive->UTC; only a genuinely unparseable value
+                # (``None``) is refused.
+                absolute_dt = _parse_iso_datetime(absolute_expires_at_raw)
+                if absolute_dt is None or absolute_dt <= now_dt:
                     db.execute("DELETE FROM user_sessions WHERE session_token = ?", (session_token,))
                     return None
             expires_at = self._renew_session_if_stale(db, row["session_token"], row["expires_at"], now_dt)
