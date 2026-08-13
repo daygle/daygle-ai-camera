@@ -16,6 +16,7 @@ from fastapi import Request
 
 from app.auth import CSRF_COOKIE, SESSION_COOKIE
 from app.config_facades import effective_auth_config
+from app.utils import _parse_iso_datetime
 
 
 def _session_cookie_name() -> str:
@@ -112,12 +113,24 @@ def set_session_cookie(
     """
     config = auth_config if auth_config is not None else effective_auth_config()
     session_hours = float(config.get('session_timeout_hours', 12))
+    # ``expires_at`` arrives as an ISO-8601 string
+    # (``2026-08-13T11:00:00+00:00``). Passing that string straight to
+    # ``set_cookie(expires=...)`` emits a MALFORMED ``Expires`` attribute --
+    # the cookie-date grammar (RFC 6265 §5.1.1) requires an HTTP-date
+    # (``Wed, 13 Aug 2026 11:00:00 GMT``), and an ISO string has no month
+    # name so it fails to parse. Spec-compliant browsers then ignore the
+    # attribute and fall back to ``Max-Age``, but non-compliant proxies /
+    # HTTP stacks can drop the cookie or treat it as already-expired, which
+    # surfaces as spurious "you were logged out" flaps. Convert to a real
+    # ``datetime`` so Starlette formats a valid ``Expires`` HTTP-date; fall
+    # back to ``Max-Age`` alone if the value is unparseable.
+    expires_dt = _parse_iso_datetime(expires_at)
     response.set_cookie(
         str(config.get('cookie_name', SESSION_COOKIE)), token,
         httponly=True,
         secure=request.url.scheme == 'https',
         samesite='lax',
-        expires=expires_at,
+        expires=expires_dt if expires_dt is not None else None,
         max_age=int(session_hours * 3600),
         # M1 (round-7): bound the cookie to an explicit host if the
         # operator has set ``auth.cookie_domain``. Same domain as the

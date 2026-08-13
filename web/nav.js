@@ -574,21 +574,35 @@ window.daygleAuthReady = (async () => {
       updateCountdown();
       return;
     }
-    // A 401 means the server-side session is gone - expired, revoked, or
-    // wiped by a server restart - while this tab is still open with cached
-    // auth. Without this branch the ticker keeps polling the dead session
-    // every ~90 s indefinitely, which is exactly the "GET
-    // /api/auth/session-remaining 401 Unauthorized" line repeating in the
-    // server logs. Stop the ticker and route through the shared
-    // session-loss path so the user is redirected to login, matching how
-    // the /api/auth/me fetches above already handle a 401.
+    // A 401 here MIGHT mean the server-side session is gone - but it might
+    // also be a transient blip (a momentary cookie race while the sliding
+    // cookie is being re-set on a concurrent response, a proxy hiccup, a
+    // single dropped request). The session-remaining poll is a COSMETIC
+    // countdown feature; it must not be the thing that logs the user out on
+    // its own authority, otherwise a single spurious 401 flips the nav to
+    // "Sign in" and bounces an actively-valid session to /login. Defer to
+    // the authoritative /api/auth/me check (refreshDaygleAuth): stop the
+    // ticker, then let that fetch decide. refreshDaygleAuth only calls
+    // handleSessionLoss when /api/auth/me ITSELF returns 401, and on success
+    // it re-renders the account and restarts the ticker - so a transient
+    // blip self-heals with no visible logout.
     if (response.status === 401) {
       stopCountdownTicker();
       const el = document.getElementById('sessionCountdown');
       if (el) el.hidden = true;
-      if (typeof window.daygleUi?.handleSessionLoss === 'function'
+      if (typeof window.refreshDaygleAuth === 'function'
           && !window.daygleAuth?.redirecting) {
-        window.daygleUi.handleSessionLoss('Session expired - please sign in again');
+        window.refreshDaygleAuth()
+          .then((result) => {
+            // Session confirmed still valid -> resume the countdown ticker
+            // that we stopped above. refreshDaygleAuth already re-rendered
+            // the account via setApiAuth's event.
+            if (result && result.user
+                && typeof window.daygleUi?.startCountdownTicker === 'function') {
+              window.daygleUi.startCountdownTicker();
+            }
+          })
+          .catch(() => { /* refreshDaygleAuth handles a real 401 itself */ });
       }
       return;
     }

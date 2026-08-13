@@ -326,6 +326,106 @@ class AuthServiceAbsoluteExpiryTests(TestCase):
             conn.close()
         self.assertEqual(count, 0)
 
+    def test_get_session_tolerates_tz_naive_absolute_expires_at(self):
+        # Regression: the H2 backfill historically wrote a tz-NAIVE
+        # ``absolute_expires_at`` (SQLite ``datetime(created_at,'+14 days')``
+        # -> ``'2026-08-27 02:18:14'``). ``get_session`` compared that naive
+        # value against a tz-aware ``now`` with a bare ``datetime.fromisoformat``,
+        # raising ``TypeError`` -> the ``except`` deleted the row and returned
+        # ``None``, force-logging-out an otherwise-valid, actively-signed-in
+        # user. A naive-but-FUTURE cap must now keep the session VALID.
+        self.auth.create_user('erin', self.PASSWORD, role='admin')
+        with mock.patch.object(self.auth, 'verify_password', return_value=True):
+            _u, token, _c, _e = self.auth.authenticate(
+                'erin', self.PASSWORD, ip_address='127.0.0.1',
+            )
+        now = datetime.now(timezone.utc)
+        naive_future_abs = (now + timedelta(days=10)).replace(tzinfo=None).isoformat(sep=' ')
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                'UPDATE user_sessions SET absolute_expires_at = ? WHERE session_token = ?',
+                (naive_future_abs, token),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        self.assertIsNotNone(self.auth.get_session(token))
+
+    def test_get_session_rejects_tz_naive_but_elapsed_absolute(self):
+        # The naive-tolerance above must not weaken the H2 guard: a naive cap
+        # that has ELAPSED still refuses the session.
+        self.auth.create_user('frank', self.PASSWORD, role='admin')
+        with mock.patch.object(self.auth, 'verify_password', return_value=True):
+            _u, token, _c, _e = self.auth.authenticate(
+                'frank', self.PASSWORD, ip_address='127.0.0.1',
+            )
+        now = datetime.now(timezone.utc)
+        naive_past_abs = (now - timedelta(seconds=1)).replace(tzinfo=None).isoformat(sep=' ')
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                'UPDATE user_sessions SET absolute_expires_at = ? WHERE session_token = ?',
+                (naive_past_abs, token),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        self.assertIsNone(self.auth.get_session(token))
+
+    def test_get_session_tolerates_tz_naive_expires_at(self):
+        # Same naive-tolerance for the sliding ``expires_at`` column: a
+        # naive-but-future value must not throw and force a logout.
+        self.auth.create_user('grace', self.PASSWORD, role='admin')
+        with mock.patch.object(self.auth, 'verify_password', return_value=True):
+            _u, token, _c, _e = self.auth.authenticate(
+                'grace', self.PASSWORD, ip_address='127.0.0.1',
+            )
+        now = datetime.now(timezone.utc)
+        naive_future = (now + timedelta(minutes=30)).replace(tzinfo=None).isoformat(sep=' ')
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                'UPDATE user_sessions SET expires_at = ? WHERE session_token = ?',
+                (naive_future, token),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        self.assertIsNotNone(self.auth.get_session(token))
+
+    def test_backfill_writes_tz_aware_absolute_expires_at(self):
+        # The migration backfill must write a tz-AWARE ISO value (``+00:00``)
+        # so a legacy NULL row never re-introduces the naive-comparison
+        # TypeError on the next ``get_session``.
+        self.auth.create_user('heidi', self.PASSWORD, role='admin')
+        with mock.patch.object(self.auth, 'verify_password', return_value=True):
+            _u, token, _c, _e = self.auth.authenticate(
+                'heidi', self.PASSWORD, ip_address='127.0.0.1',
+            )
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                'UPDATE user_sessions SET absolute_expires_at = NULL WHERE session_token = ?',
+                (token,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        # Re-run init() to trigger the idempotent backfill UPDATE.
+        self.auth.init()
+        conn = sqlite3.connect(self.db_path)
+        try:
+            value = conn.execute(
+                'SELECT absolute_expires_at FROM user_sessions WHERE session_token = ?',
+                (token,),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertIsNotNone(value)
+        parsed = datetime.fromisoformat(value)
+        self.assertIsNotNone(parsed.tzinfo, 'backfilled value must be tz-aware')
+
 
 # H3 ---------------------------------------------------------------------
 
