@@ -578,3 +578,71 @@ def test_prebuffer_concat_list_uses_ffmpeg_safe_absolute_paths(tmp_path, monkeyp
         assert '\\' not in line
         listed_path = line[len("file '"):-1]
         assert Path(listed_path).is_absolute()
+
+
+def test_prebuffer_worker_backs_off_and_throttles_on_dead_link(tmp_path, monkeypatch):
+    # A camera whose RTSP link is dead makes ffmpeg exit immediately, over and
+    # over. The worker must NOT reconnect at a flat cadence while spamming an
+    # identical WARNING each cycle; it must back off exponentially (bounded) and
+    # log the failure only once per streak.
+    import app.recordings as recordings_module
+    RecordingService = recordings_module.RecordingService
+
+    service = RecordingService({'storage': {'recordings_dir': str(tmp_path / 'rec')}, 'recording': {}})
+
+    class _DeadProc:
+        # poll() returns a non-zero code immediately => the inner segment loop
+        # never runs and the worker treats this as a failed reconnect.
+        def poll(self):
+            return 1
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            return 1
+
+        def kill(self):
+            pass
+
+    def fake_popen(_cmd, **_kwargs):
+        return _DeadProc()
+
+    class _StopAfterEvent(threading.Event):
+        """Records backoff waits and stops the worker after N reconnects."""
+
+        def __init__(self, stop_after):
+            super().__init__()
+            self.stop_after = stop_after
+            self.backoffs: list[float] = []
+
+        def wait(self, timeout=None):
+            self.backoffs.append(timeout)
+            if len(self.backoffs) >= self.stop_after:
+                self.set()
+            return True
+
+    warnings: list[str] = []
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(recordings_module.subprocess, 'Popen', fake_popen)
+    monkeypatch.setattr(
+        recordings_module.logger,
+        'warning',
+        lambda msg, *args, **_kw: warnings.append(msg % args if args else msg),
+    )
+
+    stop = _StopAfterEvent(stop_after=6)
+    service._run_prebuffer_worker('cam', 'rtsp://example/stream', {
+        'stop_event': stop,
+        'stream_url': 'rtsp://example/stream',
+        'buffer_seconds': 20,
+    })
+
+    base = RecordingService.PREBUFFER_RECONNECT_BACKOFF_BASE_SECONDS
+    cap = RecordingService.PREBUFFER_RECONNECT_BACKOFF_MAX_SECONDS
+    expected = [min(cap, base * (2 ** i)) for i in range(6)]
+    assert stop.backoffs == expected, 'reconnect delay must grow exponentially and cap'
+    # The whole failure streak elapses in well under the throttle interval, so
+    # only the first failure is logged instead of one line per reconnect.
+    assert len(warnings) == 1, f'expected a single throttled WARNING, got {warnings}'
+    assert 'reconnecting (attempt 1)' in warnings[0]
