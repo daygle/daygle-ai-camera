@@ -49,6 +49,20 @@ class RecordingService:
     # while keeping event timing reasonably granular.
     PREBUFFER_SEGMENT_SECONDS = 4
     PREBUFFER_SEGMENT_GLOB = 'segment-*.mp4'
+    # Reconnect pacing for a prebuffer ingest worker whose ffmpeg keeps dying
+    # without ever staying up (dead/flapping RTSP link). Mirrors the OpenCV
+    # capture path in ``camera_backend`` so an unreachable camera backs off
+    # instead of hammering a reconnect every ~25s and spamming the log with an
+    # identical WARNING each cycle. A worker that stays up for
+    # ``PREBUFFER_HEALTHY_RUN_SECONDS`` is considered recovered: the failure
+    # streak resets and the next reconnect is prompt.
+    PREBUFFER_RECONNECT_BACKOFF_BASE_SECONDS = 2.0
+    PREBUFFER_RECONNECT_BACKOFF_MAX_SECONDS = 30.0
+    PREBUFFER_HEALTHY_RUN_SECONDS = 60.0
+    # Throttle for the repeated "stalled/exited; reconnecting" WARNING while a
+    # camera stays down: log the first failure in a streak, then at most once
+    # per this interval, then a single recovery line when it comes back.
+    PREBUFFER_FAILURE_LOG_INTERVAL_SECONDS = 60.0
     # Floor for sidecar audio retention. The worker actually retains audio for
     # the full prebuffer window (pre + max_clip) so long event clips get audio
     # for their whole length; this is just the minimum when that window is tiny.
@@ -1201,6 +1215,11 @@ class RecordingService:
         audio_enabled = not self._audio_disabled_marker(camera_key).exists()
         just_disabled_audio = False
 
+        # Reconnect backoff / log throttling for a flapping or dead RTSP link.
+        stall_seconds = max(self.PREBUFFER_SEGMENT_SECONDS * 5, 20)
+        consecutive_failures = 0
+        last_failure_log_at = 0.0  # time.monotonic() of the last emitted WARNING
+
         while not stop_event.is_set():
             from app.config_facades import effective_live_config as _elc  # noqa: PLC0415
             _live_config = _elc()
@@ -1318,10 +1337,8 @@ class RecordingService:
                             last_segment_ts = newest
                     except OSError:
                         pass
-                    stall_seconds = max(self.PREBUFFER_SEGMENT_SECONDS * 5, 20)
                     if time.time() - last_segment_ts > stall_seconds:
                         restart_reason = 'segment_stall'
-                        logger.warning('Prebuffer ingest for %s stalled (no segment in %.0fs); restarting.', camera_key, stall_seconds)
                         # SIGKILL rather than SIGTERM: the stream is already dead so
                         # graceful cleanup is pointless, and ffmpeg can segfault in its
                         # RTSP teardown path when the connection is in a broken state.
@@ -1407,7 +1424,52 @@ class RecordingService:
                     just_disabled_audio = False
                 else:
                     run_seconds = time.time() - ffmpeg_started_at
-                    time.sleep(5 if run_seconds < 60 else 1)
+                    if run_seconds >= self.PREBUFFER_HEALTHY_RUN_SECONDS:
+                        # The worker stayed up long enough to be considered
+                        # healthy; a stall/exit now is a transient glitch.
+                        # Reset the failure streak and reconnect promptly.
+                        if consecutive_failures:
+                            logger.info(
+                                'Prebuffer ingest for %s recovered after %d failed reconnect%s.',
+                                camera_key,
+                                consecutive_failures,
+                                '' if consecutive_failures == 1 else 's',
+                            )
+                            consecutive_failures = 0
+                        stop_event.wait(1)
+                    else:
+                        # Never stayed up: dead or flapping link. Back off
+                        # exponentially and throttle the WARNING so a camera
+                        # that is down for an hour does not emit ~140 identical
+                        # lines.
+                        consecutive_failures += 1
+                        now = time.monotonic()
+                        if (
+                            consecutive_failures == 1
+                            or now - last_failure_log_at >= self.PREBUFFER_FAILURE_LOG_INTERVAL_SECONDS
+                        ):
+                            if restart_reason == 'segment_stall':
+                                logger.warning(
+                                    'Prebuffer ingest for %s stalled (no segment in %.0fs); '
+                                    'reconnecting (attempt %d).',
+                                    camera_key,
+                                    stall_seconds,
+                                    consecutive_failures,
+                                )
+                            else:
+                                logger.warning(
+                                    'Prebuffer ingest for %s exited (%s); reconnecting (attempt %d).',
+                                    camera_key,
+                                    restart_reason,
+                                    consecutive_failures,
+                                )
+                            last_failure_log_at = now
+                        backoff = min(
+                            self.PREBUFFER_RECONNECT_BACKOFF_MAX_SECONDS,
+                            self.PREBUFFER_RECONNECT_BACKOFF_BASE_SECONDS * (2 ** (consecutive_failures - 1)),
+                        )
+                        # Wake promptly if the worker is asked to stop mid-backoff.
+                        stop_event.wait(backoff)
 
     # ── High-res recording prebuffer ──────────────────────────────────
     # When a camera exposes dual streams (sub-stream for detection,
@@ -1459,6 +1521,7 @@ class RecordingService:
         camera_dir = self.prebuffer_dir / f'{camera_key}-rec'
         camera_dir.mkdir(parents=True, exist_ok=True)
         output_pattern = camera_dir / 'segment-%Y%m%dT%H%M%S.mp4'
+        consecutive_failures = 0
         while not stop_event.is_set():
             command = [
                 ffmpeg,
@@ -1520,7 +1583,18 @@ class RecordingService:
                 self._prune_prebuffer_segments(camera_dir, keep_seconds)
             if not stop_event.is_set():
                 run_seconds = time.time() - ffmpeg_started_at
-                time.sleep(5 if run_seconds < 60 else 1)
+                if run_seconds >= self.PREBUFFER_HEALTHY_RUN_SECONDS:
+                    consecutive_failures = 0
+                    stop_event.wait(1)
+                else:
+                    # Dead or flapping recording link: back off exponentially
+                    # instead of reconnecting every ~25s forever.
+                    consecutive_failures += 1
+                    backoff = min(
+                        self.PREBUFFER_RECONNECT_BACKOFF_MAX_SECONDS,
+                        self.PREBUFFER_RECONNECT_BACKOFF_BASE_SECONDS * (2 ** (consecutive_failures - 1)),
+                    )
+                    stop_event.wait(backoff)
 
     def rec_prebuffer_segments_dir(self, camera_id: str) -> Path:
         """Return the directory holding high-res recording prebuffer segments."""
