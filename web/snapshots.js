@@ -244,7 +244,7 @@ function snapshotRow(event) {
     : '';
   const snapshotUrl = `/api/events/${encodeURIComponent(event.id)}/snapshot`;
   const actions = [
-    `<a class="secondary activity-item-action activity-item-action-snapshot" href="${snapshotUrl}" target="_blank" rel="noopener" aria-label="Open snapshot for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg><span class="activity-action-label">Open</span></a>`,
+    `<a class="secondary activity-item-action activity-item-action-snapshot" href="${snapshotUrl}" target="_blank" rel="noopener" aria-label="Open snapshot for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg><span class="activity-action-label">Open</span></a>`,
   ];
   // Deleting a snapshot is an admin action (the backend requires admin).
   if (window.daygleAuth?.user?.role === 'admin') {

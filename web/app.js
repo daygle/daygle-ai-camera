@@ -190,7 +190,7 @@ function applyFilter(items) {
 function recordingLink(recordingId, label) {
   if (!recordingId) return '';
   const playIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg>';
-  return `<button class="secondary activity-item-action" data-play-recording="${encodeURIComponent(recordingId)}" type="button" aria-label="Play ${escapeHtml(label)}">${playIcon}<span class="activity-action-label">${escapeHtml(label)}</span></button>`;
+  return `<button class="secondary activity-item-action activity-item-action-play" data-play-recording="${encodeURIComponent(recordingId)}" type="button" aria-label="Play recording #${escapeHtml(String(recordingId))}">${playIcon}<span class="activity-action-label">${escapeHtml(label)}</span></button>`;
 }
 
 function renderActivityItem(item) {
@@ -204,7 +204,7 @@ function renderActivityItem(item) {
     ? item.zoneNames.map(escapeHtml).join(', ')
     : '-';
   const actions = [];
-  if (item.recordingId) actions.push(recordingLink(item.recordingId, 'Recording'));
+  if (item.recordingId) actions.push(recordingLink(item.recordingId, 'Play'));
   if (window.daygleAuth?.user?.role === 'admin') {
     const dismissIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
     actions.push(`<button class="secondary delete-btn activity-item-action" data-dismiss-event="${escapeHtml(String(item.id))}" type="button" aria-label="Dismiss ${escapeHtml(title)}">${dismissIcon}<span class="activity-action-label">Dismiss</span></button>`);

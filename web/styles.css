@@ -3605,6 +3605,20 @@ button.activity-item-action.activity-item-action-recording:hover {
   background: rgba(168, 85, 247, 0.2);
   border-color: #a855f7;
 }
+
+/* Play (cyan/accent): opens the inline clip player. Shared by the dashboard
+   feed and the recordings library so the same action reads the same colour. */
+a.activity-item-action.activity-item-action-play,
+button.activity-item-action.activity-item-action-play {
+  background: rgba(71, 214, 255, 0.10);
+  color: var(--accent);
+  border: 1px solid rgba(71, 214, 255, 0.4);
+}
+a.activity-item-action.activity-item-action-play:hover,
+button.activity-item-action.activity-item-action-play:hover {
+  background: rgba(71, 214, 255, 0.18);
+  border-color: var(--accent);
+}
 :root.light a.activity-item-action.activity-item-action-snapshot,
 :root.light button.activity-item-action.activity-item-action-snapshot {
   background: rgba(5, 150, 105, 0.10);
@@ -3616,6 +3630,12 @@ button.activity-item-action.activity-item-action-recording:hover {
   background: rgba(124, 58, 237, 0.10);
   color: #6d28d9;
   border-color: rgba(124, 58, 237, 0.35);
+}
+:root.light a.activity-item-action.activity-item-action-play,
+:root.light button.activity-item-action.activity-item-action-play {
+  background: rgba(2, 132, 199, 0.10);
+  color: #0369a1;
+  border-color: rgba(2, 132, 199, 0.35);
 }
 
 /* ─── Snapshots library (snapshots.html) ──────────────────────────────────
