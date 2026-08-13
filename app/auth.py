@@ -831,8 +831,7 @@ class AuthService:
                 )
                 # Purge login_attempts rows older than 90 days. Combined into
                 # the same transaction as the session sweep for atomicity.
-                from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-                cutoff_iso = (_dt.now(_tz.utc) - _td(days=90)).isoformat()
+                cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
                 db.execute(
                     'DELETE FROM login_attempts WHERE created_at < ?',
                     (cutoff_iso,),
