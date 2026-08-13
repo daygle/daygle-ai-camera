@@ -106,12 +106,15 @@ Unattended-Upgrade::Origins-Pattern {
 Unattended-Upgrade::Package-Blacklist {
 };
 
+// Email only when an upgrade fails ("always" and "on-change" are louder).
 Unattended-Upgrade::Mail "root";
-Unattended-Upgrade::MailReport "on-change";
+Unattended-Upgrade::MailReport "only-on-error";
 Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
 Unattended-Upgrade::Remove-New-Unused-Dependencies "true";
 Unattended-Upgrade::Remove-Unused-Dependencies "false";
-Unattended-Upgrade::Automatic-Reboot "false";
+// Reboot automatically, but only when an update requires it, at this local time.
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-Time "03:00";
 Unattended-Upgrade::AutoFixInterruptedDpkg "true";
 EOF
 ```
