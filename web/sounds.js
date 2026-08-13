@@ -480,6 +480,7 @@ async function saveSounds() {
     editingSound = normalisedSound(saved?.detection?.sound);
     setMessage('Sound settings saved.');
     await refreshStatus();
+    await refreshDetectorStatuses();
   } catch (err) {
     // Skip UI updates if api() triggered a 401 redirect
     if (window.daygleAuth?.redirecting) return;
@@ -505,6 +506,7 @@ async function loadSounds() {
   const camera = currentCamera();
   editingSound = normalisedSound(camera?.detection?.sound);
   await refreshStatus();
+  await refreshDetectorStatuses();
 }
 
 cameraSelect.addEventListener('change', () => selectCamera(cameraSelect.value));
