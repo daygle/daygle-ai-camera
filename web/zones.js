@@ -247,12 +247,24 @@ function renderZoneBox(zone, index) {
   const handles = zone.points.map((point, pointIndex) => (
     `<i class="zone-handle zone-point-handle" data-zone-index="${index}" data-point-index="${pointIndex}" style="left:${point.x * 100}%;top:${point.y * 100}%"></i>`
   )).join('');
+  // Mid-edge '+' handles let an existing zone gain extra vertices (e.g. turn a
+  // full-frame rectangle into a custom polygon). Only the selected zone shows
+  // them so the canvas isn't littered with handles for every area.
+  const addPointHandles = index === selectedZoneIndex && !drawingMode
+    ? zone.points.map((point, pointIndex) => {
+        const next = zone.points[(pointIndex + 1) % zone.points.length];
+        const midX = (point.x + next.x) / 2;
+        const midY = (point.y + next.y) / 2;
+        return `<i class="zone-handle zone-add-point-handle" data-zone-index="${index}" data-add-point="${index}:${pointIndex}" title="Add a point" style="left:${midX * 100}%;top:${midY * 100}%"></i>`;
+      }).join('')
+    : '';
   return `
     <svg class="monitor-zone-polygon${selected}" data-zone-index="${index}" viewBox="0 0 100 100" preserveAspectRatio="none">
       <polygon data-zone-index="${index}" points="${points}"></polygon>
     </svg>
     <span class="zone-label${selected}" data-zone-index="${index}" style="left:${labelPoint.x * 100}%;top:${labelPoint.y * 100}%">${escapeHtml(zone.name || `Zone ${index + 1}`)}</span>
     ${handles}
+    ${addPointHandles}
   `;
 }
 
@@ -962,6 +974,25 @@ function bindZoneDrawing() {
       liveEls.zoneOverlay.setPointerCapture(event.pointerId);
       return;
     }
+    const addPointHandle = event.target.closest('[data-add-point]');
+    if (addPointHandle) {
+      event.preventDefault();
+      const [zoneIndex, edgeIndex] = addPointHandle.dataset.addPoint.split(':').map(Number);
+      const zone = cameraDetection().zones[zoneIndex];
+      const current = zone?.points?.[edgeIndex];
+      const next = zone?.points?.[(edgeIndex + 1) % zone.points.length];
+      if (current && next) {
+        zone.points.splice(edgeIndex + 1, 0, {
+          x: (current.x + next.x) / 2,
+          y: (current.y + next.y) / 2,
+        });
+        normalizeZone(zone);
+        selectedZoneIndex = zoneIndex;
+        renderZones();
+        markZoneUnsaved();
+      }
+      return;
+    }
     const pointHandle = event.target.closest('[data-point-index]');
     const zoneBox = event.target.closest('.monitor-zone-polygon[data-zone-index], .zone-label[data-zone-index], polygon[data-zone-index]');
     if (pointHandle || zoneBox) {
@@ -1000,6 +1031,22 @@ function bindZoneDrawing() {
     zoneDrag = null;
     renderZones();
     if (draftPolygon) renderDraftPolygon();
+  });
+  liveEls.zoneOverlay.addEventListener('dblclick', (event) => {
+    if (drawingMode) return;
+    const pointHandle = event.target.closest('[data-point-index]');
+    if (!pointHandle) return;
+    event.preventDefault();
+    const zoneIndex = Number(pointHandle.dataset.zoneIndex);
+    const pointIndex = Number(pointHandle.dataset.pointIndex);
+    const zone = cameraDetection().zones[zoneIndex];
+    // A polygon needs at least 3 vertices; dropping below that would collapse
+    // the zone into a line and make the even-odd hit test meaningless.
+    if (!zone || zone.points.length <= 3) return;
+    zone.points.splice(pointIndex, 1);
+    normalizeZone(zone);
+    renderZones();
+    markZoneUnsaved();
   });
 }
 
