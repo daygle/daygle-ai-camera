@@ -138,11 +138,13 @@ Default: `Enabled`
 
 ### Shadow Suppression
 
-Rejects MOG2-classified cast shadows so a moving shadow does not register as motion. **MOG2 only** (has no effect with the Diff engine). Tri-state:
+Rejects MOG2-classified cast shadows so a moving shadow does not register as a **motion** alert. **MOG2 only** (has no effect with the Diff engine). This setting filters Layer 1 pixel motion; it does **not** filter Layer 2 YOLO object detections. With **Always Run Object Detection** enabled (the default), YOLO still evaluates every frame and can report a low-confidence object in a static shadow. Tri-state:
 
-- **On** (default) - always reject shadows.
+- **On** (default) - always reject shadows from motion alerts.
 - **Off** - never reject; use on very dark or IR scenes where a genuine subject can be misread as a shadow and dropped.
 - **Auto (day only)** - reject shadows only while the scene is bright, and automatically stop at night/IR (when the frame's mean brightness drops below the night threshold). Best for a camera that runs colour by day and IR by night without manual switching.
+
+If a snapshot is labelled with an object such as `Cat 35%` while the motion status is quiet, that is an object-detector result, not a shadow-suppression failure. Raise that object's rule minimum confidence, remove the object rule, or disable **Always Run Object Detection** if you prefer object inference to run only after motion.
 
 Default: `On`
 
@@ -411,9 +413,9 @@ This per-zone path requires the internal diff mask - a 240×320 boolean array pr
 
 ### Shadows and light reflections
 
-With the default **MOG2** engine and **Shadow Suppression** on, cast shadows are classified separately and dropped, so a person's moving shadow no longer triggers Layer 1 by itself. This is not perfect - a hard-edged shadow or a headlight sweeping a wall can still be misread, and on very dark/IR scenes shadow suppression can occasionally drop a genuine subject (disable it there).
+With the default **MOG2** engine and **Shadow Suppression** on, cast shadows are classified separately and dropped, so a person's moving shadow no longer triggers Layer 1 by itself. This does not prevent the independent YOLO pass from producing a false object label: **Always Run Object Detection** is enabled by default, and YOLO can still label a texture or shadow edge as (for example) `cat` at low confidence. A hard-edged shadow or a headlight sweeping a wall can also be misread as motion, and on very dark/IR scenes shadow suppression can occasionally drop a genuine subject (disable it there).
 
-**Workaround:** Keep **Shadow Suppression** on for daytime/colour scenes; raise **Motion Pixel Threshold** to filter minor brightness changes; and use zone geometry to avoid placing motion zones in areas prone to shadows or reflections. Using object rules (person/car) instead of motion rules also avoids this, since YOLO has semantic understanding that pixel-diff does not.
+**Workaround:** Keep **Shadow Suppression** on for daytime/colour scenes; raise **Motion Pixel Threshold** to filter minor brightness changes; and use zone geometry to avoid placing motion zones in areas prone to shadows or reflections. For false object labels, raise the matching object's minimum confidence (the screenshot's `Cat 35%` should not pass a rule configured above 0.35), or disable **Always Run Object Detection** to restore motion-gated inference. Using object rules (person/car) instead of motion rules still avoids motion-only shadow alerts, but it cannot make a low-confidence YOLO classification correct.
 
 ### First frame after startup or camera reconnect
 

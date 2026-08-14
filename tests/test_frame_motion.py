@@ -237,6 +237,41 @@ def test_mog2_is_the_default_engine_and_reports_motion():
     assert mask is not None and mask.dtype == bool
 
 
+def test_mog2_shadow_suppression_drops_cast_shadow_but_not_brightness_change():
+    """MOG2 must classify a daylight cast shadow as shadow (127), so the
+    suppression switch drops it from the motion mask; disabling the switch
+    includes the same pixels as foreground motion."""
+    cam_on = "mog2-shadow-on"
+    cam_off = "mog2-shadow-off"
+    for cam in (cam_on, cam_off):
+        for state in (st._frame_motion_mog2, st._frame_motion_mog2_meta,
+                      st._frame_motion_scene_streak):
+            state.pop(cam, None)
+
+    base = np.full((240, 320, 3), 200, dtype=np.uint8)
+    shadow = base.copy()
+    shadow[60:190, 50:260] = 105
+    for cam, suppression in ((cam_on, 'on'), (cam_off, 'off')):
+        for _ in range(5):
+            ds.detect_frame_motion(
+                cam, base, denoise=False, shadow_suppression=suppression,
+            )
+
+    has_shadow_motion, _shadow_conf, shadow_mask, shadow_fraction = ds.detect_frame_motion(
+        cam_on, shadow, denoise=False, shadow_suppression='on',
+    )
+    has_foreground_motion, _foreground_conf, foreground_mask, foreground_fraction = ds.detect_frame_motion(
+        cam_off, shadow, denoise=False, shadow_suppression='off',
+    )
+
+    assert has_shadow_motion is False
+    assert shadow_fraction == 0.0
+    assert shadow_mask is not None and not np.any(shadow_mask)
+    assert has_foreground_motion is True
+    assert foreground_fraction > 0.05
+    assert foreground_mask is not None and np.any(foreground_mask)
+
+
 def test_mog2_denoise_removes_isolated_speckle():
     """With denoise on, a lone single-pixel change is erased from the mask;
     with denoise off the same speckle survives. Proves the morphological open
