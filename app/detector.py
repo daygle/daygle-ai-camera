@@ -787,7 +787,8 @@ class OnnxYoloDetector:
         if predictions.shape[1] != 6:
             raise ValueError(
                 f"Unexpected NMS-free output shape: {tuple(np.asarray(output).shape)}. Expected [1, N, 6]."
-            )        # Slice into structured arrays. ``class_ids`` is cast to int32 once so
+            )
+        # Slice into structured arrays. ``class_ids`` is cast to int32 once so
         # the per-box label lookup below doesn't repeatedly coerce floats.
         boxes = predictions[:, :4]  # [x1, y1, x2, y2] in input-space
         scores = predictions[:, 4]  # confidence

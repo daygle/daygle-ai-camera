@@ -443,6 +443,28 @@ def test_validate_camera_settings_rejects_missing_stream_url_for_onvif(monkeypat
     assert 'stream_url is required' in exc_info.value.detail
 
 
+def test_validate_camera_settings_persists_and_validates_stale_frame_grabs(monkeypatch, pv):
+    """``stale_frame_grabs`` (UI "Frame Buffer Drains") must survive validation.
+
+    It was previously absent from the validator's key handling, so the setting
+    was silently dropped on every save and never persisted. Blank -> None,
+    a valid integer is kept, and an out-of-range value is a clean 400.
+    """
+    from fastapi import HTTPException
+    _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok')
+
+    kept = pv.validate_camera_settings({'stale_frame_grabs': 5})
+    assert kept['stale_frame_grabs'] == 5
+
+    blank = pv.validate_camera_settings({'stale_frame_grabs': ''})
+    assert blank['stale_frame_grabs'] is None
+
+    with pytest.raises(HTTPException) as exc_info:
+        pv.validate_camera_settings({'stale_frame_grabs': 99})
+    assert exc_info.value.status_code == 400
+    assert 'stale_frame_grabs must be between 0 and 20' in exc_info.value.detail
+
+
 def test_validate_camera_settings_rejects_invalid_flip(monkeypatch, pv):
     from fastapi import HTTPException
     _install_validator_dependencies(monkeypatch, build_stream_url=lambda settings: 'rtsp://ok')

@@ -180,6 +180,32 @@ def test_deliver_push_notifications_passes_all_triggered_labels(tmp_path, monkey
     assert {entry['camera_id'] for entry in captured} == {'front'}
 
 
+def test_alert_detection_type_classifies_every_sound_class_as_sound():
+    """Every configured sound class must render "Detection Type: Sound", motion
+    as "Motion", and object labels (including underscored ones) as "Object".
+
+    Regression guard for the old underscore heuristic, which misclassified
+    ``doorbell`` (no underscore) and ``car_alarm`` (excluded by the ``car``
+    prefix) as "Object", and inversely tagged underscored object labels such as
+    ``traffic_light`` as "Sound".
+    """
+    from app.alert_formatting import build_alert_content
+    from app.sound_detector import SOUND_CLASSES
+
+    def detection_type_for(label: str) -> str:
+        return build_alert_content(
+            {'label': label, 'rule_name': f'{label} rule', 'confidence': 0.9, 'message': 'x'},
+            event_id=1,
+            camera_name='Cam',
+        ).detection_type
+
+    for class_id in SOUND_CLASSES:
+        assert detection_type_for(class_id) == 'Sound', class_id
+    assert detection_type_for('motion') == 'Motion'
+    for object_label in ('cat', 'person', 'car', 'traffic_light', 'fire_hydrant'):
+        assert detection_type_for(object_label) == 'Object', object_label
+
+
 def test_email_alert_subject_lists_all_triggered_labels():
     """A single event whose detections include both cat and person must produce
     TWO alert emails (one per rule), each citing "Cat, Person detected" in the

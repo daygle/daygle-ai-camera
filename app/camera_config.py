@@ -78,10 +78,15 @@ def normalize_camera_settings(
     else:
         camera_settings['fps'] = int(raw_fps)
     camera_settings['recording_stream_path'] = str(camera_settings.get('recording_stream_path') or '').strip()
+    # Match the ``fps`` handling above: an empty/whitespace string (the form's
+    # blank "Auto" value, or a restored/legacy config) means "no override" ->
+    # None, rather than reaching ``int('')`` and raising ValueError out of every
+    # ``effective_cameras_config`` read.
     raw_stale = camera_settings.get('stale_frame_grabs')
-    camera_settings['stale_frame_grabs'] = (
-        int(raw_stale) if raw_stale is not None else None
-    )
+    if raw_stale is None or (isinstance(raw_stale, str) and not raw_stale.strip()):
+        camera_settings['stale_frame_grabs'] = None
+    else:
+        camera_settings['stale_frame_grabs'] = int(raw_stale)
     detection = default_camera_detection_settings()
     if isinstance(camera_settings.get('detection'), dict):
         detection.update(camera_settings['detection'])

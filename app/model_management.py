@@ -364,13 +364,11 @@ def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, preci
     #    concern handled by ``app.quantization.quantize_int8``.
     export_kwargs = _export_kwargs(nms_free, precision=precision, device=device)
     cached_weights = MODELS_DIR / pt_name
-    weights_arg = pt_name
     export_script = (
         "import sys\n"
         "from ultralytics import YOLO\n"
         f"YOLO(sys.argv[1]).export({export_kwargs}, imgsz=int(sys.argv[2]))\n"
     )
-    command = [sys.executable, '-c', export_script, pt_name, str(imgsz)]
     # Ultralytics always emits ``<weights-stem>.onnx``. Export resolution
     # variants in an isolated directory so producing ``yolo11n-1024.onnx``
     # cannot overwrite the legacy ``yolo11n.onnx`` or another variant.
@@ -385,7 +383,7 @@ def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, preci
         if cached_weights.is_file():
             shutil.copy2(cached_weights, export_dir / pt_name)
     try:
-        command = [sys.executable, '-c', export_script, weights_arg, str(imgsz)]
+        command = [sys.executable, '-c', export_script, pt_name, str(imgsz)]
         result = subprocess.run(command, cwd=export_dir, capture_output=True, text=True, timeout=600, check=False)
         if result.returncode != 0:
             details = (result.stderr or result.stdout or '').strip()

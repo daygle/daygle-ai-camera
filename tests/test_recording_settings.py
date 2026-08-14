@@ -341,6 +341,33 @@ def test_normalize_camera_sound_settings_passes_through_active_window_strings(mo
     assert rule['name'] == 'Siren'
 
 
+def test_normalize_camera_sound_settings_zero_pads_active_and_notify_windows(monkeypatch, rs):
+    """Non-padded ``H:MM`` bounds must be zero-padded to ``HH:MM``.
+
+    The active/notify windows are compared LEXICALLY against the current
+    ``HH:MM`` in ``SoundDetector._rule_active_now`` / ``_rule_notify_active_now``,
+    so ``"9:00"`` (which sorts after ``"10:00"`` and ``"08:30"``) would evaluate
+    the window incorrectly. This mirrors the zone-rule path, which already
+    normalises via ``app.utils.normalize_hhmm``. Guards a config that reached
+    storage from a direct API call or a restored/legacy backup rather than the
+    zero-padding settings form.
+    """
+    _install_recording_dependencies(monkeypatch)
+
+    out = rs._normalize_camera_sound_settings({
+        'rules': [{
+            'class': 'siren',
+            'active_start': '9:00', 'active_end': '17:5',
+            'notify_start': '8:05', 'notify_end': '22:00',
+        }],
+    })
+    rule = out['rules'][0]
+    assert rule['active_start'] == '09:00'
+    assert rule['active_end'] == '17:05'
+    assert rule['notify_start'] == '08:05'
+    assert rule['notify_end'] == '22:00'
+
+
 def test_normalize_camera_sound_settings_drops_rules_when_class_lacks_default(monkeypatch, rs):
     """If a saved rule's class doesn't have a matching default in
     ``DEFAULT_RULES`` (race with config schema updates), the rule is

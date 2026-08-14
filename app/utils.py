@@ -192,6 +192,33 @@ def normalize_email_recipients(value: Any) -> list[str]:
     return recipients
 
 
+def normalize_hhmm(value: Any) -> str | None:
+    """Return a zero-padded ``HH:MM`` string, or ``None`` for empty/unset values.
+
+    Alert active/notify windows are compared LEXICALLY against the current
+    ``HH:MM`` (see ``AlertEngine._is_active_now``, ``_rule_notify_active_now``
+    and ``SoundDetector._rule_active_now``). A non-padded ``"9:00"`` sorts after
+    ``"10:00"`` and after a padded ``"08:30"`` (``'9' > '1' > '0'``), so a rule
+    whose bounds are not zero-padded evaluates its window wrong. Padding here
+    keeps the comparison correct regardless of how the value reached storage
+    (settings form, direct API call, or a restored/legacy config). Values that
+    are already zero-padded or that can't be parsed pass through unchanged so
+    existing well-formed data is unaffected.
+    """
+    s = str(value or '').strip()
+    if not s:
+        return None
+    parts = s.split(':')
+    if len(parts) == 2:
+        try:
+            h, m = int(parts[0]), int(parts[1])
+            if 0 <= h <= 23 and 0 <= m <= 59:
+                return f'{h:02d}:{m:02d}'
+        except ValueError:
+            pass
+    return s
+
+
 def _parse_iso_datetime(value: Any) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(str(value or ''))

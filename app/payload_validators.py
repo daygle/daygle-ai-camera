@@ -266,6 +266,22 @@ def validate_camera_settings(payload: dict[str, Any], current: dict[str, Any] | 
         if fps_val < 1 or fps_val > 120:
             raise HTTPException(status_code=400, detail='fps must be between 1 and 120.')
         updated['fps'] = fps_val
+    # ``stale_frame_grabs`` (UI: "Frame Buffer Drains") is an optional per-camera
+    # override consumed by OpenCvStreamCamera. It was previously absent from this
+    # validator, so the setting was silently dropped on every save and never
+    # persisted. Mirror the fps handling: blank/None -> None (auto), otherwise a
+    # validated 0-20 integer (matching the form's min/max).
+    raw_stale = payload.get('stale_frame_grabs') if 'stale_frame_grabs' in payload else current.get('stale_frame_grabs')
+    if raw_stale is None or raw_stale == '':
+        updated['stale_frame_grabs'] = None
+    else:
+        try:
+            stale_val = int(raw_stale)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail='stale_frame_grabs must be an integer.') from exc
+        if stale_val < 0 or stale_val > 20:
+            raise HTTPException(status_code=400, detail='stale_frame_grabs must be between 0 and 20.')
+        updated['stale_frame_grabs'] = stale_val
     if 'port' in updated or 'port' in payload:
         updated['port'] = _int_field({**current, **payload}, 'port', 554, 1, 65535)
     for key in ('stream_url', 'recording_stream_path', 'host', 'path', 'username', 'password'):

@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
 import numpy as np  # noqa: E402
 
 import app.detection_state as ds  # noqa: E402
+import app.event_debounce as ed  # noqa: E402
 import app.state as st  # noqa: E402
 
 
@@ -79,6 +80,52 @@ def test_invalid_image_fails_closed_instead_of_synthetic_motion():
     assert confidence == 0.0
     assert diff_mask is None
     assert fraction == 0.0
+
+
+def test_steady_state_backoff_clear_does_not_wipe_motion_background():
+    """``clear_live_camera_backoff`` runs on EVERY successful frame, before the
+    motion gate. In steady state (camera not backed off) it must NOT reset the
+    per-camera motion state, otherwise the diff engine's adaptive background is
+    destroyed every cycle and it can never accumulate one -- so it never reports
+    motion (and the periodic-scan clock resets every frame). It may only reset
+    on a genuine transition out of backoff."""
+    cam = "motion-backoff-steady"
+    st._frame_motion_prev.pop(cam, None)
+    st.live_detection_failure_count.pop(cam, None)
+    st.live_detection_retry_after.pop(cam, None)
+    st._periodic_scan_last_ts[cam] = 12345.0
+
+    base = np.full((120, 160, 3), 100, dtype=np.uint8)
+    moved = base.copy()
+    moved[20:90, 40:130] = 255  # a large, clearly-alertable change
+
+    # Simulate the live-monitor order: clear backoff, then run the gate.
+    ed.clear_live_camera_backoff(cam)
+    ds.detect_frame_motion(cam, base, algorithm="diff")  # seeds the background
+    # Steady-state clear must leave the seeded background and the scan clock in place.
+    assert cam in st._frame_motion_prev
+    assert st._periodic_scan_last_ts.get(cam) == 12345.0
+
+    ed.clear_live_camera_backoff(cam)
+    has_motion, _conf, _mask, frac = ds.detect_frame_motion(cam, moved, algorithm="diff")
+    assert has_motion is True and frac > 0.0
+
+
+def test_recovery_backoff_clear_resets_motion_state():
+    """A genuine transition out of backoff DOES reset the per-camera motion
+    state (both engines) so a scene that changed during the outage reseeds
+    instead of producing a spurious first-frame motion event."""
+    cam = "motion-backoff-recovery"
+    base = np.full((120, 160, 3), 100, dtype=np.uint8)
+    ds.detect_frame_motion(cam, base, algorithm="diff")  # seed a background
+    assert cam in st._frame_motion_prev
+
+    st.live_detection_failure_count[cam] = 3  # mark the camera as backed off
+    ed.clear_live_camera_backoff(cam)
+
+    assert cam not in st._frame_motion_prev
+    assert cam not in st._frame_motion_mog2
+    assert cam not in st._periodic_scan_last_ts
 
 
 def test_sub_gate_motion_keeps_confidence_zero_but_records_changes():

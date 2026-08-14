@@ -13,17 +13,22 @@ from app.auth_gates import require_admin, require_user
 from app.camera_config import normalize_camera_id
 from app.config_facades import effective_cameras_config, effective_recording_config
 from app.deps import get_database
-from app.media_utils import mp4_has_video_stream, recording_stream_path, safe_storage_path
-from app.recording_extension import load_recording_detection_track, recording_track_sidecar_path
-from app.request_helpers import write_audit_log
-from app.utils import camera_default_name
-from app.backup import purge_recordings_by_policy
+from app.media_utils import (
+    _recording_timeline_segment,
+    mp4_has_video_stream,
+    recording_stream_path,
+    safe_storage_path,
+)
 from app.recording_extension import (
     _recording_capture_window,
     delete_recording_files,
+    load_recording_detection_track,
+    recording_track_sidecar_path,
     write_live_history_detection_track,
 )
-from app.media_utils import _recording_timeline_segment
+from app.request_helpers import write_audit_log
+from app.utils import camera_default_name
+from app.backup import purge_recordings_by_policy
 
 router = APIRouter()
 

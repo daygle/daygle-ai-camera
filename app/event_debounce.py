@@ -145,15 +145,37 @@ def remember_live_event(camera_id: str, labels: set[str], *, merge: bool=False) 
 
 
 def clear_live_camera_backoff(camera_id: str) -> None:
-    from app.diagnostics import log_camera_diagnostic
     with _state._live_backoff_lock:
         was_backed_off = bool(_state.live_detection_failure_count.get(camera_id))
         _state.live_detection_retry_after.pop(camera_id, None)
         _state.live_detection_failure_count.pop(camera_id, None)
-    if was_backed_off:
-        log_camera_diagnostic(camera_id, 'detection_recovered', 'Live detection resumed after a successful frame read.', severity='info')
+    if not was_backed_off:
+        # Steady-state success (this runs on EVERY successful frame read, before
+        # ``process_live_stream_alerts``): the backoff counters were already
+        # empty, so there is nothing to recover. The per-camera motion models
+        # and the periodic-scan clock MUST persist between frames -- the diff
+        # engine accumulates its adaptive background in ``_frame_motion_prev``,
+        # and the periodic scan measures its interval from
+        # ``_periodic_scan_last_ts``. Clearing them unconditionally here reset
+        # the diff background every cycle (so it never accumulated one and never
+        # reported motion) and reset the scan clock every cycle (so the periodic
+        # scan fired every frame instead of every N seconds). Only reset on a
+        # genuine transition out of backoff.
+        return
+    log_camera_diagnostic(camera_id, 'detection_recovered', 'Live detection resumed after a successful frame read.', severity='info')
+    # Genuine recovery from an outage: frames were unavailable for a while and
+    # the scene may have changed, so drop the stale per-camera motion state for
+    # BOTH engines (the diff engine's adaptive background and last-frame
+    # buffers, and the MOG2 mixture model + scene-streak). Each engine reseeds
+    # from the next frame instead of diffing against a pre-outage model and
+    # emitting a spurious motion event on the first recovered frame.
     with _state._frame_motion_lock:
         _state._frame_motion_prev.pop(camera_id, None)
+        _state._frame_motion_last_frame.pop(camera_id, None)
+        _state._frame_motion_last_gray.pop(camera_id, None)
+        _state._frame_motion_mog2.pop(camera_id, None)
+        _state._frame_motion_mog2_meta.pop(camera_id, None)
+        _state._frame_motion_scene_streak.pop(camera_id, None)
     _state._frame_motion_error_cameras.discard(camera_id)
     _state._periodic_scan_last_ts.pop(camera_id, None)
 

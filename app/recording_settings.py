@@ -58,7 +58,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.sound_detector import DEFAULT_RULES, SOUND_CLASSES
-from app.utils import normalize_bool_setting, normalize_email_recipients
+from app.utils import normalize_bool_setting, normalize_email_recipients, normalize_hhmm
 
 
 def normalize_camera_recording_settings(settings: Any) -> dict[str, Any]:
@@ -151,10 +151,14 @@ def _normalize_camera_sound_settings(raw: Any) -> dict[str, Any]:
             'email_enabled': normalize_bool_setting(r.get('email_enabled'), False),
             'email_recipients': normalize_email_recipients(r.get('email_recipients', [])),
             'push_enabled': normalize_bool_setting(r.get('push_enabled'), False),
-            'active_start': str(r.get('active_start') or '').strip() or None,
-            'active_end': str(r.get('active_end') or '').strip() or None,
-            'notify_start': str(r.get('notify_start') or '').strip() or None,
-            'notify_end': str(r.get('notify_end') or '').strip() or None,
+            # Zero-pad the active/notify windows exactly like the zone-rule path
+            # (app.zone_schema): both are compared lexically against the current
+            # HH:MM, so a non-padded "9:00" (from a direct API call or restored
+            # config) would otherwise evaluate the window wrong.
+            'active_start': normalize_hhmm(r.get('active_start')),
+            'active_end': normalize_hhmm(r.get('active_end')),
+            'notify_start': normalize_hhmm(r.get('notify_start')),
+            'notify_end': normalize_hhmm(r.get('notify_end')),
         })
     return {'enabled': enabled, 'rules': rules}
 

@@ -86,6 +86,15 @@ def _now_hm_in_admin_tz() -> str:
     return now_local.strftime('%H:%M')
 
 
+# Alternative spellings that collapse to a single canonical object label, so a
+# ``person`` rule fires for a ``human``/``people``/``pedestrian`` detection.
+_OBJECT_LABEL_ALIASES: dict[str, str] = {
+    'human': 'person',
+    'people': 'person',
+    'pedestrian': 'person',
+}
+
+
 class AlertEngine:
     def __init__(self, rules: list[dict[str, Any]]) -> None:
         self.rules = rules
@@ -204,12 +213,10 @@ class AlertEngine:
     @staticmethod
     def _normalize_object_label(value: Any) -> str:
         label = str(value or '').strip().lower()
-        aliases = {
-            'human': 'person',
-            'people': 'person',
-            'pedestrian': 'person',
-        }
-        return aliases.get(label, label)
+        # ``process`` calls this per detection and per rule on the ~4 Hz hot
+        # path, so the alias map is a module constant rather than a dict rebuilt
+        # on every call.
+        return _OBJECT_LABEL_ALIASES.get(label, label)
 
     @staticmethod
     def _is_active_now(rule: dict[str, Any]) -> bool:
