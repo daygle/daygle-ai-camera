@@ -248,6 +248,15 @@ def test_normalize_camera_settings_coerces_stale_frame_grabs(cc):
     assert cc.normalize_camera_settings({})['stale_frame_grabs'] is None
 
 
+def test_normalize_camera_settings_treats_blank_stale_frame_grabs_as_none(cc):
+    """A blank/whitespace ``stale_frame_grabs`` (the form's "Auto" value, or a
+    restored/legacy config) must resolve to None like ``fps`` does, rather than
+    reaching ``int('')`` and raising ValueError out of every
+    ``effective_cameras_config`` read."""
+    assert cc.normalize_camera_settings({'stale_frame_grabs': ''})['stale_frame_grabs'] is None
+    assert cc.normalize_camera_settings({'stale_frame_grabs': '  '})['stale_frame_grabs'] is None
+
+
 # -- _redact_camera --------------------------------------------------------
 
 def test_redact_camera_strips_password_and_adds_has_password_flag(cc):
