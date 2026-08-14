@@ -84,30 +84,14 @@ from __future__ import annotations
 from typing import Any
 
 from app.camera_id import normalize_camera_id
-from app.utils import normalize_bool_setting, normalize_email_recipients
+from app.utils import normalize_bool_setting, normalize_email_recipients, normalize_hhmm
 
 
-def _normalize_hhmm(value: Any) -> str | None:
-    """Return a zero-padded ``HH:MM`` string, or ``None`` for empty/unset values.
-
-    Ensures lexicographic comparison in ``_rule_notify_active_now`` and
-    ``AlertEngine._is_active_now`` works correctly: "9:00" stored verbatim
-    compares as "9:00" > "10:00" (wrong), while "09:00" compares correctly.
-    Values that are already zero-padded or that can't be parsed pass through
-    unchanged so existing well-formed data is unaffected.
-    """
-    s = str(value or '').strip()
-    if not s:
-        return None
-    parts = s.split(':')
-    if len(parts) == 2:
-        try:
-            h, m = int(parts[0]), int(parts[1])
-            if 0 <= h <= 23 and 0 <= m <= 59:
-                return f'{h:02d}:{m:02d}'
-        except ValueError:
-            pass
-    return s
+# ``HH:MM`` normalisation lives in ``app.utils`` (canonical home for the
+# ``normalize_*`` settings helpers) so the zone-rule and sound-rule settings
+# paths share one implementation. Kept under the original module-private name
+# for the four call sites below.
+_normalize_hhmm = normalize_hhmm
 
 
 # Module-private label canonicalization: maps alternative spellings of the
