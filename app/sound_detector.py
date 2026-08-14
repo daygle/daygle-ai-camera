@@ -1037,7 +1037,3 @@ class SoundDetector:
                     buffer = buffer[-chunk_samples:]
             # Segments arrive ~1/s; poll a little faster so detection stays prompt.
             self._stop_event.wait(0.5)
-
-
-# Backwards-compatible alias
-CatMeowDetector = SoundDetector

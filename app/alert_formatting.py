@@ -85,15 +85,21 @@ def build_alert_content(
 
     detected_at_display = str(detected_at).strip() if detected_at else None
 
-    # Detection type from the alert label: motion, an underscored sound class
-    # (e.g. ``dog_bark``) that is not a vehicle/person object, or an object.
+    # Detection type from the alert label: motion, a configured sound class
+    # (e.g. ``dog_bark``), or otherwise an object. Membership is tested against
+    # the authoritative ``SOUND_CLASSES`` catalogue rather than an underscore
+    # heuristic: the old heuristic misclassified ``doorbell`` (no underscore ->
+    # "Object") and ``car_alarm`` (excluded by the ``car`` prefix -> "Object"),
+    # and inversely tagged underscored object labels (e.g. ``traffic_light``)
+    # as "Sound". Imported lazily to keep this pure formatter free of a
+    # module-level dependency on the sound backend (mirrors app.api.sound_router).
     label_val = str(alert.get('label') or '').strip()
     label_lower = label_val.lower()
-    detection_type = 'Object'
     if label_lower == 'motion':
         detection_type = 'Motion'
-    elif '_' in label_lower and not label_lower.startswith(('car', 'person', 'truck')):
-        detection_type = 'Sound'
+    else:
+        from app.sound_detector import SOUND_CLASSES
+        detection_type = 'Sound' if label_lower in SOUND_CLASSES else 'Object'
 
     # Zone (and a fallback label) come from the canonical
     # "Camera / Zone / Label" rule name when present.
