@@ -65,14 +65,10 @@ function setAddZoneLabel(text) {
   if (label) label.textContent = text;
 }
 
-// Shape taxonomy for the per-zone Shape control. All three are really polygons
-// in the data model - the labels just describe the geometry:
-//   full      - the 4 corners of the camera frame
-//   rectangle - an axis-aligned 4-point box that does not cover the whole frame
-//   polygon   - anything else (custom shapes, 3-point or 5+ point areas)
-// Detected by shape rather than a stored flag, so a rectangle dragged back to
-// the frame corners reads as full frame again and any drag of a corner or an
-// added vertex naturally reclassifies it.
+// A "full frame" zone is just a polygon whose points are the four corners of
+// the camera frame. Detected by shape rather than a stored flag so a rectangle
+// reshaped back to the frame corners reads as full frame again, and any drag of
+// a corner or an added vertex naturally flips it back to a polygon.
 const FULL_FRAME_POINTS = [
   { x: 0, y: 0 },
   { x: 1, y: 0 },
@@ -89,30 +85,12 @@ function isFullFrameZone(zone) {
   });
 }
 
-// Axis-aligned rectangle: the zone's points coincide with the corners of its
-// own bounding box (x/y/width/height) but it does not cover the whole frame.
-function isRectangleZone(zone) {
-  const points = zone?.points;
-  if (!Array.isArray(points) || points.length !== 4) return false;
-  const corners = rectanglePoints(zone);
-  return points.every((point, index) => {
-    const corner = corners[index];
-    return Math.abs(point.x - corner.x) < 0.001 && Math.abs(point.y - corner.y) < 0.001;
-  });
-}
-
-function zoneShape(zone) {
-  if (isFullFrameZone(zone)) return 'full';
-  if (isRectangleZone(zone)) return 'rectangle';
-  return 'polygon';
-}
-
-// Remember the shape a zone had before a shape-replacing conversion (to full
-// frame or to a rectangle) so it can be undone in-session. Stored as
-// non-enumerable properties so they never leak into the saved JSON payload
-// (the backend rebuilds zones with a fixed key set anyway, so they can never
-// persist). `_convertedSeq` is a monotonic sequence used by Ctrl+Z to undo the
-// most recent conversion when several zones have one pending.
+// Remember the shape a zone had before it was converted to full frame so the
+// conversion can be undone in-session. Stored as non-enumerable properties so
+// they never leak into the saved JSON payload (the backend rebuilds zones with
+// a fixed key set anyway, so they can never persist). `_convertedSeq` is a
+// monotonic sequence used by Ctrl+Z to undo the most recent conversion when
+// several zones have one pending.
 let shapeUndoSeq = 0;
 
 function rememberZoneShape(zone, points) {
@@ -138,12 +116,6 @@ function clearRememberedShape(zone) {
 function convertZoneToFullFrame(zone) {
   rememberZoneShape(zone, zone.points);
   zone.points = FULL_FRAME_POINTS.map((point) => ({ ...point }));
-  normalizeZone(zone);
-}
-
-function convertZoneToRectangle(zone) {
-  rememberZoneShape(zone, zone.points);
-  zone.points = rectanglePoints(zone);
   normalizeZone(zone);
 }
 
@@ -372,12 +344,9 @@ function renderZoneBox(zone, index) {
   const labelPoint = { x: zone.x, y: zone.y };
   // Compact shape badge on the canvas label (hover shows the full name).
   // The third entry is the CSS suffix (.zone-shape-badge--<suffix>).
-  const shape = zoneShape(zone);
-  const shapeBadge = {
-    full: ['Full', 'Full frame', 'full'],
-    rectangle: ['Rect', 'Rectangle', 'rect'],
-    polygon: ['Poly', 'Polygon', 'poly'],
-  }[shape];
+  const shapeBadge = isFullFrameZone(zone)
+    ? ['Full', 'Full frame', 'full']
+    : ['Poly', 'Polygon', 'poly'];
   const handles = zone.points.map((point, pointIndex) => (
     `<i class="zone-handle zone-point-handle" data-zone-index="${index}" data-point-index="${pointIndex}" style="left:${point.x * 100}%;top:${point.y * 100}%"></i>`
   )).join('');
@@ -567,15 +536,12 @@ function renderZones() {
     return;
   }
   liveEls.zoneList.innerHTML = zones.map((zone, index) => {
-    const shape = zoneShape(zone);
+    const fullFrame = isFullFrameZone(zone);
     const zoneLabel = escapeHtml(zone.name || `Zone ${index + 1}`);
     const hasUndo = Boolean(zone._previousPoints);
     const polygonTitle = hasUndo
       ? 'Restore the shape from before the last conversion'
       : 'Custom shape - drag corner dots or click a mid-edge dot to add a point';
-    const rectangleTitle = shape === 'polygon'
-      ? 'Snap this area to its tightest axis-aligned box'
-      : 'An axis-aligned box - drag a corner dot to resize it';
     const shapeOption = (mode, label, active, title) => `
       <button type="button" class="zone-shape-option${active ? ' is-active' : ''}" data-zone-shape="${index}" data-zone-shape-mode="${mode}" aria-pressed="${active}" title="${title}">${label}</button>`;
     return `
@@ -591,16 +557,24 @@ function renderZones() {
             ${hasUndo ? `<button type="button" class="zone-shape-undo" data-undo-zone-shape="${index}" title="Restore the shape this area had before its last conversion">${ICONS.undo}Undo</button>` : ''}
           </div>
           <div class="zone-shape-toggle" role="group" aria-label="Shape for ${zoneLabel}">
-            ${shapeOption('full', 'Full frame', shape === 'full', 'Cover the whole camera frame')}
-            ${shapeOption('rectangle', 'Rectangle', shape === 'rectangle', rectangleTitle)}
-            ${shapeOption('polygon', 'Polygon', shape === 'polygon', polygonTitle)}
+            ${shapeOption('full', 'Full frame', fullFrame, 'Cover the whole camera frame')}
+            ${shapeOption('polygon', 'Polygon', !fullFrame, polygonTitle)}
           </div>
         </div>
         <div class="zone-visibility-field">
           <span>Visibility</span>
-          <button class="secondary zone-visibility-toggle ${zone.enabled !== false ? 'is-shown' : 'is-hidden'}" type="button" data-zone-enabled="${index}" aria-label="${zone.enabled !== false ? 'Hide' : 'Show'} ${zoneLabel} area" aria-pressed="${zone.enabled !== false}">${zone.enabled !== false ? 'Shown' : 'Hidden'}</button>
+          <label class="toggle-control zone-visibility-toggle ${zone.enabled !== false ? 'is-shown' : 'is-hidden'}" title="${zone.enabled !== false ? 'Hide this area on the preview' : 'Show this area on the preview'}">
+            <input type="checkbox" data-zone-enabled="${index}" ${zone.enabled !== false ? 'checked' : ''} aria-label="${zone.enabled !== false ? 'Hide' : 'Show'} ${zoneLabel} area" />
+            <span>${zone.enabled !== false ? 'Shown' : 'Hidden'}</span>
+          </label>
         </div>
-        <button class="btn-danger zone-action-btn" type="button" data-delete-zone="${index}">${ICONS.remove}Remove</button>
+        <div class="zone-row-actions">
+          <button class="btn-danger zone-action-btn" type="button" data-delete-zone="${index}">${ICONS.remove}Remove</button>
+          <button class="primary zone-action-save" type="button" data-save-zone="${index}" title="Save all zone changes">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+            Save
+          </button>
+        </div>
       </div>
     </div>
   `;
@@ -876,49 +850,41 @@ function bindZoneControls(zones) {
       markZoneUnsaved();
     });
   });
-  document.querySelectorAll('[data-zone-enabled]').forEach((button) => {
-    button.addEventListener('click', () => {
-      selectedZoneIndex = Number(button.dataset.zoneEnabled);
-      zones[selectedZoneIndex].enabled = zones[selectedZoneIndex].enabled === false;
+  document.querySelectorAll('[data-zone-enabled]').forEach((checkbox) => {
+    checkbox.addEventListener('change', () => {
+      const index = Number(checkbox.dataset.zoneEnabled);
+      selectedZoneIndex = index;
+      zones[index].enabled = checkbox.checked;
       renderZones();
       refreshFrame();
       markZoneUnsaved();
     });
   });
-  // Switch an existing zone between full frame, an axis-aligned rectangle, and
-  // a custom polygon shape. Shape-replacing conversions (-> full frame, ->
-  // rectangle) apply immediately with NO confirm dialog: both remember the
-  // previous shape first, so the Undo button and the Polygon option can always
-  // bring it back. "Softer" selections just ready the zone for reshaping,
-  // which every zone supports via its corner dots and mid-edge + handles.
+  // Per-area Save: same operation as the footer/header Save buttons - the whole
+  // camera's zone config is persisted at once.
+  document.querySelectorAll('[data-save-zone]').forEach((button) => {
+    button.addEventListener('click', () => saveZones());
+  });
+  // Switch an existing zone between the full frame and a custom polygon shape.
+  // Converting to full frame applies immediately with NO confirm dialog: the
+  // previous shape is remembered first, so the Undo button and the Polygon
+  // option can always bring it back. "Softer" selections just ready the zone
+  // for reshaping, which every zone supports via its corner dots and mid-edge
+  // + handles.
   document.querySelectorAll('[data-zone-shape]').forEach((button) => {
     button.addEventListener('click', () => {
       const index = Number(button.dataset.zoneShape);
       const zone = zones[index];
       if (!zone) return;
       const mode = button.dataset.zoneShapeMode;
-      const shape = zoneShape(zone);
-      if (mode === 'full' && shape !== 'full') {
+      if (mode === 'full' && !isFullFrameZone(zone)) {
         convertZoneToFullFrame(zone);
         selectedZoneIndex = index;
         renderZones();
         refreshFrame();
         markZoneUnsaved();
         liveEls.status.textContent = 'Zone converted to full frame - click Save Zones to apply.';
-      } else if (mode === 'rectangle' && shape === 'polygon') {
-        convertZoneToRectangle(zone);
-        selectedZoneIndex = index;
-        renderZones();
-        refreshFrame();
-        markZoneUnsaved();
-        liveEls.status.textContent = 'Zone snapped to a rectangle - click Save Zones to apply.';
-      } else if (mode === 'rectangle' && shape === 'full') {
-        // A full frame is already a rectangle - selecting Rectangle just readies
-        // the zone so a corner can be dragged in to shrink it.
-        selectedZoneIndex = index;
-        renderZones();
-        liveEls.status.textContent = 'Drag a corner dot to shrink this area into a rectangle.';
-      } else if (mode === 'polygon' && shape !== 'polygon') {
+      } else if (mode === 'polygon' && isFullFrameZone(zone)) {
         // Restore the pre-conversion shape when one is remembered, otherwise
         // just select the zone so its reshape handles appear.
         if (!restorePreviousZoneShape(index)) {
@@ -1289,6 +1255,8 @@ function markZoneUnsaved() {
   if (btn) btn.style.display = '';
   liveEls.status.textContent = 'Unsaved changes - click Save Zones to apply.';
   liveEls.status.classList.add('has-unsaved');
+  // Reveal the per-area Save buttons while there is something to save.
+  liveEls.zoneList?.classList.add('has-unsaved');
 }
 
 function markZoneSaved() {
@@ -1296,6 +1264,7 @@ function markZoneSaved() {
   const btn = document.getElementById('saveZonesBtnHeader');
   if (btn) btn.style.display = 'none';
   liveEls.status.classList.remove('has-unsaved');
+  liveEls.zoneList?.classList.remove('has-unsaved');
 }
 
 async function saveZones() {

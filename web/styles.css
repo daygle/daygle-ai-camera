@@ -122,7 +122,6 @@
 :root.light .update-output { background: rgba(255,255,255,.6); color: var(--muted); }
 :root.light .zone-label { background: rgba(255,255,255,.85); }
 :root.light .zone-shape-badge--full { background: rgba(2,132,199,.12); color: #0369a1; }
-:root.light .zone-shape-badge--rect { background: rgba(5,150,105,.12); color: #047857; }
 :root.light .zone-shape-badge--poly { background: rgba(234,88,12,.12); color: #c2410c; }
 :root.light .zone-row.selected { border-color: rgba(5,150,105,.6); background: rgba(5,150,105,.06); }
 :root.light .live-detection-status {
@@ -1499,7 +1498,6 @@ input[type="file"] { padding: 10px; }
   font-style: normal;
 }
 .zone-shape-badge--full { background: rgba(71,214,255,.18); color: var(--accent); }
-.zone-shape-badge--rect { background: rgba(73,230,163,.16); color: var(--success); }
 .zone-shape-badge--poly { background: rgba(251,146,60,.2); color: #fb923c; }
 .zone-handle {
   position: absolute;
@@ -5965,15 +5963,35 @@ button.secondary:disabled, a.secondary:disabled {
 .zone-row-main label > span { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
 .zone-row-main .zone-visibility-field > span { color: var(--muted); background: transparent; }
 .zone-row-main label select { min-height: 42px; border-radius: 11px; }
-.zone-action-btn {
+.zone-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   grid-column: 2;
   grid-row: 3;
   align-self: end;
+}
+.zone-action-btn {
   height: 42px;
   min-height: 42px;
   padding: 10px 12px;
   border-radius: 11px;
 }
+.zone-action-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 42px;
+  min-height: 42px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  line-height: 1;
+}
+.zone-action-save svg { display: block; flex: 0 0 auto; }
+/* Per-area Save only appears while there are unsaved zone changes (the
+   .has-unsaved class is toggled on #zoneList by markZoneUnsaved/Saved). */
+.zones-list .zone-row-actions .zone-action-save { display: none; }
+.zones-list.has-unsaved .zone-row-actions .zone-action-save { display: inline-flex; }
 .zone-shape-field { display: grid; grid-column: 1 / -1; grid-row: 2; gap: 5px; min-width: 0; }
 .zone-shape-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .zone-shape-head > span { color: var(--muted); font-size: 10px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
@@ -5996,11 +6014,11 @@ button.secondary:disabled, a.secondary:disabled {
 .zone-shape-undo svg { flex: 0 0 auto; }
 .zone-shape-toggle {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 1fr 1fr;
   gap: 3px;
   padding: 3px;
   width: 100%;
-  max-width: 280px;
+  max-width: 240px;
   border: 1px solid var(--border);
   border-radius: 11px;
   background: rgba(255,255,255,.03);
@@ -6030,28 +6048,23 @@ button.secondary:disabled, a.secondary:disabled {
 }
 .zone-visibility-field { display: grid; grid-column: 1; grid-row: 3; gap: 5px; min-width: 0; }
 .zone-visibility-field > span { color: var(--muted); font-size: 10px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
-.zone-visibility-toggle {
+/* The Shown/Hidden switch: a toggle-control pill (native checkbox + label),
+   like the motion on/off switch. Scoped to .zone-row-main to override the
+   shared .zone-row label rules (grid display, tiny uppercase spans). */
+.zone-row-main .zone-visibility-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 10px;
   width: min(100%, 230px);
   min-height: 42px;
-  padding: 10px 14px;
-  border-radius: 11px;
   font-size: 13px;
-  font-weight: 800;
+  color: var(--text);
 }
-.zone-visibility-toggle.is-shown {
-  color: var(--success);
-  border-color: rgba(73,230,163,.35);
-  background: rgba(73,230,163,.08);
-}
-.zone-visibility-toggle.is-hidden {
-  color: var(--muted);
-  border-color: var(--border);
-  background: rgba(255,255,255,.04);
-}
-.zone-visibility-toggle:hover:not(:disabled) { border-color: var(--success); }
+.zone-row-main .zone-visibility-toggle input { width: auto; accent-color: var(--success); margin: 0; }
+.zone-row-main .zone-visibility-toggle > span { font-size: 13px; letter-spacing: normal; text-transform: none; }
+.zone-row-main .zone-visibility-toggle.is-shown span { color: var(--success); }
+.zone-row-main .zone-visibility-toggle.is-hidden span { color: var(--muted); }
 .live-detection-status { margin-top: 13px; padding: 11px 12px; border-radius: 12px; font-size: 11px; }
 
 .zones-rules-tip {
@@ -6258,6 +6271,11 @@ button.secondary:disabled, a.secondary:disabled {
   .zones-frame-wrap, .zones-frame-wrap .live-frame { min-height: 360px; }
   .zones-frame-wrap .live-frame { height: min(62vh, 600px); }
 }
+/* When the settings card is narrow, the Remove + Save cluster no longer fits
+   next to the Visibility switch, so it drops to its own right-aligned row. */
+@media (max-width: 1150px) {
+  .zone-row-actions { grid-column: 1 / -1; grid-row: 4; justify-self: end; }
+}
 @media (max-width: 760px) {
   .zones-hero { align-items: stretch; flex-direction: column; gap: 14px; }
   .zones-hero-action { justify-content: stretch; }
@@ -6270,7 +6288,7 @@ button.secondary:disabled, a.secondary:disabled {
   .zone-card-actions { align-items: stretch; flex-direction: column; }
   .zone-card-action-buttons { width: 100%; }
   .zone-card-action-buttons button { flex: 1; }
-  .zone-visibility-toggle { width: 100%; }
+  .zone-row-main .zone-visibility-toggle { width: 100%; }
   .zone-object-rules-header { align-items: stretch; flex-direction: column; }
   .zone-object-rules-header::before { order: 0; }
   .zone-object-rules-header select { max-width: none; width: 100%; }
