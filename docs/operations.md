@@ -26,7 +26,7 @@ Filter by camera ID, event type, or severity when investigating a specific strea
 
 - **Detection & Live** - live refresh rates, detection interval, event merge window, background detection, and (under *Advanced Motion Tuning*) the low-level motion-gate values documented in [motion-detection.md](motion-detection.md).
 - **Recording** - event clip timing (pre/post-event, keep-recording-after-motion, max clip length), retention/auto-purge, and storage directories.
-- **Zones** - draw zones directly in the zone editor with **Add Zone**, manage zone rules, and use the per-zone visibility controls to show or hide overlays while configuring the scene.
+- **Zones** - draw zones directly in the zone editor with **Draw polygon** or **Full Frame**, use the per-zone **Shape** control to convert areas between full frame, rectangle, and polygon shapes, manage zone rules, and use the per-zone visibility controls to show or hide overlays while configuring the scene.
 - **Notifications** - push (ntfy), camera offline alerts, and email (SMTP) delivery, each with a test action.
 - **System** - software updates, Cloudflare Tunnel, database backup/restore, login security, and the Danger Zone. Software Updates appears above Cloudflare Tunnel; the tunnel card shows whether the service is running, stopped, unconfigured, or needs attention.
 

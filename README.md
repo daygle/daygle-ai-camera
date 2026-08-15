@@ -224,7 +224,7 @@ If cloudflared cannot start or later exits, Daygle logs a clear warning and cont
 - `/` - dashboard and event search
 - `/live` - live camera view with detection overlay
 - `/cameras` - camera management, recording, and PTZ
-- `/zones` - monitoring zone editor (use **Add Zone** to draw areas), visibility controls, and object/motion rules
+- `/zones` - monitoring zone editor (use **Draw polygon** or **Full Frame** to add areas, and the per-zone **Shape** control to convert between full frame, rectangle, and polygon), visibility controls, and object/motion rules
 - `/sounds` - sound detection rules
 - `/onnx` - AI model library and detector settings
 - `/settings` - detection, recording, notifications, retention, backup, Cloudflare Tunnel, and updates
