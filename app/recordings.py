@@ -117,14 +117,12 @@ class RecordingService:
     # cycle. This debounce suppresses rapid toggles: a genuine admin-saved
     # URL change still restarts the worker once the window expires.
     PREBUFFER_RESTART_DEBOUNCE_SECONDS: float = 10.0
-    # The audio mux writes a second copy of the clip (video stream-copied,
-    # audio re-encoded) and ffmpeg's +faststart then rewrites the file to move
-    # the moov atom to the front, so it needs roughly the clip's size again in
-    # free space on the recordings filesystem. When the disk is nearly full the
-    # final faststart pass fails with ENOSPC *after* burning CPU through the
-    # whole encode (ffmpeg 'return code -28 (No space left on device)'), so we
-    # check free space up front and keep the silent clip instead. Margin beyond
-    # clip + sidecar bytes: a fraction plus a fixed floor for the rewrite.
+    # The audio mux writes a fresh copy of the clip (video stream-copied, audio
+    # re-encoded) beside the silent render and atomically replaces it. It writes
+    # the moov atom at the end (no +faststart second pass), so it needs roughly
+    # one clip's worth of free space plus the sidecar bytes. Keep a margin so a
+    # nearly-full recordings disk surfaces as a clear diagnostic instead of
+    # ffmpeg's raw ENOSPC stderr after burning CPU through the whole encode.
     AUDIO_MUX_DISK_HEADROOM_FRACTION: float = 0.15
     AUDIO_MUX_DISK_HEADROOM_BYTES: int = 16 * 1024 * 1024
     # Minimum interval between "recordings disk is full" camera diagnostics for
@@ -2071,14 +2069,11 @@ class RecordingService:
                 )
                 return False
 
-            # The mux writes a second copy of the clip (video stream-copied,
-            # audio re-encoded) beside it and atomically replaces the silent
-            # clip, and ffmpeg's +faststart finishes by rewriting the file to
-            # move the moov atom to the front - roughly the clip's size again in
-            # free space on the recordings filesystem. When the disk is nearly
-            # full the faststart pass fails with ENOSPC *after* burning CPU
-            # through the whole encode, so check up front and keep the silent
-            # clip with a clear diagnostic instead.
+            # The mux writes a fresh copy of the clip (video stream-copied,
+            # audio re-encoded) beside the silent render and atomically replaces
+            # it. Check free space up front so a nearly-full recordings disk
+            # surfaces as a clear diagnostic instead of ffmpeg's raw ENOSPC
+            # stderr after burning CPU through the whole encode.
             try:
                 free_bytes = shutil.disk_usage(video_path.parent).free
                 needed_bytes = int(
@@ -2160,8 +2155,12 @@ class RecordingService:
                 '-shortest',
                 '-t',
                 f'{float(duration_seconds):.3f}',
-                '-movflags',
-                '+faststart',
+                # No +faststart here: ffmpeg's faststart second pass rewrites
+                # the output in place after the encode and has been observed
+                # failing with ENOSPC on a healthy recordings filesystem, which
+                # discarded the whole mux and kept the silent clip. The
+                # recordings endpoint serves moov-at-end files via HTTP range
+                # requests, so the moov atom can safely stay at the end.
                 str(muxed_path),
             ])
             try:

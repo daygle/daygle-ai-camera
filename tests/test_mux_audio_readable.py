@@ -198,6 +198,44 @@ def test_mux_uses_staged_audio_paths_and_cleans_them(tmp_path, monkeypatch):
     assert video.read_bytes() == b'muxed'
 
 
+def test_mux_command_omits_faststart_second_pass(tmp_path, monkeypatch):
+    """The mux must not ask ffmpeg for +faststart.
+
+    ffmpeg's faststart second pass rewrites the output in place after the
+    encode and has failed with ENOSPC on a healthy recordings filesystem,
+    discarding a completed mux and keeping the silent clip. The moov atom
+    stays at the end of the file, which the range-capable recordings endpoint
+    serves fine.
+    """
+    service = _service(tmp_path)
+    audio_dir = service.audio_dir / 'camera-1'
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    source = _wav(audio_dir / 'aud-000.wav', 4096)
+    now = time.time()
+    os.utime(source, (now, now))
+
+    captured = {}
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(service, '_readable_audio_segments', lambda segments: segments)
+    monkeypatch.setattr(service, '_segment_timeline', lambda *a, **k: [(source, now - 1, now)])
+    monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _p: True))
+
+    def fake_run(command, *_args, **_kwargs):
+        captured['command'] = command
+        Path(command[-1]).write_bytes(b'muxed')
+        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+    video = tmp_path / 'clip.mp4'
+    video.write_bytes(b'video')
+
+    assert service._mux_prebuffer_audio('camera-1', video, now - 1, 1.0) is True
+    assert '+faststart' not in captured['command']
+    assert '-movflags' not in captured['command']
+    assert video.read_bytes() == b'muxed'
+
+
 def test_mux_stages_audio_on_recordings_volume_not_system_temp(tmp_path, monkeypatch):
     """Sidecars must be staged on the recordings volume (under ``.prebuffer``),
     not the default ``$TMPDIR``.
