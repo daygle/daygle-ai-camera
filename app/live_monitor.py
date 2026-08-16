@@ -505,7 +505,8 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # motion gate: when set, inference runs every cycle regardless of pixel
     # motion, so a still/slow/low-contrast subject is never hidden from the
     # detector. Motion detection itself is unchanged -- it still runs above and
-    # feeds motion-only zones/alerts. Default off keeps the CPU-saving gate.
+    # feeds motion-only zones/alerts. Default on; disable it to restore the
+    # CPU-saving motion gate (inference only when motion fires).
     always_run_object_detection = normalize_bool_setting(live_settings.get('always_run_object_detection'), True)
     if not frame_has_motion and (not motion_gate_error) and (not force_scan) and (not motion_detections) and (not always_run_object_detection):
         update_live_detection_status(camera_id, state='checked', reason='No motion detected; ONNX inference skipped.', detected_labels=[], matched_labels=[], detections=[], motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)

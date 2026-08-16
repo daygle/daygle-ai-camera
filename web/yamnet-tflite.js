@@ -61,17 +61,6 @@ function backendNote(backend, reason = '') {
   return `Sound backend reported ${displayValue(backend)}.`;
 }
 
-function formatConfidenceMap(confidences = {}) {
-  const entries = Object.entries(confidences || {})
-    .filter(([, value]) => Number.isFinite(Number(value)))
-    .sort((a, b) => Number(b[1]) - Number(a[1]))
-    .slice(0, 4);
-  if (!entries.length) return 'None';
-  return entries
-    .map(([label, value]) => `${titleCaseWords(label)} ${Math.round(Number(value) * 100)}%`)
-    .join(', ');
-}
-
 function soundConfig(camera) {
   return camera?.detection?.sound || {};
 }
@@ -96,19 +85,6 @@ function cameraSoundReason(camera, status) {
   if (!hasRtspConfig(camera)) return 'No RTSP stream configured';
   if (status.running) return 'Running';
   return displayValue(status.detector_status || status.state, 'Not running');
-}
-
-function cameraSoundClass(camera, status) {
-  if (status.running) return 'status-ok';
-  const reason = cameraSoundReason(camera, status).toLowerCase();
-  if (reason.includes('loading')) return 'status-warning';
-  if (reason === 'sound disabled' || reason === 'no enabled sound rules') return '';
-  return 'status-error';
-}
-
-function soundConfigured(camera) {
-  const sound = camera?.detection?.sound || {};
-  return sound.enabled === true;
 }
 
 function cameraLabel(camera) {

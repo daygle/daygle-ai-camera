@@ -36,10 +36,6 @@ function markSaved() {
   if (saveBtnHeader) saveBtnHeader.style.display = 'none';
 }
 
-function effectiveMode(label) {
-  return labels[label] || defaultSelect.value || 'any';
-}
-
 function renderTable() {
   if (!availableLabels.length) {
     tableWrap.hidden = true;
