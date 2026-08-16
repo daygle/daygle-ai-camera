@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<script>(function(){var t=localStorage.getItem("daygle.theme");if(t)document.documentElement.classList.add(t);})()</script>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Objects - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell page-stack">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Monitoring workspace</p>
+        <h1>Objects</h1>
+        <p class="muted">Choose whether each object class counts when it is moving, standing still, or either, and alert when an object has been sitting still for a while - a package left in view, a pet that has settled down. Detection still runs on every cycle; this decides what becomes an event, recording, or alert.</p>
+      </div>
+      <div class="hero-action">
+        <button id="saveObjectsBtnHeader" type="button" class="primary" style="display:none">Save Changes</button>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">◉</div>
+        <div>
+          <h2>Detection Behavior</h2>
+          <p class="settings-section-subtitle">Set the default for every object, then override individual classes below. How "moving" is decided: an object is moving when its pixels are changing in the motion layer, and still when it has been absorbed into the background (a parked car, someone standing still).</p>
+        </div>
+      </div>
+      <form id="objectsForm" class="form-stack">
+        <label>
+          <span>Default for all objects <span class="info-tip" data-tip="Applied to every object class unless overridden below. Moving &amp; Still (default) keeps today's behaviour. Moving only ignores parked/still subjects (e.g. a car left in view). Still only ignores subjects that are actively moving." title="Applied to every object class unless overridden below. Moving &amp; Still (default) keeps today's behaviour. Moving only ignores parked/still subjects (e.g. a car left in view). Still only ignores subjects that are actively moving." tabindex="0" aria-label="Help: Default detection mode for every object class"></span></span>
+          <select name="default_mode">
+            <option value="any">Moving &amp; Still</option>
+            <option value="moving">Moving only</option>
+            <option value="still">Still only</option>
+          </select>
+        </label>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🏷️</div>
+        <div>
+          <h2>Per-Object Overrides</h2>
+          <p class="settings-section-subtitle">One row per class the loaded model can identify. <strong>Inherit</strong> uses the default above; the Effective column shows what actually applies. <strong>Still alert after</strong> fires an event, recording, and in-app alert the first time this object has been detected continuously still for that many minutes - 0 turns it off.</p>
+        </div>
+      </div>
+      <div id="objectsMessage" class="muted" style="margin-bottom:8px"></div>
+      <div id="objectsTableWrap" class="cameras-table-wrap">
+        <table class="rule-table">
+          <thead>
+            <tr>
+              <th>Object</th>
+              <th>Detection mode</th>
+              <th>Effective</th>
+              <th>Still alert after (min)</th>
+            </tr>
+          </thead>
+          <tbody id="objectsTableBody"></tbody>
+        </table>
+      </div>
+      <p id="objectsEmpty" class="muted empty-message" hidden>No labels are available yet. Install and load an ONNX model on the ONNX page first.</p>
+      <div class="button-row" style="margin-top:16px">
+        <button type="button" id="saveObjectsBtn" class="primary">Save Objects</button>
+      </div>
+    </section>
+  </main>
+  <script src="/static/nav.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/objects.js"></script>
+</body>
+</html>

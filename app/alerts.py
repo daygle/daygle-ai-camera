@@ -158,12 +158,18 @@ class AlertEngine:
                         continue
                     self.last_triggered[cooldown_key] = now
 
-                alerts.append({
+                state = detection.get('motion_state')
+                alert_entry: dict[str, Any] = {
                     'rule_name': rule_name,
                     'label': label,
                     'confidence': confidence,
                     'message': f'Alert triggered: {label} detected ({confidence:.2%})'
-                })
+                }
+                # Carry the moving/still classification onto the alert so email
+                # and push notifications can report it (see app.alert_formatting).
+                if state in ('moving', 'still'):
+                    alert_entry['motion_state'] = state
+                alerts.append(alert_entry)
 
         return alerts
 

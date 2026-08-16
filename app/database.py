@@ -104,6 +104,17 @@ class EventDatabase(
                 db.execute("ALTER TABLE detections ADD COLUMN zone_name TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists on upgrades from pre-zone-name schema
+            # Migration: mark detections that fired a still-dwell alert (the
+            # "still for N minutes" Objects page setting) so the UI can badge
+            # them. New installs get the column via CREATE TABLE below.
+            try:
+                db.execute("ALTER TABLE detections ADD COLUMN still_alert INTEGER NOT NULL DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # Column already exists on upgrades from pre-still-alert schema
+            try:
+                db.execute("ALTER TABLE detections ADD COLUMN still_alert_minutes INTEGER")
+            except sqlite3.OperationalError:
+                pass  # Column already exists on upgrades from pre-still-alert schema
             # Migration: make "which clip this event belongs to" a first-class
             # link. A recording spans many events (a continuous clip accrues a
             # fresh event each time a new object/sound appears), so events carry
@@ -153,6 +164,8 @@ class EventDatabase(
                     width REAL NOT NULL,
                     height REAL NOT NULL,
                     zone_name TEXT,
+                    still_alert INTEGER NOT NULL DEFAULT 0,
+                    still_alert_minutes INTEGER,
                     FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
                 );
 

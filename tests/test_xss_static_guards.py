@@ -130,6 +130,7 @@ class H2RegressionGuardTests(unittest.TestCase):
         'web/nav.js',
         'web/onnx.js',
         'web/profile.js',
+        'web/objects.js',
     )
 
     RAW_INTERP_PATTERN = re.compile(

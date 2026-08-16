@@ -94,9 +94,16 @@ function detectionBadges(detections = [], { isSound = false } = {}) {
   const emptyText = isSound ? 'No sound detections' : 'No detections';
   if (!detections.length) return `<span class="muted">${emptyText}</span>`;
   const best = new Map();
+  const stillAlertMinutes = new Map();
   for (const d of detections) {
     const label = String(d.label || '').trim().toLowerCase();
     if (!label) continue;
+    // Remember the still-dwell alert threshold per label (Objects page
+    // "still for N minutes") so the badge renders beside the object pill.
+    if (d.still_alert && !stillAlertMinutes.has(label)) {
+      const parsed = Number.parseInt(d.still_alert_minutes, 10);
+      if (Number.isFinite(parsed) && parsed > 0) stillAlertMinutes.set(label, parsed);
+    }
     const conf = Number(d.confidence);
     if (!Number.isFinite(conf)) {
       if (!best.has(label)) best.set(label, null);
@@ -107,9 +114,12 @@ function detectionBadges(detections = [], { isSound = false } = {}) {
   if (!best.size) return `<span class="muted">${emptyText}</span>`;
   return Array.from(best.entries())
     .sort((a, b) => (b[1] ?? -1) - (a[1] ?? -1))
-    .map(([label, conf]) => String(label).toLowerCase() === 'motion'
-      ? motionPill(conf)
-      : detectionPill(label, conf, isSound))
+    .map(([label, conf]) => {
+      const pill = String(label).toLowerCase() === 'motion'
+        ? motionPill(conf)
+        : detectionPill(label, conf, isSound);
+      return pill + (stillAlertMinutes.has(label) ? stillAlertBadge(stillAlertMinutes.get(label)) : '');
+    })
     .join('');
 }
 

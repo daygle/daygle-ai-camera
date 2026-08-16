@@ -247,6 +247,7 @@ window.daygleAuthReady = (async () => {
       links: [
         { href: '/cameras', match: '/cameras', label: 'Cameras' },
         { href: '/zones', match: '/zones', label: 'Zones' },
+        { href: '/objects', match: '/objects', label: 'Objects' },
         { href: '/sounds', match: '/sounds', label: 'Sounds' },
       ],
     },

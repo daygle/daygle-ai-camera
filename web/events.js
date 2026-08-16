@@ -158,7 +158,7 @@ function eventPills(event) {
     null,
   );
   const motionBadge = motionDetections.length ? motionPill(strongestMotion?.confidence ?? null) : '';
-  return `${motionBadge}${objectDetections.map((d) => detectionPill(d.label, d.confidence)).join('')}`
+  return `${motionBadge}${objectDetections.map((d) => detectionPill(d.label, d.confidence) + (d.still_alert ? stillAlertBadge(d.still_alert_minutes) : '')).join('')}`
     || '<span class="muted">No detections</span>';
 }
 

@@ -34,6 +34,22 @@ test('motion and object detections use distinct overlay colors', () => {
 });
 
 
+test('overlayMotionStateTag maps moving/still to their tag colors', () => {
+  // Round-trip through JSON: values built inside the vm realm carry the sandbox
+  // realm's prototypes, which deepStrictEqual rejects on reference equality.
+  const plain = (value) => JSON.parse(JSON.stringify(value));
+  assert.deepEqual(plain(sandbox.overlayMotionStateTag({ motion_state: 'moving' })), { text: 'Moving', color: '#49e6a3' });
+  assert.deepEqual(plain(sandbox.overlayMotionStateTag({ motion_state: 'still' })), { text: 'Still', color: '#fbbf24' });
+});
+
+
+test('overlayMotionStateTag returns null without a classification', () => {
+  assert.equal(sandbox.overlayMotionStateTag({ label: 'person' }), null);
+  assert.equal(sandbox.overlayMotionStateTag({ motion_state: 'any' }), null);
+  assert.equal(sandbox.overlayMotionStateTag(null), null);
+});
+
+
 test('sampleTrackAtTime interpolates through a short missed sample', () => {
   const sampled = sandbox.sampleTrackAtTime(track, 1.5);
   assert.equal(sampled.length, 1);

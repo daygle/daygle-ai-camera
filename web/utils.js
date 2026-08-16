@@ -349,6 +349,10 @@ const DETECTION_EYE_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill
 // callers that need a larger standalone icon can wrap it in their own svg.
 const DETECTION_MOTION_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="m4 19.5 4-4.5 1.5 4 5.5-3-2-7 4-3"/></svg>';
 
+// Small clock icon (lucide-style "timer") for the still-alert badge. Same
+// 11px inline sizing as the eye / running-man pill icons.
+const DETECTION_CLOCK_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+
 // Same icon, scaled up for row-level list rendering (recordings row icon).
 const MOTION_RUNNING_ROW_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="m4 19.5 4-4.5 1.5 4 5.5-3-2-7 4-3"/></svg>';
 
@@ -380,6 +384,19 @@ function detectionPill(label, confidence, isSound = false) {
     return `<span class="detection detection-sound">🔊 ${escapeHtml(display)}${confidenceText}</span>`;
   }
   return `<span class="detection detection-object">${DETECTION_EYE_ICON} ${escapeHtml(display)}${confidenceText}</span>`;
+}
+
+// Amber "Still N Min" badge for a detection that fired a still-dwell alert
+// (the Objects page "still for N minutes" setting): the object had been
+// detected continuously still for N minutes -- a package left in view, a pet
+// that settled down. Rendered beside the object pill on the dashboard and
+// events list; the badge is absent for ordinary detections.
+function stillAlertBadge(minutes) {
+  const parsed = Number.parseInt(minutes, 10);
+  const n = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  const label = n === null ? 'Still' : `Still ${n} Min`;
+  const title = n === null ? 'Still alert' : `Still alert: detected continuously still for ${n} minutes`;
+  return `<span class="detection detection-still-alert" title="${escapeHtml(title)}">${DETECTION_CLOCK_ICON} ${label}</span>`;
 }
 
 // Render the teal/green "Motion" pill (running-man icon + optional motion
@@ -1087,7 +1104,7 @@ window.daygleUi = {
   handleSessionLoss, defaultReturnTo,
   // UI helpers
   showToast, escapeHtml, safeHtml, titleCase, normalizeEmailList, requireElements, initDaygleTabs,
-  detectionPill, motionPill, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, MOTION_RUNNING_ROW_ICON,
+  detectionPill, motionPill, stillAlertBadge, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, DETECTION_CLOCK_ICON, MOTION_RUNNING_ROW_ICON,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,
   isMotionOnlyRecording, motionConfidenceFor, recordingHasMotion,
   isMotionOnlyEvent, isMotionOnlyEventItem,

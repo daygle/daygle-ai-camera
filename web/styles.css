@@ -540,6 +540,10 @@ textarea {
 .detection.detection-sound { background: rgba(168,85,247,.2); color: #a855f7; border: 1px solid rgba(168,85,247,.4); }
 .detection.detection-motion { background: rgba(45, 212, 191, 0.12); color: #2dd4bf; border: 1px solid rgba(45, 212, 191, 0.4); }
 .detection.detection-alert { background: rgba(239, 68, 68, 0.14); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
+.detection.detection-still-alert { background: rgba(251, 191, 36, 0.12); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.4); }
+/* Objects page: per-row "still alert after" minutes input. Compact so the
+   four-column rule table stays readable next to the mode dropdowns. */
+.still-alert-input { width: 68px; padding: 6px 8px; }
 .empty { color: var(--muted); padding: 12px; }
 
 .form-stack { display: grid; gap: 14px; margin-top: 18px; }

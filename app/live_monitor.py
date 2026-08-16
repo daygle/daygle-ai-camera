@@ -30,6 +30,11 @@ from app.detection_state import (
     record_live_detection_history,
 )
 from app.detection_status import _camera_has_live_alert_stream, update_live_detection_status
+from app.object_settings import (
+    filter_detections_by_motion_mode,
+    still_alert_thresholds,
+    update_still_dwell_alerts,
+)
 from app.object_tracking import update_object_tracks
 from app.region_detection import (
     detect_with_region_boost,
@@ -562,6 +567,14 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state, detections=[], motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         return None
     detections = normalize_detection_boxes_for_frame(detections, frame)
+    # Per-label still/moving filter (Objects page): drop detections whose
+    # label's detection mode (any/moving/still) does not allow this object's
+    # motion state, so a "car moving only" rule never records a parked car.
+    # Classified from the Layer-1 diff mask: a box overlapping changed pixels
+    # is moving, otherwise still (no mask -> still). Motion-zone rules (Layer
+    # 3) are a separate pixel-diff axis and are unaffected. Surviving
+    # detections carry a ``motion_state`` annotation for overlays/status.
+    detections = filter_detections_by_motion_mode(detections, diff_mask)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     object_detections = filter_detections_for_camera(detections, settings)
     # Temporal confirmation gate: require an object label to persist across
@@ -582,6 +595,37 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # continuity). Additive: it only annotates the dicts, so alerts/recordings
     # are unchanged, and the ids thread through to the history + recording rows.
     object_detections = update_object_tracks(camera_id, object_detections)
+    # Still-dwell alerts (Objects page: "still for N minutes"): a label that
+    # has been detected continuously still for its configured threshold fires
+    # one dwell alert per streak, watching the same Layer-1 background-
+    # absorption classification the still/moving filter applies. Built from the
+    # confirmed + tracked detections so only persistent objects participate;
+    # the streak resets the moment the subject moves or leaves the frame.
+    # Thresholds are read once per cycle (shared by the tracker and the
+    # synthetic alert rules below).
+    _still_thresholds = still_alert_thresholds()
+    dwell_detections = update_still_dwell_alerts(camera_id, object_detections, _still_thresholds)
+    if dwell_detections:
+        # Stamp the containing zone so a dwell detection can also match the
+        # operator's existing zone rules for that label -- a "person -> email"
+        # rule then notifies on a long-still person exactly like it would on
+        # any other detection, without any extra per-label notification setup.
+        _dwell_enabled_zones = [
+            zone for zone in (settings.get('detection') or {}).get('zones', [])
+            if zone.get('enabled', True)
+        ]
+        _zone_stamp: list[dict[str, Any]] = []
+        for _dwell in dwell_detections:
+            _matching_zone = next(
+                (zone for zone in _dwell_enabled_zones if detection_matches_zone(_dwell, zone)),
+                None,
+            )
+            _zone_stamp.append({
+                **_dwell,
+                'zone_name': str(_matching_zone.get('name') or _matching_zone.get('id') or '').strip() or None if _matching_zone else None,
+                'zone_id': str(_matching_zone.get('id') or _matching_zone.get('name') or '') if _matching_zone else '',
+            })
+        dwell_detections = _zone_stamp
     zone_rules = zone_object_alert_rules(settings)
     has_object_zone_rules = any((zone.get('enabled', True) and zone.get('monitor_objects', True) and any((rule.get('enabled', True) and str(rule.get('label') or '').strip() for rule in zone.get('object_rules') or [])) for zone in (settings.get('detection') or {}).get('zones', [])))
     object_alert_detections = zone_alert_detections(settings, object_detections) if has_object_zone_rules else list(object_detections)
@@ -595,13 +639,15 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     ]
     record_live_detection_history(
         camera_id,
-        list(object_alert_detections) + record_only_detections + motion_history_detections,
+        list(object_alert_detections) + record_only_detections + motion_history_detections + dwell_detections,
         sample_ts=frame_capture_ts,
         live_config=live_settings,
     )
     alert_detections = list(object_alert_detections) + record_only_detections
     for _mot in motion_detections:
         alert_detections.append({**_mot, 'label': 'motion', 'motion_event': True})
+    for _dwell in dwell_detections:
+        alert_detections.append(_dwell)
     _monitored_zones = [
         z for z in (settings.get('detection') or {}).get('zones', [])
         if z.get('enabled', True) and z.get('monitor_objects', True)
@@ -612,6 +658,23 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         update_live_detection_status(camera_id, state='checked', reason=reason, object_reason=object_reason, detected_labels=raw_labels, matched_labels=[], detections=list(detections), motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         return None
     triggered = _state.alerts.process(alert_detections, rules=zone_rules)
+    # Dwell alerts are first-class in-app alerts added directly to ``triggered``
+    # (they fire once per still streak by construction, so a zone-style rule
+    # with cooldowns would either flood alerts or risk being skipped). The
+    # alert-history row uses a descriptive name; email/push stay untouched
+    # unless the dwell detection also matched one of the operator's real zone
+    # rules above (which still happens normally via the stamped zone_id).
+    for _dwell in dwell_detections:
+        _dwell_label = str(_dwell.get('label') or '').strip()
+        if not _dwell_label:
+            continue
+        triggered.append({
+            'rule_name': f"Still for {_dwell.get('still_alert_minutes')} min: {_dwell_label}",
+            'label': _dwell_label,
+            'confidence': float(_dwell.get('confidence') or 0),
+            'message': f"Alert triggered: {_dwell_label} still for {_dwell.get('still_alert_minutes')} minutes",
+            'motion_state': 'still',  # a dwell streak only fires while still
+        })
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     triggered_labels = {str(alert.get('label') or '').lower() for alert in triggered}
     _confident_object_detections: list[dict[str, Any]] = []
@@ -654,6 +717,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         # recording when Record is off. The alert itself still fires via
         # ``triggered_labels`` (visible as ``alert_matched``) and delivery.
         recording_detections.append({**_mot, 'label': 'motion', 'motion_event': True, 'alert_matched': 'motion' in triggered_labels, 'alert_triggered': _motion_record})
+    for _dwell in dwell_detections:
+        # A dwell alert always records when the camera can: the whole point is
+        # to capture the subject (a package, a pet) that has been left in view.
+        recording_detections.append({**_dwell, 'alert_matched': True, 'alert_triggered': True})
     matched_labels = [str(detection.get('label')) for detection in alert_detections if detection.get('label')]
     camera_recording_config = _state.camera_event_recording_config(settings)
     debounced_labels = detection_label_set([detection for detection in recording_detections if detection.get('alert_triggered')])
@@ -687,7 +754,15 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # debounce window is derived from the same label cooldowns regardless of
     # whether a recording attaches, so an alert-only camera is throttled to one
     # event per window like a recording camera is.
-    if resolved_cooldowns and not live_event_fresh_labels(camera_id, resolved_cooldowns):
+    #
+    # A still-dwell alert is the one exception: it fires ONCE per still streak
+    # by construction, and its label's debounce window has been continuously
+    # refreshed by the very cycles that built the streak -- so the normal gate
+    # would swallow it forever. Bypass the gate for the cycle that crosses the
+    # threshold so the dwell alert always becomes an event.
+    if dwell_detections:
+        pass
+    elif resolved_cooldowns and not live_event_fresh_labels(camera_id, resolved_cooldowns):
         debounce_seconds = max(resolved_cooldowns.values())
         extended_recording_id = extend_active_rtsp_recording(camera_id=camera_id, event_time=frame_capture_time, recording_config=camera_recording_config, detections=recording_detections)
         remember_live_event(camera_id, debounced_labels, merge=True)

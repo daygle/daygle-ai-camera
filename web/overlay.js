@@ -21,12 +21,27 @@ const MOTION_OVERLAY_COLOR = '#49e6a3';
 const OBJECT_OVERLAY_COLOR = '#47d6ff';
 const OVERLAY_BOX_ALPHA = 0.78;
 const OVERLAY_LABEL_BACKGROUND = 'rgba(7, 11, 19, 0.58)';
+// Per-detection moving/still tag colors (tag text next to the box label).
+// Teal reuses the motion accent; amber matches the app's warning palette.
+const MOTION_STATE_COLORS = { moving: MOTION_OVERLAY_COLOR, still: '#fbbf24' };
 
 function overlayColorForDetection(detection) {
   const label = String(detection?.label || '').trim().toLowerCase();
   return detection?.motion_event === true || label === 'motion'
     ? MOTION_OVERLAY_COLOR
     : OBJECT_OVERLAY_COLOR;
+}
+
+// The moving/still tag shown beside an object's box label. The classification
+// is computed server-side (app/object_settings.py) from the Layer-1 motion
+// diff mask: a box overlapping changed pixels is "moving", a box absorbed into
+// the background is "still". Returns null for motion-zone boxes and for any
+// detection that has no classification (e.g. legacy events), which draw the
+// label alone.
+function overlayMotionStateTag(detection) {
+  const state = detection?.motion_state;
+  if (state !== 'moving' && state !== 'still') return null;
+  return { text: state[0].toUpperCase() + state.slice(1), color: MOTION_STATE_COLORS[state] };
 }
 
 function _getCachedContext(canvas) {
@@ -350,5 +365,19 @@ function drawDetectionBoxesOnCanvas(canvas, detections, referenceEl) {
     ctx.fillRect(dx, labelY, labelWidth, labelHeight);
     ctx.fillStyle = overlayColor;
     ctx.fillText(label, dx + 6, labelY + labelHeight / 2);
+    // Moving/still tag: a compact second pill naming how this object was
+    // classified, so someone watching the feed sees the same decision the
+    // Objects page filter is making. Same dark backing as the label pill;
+    // colored text tells the state at a glance.
+    const stateTag = overlayMotionStateTag(detection);
+    if (stateTag) {
+      const stateWidth = _measureTextWidth(ctx, stateTag.text);
+      const statePillWidth = stateWidth + 12;
+      const stateX = dx + labelWidth + 4;
+      ctx.fillStyle = OVERLAY_LABEL_BACKGROUND;
+      ctx.fillRect(stateX, labelY, statePillWidth, labelHeight);
+      ctx.fillStyle = stateTag.color;
+      ctx.fillText(stateTag.text, stateX + 6, labelY + labelHeight / 2);
+    }
   }
 }

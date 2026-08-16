@@ -65,7 +65,8 @@ PUBLIC_PREFIXES: tuple[str, ...] = ('/static/',)
 PUBLIC_PATHS: frozenset[str] = frozenset({'/favicon.ico', '/login', '/setup'})
 ADMIN_PATHS: frozenset[str] = frozenset({
     '/onnx', '/yamnet-tflite', '/ai', '/cameras', '/settings',
-    '/users', '/zones', '/sounds', '/audit', '/camera-log', '/application-log',
+    '/users', '/zones', '/sounds', '/objects', '/audit', '/camera-log',
+    '/application-log',
 })
 MUTATING_METHODS: frozenset[str] = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
 
@@ -177,6 +178,13 @@ _motion_confirm_lock: threading.Lock = threading.Lock()
 # does not track these cross-module attribute accesses.
 # codeql[py/unused-global-variable]
 _motion_confirm_streaks: dict = {}
+# Per-camera still-dwell streaks (app/object_settings.py):
+# {camera_id: {label: {'still_since': epoch_seconds, 'alerted': bool}}}. The
+# "still for N minutes" alert watches how long a label has been detected
+# continuously still; streaks are dropped when the subject moves or vanishes.
+_still_dwell_lock: threading.Lock = threading.Lock()
+# codeql[py/unused-global-variable]
+_still_dwell: dict = {}
 
 # ---------------------------------------------------------------------------
 # Active RTSP recordings

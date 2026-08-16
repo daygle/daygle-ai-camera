@@ -206,6 +206,126 @@ def test_alert_detection_type_classifies_every_sound_class_as_sound():
         assert detection_type_for(object_label) == 'Object', object_label
 
 
+def test_alert_formatting_mentions_moving_still_state():
+    """Notifications must say whether the triggering object was moving or still.
+
+    The live monitor stamps ``motion_state`` on each alert; the shared
+    formatter renders a "State: Moving" / "State: Still" body line (and the
+    email HTML table row). Motion-zone, sound, and legacy alerts carry no
+    classification and omit the line entirely.
+    """
+    from app.alert_formatting import build_alert_content
+
+    base = {'label': 'person', 'rule_name': 'Person alert', 'confidence': 0.9, 'message': 'Person matched'}
+
+    moving = build_alert_content(base, event_id=1, camera_name='Cam', motion_state='moving')
+    assert moving.motion_state_display == 'Moving'
+    assert 'State: Moving' in moving.plain_text
+    assert 'State: Moving' in moving.plain_text.split('Detection Type: Object')[1].split('Rule:')[0]
+
+    still = build_alert_content(base, event_id=1, camera_name='Cam', motion_state='still')
+    assert still.motion_state_display == 'Still'
+    assert 'State: Still' in still.plain_text
+
+    for absent in (None, '', 'junk', 'moving-ish'):
+        content = build_alert_content(base, event_id=1, camera_name='Cam', motion_state=absent)
+        assert content.motion_state_display is None, absent
+        assert 'State:' not in content.plain_text, absent
+        # Unknown classifications must not leak into the body either.
+        assert 'Moving' not in content.plain_text and 'Still' not in content.plain_text, absent
+
+
+def test_alert_engine_stamps_motion_state_on_alerts():
+    """Alerts built from object detections carry the moving/still classification.
+
+    The stamp rides the alert dict so the email/push channels (which read
+    ``alert.get('motion_state')``) can report it. Motion-zone detections are
+    untagged and produce alerts with no stamp.
+    """
+    from app.alerts import AlertEngine
+
+    engine = AlertEngine([])
+    rules = [
+        {'name': 'Person alert', 'enabled': True, 'object': 'person', 'min_confidence': 0.5, 'cooldown_seconds': 0},
+        {'name': 'Cat alert', 'enabled': True, 'object': 'cat', 'min_confidence': 0.5, 'cooldown_seconds': 0},
+        {'name': 'Motion alert', 'enabled': True, 'object': 'motion', 'min_confidence': 0.45, 'cooldown_seconds': 0},
+    ]
+    detections = [
+        {'label': 'person', 'confidence': 0.9, 'motion_state': 'still', 'zone_id': ''},
+        {'label': 'cat', 'confidence': 0.8, 'motion_state': 'moving', 'zone_id': ''},
+        {'label': 'motion', 'confidence': 0.7, 'motion_event': True, 'zone_id': ''},
+    ]
+    alerts = engine.process(detections, rules=rules)
+    by_label = {alert['label']: alert for alert in alerts}
+    assert by_label['person']['motion_state'] == 'still'
+    assert by_label['cat']['motion_state'] == 'moving'
+    assert 'motion_state' not in by_label['motion']
+
+
+def test_email_alert_mentions_state_row_and_plain_line():
+    """An email for a still/moving detection must show a State row in the HTML
+    table and a matching State line in the plain-text part."""
+    from app.email_alerts import EmailAlertService
+    import smtplib
+
+    sent_messages: list = []
+
+    class FakeSMTP:
+        def __init__(self, *_a, **_k): pass
+        def __enter__(self): return self
+        def __exit__(self, *_a): return False
+        def starttls(self): pass
+        def login(self, *_a, **_k): pass
+        def send_message(self, message): sent_messages.append(message)
+
+    _original_smtp = smtplib.SMTP
+    _original_smtp_ssl = smtplib.SMTP_SSL
+    try:
+        smtplib.SMTP = FakeSMTP
+        smtplib.SMTP_SSL = FakeSMTP
+
+        service = EmailAlertService({
+            'enabled': True,
+            'host': 'smtp.example.test',
+            'port': 587,
+            'from_address': 'alerts@example.test',
+            'use_tls': True,
+            'use_ssl': False,
+        })
+        service.send_alert(
+            {'label': 'person', 'rule_name': 'Person alert', 'confidence': 0.9,
+             'message': 'Person matched', 'motion_state': 'still'},
+            event_id=42,
+            recipients=['owner@example.test'],
+            camera_name='Front Door',
+        )
+
+        assert len(sent_messages) == 1
+        message = sent_messages[0]
+
+        def _iter_parts(message):
+            payload = message.get_payload()
+            if isinstance(payload, list):
+                for part in payload:
+                    yield from _iter_parts(part)
+            else:
+                yield message
+
+        html_part = None
+        plain_part = None
+        for part in _iter_parts(message):
+            if part.get_content_type() == 'text/html':
+                html_part = part.get_payload(decode=True).decode('utf-8', 'ignore')
+            elif part.get_content_type() == 'text/plain':
+                plain_part = part.get_payload(decode=True).decode('utf-8', 'ignore')
+        assert html_part is not None and plain_part is not None
+        assert 'State' in html_part and 'Still' in html_part, 'html table must show the State row'
+        assert 'State: Still' in plain_part, 'plain body must mention the State'
+    finally:
+        smtplib.SMTP = _original_smtp
+        smtplib.SMTP_SSL = _original_smtp_ssl
+
+
 def test_email_alert_subject_lists_all_triggered_labels():
     """A single event whose detections include both cat and person must produce
     TWO alert emails (one per rule), each citing "Cat, Person detected" in the

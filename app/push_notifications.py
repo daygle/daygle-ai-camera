@@ -67,6 +67,7 @@ class PushNotificationService:
             camera_name=camera_name,
             triggered_labels=triggered_labels,
             detected_at=detected_at,
+            motion_state=alert.get('motion_state'),
         )
         self._deliver(content.subject, content.plain_text)
 

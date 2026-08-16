@@ -51,8 +51,8 @@ class EventsMixin:
                 box = detection.get("box", {})
                 db.execute(
                     """
-                    INSERT INTO detections (event_id, label, confidence, x, y, width, height, zone_name)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO detections (event_id, label, confidence, x, y, width, height, zone_name, still_alert, still_alert_minutes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         event_id,
@@ -63,6 +63,8 @@ class EventsMixin:
                         float(box.get("width", 0)),
                         float(box.get("height", 0)),
                         detection.get("zone_name") or None,
+                        int(bool(detection.get("still_alert"))),
+                        detection.get("still_alert_minutes") or None,
                     ),
                 )
             return event_id

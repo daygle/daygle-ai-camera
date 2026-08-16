@@ -118,6 +118,83 @@ This solves the standing-still problem: even if a person has been absorbed into 
 
 ---
 
+## Per-object still / moving detection
+
+By default YOLO reports every object it can recognise, whether the subject is
+walking down the drive or parked in it. The **Objects** page
+(`/objects`, admin) lets you decide, per object class, whether detections
+should count when the subject is **moving**, **still**, or **both** (the
+default). This is a separate knob from the motion gate: it does not change
+when YOLO *runs*, only which detections become events, recordings, and
+alerts.
+
+**How "moving" is decided.** Each cycle already computes the Layer-1 motion
+diff mask. An object whose bounding box overlaps a meaningful share of changed
+pixels is *moving*; otherwise it is *still*. A subject that stops (a parked
+car, someone standing still) is absorbed into the background model over
+roughly `1 / Motion Background Alpha` frames and naturally reads as still,
+while a subject that keeps moving lands on fresh pixels every frame and stays
+moving. When no pixel change was measured at all (a periodic scan on a quiet
+frame, the first frame after a camera reconnect), the detection is treated as
+still.
+
+**Settings.** The page has a **Default for all objects** selector (`Moving &
+Still`, `Moving only`, or `Still only`) plus one row per label the loaded
+model can identify, each with `Inherit` (use the default) or an explicit
+override. The **Effective** column shows what actually applies. Settings are
+global (all cameras) and stored in the database.
+
+**Seeing the classification.** Every detection now carries its classification:
+when the live view's object overlay is on, each box label is followed by a
+small **`Moving`** (teal) or **`Still`** (amber) tag, and the same tag replays
+on the timeline / recordings playback overlay. Email and push notifications
+for the alert also report it with a **State: Moving** / **State: Still** line
+in the body (and a State row in the email table), so you know at a glance
+whether the object was moving or standing still when it triggered. The tag
+comes from the same Layer-1 diff-mask decision the filter uses, so what you
+see on the feed is exactly the decision being applied. Motion-zone boxes,
+sound alerts, and older recordings recorded before this feature have no tag.
+
+**Still alerts ("still for N minutes").** Each row also has a **Still alert
+after (min)** field. When set, the monitor watches how long that object has
+been detected **continuously still** (its pixels absorbed into the background
+model - a package left in view, a pet that settled down, a car parked in the
+frame) and fires a one-shot alert the first cycle the streak passes N minutes:
+
+- The alert creates a normal event with a snapshot, links a recording when the
+  camera can record, and writes an alert-history row named `Still for N min:
+  <object>`, so it shows up on the timeline / dashboard / audit log like any
+  other alert.
+- Existing zone rules still apply: if the still object sits inside a monitored
+  zone with an email/push rule for that label, that rule notifies normally -
+  no extra per-label notification setup is needed.
+- The streak is label-level (two still packages of the same class share one
+  count) and resets the moment the subject moves again or leaves the frame, so
+  a fresh still run can alert again later. The dashboard and events list badge
+  alerted events with an amber **Still N Min** pill.
+
+Typical use: a delivery spot - set `package` (or `person`) to **Still alert
+after 10 min** so a package that has been sitting for ten minutes alerts,
+while a person just walking past never does. Combine with the Detection Mode
+`Still only` when you only care about stationary subjects.
+
+**Typical use:**
+
+- A driveway camera where a parked car would otherwise fire `car` events
+  constantly: set `car` to **Moving only** - a car arriving or leaving still
+alerts, one left in view does not.
+- A camera watching a spot where people routinely stand still (a doorway, a
+  counter): set `person` to **Still only** if you only care about loitering.
+- A low-traffic scene where every detected object is interesting: leave the
+default at **Moving & Still**.
+
+This filter applies to **object** detections only (Layer 2). Per-zone
+**motion** rules (Layer 3) are a separate pixel-diff axis and are never
+filtered, so a "car moving only" setting does not silence a "motion in the
+driveway" zone rule.
+
+---
+
 ## Settings reference
 
 All of these live under **Settings → Detection & Live → Live Performance**. The **Motion Engine**, **Denoise**, **Shadow Suppression**, **Periodic Scan Interval**, and the low-level motion tuning values (**Motion Pixel Threshold**, **Motion Gate Fraction**, **Motion Scale Fraction**, **Motion Background Alpha**, **Motion Frame Width**, and **Motion Frame Height**) are grouped under the **Advanced Motion Tuning** disclosure on that card.

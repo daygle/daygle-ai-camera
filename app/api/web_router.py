@@ -11,6 +11,7 @@ Routes:
 - GET  /live          -- live_page
 - GET  /zones         -- zones_page
 - GET  /sounds        -- sounds_page
+- GET  /objects       -- objects_page
 - GET  /cameras       -- cameras_page
 - GET  /events        -- events_page
 - GET  /search        -- dashboard_aliases
@@ -220,6 +221,15 @@ def sounds_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     sounds_path = web_dir / 'sounds.html'
     if sounds_path.exists():
         return FileResponse(sounds_path)
+    return root(web_dir=web_dir)
+
+
+@router.get('/objects')
+def objects_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
+    objects_path = web_dir / 'objects.html'
+    if objects_path.exists():
+        return FileResponse(objects_path)
     return root(web_dir=web_dir)
 
 

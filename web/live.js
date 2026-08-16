@@ -667,7 +667,7 @@ function ingestServerTrackDetections(payload) {
   liveAiTrackPrevCaptureMs = liveAiTrackCaptureMs;
   liveAiTrackDetections = (payload.detections || [])
     .filter((d) => d && d.box && !d.motion_event && String(d.label || '').trim().toLowerCase() !== 'motion')
-    .map((d) => ({ label: d.label, confidence: d.confidence, box: d.box }));
+    .map((d) => ({ label: d.label, confidence: d.confidence, box: d.box, motion_state: d.motion_state }));
   liveAiTrackCaptureMs = performance.now();
   drawLiveOverlay();
 }

@@ -111,8 +111,22 @@ def record_live_detection_history(camera_id: str, detections: list[dict[str, Any
 
     Empty cycles are recorded too: a recording track sliced from the history
     needs "nothing in frame" samples so playback overlays clear when an object
-    leaves instead of holding the last box."""
-    sample = [{'label': detection.get('label'), 'confidence': detection.get('confidence'), 'box': detection.get('box')} for detection in detections if isinstance(detection.get('box'), dict)]
+    leaves instead of holding the last box.
+
+    ``motion_state`` (when present) is preserved alongside label/confidence/box
+    so tracks sliced from this history replay the moving/still tag on playback
+    overlays. Everything else is intentionally dropped -- the history is a
+    compact box record, not a full detection dict."""
+    sample = [
+        {
+            'label': detection.get('label'),
+            'confidence': detection.get('confidence'),
+            'box': detection.get('box'),
+            **({'motion_state': detection['motion_state']} if detection.get('motion_state') in ('moving', 'still') else {}),
+        }
+        for detection in detections
+        if isinstance(detection.get('box'), dict)
+    ]
     if sample_ts is None:
         sample_ts = time.time()
     history_minutes = max(1, int((live_config or effective_live_config()).get('detection_history_minutes', 10)))

@@ -11,6 +11,7 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 - Sound detection using YAMNet TFLite
 - Three-layer detection: pixel-diff motion gate, YOLO object detection, and per-zone motion rules
 - Monitoring zones, motion and object rules, per-label confidence and cooldowns
+- Per-object detection behavior: choose, per class, whether detections count for moving subjects, still subjects, or both (a parked car can be ignored while a passing one still alerts)
 - Umbrella `animal` / `pet` group labels so one rule can match any related class (e.g. a cat misread as a dog at night)
 - Optional temporal confirmation gate that requires an object to persist across several detection cycles before it alerts, suppressing single-frame false positives
 - Continuous per-camera recording plus event clips with pre/post-event buffering
@@ -225,6 +226,7 @@ If cloudflared cannot start or later exits, Daygle logs a clear warning and cont
 - `/live` - live camera view with detection overlay
 - `/cameras` - camera management, recording, and PTZ
 - `/zones` - monitoring zone editor (use **Draw polygon** or **Full Frame** to add areas, and the per-zone **Shape** control to convert between full frame and polygon), visibility controls, and object/motion rules
+- `/objects` - per-object detection behavior (moving only / still only / both) with a global default
 - `/sounds` - sound detection rules
 - `/onnx` - AI model library and detector settings
 - `/settings` - detection, recording, notifications, retention, backup, Cloudflare Tunnel, and updates

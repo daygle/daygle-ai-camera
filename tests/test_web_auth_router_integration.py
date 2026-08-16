@@ -21,9 +21,9 @@ These tests defend that public-surface contract:
    ``app.api.web_router.login_page`` -- the back-compat alias is wired.
 2. ``main.setup_page`` is the SAME function object as
    ``app.api.web_router.setup_page`` -- the back-compat alias is wired.
-3. ``web_router`` registers the expected 23 unique page-handler paths
-   (19 functions × 1 decorator + 1 function ``dashboard_aliases`` ×
-   3 decorators).
+3. ``web_router`` registers the expected 24 unique page-handler paths
+   (23 functions × 1 decorator + 1 function ``dashboard_aliases`` ×
+   1 decorator).
 4. ``dashboard_aliases`` is the route handler for ``/alerts``,
    ``/events``, ``/search`` (one function, three decorator paths).
 5. ``auth_router`` registers exactly the four auth-cycle endpoints
@@ -136,8 +136,8 @@ def test_web_router_registers_expected_page_paths(app_modules):
     There is no separate ``/alerts`` page: an alert is a property of an event,
     surfaced as an indicator on the Events row.
 
-    The 23 paths are: ``/``, ``/favicon.ico``, ``/login``, ``/setup``,
-    ``/live``, ``/zones``, ``/sounds``, ``/cameras``,
+    The 24 paths are: ``/``, ``/favicon.ico``, ``/login``, ``/setup``,
+    ``/live``, ``/zones``, ``/sounds``, ``/objects``, ``/cameras``,
     ``/events``, ``/search``, ``/recordings``, ``/snapshots``,
     ``/recordings/timeline``,
     ``/onnx``, ``/ai``, ``/yamnet-tflite``, ``/yamnet``, ``/profile``,
@@ -152,6 +152,7 @@ def test_web_router_registers_expected_page_paths(app_modules):
         "/live",
         "/zones",
         "/sounds",
+        "/objects",
         "/cameras",
         "/events",
         "/search",

@@ -100,6 +100,7 @@ class EmailAlertService:
             camera_name=camera_name,
             triggered_labels=triggered_labels,
             detected_at=detected_at,
+            motion_state=alert.get('motion_state'),
         )
         subject = content.subject
         headline = content.headline
@@ -107,6 +108,7 @@ class EmailAlertService:
         camera_display = content.camera_display
         zone_name = content.zone_name
         detection_type = content.detection_type
+        motion_state_display = content.motion_state_display
         rule_display = content.rule_display
         detected_at_display = content.detected_at_display
         all_triggers_line = content.all_triggers_line
@@ -130,6 +132,10 @@ class EmailAlertService:
             f'<tr><td style="padding:4px 0;color:#888">Zone</td><td style="padding:4px 0">{escape(zone_name)}</td></tr>'
             if zone_name else ''
         )
+        state_row = (
+            f'<tr><td style="padding:4px 0;color:#888">State</td><td style="padding:4px 0">{escape(motion_state_display)}</td></tr>'
+            if motion_state_display else ''
+        )
         html_content = (
             '<!DOCTYPE html><html><body style="font-family:sans-serif;color:#333;max-width:600px;margin:0 auto;padding:16px">'
             f'<h2 style="margin-top:0">{escape(headline)}</h2>'
@@ -138,6 +144,7 @@ class EmailAlertService:
             f'<tr><td style="padding:4px 0;color:#888;width:120px">Camera</td><td style="padding:4px 0">{escape(camera_display)}</td></tr>'
             f'{zone_row}'
             f'<tr><td style="padding:4px 0;color:#888">Detection Type</td><td style="padding:4px 0">{escape(detection_type)}</td></tr>'
+            f'{state_row}'
             f'<tr><td style="padding:4px 0;color:#888">Rule</td><td style="padding:4px 0">{escape(rule_display)}</td></tr>'
             f'{detected_at_row}'
             f'{all_triggers_row}'

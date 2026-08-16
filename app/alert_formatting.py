@@ -28,6 +28,7 @@ class AlertContent:
     camera_display: str
     zone_name: str
     detection_type: str
+    motion_state_display: str | None
     rule_display: str
     detected_at_display: str | None
     all_triggers_line: str | None
@@ -60,6 +61,7 @@ def build_alert_content(
     camera_name: str | None = None,
     triggered_labels: list[str] | None = None,
     detected_at: str | None = None,
+    motion_state: str | None = None,
 ) -> AlertContent:
     """Build the shared title + body for one alert notification.
 
@@ -115,6 +117,19 @@ def build_alert_content(
         label_val = detection_type
     rule_display = label_val.replace('_', ' ').title()
 
+    # Moving/still classification of the alert's detection (see
+    # app.object_settings): the state is stamped on the alert by the live
+    # monitor, so both notification channels can say whether the object was
+    # moving or standing still when it triggered. Motion-zone and sound alerts
+    # carry no classification and omit the line.
+    state_raw = str(motion_state or '').strip().lower()
+    if state_raw == 'moving':
+        motion_state_display = 'Moving'
+    elif state_raw == 'still':
+        motion_state_display = 'Still'
+    else:
+        motion_state_display = None
+
     alert_message = str(alert.get('message') or 'Alert triggered.').title()
     confidence = float(alert.get('confidence') or 0)
 
@@ -122,6 +137,8 @@ def build_alert_content(
     if zone_name:
         plain_lines.append(f"Zone: {zone_name}")
     plain_lines.append(f"Detection Type: {detection_type}")
+    if motion_state_display:
+        plain_lines.append(f"State: {motion_state_display}")
     plain_lines.append(f"Rule: {rule_display}")
     if detected_at_display:
         plain_lines.append(f"Detected: {detected_at_display}")
@@ -139,6 +156,7 @@ def build_alert_content(
         camera_display=camera_display,
         zone_name=zone_name,
         detection_type=detection_type,
+        motion_state_display=motion_state_display,
         rule_display=rule_display,
         detected_at_display=detected_at_display,
         all_triggers_line=all_triggers_line,
