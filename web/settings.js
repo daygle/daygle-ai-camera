@@ -71,6 +71,7 @@ const FIELD_LABELS = {
   session_timeout_hours: 'Session Timeout Hours',
   max_login_attempts: 'Max Login Attempts',
   lockout_minutes: 'Lockout Minutes',
+  trusted_proxies: 'Trusted Proxy IPs',
   from_address: 'From Address',
   use_tls: 'STARTTLS',
   use_ssl: 'SSL',
@@ -237,6 +238,7 @@ const FORM_DEFAULTS = {
     session_timeout_hours: 12,
     max_login_attempts: 5,
     lockout_minutes: 15,
+    trusted_proxies: ['127.0.0.1', '::1'],
   },
   email: {
     enabled: 'false',
@@ -283,7 +285,7 @@ const FIELD_TYPES = {
   boolean: new Set([
     'enabled', 'continuous', 'auto_purge_enabled', 'background_detection_enabled',
     'always_run_object_detection', 'object_detection_region_boost', 'motion_denoise',
-    'use_tls', 'use_ssl', 'autostart',
+    'use_tls', 'use_ssl', 'autostart', 'tunnel_loopback_only',
   ]),
   integer: new Set([
     'width', 'height', 'fps', 'port', 'pre_event_seconds', 'post_event_seconds',
@@ -299,7 +301,7 @@ const FIELD_TYPES = {
     'motion_gate_fraction', 'motion_scale_fraction', 'motion_background_alpha',
     'session_timeout_hours',
   ]),
-  csv: new Set(['vehicle_labels']),
+  csv: new Set(['vehicle_labels', 'trusted_proxies']),
   triState: new Set(['motion_shadow_suppression']),
 };
 
@@ -447,6 +449,11 @@ function renderCloudflareTunnel(status) {
 
   const autostart = forms.cloudflareTunnel?.elements.autostart;
   if (autostart && status?.autostart != null) autostart.value = status.autostart ? 'true' : 'false';
+
+  const lanToggle = forms.cloudflareTunnel?.elements.tunnel_loopback_only;
+  if (lanToggle && status?.tunnel_loopback_only != null) {
+    lanToggle.value = status.tunnel_loopback_only ? 'true' : 'false';
+  }
 
   const startBtn = document.getElementById('startCloudflareTunnelBtn');
   const stopBtn = document.getElementById('stopCloudflareTunnelBtn');

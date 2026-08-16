@@ -398,6 +398,13 @@
             <option value="true">Enabled</option>
           </select>
         </label>
+        <label>
+          <span>Serve LAN While Tunnel Is Active <span class="info-tip" data-tip="When enabled, the app keeps the configured server.host (e.g. 0.0.0.0) while the tunnel runs, so a LAN reverse proxy / split-DNS setup can reach it too. Applies on restart. Default: Disabled (tunnel is the only ingress)" title="When enabled, the app keeps the configured server.host (e.g. 0.0.0.0) while the tunnel runs, so a LAN reverse proxy / split-DNS setup can reach it too. Applies on restart. Default: Disabled (tunnel is the only ingress)" tabindex="0" aria-label="Help: Keep the LAN bind while the Cloudflare Tunnel is active. Applies on restart."></span></span>
+          <select name="tunnel_loopback_only">
+            <option value="false">Disabled</option>
+            <option value="true">Enabled</option>
+          </select>
+        </label>
       </form>
       <div id="cloudflareTunnelStatus" class="status-panel cloudflare-tunnel-status" aria-live="polite">
         <div class="cloudflare-tunnel-status-main">
@@ -409,7 +416,7 @@
         </div>
         <span id="cloudflareTunnelTokenSummary" class="cloudflare-token-summary">Token Status: Checking…</span>
       </div>
-      <p class="field-help">When a token is configured, the server binds to <code>127.0.0.1</code> by default so the tunnel is the only public path. Setups that also serve the LAN through a local reverse proxy (split DNS) can set <code>server.tunnel_loopback_only: false</code> in <code>config.yaml</code> to keep the configured <code>server.host</code> while the tunnel is active. Cloudflare Access can add an additional login layer; Android clients must send its <code>CF-Access-Client-Id</code> and <code>CF-Access-Client-Secret</code> headers on every request.</p>
+      <p class="field-help">When a token is configured, the server binds to <code>127.0.0.1</code> by default so the tunnel is the only public path. Setups that also serve the LAN through a local reverse proxy (split DNS) can enable <strong>Serve LAN While Tunnel Is Active</strong> (or set <code>server.tunnel_loopback_only: false</code> in <code>config.yaml</code>) to keep the configured <code>server.host</code> while the tunnel runs; the bind change applies on restart, and saving this form requires re-entering the token. Cloudflare Access can add an additional login layer; Android clients must send its <code>CF-Access-Client-Id</code> and <code>CF-Access-Client-Secret</code> headers on every request.</p>
       <div class="button-row">
         <button id="saveCloudflareTunnelBtn" type="submit" form="cloudflareTunnelForm">Save Tunnel Settings</button>
         <button id="startCloudflareTunnelBtn" class="btn-info" type="button" disabled>Start Tunnel</button>
@@ -456,6 +463,9 @@
         <label>
           <span>Lockout Minutes <span class="info-tip" data-tip="How long the account is locked after exceeding max login attempts. Default: 15 minutes" title="How long the account is locked after exceeding max login attempts. Default: 15 minutes" tabindex="0" aria-label="Help: How long the account is locked after exceeding max login attempts. Default: 15 m..."></span></span>
           <input name="lockout_minutes" type="number" min="1" max="1440" placeholder="15" /></label>
+        <label>
+          <span>Trusted Proxy IPs <span class="info-tip" data-tip="Comma-separated IPs or CIDRs whose X-Forwarded-For header is honored (e.g. a reverse proxy in front of Daygle). Only these peers may influence the reported client IP. Default: 127.0.0.1, ::1" title="Comma-separated IPs or CIDRs whose X-Forwarded-For header is honored (e.g. a reverse proxy in front of Daygle). Only these peers may influence the reported client IP. Default: 127.0.0.1, ::1" tabindex="0" aria-label="Help: Comma-separated IPs or CIDRs whose X-Forwarded-For header is honored. Default: 127.0.0.1, ::1"></span></span>
+          <input name="trusted_proxies" placeholder="127.0.0.1, ::1" /></label>
       </form>
       <div class="button-row">
         <button type="submit" form="authSettingsForm">Save Login Security</button>

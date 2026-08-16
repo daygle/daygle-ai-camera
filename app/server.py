@@ -46,7 +46,11 @@ def server_host(config: dict[str, Any] | None = None) -> str:
     persisted = _persisted_tunnel_settings(storage.get("database", "data/daygle_ai_camera.sqlite3"))
     token_store = CloudflareTunnelSecretStore(storage.get("database", "data/daygle_ai_camera.sqlite3"))
     tunnel = resolve_cloudflare_tunnel_settings(config, persisted, persisted_token=token_store.read())
+    # A UI-saved ``tunnel_loopback_only`` in app_settings (the Cloudflare
+    # Tunnel settings card) overrides the YAML bootstrap default.
     loopback_only = bool(server_config.get("tunnel_loopback_only", True))
+    if isinstance(persisted, dict) and "tunnel_loopback_only" in persisted:
+        loopback_only = bool(persisted.get("tunnel_loopback_only"))
     if tunnel.token and loopback_only:
         return "127.0.0.1"
     return str(server_config.get("host", "0.0.0.0"))

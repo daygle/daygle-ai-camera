@@ -66,3 +66,39 @@ def test_explicit_loopback_host_is_respected() -> None:
         server_host(_config(host="127.0.0.1", tunnel_loopback_only=False, tunnel_token="tok"))
         == "127.0.0.1"
     )
+
+
+def test_persisted_tunnel_loopback_only_overrides_yaml(tmp_path) -> None:
+    """A UI-saved value in app_settings wins over the YAML bootstrap default."""
+    import json
+    import sqlite3
+
+    db_path = tmp_path / "data" / "daygle_ai_camera.sqlite3"
+    db_path.parent.mkdir()
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES ('cloudflare_tunnel', ?, '')",
+            (json.dumps({"tunnel_loopback_only": False}),),
+        )
+
+    # YAML says loopback-only, but the UI toggle says serve the LAN.
+    cfg = _config(
+        host="0.0.0.0",
+        tunnel_loopback_only=True,
+        tunnel_token="tok",
+    )
+    cfg["storage"] = {"database": str(db_path)}
+    assert server_host(cfg) == "0.0.0.0"
+
+    # The reverse: UI locked to loopback overrides a YAML opt-out.
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "UPDATE app_settings SET value = ? WHERE key = 'cloudflare_tunnel'",
+            (json.dumps({"tunnel_loopback_only": True}),),
+        )
+    cfg = _config(host="0.0.0.0", tunnel_loopback_only=False, tunnel_token="tok")
+    cfg["storage"] = {"database": str(db_path)}
+    assert server_host(cfg) == "127.0.0.1"

@@ -60,8 +60,7 @@ def get_system_settings(request: Request, db=Depends(get_database), auth_enabled
     # explicit gate here is the second line if a future refactor moves
     # the path out of the middleware's admin match list.
     require_admin(request)
-    tunnel = _state.cloudflare_tunnel_manager
-    return {'version': _current_version(), 'camera': get_camera_config(None), 'cameras': effective_cameras_config(), 'live': effective_live_config(), 'recording': effective_recording_config(), 'storage': effective_storage_config(), 'cloudflare_tunnel': tunnel.status() if tunnel is not None else {'configured': False, 'running': False, 'source': 'none', 'autostart': False, 'pid': None, 'binary': 'cloudflared', 'error': None},        'auth': {
+    return {'version': _current_version(), 'camera': get_camera_config(None), 'cameras': effective_cameras_config(), 'live': effective_live_config(), 'recording': effective_recording_config(), 'storage': effective_storage_config(), 'cloudflare_tunnel': _tunnel_status(db),        'auth': {
             'session_timeout_hours': effective_auth_config().get('session_timeout_hours'),
             'max_login_attempts': effective_auth_config().get('max_login_attempts'),
             'lockout_minutes': effective_auth_config().get('lockout_minutes'),
@@ -69,6 +68,7 @@ def get_system_settings(request: Request, db=Depends(get_database), auth_enabled
             'rate_limit_window_seconds': effective_auth_config().get('rate_limit_window_seconds'),
             'rate_limit_base_delay': effective_auth_config().get('rate_limit_base_delay'),
             'rate_limit_max_delay': effective_auth_config().get('rate_limit_max_delay'),
+            'trusted_proxies': effective_auth_config().get('trusted_proxies'),
         }, 'bootstrap': {'database': _state.config.get('storage', {}).get('database'), 'auth_enabled': auth_enabled, 'cookie_name': str(effective_auth_config().get('cookie_name', SESSION_COOKIE)), 'server': _state.config.get('server', {})}}
 
 
@@ -140,17 +140,29 @@ async def restore_database(request: Request, file: UploadFile=File(...), db=Depe
         await file.close()
 
 
-def _tunnel_status():
+def _tunnel_status(db=None):
+    """Tunnel manager status plus the effective ``tunnel_loopback_only`` value.
+
+    The bind-mode toggle is persisted in ``app_settings`` (UI) and falls back
+    to the ``server.tunnel_loopback_only`` YAML bootstrap value (default true)
+    when it has never been saved from the dashboard.
+    """
     manager = _state.cloudflare_tunnel_manager
     if manager is None:
-        return {'configured': False, 'running': False, 'source': 'none', 'autostart': False, 'pid': None, 'binary': 'cloudflared', 'error': None}
-    return manager.status()
+        status = {'configured': False, 'running': False, 'source': 'none', 'autostart': False, 'pid': None, 'binary': 'cloudflared', 'error': None}
+    else:
+        status = manager.status()
+    default_loopback = bool(_state.config.get('server', {}).get('tunnel_loopback_only', True))
+    persisted = db.get_setting('cloudflare_tunnel') if db is not None else None
+    persisted = persisted if isinstance(persisted, dict) else {}
+    status['tunnel_loopback_only'] = bool(persisted.get('tunnel_loopback_only', default_loopback))
+    return status
 
 
 @router.get('/api/settings/system/cloudflare-tunnel')
-def get_cloudflare_tunnel_settings(request: Request):
+def get_cloudflare_tunnel_settings(request: Request, db=Depends(get_database)):
     require_admin(request)
-    return _tunnel_status()
+    return _tunnel_status(db)
 
 
 @router.put('/api/settings/system/cloudflare-tunnel')
@@ -171,7 +183,11 @@ async def update_cloudflare_tunnel_settings(request: Request, db=Depends(get_dat
         # An empty field means clear the persisted token, not an accidental
         # overwrite of a secret that the browser deliberately never receives.
         token = None
-    autostart = bool(payload.get('autostart', False))
+    current_persisted = db.get_setting('cloudflare_tunnel') or {}
+    if not isinstance(current_persisted, dict):
+        current_persisted = {}
+    autostart = bool(payload.get('autostart', current_persisted.get('autostart', False)))
+    tunnel_loopback_only = bool(payload.get('tunnel_loopback_only', current_persisted.get('tunnel_loopback_only', False)))
     if token:
         try:
             token_store.write(token)
@@ -180,7 +196,7 @@ async def update_cloudflare_tunnel_settings(request: Request, db=Depends(get_dat
     else:
         token_store.clear()
     # SQLite stores only non-secret metadata; the secret lives in a 0600 file.
-    persisted = {'configured': bool(token), 'autostart': autostart}
+    persisted = {'configured': bool(token), 'autostart': autostart, 'tunnel_loopback_only': tunnel_loopback_only}
     db.set_setting('cloudflare_tunnel', persisted, utc_now())
     manager.configure(token, source='database', autostart=autostart)
     write_audit_log(request, db, 'update', 'settings.cloudflare_tunnel', details={'configured': bool(token), 'autostart': autostart})

@@ -388,16 +388,56 @@ def test_system_settings_are_editable_from_api(tmp_path, monkeypatch):
         status, _headers, auth_settings = client.request(
             "/api/settings/system/auth",
             method="PUT",
-            json_body={"session_timeout_hours": 6, "max_login_attempts": 4, "lockout_minutes": 10},
+            json_body={
+                "session_timeout_hours": 6,
+                "max_login_attempts": 4,
+                "lockout_minutes": 10,
+                "trusted_proxies": ["127.0.0.1", "192.168.20.1"],
+            },
             headers={"X-CSRF-Token": csrf},
         )
         assert status == 200
         assert auth_settings["max_login_attempts"] == 4
+        assert auth_settings["trusted_proxies"] == ["127.0.0.1", "192.168.20.1"]
 
         system_settings = client.request("/api/settings/system")[2]
         assert system_settings["camera"]["width"] == 640
         assert system_settings["recording"]["format"] == "mp4"
         assert system_settings["auth"]["lockout_minutes"] == 10
+        assert "192.168.20.1" in system_settings["auth"]["trusted_proxies"]
+
+        # The saved proxy is honored by the runtime client-IP gate.
+        from app.auth_gates import _trusted_proxies
+        assert "192.168.20.1" in _trusted_proxies()
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_cloudflare_tunnel_loopback_toggle_persists(tmp_path, monkeypatch):
+    """The Serve-LAN toggle survives a tunnel-settings save and is reported back."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        status, _headers, saved = client.request(
+            "/api/settings/system/cloudflare-tunnel",
+            method="PUT",
+            json_body={"autostart": False, "tunnel_loopback_only": True},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+
+        status, _headers, tunnel = client.request("/api/settings/system/cloudflare-tunnel")
+        assert status == 200
+        assert tunnel["tunnel_loopback_only"] is True
+
+        status, _headers, system = client.request("/api/settings/system")
+        assert status == 200
+        assert system["cloudflare_tunnel"]["tunnel_loopback_only"] is True
     finally:
         server.should_exit = True
         thread.join(timeout=5)

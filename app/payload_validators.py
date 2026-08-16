@@ -59,7 +59,7 @@ Cluster membership:
   attempts to change it).
 
 - ``validate_auth_settings`` -- session-timeout + max-login-attempts +
-  lockout-minutes validator.
+  lockout-minutes + trusted-proxies validator.
 
 - ``validate_live_settings`` -- the second-heaviest cluster member
   (per-camera live framerates + detection interval + motion-tuner
@@ -97,6 +97,7 @@ Pool C reach sites (resolved via ``main.<attr>`` at call time):
 
 from __future__ import annotations
 
+import ipaddress
 import os
 from pathlib import Path
 from typing import Any
@@ -502,6 +503,37 @@ def validate_storage_settings(payload: dict[str, Any]) -> dict[str, Any]:
     return updated
 
 
+def _normalize_trusted_proxies(raw: Any) -> list[str]:
+    """Normalise ``trusted_proxies`` to a de-duplicated list of IPs/CIDRs.
+
+    Accepts a list/tuple/set or a comma-separated string. Every entry must
+    parse as an IP address or network (CIDR); anything else raises 400 so a
+    typo cannot silently widen the set of peers whose ``X-Forwarded-For`` is
+    honoured (anti-spoofing trust boundary).
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        entries = [part.strip() for part in raw.split(',') if part.strip()]
+    elif isinstance(raw, (list, tuple, set)):
+        entries = [str(item).strip() for item in raw if str(item).strip()]
+    else:
+        raise HTTPException(status_code=400, detail='trusted_proxies must be a list or comma-separated string.')
+    normalized: list[str] = []
+    for entry in entries:
+        try:
+            # strict=False accepts bare host IPs (127.0.0.1, ::1) as /32 | /128.
+            ipaddress.ip_network(entry, strict=False)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f'trusted_proxies contains an invalid IP or CIDR: {entry}',
+            ) from exc
+        if entry not in normalized:
+            normalized.append(entry)
+    return normalized
+
+
 def validate_auth_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = effective_auth_config()
     merged = {**current, **payload}
@@ -531,6 +563,9 @@ def validate_auth_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'rate_limit_window_seconds': _int_field(merged, 'rate_limit_window_seconds', 60, 10, 3600),
         'rate_limit_base_delay': rate_limit_base_delay,
         'rate_limit_max_delay': rate_limit_max_delay,
+        'trusted_proxies': _normalize_trusted_proxies(
+            merged.get('trusted_proxies', ['127.0.0.1', '::1'])
+        ),
     }
 
 

@@ -894,7 +894,35 @@ def test_validate_auth_settings_returns_expected_fields(monkeypatch, pv):
         'session_timeout_hours', 'max_login_attempts', 'lockout_minutes',
         'rate_limit_max_attempts', 'rate_limit_window_seconds',
         'rate_limit_base_delay', 'rate_limit_max_delay',
+        'trusted_proxies',
     }
+
+
+def test_validate_auth_settings_normalizes_trusted_proxies_list(monkeypatch, pv):
+    _install_validator_dependencies(monkeypatch)
+    out = pv.validate_auth_settings({'trusted_proxies': ['127.0.0.1', ' ::1 ', '192.168.20.1']})
+    assert out['trusted_proxies'] == ['127.0.0.1', '::1', '192.168.20.1']
+
+
+def test_validate_auth_settings_normalizes_trusted_proxies_csv(monkeypatch, pv):
+    _install_validator_dependencies(monkeypatch)
+    out = pv.validate_auth_settings({'trusted_proxies': '10.0.0.5, 10.0.0.5 , 192.168.20.0/24'})
+    assert out['trusted_proxies'] == ['10.0.0.5', '192.168.20.0/24']
+
+
+def test_validate_auth_settings_defaults_trusted_proxies(monkeypatch, pv):
+    _install_validator_dependencies(monkeypatch)
+    out = pv.validate_auth_settings({})
+    assert out['trusted_proxies'] == ['127.0.0.1', '::1']
+
+
+def test_validate_auth_settings_rejects_invalid_trusted_proxy(monkeypatch, pv):
+    from fastapi import HTTPException
+    _install_validator_dependencies(monkeypatch)
+    with pytest.raises(HTTPException) as exc_info:
+        pv.validate_auth_settings({'trusted_proxies': ['127.0.0.1', 'not-an-ip']})
+    assert exc_info.value.status_code == 400
+    assert 'invalid IP or CIDR' in exc_info.value.detail
 
 
 # ---------------------------------------------------------------------------
