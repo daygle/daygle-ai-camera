@@ -212,6 +212,8 @@ For headless/service deployments, set `DAYGLE_CLOUDFLARED_TOKEN` in the service 
 
 When tunnel mode is active, Daygle binds Uvicorn to `127.0.0.1` and enables `--proxy-headers --forwarded-allow-ips=127.0.0.1`; this keeps the connector as the only ingress while preserving the client address supplied by the trusted local connector path for audit and login rate-limit handling.
 
+Deployments that need **both** the tunnel and LAN access (split DNS: LAN clients resolve the hostname to a local reverse proxy such as OPNsense HAProxy while external clients use the tunnel) can keep both ingress paths on the same origin by setting `server.tunnel_loopback_only: false` in `config.yaml`. The app then binds the configured `server.host` (typically `0.0.0.0`) even while the tunnel is active, so the connector and the LAN proxy both reach it. Add the LAN reverse proxy's IP to `auth.trusted_proxies` and have the proxy send `X-Forwarded-Proto` (and `X-Forwarded-For`) so the dashboard's origin checks, audit log, and login rate-limiting keep working for LAN clients. Changing the binding takes effect on the next Daygle restart.
+
 ### Cloudflare Access
 
 Cloudflare Access is optional. If Access is enabled for the hostname, interactive browser logins are redirected to the Cloudflare Access page. The Android app cannot complete that browser flow automatically: configure it to send `CF-Access-Client-Id` and `CF-Access-Client-Secret` headers on every request (including API, image, and recording requests), as required by your Access application policy.

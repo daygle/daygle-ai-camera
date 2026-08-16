@@ -4,6 +4,12 @@
 server:
   host: 0.0.0.0
   port: 8080
+  # Default true: a configured Cloudflare Tunnel token makes the app bind to
+  # 127.0.0.1 so the tunnel is the only ingress. Set to false to keep the
+  # configured host (e.g. 0.0.0.0) while the tunnel is active - needed when a
+  # LAN reverse proxy / split-DNS setup (e.g. OPNsense HAProxy plus local
+  # DNS) must reach the app alongside the tunnel.
+  tunnel_loopback_only: true
 
 # Optional bootstrap settings for a headless Cloudflare Tunnel deployment.
 # Prefer DAYGLE_CLOUDFLARED_TOKEN or the Settings UI so the token is not

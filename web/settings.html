@@ -409,7 +409,7 @@
         </div>
         <span id="cloudflareTunnelTokenSummary" class="cloudflare-token-summary">Token Status: Checking…</span>
       </div>
-      <p class="field-help">The server binds to <code>127.0.0.1</code> whenever a token is configured, so the tunnel is the only public path. Cloudflare Access can add an additional login layer; Android clients must send its <code>CF-Access-Client-Id</code> and <code>CF-Access-Client-Secret</code> headers on every request.</p>
+      <p class="field-help">When a token is configured, the server binds to <code>127.0.0.1</code> by default so the tunnel is the only public path. Setups that also serve the LAN through a local reverse proxy (split DNS) can set <code>server.tunnel_loopback_only: false</code> in <code>config.yaml</code> to keep the configured <code>server.host</code> while the tunnel is active. Cloudflare Access can add an additional login layer; Android clients must send its <code>CF-Access-Client-Id</code> and <code>CF-Access-Client-Secret</code> headers on every request.</p>
       <div class="button-row">
         <button id="saveCloudflareTunnelBtn" type="submit" form="cloudflareTunnelForm">Save Tunnel Settings</button>
         <button id="startCloudflareTunnelBtn" class="btn-info" type="button" disabled>Start Tunnel</button>

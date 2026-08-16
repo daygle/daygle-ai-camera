@@ -11,7 +11,16 @@ DEFAULT_CONFIG_PATH = Path("config.yaml")
 CONFIG_ENV_VAR = "DAYGLE_CONFIG"
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "server": {"host": "0.0.0.0", "port": 8080},
+    "server": {
+        "host": "0.0.0.0",
+        "port": 8080,
+        # Default true: a configured Cloudflare Tunnel token makes the app bind
+        # to 127.0.0.1 so the tunnel is the only ingress. Set to false to keep
+        # the configured server.host (e.g. 0.0.0.0) while the tunnel is active
+        # -- needed when a LAN reverse proxy / split-DNS setup (OPNsense
+        # HAProxy + local DNS) must reach the app alongside the tunnel.
+        "tunnel_loopback_only": True,
+    },
     "cloudflare_tunnel": {"binary": "cloudflared"},
     "ai": {
         "enabled": True,

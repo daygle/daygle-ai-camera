@@ -28,19 +28,28 @@ def _persisted_tunnel_settings(database_path: str | Path) -> dict[str, Any]:
 
 
 def server_host(config: dict[str, Any] | None = None) -> str:
-    """Return loopback whenever a tunnel token is configured.
+    """Return the Uvicorn bind address for this run.
+
+    By default, a configured Cloudflare Tunnel token forces loopback
+    (``127.0.0.1``) so the connector is the only ingress. Operators who front
+    the same origin with a LAN reverse proxy / split-DNS setup (e.g. OPNsense
+    HAProxy for LAN clients plus the tunnel for external clients) can opt out
+    with ``server.tunnel_loopback_only: false`` to keep the configured
+    ``server.host`` (typically ``0.0.0.0``) while the tunnel is active.
 
     Environment configuration is available before Uvicorn starts; the DB
     lookup covers a previously saved UI token for systemd/service launches.
     """
     config = config if config is not None else load_settings()
+    server_config = config.get("server", {}) if isinstance(config, dict) else {}
     storage = config.get("storage", {}) if isinstance(config, dict) else {}
     persisted = _persisted_tunnel_settings(storage.get("database", "data/daygle_ai_camera.sqlite3"))
     token_store = CloudflareTunnelSecretStore(storage.get("database", "data/daygle_ai_camera.sqlite3"))
     tunnel = resolve_cloudflare_tunnel_settings(config, persisted, persisted_token=token_store.read())
-    if tunnel.token:
+    loopback_only = bool(server_config.get("tunnel_loopback_only", True))
+    if tunnel.token and loopback_only:
         return "127.0.0.1"
-    return str(config.get("server", {}).get("host", "0.0.0.0"))
+    return str(server_config.get("host", "0.0.0.0"))
 
 
 def main() -> None:
