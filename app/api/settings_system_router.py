@@ -144,15 +144,16 @@ def _tunnel_status(db=None):
     """Tunnel manager status plus the effective ``tunnel_loopback_only`` value.
 
     The bind-mode toggle is persisted in ``app_settings`` (UI) and falls back
-    to the ``server.tunnel_loopback_only`` YAML bootstrap value (default true)
-    when it has never been saved from the dashboard.
+    to the ``server.tunnel_loopback_only`` YAML bootstrap value (default
+    false: LAN serving stays on when a tunnel token is configured) when it
+    has never been saved from the dashboard.
     """
     manager = _state.cloudflare_tunnel_manager
     if manager is None:
         status = {'configured': False, 'running': False, 'source': 'none', 'autostart': False, 'pid': None, 'binary': 'cloudflared', 'error': None}
     else:
         status = manager.status()
-    default_loopback = bool(_state.config.get('server', {}).get('tunnel_loopback_only', True))
+    default_loopback = bool(_state.config.get('server', {}).get('tunnel_loopback_only', False))
     persisted = db.get_setting('cloudflare_tunnel') if db is not None else None
     persisted = persisted if isinstance(persisted, dict) else {}
     status['tunnel_loopback_only'] = bool(persisted.get('tunnel_loopback_only', default_loopback))
@@ -187,7 +188,17 @@ async def update_cloudflare_tunnel_settings(request: Request, db=Depends(get_dat
     if not isinstance(current_persisted, dict):
         current_persisted = {}
     autostart = bool(payload.get('autostart', current_persisted.get('autostart', False)))
-    tunnel_loopback_only = bool(payload.get('tunnel_loopback_only', current_persisted.get('tunnel_loopback_only', False)))
+    # Fall back through UI-saved value -> ``server.tunnel_loopback_only``
+    # bootstrap default -> False, mirroring ``_tunnel_status`` exactly. A body
+    # that omits the field must never silently flip the LAN bind mode, so an
+    # omitted field always resolves to the bootstrap default (LAN serving).
+    default_loopback = bool(_state.config.get('server', {}).get('tunnel_loopback_only', False))
+    tunnel_loopback_only = bool(
+        payload.get(
+            'tunnel_loopback_only',
+            current_persisted.get('tunnel_loopback_only', default_loopback),
+        )
+    )
     if token:
         try:
             token_store.write(token)
@@ -200,7 +211,9 @@ async def update_cloudflare_tunnel_settings(request: Request, db=Depends(get_dat
     db.set_setting('cloudflare_tunnel', persisted, utc_now())
     manager.configure(token, source='database', autostart=autostart)
     write_audit_log(request, db, 'update', 'settings.cloudflare_tunnel', details={'configured': bool(token), 'autostart': autostart})
-    return _tunnel_status()
+    # Report the value that was actually persisted (like the GET handler),
+    # not the bootstrap default derived from an empty read.
+    return _tunnel_status(db)
 
 
 @router.post('/api/settings/system/cloudflare-tunnel/start')
@@ -277,6 +290,49 @@ async def update_storage_settings(
     # ``_apply_settings_lock`` serialises concurrent apply calls safely.
     threading.Thread(target=apply_storage_and_recording_settings, daemon=True).start()
     return settings
+
+
+@router.put('/api/settings/system/network')
+async def update_network_settings(request: Request, db=Depends(get_database), auth=Depends(get_auth)):
+    """LAN & Proxy Access card: LAN serving while a tunnel runs, plus the
+    trusted reverse-proxy peers.
+
+    ``tunnel_loopback_only`` lives in the ``cloudflare_tunnel`` settings row
+    (it only affects binding once a token is configured); ``trusted_proxies``
+    lives in the ``auth`` settings row. Each missing field falls back to its
+    current persisted value, so a partial save cannot disturb the other
+    setting -- and this endpoint never touches the stored tunnel token.
+    """
+    require_admin(request)
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail='Network settings must be an object.')
+    current_persisted = db.get_setting('cloudflare_tunnel') or {}
+    if not isinstance(current_persisted, dict):
+        current_persisted = {}
+    default_loopback = bool(_state.config.get('server', {}).get('tunnel_loopback_only', False))
+    tunnel_loopback_only = bool(
+        payload.get(
+            'tunnel_loopback_only',
+            current_persisted.get('tunnel_loopback_only', default_loopback),
+        )
+    )
+    db.set_setting(
+        'cloudflare_tunnel',
+        {**current_persisted, 'tunnel_loopback_only': tunnel_loopback_only},
+        utc_now(),
+    )
+    # The auth validator merges partial payloads with the current auth
+    # settings, so an omitted trusted_proxies field preserves the saved list.
+    auth_payload = {'trusted_proxies': payload['trusted_proxies']} if 'trusted_proxies' in payload else {}
+    validated = validate_auth_settings(auth_payload)
+    db.set_setting('auth', validated, utc_now())
+    auth.apply_config(validated)
+    write_audit_log(
+        request, db, 'update', 'settings.network',
+        details={'tunnel_loopback_only': tunnel_loopback_only, 'trusted_proxies': validated.get('trusted_proxies')},
+    )
+    return {'tunnel_loopback_only': tunnel_loopback_only, 'trusted_proxies': validated.get('trusted_proxies')}
 
 
 @router.put('/api/settings/system/auth')

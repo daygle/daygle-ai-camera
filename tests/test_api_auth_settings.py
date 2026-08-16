@@ -430,6 +430,9 @@ def test_cloudflare_tunnel_loopback_toggle_persists(tmp_path, monkeypatch):
             headers={"X-CSRF-Token": csrf},
         )
         assert status == 200
+        # The PUT response must reflect what was persisted (true), not the
+        # bootstrap default read from an empty settings table.
+        assert saved["tunnel_loopback_only"] is True
 
         status, _headers, tunnel = client.request("/api/settings/system/cloudflare-tunnel")
         assert status == 200
@@ -438,6 +441,136 @@ def test_cloudflare_tunnel_loopback_toggle_persists(tmp_path, monkeypatch):
         status, _headers, system = client.request("/api/settings/system")
         assert status == 200
         assert system["cloudflare_tunnel"]["tunnel_loopback_only"] is True
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_cloudflare_tunnel_loopback_omitted_field_keeps_lan_default(tmp_path, monkeypatch):
+    """An omitted ``tunnel_loopback_only`` field must keep the config bootstrap
+    default (false: LAN serving stays on) instead of silently flipping the
+    bind mode to loopback."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        # Nothing persisted yet; the field is omitted from the payload. The
+        # config default (server.tunnel_loopback_only, false in the test
+        # bootstrap) must be preserved rather than replaced by ``True``.
+        status, _headers, saved = client.request(
+            "/api/settings/system/cloudflare-tunnel",
+            method="PUT",
+            json_body={"autostart": False},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert saved["tunnel_loopback_only"] is False
+
+        status, _headers, tunnel = client.request("/api/settings/system/cloudflare-tunnel")
+        assert status == 200
+        assert tunnel["tunnel_loopback_only"] is False
+
+        # The persisted metadata says the toggle was saved, not defaulted.
+        status, _headers, system = client.request("/api/settings/system")
+        assert status == 200
+        assert system["cloudflare_tunnel"]["tunnel_loopback_only"] is False
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_network_settings_card_persists_and_merges(tmp_path, monkeypatch):
+    """The LAN & Proxy Access card saves both fields and partial saves merge."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        status, _headers, saved = client.request(
+            "/api/settings/system/network",
+            method="PUT",
+            json_body={"tunnel_loopback_only": False, "trusted_proxies": ["127.0.0.1", "192.168.20.1"]},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert saved["tunnel_loopback_only"] is False
+        assert saved["trusted_proxies"] == ["127.0.0.1", "192.168.20.1"]
+
+        # Persisted and reported through the existing read paths.
+        status, _headers, tunnel = client.request("/api/settings/system/cloudflare-tunnel")
+        assert status == 200
+        assert tunnel["tunnel_loopback_only"] is False
+
+        status, _headers, system = client.request("/api/settings/system")
+        assert status == 200
+        assert system["auth"]["trusted_proxies"] == ["127.0.0.1", "192.168.20.1"]
+        assert system["cloudflare_tunnel"]["tunnel_loopback_only"] is False
+
+        # A partial save (only the proxy list) leaves the LAN toggle untouched.
+        status, _headers, saved = client.request(
+            "/api/settings/system/network",
+            method="PUT",
+            json_body={"trusted_proxies": ["10.0.0.5"]},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert saved["tunnel_loopback_only"] is False
+        assert saved["trusted_proxies"] == ["10.0.0.5"]
+        status, _headers, system = client.request("/api/settings/system")
+        assert status == 200
+        assert system["cloudflare_tunnel"]["tunnel_loopback_only"] is False
+        assert system["auth"]["trusted_proxies"] == ["10.0.0.5"]
+
+        # Invalid proxy entries are rejected with 400.
+        status, _headers, _body = client.request(
+            "/api/settings/system/network",
+            method="PUT",
+            json_body={"trusted_proxies": ["not-an-ip"]},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 400
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_network_save_keeps_stored_tunnel_token(tmp_path, monkeypatch):
+    """Saving the LAN & Proxy card must not clear a stored tunnel token."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        status, _headers, _saved = client.request(
+            "/api/settings/system/cloudflare-tunnel",
+            method="PUT",
+            json_body={"token": "tok-123", "autostart": True},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+
+        status, _headers, saved = client.request(
+            "/api/settings/system/network",
+            method="PUT",
+            json_body={"trusted_proxies": ["127.0.0.1"]},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert saved["tunnel_loopback_only"] is False
+
+        # Configured state and the autostart flag survive the network save.
+        status, _headers, tunnel = client.request("/api/settings/system/cloudflare-tunnel")
+        assert status == 200
+        assert tunnel["configured"] is True
+        assert tunnel["autostart"] is True
+        assert tunnel["tunnel_loopback_only"] is False
     finally:
         server.should_exit = True
         thread.join(timeout=5)

@@ -1,9 +1,9 @@
 """Unit tests for the Uvicorn bind-address decision (``app/server.py``).
 
-``server_host`` must default to loopback whenever a Cloudflare Tunnel token is
-configured (the tunnel is the only ingress), and must honour
-``server.tunnel_loopback_only: false`` so a LAN reverse proxy / split-DNS
-front-end can reach the same origin while the tunnel stays active.
+``server_host`` must default to the configured host (LAN serving) even when a
+Cloudflare Tunnel token is configured -- a fresh install keeps LAN access --
+and must honour ``server.tunnel_loopback_only: true`` so operators can force
+loopback (the tunnel is the only ingress), including a UI-saved toggle.
 """
 
 from __future__ import annotations
@@ -44,11 +44,22 @@ def test_no_tunnel_defaults_to_all_interfaces() -> None:
     assert server_host(_config()) == "0.0.0.0"
 
 
-def test_tunnel_token_defaults_to_loopback() -> None:
-    assert server_host(_config(host="0.0.0.0", tunnel_token="tok")) == "127.0.0.1"
+def test_tunnel_token_defaults_to_lan_serving() -> None:
+    # A token alone does NOT cut off LAN access: a fresh install keeps the
+    # configured host by default (tunnel_loopback_only defaults to false).
+    assert server_host(_config(host="0.0.0.0", tunnel_token="tok")) == "0.0.0.0"
+    assert server_host(_config(host="192.168.20.145", tunnel_token="tok")) == "192.168.20.145"
 
 
-def test_tunnel_token_with_loopback_only_disabled_keeps_host() -> None:
+def test_tunnel_token_with_loopback_only_enabled_binds_loopback() -> None:
+    # tunnel_loopback_only: true forces the tunnel-only ingress.
+    assert (
+        server_host(_config(host="0.0.0.0", tunnel_loopback_only=True, tunnel_token="tok"))
+        == "127.0.0.1"
+    )
+
+
+def test_tunnel_token_with_loopback_only_false_keeps_host() -> None:
     cfg = _config(host="0.0.0.0", tunnel_loopback_only=False, tunnel_token="tok")
     assert server_host(cfg) == "0.0.0.0"
 

@@ -156,6 +156,7 @@ const forms = {
   auth: document.getElementById('authSettingsForm'),
   databaseRestore: document.getElementById('databaseRestoreForm'),
   cloudflareTunnel: document.getElementById('cloudflareTunnelForm'),
+  network: document.getElementById('networkAccessForm'),
 };
 
 // api() is provided by web/utils.js (loaded before this script). It reads
@@ -238,6 +239,9 @@ const FORM_DEFAULTS = {
     session_timeout_hours: 12,
     max_login_attempts: 5,
     lockout_minutes: 15,
+  },
+  network: {
+    tunnel_loopback_only: 'false',
     trusted_proxies: ['127.0.0.1', '::1'],
   },
   email: {
@@ -367,6 +371,10 @@ async function loadSettings() {
   fillForm(forms.retention, settings.recording, FORM_DEFAULTS.recording);
   fillForm(forms.storage, settings.storage, FORM_DEFAULTS.storage);
   fillForm(forms.auth, settings.auth, FORM_DEFAULTS.auth);
+  fillForm(forms.network, {
+    tunnel_loopback_only: settings.cloudflare_tunnel?.tunnel_loopback_only,
+    trusted_proxies: settings.auth?.trusted_proxies,
+  }, FORM_DEFAULTS.network);
   renderEmail(emailSettings);
   renderPush(pushSettings);
   renderCameraOffline(cameraOfflineSettings);
@@ -449,11 +457,6 @@ function renderCloudflareTunnel(status) {
 
   const autostart = forms.cloudflareTunnel?.elements.autostart;
   if (autostart && status?.autostart != null) autostart.value = status.autostart ? 'true' : 'false';
-
-  const lanToggle = forms.cloudflareTunnel?.elements.tunnel_loopback_only;
-  if (lanToggle && status?.tunnel_loopback_only != null) {
-    lanToggle.value = status.tunnel_loopback_only ? 'true' : 'false';
-  }
 
   const startBtn = document.getElementById('startCloudflareTunnelBtn');
   const stopBtn = document.getElementById('stopCloudflareTunnelBtn');
@@ -548,6 +551,7 @@ bindForm('recording', 'Recording');
 bindForm('retention', 'Retention', 'recording');
 bindForm('storage', 'Storage');
 bindForm('auth', 'Login security');
+bindForm('network', 'LAN & proxy');
 
 emailForm?.addEventListener('submit', guard(async (event) => {
   event.preventDefault();

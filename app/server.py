@@ -30,12 +30,13 @@ def _persisted_tunnel_settings(database_path: str | Path) -> dict[str, Any]:
 def server_host(config: dict[str, Any] | None = None) -> str:
     """Return the Uvicorn bind address for this run.
 
-    By default, a configured Cloudflare Tunnel token forces loopback
-    (``127.0.0.1``) so the connector is the only ingress. Operators who front
-    the same origin with a LAN reverse proxy / split-DNS setup (e.g. OPNsense
-    HAProxy for LAN clients plus the tunnel for external clients) can opt out
-    with ``server.tunnel_loopback_only: false`` to keep the configured
-    ``server.host`` (typically ``0.0.0.0``) while the tunnel is active.
+    By default the app keeps serving the configured ``server.host``
+    (typically ``0.0.0.0``) even when a Cloudflare Tunnel token is
+    configured, so LAN clients and the connector coexist -- the natural
+    posture for a fresh install and for split-DNS deployments (e.g. OPNsense
+    HAProxy for LAN clients plus the tunnel for external clients). Operators
+    who want the tunnel to be the ONLY ingress set
+    ``server.tunnel_loopback_only: true`` to force loopback (``127.0.0.1``).
 
     Environment configuration is available before Uvicorn starts; the DB
     lookup covers a previously saved UI token for systemd/service launches.
@@ -46,9 +47,9 @@ def server_host(config: dict[str, Any] | None = None) -> str:
     persisted = _persisted_tunnel_settings(storage.get("database", "data/daygle_ai_camera.sqlite3"))
     token_store = CloudflareTunnelSecretStore(storage.get("database", "data/daygle_ai_camera.sqlite3"))
     tunnel = resolve_cloudflare_tunnel_settings(config, persisted, persisted_token=token_store.read())
-    # A UI-saved ``tunnel_loopback_only`` in app_settings (the Cloudflare
-    # Tunnel settings card) overrides the YAML bootstrap default.
-    loopback_only = bool(server_config.get("tunnel_loopback_only", True))
+    # A UI-saved ``tunnel_loopback_only`` in app_settings (the LAN & Proxy
+    # Access settings card) overrides the YAML bootstrap default.
+    loopback_only = bool(server_config.get("tunnel_loopback_only", False))
     if isinstance(persisted, dict) and "tunnel_loopback_only" in persisted:
         loopback_only = bool(persisted.get("tunnel_loopback_only"))
     if tunnel.token and loopback_only:

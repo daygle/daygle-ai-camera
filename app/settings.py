@@ -14,12 +14,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "server": {
         "host": "0.0.0.0",
         "port": 8080,
-        # Default true: a configured Cloudflare Tunnel token makes the app bind
-        # to 127.0.0.1 so the tunnel is the only ingress. Set to false to keep
-        # the configured server.host (e.g. 0.0.0.0) while the tunnel is active
-        # -- needed when a LAN reverse proxy / split-DNS setup (OPNsense
-        # HAProxy + local DNS) must reach the app alongside the tunnel.
-        "tunnel_loopback_only": True,
+        # Default false: a fresh install keeps serving the LAN (the configured
+        # server.host, e.g. 0.0.0.0) even after a Cloudflare Tunnel token is
+        # configured, so LAN clients and the tunnel coexist -- the natural
+        # posture for a camera app and required for a LAN reverse proxy /
+        # split-DNS setup (OPNsense HAProxy + local DNS). Set to true to make
+        # a configured token bind the app to 127.0.0.1 so the tunnel is the
+        # only ingress.
+        "tunnel_loopback_only": False,
     },
     "cloudflare_tunnel": {"binary": "cloudflared"},
     "ai": {

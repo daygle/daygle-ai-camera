@@ -398,13 +398,6 @@
             <option value="true">Enabled</option>
           </select>
         </label>
-        <label>
-          <span>Serve LAN While Tunnel Is Active <span class="info-tip" data-tip="When enabled, the app keeps the configured server.host (e.g. 0.0.0.0) while the tunnel runs, so a LAN reverse proxy / split-DNS setup can reach it too. Applies on restart. Default: Disabled (tunnel is the only ingress)" title="When enabled, the app keeps the configured server.host (e.g. 0.0.0.0) while the tunnel runs, so a LAN reverse proxy / split-DNS setup can reach it too. Applies on restart. Default: Disabled (tunnel is the only ingress)" tabindex="0" aria-label="Help: Keep the LAN bind while the Cloudflare Tunnel is active. Applies on restart."></span></span>
-          <select name="tunnel_loopback_only">
-            <option value="true">Disabled</option>
-            <option value="false">Enabled</option>
-          </select>
-        </label>
       </form>
       <div id="cloudflareTunnelStatus" class="status-panel cloudflare-tunnel-status" aria-live="polite">
         <div class="cloudflare-tunnel-status-main">
@@ -416,12 +409,38 @@
         </div>
         <span id="cloudflareTunnelTokenSummary" class="cloudflare-token-summary">Token Status: Checking…</span>
       </div>
-      <p class="field-help">When a token is configured, the server binds to <code>127.0.0.1</code> by default so the tunnel is the only public path. Setups that also serve the LAN through a local reverse proxy (split DNS) can enable <strong>Serve LAN While Tunnel Is Active</strong> (or set <code>server.tunnel_loopback_only: false</code> in <code>config.yaml</code>) to keep the configured <code>server.host</code> while the tunnel runs; the bind change applies on restart, and saving this form requires re-entering the token. Cloudflare Access can add an additional login layer; Android clients must send its <code>CF-Access-Client-Id</code> and <code>CF-Access-Client-Secret</code> headers on every request.</p>
+      <p class="field-help">Tokens are stored in a protected file and are never returned to the browser or written to logs. Saving this form requires re-entering the token. LAN access while the tunnel runs is controlled on the <strong>LAN &amp; Proxy Access</strong> card (default: enabled). Cloudflare Access can add an additional login layer; Android clients must send its <code>CF-Access-Client-Id</code> and <code>CF-Access-Client-Secret</code> headers on every request.</p>
       <div class="button-row">
         <button id="saveCloudflareTunnelBtn" type="submit" form="cloudflareTunnelForm">Save Tunnel Settings</button>
         <button id="startCloudflareTunnelBtn" class="btn-info" type="button" disabled>Start Tunnel</button>
         <button id="stopCloudflareTunnelBtn" class="secondary" type="button" disabled>Stop Tunnel</button>
         <button id="restartCloudflareTunnelBtn" class="secondary" type="button" disabled>Restart Tunnel</button>
+      </div>
+    </section>
+
+    <section class="card" id="networkAccessSection">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🌐</div>
+        <div>
+          <h2>LAN &amp; Proxy Access</h2>
+          <p class="settings-section-subtitle">Control how Daygle is reached on your network: LAN serving while a tunnel runs, and which reverse proxies may forward client details.</p>
+        </div>
+      </div>
+      <form id="networkAccessForm" class="form-grid">
+        <label>
+          <span>Serve LAN While Tunnel Is Active <span class="info-tip" data-tip="When enabled (the default), the app keeps the configured server.host (e.g. 0.0.0.0) while the tunnel runs, so LAN clients and a split-DNS reverse proxy stay connected. Disable to bind to 127.0.0.1 so the tunnel is the only ingress. Applies on restart. Default: Enabled" title="When enabled (the default), the app keeps the configured server.host (e.g. 0.0.0.0) while the tunnel runs, so LAN clients and a split-DNS reverse proxy stay connected. Disable to bind to 127.0.0.1 so the tunnel is the only ingress. Applies on restart. Default: Enabled" tabindex="0" aria-label="Help: Keep the LAN bind while the Cloudflare Tunnel is active. Applies on restart."></span></span>
+          <select name="tunnel_loopback_only">
+            <option value="true">Disabled</option>
+            <option value="false">Enabled</option>
+          </select>
+        </label>
+        <label>
+          <span>Trusted Proxy IPs <span class="info-tip" data-tip="Comma-separated IPs or CIDRs whose X-Forwarded-For / X-Forwarded-Proto headers are honored (e.g. an OPNsense HAProxy in front of Daygle). Only these peers may influence the reported client IP and the dashboard's origin checks. Default: 127.0.0.1, ::1" title="Comma-separated IPs or CIDRs whose X-Forwarded-For / X-Forwarded-Proto headers are honored (e.g. a reverse proxy in front of Daygle). Only these peers may influence the reported client IP and the dashboard's origin checks. Default: 127.0.0.1, ::1" tabindex="0" aria-label="Help: Comma-separated IPs or CIDRs whose X-Forwarded-For / X-Forwarded-Proto headers are honored. Default: 127.0.0.1, ::1"></span></span>
+          <input name="trusted_proxies" placeholder="127.0.0.1, ::1" /></label>
+      </form>
+      <p class="field-help">By default the app keeps serving the LAN (the configured <code>server.host</code>) even when a tunnel token is configured. Disable <strong>Serve LAN While Tunnel Is Active</strong> (or set <code>server.tunnel_loopback_only: true</code> in <code>config.yaml</code>) to bind to <code>127.0.0.1</code> so the tunnel is the only ingress; the bind change applies on restart. Add the IP of any reverse proxy in front of Daygle (e.g. <code>192.168.20.1</code> for an OPNsense HAProxy) to <strong>Trusted Proxy IPs</strong> so forwarded client headers are honored for origin checks, the audit log, and login rate limiting.</p>
+      <div class="button-row">
+        <button type="submit" form="networkAccessForm">Save LAN &amp; Proxy Settings</button>
       </div>
     </section>
 
@@ -463,9 +482,6 @@
         <label>
           <span>Lockout Minutes <span class="info-tip" data-tip="How long the account is locked after exceeding max login attempts. Default: 15 minutes" title="How long the account is locked after exceeding max login attempts. Default: 15 minutes" tabindex="0" aria-label="Help: How long the account is locked after exceeding max login attempts. Default: 15 m..."></span></span>
           <input name="lockout_minutes" type="number" min="1" max="1440" placeholder="15" /></label>
-        <label>
-          <span>Trusted Proxy IPs <span class="info-tip" data-tip="Comma-separated IPs or CIDRs whose X-Forwarded-For header is honored (e.g. a reverse proxy in front of Daygle). Only these peers may influence the reported client IP. Default: 127.0.0.1, ::1" title="Comma-separated IPs or CIDRs whose X-Forwarded-For header is honored (e.g. a reverse proxy in front of Daygle). Only these peers may influence the reported client IP. Default: 127.0.0.1, ::1" tabindex="0" aria-label="Help: Comma-separated IPs or CIDRs whose X-Forwarded-For header is honored. Default: 127.0.0.1, ::1"></span></span>
-          <input name="trusted_proxies" placeholder="127.0.0.1, ::1" /></label>
       </form>
       <div class="button-row">
         <button type="submit" form="authSettingsForm">Save Login Security</button>
