@@ -33,6 +33,13 @@ from app.rate_limiter import (
 
 REPO_DIR = str(Path(__file__).resolve().parents[1])
 
+# On Windows, ``subprocess.run(["bash", ...])`` resolves "bash" to the WSL
+# launcher (the System32 bash.exe) because CreateProcess searches the system
+# directory before PATH; that WSL bash cannot see the repo scripts. Resolve the
+# real bash explicitly: Git Bash on Windows (which understands Windows paths and
+# tolerates CRLF), /usr/bin/bash elsewhere.
+BASH = shutil.which("bash") or "bash"
+
 
 # N1 ---------------------------------------------------------------------
 
@@ -148,14 +155,14 @@ class DependencyLockScriptsSyntaxTests(unittest.TestCase):
 
     def test_lock_python_deps_sh_parses(self):
         result = subprocess.run(
-            ['bash', '-n', REPO_DIR + '/scripts/lock_python_deps.sh'],
+            [BASH, '-n', REPO_DIR + '/scripts/lock_python_deps.sh'],
             capture_output=True, text=True, check=False,
         )
         self.assertEqual(result.returncode, 0, 'lock_python_deps.sh has bash syntax error')
 
     def test_install_python_deps_sh_parses(self):
         result = subprocess.run(
-            ['bash', '-n', REPO_DIR + '/scripts/install_python_deps.sh'],
+            [BASH, '-n', REPO_DIR + '/scripts/install_python_deps.sh'],
             capture_output=True, text=True, check=False,
         )
         self.assertEqual(

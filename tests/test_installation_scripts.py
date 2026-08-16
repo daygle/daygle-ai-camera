@@ -13,6 +13,13 @@ from pathlib import Path
 REPO_DIR = Path(__file__).resolve().parents[1]
 INSTALL_SCRIPT = REPO_DIR / "scripts" / "install_python_deps.sh"
 
+# On Windows, ``subprocess.run(["bash", ...])`` resolves "bash" to the WSL
+# launcher (the System32 bash.exe) because CreateProcess searches the system
+# directory before PATH; that WSL bash cannot see the repo scripts and has no
+# git. Resolve the real bash explicitly: Git Bash on Windows (which understands
+# Windows paths, tolerates CRLF, and ships git), /usr/bin/bash elsewhere.
+BASH = shutil.which("bash") or "bash"
+
 
 class DependencyVariantSelectionTests(unittest.TestCase):
     def setUp(self):
@@ -69,7 +76,7 @@ fi
         env["DAYGLE_TEST_PROVIDER_FAIL"] = "1" if provider_fail else "0"
         env["DAYGLE_TEST_NO_GPU"] = "0"
         result = subprocess.run(
-            ["bash", str(INSTALL_SCRIPT), str(self.fake_python), str(REPO_DIR / "requirements.txt")],
+            [BASH, str(INSTALL_SCRIPT), str(self.fake_python), str(REPO_DIR / "requirements.txt")],
             cwd=str(REPO_DIR),
             env=env,
             capture_output=True,
@@ -109,7 +116,7 @@ fi
         env["DAYGLE_TEST_CAPTURE"] = str(self.capture)
         env["DAYGLE_TEST_NO_GPU"] = "1"
         result = subprocess.run(
-            ["bash", str(INSTALL_SCRIPT), str(self.fake_python), str(REPO_DIR / "requirements.txt")],
+            [BASH, str(INSTALL_SCRIPT), str(self.fake_python), str(REPO_DIR / "requirements.txt")],
             cwd=str(REPO_DIR),
             env=env,
             capture_output=True,
@@ -128,7 +135,7 @@ fi
         env["DAYGLE_TEST_PROVIDER_FAIL"] = "1"
         env["DAYGLE_TEST_CAPTURE"] = str(self.capture)
         result = subprocess.run(
-            ["bash", str(INSTALL_SCRIPT), str(self.fake_python), str(REPO_DIR / "requirements.txt")],
+            [BASH, str(INSTALL_SCRIPT), str(self.fake_python), str(REPO_DIR / "requirements.txt")],
             cwd=str(REPO_DIR),
             env=env,
             capture_output=True,
@@ -142,7 +149,7 @@ fi
         env = dict(os.environ)
         env["DAYGLE_ONNXRUNTIME_VARIANT"] = "cuda"
         result = subprocess.run(
-            ["bash", str(INSTALL_SCRIPT), str(self.fake_python), str(REPO_DIR / "requirements.txt")],
+            [BASH, str(INSTALL_SCRIPT), str(self.fake_python), str(REPO_DIR / "requirements.txt")],
             cwd=str(REPO_DIR),
             env=env,
             capture_output=True,

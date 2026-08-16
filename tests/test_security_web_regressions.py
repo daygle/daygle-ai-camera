@@ -26,6 +26,13 @@ from app.recording_extension import clear_runtime_media_directory
 
 REPO_DIR = str(Path(__file__).resolve().parents[1])
 
+# On Windows, ``subprocess.run(["bash", ...])`` resolves "bash" to the WSL
+# launcher (the System32 bash.exe) because CreateProcess searches the system
+# directory before PATH; that WSL bash cannot see the repo scripts and has no
+# git. Resolve the real bash explicitly: Git Bash on Windows (which understands
+# Windows paths, tolerates CRLF, and ships git), /usr/bin/bash elsewhere.
+BASH = shutil.which("bash") or "bash"
+
 
 def _hermetic_git_env():
     """Run git/update.sh isolated from the developer's ambient git config.
@@ -72,7 +79,7 @@ class UpdateScriptOriginGuardTests(TestCase):
     def test_update_sh_rejects_non_allowlisted_origin(self):
         bad_repo = self._make_git_repo('git@github.com:evil/malicious-fork.git')
         result = subprocess.run(
-            ['bash', REPO_DIR + '/scripts/update.sh'],
+            [BASH, REPO_DIR + '/scripts/update.sh'],
             cwd=bad_repo, capture_output=True, text=True, check=False,
             env=_hermetic_git_env(),
         )
@@ -101,7 +108,7 @@ class UpdateScriptOriginGuardTests(TestCase):
         env = _hermetic_git_env()
         env['GIT_ALLOW_PROTOCOL'] = 'file'
         result = subprocess.run(
-            ['bash', str(scripts_dir / 'update.sh')],
+            [BASH, str(scripts_dir / 'update.sh')],
             cwd=good_repo, capture_output=True, text=True, check=False,
             env=env,
         )
