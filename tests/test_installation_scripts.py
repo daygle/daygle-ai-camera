@@ -105,8 +105,11 @@ fi
         self.assertFalse(any(line.startswith("onnxruntime=") for line in lines))
 
     def test_cpu_variant_keeps_cpu_onnxruntime(self):
+        # A committed requirements.cpu.lock.txt exists in the repo, so the
+        # installer uses the hash-pinned lock (exact == pins) rather than the
+        # raw requirements.txt fallback.
         lines = self._package_lines(self._run("cpu"))
-        self.assertTrue(any(line.startswith("onnxruntime>=") for line in lines))
+        self.assertTrue(any(line.startswith("onnxruntime==") for line in lines))
         self.assertFalse(any(line.startswith("onnxruntime-gpu") for line in lines))
 
     def test_auto_variant_falls_back_to_cpu_without_usable_nvidia_smi(self):
@@ -118,6 +121,37 @@ fi
         result = subprocess.run(
             [BASH, str(INSTALL_SCRIPT), str(self.fake_python), str(REPO_DIR / "requirements.txt")],
             cwd=str(REPO_DIR),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = self._package_lines(self.capture.read_text(encoding="utf-8"))
+        # auto with no usable GPU resolves to the CPU variant, which uses the
+        # committed requirements.cpu.lock.txt (exact == pins).
+        self.assertTrue(any(line.startswith("onnxruntime==") for line in lines))
+        self.assertFalse(any(line.startswith("onnxruntime-gpu") for line in lines))
+
+    def test_cpu_variant_without_lock_file_keeps_cpu_onnxruntime(self):
+        # Stage the installer in a directory with no committed lock so the
+        # awk-filtered requirements.txt fallback path is still exercised.
+        staged = self.tmpdir / "stage"
+        staged.mkdir()
+        shutil.copy(INSTALL_SCRIPT, staged / "install_python_deps.sh")
+        staged_req = staged / "requirements.txt"
+        staged_req.write_text(
+            (REPO_DIR / "requirements.txt").read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        env = dict(os.environ)
+        env["PATH"] = f"{self.bin_dir}{os.pathsep}{env.get('PATH', '')}"
+        env["DAYGLE_ONNXRUNTIME_VARIANT"] = "cpu"
+        env["DAYGLE_TEST_CAPTURE"] = str(self.capture)
+        env["DAYGLE_TEST_PROVIDER_FAIL"] = "0"
+        env["DAYGLE_TEST_NO_GPU"] = "0"
+        result = subprocess.run(
+            [BASH, str(staged / "install_python_deps.sh"), str(self.fake_python), str(staged_req)],
+            cwd=str(staged),
             env=env,
             capture_output=True,
             text=True,
