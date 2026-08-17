@@ -131,7 +131,6 @@
 }
 :root.light .monitor-zone-polygon polygon,
 :root.light .monitor-zone-polygon polyline { fill: rgba(2,132,199,.08); }
-:root.light .labels-list .label-tag { background: rgba(0,0,0,.03); }
 :root.light .toast { background: #fff; box-shadow: 0 8px 32px rgba(0,0,0,.12); }
 :root.light .activity-filter-group { background: rgba(0,0,0,.04); border-color: rgba(0,0,0,.08); }
 :root.light .activity-filter-pill:hover { background: rgba(0,0,0,.08); color: var(--text); }
@@ -3096,24 +3095,6 @@ tr.drag-over {
 }
 .badge-active { background: var(--accent); color: #000; }
 
-/* ─── Labels list ───────────────────────────────────────────────────────────── */
-.labels-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 4px;
-}
-.label-tag {
-  display: inline-block;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 3px 8px;
-  font-size: 12px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
 /* ─── Toast notifications ───────────────────────────────────────────────────── */
 .toast-container {
   position: fixed;
@@ -3424,6 +3405,43 @@ tr.drag-over {
   font-weight: 700;
   text-transform: none;
   letter-spacing: 0;
+}
+
+/* GPU health card thermal states (driven by /api/system/resources):
+   warn tints the value + icon amber as the card approaches the 90 C
+   throttle ceiling; critical switches to the danger palette so a card at
+   its thermal limit stands out in the stats grid. */
+.stats-grid .stat-card.stat-card-warn {
+  border-color: rgba(251, 191, 36, 0.45);
+}
+.stats-grid .stat-card.stat-card-warn .stat-card-value,
+.stats-grid .stat-card.stat-card-warn .stat-card-icon {
+  color: #f8c55d;
+}
+.stats-grid .stat-card.stat-card-warn .stat-card-icon {
+  background: rgba(248, 197, 93, 0.1);
+  border-color: rgba(248, 197, 93, 0.3);
+}
+.stats-grid .stat-card.stat-card-danger {
+  border-color: rgba(248, 113, 113, 0.55);
+}
+.stats-grid .stat-card.stat-card-danger .stat-card-value,
+.stats-grid .stat-card.stat-card-danger .stat-card-icon {
+  color: var(--danger);
+}
+.stats-grid .stat-card.stat-card-danger .stat-card-icon {
+  background: rgba(255, 92, 138, 0.12);
+  border-color: rgba(255, 92, 138, 0.35);
+}
+.stats-grid .stat-card.stat-card-danger .stat-card-sub {
+  color: #fecaca;
+}
+:root.light .stats-grid .stat-card.stat-card-warn .stat-card-value,
+:root.light .stats-grid .stat-card.stat-card-warn .stat-card-icon {
+  color: #b45309;
+}
+:root.light .stats-grid .stat-card.stat-card-danger .stat-card-sub {
+  color: #991b1b;
 }
 
 /* Activity feed card + filter pills */
@@ -6313,4 +6331,38 @@ button.secondary:disabled, a.secondary:disabled {
   .zones-frame-wrap, .zones-frame-wrap .live-frame { min-height: 290px; }
   .zones-frame-wrap .live-frame { height: min(58vh, 470px); }
   .zones-list .zone-shape-toggle { max-width: none; }
+}
+
+/* ─── Objects page: object groups card ──────────────────────────────────── */
+.group-form-fields {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) 1fr;
+  gap: 12px;
+  align-items: end;
+}
+.form-stack.group-form .button-row {
+  justify-content: flex-start;
+  border-top: none;
+  padding-top: 0;
+  margin-top: 4px;
+}
+.form-stack.group-form .button-row button { min-width: 0; }
+.group-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+.group-row-main { min-width: 0; }
+.group-name { font-weight: 800; color: var(--text); }
+.group-members { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.group-row-actions { display: flex; gap: 8px; flex-shrink: 0; }
+@media (max-width: 600px) {
+  .group-form-fields { grid-template-columns: 1fr; }
+  .group-row { flex-direction: column; align-items: stretch; }
+  .group-row-actions { justify-content: flex-end; }
 }

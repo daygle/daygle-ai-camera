@@ -84,6 +84,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.camera_id import normalize_camera_id
+from app.label_groups import cached_label_groups
 from app.utils import normalize_bool_setting, normalize_email_recipients, normalize_hhmm
 
 
@@ -117,15 +118,12 @@ _LABEL_ALIASES: dict[str, str] = {
 # allow-list for ``cat`` still matches only ``cat``. A user who instead
 # configures ``animal`` (or ``pet``) opts into the umbrella -- e.g. at night an
 # IR-lit cat is frequently misclassified as ``dog``, so an ``animal``/``pet``
-# rule still fires. The member sets are the COCO animal classes; extend here if
-# a custom model adds labels.
-_LABEL_GROUPS: dict[str, frozenset[str]] = {
-    'animal': frozenset({
-        'bird', 'cat', 'dog', 'horse', 'sheep', 'cow',
-        'elephant', 'bear', 'zebra', 'giraffe',
-    }),
-    'pet': frozenset({'cat', 'dog', 'bird'}),
-}
+# rule still fires.
+#
+# The group *definitions* are user-managed and live in ``app.label_groups``
+# (``animal`` / ``pet`` are only first-run defaults). The two matching helpers
+# below read them through ``cached_label_groups()``, so an operator-created
+# group works exactly like the built-ins without touching this module.
 
 
 def _optional_fraction(value: Any, low: float, high: float) -> float | None:
@@ -166,7 +164,7 @@ def label_matches(detection_label: Any, configured_label: Any) -> bool:
         return False
     if detection == configured:
         return True
-    members = _LABEL_GROUPS.get(configured)
+    members = cached_label_groups().get(configured)
     return bool(members and detection in members)
 
 
@@ -183,9 +181,10 @@ def detection_label_in_allowed(detection_label: Any, allowed_labels: set[str]) -
         return False
     if detection in allowed_labels:
         return True
+    groups = cached_label_groups()
     return any(
         detection in members
-        for members in (_LABEL_GROUPS.get(label) for label in allowed_labels)
+        for members in (groups.get(label) for label in allowed_labels)
         if members
     )
 

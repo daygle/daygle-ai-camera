@@ -1,6 +1,6 @@
 """Settings payload validators extracted from ``app/main.py`` (Phase-22).
 
-The 9 helpers shipped here cluster around settings-router payload
+The 10 helpers shipped here cluster around settings-router payload
 validation -- the small, mostly-pure functions called by every mutating
 settings endpoint to coerce and bounds-check an inbound ``dict`` payload
 before the route writes it back to the database / record-store.
@@ -61,6 +61,9 @@ Cluster membership:
 - ``validate_auth_settings`` -- session-timeout + max-login-attempts +
   lockout-minutes + trusted-proxies validator.
 
+- ``validate_system_settings`` -- GPU-health thresholds (warn/critical
+  temperature) validator; critical must stay above warn.
+
 - ``validate_live_settings`` -- the second-heaviest cluster member
   (per-camera live framerates + detection interval + motion-tuner
   fields + periodic-scan interval).
@@ -113,6 +116,7 @@ from app.config_facades import (
     effective_push_notification_settings,
     effective_recording_config,
     effective_storage_config,
+    effective_system_config,
 )
 from app.recording_settings import (
     _migrate_legacy_camera_motion,
@@ -567,6 +571,25 @@ def validate_auth_settings(payload: dict[str, Any]) -> dict[str, Any]:
             merged.get('trusted_proxies', ['127.0.0.1', '::1'])
         ),
     }
+
+
+def validate_system_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    """Validate the GPU-health / host-level system settings payload.
+
+    Both thresholds are bounded integers (warn below critical); the
+    critical value must always stay above warn so a misordered save cannot
+    flip the card straight into its danger state.
+    """
+    current = effective_system_config()
+    merged = {**current, **payload}
+    gpu_temp_warn_c = _int_field(merged, 'gpu_temp_warn_c', 85, 30, 120)
+    gpu_temp_critical_c = _int_field(merged, 'gpu_temp_critical_c', 90, 40, 150)
+    if gpu_temp_critical_c <= gpu_temp_warn_c:
+        raise HTTPException(
+            status_code=400,
+            detail='GPU critical temperature must be above the warn temperature.',
+        )
+    return {'gpu_temp_warn_c': gpu_temp_warn_c, 'gpu_temp_critical_c': gpu_temp_critical_c}
 
 
 def validate_live_settings(payload: dict[str, Any]) -> dict[str, Any]:

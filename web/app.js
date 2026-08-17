@@ -12,6 +12,9 @@ const els = {
   loadSub: document.getElementById('loadSub'),
   ramValue: document.getElementById('ramValue'),
   ramSub: document.getElementById('ramSub'),
+  gpuValue: document.getElementById('gpuValue'),
+  gpuSub: document.getElementById('gpuSub'),
+  gpuCard: document.getElementById('gpuCard'),
   // Scope to [data-filter] so the category group and the range group stay
   // independent: both share the .activity-filter-pill class, so selecting by
   // class swept the range buttons into the category handler, which reset the
@@ -436,6 +439,58 @@ function renderSystemResources(res) {
       ? `${formatGB(mem.used)} / ${formatGB(mem.total)} used`
       : 'Memory usage';
   }
+
+  renderGpuStatus(res?.gpu);
+}
+
+// ─── GPU health card ────────────────────────────────────────────────────────
+// Renders the nvidia-smi snapshot served under /api/system/resources. When
+// the host has no NVIDIA GPU (or nvidia-smi is unavailable) the backend
+// returns null and the card is hidden entirely. Thermal status comes from
+// the backend (warn >= 85 C, critical >= 90 C - the Tesla P4 throttle
+// ceiling), driving the card's warning styling and message.
+function renderGpuStatus(gpu) {
+  if (!els.gpuValue) return;
+  const primary = gpu?.primary;
+
+  if (!primary) {
+    if (els.gpuCard) els.gpuCard.hidden = true;
+    return;
+  }
+  if (els.gpuCard) els.gpuCard.hidden = false;
+  const status = primary?.thermal_status;
+  els.gpuCard?.classList.toggle('stat-card-warn', status === 'warn');
+  els.gpuCard?.classList.toggle('stat-card-danger', status === 'critical');
+
+  const temp = primary.temperature_c;
+  els.gpuValue.textContent = Number.isFinite(temp) ? `${Math.round(temp)}°C` : ' - ';
+
+  const detail = [];
+  if (Number.isFinite(primary.utilization_percent)) detail.push(`${Math.round(primary.utilization_percent)}% util`);
+  if (Number.isFinite(primary.graphics_clock_mhz)) detail.push(`${Math.round(primary.graphics_clock_mhz)} MHz`);
+  if (Number.isFinite(primary.power_draw_watts)) {
+    const draw = primary.power_draw_watts.toFixed(0);
+    detail.push(Number.isFinite(primary.power_limit_watts)
+      ? `${draw}/${primary.power_limit_watts.toFixed(0)} W`
+      : `${draw} W`);
+  }
+  // VRAM reuses formatGB (binary GB, same convention as the RAM card): the
+  // backend reports memory in MiB, so scale up to bytes first.
+  if (Number.isFinite(primary.memory_used_mb) && Number.isFinite(primary.memory_total_mb)) {
+    detail.push(`${formatGB(primary.memory_used_mb * (1024 ** 2))}/${formatGB(primary.memory_total_mb * (1024 ** 2))} VRAM`);
+  }
+
+  const criticalTemp = Number.isFinite(gpu?.critical_temp_c) ? gpu.critical_temp_c : 90;
+  if (els.gpuSub) {
+    if (status === 'critical') {
+      els.gpuSub.textContent = `At ${criticalTemp}°C throttle limit - reduce load or improve airflow`;
+    } else if (status === 'warn') {
+      els.gpuSub.textContent = `Approaching ${criticalTemp}°C throttle limit - check airflow`;
+    } else {
+      els.gpuSub.textContent = detail.length ? detail.join(' · ') : 'Graphics card';
+    }
+  }
+  if (els.gpuCard) els.gpuCard.title = primary.name ? String(primary.name) : '';
 }
 
 async function loadSystemResources() {

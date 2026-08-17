@@ -444,6 +444,28 @@
       </div>
     </section>
 
+    <section class="card" id="gpuHealthCard">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🖥️</div>
+        <div>
+          <h2>GPU Health</h2>
+          <p class="settings-section-subtitle">Thermal thresholds for the dashboard GPU health card. The warn threshold tints the card amber; the critical threshold turns it red at the card's throttle limit.</p>
+        </div>
+      </div>
+      <form id="gpuHealthForm" class="form-grid">
+        <label>
+          <span>Warn Temperature (°C) <span class="info-tip" data-tip="The dashboard GPU card turns amber at this temperature. Default: 85°C" title="The dashboard GPU card turns amber at this temperature. Default: 85°C" tabindex="0" aria-label="Help: The dashboard GPU card turns amber at this temperature. Default: 85°C"></span></span>
+          <input name="gpu_temp_warn_c" type="number" min="30" max="120" step="1" placeholder="85" /></label>
+        <label>
+          <span>Critical Temperature (°C) <span class="info-tip" data-tip="The dashboard GPU card turns red at this temperature - treat it as the card's throttle limit (the Tesla P4 throttles at ~90°C). Default: 90°C" title="The dashboard GPU card turns red at this temperature - treat it as the card's throttle limit. Default: 90°C" tabindex="0" aria-label="Help: The dashboard GPU card turns red at this temperature - treat it as the card's throttle limit. Default: 90°C"></span></span>
+          <input name="gpu_temp_critical_c" type="number" min="40" max="150" step="1" placeholder="90" /></label>
+      </form>
+      <p class="field-help">These values apply to the GPU card on the Dashboard. The defaults match the Tesla P4's ~90°C throttle ceiling; tune them to your own card's limit.</p>
+      <div class="button-row">
+        <button type="submit" form="gpuHealthForm">Save GPU Health Settings</button>
+      </div>
+    </section>
+
     <section class="card">
       <div class="settings-section-header">
         <div class="settings-section-icon" aria-hidden="true">💾</div>

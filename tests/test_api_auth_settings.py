@@ -1168,6 +1168,41 @@ def test_system_live_settings_update(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+def test_system_gpu_health_settings_update(tmp_path, monkeypatch):
+    """PUT /api/settings/system/gpu persists the GPU health thresholds."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        status, _headers, updated = client.request(
+            "/api/settings/system/gpu",
+            method="PUT",
+            json_body={"gpu_temp_warn_c": 80, "gpu_temp_critical_c": 83},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert updated["gpu_temp_warn_c"] == 80
+        assert updated["gpu_temp_critical_c"] == 83
+        status, _headers, system = client.request("/api/settings/system")
+        assert status == 200
+        assert system["system"]["gpu_temp_warn_c"] == 80
+        assert system["system"]["gpu_temp_critical_c"] == 83
+
+        # critical must stay above warn.
+        status, _headers, _body = client.request(
+            "/api/settings/system/gpu",
+            method="PUT",
+            json_body={"gpu_temp_warn_c": 90, "gpu_temp_critical_c": 90},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 400
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_system_resources_endpoint(tmp_path, monkeypatch):
     """/api/system/resources returns CPU/load/RAM and is admin-gated."""
     app, _database_path = _load_app(tmp_path, monkeypatch)
@@ -1179,7 +1214,7 @@ def test_system_resources_endpoint(tmp_path, monkeypatch):
 
         status, _headers, payload = client.request("/api/system/resources")
         assert status == 200
-        assert set(payload) == {"cpu_percent", "cpu_count", "load_average", "memory"}
+        assert set(payload) == {"cpu_percent", "cpu_count", "load_average", "memory", "gpu"}
         # On the Linux CI host these are populated; values are best-effort so
         # only assert the shape, not exact numbers.
         assert payload["cpu_count"] is None or payload["cpu_count"] >= 1
@@ -1187,6 +1222,15 @@ def test_system_resources_endpoint(tmp_path, monkeypatch):
         if mem is not None:
             assert mem["used"] <= mem["total"]
             assert 0 <= mem["percent"] <= 100
+        # The GPU card is best-effort: hosts without an NVIDIA driver get
+        # null, hosts with nvidia-smi get the full snapshot shape.
+        gpu = payload["gpu"]
+        assert gpu is None or (
+            isinstance(gpu, dict)
+            and gpu["count"] >= 1
+            and set(gpu["primary"]) >= {"name", "temperature_c", "utilization_percent", "thermal_status"}
+            and gpu["primary"]["thermal_status"] in ("ok", "warn", "critical", "unknown")
+        )
 
         # Anonymous callers are rejected before reaching the handler.
         anon = LocalClient(base_url)
@@ -1202,6 +1246,69 @@ def test_system_resources_endpoint(tmp_path, monkeypatch):
         viewer_client = LocalClient(base_url)
         _login(viewer_client, "viewer", "Viewer123!")
         assert viewer_client.request("/api/system/resources")[0] == 403
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_label_groups_settings_update(tmp_path, monkeypatch):
+    """GET/PUT /api/settings/label_groups persists create/edit/remove of groups."""
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        # First run exposes the built-in defaults.
+        status, _headers, initial = client.request("/api/settings/label_groups")
+        assert status == 200
+        assert "animal" in initial["groups"]
+        assert "cat" in initial["groups"]["animal"]
+        assert "available_labels" in initial
+
+        # Create a new group, edit pet, and remove animal in one save.
+        status, _headers, updated = client.request(
+            "/api/settings/label_groups",
+            method="PUT",
+            json_body={"groups": {"vehicle": ["car", "truck", "bus"], "pet": ["cat", "dog"]}},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        assert updated["groups"]["vehicle"] == ["bus", "car", "truck"]  # sorted
+        assert "animal" not in updated["groups"]  # removal persisted
+
+        status, _headers, fetched = client.request("/api/settings/label_groups")
+        assert status == 200
+        assert "vehicle" in fetched["groups"]
+        assert "animal" not in fetched["groups"]
+
+        # A group that contains itself is rejected.
+        status, _headers, _body = client.request(
+            "/api/settings/label_groups",
+            method="PUT",
+            json_body={"groups": {"cat": ["cat", "dog"]}},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 400
+
+        # A reserved name is rejected.
+        status, _headers, _body = client.request(
+            "/api/settings/label_groups",
+            method="PUT",
+            json_body={"groups": {"motion": ["cat"]}},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 400
+
+        # A group name that collides with a member label is rejected.
+        status, _headers, _body = client.request(
+            "/api/settings/label_groups",
+            method="PUT",
+            json_body={"groups": {"cat": ["dog"], "dog": ["cat"]}},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 400
     finally:
         server.should_exit = True
         thread.join(timeout=5)

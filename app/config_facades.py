@@ -73,6 +73,7 @@ def _normalize_shadow_suppression(value: Any) -> str:
 
 
 DEFAULT_RECORDING_CONFIG: dict[str, Any] = copy.deepcopy(DEFAULT_CONFIG['recording'])
+DEFAULT_SYSTEM_CONFIG: dict[str, Any] = copy.deepcopy(DEFAULT_CONFIG['system'])
 DEFAULT_STORAGE_CONFIG: dict[str, Any] = copy.deepcopy(DEFAULT_CONFIG['storage'])
 DEFAULT_AUTH_CONFIG: dict[str, Any] = copy.deepcopy(DEFAULT_CONFIG['auth'])
 DEFAULT_EMAIL_ALERT_SETTINGS: dict[str, Any] = copy.deepcopy(DEFAULT_CONFIG['alerts']['email'])
@@ -170,6 +171,18 @@ def effective_live_config() -> dict[str, Any]:
     settings['motion_shadow_suppression'] = _normalize_shadow_suppression(
         settings.get('motion_shadow_suppression')
     )
+    return settings
+
+
+def effective_system_config() -> dict[str, Any]:
+    """GPU-health + host-level system settings (defaults -> YAML -> DB)."""
+    settings = copy.deepcopy(DEFAULT_SYSTEM_CONFIG)
+    config_system = _state.config.get('system', {})
+    if isinstance(config_system, dict):
+        settings.update(config_system)
+    override = _database_setting('system')
+    if isinstance(override, dict):
+        settings.update(override)
     return settings
 
 

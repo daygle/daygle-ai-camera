@@ -8,10 +8,10 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Query, Request
 
 from app.auth_gates import require_admin
-from app.config_facades import effective_ai_config
+from app.config_facades import effective_ai_config, effective_system_config
 from app.deps import get_cameras_config, get_database
 from app.sound_detector import SOUND_CLASSES
-from app.system_metrics import system_resources
+from app.system_metrics import GPU_TEMP_CRITICAL_C, GPU_TEMP_WARN_C, system_resources
 
 router = APIRouter()
 
@@ -26,9 +26,15 @@ def stats(request: Request, since: str | None = Query(None), cameras_config=Depe
 
 @router.get('/api/system/resources')
 def system_resources_status(request: Request):
-    """Host CPU / load-average / RAM snapshot for the dashboard cards."""
+    """Host CPU / load-average / RAM / GPU snapshot for the dashboard cards."""
     require_admin(request)
-    return system_resources()
+    # GPU thermal thresholds are admin-tunable (Settings -> System -> GPU
+    # Health); fall back to the module defaults when unset.
+    system = effective_system_config()
+    return system_resources(
+        gpu_warn_c=int(system.get('gpu_temp_warn_c') or GPU_TEMP_WARN_C),
+        gpu_critical_c=int(system.get('gpu_temp_critical_c') or GPU_TEMP_CRITICAL_C),
+    )
 
 
 @router.get('/api/labels')

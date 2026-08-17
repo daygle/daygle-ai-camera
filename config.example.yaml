@@ -10,6 +10,14 @@ server:
   # to 127.0.0.1 so the tunnel is the only ingress.
   tunnel_loopback_only: false
 
+# Host-level tuning for the dashboard GPU health card. The warn threshold
+# tints the card amber; the critical threshold turns it red. Defaults match
+# the Tesla P4 (throttle ceiling ~90 C); tune for other NVIDIA cards. These
+# are also editable in the Settings -> System -> GPU Health card.
+system:
+  gpu_temp_warn_c: 85
+  gpu_temp_critical_c: 90
+
 # Optional bootstrap settings for a headless Cloudflare Tunnel deployment.
 # Prefer DAYGLE_CLOUDFLARED_TOKEN or the Settings UI so the token is not
 # committed to this file.

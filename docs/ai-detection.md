@@ -105,7 +105,7 @@ automatically, and any reload warning is surfaced in the Status panel.
   detection is skipped and the status panel reports *AI DISABLED*. Default:
   Enabled.
 - **Device** - inference device. *Auto* detects a CUDA GPU at startup and falls
-  back to CPU; *CUDA (GPU)* forces the GPU; *CPU* forces CPU. INT8 precision
+  back to CPU; *GPU (CUDA)* forces the GPU; *CPU* forces CPU. INT8 precision
   always runs on CPU regardless of this setting. Default: Auto.
 - **Concurrent Cameras** - how many cameras can run ONNX inference at the same
   time. Default: 1 (serialised). Set this to your camera count so each camera

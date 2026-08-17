@@ -105,7 +105,7 @@ systemctl restart daygle-ai-camera
 journalctl -u daygle-ai-camera -f
 ```
 
-Then at `http://<server-ip>:8080/onnx`: **Device = CUDA (GPU)**, **Precision =
+Then at `http://<server-ip>:8080/onnx`: **Device = GPU (CUDA)**, **Precision =
 FP32**, **GPU memory limit = 0**. Save, then **Reload detector → Check model →
 Test detector**. In a second shell, `nvidia-smi` should show the Python process
 holding GPU memory during the test - that is the definitive confirmation, more

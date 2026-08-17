@@ -147,6 +147,7 @@ def _install_validator_dependencies(
     config=None,
     effective_auth_config=None,
     effective_live_config=None,
+    effective_system_config=None,
     cameras_config=None,
 ):
     """Install hermetic stand-ins for the cross-module deps of the 9 validators.
@@ -202,6 +203,8 @@ def _install_validator_dependencies(
         effective_auth_config = lambda: {}
     if effective_live_config is None:
         effective_live_config = lambda: {}
+    if effective_system_config is None:
+        effective_system_config = lambda: {}
     if cameras_config is None:
         cameras_config = []
 
@@ -211,6 +214,7 @@ def _install_validator_dependencies(
     monkeypatch.setattr(pv, 'effective_storage_config', effective_storage_config)
     monkeypatch.setattr(pv, 'effective_auth_config', effective_auth_config)
     monkeypatch.setattr(pv, 'effective_live_config', effective_live_config)
+    monkeypatch.setattr(pv, 'effective_system_config', effective_system_config)
     monkeypatch.setattr(pv, 'effective_recording_config', effective_recording_config)
     monkeypatch.setattr(pv, 'normalize_bool_setting', normalize_bool_setting)
     monkeypatch.setattr(pv, 'normalize_camera_id', normalize_camera_id)
@@ -1055,3 +1059,50 @@ def test_validate_live_settings_rejects_snapshot_quality_out_of_range(monkeypatc
             pv.validate_live_settings({'snapshot_quality': bad})
         assert exc_info.value.status_code == 400
         assert 'snapshot_quality must be between 2 and 31' in exc_info.value.detail
+
+
+# ---------------------------------------------------------------------------
+# 12. validate_system_settings
+# ---------------------------------------------------------------------------
+
+
+def test_validate_system_settings_returns_defaults(monkeypatch, pv):
+    """Empty payload -> the documented 85 / 90 defaults."""
+    _install_validator_dependencies(monkeypatch)
+    assert pv.validate_system_settings({}) == {'gpu_temp_warn_c': 85, 'gpu_temp_critical_c': 90}
+
+
+def test_validate_system_settings_accepts_custom_values(monkeypatch, pv):
+    """Other cards can tune the thresholds (e.g. a card throttling at 83 C)."""
+    _install_validator_dependencies(monkeypatch)
+    out = pv.validate_system_settings({'gpu_temp_warn_c': 80, 'gpu_temp_critical_c': 83})
+    assert out == {'gpu_temp_warn_c': 80, 'gpu_temp_critical_c': 83}
+
+
+def test_validate_system_settings_rejects_non_integer(monkeypatch, pv):
+    from fastapi import HTTPException
+    _install_validator_dependencies(monkeypatch)
+    with pytest.raises(HTTPException) as exc_info:
+        pv.validate_system_settings({'gpu_temp_warn_c': 'hot'})
+    assert exc_info.value.status_code == 400
+    assert 'gpu_temp_warn_c must be an integer' in exc_info.value.detail
+
+
+def test_validate_system_settings_rejects_out_of_range(monkeypatch, pv):
+    from fastapi import HTTPException
+    _install_validator_dependencies(monkeypatch)
+    with pytest.raises(HTTPException) as exc_info:
+        pv.validate_system_settings({'gpu_temp_warn_c': 5})  # below min 30
+    assert exc_info.value.status_code == 400
+    assert 'gpu_temp_warn_c must be between 30 and 120' in exc_info.value.detail
+
+
+def test_validate_system_settings_rejects_critical_at_or_below_warn(monkeypatch, pv):
+    """critical must stay above warn so a misordered save cannot flip the
+    card straight into its danger state."""
+    from fastapi import HTTPException
+    _install_validator_dependencies(monkeypatch)
+    with pytest.raises(HTTPException) as exc_info:
+        pv.validate_system_settings({'gpu_temp_warn_c': 90, 'gpu_temp_critical_c': 90})
+    assert exc_info.value.status_code == 400
+    assert 'must be above the warn temperature' in exc_info.value.detail

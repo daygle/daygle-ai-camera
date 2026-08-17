@@ -147,18 +147,6 @@ function renderStatus(status) {
   statusPanel.innerHTML = rows.join('');
 }
 
-function renderLabels(labels) {
-  const el = document.getElementById('labelsList');
-  if (!el) return;
-  if (!labels || !labels.length) {
-    el.innerHTML = '<p class="muted">No labels loaded.</p>';
-    return;
-  }
-  el.innerHTML = labels.map((label) =>
-    `<span class="label-tag">${escapeHtml(titleCaseWords(label))}</span>`
-  ).join('');
-}
-
 function renderAi(settings) {
   for (const [key, value] of Object.entries(settings)) {
     const el = aiForm.elements[key];
@@ -178,18 +166,15 @@ function renderAi(settings) {
       ? (limitBytes / (1024 * 1024 * 1024)).toFixed(1)
       : '0';
   }
-  // Min Confidence slider: range inputs only accept numeric strings, so
-  // coerce here (the generic loop above would pass '' through when the
-  // key is absent, which the browser resets to the midpoint 0.5).
-  // ``null``/``undefined``/absent map to the 0.45 default; ``0`` stays 0
-  // (it is a legitimate persisted value, not 'unset').
+  // Min Confidence: a blank field must not send '' (the backend would treat
+  // it as missing and fall back to 0.45 anyway), and ``0`` is a legitimate
+  // persisted value, not 'unset' - so coerce here instead of letting the
+  // generic loop above pass raw values through.
   if (aiForm.elements['confidence']) {
     const conf = settings.confidence == null ? NaN : Number(settings.confidence);
     aiForm.elements['confidence'].value = Number.isFinite(conf) ? String(conf) : '0.45';
-    syncConfidenceReadout();
   }
   renderStatus(settings);
-  renderLabels(settings.available_labels);
   if (settings.reload_succeeded === false) setMessage(`Settings saved, but detector reload failed: ${settings.reload_error || settings.last_detector_error}`);
   else messageEl.textContent = settings.last_detector_error ? `Detector warning: ${settings.last_detector_error}` : '';
 }
@@ -437,18 +422,6 @@ async function runAction(buttonId, path, label) {
   } finally {
     button.disabled = false;
   }
-}
-
-function syncConfidenceReadout() {
-  const slider = aiForm.elements['confidence'];
-  const readout = document.getElementById('confidenceValue');
-  if (slider && readout) readout.textContent = Number(slider.value).toFixed(2);
-}
-
-// Keep the numeric readout next to the slider in sync while dragging.
-const confidenceSlider = aiForm.elements['confidence'];
-if (confidenceSlider) {
-  confidenceSlider.addEventListener('input', syncConfidenceReadout);
 }
 
 document.querySelectorAll('.field-help').forEach((el) => {

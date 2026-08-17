@@ -216,6 +216,8 @@ from app.api.settings_ai_router import router as settings_ai_router
 app.include_router(settings_ai_router)
 from app.api.objects_router import router as objects_router
 app.include_router(objects_router)
+from app.api.label_groups_router import router as label_groups_router
+app.include_router(label_groups_router)
 from app.api.recordings_router import router as recordings_router
 app.include_router(recordings_router)
 from app.api.cameras_router import router as cameras_router

@@ -43,10 +43,39 @@
 
     <section class="card">
       <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🔖</div>
+        <div>
+          <h2>Object Groups</h2>
+          <p class="settings-section-subtitle">A group is a single label that matches any of its member classes - add <code>animal</code> to a zone rule and it fires for <code>cat</code>, <code>dog</code>, or any other member. Create, edit, or remove groups here; they become available in the Zones page label pickers alongside ordinary classes.</p>
+        </div>
+      </div>
+      <div id="groupsMessage" class="muted" style="margin-bottom:8px"></div>
+      <div id="groupsList"></div>
+      <form id="groupForm" class="form-stack group-form" autocomplete="off">
+        <div class="group-form-fields">
+          <label>
+            <span>Group name</span>
+            <input type="text" id="groupNameInput" placeholder="e.g. vehicle" />
+          </label>
+          <label class="group-members-field">
+            <span>Member labels <span class="muted">(comma-separated)</span></span>
+            <input type="text" id="groupMembersInput" list="groupMembersDatalist" placeholder="car, truck, bus, motorcycle" />
+            <datalist id="groupMembersDatalist"></datalist>
+          </label>
+        </div>
+        <div class="button-row group-form-actions">
+          <button type="button" id="groupAddBtn" class="primary">Add Group</button>
+          <button type="button" id="groupCancelBtn" class="secondary" hidden>Cancel</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
         <div class="settings-section-icon" aria-hidden="true">🏷️</div>
         <div>
           <h2>Per-Object Overrides</h2>
-          <p class="settings-section-subtitle">One row per class the loaded model can identify. <strong>Inherit</strong> uses the default above; the Effective column shows what actually applies. <strong>Still alert after</strong> fires an event, recording, and in-app alert the first time this object has been detected continuously still for that many minutes - 0 turns it off.</p>
+          <p class="settings-section-subtitle">One row per class the current detector can identify, loaded from <code>models/coco.names</code> - the 80 standard COCO categories. <strong>Inherit</strong> uses the default above; the Effective column shows what actually applies. <strong>Still alert after</strong> fires an event, recording, and in-app alert the first time this object has been detected continuously still for that many minutes - 0 turns it off.</p>
         </div>
       </div>
       <div id="objectsMessage" class="muted" style="margin-bottom:8px"></div>

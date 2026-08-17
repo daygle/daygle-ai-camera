@@ -63,17 +63,6 @@
       </div>
     </section>
 
-    <section class="card">
-      <div class="settings-section-header">
-        <div class="settings-section-icon">🏷️</div>
-        <div>
-          <h2>Loaded Labels</h2>
-          <p class="settings-section-subtitle">Object classes the current detector can identify, loaded from <code>models/coco.names</code>. These are the 80 standard COCO categories.</p>
-        </div>
-      </div>
-      <div id="labelsList" class="labels-list"></div>
-    </section>
-
     </div><!-- /panel-models -->
 
     <div class="settings-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" data-panel="settings" hidden>
@@ -98,7 +87,7 @@
           <span>Device <span class="info-tip" data-tip="Inference device. Auto detects a CUDA GPU at startup and falls back to CPU. Note: INT8 precision always runs on CPU regardless of this setting. Default: Auto" title="Inference device. Auto detects a CUDA GPU at startup and falls back to CPU. Note: INT8 precision always runs on CPU regardless of this setting. Default: Auto" tabindex="0" aria-label="Help: Inference device. Auto detects a CUDA GPU at startup and falls back to CPU. INT8 always runs on CPU. Default: Auto"></span></span>
           <select name="device">
             <option value="auto">Auto (Use GPU If Available)</option>
-            <option value="cuda">CUDA (GPU)</option>
+            <option value="cuda">GPU (CUDA)</option>
             <option value="cpu">CPU</option>
           </select></label>
         <label>
@@ -106,10 +95,7 @@
           <input name="max_concurrent_inferences" type="number" min="1" max="16" step="1" placeholder="1" /></label>
         <label>
           <span>Min Confidence <span class="info-tip" data-tip="Minimum confidence score (0-1) a detection must reach to be reported. Detections below this are discarded before alert matching. Per-label thresholds on the Zones page override this global value. Default: 0.45" title="Minimum confidence score (0-1) a detection must reach to be reported. Detections below this are discarded before alert matching. Per-label thresholds on the Zones page override this global value. Default: 0.45" tabindex="0" aria-label="Help: Minimum confidence score (0-1) a detection must reach to be reported. Detections below this are discarded before alert matching. Per-label thresholds on the Zones page override this. Default: 0.45"></span></span>
-          <div class="range-field">
-            <input name="confidence" type="range" min="0" max="1" step="0.01" value="0.45" />
-            <output id="confidenceValue" for="confidence">0.45</output>
-          </div></label>
+          <input name="confidence" type="number" min="0" max="1" step="0.01" value="0.45" /></label>
         </div>
         <details class="settings-advanced">
           <summary>Advanced</summary>

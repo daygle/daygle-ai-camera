@@ -22,6 +22,7 @@ from app.config_facades import (
     effective_live_config,
     effective_recording_config,
     effective_storage_config,
+    effective_system_config,
     get_camera_config,
 )
 from app.deps import (
@@ -34,6 +35,7 @@ from app.payload_validators import (
     validate_live_settings,
     validate_recording_settings,
     validate_storage_settings,
+    validate_system_settings,
 )
 from app.request_helpers import write_audit_log
 from app.backup import (
@@ -60,7 +62,7 @@ def get_system_settings(request: Request, db=Depends(get_database), auth_enabled
     # explicit gate here is the second line if a future refactor moves
     # the path out of the middleware's admin match list.
     require_admin(request)
-    return {'version': _current_version(), 'camera': get_camera_config(None), 'cameras': effective_cameras_config(), 'live': effective_live_config(), 'recording': effective_recording_config(), 'storage': effective_storage_config(), 'cloudflare_tunnel': _tunnel_status(db),        'auth': {
+    return {'version': _current_version(), 'camera': get_camera_config(None), 'cameras': effective_cameras_config(), 'live': effective_live_config(), 'recording': effective_recording_config(), 'storage': effective_storage_config(), 'system': effective_system_config(), 'cloudflare_tunnel': _tunnel_status(db),        'auth': {
             'session_timeout_hours': effective_auth_config().get('session_timeout_hours'),
             'max_login_attempts': effective_auth_config().get('max_login_attempts'),
             'lockout_minutes': effective_auth_config().get('lockout_minutes'),
@@ -241,6 +243,16 @@ def restart_cloudflare_tunnel(request: Request):
     if manager is None:
         raise HTTPException(status_code=503, detail='Cloudflare Tunnel manager is not ready.')
     return manager.restart()
+
+
+@router.put('/api/settings/system/gpu')
+async def update_gpu_health_settings(request: Request, db=Depends(get_database)):
+    """GPU health card thermal thresholds (warn / critical temperature)."""
+    require_admin(request)
+    settings = validate_system_settings(await request.json())
+    db.set_setting('system', settings, utc_now())
+    write_audit_log(request, db, 'update', 'settings.system.gpu')
+    return settings
 
 
 @router.put('/api/settings/system/live')

@@ -10,6 +10,14 @@ const messageEl = document.getElementById('objectsMessage');
 const saveBtn = document.getElementById('saveObjectsBtn');
 const saveBtnHeader = document.getElementById('saveObjectsBtnHeader');
 
+const groupsList = document.getElementById('groupsList');
+const groupsMessage = document.getElementById('groupsMessage');
+const groupNameInput = document.getElementById('groupNameInput');
+const groupMembersInput = document.getElementById('groupMembersInput');
+const groupMembersDatalist = document.getElementById('groupMembersDatalist');
+const groupAddBtn = document.getElementById('groupAddBtn');
+const groupCancelBtn = document.getElementById('groupCancelBtn');
+
 const MODE_LABELS = {
   any: 'Moving & Still',
   moving: 'Moving Only',
@@ -24,6 +32,8 @@ let hasUnsavedChanges = false;
 let availableLabels = [];
 let labels = {}; // label -> 'any' | 'moving' | 'still' (explicit overrides only)
 let stillAlerts = {}; // label -> minutes for the "still for N minutes" dwell alert
+let groups = {}; // group name -> [member labels]
+let editingGroupName = null; // set while editing an existing group
 
 function markUnsaved() {
   if (hasUnsavedChanges) return;
@@ -104,16 +114,132 @@ function render(settings) {
   renderTable();
 }
 
+// ─── Object Groups ────────────────────────────────────────────────────────
+
+function parseMembers(raw) {
+  const seen = new Set();
+  return String(raw || '')
+    .split(',')
+    .map((member) => member.trim().toLowerCase())
+    .filter((member) => member && !seen.has(member) && seen.add(member));
+}
+
+function renderGroups() {
+  if (!groupsList) return;
+  const names = Object.keys(groups).sort();
+  if (!names.length) {
+    groupsList.innerHTML = '<p class="muted empty-message">No groups yet. Add one above - e.g. <code>vehicle</code> → <code>car, truck, bus</code>.</p>';
+    return;
+  }
+  groupsList.innerHTML = names.map((name) => {
+    const members = (groups[name] || [])
+      .map((member) => `<span class="chip">${escapeHtml(titleCase(member))}</span>`)
+      .join('');
+    return `
+      <div class="group-row" data-group-name="${escapeHtml(name)}">
+        <div class="group-row-main">
+          <span class="group-name">${escapeHtml(name)}</span>
+          <div class="group-members">${members || '<span class="muted">no members</span>'}</div>
+        </div>
+        <div class="group-row-actions">
+          <button type="button" class="secondary" data-group-edit="${escapeHtml(name)}">Edit</button>
+          <button type="button" class="btn-danger" data-group-remove="${escapeHtml(name)}">Remove</button>
+        </div>
+      </div>`;
+  }).join('');
+  groupsList.querySelectorAll('[data-group-edit]').forEach((btn) => {
+    btn.addEventListener('click', () => startEditGroup(btn.dataset.groupEdit));
+  });
+  groupsList.querySelectorAll('[data-group-remove]').forEach((btn) => {
+    btn.addEventListener('click', () => removeGroup(btn.dataset.groupRemove));
+  });
+}
+
+function resetGroupForm() {
+  editingGroupName = null;
+  groupNameInput.value = '';
+  groupMembersInput.value = '';
+  groupAddBtn.textContent = 'Add Group';
+  groupCancelBtn.hidden = true;
+}
+
+function startEditGroup(name) {
+  editingGroupName = name;
+  groupNameInput.value = name;
+  groupMembersInput.value = (groups[name] || []).join(', ');
+  groupAddBtn.textContent = 'Save Group';
+  groupCancelBtn.hidden = false;
+  groupNameInput.focus();
+}
+
+async function persistGroups(next) {
+  try {
+    const result = await api('/api/settings/label_groups', {
+      method: 'PUT',
+      body: JSON.stringify({ groups: next }),
+    });
+    groups = (result && result.groups) || {};
+    renderGroups();
+    groupsMessage.textContent = 'Object groups saved.';
+    window.showToast('Object groups saved.');
+  } catch (error) {
+    if (window.daygleAuth?.redirecting) return;
+    groupsMessage.textContent = error.message;
+    window.showToast(error.message, true);
+  }
+}
+
+async function saveGroup() {
+  const name = groupNameInput.value.trim().toLowerCase();
+  const members = parseMembers(groupMembersInput.value);
+  if (!name) {
+    window.showToast('Enter a group name.', true);
+    return;
+  }
+  if (/\s|,/.test(name)) {
+    window.showToast('Group name must be a single word (no spaces or commas).', true);
+    return;
+  }
+  if (!members.length) {
+    window.showToast('Add at least one member label.', true);
+    return;
+  }
+  if (name !== editingGroupName && Object.prototype.hasOwnProperty.call(groups, name)) {
+    window.showToast('A group with that name already exists.', true);
+    return;
+  }
+  const next = { ...groups };
+  if (editingGroupName && editingGroupName !== name) delete next[editingGroupName];
+  next[name] = members;
+  await persistGroups(next);
+  resetGroupForm();
+}
+
+async function removeGroup(name) {
+  const next = { ...groups };
+  delete next[name];
+  if (editingGroupName === name) resetGroupForm();
+  await persistGroups(next);
+}
+
 async function loadAll() {
   await window.daygleAuthReady;
-  const [objectSettings, aiSettings] = await Promise.all([
+  const [objectSettings, aiSettings, groupSettings] = await Promise.all([
     api('/api/settings/objects'),
     api('/api/settings/ai'),
+    api('/api/settings/label_groups'),
   ]);
   availableLabels = Array.isArray(aiSettings.available_labels)
     ? aiSettings.available_labels.filter((label) => String(label || '').trim())
     : [];
+  groups = (groupSettings && groupSettings.groups) || {};
   render(objectSettings);
+  renderGroups();
+  if (groupMembersDatalist) {
+    groupMembersDatalist.innerHTML = availableLabels
+      .map((label) => `<option value="${escapeHtml(label)}">${escapeHtml(titleCase(label))}</option>`)
+      .join('');
+  }
 }
 
 defaultSelect.addEventListener('change', () => {
@@ -153,6 +279,9 @@ async function saveObjects() {
 
 saveBtn.addEventListener('click', saveObjects);
 saveBtnHeader?.addEventListener('click', saveObjects);
+
+groupAddBtn?.addEventListener('click', saveGroup);
+groupCancelBtn?.addEventListener('click', resetGroupForm);
 
 window.addEventListener('beforeunload', (event) => {
   if (!hasUnsavedChanges) return;

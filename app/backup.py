@@ -43,6 +43,7 @@ from app.config_facades import (
     effective_storage_config,
 )
 from app.database import AUDIT_LOG_IMMUTABLE_TRIGGERS
+from app.label_groups import refresh_label_groups
 from app.recording_files import delete_recording_files
 from app.media_utils import safe_storage_path
 from app.utils import normalize_bool_setting
@@ -665,6 +666,9 @@ def refresh_runtime_after_database_restore() -> None:
     _state.apply_storage_and_recording_settings()
     _state.apply_cameras_settings(effective_cameras_config())
     _state.auth.apply_config(effective_auth_config())
+    # The object-label groups cache may have been primed from the OLD database;
+    # re-read so zone/alert matching reflects the restored group map.
+    refresh_label_groups()
 
 
 def purge_recordings_by_policy(*, force: bool = False) -> dict[str, Any]:

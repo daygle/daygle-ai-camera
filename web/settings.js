@@ -157,6 +157,7 @@ const forms = {
   databaseRestore: document.getElementById('databaseRestoreForm'),
   cloudflareTunnel: document.getElementById('cloudflareTunnelForm'),
   network: document.getElementById('networkAccessForm'),
+  gpu: document.getElementById('gpuHealthForm'),
 };
 
 // api() is provided by web/utils.js (loaded before this script). It reads
@@ -244,6 +245,10 @@ const FORM_DEFAULTS = {
     tunnel_loopback_only: 'false',
     trusted_proxies: ['127.0.0.1', '::1'],
   },
+  gpu: {
+    gpu_temp_warn_c: 85,
+    gpu_temp_critical_c: 90,
+  },
   email: {
     enabled: 'false',
     host: '',
@@ -299,6 +304,7 @@ const FIELD_TYPES = {
     'periodic_scan_interval_seconds', 'motion_frame_width', 'motion_frame_height',
     'ingest_frame_fps', 'snapshot_quality', 'offline_delay_minutes',
     'detection_confirm_frames', 'detection_confirm_window',
+    'gpu_temp_warn_c', 'gpu_temp_critical_c',
   ]),
   number: new Set([
     'detection_interval_seconds', 'event_debounce_seconds', 'detection_history_minutes',
@@ -352,6 +358,15 @@ function renderCameraOffline(settings) {
   fillForm(form, settings, FORM_DEFAULTS.cameraOffline);
 }
 
+// The GPU Health thresholds only matter when the host has an NVIDIA GPU, so
+// collapse the card when the metrics endpoint reports none. Fetched
+// independently of the settings payload so a metrics error neither blocks the
+// page nor hides a card that should stay visible (fail-open).
+function syncGpuHealthVisibility(resources) {
+  const card = document.getElementById('gpuHealthCard');
+  if (card && !resources?.gpu) card.hidden = true;
+}
+
 
 async function loadSettings() {
   // nav.js's daygleAuthReady IIFE has already fetched /api/auth/me once at
@@ -371,6 +386,8 @@ async function loadSettings() {
   fillForm(forms.retention, settings.recording, FORM_DEFAULTS.recording);
   fillForm(forms.storage, settings.storage, FORM_DEFAULTS.storage);
   fillForm(forms.auth, settings.auth, FORM_DEFAULTS.auth);
+  fillForm(forms.gpu, settings.system, FORM_DEFAULTS.gpu);
+  api('/api/system/resources').then(syncGpuHealthVisibility).catch(() => {});
   fillForm(forms.network, {
     tunnel_loopback_only: settings.cloudflare_tunnel?.tunnel_loopback_only,
     trusted_proxies: settings.auth?.trusted_proxies,
@@ -552,6 +569,7 @@ bindForm('retention', 'Retention', 'recording');
 bindForm('storage', 'Storage');
 bindForm('auth', 'Login security');
 bindForm('network', 'LAN & proxy');
+bindForm('gpu', 'GPU health');
 
 emailForm?.addEventListener('submit', guard(async (event) => {
   event.preventDefault();

@@ -23,6 +23,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # only ingress.
         "tunnel_loopback_only": False,
     },
+    # Host-level tuning for the dashboard GPU health card. warn tints the
+    # card amber; critical turns it red. The defaults match the validated
+    # Tesla P4 deployment (Pascal, sm_61), whose throttle ceiling is ~90 C;
+    # other NVIDIA cards throttle lower/higher, so both are configurable.
+    "system": {
+        "gpu_temp_warn_c": 85,
+        "gpu_temp_critical_c": 90,
+    },
     "cloudflare_tunnel": {"binary": "cloudflared"},
     "ai": {
         "enabled": True,
