@@ -120,11 +120,16 @@ class _DetectorStub:
         available: bool = False,
         unavailable_reason: object = None,
         active_precision: str = 'fp32',
+        active_providers: object = None,
     ) -> None:
         self.backend = backend
         self.available = available
         self.unavailable_reason = unavailable_reason
         self.active_precision = active_precision
+        # ONNX Runtime's live provider list (e.g. ['CUDAExecutionProvider',
+        # 'CPUExecutionProvider']); ai_status_payload derives active_device.
+        if active_providers is not None:
+            self.active_providers = active_providers
 
 
 def _install_ai_dependencies(
@@ -283,6 +288,51 @@ def test_ai_status_payload_active_precision_none_when_not_loaded(monkeypatch, ai
     out = ais.ai_status_payload({'backend': 'onnx', 'model_path': 'models/missing.onnx'})
     assert out['model_loaded'] is False
     assert out['active_precision'] is None
+
+
+def test_ai_status_payload_active_device_cuda_when_cuda_provider_present(monkeypatch, ais):
+    """active_device resolves from ORT's live provider list: CUDA when the
+    CUDA EP is active, so the Status panel disambiguates Device: Auto."""
+    _install_ai_dependencies(
+        monkeypatch,
+        detector=_DetectorStub(
+            backend='onnx', available=True,
+            active_providers=['CUDAExecutionProvider', 'CPUExecutionProvider'],
+        ),
+        detector_loaded_for=True,
+        onnx_runtime_installed=True,
+        model_exists=True,
+    )
+    out = ais.ai_status_payload({'backend': 'onnx', 'model_path': 'models/yolov8n.onnx'})
+    assert out['active_device'] == 'CUDA (GPU)'
+
+
+def test_ai_status_payload_active_device_cpu_and_none_when_not_loaded(monkeypatch, ais):
+    """CPU-only providers report CPU; an unloaded detector reports None."""
+    _install_ai_dependencies(
+        monkeypatch,
+        detector=_DetectorStub(
+            backend='onnx', available=True, active_providers=['CPUExecutionProvider'],
+        ),
+        detector_loaded_for=True,
+        onnx_runtime_installed=True,
+        model_exists=True,
+    )
+    out = ais.ai_status_payload({'backend': 'onnx', 'model_path': 'models/yolov8n.onnx'})
+    assert out['active_device'] == 'CPU'
+
+    _install_ai_dependencies(
+        monkeypatch,
+        detector=_DetectorStub(
+            backend='unknown', available=False, active_providers=['CUDAExecutionProvider'],
+        ),
+        detector_loaded_for=False,
+        onnx_runtime_installed=True,
+        model_exists=False,
+    )
+    out = ais.ai_status_payload({'backend': 'onnx', 'model_path': 'models/missing.onnx'})
+    assert out['model_loaded'] is False
+    assert out['active_device'] is None
 
 
 def test_ai_status_payload_distinguishes_int8_request_from_fp32_fallback(monkeypatch, ais):
