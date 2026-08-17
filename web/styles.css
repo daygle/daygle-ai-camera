@@ -78,6 +78,7 @@
 :root.light .detection.detection-object { background: rgba(2,132,199,.12); color: #0369a1; border-color: rgba(2,132,199,.35); font-weight: 800; }
 :root.light .detection.detection-sound { background: rgba(124,58,237,.16); color: #6d28d9; border-color: rgba(124,58,237,.35); font-weight: 800; }
 :root.light .detection.detection-motion { background: rgba(5,150,105,.14); color: #047857; border-color: rgba(5,150,105,.35); font-weight: 800; }
+:root.light .detection.detection-continuous { background: rgba(71,85,105,.12); color: #475569; border-color: rgba(71,85,105,.3); font-weight: 800; }
 :root.light .detection.detection-alert { background: rgba(220,38,38,.12); color: #b91c1c; border-color: rgba(220,38,38,.35); font-weight: 800; }
 :root.light .status-panel div { background: rgba(255,255,255,.6); }
 :root.light .danger-zone-card {
@@ -138,6 +139,7 @@
 :root.light .activity-item-type { background: rgba(71,214,255,.12); color: var(--accent); font-weight: 700; border: 1px solid rgba(71,214,255,.3); }
 :root.light .activity-item-sound .activity-item-type { background: rgba(124,58,237,.15); color: #6d28d9; border: 1px solid rgba(124,58,237,.25); }
 :root.light .activity-item-motion .activity-item-type { background: rgba(5,150,105,.12); color: #047857; border: 1px solid rgba(5,150,105,.2); }
+:root.light .activity-item-continuous .activity-item-type { background: rgba(71,85,105,.1); color: #475569; border: 1px solid rgba(71,85,105,.2); }
 :root.light .zone-object-rule { background: rgba(0,0,0,.025); }
 :root.light .live-status,
 :root.light .live-status-pill.has-unsaved {
@@ -538,6 +540,7 @@ textarea {
 .detection.detection-object { background: rgba(71,214,255,.1); color: #47d6ff; border: 1px solid rgba(71,214,255,.3); }
 .detection.detection-sound { background: rgba(168,85,247,.2); color: #a855f7; border: 1px solid rgba(168,85,247,.4); }
 .detection.detection-motion { background: rgba(45, 212, 191, 0.12); color: #2dd4bf; border: 1px solid rgba(45, 212, 191, 0.4); }
+.detection.detection-continuous { background: rgba(148, 163, 184, 0.14); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.35); }
 .detection.detection-alert { background: rgba(239, 68, 68, 0.14); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
 .detection.detection-still-alert { background: rgba(251, 191, 36, 0.12); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.4); }
 /* Objects page: per-row "still alert after" minutes input. Compact so the
@@ -3619,6 +3622,13 @@ tr.drag-over {
   background: rgba(168, 85, 247, 0.14);
   color: #a855f7;
   border-color: rgba(168, 85, 247, 0.4);
+}
+/* Always-on continuous capture segments read in a neutral slate so they sit
+   apart from triggered object / motion / sound clips. */
+.activity-item-continuous .activity-item-type {
+  background: rgba(148, 163, 184, 0.14);
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.4);
 }
 .activity-item-when {
   display: flex;
