@@ -9,7 +9,19 @@ from __future__ import annotations
 
 import subprocess
 
+import pytest
+
 import app.system_metrics as system_metrics
+
+
+@pytest.fixture(autouse=True)
+def _reset_gpu_cache():
+    """The polled ``system_resources`` path reads nvidia-smi through a TTL
+    cache; clear it around every test so a snapshot from one test never leaks
+    into the next (the parse/threshold tests each patch their own output)."""
+    system_metrics.reset_gpu_snapshot_cache()
+    yield
+    system_metrics.reset_gpu_snapshot_cache()
 
 
 class _FakeCompletedProcess:
@@ -154,3 +166,33 @@ def test_system_resources_includes_gpu(monkeypatch):
     resources = system_metrics.system_resources()
     assert resources['gpu'] is not None
     assert resources['gpu']['primary']['name'] == 'Tesla P4'
+
+
+def test_system_resources_caches_nvidia_smi_across_polls(monkeypatch):
+    """Rapid polls share one nvidia-smi read: the subprocess is spawned once
+    within the TTL window, not once per /api/system/resources call."""
+    calls = {'n': 0}
+
+    def _counting_run(*_args, **_kwargs):
+        calls['n'] += 1
+        return _FakeCompletedProcess(0, P4_LINE)
+
+    monkeypatch.setattr(system_metrics.subprocess, 'run', _counting_run)
+    for _ in range(5):
+        assert system_metrics.system_resources()['gpu']['primary']['name'] == 'Tesla P4'
+    assert calls['n'] == 1  # one spawn for five polls inside the TTL
+
+
+def test_system_resources_no_gpu_does_not_respawn(monkeypatch):
+    """A host without a GPU caches the None result too, so repeated polls do
+    not keep spawning nvidia-smi just to fail again."""
+    calls = {'n': 0}
+
+    def _raise(*_args, **_kwargs):
+        calls['n'] += 1
+        raise FileNotFoundError('nvidia-smi')
+
+    monkeypatch.setattr(system_metrics.subprocess, 'run', _raise)
+    for _ in range(5):
+        assert system_metrics.system_resources()['gpu'] is None
+    assert calls['n'] == 1
