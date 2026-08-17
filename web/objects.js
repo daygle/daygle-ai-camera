@@ -12,8 +12,8 @@ const saveBtnHeader = document.getElementById('saveObjectsBtnHeader');
 
 const MODE_LABELS = {
   any: 'Moving & Still',
-  moving: 'Moving only',
-  still: 'Still only',
+  moving: 'Moving Only',
+  still: 'Still Only',
 };
 
 function modeLabel(mode) {
@@ -44,7 +44,7 @@ function renderTable() {
   }
   tableWrap.hidden = false;
   emptyEl.hidden = true;
-  const defaultMode = defaultSelect.value || 'any';
+  const defaultMode = defaultSelect.value || 'moving';
   tableBody.innerHTML = availableLabels.map((label) => {
     const title = escapeHtml(titleCase(label));
     const override = labels[label];
@@ -57,8 +57,8 @@ function renderTable() {
           <select data-object-mode="${escapeHtml(label)}" aria-label="Detection mode for ${title}">
             <option value="inherit" ${override ? '' : 'selected'}>Inherit (${escapeHtml(modeLabel(defaultMode))})</option>
             <option value="any" ${override === 'any' ? 'selected' : ''}>Moving &amp; Still</option>
-            <option value="moving" ${override === 'moving' ? 'selected' : ''}>Moving only</option>
-            <option value="still" ${override === 'still' ? 'selected' : ''}>Still only</option>
+            <option value="moving" ${override === 'moving' ? 'selected' : ''}>Moving Only</option>
+            <option value="still" ${override === 'still' ? 'selected' : ''}>Still Only</option>
           </select>
         </td>
         <td><span class="model-status ${effective === 'any' ? 'model-status-installed' : 'model-status-active'}">${escapeHtml(modeLabel(effective))}</span></td>
@@ -87,7 +87,7 @@ function renderTable() {
 }
 
 function render(settings) {
-  defaultSelect.value = settings.default_mode || 'any';
+  defaultSelect.value = settings.default_mode || 'moving';
   labels = {};
   if (settings.labels && typeof settings.labels === 'object') {
     for (const [label, mode] of Object.entries(settings.labels)) {
@@ -132,7 +132,7 @@ async function saveObjects() {
       if (minutes > 0) stillAlertsPayload[label] = minutes;
     });
     const payload = {
-      default_mode: defaultSelect.value || 'any',
+      default_mode: defaultSelect.value || 'moving',
       labels,
       still_alerts: stillAlertsPayload,
     };

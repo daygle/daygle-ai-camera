@@ -49,10 +49,10 @@ class _FakeDatabase:
 
 
 def test_normalize_object_settings_defaults():
-    assert os.normalize_object_settings(None) == {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}
-    assert os.normalize_object_settings({}) == {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}
-    assert os.normalize_object_settings('junk') == {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}
-    assert os.normalize_object_settings([]) == {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}
+    assert os.normalize_object_settings(None) == {'default_mode': 'moving', 'labels': {}, 'still_alerts': {}}
+    assert os.normalize_object_settings({}) == {'default_mode': 'moving', 'labels': {}, 'still_alerts': {}}
+    assert os.normalize_object_settings('junk') == {'default_mode': 'moving', 'labels': {}, 'still_alerts': {}}
+    assert os.normalize_object_settings([]) == {'default_mode': 'moving', 'labels': {}, 'still_alerts': {}}
 
 
 def test_normalize_object_settings_round_trip():
@@ -65,10 +65,12 @@ def test_normalize_object_settings_coerces_invalid_modes():
         'default_mode': 'sometimes',
         'labels': {'person': 'MOVING', 'car': 'bogus', 'bird': ''},
     })
-    # Invalid default falls back to 'any'; uppercase mode is normalised;
-    # bogus/empty modes are dropped entirely (never persisted).
-    assert out['default_mode'] == 'any'
-    assert out['labels'] == {'person': 'moving'}
+    # Invalid default falls back to 'moving'; uppercase mode is normalised;
+    # bogus/empty modes are dropped entirely (never persisted). The
+    # normalised 'person': 'moving' equals the new default, so it is dropped
+    # as a redundant override.
+    assert out['default_mode'] == 'moving'
+    assert out['labels'] == {}
 
 
 def test_normalize_object_settings_drops_redundant_override():
@@ -81,7 +83,9 @@ def test_normalize_object_settings_drops_redundant_override():
 
 def test_normalize_object_settings_canonicalizes_labels():
     out = os.normalize_object_settings({'labels': {'Human': 'still', 'cat': 'moving'}})
-    assert out['labels'] == {'person': 'still', 'cat': 'moving'}
+    # 'cat': 'moving' equals the new default, so only the canonicalised
+    # 'person': 'still' override survives.
+    assert out['labels'] == {'person': 'still'}
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +108,7 @@ def test_effective_object_settings_defaults_without_database(monkeypatch):
     previous = _state.database
     try:
         _state.database = None
-        assert os.effective_object_settings() == {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}
+        assert os.effective_object_settings() == {'default_mode': 'moving', 'labels': {}, 'still_alerts': {}}
     finally:
         _state.database = previous
 
@@ -121,8 +125,8 @@ def test_motion_mode_for_label_resolution():
     assert os.motion_mode_for_label('Human', settings) == 'moving'  # alias -> no override
 
 
-def test_motion_mode_for_label_defaults_to_any():
-    assert os.motion_mode_for_label('person', {'default_mode': 'bogus', 'labels': {}}) == 'any'
+def test_motion_mode_for_label_defaults_to_moving():
+    assert os.motion_mode_for_label('person', {'default_mode': 'bogus', 'labels': {}}) == 'moving'
 
 
 # ---------------------------------------------------------------------------

@@ -46,7 +46,7 @@ async def update_object_settings(request: Request, db=Depends(get_database)):
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail='Payload must be a JSON object.')
 
-    raw_default = payload.get('default_mode', 'any')
+    raw_default = payload.get('default_mode', 'moving')
     default_mode = str(raw_default or '').strip().lower()
     if default_mode not in VALID_MODES:
         raise HTTPException(

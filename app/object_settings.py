@@ -3,8 +3,7 @@
 The ONNX detector (Layer 2) reports any object it can recognise, whether the
 subject is walking down the drive or parked in it. This module lets an
 operator say, per object label, whether detections should count for **moving**
-subjects only, **still** subjects only, or both (the default, preserving the
-historical behaviour).
+subjects only, **still** subjects only, or both.
 
 How "moving" is decided
 -----------------------
@@ -32,14 +31,14 @@ never filtered here, so a "car moving only" setting does not silence a
 Settings are stored in the database (setting key ``objects``) as::
 
     {
-        "default_mode": "any",                  # any | moving | still
-        "labels": {"person": "moving"},        # optional per-label overrides
+        "default_mode": "moving",               # moving | any | still
+        "labels": {"person": "still"},         # optional per-label overrides
         "still_alerts": {"package": 10},       # label -> minutes (0/absent = off)
     }
 
 A label without an override falls back to ``default_mode``; the default for
-``default_mode`` is ``any`` so an unconfigured install behaves exactly as
-before.
+``default_mode`` is ``moving`` so a fresh install only counts moving subjects
+(choose ``any`` to restore the historical moving-or-still behaviour).
 
 Still-dwell alerts
 ------------------
@@ -66,14 +65,14 @@ from app.zone_schema import canonical_label
 logger = logging.getLogger('daygle.ai')
 
 # Detection-behavior modes.
-MODE_ANY = 'any'      # moving and still (default; current behaviour)
-MODE_MOVING = 'moving'  # only when the object's pixels are changing
+MODE_ANY = 'any'      # moving and still
+MODE_MOVING = 'moving'  # only when the object's pixels are changing (default)
 MODE_STILL = 'still'    # only when the object's pixels are not changing
 
 VALID_MODES: frozenset[str] = frozenset({MODE_ANY, MODE_MOVING, MODE_STILL})
 
 DEFAULT_OBJECT_SETTINGS: dict[str, Any] = {
-    'default_mode': MODE_ANY,
+    'default_mode': MODE_MOVING,
     'labels': {},
     'still_alerts': {},
 }
@@ -107,11 +106,11 @@ def normalize_object_settings(value: Any) -> dict[str, Any]:
     """
     if not isinstance(value, dict):
         return {
-            'default_mode': MODE_ANY,
+            'default_mode': MODE_MOVING,
             'labels': {},
             'still_alerts': {},
         }
-    default_mode = normalize_mode(value.get('default_mode'), MODE_ANY)
+    default_mode = normalize_mode(value.get('default_mode'), MODE_MOVING)
     labels: dict[str, str] = {}
     raw_labels = value.get('labels')
     if isinstance(raw_labels, dict):
@@ -172,10 +171,10 @@ def motion_mode_for_label(
     """Resolve the effective detection mode for one detection label.
 
     A per-label override wins; otherwise the global ``default_mode`` applies;
-    anything unset resolves to ``any`` (current behaviour).
+    anything unset resolves to ``moving`` (the default).
     """
     resolved = settings if settings is not None else effective_object_settings()
-    default_mode = normalize_mode(resolved.get('default_mode'), MODE_ANY)
+    default_mode = normalize_mode(resolved.get('default_mode'), MODE_MOVING)
     labels = resolved.get('labels')
     if isinstance(labels, dict):
         canonical = canonical_label(label)
@@ -342,9 +341,9 @@ def filter_detections_by_motion_mode(
 
     Each surviving detection is annotated with ``motion_state`` (``moving`` /
     ``still``) so overlays and status payloads can tag how it was classified.
-    The annotation is applied even when no label is restricted -- the default
-    ``any`` configuration returns everything, but every detection still carries
-    its classification so the live view and timeline can show it. Motion-zone
+    The annotation is applied even when no label is restricted -- an ``any``
+    configuration returns everything, but every detection still carries its
+    classification so the live view and timeline can show it. Motion-zone
     detections never pass through this filter and stay untagged.
 
     Fast path: when no label is restricted and there is no diff mask, no pixel

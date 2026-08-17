@@ -21,7 +21,7 @@ def test_objects_settings_defaults_and_page_route(tmp_path, monkeypatch):
 
         status, _headers, payload = client.request("/api/settings/objects")
         assert status == 200
-        assert payload["default_mode"] == "any"
+        assert payload["default_mode"] == "moving"
         assert payload["labels"] == {}
         assert payload["still_alerts"] == {}
         assert "available_labels" in payload

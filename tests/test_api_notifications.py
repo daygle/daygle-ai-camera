@@ -423,6 +423,9 @@ def test_object_detection_with_email_rule_delivers_email(tmp_path, monkeypatch, 
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    # The frame fails the motion gate (diff None -> 'still'); keep the
+    # historical any default so the notification rules are what's tested.
+    main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
     main.alerts.last_triggered.clear()
 
@@ -458,6 +461,9 @@ def test_object_detection_with_email_rule_delivers_one_envelope_per_recipient(tm
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    # The frame fails the motion gate (diff None -> 'still'); keep the
+    # historical any default so the notification rules are what's tested.
+    main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
     main.alerts.last_triggered.clear()
 
@@ -568,6 +574,9 @@ def test_object_detection_without_global_email_enabled_sends_nothing(tmp_path, m
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    # The frame fails the motion gate (diff None -> 'still'); keep the
+    # historical any default so the notification rules are what's tested.
+    main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
     main.alerts.last_triggered.clear()
 

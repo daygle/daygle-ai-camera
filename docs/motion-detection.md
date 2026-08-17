@@ -138,11 +138,13 @@ moving. When no pixel change was measured at all (a periodic scan on a quiet
 frame, the first frame after a camera reconnect), the detection is treated as
 still.
 
-**Settings.** The page has a **Default for all objects** selector (`Moving &
-Still`, `Moving only`, or `Still only`) plus one row per label the loaded
+**Settings.** The page has a **Default Mode** selector (`Moving Only`,
+`Moving & Still`, or `Still Only`) plus one row per label the loaded
 model can identify, each with `Inherit` (use the default) or an explicit
 override. The **Effective** column shows what actually applies. Settings are
-global (all cameras) and stored in the database.
+global (all cameras) and stored in the database. The default is **Moving
+Only**; choose **Moving & Still** to restore the historical behaviour of
+counting every detected subject.
 
 **Seeing the classification.** Every detection now carries its classification:
 when the live view's object overlay is on, each box label is followed by a
@@ -176,17 +178,17 @@ frame) and fires a one-shot alert the first cycle the streak passes N minutes:
 Typical use: a delivery spot - set `package` (or `person`) to **Still alert
 after 10 min** so a package that has been sitting for ten minutes alerts,
 while a person just walking past never does. Combine with the Detection Mode
-`Still only` when you only care about stationary subjects.
+`Still Only` when you only care about stationary subjects.
 
 **Typical use:**
 
 - A driveway camera where a parked car would otherwise fire `car` events
-  constantly: set `car` to **Moving only** - a car arriving or leaving still
+  constantly: set `car` to **Moving Only** - a car arriving or leaving still
 alerts, one left in view does not.
 - A camera watching a spot where people routinely stand still (a doorway, a
-  counter): set `person` to **Still only** if you only care about loitering.
-- A low-traffic scene where every detected object is interesting: leave the
-default at **Moving & Still**.
+  counter): set `person` to **Still Only** if you only care about loitering.
+- A low-traffic scene where every detected object is interesting: set the
+default to **Moving & Still** so moving and stationary subjects both count.
 
 This filter applies to **object** detections only (Layer 2). Per-zone
 **motion** rules (Layer 3) are a separate pixel-diff axis and are never

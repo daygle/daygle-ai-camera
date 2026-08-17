@@ -31,11 +31,11 @@
       </div>
       <form id="objectsForm" class="form-stack">
         <label>
-          <span>Default for all objects <span class="info-tip" data-tip="Applied to every object class unless overridden below. Moving &amp; Still (default) keeps today's behaviour. Moving only ignores parked/still subjects (e.g. a car left in view). Still only ignores subjects that are actively moving." title="Applied to every object class unless overridden below. Moving &amp; Still (default) keeps today's behaviour. Moving only ignores parked/still subjects (e.g. a car left in view). Still only ignores subjects that are actively moving." tabindex="0" aria-label="Help: Default detection mode for every object class"></span></span>
+          <span>Default Mode <span class="info-tip" data-tip="Applied to every object class unless overridden below. Moving Only (default) counts subjects while they are moving and ignores parked/still subjects (e.g. a car left in view). Moving &amp; Still counts both moving and stationary subjects. Still Only counts only stationary subjects." title="Applied to every object class unless overridden below. Moving Only (default) counts subjects while they are moving and ignores parked/still subjects (e.g. a car left in view). Moving &amp; Still counts both moving and stationary subjects. Still Only counts only stationary subjects." tabindex="0" aria-label="Help: Default detection mode for every object class"></span></span>
           <select name="default_mode">
+            <option value="moving" selected>Moving Only</option>
             <option value="any">Moving &amp; Still</option>
-            <option value="moving">Moving only</option>
-            <option value="still">Still only</option>
+            <option value="still">Still Only</option>
           </select>
         </label>
       </form>

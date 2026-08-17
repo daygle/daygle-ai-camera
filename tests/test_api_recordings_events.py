@@ -674,6 +674,9 @@ def test_live_monitor_populates_detection_history(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    # The frame fails the motion gate (diff None -> 'still'); keep the
+    # historical any default so the history-tracking logic is what's tested.
+    main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
     main.alerts.last_triggered.clear()
 

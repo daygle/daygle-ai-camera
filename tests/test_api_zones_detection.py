@@ -119,6 +119,9 @@ def test_invalid_motion_frame_does_not_create_recording(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main._state, 'detector', EmptyDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    # The frame fails the motion gate (diff None -> 'still'); keep the
+    # historical any default so this zone/recording logic is what's tested.
+    main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
 
     settings = {
         'id': 'camera-1',
@@ -512,6 +515,9 @@ def test_zone_spatial_filtering_blocks_detections_outside_zone(tmp_path, monkeyp
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main._state.live_detection_last_checked.clear()
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
+    # The frame fails the motion gate (diff None -> 'still'); keep the
+    # historical any default so this zone/recording logic is what's tested.
+    main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
 
     zones = _zs.normalize_monitoring_zones([
         {
@@ -616,6 +622,9 @@ def test_record_only_zone_rule_detection_creates_event_and_recording(tmp_path, m
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
+    # The frame fails the motion gate (diff None -> 'still'); keep the
+    # historical any default so this zone/recording logic is what's tested.
+    main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
 
     # Camera has a zone covering the whole frame:
@@ -675,6 +684,9 @@ def test_record_only_zone_with_no_alert_rules_keeps_zone_name(tmp_path, monkeypa
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
+    # The frame fails the motion gate (diff None -> 'still'); keep the
+    # historical any default so this zone/recording logic is what's tested.
+    main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
 
     event_id = _lm.process_live_stream_alerts(
@@ -728,6 +740,9 @@ def test_zone_detection_creates_alert_and_recording(tmp_path, monkeypatch, label
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    # The frame fails the motion gate (diff None -> 'still'); keep the
+    # historical any default so this zone/recording logic is what's tested.
+    main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
     main.alerts.last_triggered.clear()
 
@@ -766,6 +781,9 @@ def test_confirmation_gate_holds_first_frame_then_alerts_on_second(tmp_path, mon
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    # The frame fails the motion gate (diff None -> 'still'); keep the
+    # historical any default so this zone/recording logic is what's tested.
+    main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     # Enable 2-of-3 confirmation (the harness default pins single-frame).
     main.database.set_setting('live', {'detection_confirm_frames': 2, 'detection_confirm_window': 3}, main.utc_now())
     main._state.live_detection_last_checked.clear()
@@ -809,6 +827,9 @@ def test_person_and_cat_in_zone_each_create_independent_events(tmp_path, monkeyp
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    # The frame fails the motion gate (diff None -> 'still'); keep the
+    # historical any default so this zone/recording logic is what's tested.
+    main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
     main.alerts.last_triggered.clear()
 
@@ -942,6 +963,9 @@ def test_object_outside_zone_does_not_create_recording(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    # The frame fails the motion gate (diff None -> 'still'); keep the
+    # historical any default so this zone/recording logic is what's tested.
+    main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
 
     # Zone covers only the left half of the frame
@@ -1067,6 +1091,9 @@ def test_debounce_window_refreshes_while_activity_continues(tmp_path, monkeypatc
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    # The frame fails the motion gate (diff None -> 'still'); keep the
+    # historical any default so this zone/recording logic is what's tested.
+    main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
     main._state.live_event_last_emitted.clear()
     main.alerts.last_triggered.clear()
@@ -1119,6 +1146,9 @@ def test_alert_only_event_is_debounced_without_recording(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+    # The frame fails the motion gate (diff None -> 'still'); keep the
+    # historical any default so this zone/recording logic is what's tested.
+    main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
     main._state.live_detection_last_checked.clear()
     main._state.live_event_last_emitted.clear()
     main.alerts.last_triggered.clear()

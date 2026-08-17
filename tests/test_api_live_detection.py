@@ -152,6 +152,10 @@ def test_live_stream_detection_without_alert_rule_does_not_record_by_default(tmp
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main._state.live_detection_last_checked.clear()
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
+    # The JPEG frame fails the motion gate (diff mask None), so every
+    # detection is classified 'still'. This test is about recording rules,
+    # not the still/moving filter: keep the historical any default.
+    main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
 
     event_id = mods.live_monitor.process_live_stream_alerts(
         b'jpeg-frame',
@@ -365,6 +369,10 @@ def test_live_stream_detection_saves_only_allowed_zone_object_labels(tmp_path, m
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main._state.live_detection_last_checked.clear()
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
+    # The JPEG frame fails the motion gate (diff mask None), so every
+    # detection is classified 'still'. This test is about zone label
+    # filtering, not the still/moving filter: keep the historical any default.
+    main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
 
     event_id = mods.live_monitor.process_live_stream_alerts(
         b'jpeg-frame',
@@ -419,6 +427,10 @@ def test_live_stream_camera_continuous_recording_records_without_alert_rule(tmp_
     monkeypatch.setattr(main._state, 'detector', FakeDetector())
     main._state.live_detection_last_checked.clear()
     main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'models/fake.onnx', 'labels_path': 'models/coco.names'}, main.utc_now())
+    # The JPEG frame fails the motion gate (diff mask None), so every
+    # detection is classified 'still'. This test is about continuous
+    # recording, not the still/moving filter: keep the historical any default.
+    main.database.set_setting('objects', {'default_mode': 'any', 'labels': {}, 'still_alerts': {}}, main.utc_now())
 
     event_id = mods.live_monitor.process_live_stream_alerts(
         b'jpeg-frame',
