@@ -1084,9 +1084,9 @@ nvidia-ml-py==13.610.43 \
     --hash=sha256:65437eb73d68d0c62c931ca4d45038472faff03bd0b8729abba4b899f70d60f2 \
     --hash=sha256:f13c72698edef492f985cc225f14faafe68ae065a2e407f45bdf6f4b9b43fde8
     # via ultralytics
-nvidia-nccl-cu13==2.29.7 \
-    --hash=sha256:674a12383e3c38a1bcccae7d4f3633b37852230b6047883cb2f4c2d1b36d9bf5 \
-    --hash=sha256:edd81538446786ec3b73972543e53bb43bcaf0bfc8ef76cb679fcc390ffe136d
+nvidia-nccl-cu13==2.31.2 \
+    --hash=sha256:0bcaf0308854cb55fcc35af72e2c83143f3b71e65a4e865e2c586b1cdcdb5ae0 \
+    --hash=sha256:b5563f8e2534f363d93ace022670ba016d3717e190ac4eba564d05fbbe8495b1
     # via torch
 nvidia-nvjitlink==13.3.33 \
     --hash=sha256:26a6de7fb4c8fdaa7703d3dad720d6d427ddfea5c48a528fd97c11733ad830e5 \
