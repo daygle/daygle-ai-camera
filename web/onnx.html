@@ -99,7 +99,9 @@
         </div>
         <details class="settings-advanced">
           <summary>Advanced</summary>
-          <p class="settings-advanced-hint">Optional inference tuning that works on its defaults - most setups never need to touch these. Change one at a time so you can attribute any per-frame impact. Model and labels paths are managed by the Model Library above.</p>
+          <p class="settings-advanced-hint">Optional inference tuning that works on its defaults - most setups never need to touch these. Change one at a time so you can attribute any per-frame impact. Settings are grouped by where they apply: the CPU and GPU groups only affect their own device, so on a CPU-only host the GPU group is inert (and vice versa). The device actually running is shown as <strong>Active Device</strong> on the Status tab.</p>
+
+          <p class="settings-device-group">All Devices</p>
           <div class="form-grid">
         <label>
           <span>Precision <span class="info-tip" data-tip="Inference precision. fp32 = full precision (default). int8 = CPU-only quantization (automatic calibration) - ~4x smaller model, ~1-2 mAP cost, biggest CPU performance win. fp16 = half precision, CUDA only - exported as fp16 when Device is CUDA or Auto on a CUDA-capable host; on CPU-only hosts the export silently falls back to fp32." title="Inference precision. fp32 = full precision (default). int8 = CPU-only quantization (automatic calibration) - ~4x smaller model, ~1-2 mAP cost, biggest CPU performance win. fp16 = half precision, CUDA only - exported as fp16 when Device is CUDA or Auto on a CUDA-capable host; on CPU-only hosts the export silently falls back to fp32." tabindex="0" aria-label="Help: Inference precision. fp32 = full precision default. int8 = CPU-only quantization with automatic calibration, about 4x smaller model and about 1-2 mAP cost, biggest CPU performance win. fp16 = half precision, CUDA only, exported when Device is CUDA or Auto on a CUDA-capable host, otherwise the export falls back to fp32."></span></span>
@@ -112,30 +114,42 @@
           <span>IoU Threshold <span class="info-tip" data-tip="Intersection-over-union threshold for merging overlapping detections. Default: 0.45" title="Intersection-over-union threshold for merging overlapping detections. Default: 0.45" tabindex="0" aria-label="Help: Intersection-over-union threshold for merging overlapping detections. Default: 0..."></span></span>
           <input name="iou_threshold" type="number" min="0" max="1" step="0.01" /></label>
         <label>
-          <span>Inference Threads <span class="info-tip" data-tip="CPU threads used per inference run. Leave blank to auto-detect (up to 4). Increasing this speeds up each inference but uses more CPU per camera." title="CPU threads used per inference run. Leave blank to auto-detect (up to 4). Increasing this speeds up each inference but uses more CPU per camera." tabindex="0" aria-label="Help: CPU threads used per inference run. Leave blank to auto-detect (up to 4). Increa..."></span></span>
-          <input name="inference_threads" type="number" min="1" max="32" step="1" placeholder="Auto" /></label>
-        <label>
-          <span>GPU Memory Limit (GiB) <span class="info-tip" data-tip="Maximum GPU memory ONNX Runtime may use on the CUDA provider (ignored on CPU). Leaving headroom prevents cuBLAS allocation errors. 0 = unlimited (default)." title="Maximum GPU memory ONNX Runtime may use on the CUDA provider (ignored on CPU). Leaving headroom prevents cuBLAS allocation errors. 0 = unlimited (default)." tabindex="0" aria-label="Help: Maximum GPU memory ONNX Runtime may use on the CUDA provider, ignored on CPU. Leaving headroom prevents cuBLAS allocation errors. 0 = unlimited (default)."></span></span>
-          <input name="gpu_mem_limit_gb" type="number" min="0" max="128" step="0.5" placeholder="0" /></label>
-        <label>
-          <span>Execution Mode <span class="info-tip" data-tip="ONNX Runtime executor mode (CPU path only). Parallel (default) runs independent graph nodes on a small inter-op thread pool. Sequential uses a single thread and can be faster on small graphs because ORT already parallelizes within each op. A/B test on your hardware. Default: parallel" title="ONNX Runtime executor mode (CPU path only). Parallel (default) runs independent graph nodes on a small inter-op thread pool. Sequential uses a single thread and can be faster on small graphs because ORT already parallelizes within each op. A/B test on your hardware. Default: parallel" tabindex="0" aria-label="Help: ONNX Runtime executor mode CPU path only. Parallel runs independent graph nodes on a small inter-op thread pool. Sequential uses a single thread. A/B test on your hardware. Default: parallel"></span></span>
-          <select name="execution_mode">
-            <option value="parallel">Parallel (Default)</option>
-            <option value="sequential">Sequential</option>
-          </select></label>
-        <label>
           <span>NMS Dedupe <span class="info-tip" data-tip="Class-aware NMS dedupe pass. Auto (recommended): skips the extra dedupe for NMS-free YOLO26 models (their head already dedupes) and keeps it for YOLOv8/YOLO11. Skip: confidence threshold only - affects NMS-free YOLO26 models; YOLOv8/YOLO11 always run class-aware NMS because their grid head emits thousands of raw boxes. Force: always run the class-aware dedupe, even on NMS-free models. The IoU Threshold above only applies when this dedupe actually runs." title="Class-aware NMS dedupe pass. Auto (recommended): skips the extra dedupe for NMS-free YOLO26 models (their head already dedupes) and keeps it for YOLOv8/YOLO11. Skip: confidence threshold only - affects NMS-free YOLO26 models; YOLOv8/YOLO11 always run class-aware NMS because their grid head emits thousands of raw boxes. Force: always run the class-aware dedupe, even on NMS-free models. The IoU Threshold above only applies when this dedupe actually runs." tabindex="0" aria-label="Help: Class-aware NMS dedupe pass. Auto skips the extra dedupe for NMS-free YOLO26 models and keeps it for YOLOv8/YOLO11. Skip confidence threshold only affects NMS-free YOLO26 models. Force always runs the dedupe. The IoU Threshold only applies when this dedupe runs."></span></span>
           <select name="confidence_only_nms">
             <option value="auto">Auto (Recommended)</option>
             <option value="on">Skip (NMS-Free Models Only)</option>
             <option value="off">Force Class-Aware NMS</option>
           </select></label>
+          </div>
+
+          <p class="settings-device-group">CPU <span class="settings-device-note">Only applies when inference runs on CPU</span></p>
+          <div class="form-grid">
+        <label>
+          <span>Inference Threads <span class="info-tip" data-tip="CPU threads used per inference run. Leave blank to auto-detect (up to 4). Increasing this speeds up each inference but uses more CPU per camera." title="CPU threads used per inference run. Leave blank to auto-detect (up to 4). Increasing this speeds up each inference but uses more CPU per camera." tabindex="0" aria-label="Help: CPU threads used per inference run. Leave blank to auto-detect (up to 4). Increa..."></span></span>
+          <input name="inference_threads" type="number" min="1" max="32" step="1" placeholder="Auto" /></label>
+        <label>
+          <span>Execution Mode <span class="info-tip" data-tip="ONNX Runtime executor mode (CPU path only). Parallel (default) runs independent graph nodes on a small inter-op thread pool. Sequential uses a single thread and can be faster on small graphs because ORT already parallelizes within each op. A/B test on your hardware. Default: parallel" title="ONNX Runtime executor mode (CPU path only). Parallel (default) runs independent graph nodes on a small inter-op thread pool. Sequential uses a single thread and can be faster on small graphs because ORT already parallelizes within each op. A/B test on your hardware. Default: parallel" tabindex="0" aria-label="Help: ONNX Runtime executor mode CPU path only. Parallel runs independent graph nodes on a small inter-op thread pool. Sequential uses a single thread. A/B test on your hardware. Default: parallel"></span></span>
+          <select name="execution_mode">
+            <option value="parallel">Parallel (Default)</option>
+            <option value="sequential">Sequential</option>
+          </select></label>
+          </div>
+
+          <p class="settings-device-group">GPU (CUDA) <span class="settings-device-note">Only applies when inference runs on a CUDA GPU</span></p>
+          <div class="form-grid">
+        <label>
+          <span>GPU Memory Limit (GiB) <span class="info-tip" data-tip="Maximum GPU memory ONNX Runtime may use on the CUDA provider (ignored on CPU). Leaving headroom prevents cuBLAS allocation errors. 0 = unlimited (default)." title="Maximum GPU memory ONNX Runtime may use on the CUDA provider (ignored on CPU). Leaving headroom prevents cuBLAS allocation errors. 0 = unlimited (default)." tabindex="0" aria-label="Help: Maximum GPU memory ONNX Runtime may use on the CUDA provider, ignored on CPU. Leaving headroom prevents cuBLAS allocation errors. 0 = unlimited (default)."></span></span>
+          <input name="gpu_mem_limit_gb" type="number" min="0" max="128" step="0.5" placeholder="0" /></label>
         <label>
           <span>CUDA IO Binding <span class="info-tip" data-tip="Copy frames to/from the GPU with ORT's io_binding API instead of host round-trips. CUDA only - automatically disabled when CUDA is unavailable. Can reduce per-frame latency on GPU systems. Default: Disabled" title="Copy frames to/from the GPU with ORT's io_binding API instead of host round-trips. CUDA only - automatically disabled when CUDA is unavailable. Can reduce per-frame latency on GPU systems. Default: Disabled" tabindex="0" aria-label="Help: CUDA IO Binding - direct CUDA memory path for frames, avoiding host round-trips. CUDA only, automatically disabled on CPU. Default: Disabled"></span></span>
           <select name="use_io_binding">
             <option value="false">Disabled</option>
             <option value="true">Enabled</option>
           </select></label>
+          </div>
+
+          <p class="settings-device-group">Paths <span class="settings-device-note">Managed by the Model Library above</span></p>
+          <div class="form-grid">
         <label>
           <span>Model Path <span class="info-tip" data-tip="Path to the active ONNX model file. Managed by the Model Library above - use Download &amp; Install or the Use button to change it. Default: models/yolo11n.onnx" title="Path to the active ONNX model file. Managed by the Model Library above - use Download &amp; Install or the Use button to change it. Default: models/yolo11n.onnx" tabindex="0" aria-label="Help: Path to the active ONNX model file. Managed by the Model Library above. Default: models/yolo11n.onnx"></span></span>
           <input name="model_path" readonly /></label>

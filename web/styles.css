@@ -1899,6 +1899,28 @@ tr.drag-over {
 .settings-advanced > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
 .settings-advanced-hint { margin: 0 14px 12px; font-size: 12px; line-height: 1.45; color: var(--muted); }
 .settings-advanced .form-grid { padding: 0 14px 14px; }
+/* Device-scoped sub-groups inside the Advanced ONNX settings: a small
+   uppercase header per group (All Devices / CPU / GPU / Paths) so an operator
+   can see which settings apply to the device their host actually runs on. */
+.settings-device-group {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 14px 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.settings-device-group .settings-device-note {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: 11px;
+  color: var(--muted);
+}
 
 @media (max-width: 600px) {
   .settings-tab { flex-basis: calc(50% - 6px); padding: 10px 12px; font-size: 13px; }
