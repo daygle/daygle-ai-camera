@@ -52,21 +52,23 @@ def test_objects_settings_save_round_trip(tmp_path, monkeypatch):
         )
         assert status == 200
         assert updated["default_mode"] == "moving"
-        # ``person: moving`` equals the global default, so it is collapsed away.
-        assert updated["labels"] == {"car": "still"}
+        # ``person: moving`` is an explicit valid override and is kept even
+        # though it equals the global default (so it can override a covering
+        # group). Only invalid/empty modes are dropped.
+        assert updated["labels"] == {"car": "still", "person": "moving"}
 
         # Persisted to the database (still_alerts always present, empty by default).
         with sqlite3.connect(database_path) as db:
             row = db.execute("SELECT value FROM app_settings WHERE key = 'objects'").fetchone()
         assert row is not None
         stored = json.loads(row[0])
-        assert stored == {"default_mode": "moving", "labels": {"car": "still"}, "group_modes": {}, "still_alerts": {}}
+        assert stored == {"default_mode": "moving", "labels": {"car": "still", "person": "moving"}, "group_modes": {}, "still_alerts": {}}
 
         # GET returns what was saved.
         status, _headers, payload = client.request("/api/settings/objects")
         assert status == 200
         assert payload["default_mode"] == "moving"
-        assert payload["labels"] == {"car": "still"}
+        assert payload["labels"] == {"car": "still", "person": "moving"}
         assert payload["still_alerts"] == {}
 
         # Still-dwell thresholds round-trip: numeric minutes are persisted,
@@ -117,12 +119,14 @@ def test_objects_settings_group_modes_round_trip(tmp_path, monkeypatch):
             headers={"X-CSRF-Token": csrf},
         )
         assert status == 200
-        # pet: moving equals the global default, so it is collapsed away.
-        assert updated["group_modes"] == {"animal": "still"}
+        # pet: moving is kept even though it equals the global default: a more
+        # specific group overriding a broader one (animal=still) back toward
+        # moving is exactly what overlapping groups are for.
+        assert updated["group_modes"] == {"animal": "still", "pet": "moving"}
 
         status, _headers, payload = client.request("/api/settings/objects")
         assert status == 200
-        assert payload["group_modes"] == {"animal": "still"}
+        assert payload["group_modes"] == {"animal": "still", "pet": "moving"}
 
         # An invalid group mode is rejected.
         status, _headers, body = client.request(

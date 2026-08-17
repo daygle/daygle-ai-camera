@@ -100,6 +100,17 @@ def normalize_mode(value: Any, default: str = MODE_ANY) -> str:
     return text if text in VALID_MODES else default
 
 
+def _explicit_mode(value: Any) -> str | None:
+    """A raw mode kept only when it is one of the valid modes, else ``None``.
+
+    Unlike ``normalize_mode`` this does NOT coerce junk to a default: an
+    empty/unparseable/unknown mode yields ``None`` so the caller can drop the
+    entry entirely rather than persist a spurious default-valued override.
+    """
+    text = str(value or '').strip().lower()
+    return text if text in VALID_MODES else None
+
+
 def normalize_object_settings(value: Any) -> dict[str, Any]:
     """Validate + canonicalise a raw ``objects`` setting dict.
 
@@ -120,23 +131,27 @@ def normalize_object_settings(value: Any) -> dict[str, Any]:
     if isinstance(raw_labels, dict):
         for raw_label, raw_mode in raw_labels.items():
             label = canonical_label(raw_label)
-            if not label:
-                continue
-            mode = normalize_mode(raw_mode, default_mode)
-            # A label override identical to the default is redundant; dropping
-            # it keeps the persisted shape minimal and "inherit" honest.
-            if mode != default_mode:
+            mode = _explicit_mode(raw_mode)
+            # Keep every explicit, valid override -- INCLUDING one that equals
+            # the default. With group modes sitting between the per-label and
+            # default layers, an explicit mode that matches the default is not
+            # redundant: it overrides a covering group's non-default mode back
+            # to that value (e.g. default=moving, animal=still, then an
+            # explicit cat=moving to keep cats moving). Only invalid/empty
+            # modes are dropped, so they never become a spurious override.
+            if label and mode is not None:
                 labels[label] = mode
     group_modes: dict[str, str] = {}
     raw_group_modes = value.get('group_modes')
     if isinstance(raw_group_modes, dict):
         for raw_group, raw_mode in raw_group_modes.items():
             group = canonical_label(raw_group)
-            if not group:
-                continue
-            mode = normalize_mode(raw_mode, default_mode)
-            # Same redundant-override convention as per-label modes above.
-            if mode != default_mode:
+            mode = _explicit_mode(raw_mode)
+            # Keep explicit group modes even when equal to the default: a more
+            # specific group overriding a broader one back to the default value
+            # (animal=still + pet=moving) is the whole point of overlapping
+            # groups, so collapsing pet=moving would defeat it.
+            if group and mode is not None:
                 group_modes[group] = mode
     still_alerts: dict[str, int] = {}
     raw_still = value.get('still_alerts')
