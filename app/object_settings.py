@@ -244,11 +244,17 @@ def update_still_dwell_alerts(
         thresholds = still_alert_thresholds()
     else:
         thresholds = _normalize_threshold_map(still_alerts)
-    if not thresholds or not detections:
+    if not thresholds:
         return []
     ts = time.time() if now is None else float(now)
     with _state._still_dwell_lock:
         per_camera = _state._still_dwell.setdefault(str(camera_id), {})
+        # An empty cycle (no still detections at all -- the subject moved or
+        # left an otherwise-empty frame) must still drop every existing streak,
+        # so ``detections`` being empty falls through to the reset loop below
+        # rather than short-circuiting and preserving a stale streak.
+        if not detections and not per_camera:
+            return []
         still_now: set[str] = set()
         emitted: list[dict[str, Any]] = []
         for detection in detections:
@@ -371,3 +377,41 @@ def filter_detections_by_motion_mode(
         if mode == MODE_ANY or mode == state:
             filtered.append({**detection, 'motion_state': state})
     return filtered
+
+
+def still_dwell_candidates(
+    detections: list[dict[str, Any]],
+    diff_mask: Any,
+    settings: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Still detections for still-alert labels, ignoring the moving/still filter.
+
+    The dwell tracker (``update_still_dwell_alerts``) can only advance a streak
+    for a label it sees classified ``still`` this cycle. But
+    ``filter_detections_by_motion_mode`` runs first and, under the default
+    ``moving`` mode, DROPS every still detection -- so a label left on the
+    default would never accrue a streak and its configured "still for N minutes"
+    alert would silently never fire. Still-dwell alerts are an independent axis
+    (see the module docstring), so this selects the still detections for labels
+    that actually have a threshold, straight from the pre-filter detection list,
+    annotated ``motion_state='still'``. The caller feeds these to the dwell
+    tracker so the alert works regardless of the label's detection mode, while
+    the normal alert/record pipeline keeps honouring "Moving Only".
+
+    Returns an empty list when nothing has a still-alert threshold, so the hot
+    path skips all per-box classification work in the common case.
+    """
+    if not detections:
+        return []
+    resolved = settings if settings is not None else effective_object_settings()
+    thresholds = still_alert_thresholds(resolved)
+    if not thresholds:
+        return []
+    candidates: list[dict[str, Any]] = []
+    for detection in detections:
+        label = canonical_label(detection.get('label'))
+        if not label or label not in thresholds:
+            continue
+        if detection_motion_state(detection, diff_mask) == MODE_STILL:
+            candidates.append({**detection, 'motion_state': MODE_STILL})
+    return candidates
