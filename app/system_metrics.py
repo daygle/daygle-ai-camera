@@ -198,14 +198,22 @@ def _thermal_status(temperature_c: int | float | None, warn_c: int, critical_c: 
     return 'ok'
 
 
-def gpu_status(warn_c: int = GPU_TEMP_WARN_C, critical_c: int = GPU_TEMP_CRITICAL_C) -> dict | None:
+def gpu_status(
+    warn_c: int = GPU_TEMP_WARN_C,
+    critical_c: int = GPU_TEMP_CRITICAL_C,
+    devices: list[dict] | None = None,
+) -> dict | None:
     """GPU snapshot for the dashboard health card, or ``None`` without NVIDIA.
 
     ``warn_c`` / ``critical_c`` are the thermal thresholds; they default to
     the module constants and are overridable by the admin via the system
-    settings (``/api/settings/system/gpu``).
+    settings (``/api/settings/system/gpu``). ``devices`` lets a caller pass an
+    already-fetched ``nvidia_smi_devices`` snapshot (e.g. the TTL-cached one)
+    so a single nvidia-smi read can be classified against different thresholds
+    without re-shelling; omitted, it takes a fresh snapshot.
     """
-    devices = nvidia_smi_devices()
+    if devices is None:
+        devices = nvidia_smi_devices()
     if not devices:
         return None
     primary = dict(devices[0])
@@ -219,15 +227,65 @@ def gpu_status(warn_c: int = GPU_TEMP_WARN_C, critical_c: int = GPU_TEMP_CRITICA
     }
 
 
+# The dashboard polls /api/system/resources every ~5s, and several open tabs
+# poll independently -- each call would otherwise spawn a fresh nvidia-smi
+# process (up to the 3s timeout, blocking a threadpool worker). A short TTL
+# snapshot collapses those into at most one nvidia-smi read per window,
+# regardless of tab count. Kept out of ``nvidia_smi_devices`` / ``gpu_status``
+# so those stay pure for direct callers and tests; only the polled
+# ``system_resources`` path reads through the cache.
+_GPU_SNAPSHOT_TTL_SECONDS: float = 4.0
+_gpu_snapshot_lock: threading.Lock = threading.Lock()
+_gpu_snapshot: list[dict] | None = None
+_gpu_snapshot_ts: float = 0.0
+_gpu_snapshot_valid: bool = False
+
+
+def _cached_nvidia_smi_devices() -> list[dict] | None:
+    """``nvidia_smi_devices`` behind a short TTL so rapid pollers share one read.
+
+    Caches the ``None`` result too, so a host without an NVIDIA GPU does not
+    re-spawn nvidia-smi on every poll just to fail again.
+    """
+    global _gpu_snapshot, _gpu_snapshot_ts, _gpu_snapshot_valid
+    now = time.monotonic()
+    with _gpu_snapshot_lock:
+        if _gpu_snapshot_valid and (now - _gpu_snapshot_ts) < _GPU_SNAPSHOT_TTL_SECONDS:
+            return _gpu_snapshot
+    devices = nvidia_smi_devices()
+    with _gpu_snapshot_lock:
+        _gpu_snapshot = devices
+        _gpu_snapshot_ts = time.monotonic()
+        _gpu_snapshot_valid = True
+    return devices
+
+
+def reset_gpu_snapshot_cache() -> None:
+    """Drop the cached nvidia-smi snapshot (tests / after a driver change)."""
+    global _gpu_snapshot, _gpu_snapshot_valid
+    with _gpu_snapshot_lock:
+        _gpu_snapshot = None
+        _gpu_snapshot_valid = False
+
+
 def system_resources(
     gpu_warn_c: int = GPU_TEMP_WARN_C,
     gpu_critical_c: int = GPU_TEMP_CRITICAL_C,
 ) -> dict[str, object]:
     """Aggregate CPU/Load/RAM/GPU snapshot for the dashboard resource cards."""
+    # Read the cached snapshot once and only classify when it is non-empty:
+    # passing a cached ``None`` (no GPU) straight into ``gpu_status`` would hit
+    # its fallback branch and re-shell nvidia-smi, defeating the cache on the
+    # very hosts that never have a GPU.
+    gpu_devices = _cached_nvidia_smi_devices()
+    gpu = (
+        gpu_status(warn_c=gpu_warn_c, critical_c=gpu_critical_c, devices=gpu_devices)
+        if gpu_devices else None
+    )
     return {
         'cpu_percent': cpu_percent(),
         'cpu_count': os.cpu_count(),
         'load_average': load_average(),
         'memory': memory(),
-        'gpu': gpu_status(warn_c=gpu_warn_c, critical_c=gpu_critical_c),
+        'gpu': gpu,
     }
