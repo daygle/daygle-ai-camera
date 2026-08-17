@@ -138,6 +138,11 @@ function renderStatus(status) {
     safeHtml`<div><span>Mode</span><strong class="ai-mode ${String(status.mode || '').toLowerCase().replace(/\s+/g, '-')}">${displayValue(status.mode, 'None')}</strong></div>`,
     safeHtml`<div><span>Model Resolution</span><strong>${status.model_input_size || 'N/A'}</strong></div>`,
     safeHtml`<div><span>Precision</span><strong>${precisionText}</strong></div>`,
+    // Which device inference is actually running on (resolved from ORT's live
+    // provider list), so ``Device: Auto`` is unambiguous and a CUDA-to-CPU
+    // fallback is visible. Also tells the operator which half of the Advanced
+    // settings (CPU vs GPU group) applies to their host.
+    safeHtml`<div><span>Active Device</span><strong>${status.active_device || 'N/A'}</strong></div>`,
   ];
   // Only surface the error row when there's an actual error -- a full-width
   // "None" row just wastes space on an otherwise healthy panel.

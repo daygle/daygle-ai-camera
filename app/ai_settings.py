@@ -236,6 +236,16 @@ def ai_status_payload(
     # The precision actually running (after any INT8/FP16 fallback), so the
     # Status panel can show when a requested int8/fp16 silently ran as fp32.
     active_precision = getattr(_state.detector, 'active_precision', None) if model_loaded else None
+    # The device actually running inference, resolved from ORT's live provider
+    # list (so ``Device: Auto`` shows which way it landed, and a CUDA request
+    # that fell back to CPU is visible). Drives the Status panel's "Active
+    # Device" row and tells operators which half of the Advanced settings --
+    # the CPU group or the GPU group -- actually applies to their host.
+    active_providers = getattr(_state.detector, 'active_providers', None) if model_loaded else None
+    if active_providers:
+        active_device = 'CUDA (GPU)' if 'CUDAExecutionProvider' in active_providers else 'CPU'
+    else:
+        active_device = None
     return {
         'active_backend': active_backend,
         'configured_backend': configured_backend,
@@ -253,6 +263,7 @@ def ai_status_payload(
         'active_config_source': active_ai_config_source(),
         'model_input_size': model_input_size,
         'active_precision': active_precision,
+        'active_device': active_device,
         # Keep the persisted request beside the runtime result so operators
         # can distinguish an intentional FP32 fallback from an FP32 setting.
         'precision': str(settings.get('precision') or 'fp32').strip().lower(),
@@ -283,6 +294,7 @@ def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
         'last_detector_error': ai_status['last_detector_error'],
         'model_input_size': ai_status.get('model_input_size'),
         'active_precision': ai_status.get('active_precision'),
+        'active_device': ai_status.get('active_device'),
         'model_name': ai_status.get('model_name'),
         # Surface the normalised tri-state so the settings form's NMS-dedupe
         # select reflects the persisted value (defaulting to 'auto') rather
