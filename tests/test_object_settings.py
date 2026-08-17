@@ -354,3 +354,47 @@ def test_dwell_streaks_are_per_camera():
 def test_dwell_noop_without_thresholds_or_detections():
     assert os.update_still_dwell_alerts('cam-1', [_still_det('package')], {}, now=1000.0) == []
     assert os.update_still_dwell_alerts('cam-1', [], {'package': 5}, now=1000.0) == []
+
+
+def test_dwell_streak_resets_on_fully_empty_frame():
+    # Regression: an empty detection list must still drop an existing streak
+    # (subject left an otherwise-empty frame), not preserve it via an early
+    # return. The dwell tracker is fed only the still-alert-label stills, so an
+    # empty list is the normal "subject gone / moved" signal.
+    os.update_still_dwell_alerts('cam-1', [_still_det('package')], {'package': 5}, now=1000.0)
+    # Frame empties for a while; the streak must not survive it.
+    assert os.update_still_dwell_alerts('cam-1', [], {'package': 5}, now=1000.0 + 3 * 60) == []
+    assert os.update_still_dwell_alerts('cam-1', [], {'package': 5}, now=1000.0 + 10 * 60) == []
+    # A fresh still run restarts from zero: no early alert from the stale streak.
+    assert os.update_still_dwell_alerts('cam-1', [_still_det('package')], {'package': 5}, now=1000.0 + 12 * 60) == []
+    out = os.update_still_dwell_alerts('cam-1', [_still_det('package')], {'package': 5}, now=1000.0 + 17 * 60)
+    assert len(out) == 1
+
+
+# ---------------------------------------------------------------------------
+# still_dwell_candidates
+# ---------------------------------------------------------------------------
+
+
+def test_still_dwell_candidates_selects_still_alert_labels_regardless_of_mode():
+    # Default "moving" mode would drop still detections in the main filter, but
+    # a label with a still-alert threshold must still reach the dwell tracker.
+    settings = {'default_mode': 'moving', 'labels': {}, 'still_alerts': {'package': 5}}
+    dets = [_det('package'), _det('car')]
+    out = os.still_dwell_candidates(dets, _mask_none_changed(), settings)
+    assert [d['label'] for d in out] == ['package']  # 'car' has no threshold
+    assert out[0]['motion_state'] == 'still'
+
+
+def test_still_dwell_candidates_excludes_moving_subjects():
+    # A subject whose pixels are changing is 'moving' and must not appear, so
+    # the tracker treats it as a streak break.
+    settings = {'default_mode': 'moving', 'labels': {}, 'still_alerts': {'package': 5}}
+    out = os.still_dwell_candidates([_det('package')], _mask_changed_inside_box(), settings)
+    assert out == []
+
+
+def test_still_dwell_candidates_empty_without_thresholds():
+    settings = {'default_mode': 'moving', 'labels': {}, 'still_alerts': {}}
+    assert os.still_dwell_candidates([_det('package')], _mask_none_changed(), settings) == []
+    assert os.still_dwell_candidates([], _mask_none_changed(), settings) == []

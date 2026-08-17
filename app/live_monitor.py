@@ -31,8 +31,10 @@ from app.detection_state import (
 )
 from app.detection_status import _camera_has_live_alert_stream, update_live_detection_status
 from app.object_settings import (
+    effective_object_settings,
     filter_detections_by_motion_mode,
     still_alert_thresholds,
+    still_dwell_candidates,
     update_still_dwell_alerts,
 )
 from app.object_tracking import update_object_tracks
@@ -568,6 +570,17 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state, detections=[], motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         return None
     detections = normalize_detection_boxes_for_frame(detections, frame)
+    # Object settings (default mode + per-label overrides + still-alert
+    # thresholds) drive both the still/moving filter and the still-dwell
+    # tracker below, so resolve them once per cycle rather than reading the
+    # ``objects`` DB setting twice on this ~4 Hz hot path.
+    object_settings = effective_object_settings()
+    # Still-dwell candidates must be taken from the UNFILTERED detections: the
+    # still/moving filter below drops still detections under the default Moving
+    # Only mode, which would otherwise starve every "still for N minutes" alert
+    # (an independent axis) of the still classifications it needs. Select them
+    # before the filter reassigns ``detections``.
+    still_candidates = still_dwell_candidates(detections, diff_mask, object_settings)
     # Per-label still/moving filter (Objects page): drop detections whose
     # label's detection mode (any/moving/still) does not allow this object's
     # motion state, so a "car moving only" rule never records a parked car.
@@ -575,7 +588,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # is moving, otherwise still (no mask -> still). Motion-zone rules (Layer
     # 3) are a separate pixel-diff axis and are unaffected. Surviving
     # detections carry a ``motion_state`` annotation for overlays/status.
-    detections = filter_detections_by_motion_mode(detections, diff_mask)
+    detections = filter_detections_by_motion_mode(detections, diff_mask, object_settings)
     raw_labels = [str(detection.get('label')) for detection in detections if detection.get('label')]
     object_detections = filter_detections_for_camera(detections, settings)
     # Temporal confirmation gate: require an object label to persist across
@@ -599,13 +612,25 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # Still-dwell alerts (Objects page: "still for N minutes"): a label that
     # has been detected continuously still for its configured threshold fires
     # one dwell alert per streak, watching the same Layer-1 background-
-    # absorption classification the still/moving filter applies. Built from the
-    # confirmed + tracked detections so only persistent objects participate;
-    # the streak resets the moment the subject moves or leaves the frame.
-    # Thresholds are read once per cycle (shared by the tracker and the
-    # synthetic alert rules below).
-    _still_thresholds = still_alert_thresholds()
-    dwell_detections = update_still_dwell_alerts(camera_id, object_detections, _still_thresholds)
+    # absorption classification the still/moving filter applies. The streak
+    # resets the moment the subject moves or leaves the frame.
+    #
+    # Fed from ``still_candidates`` (still detections for still-alert labels,
+    # taken before the moving/still filter) rather than ``object_detections``:
+    # under the default Moving Only mode the filter drops still detections, so
+    # sourcing the tracker from the filtered set would never let a default-mode
+    # label accrue a streak. The candidates are zone-scoped the same way the
+    # normal object pipeline is so a dwell alert still respects which zones the
+    # camera monitors and whether object detection is enabled.
+    _still_thresholds = still_alert_thresholds(object_settings)
+    if _still_thresholds:
+        # Zone-scope the still candidates (skip when there are none so we do no
+        # zone work on the common empty cycle). An empty input still runs the
+        # tracker so a streak resets when its subject moves or leaves the frame.
+        _dwell_input = filter_detections_for_camera(still_candidates, settings) if still_candidates else []
+        dwell_detections = update_still_dwell_alerts(camera_id, _dwell_input, _still_thresholds)
+    else:
+        dwell_detections = []
     if dwell_detections:
         # Stamp the containing zone so a dwell detection can also match the
         # operator's existing zone rules for that label -- a "person -> email"
