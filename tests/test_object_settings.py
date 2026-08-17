@@ -66,27 +66,30 @@ def test_normalize_object_settings_coerces_invalid_modes():
         'default_mode': 'sometimes',
         'labels': {'person': 'MOVING', 'car': 'bogus', 'bird': ''},
     })
-    # Invalid default falls back to 'moving'; uppercase mode is normalised;
-    # bogus/empty modes are dropped entirely (never persisted). The
-    # normalised 'person': 'moving' equals the new default, so it is dropped
-    # as a redundant override.
+    # Invalid default falls back to 'moving'; uppercase mode is normalised and
+    # kept (an explicit valid override, even one equal to the default, is
+    # preserved so it can override a covering group); bogus/empty modes are
+    # dropped entirely so they never become a spurious override.
     assert out['default_mode'] == 'moving'
-    assert out['labels'] == {}
+    assert out['labels'] == {'person': 'moving'}
 
 
-def test_normalize_object_settings_drops_redundant_override():
+def test_normalize_object_settings_keeps_explicit_default_override():
+    # An explicit override equal to the default is NOT dropped: with group
+    # modes between the per-label and default layers, it is meaningful (it
+    # overrides a covering group's non-default mode back to the default value).
     out = os.normalize_object_settings({
         'default_mode': 'moving',
         'labels': {'person': 'moving', 'car': 'still'},
     })
-    assert out['labels'] == {'car': 'still'}
+    assert out['labels'] == {'person': 'moving', 'car': 'still'}
 
 
 def test_normalize_object_settings_canonicalizes_labels():
     out = os.normalize_object_settings({'labels': {'Human': 'still', 'cat': 'moving'}})
-    # 'cat': 'moving' equals the new default, so only the canonicalised
-    # 'person': 'still' override survives.
-    assert out['labels'] == {'person': 'still'}
+    # Human canonicalizes to person; cat: moving is an explicit valid override
+    # and is kept even though it equals the default.
+    assert out['labels'] == {'person': 'still', 'cat': 'moving'}
 
 
 def test_normalize_object_settings_group_modes():
@@ -94,9 +97,11 @@ def test_normalize_object_settings_group_modes():
         'default_mode': 'moving',
         'group_modes': {'Animal': 'still', 'pet': 'moving', 'nope': 'bogus'},
     })
-    # Group names canonicalize to lowercase; 'pet': 'moving' equals the default
-    # so it is dropped; 'nope' is not a valid mode so it is dropped too.
-    assert out['group_modes'] == {'animal': 'still'}
+    # Group names canonicalize to lowercase; 'pet': 'moving' is kept even though
+    # it equals the default (a more specific group overriding a broader one back
+    # to the default is the point of overlapping groups); 'nope' is an invalid
+    # mode so it is dropped.
+    assert out['group_modes'] == {'animal': 'still', 'pet': 'moving'}
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +165,21 @@ def test_motion_mode_for_label_per_label_override_beats_group():
     settings = {'default_mode': 'moving', 'labels': {'cat': 'any'}, 'group_modes': {'animal': 'still'}}
     assert os.motion_mode_for_label('cat', settings) == 'any'
     assert os.motion_mode_for_label('dog', settings) == 'still'
+
+
+def test_specific_group_overrides_broader_group_through_normalize():
+    # Regression: a more specific group set back to the default value must
+    # survive normalization and win at resolution. default=moving, animal=still,
+    # pet=moving -> pets stay moving while other animals go still. Previously
+    # pet=moving was collapsed as "redundant", flipping cats/dogs to still.
+    settings = os.normalize_object_settings({
+        'default_mode': 'moving',
+        'group_modes': {'animal': 'still', 'pet': 'moving'},
+    })
+    assert settings['group_modes'] == {'animal': 'still', 'pet': 'moving'}
+    assert os.motion_mode_for_label('cat', settings) == 'moving'   # pet wins (smaller)
+    assert os.motion_mode_for_label('dog', settings) == 'moving'   # pet wins
+    assert os.motion_mode_for_label('horse', settings) == 'still'  # only animal
 
 
 # ---------------------------------------------------------------------------

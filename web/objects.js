@@ -31,6 +31,26 @@ function modeLabel(mode) {
   return MODE_LABELS[mode] || 'Moving & Still';
 }
 
+// Mirror the backend's per-label resolution (app/object_settings.py
+// motion_mode_for_label): the mode a class INHERITS when it has no per-object
+// override is its most specific covering group's mode (fewest members wins,
+// ties broken alphabetically), otherwise the global default. Keeps the
+// per-object Effective column and the "Inherit (…)" hint honest once group
+// modes exist -- without this they would ignore groups and mislead.
+function groupFallbackMode(label) {
+  const l = String(label || '').toLowerCase();
+  let best = null; // { size, name, mode }
+  for (const [name, mode] of Object.entries(groupModes)) {
+    const members = groups[name];
+    if (!Array.isArray(members) || !members.includes(l)) continue;
+    const size = members.length;
+    if (!best || size < best.size || (size === best.size && name < best.name)) {
+      best = { size, name, mode };
+    }
+  }
+  return best ? best.mode : (defaultSelect.value || 'moving');
+}
+
 let hasUnsavedChanges = false;
 let availableLabels = [];
 let labels = {}; // label -> 'any' | 'moving' | 'still' (explicit overrides only)
@@ -38,6 +58,29 @@ let stillAlerts = {}; // label -> minutes for the "still for N minutes" dwell al
 let groups = {}; // group name -> [member labels]
 let groupModes = {}; // group name -> 'any' | 'moving' | 'still'
 let editingGroupName = null; // set while editing an existing group
+
+// Read the still-alert inputs currently in the DOM back into ``stillAlerts``
+// so an INTERACTIVE re-render (a mode / group change) does not discard values
+// the operator has typed but not yet saved. Only used by ``rerenderObjectTable``
+// -- the server-authoritative ``render`` path deliberately skips it so a value
+// the backend clamped (e.g. a capped still-alert threshold) is not overwritten
+// by the raw text still sitting in the input.
+function syncStillAlertsFromDom() {
+  if (!tableBody) return;
+  tableBody.querySelectorAll('input[data-still-alert]').forEach((input) => {
+    const label = input.dataset.stillAlert;
+    const minutes = Number.parseInt(input.value, 10) || 0;
+    if (minutes > 0) stillAlerts[label] = minutes;
+    else delete stillAlerts[label];
+  });
+}
+
+// Re-render the per-object table after an interactive change, preserving any
+// unsaved still-alert edits. Use this (not renderTable) from event handlers.
+function rerenderObjectTable() {
+  syncStillAlertsFromDom();
+  renderTable();
+}
 
 function markUnsaved() {
   if (hasUnsavedChanges) return;
@@ -58,18 +101,20 @@ function renderTable() {
   }
   tableWrap.hidden = false;
   emptyEl.hidden = true;
-  const defaultMode = defaultSelect.value || 'moving';
   tableBody.innerHTML = availableLabels.map((label) => {
     const title = escapeHtml(titleCase(label));
     const override = labels[label];
-    const effective = override || defaultMode;
+    // Effective and the "Inherit (…)" hint follow the same precedence the
+    // backend uses: per-object override > most specific covering group > default.
+    const fallback = groupFallbackMode(label);
+    const effective = override || fallback;
     const stillMinutes = stillAlerts[label] || 0;
     return `
       <tr data-object-label="${escapeHtml(label)}">
         <td class="cell-label">${title}</td>
         <td>
           <select data-object-mode="${escapeHtml(label)}" aria-label="Detection mode for ${title}">
-            <option value="inherit" ${override ? '' : 'selected'}>Inherit (${escapeHtml(modeLabel(defaultMode))})</option>
+            <option value="inherit" ${override ? '' : 'selected'}>Inherit (${escapeHtml(modeLabel(fallback))})</option>
             <option value="any" ${override === 'any' ? 'selected' : ''}>Moving &amp; Still</option>
             <option value="moving" ${override === 'moving' ? 'selected' : ''}>Moving Only</option>
             <option value="still" ${override === 'still' ? 'selected' : ''}>Still Only</option>
@@ -88,7 +133,7 @@ function renderTable() {
       const value = select.value;
       if (value === 'inherit') delete labels[label];
       else labels[label] = value;
-      renderTable();
+      rerenderObjectTable();
       markUnsaved();
     });
   });
@@ -204,6 +249,7 @@ function renderGroupModes() {
       if (value === 'inherit') delete groupModes[name];
       else groupModes[name] = value;
       renderGroupModes();
+      rerenderObjectTable();  // a group mode change shifts the per-object Effective column
       markUnsaved();
     });
   });
@@ -235,6 +281,7 @@ async function persistGroups(next) {
     groups = (result && result.groups) || {};
     renderGroups();
     renderGroupModes();
+    rerenderObjectTable();  // membership changes shift which classes a group covers
     groupsMessage.textContent = 'Object groups saved.';
     window.showToast('Object groups saved.');
   } catch (error) {
@@ -305,7 +352,8 @@ async function loadAll() {
 }
 
 defaultSelect.addEventListener('change', () => {
-  renderTable();
+  rerenderObjectTable();
+  renderGroupModes();  // the default drives every "Inherit (…)" hint / Effective cell
   markUnsaved();
 });
 
