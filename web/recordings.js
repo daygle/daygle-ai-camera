@@ -403,11 +403,15 @@ function renderRecordings(recordings) {
         : '';
       badges = `${motionBadge}${summaryBadges}` || '<span class="muted">No detections</span>';
     }
-    // A recording spans many events - surface the count so it reads as one
-    // clip containing several detections rather than looking duplicated.
+    // A recording spans many events - show each event's type as its own pill
+    // (object / motion / sound) instead of a bare count, so a clip containing
+    // several detections reads as its constituent events rather than a number.
+    // Single-event recordings keep the summary pills above (per-event pills
+    // would just duplicate them). recordingEventPills is provided by
+    // web/utils.js (loaded before this script).
     const eventCount = Array.isArray(recording.events) ? recording.events.length : 0;
     if (eventCount > 1) {
-      badges += `<span class="detection detection-object" title="This recording spans ${eventCount} events">${eventCount} events</span>`;
+      badges += recording.events.map(recordingEventPills).join('');
     }
     const actions = [
       mediaReady

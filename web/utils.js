@@ -587,6 +587,54 @@ function recordingDetectionSummary(recording) {
     .sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1));
 }
 
+// Render one type pill for a single event inside a recording (object /
+// motion / sound), mirroring the Events page's boundary: a sound source or
+// sound-class detection renders the speaker pill, an event whose detections
+// are all generic markers (motion) renders the Motion pill, and anything
+// else renders the strongest concrete object label. The Recordings list uses
+// this per-event to show what a multi-event clip actually contains -- one
+// pill per linked event -- instead of collapsing them into a bare "N events"
+// count. The payload shape is the event dict that /api/recordings attaches to
+// ``recording.events`` (each with its own ``detections`` + ``metadata``).
+function recordingEventPills(event) {
+  if (!event) return '';
+  const detections = Array.isArray(event.detections) ? event.detections : [];
+  if (String(event.source || '').toLowerCase() === 'sound'
+      || event.metadata?.source === 'sound-detection'
+      || detections.some((d) => isSoundLabel(d && d.label))) {
+    const soundDetections = detections.filter((d) => isSoundLabel(d && d.label));
+    if (soundDetections.length) {
+      return soundDetections
+        .map((d) => detectionPill(d.label, d.confidence, true))
+        .join('');
+    }
+    const meta = event.metadata || {};
+    const label = meta.class_label || meta.label || event.trigger_label;
+    const confidence = typeof meta.confidence === 'number' ? meta.confidence : null;
+    return label ? detectionPill(label, confidence, true) : '';
+  }
+  // Motion-only event: every detection is a generic marker (motion), so the
+  // single Motion pill with the strongest intensity stands in for the event.
+  const concrete = detections.filter((d) => {
+    const label = String(d && d.label || '').trim().toLowerCase();
+    return label && !GENERIC_TRIGGER_LABELS.has(label);
+  });
+  if (!concrete.length) {
+    const strongest = detections
+      .filter((d) => String(d && d.label || '').trim().toLowerCase() === 'motion')
+      .reduce((best, d) => (d && Number(d.confidence) > (best ? Number(best.confidence) : -1) ? d : best), null);
+    return strongest ? motionPill(strongest.confidence) : '';
+  }
+  // Object event: the strongest concrete detection of THIS event (plus its
+  // still-alert badge when the event fired a dwell alert). The clip-level
+  // Motion pill in the row already covers frame motion, so no duplicate here.
+  const strongestObject = concrete
+    .slice()
+    .sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0))[0];
+  return detectionPill(strongestObject.label, strongestObject.confidence)
+    + (strongestObject.still_alert ? stillAlertBadge(strongestObject.still_alert_minutes) : '');
+}
+
 // ─── Shared log table formatting ──────────────────────────────────────────
 // Audit + camera-log entries use the same locale-aware "Nov 4, 2025, 12:30:45"
 // format. Centralised here so a future tweak (e.g. honouring the user's
@@ -1109,7 +1157,7 @@ window.daygleUi = {
   isMotionOnlyRecording, motionConfidenceFor, recordingHasMotion,
   isMotionOnlyEvent, isMotionOnlyEventItem,
   // Shared recording readers (recordings list + timeline).
-  isSoundRecording, recordingTriggerType, recordingTriggerLabel, recordingZoneNames, recordingDetectionSummary, cameraLabel,
+  isSoundRecording, recordingTriggerType, recordingTriggerLabel, recordingZoneNames, recordingDetectionSummary, recordingEventPills, cameraLabel,
   renderTimeSelect, timeSelectValue, setTimeSelectValue,
   // Logs (audit + camera-log share these)
   formatLogTime, LOG_PAGE_SIZE,
