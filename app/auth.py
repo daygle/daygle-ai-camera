@@ -188,7 +188,7 @@ class AuthService:
                     timezone TEXT NOT NULL DEFAULT 'Australia/Sydney',
                     date_format TEXT NOT NULL DEFAULT 'locale',
                     time_format TEXT NOT NULL DEFAULT '24h',
-                    theme TEXT NOT NULL DEFAULT 'system',
+                    theme TEXT NOT NULL DEFAULT 'light',
                     failed_attempts INTEGER NOT NULL DEFAULT 0,
                     locked_until TEXT,
                     created_at TEXT NOT NULL,
@@ -247,7 +247,7 @@ class AuthService:
             # Migration: add the theme column to existing databases.
             # The CREATE TABLE above already includes it for fresh installs.
             try:
-                db.execute("ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'system'")
+                db.execute("ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'light'")
             except sqlite3.OperationalError as exc:
                 if 'duplicate column name' not in str(exc).lower():
                     raise

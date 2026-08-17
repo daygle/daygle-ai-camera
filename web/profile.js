@@ -21,7 +21,7 @@ function renderProfile(user) {
   profileForm.elements.timezone.value = user.timezone || 'Australia/Sydney';
   profileForm.elements.date_format.value = user.date_format || 'locale';
   profileForm.elements.time_format.value = user.time_format || '24h';
-  profileForm.elements.theme.value = user.theme || 'system';
+  profileForm.elements.theme.value = user.theme || 'light';
   const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ');
   // Each row is built via ``safeHtml`` (web/utils.js) so server-supplied
   // fields (username, role, timezone, etc.) can't smuggle HTML into the

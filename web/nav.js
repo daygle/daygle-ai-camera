@@ -465,7 +465,7 @@ window.daygleAuthReady = (async () => {
   }
 
   // ── Apply theme from user profile ──────────────────────────────
-  const userTheme = window.daygleAuth?.user?.theme || 'system';
+  const userTheme = window.daygleAuth?.user?.theme || 'light';
   if (typeof window.setDaygleThemePref === 'function') {
     window.setDaygleThemePref(userTheme);
   }
