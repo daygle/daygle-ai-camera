@@ -49,14 +49,15 @@ class _FakeDatabase:
 
 
 def test_normalize_object_settings_defaults():
-    assert os.normalize_object_settings(None) == {'default_mode': 'moving', 'labels': {}, 'still_alerts': {}}
-    assert os.normalize_object_settings({}) == {'default_mode': 'moving', 'labels': {}, 'still_alerts': {}}
-    assert os.normalize_object_settings('junk') == {'default_mode': 'moving', 'labels': {}, 'still_alerts': {}}
-    assert os.normalize_object_settings([]) == {'default_mode': 'moving', 'labels': {}, 'still_alerts': {}}
+    defaults = {'default_mode': 'moving', 'labels': {}, 'group_modes': {}, 'still_alerts': {}}
+    assert os.normalize_object_settings(None) == defaults
+    assert os.normalize_object_settings({}) == defaults
+    assert os.normalize_object_settings('junk') == defaults
+    assert os.normalize_object_settings([]) == defaults
 
 
 def test_normalize_object_settings_round_trip():
-    raw = {'default_mode': 'moving', 'labels': {'person': 'still', 'car': 'still'}, 'still_alerts': {}}
+    raw = {'default_mode': 'moving', 'labels': {'person': 'still', 'car': 'still'}, 'group_modes': {}, 'still_alerts': {}}
     assert os.normalize_object_settings(raw) == raw
 
 
@@ -88,6 +89,16 @@ def test_normalize_object_settings_canonicalizes_labels():
     assert out['labels'] == {'person': 'still'}
 
 
+def test_normalize_object_settings_group_modes():
+    out = os.normalize_object_settings({
+        'default_mode': 'moving',
+        'group_modes': {'Animal': 'still', 'pet': 'moving', 'nope': 'bogus'},
+    })
+    # Group names canonicalize to lowercase; 'pet': 'moving' equals the default
+    # so it is dropped; 'nope' is not a valid mode so it is dropped too.
+    assert out['group_modes'] == {'animal': 'still'}
+
+
 # ---------------------------------------------------------------------------
 # effective_object_settings
 # ---------------------------------------------------------------------------
@@ -108,7 +119,7 @@ def test_effective_object_settings_defaults_without_database(monkeypatch):
     previous = _state.database
     try:
         _state.database = None
-        assert os.effective_object_settings() == {'default_mode': 'moving', 'labels': {}, 'still_alerts': {}}
+        assert os.effective_object_settings() == {'default_mode': 'moving', 'labels': {}, 'group_modes': {}, 'still_alerts': {}}
     finally:
         _state.database = previous
 
@@ -127,6 +138,28 @@ def test_motion_mode_for_label_resolution():
 
 def test_motion_mode_for_label_defaults_to_moving():
     assert os.motion_mode_for_label('person', {'default_mode': 'bogus', 'labels': {}}) == 'moving'
+
+
+def test_motion_mode_for_label_group_mode_applies():
+    settings = {'default_mode': 'moving', 'labels': {}, 'group_modes': {'animal': 'still'}}
+    assert os.motion_mode_for_label('cat', settings) == 'still'
+    assert os.motion_mode_for_label('horse', settings) == 'still'
+    assert os.motion_mode_for_label('person', settings) == 'moving'  # not an animal
+
+
+def test_motion_mode_for_label_most_specific_group_wins():
+    settings = {'default_mode': 'moving', 'labels': {}, 'group_modes': {'animal': 'still', 'pet': 'moving'}}
+    # cat is in both animal (10 members) and pet (3 members): the smaller pet
+    # umbrella is more specific and wins.
+    assert os.motion_mode_for_label('cat', settings) == 'moving'
+    # horse is only in animal.
+    assert os.motion_mode_for_label('horse', settings) == 'still'
+
+
+def test_motion_mode_for_label_per_label_override_beats_group():
+    settings = {'default_mode': 'moving', 'labels': {'cat': 'any'}, 'group_modes': {'animal': 'still'}}
+    assert os.motion_mode_for_label('cat', settings) == 'any'
+    assert os.motion_mode_for_label('dog', settings) == 'still'
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +271,18 @@ def test_filter_mixed_labels():
         [moving_car, still_person, still_car], _mask_changed_inside_box(), settings,
     )
     assert [d['label'] for d in out] == ['car', 'person']
+
+
+def test_filter_respects_group_mode():
+    settings = {'default_mode': 'any', 'labels': {}, 'group_modes': {'pet': 'moving'}}
+    moving = _det('cat', x=0.3, y=0.3, w=0.2, h=0.2)
+    still = _det('cat', x=0.6, y=0.6, w=0.2, h=0.2)
+    out = os.filter_detections_by_motion_mode(
+        [moving, still], _mask_changed_inside_box(), settings,
+    )
+    assert len(out) == 1
+    assert out[0]['motion_state'] == 'moving'
+    assert out[0]['box'] == moving['box']
 
 
 def test_filter_no_mask_classifies_still():

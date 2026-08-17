@@ -60,7 +60,7 @@ def test_objects_settings_save_round_trip(tmp_path, monkeypatch):
             row = db.execute("SELECT value FROM app_settings WHERE key = 'objects'").fetchone()
         assert row is not None
         stored = json.loads(row[0])
-        assert stored == {"default_mode": "moving", "labels": {"car": "still"}, "still_alerts": {}}
+        assert stored == {"default_mode": "moving", "labels": {"car": "still"}, "group_modes": {}, "still_alerts": {}}
 
         # GET returns what was saved.
         status, _headers, payload = client.request("/api/settings/objects")
@@ -97,6 +97,42 @@ def test_objects_settings_save_round_trip(tmp_path, monkeypatch):
         )
         assert status == 400
         assert "must be 'any', 'moving', or 'still'" in updated["detail"]
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_objects_settings_group_modes_round_trip(tmp_path, monkeypatch):
+    app, _database_path = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+
+        status, _headers, updated = client.request(
+            "/api/settings/objects",
+            method="PUT",
+            json_body={"default_mode": "moving", "group_modes": {"animal": "still", "pet": "moving"}},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 200
+        # pet: moving equals the global default, so it is collapsed away.
+        assert updated["group_modes"] == {"animal": "still"}
+
+        status, _headers, payload = client.request("/api/settings/objects")
+        assert status == 200
+        assert payload["group_modes"] == {"animal": "still"}
+
+        # An invalid group mode is rejected.
+        status, _headers, body = client.request(
+            "/api/settings/objects",
+            method="PUT",
+            json_body={"default_mode": "moving", "group_modes": {"animal": "bogus"}},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert status == 400
+        assert "group_modes" in body["detail"]
     finally:
         server.should_exit = True
         thread.join(timeout=5)

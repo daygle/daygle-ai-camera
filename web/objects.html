@@ -54,11 +54,11 @@
       <form id="groupForm" class="form-stack group-form" autocomplete="off">
         <div class="group-form-fields">
           <label>
-            <span>Group name</span>
+            <span>Group Name</span>
             <input type="text" id="groupNameInput" placeholder="e.g. vehicle" />
           </label>
           <label class="group-members-field">
-            <span>Member labels <span class="muted">(comma-separated)</span></span>
+            <span>Member Labels <span class="muted">(comma-separated)</span></span>
             <input type="text" id="groupMembersInput" list="groupMembersDatalist" placeholder="car, truck, bus, motorcycle" />
             <datalist id="groupMembersDatalist"></datalist>
           </label>
@@ -68,6 +68,30 @@
           <button type="button" id="groupCancelBtn" class="secondary" hidden>Cancel</button>
         </div>
       </form>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon" aria-hidden="true">🐾</div>
+        <div>
+          <h2>Group Behavior</h2>
+          <p class="settings-section-subtitle">Set one detection mode for a whole group and it applies to every member class - unless a class has its own override in Per-Object Overrides below. When a class belongs to several groups, the smallest (most specific) group wins.</p>
+        </div>
+      </div>
+      <div id="groupModesEmpty" class="muted empty-message" hidden>No groups yet. Create one in Object Groups above to set its behavior.</div>
+      <div id="groupModesTableWrap" class="cameras-table-wrap">
+        <table class="rule-table">
+          <thead>
+            <tr>
+              <th>Group</th>
+              <th>Members</th>
+              <th>Detection Mode</th>
+              <th>Effective</th>
+            </tr>
+          </thead>
+          <tbody id="groupModesBody"></tbody>
+        </table>
+      </div>
     </section>
 
     <section class="card">
@@ -84,7 +108,7 @@
           <thead>
             <tr>
               <th>Object</th>
-              <th>Detection mode</th>
+              <th>Detection Mode</th>
               <th>Effective</th>
               <th>Still alert after (min)</th>
             </tr>

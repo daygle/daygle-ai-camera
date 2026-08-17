@@ -33,6 +33,7 @@ Settings are stored in the database (setting key ``objects``) as::
     {
         "default_mode": "moving",               # moving | any | still
         "labels": {"person": "still"},         # optional per-label overrides
+        "group_modes": {"animal": "moving"},   # optional per-group overrides
         "still_alerts": {"package": 10},       # label -> minutes (0/absent = off)
     }
 
@@ -60,6 +61,7 @@ import time
 from typing import Any
 
 import app.state as _state
+from app.label_groups import cached_label_groups
 from app.zone_schema import canonical_label
 
 logger = logging.getLogger('daygle.ai')
@@ -74,6 +76,7 @@ VALID_MODES: frozenset[str] = frozenset({MODE_ANY, MODE_MOVING, MODE_STILL})
 DEFAULT_OBJECT_SETTINGS: dict[str, Any] = {
     'default_mode': MODE_MOVING,
     'labels': {},
+    'group_modes': {},
     'still_alerts': {},
 }
 
@@ -108,6 +111,7 @@ def normalize_object_settings(value: Any) -> dict[str, Any]:
         return {
             'default_mode': MODE_MOVING,
             'labels': {},
+            'group_modes': {},
             'still_alerts': {},
         }
     default_mode = normalize_mode(value.get('default_mode'), MODE_MOVING)
@@ -123,6 +127,17 @@ def normalize_object_settings(value: Any) -> dict[str, Any]:
             # it keeps the persisted shape minimal and "inherit" honest.
             if mode != default_mode:
                 labels[label] = mode
+    group_modes: dict[str, str] = {}
+    raw_group_modes = value.get('group_modes')
+    if isinstance(raw_group_modes, dict):
+        for raw_group, raw_mode in raw_group_modes.items():
+            group = canonical_label(raw_group)
+            if not group:
+                continue
+            mode = normalize_mode(raw_mode, default_mode)
+            # Same redundant-override convention as per-label modes above.
+            if mode != default_mode:
+                group_modes[group] = mode
     still_alerts: dict[str, int] = {}
     raw_still = value.get('still_alerts')
     if isinstance(raw_still, dict):
@@ -136,6 +151,7 @@ def normalize_object_settings(value: Any) -> dict[str, Any]:
     return {
         'default_mode': default_mode,
         'labels': labels,
+        'group_modes': group_modes,
         'still_alerts': still_alerts,
     }
 
@@ -170,17 +186,51 @@ def motion_mode_for_label(
 ) -> str:
     """Resolve the effective detection mode for one detection label.
 
-    A per-label override wins; otherwise the global ``default_mode`` applies;
-    anything unset resolves to ``moving`` (the default).
+    Precedence: an explicit per-label override wins; otherwise the most
+    specific covering object group's mode (see ``_group_mode_for_label``);
+    otherwise the global ``default_mode`` applies; anything unset resolves to
+    ``moving`` (the default).
     """
     resolved = settings if settings is not None else effective_object_settings()
     default_mode = normalize_mode(resolved.get('default_mode'), MODE_MOVING)
     labels = resolved.get('labels')
     if isinstance(labels, dict):
         canonical = canonical_label(label)
-        if canonical and canonical in labels:
-            return normalize_mode(labels[canonical], default_mode)
+        if canonical:
+            if canonical in labels:
+                return normalize_mode(labels[canonical], default_mode)
+            group_mode = _group_mode_for_label(canonical, resolved, default_mode)
+            if group_mode is not None:
+                return group_mode
     return default_mode
+
+
+def _group_mode_for_label(
+    label: str,
+    resolved: dict[str, Any],
+    default_mode: str,
+) -> str | None:
+    """Resolve a detection label's mode via the groups that contain it.
+
+    Returns ``None`` when no covering group has an explicit mode (the caller
+    falls back to the default). A label inside several groups with different
+    modes resolves to the most specific group (fewest members - the tightest
+    umbrella); ties break alphabetically so the result is deterministic.
+    """
+    group_modes = resolved.get('group_modes')
+    if not isinstance(group_modes, dict) or not group_modes:
+        return None
+    groups = cached_label_groups()
+    covering: list[tuple[int, str, str]] = []
+    for group, raw_mode in group_modes.items():
+        members = groups.get(group)
+        if members is None or label not in members:
+            continue
+        covering.append((len(members), group, raw_mode))
+    if not covering:
+        return None
+    covering.sort(key=lambda item: (item[0], item[1]))
+    return normalize_mode(covering[0][2], default_mode)
 
 
 def _normalize_threshold_map(value: Any) -> dict[str, int]:

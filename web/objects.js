@@ -17,6 +17,9 @@ const groupMembersInput = document.getElementById('groupMembersInput');
 const groupMembersDatalist = document.getElementById('groupMembersDatalist');
 const groupAddBtn = document.getElementById('groupAddBtn');
 const groupCancelBtn = document.getElementById('groupCancelBtn');
+const groupModesBody = document.getElementById('groupModesBody');
+const groupModesTableWrap = document.getElementById('groupModesTableWrap');
+const groupModesEmpty = document.getElementById('groupModesEmpty');
 
 const MODE_LABELS = {
   any: 'Moving & Still',
@@ -33,6 +36,7 @@ let availableLabels = [];
 let labels = {}; // label -> 'any' | 'moving' | 'still' (explicit overrides only)
 let stillAlerts = {}; // label -> minutes for the "still for N minutes" dwell alert
 let groups = {}; // group name -> [member labels]
+let groupModes = {}; // group name -> 'any' | 'moving' | 'still'
 let editingGroupName = null; // set while editing an existing group
 
 function markUnsaved() {
@@ -111,7 +115,14 @@ function render(settings) {
       if (Number.isFinite(parsed) && parsed > 0) stillAlerts[label] = parsed;
     }
   }
+  groupModes = {};
+  if (settings.group_modes && typeof settings.group_modes === 'object') {
+    for (const [group, mode] of Object.entries(settings.group_modes)) {
+      if (MODE_LABELS[mode]) groupModes[group] = mode;
+    }
+  }
   renderTable();
+  renderGroupModes();
 }
 
 // ─── Object Groups ────────────────────────────────────────────────────────
@@ -138,7 +149,7 @@ function renderGroups() {
     return `
       <div class="group-row" data-group-name="${escapeHtml(name)}">
         <div class="group-row-main">
-          <span class="group-name">${escapeHtml(name)}</span>
+          <span class="group-name">${escapeHtml(titleCase(name))}</span>
           <div class="group-members">${members || '<span class="muted">no members</span>'}</div>
         </div>
         <div class="group-row-actions">
@@ -155,6 +166,49 @@ function renderGroups() {
   });
 }
 
+function renderGroupModes() {
+  if (!groupModesBody) return;
+  const names = Object.keys(groups).sort();
+  if (!names.length) {
+    if (groupModesTableWrap) groupModesTableWrap.hidden = true;
+    if (groupModesEmpty) groupModesEmpty.hidden = false;
+    return;
+  }
+  if (groupModesTableWrap) groupModesTableWrap.hidden = false;
+  if (groupModesEmpty) groupModesEmpty.hidden = true;
+  const defaultMode = defaultSelect.value || 'moving';
+  groupModesBody.innerHTML = names.map((name) => {
+    const title = escapeHtml(titleCase(name));
+    const members = (groups[name] || []).map((member) => titleCase(member)).join(', ');
+    const override = groupModes[name];
+    const effective = override || defaultMode;
+    return `
+      <tr data-group-mode="${escapeHtml(name)}">
+        <td class="cell-label">${title}</td>
+        <td class="muted">${escapeHtml(members)}</td>
+        <td>
+          <select data-group-mode-select="${escapeHtml(name)}" aria-label="Detection mode for ${title}">
+            <option value="inherit" ${override ? '' : 'selected'}>Inherit (${escapeHtml(modeLabel(defaultMode))})</option>
+            <option value="any" ${override === 'any' ? 'selected' : ''}>Moving &amp; Still</option>
+            <option value="moving" ${override === 'moving' ? 'selected' : ''}>Moving Only</option>
+            <option value="still" ${override === 'still' ? 'selected' : ''}>Still Only</option>
+          </select>
+        </td>
+        <td><span class="model-status ${effective === 'any' ? 'model-status-installed' : 'model-status-active'}">${escapeHtml(modeLabel(effective))}</span></td>
+      </tr>`;
+  }).join('');
+  groupModesBody.querySelectorAll('select[data-group-mode-select]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const name = select.dataset.groupModeSelect;
+      const value = select.value;
+      if (value === 'inherit') delete groupModes[name];
+      else groupModes[name] = value;
+      renderGroupModes();
+      markUnsaved();
+    });
+  });
+}
+
 function resetGroupForm() {
   editingGroupName = null;
   groupNameInput.value = '';
@@ -165,7 +219,7 @@ function resetGroupForm() {
 
 function startEditGroup(name) {
   editingGroupName = name;
-  groupNameInput.value = name;
+  groupNameInput.value = titleCase(name);
   groupMembersInput.value = (groups[name] || []).join(', ');
   groupAddBtn.textContent = 'Save Group';
   groupCancelBtn.hidden = false;
@@ -180,6 +234,7 @@ async function persistGroups(next) {
     });
     groups = (result && result.groups) || {};
     renderGroups();
+    renderGroupModes();
     groupsMessage.textContent = 'Object groups saved.';
     window.showToast('Object groups saved.');
   } catch (error) {
@@ -209,7 +264,13 @@ async function saveGroup() {
     return;
   }
   const next = { ...groups };
-  if (editingGroupName && editingGroupName !== name) delete next[editingGroupName];
+  if (editingGroupName && editingGroupName !== name) {
+    delete next[editingGroupName];
+    if (Object.prototype.hasOwnProperty.call(groupModes, editingGroupName)) {
+      groupModes[name] = groupModes[editingGroupName];
+      delete groupModes[editingGroupName];
+    }
+  }
   next[name] = members;
   await persistGroups(next);
   resetGroupForm();
@@ -218,6 +279,7 @@ async function saveGroup() {
 async function removeGroup(name) {
   const next = { ...groups };
   delete next[name];
+  delete groupModes[name];
   if (editingGroupName === name) resetGroupForm();
   await persistGroups(next);
 }
@@ -257,9 +319,14 @@ async function saveObjects() {
       const minutes = Number.parseInt(input.value, 10) || 0;
       if (minutes > 0) stillAlertsPayload[label] = minutes;
     });
+    const groupModesPayload = {};
+    for (const [group, mode] of Object.entries(groupModes)) {
+      if (Object.prototype.hasOwnProperty.call(groups, group)) groupModesPayload[group] = mode;
+    }
     const payload = {
       default_mode: defaultSelect.value || 'moving',
       labels,
+      group_modes: groupModesPayload,
       still_alerts: stillAlertsPayload,
     };
     const result = await api('/api/settings/objects', { method: 'PUT', body: JSON.stringify(payload) });

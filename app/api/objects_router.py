@@ -1,8 +1,9 @@
 """Settings / Objects APIRouter.
 
 Per-label still/moving object-detection behavior (the Objects page). Stores a
-small ``{default_mode, labels}`` dict in the ``objects`` database setting and
-exposes the available model labels so the page can render one row per class.
+small ``{default_mode, labels, group_modes, still_alerts}`` dict in the
+``objects`` database setting and exposes the available model labels so the
+page can render one row per class.
 """
 
 from __future__ import annotations
@@ -67,6 +68,19 @@ async def update_object_settings(request: Request, db=Depends(get_database)):
                 detail=f"labels['{label}'] must be 'any', 'moving', or 'still'.",
             )
 
+    raw_group_modes = payload.get('group_modes', {})
+    if raw_group_modes is None:
+        raw_group_modes = {}
+    if not isinstance(raw_group_modes, dict):
+        raise HTTPException(status_code=400, detail='group_modes must be an object mapping a group name to a mode.')
+    for group, raw_mode in raw_group_modes.items():
+        mode = str(raw_mode or '').strip().lower()
+        if mode not in VALID_MODES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"group_modes['{group}'] must be 'any', 'moving', or 'still'.",
+            )
+
     raw_still = payload.get('still_alerts', {})
     if raw_still is None:
         raw_still = {}
@@ -89,12 +103,14 @@ async def update_object_settings(request: Request, db=Depends(get_database)):
     normalized = normalize_object_settings({
         'default_mode': default_mode,
         'labels': raw_labels,
+        'group_modes': raw_group_modes,
         'still_alerts': raw_still,
     })
     db.set_setting('objects', normalized, utc_now())
     write_audit_log(request, db, 'update', 'settings.objects', details={
         'default_mode': normalized['default_mode'],
         'labels': sorted(normalized['labels']),
+        'group_modes': normalized['group_modes'],
         'still_alerts': normalized['still_alerts'],
     })
     return {
