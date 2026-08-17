@@ -990,8 +990,11 @@ function applyDaygleTheme(themePref) {
 
   document.documentElement.classList.toggle('light', isLight);
 
-  // Cache the resolved class name for the inline flash-prevention script.
-  const cache = isLight ? 'light' : '';
+  // Cache the resolved theme for the inline flash-prevention script. We store
+  // 'dark' explicitly (rather than an empty string) so the pre-paint script can
+  // distinguish "user chose dark" from "no choice yet" — the latter now
+  // defaults to light.
+  const cache = isLight ? 'light' : 'dark';
   try { localStorage.setItem('daygle.theme', cache); } catch (_err) { /* ignore */ }
 }
 
@@ -1007,7 +1010,7 @@ function watchDaygleSystemTheme() {
     const pref = window.daygleThemePref || 'system';
     if (pref === 'system') {
       document.documentElement.classList.toggle('light', mq.matches);
-      const cache = mq.matches ? 'light' : '';
+      const cache = mq.matches ? 'light' : 'dark';
       try { localStorage.setItem('daygle.theme', cache); } catch (_err) { /* ignore */ }
     }
   };
@@ -1025,10 +1028,10 @@ function unwatchDaygleSystemTheme() {
 
 // Apply the user's saved theme preference. Called on page load after auth
 // resolves, and on profile save when the preference changes.
-window.daygleThemePref = 'system'; // default until auth resolves
+window.daygleThemePref = 'light'; // default until auth resolves
 
 function setDaygleThemePref(theme) {
-  window.daygleThemePref = theme || 'system';
+  window.daygleThemePref = theme || 'light';
   applyDaygleTheme(window.daygleThemePref);
   if (window.daygleThemePref === 'system') {
     watchDaygleSystemTheme();
@@ -1051,7 +1054,7 @@ const DAYGLE_THEME_MESSAGE_TYPE = 'daygle-theme-prefs';
 function broadcastDaygleThemePref(theme) {
   const payload = JSON.stringify({
     type: DAYGLE_THEME_MESSAGE_TYPE,
-    theme: theme || 'system',
+    theme: theme || 'light',
   });
   if (typeof BroadcastChannel === 'function') {
     try {

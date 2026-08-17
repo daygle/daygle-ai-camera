@@ -45,14 +45,12 @@ def _get_cookie_domain(config: dict | None = None) -> str | None:
 def auth_page(title: str, body: str) -> HTMLResponse:
     """Build an HTMLResponse for a standalone auth page (login / setup)."""
     # Detect theme: honour an explicit localStorage choice first, then fall
-    # back to the browser/OS prefers-color-scheme so the login page matches
-    # the user's system theme on first visit.
+    # back to the light theme (the site default) so the login page shows light
+    # on first visit unless the user has explicitly chosen dark.
     theme_script = (
         '<script>(function(){'
         'var t=localStorage.getItem("daygle.theme");'
-        'if(t)document.documentElement.classList.add(t);'
-        'else if(window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches)'
-        'document.documentElement.classList.add("light");'
+        'if(t!=="dark")document.documentElement.classList.add("light");'
         '})()</script>'
     )
     # ``body`` is assembled from fixed templates; callers escape any user
