@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
 from typing import Any
 
 from app.utils import _normalize_iso_to_utc
@@ -69,9 +68,13 @@ class CameraDiagnosticsMixin:
         camera_id: str | None,
         event_type: str | None,
         severity: str | None,
-        date_from: str | None = None,
-        date_to: str | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
     ) -> tuple[str, list[Any]]:
+        # ``created_after`` / ``created_before`` are half-open [after, before)
+        # UTC ISO bounds. The router derives them from the requested calendar
+        # days in the *viewer's* timezone (see local_day_bounds_to_utc), so the
+        # day window matches what the user selected rather than the UTC day.
         conditions: list[str] = []
         params: list[Any] = []
         if camera_id:
@@ -83,13 +86,12 @@ class CameraDiagnosticsMixin:
         if severity:
             conditions.append("severity = ?")
             params.append(severity)
-        if date_from:
+        if created_after:
             conditions.append("created_at >= ?")
-            params.append(f'{date_from}T00:00:00+00:00')
-        if date_to:
+            params.append(_normalize_iso_to_utc(created_after) or created_after)
+        if created_before:
             conditions.append("created_at < ?")
-            next_day = date.fromisoformat(date_to) + timedelta(days=1)
-            params.append(f'{next_day.isoformat()}T00:00:00+00:00')
+            params.append(_normalize_iso_to_utc(created_before) or created_before)
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         return where, params
 
@@ -101,11 +103,11 @@ class CameraDiagnosticsMixin:
         camera_id: str | None = None,
         event_type: str | None = None,
         severity: str | None = None,
-        date_from: str | None = None,
-        date_to: str | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
     ) -> list[dict[str, Any]]:
         where, params = self._camera_diagnostics_filter(
-            camera_id, event_type, severity, date_from, date_to,
+            camera_id, event_type, severity, created_after, created_before,
         )
         with self.connect() as db:
             rows = db.execute(
@@ -125,11 +127,11 @@ class CameraDiagnosticsMixin:
         camera_id: str | None = None,
         event_type: str | None = None,
         severity: str | None = None,
-        date_from: str | None = None,
-        date_to: str | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
     ) -> int:
         where, params = self._camera_diagnostics_filter(
-            camera_id, event_type, severity, date_from, date_to,
+            camera_id, event_type, severity, created_after, created_before,
         )
         with self.connect() as db:
             row = db.execute(f"SELECT COUNT(*) AS count FROM camera_diagnostics {where}", params).fetchone()

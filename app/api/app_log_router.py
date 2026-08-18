@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from app.auth_gates import require_admin
+from app.utils import local_day_bounds_to_utc
 
 router = APIRouter()
 
@@ -116,9 +117,21 @@ def get_app_log(
     level: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    tz_offset_minutes: int | None = Query(
+        None, ge=-840, le=840,
+        description="Browser Date.getTimezoneOffset(); resolves date_from/date_to in the viewer's local day. Omit for UTC days.",
+    ),
 ):
     require_admin(request)
     parsed_from, parsed_to = _log_date_range(date_from, date_to)
+    # Resolve the requested calendar days in the viewer's timezone, then hand
+    # journalctl absolute ``@<epoch>`` bounds so the window is unambiguous
+    # regardless of the server's own timezone (mirrors /api/recordings/timeline).
+    start, end = local_day_bounds_to_utc(
+        parsed_from.isoformat() if parsed_from else None,
+        parsed_to.isoformat() if parsed_to else None,
+        tz_offset_minutes,
+    )
     # Keep user-controlled pagination out of the subprocess argument list.
     # The query parameter is applied to the parsed entries below instead.
     cmd = ['journalctl', '-u', _SERVICE, '-n', '1000', '-o', 'json', '--no-pager']
@@ -134,10 +147,12 @@ def get_app_log(
         cmd += ['-p', '6']
     elif level == 'debug':
         cmd += ['-p', '7']
-    if parsed_from:
-        cmd += ['--since', f'{parsed_from.isoformat()} 00:00:00']
-    if parsed_to:
-        cmd += ['--until', f'{parsed_to.isoformat()} 23:59:59']
+    if start:
+        cmd += ['--since', f'@{int(start.timestamp())}']
+    if end:
+        # ``end`` is the exclusive next-day boundary; journalctl ``--until`` is
+        # inclusive, so step back one second to keep the window half-open.
+        cmd += ['--until', f'@{int(end.timestamp()) - 1}']
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         entries: list[dict] = []

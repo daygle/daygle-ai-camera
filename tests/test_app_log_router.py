@@ -8,10 +8,18 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.app_log_router import get_app_log
+from app.utils import local_day_bounds_to_utc
 
 
 def _request() -> SimpleNamespace:
     return SimpleNamespace(state=SimpleNamespace(user={'role': 'admin'}))
+
+
+def _expected_since_until(date_from, date_to, tz_offset_minutes):
+    start, end = local_day_bounds_to_utc(date_from, date_to, tz_offset_minutes)
+    # journalctl gets absolute ``@<epoch>`` bounds; ``--until`` steps back one
+    # second to stay half-open against the exclusive next-day boundary.
+    return ['--since', f'@{int(start.timestamp())}', '--until', f'@{int(end.timestamp()) - 1}']
 
 
 def test_application_log_passes_date_range_to_journalctl() -> None:
@@ -36,15 +44,31 @@ def test_application_log_passes_date_range_to_journalctl() -> None:
             lines=200,
             date_from='2026-01-10',
             date_to='2026-01-12',
+            tz_offset_minutes=None,
         )
 
     assert require_admin.call_count == 1
     command = run.call_args.args[0]
-    assert command[-4:] == [
-        '--since', '2026-01-10 00:00:00',
-        '--until', '2026-01-12 23:59:59',
-    ]
+    # No tz offset -> UTC days, handed to journalctl as absolute @epoch bounds.
+    assert command[-4:] == _expected_since_until('2026-01-10', '2026-01-12', None)
     assert len(payload['entries']) == 1
+
+
+def test_application_log_resolves_dates_in_viewer_timezone() -> None:
+    completed = SimpleNamespace(stdout='')
+    with patch.dict(get_app_log.__globals__, {'require_admin': MagicMock()}), \
+         patch('app.api.app_log_router.subprocess.run', return_value=completed) as run:
+        get_app_log(
+            _request(),
+            lines=200,
+            date_from='2026-01-10',
+            date_to='2026-01-12',
+            tz_offset_minutes=-600,  # UTC+10
+        )
+    command = run.call_args.args[0]
+    # The viewer's local days map to earlier UTC instants than the UTC-day case.
+    assert command[-4:] == _expected_since_until('2026-01-10', '2026-01-12', -600)
+    assert command[-4:] != _expected_since_until('2026-01-10', '2026-01-12', None)
 
 
 @pytest.mark.parametrize('field, value', [
