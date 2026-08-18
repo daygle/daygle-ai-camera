@@ -21,7 +21,7 @@ import pytest
 
 from tests.support import *  # noqa: F401,F403 - shared harness + stdlib re-exports
 
-from app.recording_extension import _make_continuous_chunk_callback, _parse_chunk_start_time
+from app.recording_extension import _parse_chunk_start_time
 
 
 def test_parse_chunk_start_time_interprets_filename_as_local_tz():
@@ -51,18 +51,6 @@ def test_parse_chunk_start_time_rejects_unparseable_names():
     assert _parse_chunk_start_time(Path('continuous_camera-2_notatimestamp.mp4')) is None
 
 
-def _stub_chunk_callback_deps(monkeypatch, *, probed):
-    """Neutralise the callback's side effects so the test isolates the
-    duration/timestamp math, and force ffprobe to return ``probed``."""
-    import app.recording_extension as rext
-    import app.detection_state as ds
-    import app.backup as backup
-    monkeypatch.setattr(rext, 'probe_video_duration', lambda _p: probed)
-    monkeypatch.setattr(rext, 'write_live_history_detection_track', lambda *a, **k: True)
-    monkeypatch.setattr(ds, 'build_track_from_live_history', lambda *a, **k: [])
-    monkeypatch.setattr(backup, 'purge_recordings_by_policy', lambda *a, **k: None)
-
-
 def _write_segment(tmp_path, name='continuous_camera-2_20260818T174900.mp4'):
     chunks_dir = tmp_path / 'recordings' / 'continuous-camera-2'
     chunks_dir.mkdir(parents=True, exist_ok=True)
@@ -71,38 +59,61 @@ def _write_segment(tmp_path, name='continuous_camera-2_20260818T174900.mp4'):
     return seg
 
 
-def test_continuous_chunk_records_true_media_duration(tmp_path, monkeypatch):
+class _CapturingDatabase:
+    """Stands in for ``_state.database`` so the test asserts exactly what the
+    callback computed (duration / start / end) without depending on the real
+    DB wiring or on ``add_recording``'s persistence path."""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def add_recording(self, **kwargs):
+        self.calls.append(kwargs)
+        return len(self.calls)
+
+
+def _run_chunk_callback(monkeypatch, *, probed, tmp_path):
+    # _load_app() pops and re-imports the entire ``app.*`` tree, so the module
+    # objects (and their ``import app.state as _state`` singletons) must be
+    # fetched AFTER it - the top-level imports point at the pre-reload tree the
+    # freshly-built callback no longer uses.
     _load_app(tmp_path, monkeypatch)
-    import app.main as main
+    import app.recording_extension as rext
+    import app.state as state
+    import app.detection_state as ds
+    import app.backup as backup
 
-    _stub_chunk_callback_deps(monkeypatch, probed=3600.0)
+    # Force ffprobe to a known value and neutralise the callback's side effects
+    # so the test isolates the duration / start / end math.
+    monkeypatch.setattr(rext, 'probe_video_duration', lambda _p: probed)
+    monkeypatch.setattr(rext, 'write_live_history_detection_track', lambda *a, **k: True)
+    monkeypatch.setattr(ds, 'build_track_from_live_history', lambda *a, **k: [])
+    monkeypatch.setattr(backup, 'purge_recordings_by_policy', lambda *a, **k: None)
+    fake_db = _CapturingDatabase()
+    # The callback reads ``_state.database`` (``_state`` is this same ``app.state``
+    # module object), so patching it here is exactly what the callback sees.
+    monkeypatch.setattr(state, 'database', fake_db)
+
     seg = _write_segment(tmp_path)
+    rext._make_continuous_chunk_callback('camera-2')('camera-2', seg)
+    assert len(fake_db.calls) == 1, 'callback should register exactly one recording'
+    return fake_db.calls[0]
 
-    _make_continuous_chunk_callback('camera-2')('camera-2', seg)
 
-    recs = main.database.list_recordings(camera_id='camera-2')
-    assert len(recs) == 1
-    rec = recs[0]
+def test_continuous_chunk_records_true_media_duration(tmp_path, monkeypatch):
+    kw = _run_chunk_callback(monkeypatch, probed=3600.0, tmp_path=tmp_path)
     # The whole point: an hour-long chunk stores ~3600s, never the 1.0s floor.
-    assert rec['duration_seconds'] == pytest.approx(3600.0)
-    assert rec['trigger_type'] == 'continuous'
+    assert kw['duration_seconds'] == pytest.approx(3600.0)
+    assert kw['trigger_type'] == 'continuous'
     # ended_at is anchored to started_at + duration so the two never disagree.
-    started = datetime.fromisoformat(rec['started_at'])
-    ended = datetime.fromisoformat(rec['ended_at'])
+    started = datetime.fromisoformat(kw['started_at'])
+    ended = datetime.fromisoformat(kw['ended_at'])
     assert (ended - started).total_seconds() == pytest.approx(3600.0)
 
 
 def test_continuous_chunk_falls_back_to_wallclock_when_probe_fails(tmp_path, monkeypatch):
-    _load_app(tmp_path, monkeypatch)
-    import app.main as main
-
     # ffprobe unavailable / failed -> None; the callback falls back to the
     # start-filename vs mtime gap (floored at 1.0s), still a positive duration.
-    _stub_chunk_callback_deps(monkeypatch, probed=None)
-    seg = _write_segment(tmp_path)
-
-    _make_continuous_chunk_callback('camera-2')('camera-2', seg)
-
-    recs = main.database.list_recordings(camera_id='camera-2')
-    assert len(recs) == 1
-    assert recs[0]['duration_seconds'] >= 1.0
+    kw = _run_chunk_callback(monkeypatch, probed=None, tmp_path=tmp_path)
+    assert kw['duration_seconds'] >= 1.0
+    assert kw['trigger_type'] == 'continuous'
