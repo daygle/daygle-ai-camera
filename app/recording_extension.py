@@ -119,7 +119,7 @@ from app.detection_status import (
     detection_label_confidences,
     detection_label_strings,
 )
-from app.media_utils import safe_storage_path
+from app.media_utils import probe_video_duration, safe_storage_path
 
 logger = logging.getLogger('daygle.ai')
 
@@ -445,9 +445,18 @@ def _parse_chunk_start_time(file_path: Path) -> datetime | None:
     if len(parts) != 2:
         return None
     try:
-        return datetime.strptime(parts[1], '%Y%m%dT%H%M%S').replace(tzinfo=timezone.utc)
+        naive = datetime.strptime(parts[1], '%Y%m%dT%H%M%S')
     except ValueError:
         return None
+    # ffmpeg's ``-strftime 1`` names each segment using the host's LOCAL wall
+    # clock, so the parsed timestamp is a local time - interpret it as such and
+    # convert to UTC. Stamping it as UTC (the previous behaviour) mis-placed the
+    # clip on the timeline on any non-UTC host and, because the chunk duration
+    # was derived as ``file_mtime_utc - this_value``, cancelled the real chunk
+    # length by the tz offset (e.g. a 1-hour chunk on a UTC+1 host collapsed to
+    # ~0s, flooring to the 1.0s minimum). ``astimezone`` on a naive datetime
+    # treats it as system-local; UTC hosts are unaffected (local == UTC).
+    return naive.astimezone(timezone.utc)
 
 
 def _make_continuous_chunk_callback(camera_id: str) -> Any:
@@ -456,12 +465,25 @@ def _make_continuous_chunk_callback(camera_id: str) -> Any:
         try:
             started_at_dt = _parse_chunk_start_time(file_path)
             stat = file_path.stat()
-            ended_at_dt = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+            mtime_dt = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
             if started_at_dt is None:
-                started_at_dt = ended_at_dt - timedelta(
+                started_at_dt = mtime_dt - timedelta(
                     seconds=effective_recording_config().get('chunk_duration_seconds', 3600)
                 )
-            duration_seconds = max(1.0, (ended_at_dt - started_at_dt).total_seconds())
+            # Prefer the container's real duration: it's the ground truth for how
+            # much footage the segment holds, robust to the host timezone and to
+            # a partial final segment written on stop/restart. Fall back to the
+            # wall-clock gap between the segment's start-of-chunk filename time
+            # and its mtime only when ffprobe is unavailable or the probe fails.
+            probed_duration = probe_video_duration(file_path)
+            if probed_duration is not None and probed_duration > 0:
+                duration_seconds = probed_duration
+            else:
+                duration_seconds = max(1.0, (mtime_dt - started_at_dt).total_seconds())
+            # Anchor the end to start + true duration so ended_at and
+            # duration_seconds never disagree (mtime can drift past the media's
+            # real end when the file is touched after its last frame is written).
+            ended_at_dt = started_at_dt + timedelta(seconds=duration_seconds)
             from app.detection_state import build_track_from_live_history
             chunk_track = build_track_from_live_history(
                 camera_id, started_at_dt.timestamp(), ended_at_dt.timestamp(),
