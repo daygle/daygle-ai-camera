@@ -49,5 +49,18 @@ def test_timeline_has_a_separate_motion_only_card_and_partition():
 
 def test_timeline_object_card_excludes_motion_only_clips():
     source = read_web("timeline.js")
-    assert "const objectRecordings = recordings.filter((r) => !isSoundRecording(r) && !isMotionOnlyRecording(r));" in source
-    assert "if (normalized === '__object__') return !isSoundRecording(recording) && !isMotionOnlyRecording(recording);" in source
+    # The Objects bucket excludes sound, motion-only AND continuous-only clips so
+    # each kind renders on its own dedicated card without being duplicated.
+    assert "const objectRecordings = recordings.filter((r) => !isSoundRecording(r) && !isMotionOnlyRecording(r) && !isContinuousOnlyRecording(r));" in source
+    assert "if (normalized === '__object__') return !isSoundRecording(recording) && !isMotionOnlyRecording(recording) && !isContinuousOnlyRecording(recording);" in source
+
+
+def test_timeline_has_a_separate_continuous_card_and_partition():
+    html = read_web("timeline.html")
+    source = read_web("timeline.js")
+    assert 'data-timeline-card="continuous"' in html
+    assert "{ kind: 'continuous'" in source
+    assert "const continuousRecordings = recordings.filter((r) => isContinuousOnlyRecording(r));" in source
+    assert "card.kind === 'continuous' ? continuousRecordings" in source
+    assert "add(continuousChips, '__continuous__'" in source
+    assert "card.kind === 'continuous' ? continuousChips" in source
