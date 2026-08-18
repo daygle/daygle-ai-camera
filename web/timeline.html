@@ -141,7 +141,7 @@
           <div class="settings-section-icon" aria-hidden="true">👁</div>
           <div>
             <h2>Objects</h2>
-            <p class="settings-section-subtitle">Recognised objects across the day. Motion-only clips have their own track below.</p>
+            <p class="settings-section-subtitle">Recognised objects across the day. Motion-only and continuous clips have their own tracks below.</p>
           </div>
           <div class="button-row timeline-card-status">
             <span class="chip chip-dim" data-timeline-card-status-chip>Idle</span>
@@ -193,6 +193,28 @@
         </div>
         <p class="muted timeline-status-text" data-timeline-card-status aria-live="polite">Loading timeline…</p>
         <div class="timeline-legend timeline-card-key" data-timeline-card-key aria-label="Sounds colour key"></div>
+        <div class="timeline-scroll">
+          <div class="timeline-hours" data-timeline-card-hours></div>
+          <div class="timeline-track">
+            <div class="timeline-grid" data-timeline-card-grid aria-hidden="true"></div>
+            <div class="timeline-rows" data-timeline-card-rows></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="card timeline-card" data-timeline-card="continuous" role="group" aria-label="Continuous recordings timeline">
+        <div class="settings-section-header">
+          <div class="settings-section-icon" aria-hidden="true">🔁</div>
+          <div>
+            <h2>Continuous</h2>
+            <p class="settings-section-subtitle">Always-on capture segments across the day. Click a coloured segment to open that clip.</p>
+          </div>
+          <div class="button-row timeline-card-status">
+            <span class="chip chip-dim" data-timeline-card-status-chip>Idle</span>
+          </div>
+        </div>
+        <p class="muted timeline-status-text" data-timeline-card-status aria-live="polite">Loading timeline…</p>
+        <div class="timeline-legend timeline-card-key" data-timeline-card-key aria-label="Continuous colour key"></div>
         <div class="timeline-scroll">
           <div class="timeline-hours" data-timeline-card-hours></div>
           <div class="timeline-track">

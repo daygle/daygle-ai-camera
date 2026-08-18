@@ -5,8 +5,8 @@ const els = {
   toTime: null,   // populated by renderTimelineTimeSelects() below
   filterSelect: document.getElementById('timelineFilterSelect'),
   timelineLoadBtn: document.getElementById('timelineLoadBtn'),
-  // The timeline visualisation now renders into three parallel cards
-  // (Objects + Motion + Sounds). Their per-card DOM refs live on TIMELINE_CARDS
+  // The timeline visualisation now renders into four parallel cards
+  // (Objects + Motion + Sounds + Continuous). Their per-card DOM refs live on TIMELINE_CARDS
   // (populated by initTimelineCards() further down) so a single render
   // call can fan out to both tracks without scattering element IDs
   // through this map. Segment clicks also stream through document-level
@@ -80,6 +80,7 @@ const TIMELINE_CARDS = [
   { kind: 'object', root: null, hours: null, grid: null, rows: null, status: null, statusChip: null, key: null },
   { kind: 'motion', root: null, hours: null, grid: null, rows: null, status: null, statusChip: null, key: null },
   { kind: 'sound',  root: null, hours: null, grid: null, rows: null, status: null, statusChip: null, key: null },
+  { kind: 'continuous', root: null, hours: null, grid: null, rows: null, status: null, statusChip: null, key: null },
 ];
 
 function initTimelineCards() {
@@ -549,6 +550,10 @@ function recordingColorKey(recording) {
   // motion chip in the per-card key instantly matches every motion
   // segment on the track.
   if (isMotionOnlyRecording(recording)) return '__motion__';
+  // Always-on capture segments keep a reserved slate accent (matching the
+  // Recordings list "Continuous" chip) so every continuous segment + its
+  // per-card key chip share one fixed hue instead of hashing per label.
+  if (isContinuousOnlyRecording(recording)) return '__continuous__';
   // Object clips and sound-class carrying object recordings (e.g. an
   // object source whose primary label is a sound class like Dog Bark)
   // both return the lowercased label verbatim so colorForKey routes them
@@ -598,6 +603,7 @@ function recordingFilterTokens(recording) {
 function filterDisplayLabel(value) {
   if (value === '__sound__') return 'Sound';
   if (value === '__object__') return 'Object';
+  if (value === '__continuous__') return 'Continuous';
   return titleCase(value || '');
 }
 
@@ -605,7 +611,8 @@ function matchesRecordingFilter(recording, filterValue) {
   const normalized = String(filterValue || '').trim().toLowerCase();
   if (!normalized) return true;
   if (normalized === '__sound__') return isSoundRecording(recording);
-  if (normalized === '__object__') return !isSoundRecording(recording) && !isMotionOnlyRecording(recording);
+  if (normalized === '__continuous__') return isContinuousOnlyRecording(recording);
+  if (normalized === '__object__') return !isSoundRecording(recording) && !isMotionOnlyRecording(recording) && !isContinuousOnlyRecording(recording);
   if (normalized === 'motion') {
     // Tightened to motion-only recordings now that motion is a real
     // category on its own. The previous "trigger type != placeholder"
@@ -627,6 +634,7 @@ function cameraLabel(recording) {
 function colorForKey(key) {
   if (key === '__sound__') return '#a855f7';
   if (key === '__motion__') return '#2dd4bf';
+  if (key === '__continuous__') return '#94a3b8';
   const normalized = String(key || 'motion').trim().toLowerCase() || 'motion';
   let hash = 0;
   for (let index = 0; index < normalized.length; index += 1) {
@@ -663,7 +671,7 @@ function colorForSoundLabel(label) {
 // both surfaces.
 function colorForRecording(recording) {
   const colorKey = recordingColorKey(recording);
-  if (colorKey === '__motion__' || colorKey === '__sound__') {
+  if (colorKey === '__motion__' || colorKey === '__sound__' || colorKey === '__continuous__') {
     return colorForKey(colorKey);
   }
   if (isSoundRecording(recording) || isSoundLabel(colorKey)) {
@@ -717,12 +725,17 @@ function populateFilterOptions(recordings) {
 
   const soundCount = recordings.filter(isSoundRecording).length;
   const motionCount = recordings.filter((recording) => !isSoundRecording(recording) && isMotionOnlyRecording(recording)).length;
-  const objectCount = recordings.length - soundCount - motionCount;
+  const continuousCount = recordings.filter((recording) => isContinuousOnlyRecording(recording)).length;
+  const objectCount = recordings.length - soundCount - motionCount - continuousCount;
   const options = [{ value: '', label: `All recordings${recordings.length ? ` (${recordings.length})` : ''}` }];
   if (soundCount > 0) options.push({ value: '__sound__', label: `Sound (${soundCount})` });
   if (motionCount > 0) options.push({ value: 'motion', label: `Motion (${motionCount})` });
   if (objectCount > 0) options.push({ value: '__object__', label: `Object (${objectCount})` });
-  const seen = new Set(['', '__sound__', '__object__', 'motion']);
+  if (continuousCount > 0) options.push({ value: '__continuous__', label: `Continuous (${continuousCount})` });
+  // '__continuous__' and its plain 'continuous' type token are both pre-seeded
+  // so the loop below doesn't add a duplicate "Continuous" option (mirrors how
+  // 'motion' is suppressed in favour of the reserved Motion option above).
+  const seen = new Set(['', '__sound__', '__object__', 'motion', '__continuous__', 'continuous']);
   const addOption = (value) => {
     const normalized = String(value || '').trim().toLowerCase();
     if (!normalized || seen.has(normalized)) return;
@@ -777,6 +790,9 @@ function renderSummary(payload, totalRecordingCount) {
       soundTriggers.add(label);
     } else if (isMotionOnlyRecording(recording)) {
       motionTriggers.add(label);
+    } else if (isContinuousOnlyRecording(recording)) {
+      // Always-on capture has no trigger - it must not inflate the Objects
+      // tally in the Triggers stat (it has its own card, not a trigger type).
     } else {
       objectTriggers.add(label);
     }
@@ -860,6 +876,7 @@ function partitionRecordingsForKeys(recordings) {
   const objectChips = [];
   const motionChips = [];
   const soundChips = [];
+  const continuousChips = [];
   const seen = new Set();
   const add = (group, dedupKey, chip) => {
     if (seen.has(dedupKey)) return;
@@ -869,6 +886,14 @@ function partitionRecordingsForKeys(recordings) {
   recordings.forEach((recording) => {
     if (isMotionOnlyRecording(recording)) {
       add(motionChips, '__motion__', { label: 'Motion', color: colorForKey('__motion__'), icon: DETECTION_MOTION_ICON });
+      return;
+    }
+    // Always-on capture segments carry no concrete label - a single neutral
+    // "Continuous" chip stands in for the whole track (partner of the Motion
+    // chip above), so they don't leak into the object key as a "Continuous"
+    // object chip.
+    if (isContinuousOnlyRecording(recording)) {
+      add(continuousChips, '__continuous__', { label: 'Continuous', color: colorForKey('__continuous__'), icon: DETECTION_CONTINUOUS_ICON });
       return;
     }
     const isSound = isSoundRecording(recording);
@@ -903,7 +928,7 @@ function partitionRecordingsForKeys(recordings) {
       }
     });
   });
-  return { objectChips, motionChips, soundChips };
+  return { objectChips, motionChips, soundChips, continuousChips };
 }
 
 function buildTimelineLayout(recordings, preEventSeconds = 0) {
@@ -937,8 +962,11 @@ function renderCardKey(card, cardRecordings) {
   // persists across renders, so this function must flip it on every
   // pass (not just the first) to keep a populated card unhidden after a
   // brief filter-driven empty state.
-  const { objectChips, motionChips, soundChips } = partitionRecordingsForKeys(cardRecordings);
-  const chips = card.kind === 'motion' ? motionChips : card.kind === 'object' ? objectChips : soundChips;
+  const { objectChips, motionChips, soundChips, continuousChips } = partitionRecordingsForKeys(cardRecordings);
+  const chips = card.kind === 'motion' ? motionChips
+    : card.kind === 'object' ? objectChips
+    : card.kind === 'continuous' ? continuousChips
+    : soundChips;
   if (!chips.length) {
     // Empty in-card key: clear chips AND mark the landmark aria-hidden so
     // screen readers don't announce "Objects colour key" on a filter that
@@ -1005,7 +1033,10 @@ function renderTimelineForCard(card, viewPayload, cardRecordings, totalRecording
   `).join('');
   card.rows.style.height = `${Math.max(46, rowCount * TIMELINE_ROW_HEIGHT)}px`;
 
-  const kindWord = card.kind === 'sound' ? 'sound' : card.kind === 'motion' ? 'motion-only' : 'object';
+  const kindWord = card.kind === 'sound' ? 'sound'
+    : card.kind === 'motion' ? 'motion-only'
+    : card.kind === 'continuous' ? 'continuous'
+    : 'object';
   const cameraName = viewPayload.camera?.name || viewPayload.camera?.id || 'this camera';
   const formattedDay = formatUserDate(viewPayload.day);
 
@@ -1019,7 +1050,10 @@ function renderTimelineForCard(card, viewPayload, cardRecordings, totalRecording
     // Different chip labels per kind ("No object matches" / "No sound
     // matches") so users glancing at the chip row can tell which card
     // ran out without reading the row text below it.
-    const reasonPrefix = kindWord === 'sound' ? 'sound' : kindWord === 'motion-only' ? 'motion' : 'object';
+    const reasonPrefix = kindWord === 'sound' ? 'sound'
+      : kindWord === 'motion-only' ? 'motion'
+      : kindWord === 'continuous' ? 'continuous'
+      : 'object';
     if (reason === 'no-data') {
       return {
         chipKind: 'empty',
@@ -1115,6 +1149,12 @@ function renderRecordingDetails(recording) {
   if (isMotionOnly) {
     detectionLabel = 'Motion';
     detectionBadges = motionPill(motionConfidenceFor(recording));
+  } else if (!isSound && isContinuousOnlyRecording(recording)) {
+    detectionLabel = 'Recording';
+    const motionBadge = recordingHasMotion(recording)
+      ? motionPill(motionConfidenceFor(recording))
+      : '';
+    detectionBadges = `${continuousPill()}${motionBadge}`;
   } else if (isSound) {
     detectionLabel = 'Sound';
     detectionBadges = detections.length
@@ -1242,14 +1282,20 @@ async function renderFilteredTimeline({ preserveSelection = true } = {}) {
   // standalone eyebrow row above them would be redundant. The function
   // stays defined so tests/test_timeline_legend_js.test.js keeps
   // passing unchanged.
+  // Always-on capture segments get their own Continuous track so they don't
+  // pad out the Objects card (they carry no detection). isContinuousOnlyRecording
+  // already excludes sounds, and motion-only excludes the continuous trigger
+  // types, so the four buckets stay mutually exclusive - no clip is duplicated.
+  const continuousRecordings = recordings.filter((r) => isContinuousOnlyRecording(r));
   const motionRecordings = recordings.filter((r) => !isSoundRecording(r) && isMotionOnlyRecording(r));
-  const objectRecordings = recordings.filter((r) => !isSoundRecording(r) && !isMotionOnlyRecording(r));
+  const objectRecordings = recordings.filter((r) => !isSoundRecording(r) && !isMotionOnlyRecording(r) && !isContinuousOnlyRecording(r));
   const soundRecordings = recordings.filter((r) => isSoundRecording(r));
 
   TIMELINE_CARDS.forEach((card) => {
-    const cardRecordings = card.kind === 'motion'
-      ? motionRecordings
-      : card.kind === 'object' ? objectRecordings : soundRecordings;
+    const cardRecordings = card.kind === 'motion' ? motionRecordings
+      : card.kind === 'object' ? objectRecordings
+      : card.kind === 'continuous' ? continuousRecordings
+      : soundRecordings;
     renderTimelineForCard(card, viewPayload, cardRecordings, allRecordings.length);
   });
 

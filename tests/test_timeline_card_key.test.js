@@ -1,6 +1,6 @@
 // Regression test for the timeline per-card colour key.
 //
-// /timeline renders three parallel cards (Objects + Motion + Sounds). Each card
+// /timeline renders four parallel cards (Objects + Motion + Sounds + Continuous). Each card
 // shows its own colour-key strip via renderCardKey(), which consumes
 // partitionRecordingsForKeys() - the single source of truth for the
 // per-kind chip partition. The interesting regression guard is the
@@ -166,6 +166,31 @@ test('card key: motion-only recordings route exclusively to the Motion card', ()
   assert.equal(soundCard.html, '', 'Sounds card must not contain motion-only clips');
   assert.equal(motionCard.html.split('Motion').length - 1, 1, 'Motion card shows one Motion chip');
   assert.ok(motionCard.html.includes(MOTION_CHIP_ICON), 'Motion card uses the motion icon');
+});
+
+test('card key: continuous recordings route exclusively to the Continuous card', () => {
+  // Always-on capture chunks carry no concrete label. They must land on the
+  // Continuous card only - never padding out the Objects card (which used to
+  // catch every non-sound, non-motion clip).
+  const continuousRecording = { trigger_type: 'continuous', labels: [], detections: [] };
+  const objectCard = cardKeyHtmlFor('object', [continuousRecording]);
+  const motionCard = cardKeyHtmlFor('motion', [continuousRecording]);
+  const soundCard = cardKeyHtmlFor('sound', [continuousRecording]);
+  const continuousCard = cardKeyHtmlFor('continuous', [continuousRecording]);
+  assert.equal(objectCard.html, '', 'Objects card must not contain continuous clips');
+  assert.equal(motionCard.html, '', 'Motion card must not contain continuous clips');
+  assert.equal(soundCard.html, '', 'Sounds card must not contain continuous clips');
+  assert.equal(continuousCard.html.split('Continuous').length - 1, 1, 'Continuous card shows one Continuous chip');
+});
+
+test('card key: a continuous chunk that caught an object stays on the Objects card', () => {
+  // Only label-less always-on segments are "continuous"; one that recognised
+  // an object keeps its concrete label and reads as an object clip.
+  const rec = { trigger_type: 'continuous', labels: ['person'], detections: [{ label: 'person', confidence: 0.7 }] };
+  const objectCard = cardKeyHtmlFor('object', [rec]);
+  const continuousCard = cardKeyHtmlFor('continuous', [rec]);
+  assert.ok(objectCard.html.includes('Person'), 'object-carrying continuous chunk shows on Objects card');
+  assert.equal(continuousCard.html, '', 'Continuous card stays empty for a chunk with a concrete label');
 });
 
 test('card key: sound-class label on an object recording routes exclusively to the Sounds card', () => {
