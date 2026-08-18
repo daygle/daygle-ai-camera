@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from app.auth_gates import require_admin
 from app.deps import get_database
 from app.request_helpers import write_audit_log
+from app.utils import local_day_bounds_to_utc
 
 router = APIRouter()
 _DATE_FORMAT = '%Y-%m-%d'
@@ -48,25 +49,34 @@ def list_camera_log(
     severity: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    tz_offset_minutes: int | None = Query(
+        None, ge=-840, le=840,
+        description="Browser Date.getTimezoneOffset(); resolves date_from/date_to in the viewer's local day. Omit for UTC days.",
+    ),
     db=Depends(get_database),
 ):
     require_admin(request)
     date_from, date_to = _validate_date_range(date_from, date_to)
+    # Resolve the requested calendar days in the viewer's timezone so the window
+    # matches what they selected (mirrors /api/recordings/timeline).
+    start, end = local_day_bounds_to_utc(date_from, date_to, tz_offset_minutes)
+    created_after = start.isoformat() if start else None
+    created_before = end.isoformat() if end else None
     entries = db.list_camera_diagnostics(
         limit=limit,
         offset=offset,
         camera_id=camera_id or None,
         event_type=event_type or None,
         severity=severity or None,
-        date_from=date_from,
-        date_to=date_to,
+        created_after=created_after,
+        created_before=created_before,
     )
     total = db.count_camera_diagnostics(
         camera_id=camera_id or None,
         event_type=event_type or None,
         severity=severity or None,
-        date_from=date_from,
-        date_to=date_to,
+        created_after=created_after,
+        created_before=created_before,
     )
     return {'entries': entries, 'total': total, 'limit': limit, 'offset': offset}
 

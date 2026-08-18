@@ -353,6 +353,10 @@ const DETECTION_MOTION_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" f
 // 11px inline sizing as the eye / running-man pill icons.
 const DETECTION_CLOCK_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
 
+// Rotating-arrows glyph for the "Continuous" recording pill (always-on
+// capture, no triggering detection).
+const DETECTION_CONTINUOUS_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
+
 // Same icon, scaled up for row-level list rendering (recordings row icon).
 const MOTION_RUNNING_ROW_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="m4 19.5 4-4.5 1.5 4 5.5-3-2-7 4-3"/></svg>';
 
@@ -410,6 +414,14 @@ function motionPill(confidence = null) {
   return `<span class="detection detection-motion">${DETECTION_MOTION_ICON} Motion${confidenceText}</span>`;
 }
 
+// Render the neutral "Continuous" pill for always-on recording chunks.
+// Continuous recordings carry no triggering detection, so the recordings
+// list shows this chip (instead of the bare "No detections" fallback that
+// reads as broken) to say the clip is a scheduled continuous segment.
+function continuousPill() {
+  return `<span class="detection detection-continuous">${DETECTION_CONTINUOUS_ICON} Continuous</span>`;
+}
+
 // A recording is "motion-only" when:
 //  * it isn't a sound recording,
 //  * no concrete object label is attached to it (the join-table labels
@@ -438,6 +450,32 @@ function isMotionOnlyRecording(recording) {
   const triggerType = String(recording.trigger_type || 'motion').trim().toLowerCase();
   if (['continuous', 'none', 'off'].includes(triggerType)) return false;
   return true;
+}
+
+// A recording is "continuous-only" when it is an always-on capture chunk
+// (trigger_type 'continuous' / 'none' / 'off') that never captured a concrete
+// object label. This is the partner of ``isMotionOnlyRecording``: together they
+// split the no-concrete-label space into motion-triggered clips and always-on
+// segments. Continuous chunks that DID catch an object keep their concrete
+// labels and read as object recordings, so those return false here. The
+// recordings list uses this to render "Continuous Recording" instead of
+// mislabelling an always-on segment as an "Object Recording" with no
+// detections, no zone and a raw camera id.
+function isContinuousOnlyRecording(recording) {
+  if (!recording) return false;
+  if (recording?.event?.metadata?.source === 'sound-detection') return false;
+  const labelCandidates = [];
+  if (Array.isArray(recording.labels)) labelCandidates.push(...recording.labels);
+  if (Array.isArray(recording.detections)) {
+    for (const d of recording.detections) labelCandidates.push(d?.label);
+  }
+  const hasConcrete = labelCandidates.some((label) => {
+    const normalized = String(label || '').trim().toLowerCase();
+    return normalized && !GENERIC_TRIGGER_LABELS.has(normalized);
+  });
+  if (hasConcrete) return false;
+  const triggerType = String(recording.trigger_type || 'motion').trim().toLowerCase();
+  return ['continuous', 'none', 'off'].includes(triggerType);
 }
 
 // Motion intensity lives as a 'motion'-labelled entry on either the event
@@ -1155,9 +1193,9 @@ window.daygleUi = {
   handleSessionLoss, defaultReturnTo,
   // UI helpers
   showToast, escapeHtml, safeHtml, titleCase, normalizeEmailList, requireElements, initDaygleTabs,
-  detectionPill, motionPill, stillAlertBadge, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, DETECTION_CLOCK_ICON, MOTION_RUNNING_ROW_ICON,
+  detectionPill, motionPill, continuousPill, stillAlertBadge, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, DETECTION_CLOCK_ICON, DETECTION_CONTINUOUS_ICON, MOTION_RUNNING_ROW_ICON,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,
-  isMotionOnlyRecording, motionConfidenceFor, recordingHasMotion,
+  isMotionOnlyRecording, isContinuousOnlyRecording, motionConfidenceFor, recordingHasMotion,
   isMotionOnlyEvent, isMotionOnlyEventItem,
   // Shared recording readers (recordings list + timeline).
   isSoundRecording, recordingTriggerType, recordingTriggerLabel, recordingZoneNames, recordingDetectionSummary, recordingEventPills, cameraLabel,

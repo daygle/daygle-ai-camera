@@ -47,6 +47,7 @@ assert.ok(ui && ui.isMotionOnlyRecording, 'utils.js should expose isMotionOnlyRe
 
 const {
   isMotionOnlyRecording,
+  isContinuousOnlyRecording,
   isMotionOnlyEvent,
   isMotionOnlyEventItem,
   motionConfidenceFor,
@@ -55,6 +56,7 @@ const {
   recordingDetectionSummary,
   recordingZoneNames,
   recordingEventPills,
+  continuousPill,
 } = ui;
 
 // ─── Shared recording readers (recordings list + timeline) ─────────────────
@@ -387,4 +389,66 @@ test('recordingEventPills: empty/unusable events render nothing', () => {
   assert.equal(recordingEventPills(null), '');
   assert.equal(recordingEventPills(undefined), '');
   assert.equal(recordingEventPills({ source: 'rtsp', detections: [] }), '');
+});
+
+// ─── isContinuousOnlyRecording (always-on capture segments) ───────────────
+// Partner of isMotionOnlyRecording: the recordings list uses it to label an
+// always-on chunk "Continuous Recording" instead of the "Object Recording"
+// default (no detections / no zone / raw camera id) it used to fall through to.
+
+test('isContinuousOnlyRecording: continuous chunk with no labels → true', () => {
+  assert.equal(isContinuousOnlyRecording({
+    trigger_type: 'continuous', labels: [], detections: [],
+  }), true);
+});
+
+test('isContinuousOnlyRecording: none/off placeholders → true', () => {
+  assert.equal(isContinuousOnlyRecording({ trigger_type: 'none', labels: [] }), true);
+  assert.equal(isContinuousOnlyRecording({ trigger_type: 'off', labels: [] }), true);
+});
+
+test('isContinuousOnlyRecording: continuous chunk that caught an object → false', () => {
+  // Keeps its concrete label and reads as an object recording instead.
+  assert.equal(isContinuousOnlyRecording({
+    trigger_type: 'continuous', labels: ['person'],
+  }), false);
+  assert.equal(isContinuousOnlyRecording({
+    trigger_type: 'continuous', labels: [], detections: [{ label: 'car', confidence: 0.8 }],
+  }), false);
+});
+
+test('isContinuousOnlyRecording: motion-triggered clip → false', () => {
+  // Motion-only clips (trigger_type motion, no concrete labels) belong to
+  // isMotionOnlyRecording, not here.
+  assert.equal(isContinuousOnlyRecording({ trigger_type: 'motion', labels: [] }), false);
+  assert.equal(isMotionOnlyRecording({ trigger_type: 'motion', labels: [] }), true);
+});
+
+test('isContinuousOnlyRecording: sound recording → false', () => {
+  assert.equal(isContinuousOnlyRecording({
+    trigger_type: 'continuous', labels: [],
+    event: { metadata: { source: 'sound-detection' } },
+  }), false);
+});
+
+test('isContinuousOnlyRecording: null/undefined → false', () => {
+  assert.equal(isContinuousOnlyRecording(null), false);
+  assert.equal(isContinuousOnlyRecording(undefined), false);
+});
+
+test('isContinuousOnlyRecording / isMotionOnlyRecording partition the no-label space', () => {
+  // Exactly one of the two is true for a label-less non-sound recording.
+  for (const trigger of ['motion', 'continuous', 'none', 'off', 'object']) {
+    const rec = { trigger_type: trigger, labels: [], detections: [] };
+    const motion = isMotionOnlyRecording(rec);
+    const continuous = isContinuousOnlyRecording(rec);
+    assert.equal(motion && continuous, false, `${trigger}: not both`);
+    assert.equal(motion || continuous, true, `${trigger}: at least one`);
+  }
+});
+
+test('continuousPill: renders a neutral Continuous chip', () => {
+  const html = continuousPill();
+  assert.ok(html.includes('detection-continuous'), 'uses the continuous pill class');
+  assert.ok(html.includes('Continuous'), 'names the continuous mode');
 });

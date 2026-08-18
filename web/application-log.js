@@ -145,6 +145,8 @@ async function loadEntries() {
   if (level) params.set('level', level);
   if (dateFrom) params.set('date_from', dateFrom);
   if (dateTo) params.set('date_to', dateTo);
+  // Resolve the date filter against the viewer's local day (matches /timeline).
+  if (dateFrom || dateTo) params.set('tz_offset_minutes', String(new Date().getTimezoneOffset()));
   try {
     const data = await api(`/api/application-log?${params}`);
     applicationLogBody.innerHTML = '';

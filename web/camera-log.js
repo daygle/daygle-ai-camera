@@ -33,6 +33,8 @@ function buildQuery(offset) {
   const params = new URLSearchParams({ limit: LOG_PAGE_SIZE, offset });
   if (f.date_from) params.set('date_from', f.date_from);
   if (f.date_to) params.set('date_to', f.date_to);
+  // Resolve the date filter against the viewer's local day (matches /timeline).
+  if (f.date_from || f.date_to) params.set('tz_offset_minutes', String(new Date().getTimezoneOffset()));
   if (f.camera_id) params.set('camera_id', f.camera_id);
   if (f.event_type) params.set('event_type', f.event_type);
   if (f.severity) params.set('severity', f.severity);

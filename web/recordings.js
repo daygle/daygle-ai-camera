@@ -65,6 +65,25 @@ function filterByConfiguredLabels(detections) {
 let overlayRafId = null;
 let overlayVfcHandle = null;
 let configuredLabels = null; // null = no filter loaded yet
+// Configured camera display names keyed by camera id, populated from
+// /api/cameras. cameraLabel() reads the event metadata's camera_name, which
+// event-less recordings (continuous chunks) don't have - it then falls back
+// to the raw camera_id slug ("camera-2"). This map lets those rows show the
+// friendly configured name ("Camera 2", "Driveway", ...) instead.
+const cameraNamesById = new Map();
+
+// Friendly camera name for a recording row. Prefers the name cameraLabel()
+// derives (event metadata for triggered clips); when that only yields the raw
+// camera_id - the continuous-chunk case - substitute the configured display
+// name so always-on segments don't read as an unnamed "camera-2".
+function recordingCameraName(recording) {
+  const label = cameraLabel(recording);
+  const cameraId = String(recording?.camera_id || '').trim();
+  if (cameraId && label === cameraId && cameraNamesById.has(cameraId)) {
+    return cameraNamesById.get(cameraId);
+  }
+  return label;
+}
 
 // api() is provided by web/utils.js (loaded before this script) - it reads
 // the CSRF token from window.daygleAuth.csrfToken and handles 401 redirects
@@ -273,7 +292,7 @@ function renderStats(recordings) {
     els.statTotalDuration.textContent = formatDurationShort(totalSeconds);
   }
   if (els.statCameraCount) {
-    const cameras = new Set(recordings.map((rec) => cameraLabel(rec)).filter(Boolean));
+    const cameras = new Set(recordings.map((rec) => recordingCameraName(rec)).filter(Boolean));
     els.statCameraCount.textContent = String(cameras.size);
   }
 }
@@ -293,7 +312,7 @@ function recordingSortValue(recording, key) {
       if (isSoundRecording(recording)) return 2;
       return isMotionOnlyRecording(recording) ? 1 : 0;
     }
-    case 'camera': return String(cameraLabel(recording) || '').toLowerCase();
+    case 'camera': return String(recordingCameraName(recording) || '').toLowerCase();
     case 'detections': {
       if (isMotionOnlyRecording(recording)) return 0;
       return recordingDetectionSummary(recording).length;
@@ -378,8 +397,18 @@ function renderRecordings(recordings) {
     const mediaReady = recording.media_ready !== false;
     const isSound = isSoundRecording(recording);
     const isMotion = isMotionOnlyRecording(recording);
-    const typeClass = isSound ? 'activity-item-sound' : isMotion ? 'activity-item-motion' : 'activity-item-event';
-    const typeLabel = isSound ? 'Sound Recording' : isMotion ? 'Motion Recording' : 'Object Recording';
+    // Always-on capture segments carry no triggering detection, so they must
+    // not fall through to the "Object Recording" default (which reads as a
+    // broken object clip with no detections). Classify them explicitly.
+    const isContinuous = !isSound && !isMotion && isContinuousOnlyRecording(recording);
+    const typeClass = isSound ? 'activity-item-sound'
+      : isMotion ? 'activity-item-motion'
+      : isContinuous ? 'activity-item-continuous'
+      : 'activity-item-event';
+    const typeLabel = isSound ? 'Sound Recording'
+      : isMotion ? 'Motion Recording'
+      : isContinuous ? 'Continuous Recording'
+      : 'Object Recording';
     const zones = recordingZoneNames(recording);
     const zoneCell = zones.length ? zones.map(escapeHtml).join(', ') : '-';
     const durationText = `${Number(recording.duration_seconds || 0).toFixed(1)}s`;
@@ -392,6 +421,15 @@ function renderRecordings(recordings) {
       // teal "Motion · NN%" pill so the row reads distinctly from object
       // and sound recordings without falling back to "No detections".
       badges = motionPill(motionConfidenceFor(recording));
+    } else if (isContinuous) {
+      // Always-on capture: no triggering detection. Show the neutral
+      // "Continuous" chip (plus a Motion pill if the segment happened to
+      // catch frame motion) instead of the "No detections" broken-looking
+      // fallback.
+      const motionBadge = hasRecordingMotion(recording)
+        ? motionPill(motionConfidenceFor(recording))
+        : '';
+      badges = `${continuousPill()}${motionBadge}`;
     } else {
       const summaryBadges = recordingDetectionSummary(recording)
         .map((d) => detectionPill(d.label, d.confidence, isSound)).join('');
@@ -422,7 +460,7 @@ function renderRecordings(recordings) {
     return `
       <tr class="activity-table-row ${typeClass}" data-recording-row="${recording.id}">
         <td class="activity-cell-type"><span class="activity-item-type">${typeLabel}</span><span class="activity-cell-ref">Recording #${recording.id}</span></td>
-        <td class="activity-cell-camera">${escapeHtml(cameraLabel(recording))}</td>
+        <td class="activity-cell-camera">${escapeHtml(recordingCameraName(recording))}</td>
         <td class="activity-cell-detections"><div class="activity-item-badges">${badges}</div></td>
         <td class="activity-cell-zone">${zoneCell}</td>
         <td class="activity-cell-when">
@@ -454,16 +492,23 @@ function renderRecordingDetails(recording) {
   const detections = recordingDetectionSummary(recording);
   const isSound = isSoundRecording(recording);
   const isMotionOnly = isMotionOnlyRecording(recording);
-  // The \"Sound\" / \"Motion\" / \"Detections\" label tracks the source the row on
-  // the list uses, so opening a clip never surprises users with a different
-  // category name. Motion-only clips render the teal motion pill (with the
-  // strongest motion intensity confidence for the clip) rather than the
-  // bare \"none\" placeholder the row used to show.
+  const isContinuous = !isSound && !isMotionOnly && isContinuousOnlyRecording(recording);
+  // The \"Sound\" / \"Motion\" / \"Continuous\" / \"Detections\" label tracks the
+  // source the row on the list uses, so opening a clip never surprises users
+  // with a different category name. Motion-only clips render the teal motion
+  // pill (with the strongest motion intensity confidence for the clip) rather
+  // than the bare \"none\" placeholder the row used to show.
   let detectionBadges;
   let detectionLabel;
   if (isMotionOnly) {
     detectionLabel = 'Motion';
     detectionBadges = motionPill(motionConfidenceFor(recording));
+  } else if (isContinuous) {
+    detectionLabel = 'Recording';
+    const motionBadge = hasRecordingMotion(recording)
+      ? motionPill(motionConfidenceFor(recording))
+      : '';
+    detectionBadges = `${continuousPill()}${motionBadge}`;
   } else if (isSound) {
     detectionLabel = 'Sound';
     const soundDetections = recordingDetectionSummary(recording);
@@ -489,7 +534,7 @@ function renderRecordingDetails(recording) {
   const detailRows = [
     safeHtml`<div><span>Recording</span><strong>#${recording.id}</strong></div>`,
     safeHtml`<div><span>Event</span><strong>${recording.event_id || 'none'}</strong></div>`,
-    safeHtml`<div><span>Camera</span><strong>${cameraLabel(recording)}</strong></div>`,
+    safeHtml`<div><span>Camera</span><strong>${recordingCameraName(recording)}</strong></div>`,
     zoneRow,
     safeHtml`<div><span>Trigger</span><strong>${recordingDisplayTrigger(recording)}</strong></div>`,
     safeHtml`<div><span>Started</span><strong>${formatDateTime(recording.started_at)}</strong></div>`,
@@ -828,7 +873,7 @@ async function playRecording(id) {
   renderRecordingDetails(recording);
   if (els.videoModalSubtitle) {
     const started = formatDateTime(recording.started_at);
-    const camera = cameraLabel(recording);
+    const camera = recordingCameraName(recording);
     els.videoModalSubtitle.textContent = started
       ? `Recording from ${camera} captured ${started}.`
       : `Recording from ${camera}.`;
@@ -947,6 +992,14 @@ async function loadCameras() {
   try {
     const data = await api('/api/cameras');
     const cameras = data?.cameras || [];
+    // Cache id -> friendly name for every camera so event-less recordings can
+    // resolve a display name (see recordingCameraName). Done before the
+    // cameraFilter early-return so the map is populated even on the playback
+    // page, which has no filter dropdown.
+    for (const camera of cameras) {
+      const id = String(camera.id || '').trim();
+      if (id) cameraNamesById.set(id, camera.name || camera.id);
+    }
     if (!cameras.length || !els.cameraFilter) return;
     for (const camera of cameras) {
       const option = document.createElement('option');

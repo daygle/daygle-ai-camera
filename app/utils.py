@@ -22,7 +22,7 @@ Cluster membership:
 from __future__ import annotations
 
 import subprocess
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -70,6 +70,34 @@ def _current_version() -> str:
 def utc_now() -> str:
     """Return the current UTC time in the application's canonical ISO form."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def local_day_bounds_to_utc(
+    day_from: str | None,
+    day_to: str | None,
+    tz_offset_minutes: int | None,
+) -> tuple[datetime | None, datetime | None]:
+    """Convert an inclusive ``[day_from, day_to]`` range of *calendar days* -- as
+    the user sees them in their browser timezone -- into a half-open
+    ``[start, end)`` pair of timezone-aware UTC datetimes.
+
+    ``day_from`` / ``day_to`` are ``YYYY-MM-DD`` strings (already validated by the
+    caller); either may be ``None``. ``tz_offset_minutes`` is the browser's
+    ``Date.getTimezoneOffset()`` -- minutes that local time is BEHIND UTC, so
+    UTC+10 is ``-600`` and UTC-5 is ``+300``. ``None`` keeps the legacy UTC-day
+    boundary. This mirrors the ``/api/recordings/timeline`` endpoint so every
+    day-window filter in the app agrees on where a day starts and ends.
+    """
+    tz = timezone.utc if tz_offset_minutes is None else timezone(timedelta(minutes=-tz_offset_minutes))
+    start: datetime | None = None
+    end: datetime | None = None
+    if day_from:
+        d = date.fromisoformat(day_from)
+        start = datetime(d.year, d.month, d.day, tzinfo=tz).astimezone(timezone.utc)
+    if day_to:
+        d = date.fromisoformat(day_to) + timedelta(days=1)
+        end = datetime(d.year, d.month, d.day, tzinfo=tz).astimezone(timezone.utc)
+    return start, end
 
 
 def _non_empty_setting(settings: dict[str, Any], key: str) -> str:
