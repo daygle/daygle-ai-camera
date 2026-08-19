@@ -128,3 +128,63 @@ def test_face_identity_metadata_summary():
 
 def test_face_identity_metadata_empty_without_faces():
     assert fi.face_identity_metadata([{'label': 'car'}, {'label': 'person'}]) == {}
+
+
+# ---------------------------------------------------------------------------
+# unknown_face_alerts (alert-on-unknown)
+# ---------------------------------------------------------------------------
+
+class _AlertService:
+    def __init__(self, available=True, alert_unknown=True):
+        self.available = available
+        self.alert_unknown = alert_unknown
+
+
+def _unknown_face(track_id):
+    return {'label': 'face', 'track_id': track_id, 'recognized': True,
+            'person_id': None, 'person_name': None, 'identity': 'unknown', 'confidence': 0.9}
+
+
+def _known_face(track_id):
+    return {'label': 'face', 'track_id': track_id, 'recognized': True,
+            'person_id': 7, 'person_name': 'Alex', 'identity': 'Alex'}
+
+
+def test_unknown_alert_fires_once_per_track(monkeypatch):
+    _use_service(monkeypatch, _AlertService())
+    fi.reset_camera_identities('uA')
+    first = fi.unknown_face_alerts('uA', [_unknown_face(1)])
+    assert len(first) == 1
+    # Same stranger next cycle -> no duplicate alert.
+    second = fi.unknown_face_alerts('uA', [_unknown_face(1)])
+    assert second == []
+
+
+def test_unknown_alert_off_when_setting_disabled(monkeypatch):
+    _use_service(monkeypatch, _AlertService(alert_unknown=False))
+    assert fi.unknown_face_alerts('uB', [_unknown_face(1)]) == []
+
+
+def test_unknown_alert_off_when_service_unavailable(monkeypatch):
+    _use_service(monkeypatch, _AlertService(available=False))
+    assert fi.unknown_face_alerts('uC', [_unknown_face(1)]) == []
+
+
+def test_known_face_does_not_alert(monkeypatch):
+    _use_service(monkeypatch, _AlertService())
+    assert fi.unknown_face_alerts('uD', [_known_face(1)]) == []
+
+
+def test_untracked_unknown_face_does_not_alert(monkeypatch):
+    _use_service(monkeypatch, _AlertService())
+    assert fi.unknown_face_alerts('uE', [_unknown_face(None)]) == []
+
+
+def test_returning_stranger_realerts(monkeypatch):
+    _use_service(monkeypatch, _AlertService())
+    fi.reset_camera_identities('uF')
+    assert len(fi.unknown_face_alerts('uF', [_unknown_face(1)])) == 1
+    # Track 1 leaves the frame (a cycle without it) -> forgotten.
+    fi.unknown_face_alerts('uF', [])
+    # A new track for a stranger alerts again.
+    assert len(fi.unknown_face_alerts('uF', [_unknown_face(2)])) == 1

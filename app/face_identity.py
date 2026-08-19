@@ -34,6 +34,9 @@ _FACE_LABEL = 'face'
 # ``None`` means "recognised as unknown so far" and is retried each cycle; a
 # MatchResult is cached and reused for the life of the track.
 _cache: dict[str, dict[Any, Any]] = {}
+# Per-camera set of unknown-face track ids already alerted, so a lingering
+# stranger raises one alert rather than one per ~4 Hz cycle.
+_alerted_unknown: dict[str, set[Any]] = {}
 _lock = threading.Lock()
 
 
@@ -138,7 +141,44 @@ def face_identity_metadata(detections: list[dict[str, Any]]) -> dict[str, Any]:
     return {'face_identities': {'people': recognized, 'unknown': unknown}}
 
 
+def unknown_face_alerts(camera_id: str, detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return the unknown-face detections that should raise a new alert.
+
+    A no-op (``[]``) unless recognition is available and ``alert_unknown`` is on.
+    Only faces already annotated as unknown (``recognized`` with no
+    ``person_id``) count, and each is alerted **once per track** -- a stranger
+    who lingers does not flood the alert feed. Tracks are forgotten when they
+    leave the frame, so the same person returning later alerts again.
+
+    Must be called after :func:`annotate_face_identities` (it reads the identity
+    annotations) and only decides *which* faces are alert-worthy; the caller
+    turns them into alert-history entries.
+    """
+    service = get_face_recognition_service()
+    if not service.available or not getattr(service, 'alert_unknown', False):
+        return []
+    face_track_ids: set[Any] = set()
+    new_alerts: list[dict[str, Any]] = []
+    with _lock:
+        alerted = _alerted_unknown.setdefault(camera_id, set())
+        for detection in detections:
+            if not _is_face(detection) or not detection.get('recognized'):
+                continue
+            track_id = detection.get('track_id')
+            if track_id is None:
+                continue
+            face_track_ids.add(track_id)
+            if detection.get('person_id') is None and track_id not in alerted:
+                alerted.add(track_id)
+                new_alerts.append(detection)
+        # Forget tracks no longer present so a returning stranger re-alerts and
+        # the set cannot grow unbounded.
+        _alerted_unknown[camera_id] = {tid for tid in alerted if tid in face_track_ids}
+    return new_alerts
+
+
 def reset_camera_identities(camera_id: str) -> None:
-    """Drop the identity cache for a camera (e.g. when it stops/reconfigures)."""
+    """Drop the identity + unknown-alert caches for a camera (stop/reconfigure)."""
     with _lock:
         _cache.pop(camera_id, None)
+        _alerted_unknown.pop(camera_id, None)
