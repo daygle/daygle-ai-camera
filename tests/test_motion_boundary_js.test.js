@@ -81,7 +81,25 @@ test('recordingDetectionSummary: sound recording collapses to its class label', 
   const summary = recordingDetectionSummary({
     event: { metadata: { source: 'sound-detection', class_label: 'Dog Bark', confidence: 0.82 } },
   });
-  assert.deepEqual(plain(summary), [{ label: 'dog bark', confidence: 0.82 }]);
+  assert.deepEqual(plain(summary), [{ label: 'dog bark', confidence: 0.82, count: 1 }]);
+});
+
+test('recordingDetectionSummary: sound recording aggregates repeated events into one counted pill', () => {
+  // Two Dog Bark events + one Car Alarm inside one clip collapse to one pill
+  // per class, carrying the strongest confidence and a per-class event count
+  // (Dog Bark ×2). Previously each event rendered its own near-identical pill.
+  const summary = recordingDetectionSummary({
+    event: { metadata: { source: 'sound-detection', class_label: 'Dog Bark', confidence: 0.76 } },
+    events: [
+      { detections: [{ label: 'dog bark', confidence: 0.76 }] },
+      { detections: [{ label: 'dog bark', confidence: 0.89 }] },
+      { detections: [{ label: 'car alarm', confidence: 0.60 }] },
+    ],
+  });
+  assert.deepEqual(plain(summary), [
+    { label: 'dog bark', confidence: 0.89, count: 2 },
+    { label: 'car alarm', confidence: 0.60, count: 1 },
+  ]);
 });
 
 test('recordingDetectionSummary: objects dedupe per label, keeping best confidence', () => {
@@ -97,9 +115,23 @@ test('recordingDetectionSummary: objects dedupe per label, keeping best confiden
     ],
   });
   assert.deepEqual(plain(summary), [
-    { label: 'person', confidence: 0.93 },
-    { label: 'dog', confidence: 0.80 },
+    { label: 'person', confidence: 0.93, count: 1 },
+    { label: 'dog', confidence: 0.80, count: 1 },
   ]);
+});
+
+test('recordingDetectionSummary: object label seen across several events is counted', () => {
+  // Two separate person events in one extended clip -> one "Person ×2" pill
+  // with the best confidence, not two stacked Person pills.
+  const summary = recordingDetectionSummary({
+    labels: ['person'],
+    events: [
+      { detections: [{ label: 'person', confidence: 0.71 }] },
+      { detections: [{ label: 'person', confidence: 0.93 }, { label: 'motion', confidence: 0.4 }] },
+    ],
+    detections: [{ label: 'person', confidence: 0.93 }],
+  });
+  assert.deepEqual(plain(summary), [{ label: 'person', confidence: 0.93, count: 2 }]);
 });
 
 test('recordingDetectionSummary: includes labels added after the original event', () => {
@@ -111,8 +143,8 @@ test('recordingDetectionSummary: includes labels added after the original event'
     label_confidences: { bird: 0.69, cat: 0.19 },
   });
   assert.deepEqual(plain(summary), [
-    { label: 'bird', confidence: 0.69 },
-    { label: 'cat', confidence: 0.19 },
+    { label: 'bird', confidence: 0.69, count: 1 },
+    { label: 'cat', confidence: 0.19, count: 1 },
   ]);
 });
 
@@ -121,7 +153,7 @@ test('recordingDetectionSummary: generic trigger labels are filtered out', () =>
     labels: ['motion', 'person'],
     detections: [{ label: 'person', confidence: 0.5 }],
   });
-  assert.deepEqual(plain(summary), [{ label: 'person', confidence: 0.5 }]);
+  assert.deepEqual(plain(summary), [{ label: 'person', confidence: 0.5, count: 1 }]);
 });
 
 test('recordingZoneNames: empty for sounds, deduped for objects', () => {

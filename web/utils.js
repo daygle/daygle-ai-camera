@@ -375,7 +375,7 @@ function isGenericTriggerLabel(label) {
 // Render a single detection pill (eye icon for objects, speaker for sounds).
 // Each label decides its own icon independently of `isSound` so a sound class
 // that sneaks into an object list still renders with the speaker icon.
-function detectionPill(label, confidence, isSound = false) {
+function detectionPill(label, confidence, isSound = false, count = 1) {
   const labelIsSound = isSound || isSoundLabel(label);
   const display = labelIsSound
     ? titleCase(String(label).replace(/_/g, ' '))
@@ -384,10 +384,18 @@ function detectionPill(label, confidence, isSound = false) {
   const confidenceText = Number.isFinite(numericConfidence)
     ? ` · ${Math.round(numericConfidence * 100)}%`
     : '';
+  // When the same label was detected across several events in one clip, a
+  // single pill stands in for all of them (best confidence) plus a "×N"
+  // multiplier -- so two Dog Bark events read as one "Dog Bark · 89% ×2"
+  // pill instead of two near-identical pills stacked on the row.
+  const numericCount = Math.round(Number(count));
+  const countText = Number.isFinite(numericCount) && numericCount > 1
+    ? ` <span class="detection-count">×${numericCount}</span>`
+    : '';
   if (labelIsSound) {
-    return `<span class="detection detection-sound">🔊 ${escapeHtml(display)}${confidenceText}</span>`;
+    return `<span class="detection detection-sound">🔊 ${escapeHtml(display)}${confidenceText}${countText}</span>`;
   }
-  return `<span class="detection detection-object">${DETECTION_EYE_ICON} ${escapeHtml(display)}${confidenceText}</span>`;
+  return `<span class="detection detection-object">${DETECTION_EYE_ICON} ${escapeHtml(display)}${confidenceText}${countText}</span>`;
 }
 
 // Amber "Still N Min" badge for a detection that fired a still-dwell alert
@@ -585,10 +593,7 @@ function recordingZoneNames(recording) {
 // and the live track), each carrying its best-seen confidence.
 function recordingDetectionSummary(recording) {
   if (isSoundRecording(recording)) {
-    const meta = recording.event?.metadata || {};
-    const label = (meta.class_label || meta.label || recording.trigger_label || 'sound').toLowerCase();
-    const confidence = Number(meta.confidence || 0);
-    return [{ label, confidence }];
+    return soundDetectionSummary(recording);
   }
   // Build best-confidence map from the saved event detections and, when
   // present, the clip's live detection track. Multi-object recordings can pick
@@ -612,12 +617,82 @@ function recordingDetectionSummary(recording) {
   for (const [label, confidence] of Object.entries(recording.label_confidences || {})) {
     rememberBest({ label, confidence });
   }
+  // Count how many distinct events contributed each concrete label so the
+  // recordings list can show "Person ×2" when the same object triggered
+  // several events inside one clip, rather than repeating the pill. Counting
+  // per-event (not per raw detection) keeps the multiplier meaningful -- a
+  // frame-by-frame track would otherwise inflate it into the hundreds.
+  const eventCounts = labelEventCounts(recording);
   // Use recording.labels as the authoritative label list when available.
   const authLabels = Array.isArray(recording.labels) && recording.labels.length
     ? recording.labels.map((l) => String(l || '').trim().toLowerCase()).filter((l) => l && !GENERIC_TRIGGER_LABELS.has(l))
     : Array.from(best.keys()).filter((l) => !GENERIC_TRIGGER_LABELS.has(l));
   return authLabels
-    .map((label) => ({ label, confidence: best.has(label) ? best.get(label) : null }))
+    .map((label) => ({
+      label,
+      confidence: best.has(label) ? best.get(label) : null,
+      count: eventCounts.get(label) || 1,
+    }))
+    .sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1));
+}
+
+// Number of distinct events in a clip that carried each concrete object label.
+// Each event contributes at most one increment per label (a Set per event) so
+// a single event that localised the same object across many frames counts once.
+function labelEventCounts(recording) {
+  const counts = new Map();
+  for (const event of (Array.isArray(recording?.events) ? recording.events : [])) {
+    const detections = Array.isArray(event?.detections) ? event.detections : [];
+    const labelsInEvent = new Set(
+      detections
+        .map((d) => String(d?.label || '').trim().toLowerCase())
+        .filter((label) => label && !GENERIC_TRIGGER_LABELS.has(label)),
+    );
+    for (const label of labelsInEvent) counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  return counts;
+}
+
+// Aggregate a sound recording's linked events into one entry per sound class,
+// carrying the strongest confidence seen and a count of how many events fired
+// that class. A clip that logged two dog barks reads as one "Dog Bark ×2" pill
+// instead of two separate near-identical pills. Falls back to the recording's
+// primary event metadata when no per-event detections are attached.
+function soundDetectionSummary(recording) {
+  const agg = new Map();
+  const add = (rawLabel, confidence) => {
+    const label = String(rawLabel || '').trim().toLowerCase();
+    if (!label) return;
+    const numeric = Number(confidence);
+    const conf = Number.isFinite(numeric) ? numeric : null;
+    const current = agg.get(label);
+    if (!current) {
+      agg.set(label, { confidence: conf, count: 1 });
+      return;
+    }
+    current.count += 1;
+    if (conf != null && (current.confidence == null || conf > current.confidence)) {
+      current.confidence = conf;
+    }
+  };
+  for (const event of (Array.isArray(recording?.events) ? recording.events : [])) {
+    const detections = Array.isArray(event?.detections) ? event.detections : [];
+    const soundDetections = detections.filter((d) => isSoundLabel(d && d.label));
+    if (soundDetections.length) {
+      for (const d of soundDetections) add(d.label, d.confidence);
+      continue;
+    }
+    const meta = event?.metadata || {};
+    const label = meta.class_label || meta.label || event?.trigger_label;
+    if (label) add(label, typeof meta.confidence === 'number' ? meta.confidence : null);
+  }
+  if (!agg.size) {
+    const meta = recording.event?.metadata || {};
+    const label = (meta.class_label || meta.label || recording.trigger_label || 'sound').toLowerCase();
+    return [{ label, confidence: Number(meta.confidence || 0), count: 1 }];
+  }
+  return Array.from(agg.entries())
+    .map(([label, value]) => ({ label, confidence: value.confidence, count: value.count }))
     .sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1));
 }
 

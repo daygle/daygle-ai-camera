@@ -459,7 +459,7 @@ function renderRecordings(recordings) {
       badges = `${continuousPill()}${motionBadge}`;
     } else {
       const summaryBadges = recordingDetectionSummary(recording)
-        .map((d) => detectionPill(d.label, d.confidence, isSound)).join('');
+        .map((d) => detectionPill(d.label, d.confidence, isSound, d.count)).join('');
       // A clip can contain both frame motion and a recognised object. Keep it
       // as an Object Recording, but show the motion intensity separately so
       // the list does not lose one of the event types.
@@ -468,16 +468,10 @@ function renderRecordings(recordings) {
         : '';
       badges = `${motionBadge}${summaryBadges}` || '<span class="muted">No detections</span>';
     }
-    // A recording spans many events - show each event's type as its own pill
-    // (object / motion / sound) instead of a bare count, so a clip containing
-    // several detections reads as its constituent events rather than a number.
-    // Single-event recordings keep the summary pills above (per-event pills
-    // would just duplicate them). recordingEventPills is provided by
-    // web/utils.js (loaded before this script).
-    const eventCount = Array.isArray(recording.events) ? recording.events.length : 0;
-    if (eventCount > 1) {
-      badges += recording.events.map(recordingEventPills).join('');
-    }
+    // recordingDetectionSummary already merges the clip's events into one pill
+    // per distinct label (with a "×N" multiplier when a label fired across
+    // several events), so we no longer append a second row of per-event pills
+    // here -- that double-render was showing every shared label twice.
     const actions = [
       mediaReady
         ? `<button class="secondary activity-item-action activity-item-action-play" data-play-recording="${recording.id}" type="button" aria-label="Play recording #${recording.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg><span class="activity-action-label">Play</span></button>`
@@ -540,14 +534,14 @@ function renderRecordingDetails(recording) {
     detectionLabel = 'Sound';
     const soundDetections = recordingDetectionSummary(recording);
     detectionBadges = soundDetections.length
-      ? soundDetections.map((d) => detectionPill(d.label, d.confidence, true)).join(' ')
+      ? soundDetections.map((d) => detectionPill(d.label, d.confidence, true, d.count)).join(' ')
       : 'none';
   } else {
     detectionLabel = 'Detections';
     const motionBadge = hasRecordingMotion(recording)
       ? motionPill(motionConfidenceFor(recording))
       : '';
-    const objectBadges = detections.map((d) => detectionPill(d.label, d.confidence)).join(' ');
+    const objectBadges = detections.map((d) => detectionPill(d.label, d.confidence, false, d.count)).join(' ');
     detectionBadges = `${motionBadge}${objectBadges}` || 'none';
   }
   const zones = recordingZoneNames(recording);

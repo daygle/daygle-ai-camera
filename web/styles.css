@@ -543,6 +543,11 @@ textarea {
 .detection.detection-continuous { background: rgba(148, 163, 184, 0.14); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.35); }
 .detection.detection-alert { background: rgba(239, 68, 68, 0.14); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
 .detection.detection-still-alert { background: rgba(251, 191, 36, 0.12); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.4); }
+/* "×N" multiplier appended to a detection pill when the same label fired
+   across several events in one clip. Kept subtly recessed (lower opacity,
+   thin separator) so it reads as metadata on the pill rather than a second
+   value competing with the confidence. */
+.detection .detection-count { margin-left: 5px; padding-left: 6px; border-left: 1px solid currentColor; opacity: .7; font-variant-numeric: tabular-nums; }
 /* Objects page: per-row "still alert after" minutes input. Compact so the
    four-column rule table stays readable next to the mode dropdowns. */
 .still-alert-input { width: 68px; padding: 6px 8px; }
