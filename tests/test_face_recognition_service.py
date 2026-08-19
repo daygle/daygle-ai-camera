@@ -190,3 +190,30 @@ def test_status_payload_reports_counts_and_availability():
     assert status['embedding_dim'] == 4
     assert status['enrolled_people'] == 1
     assert status['enrolled_faces'] == 1
+
+
+# ---------------------------------------------------------------------------
+# embed_face (enrollment)
+# ---------------------------------------------------------------------------
+
+def test_embed_face_returns_vector_when_available():
+    svc = _service(
+        {'enabled': True, 'model_path': 'x'}, _FakeDB(), embedder=_StubEmbedder([1, 0, 0, 0])
+    )
+    vec = svc.embed_face(np.zeros((112, 112, 3), dtype=np.uint8))
+    assert vec is not None
+    assert float(np.linalg.norm(vec)) == pytest.approx(1.0, abs=1e-6)
+
+
+def test_embed_face_none_when_disabled():
+    svc = FaceRecognitionService({'enabled': False}, _FakeDB())
+    assert svc.embed_face(np.zeros((112, 112, 3), dtype=np.uint8)) is None
+
+
+def test_embed_face_none_below_min_size():
+    svc = _service(
+        {'enabled': True, 'model_path': 'x', 'min_face_pixels': 80},
+        _FakeDB(),
+        embedder=_StubEmbedder([1, 0, 0, 0]),
+    )
+    assert svc.embed_face(np.zeros((40, 40, 3), dtype=np.uint8)) is None

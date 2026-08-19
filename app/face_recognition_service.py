@@ -123,6 +123,24 @@ class FaceRecognitionService:
             return None
         return matcher.match(embedding, threshold=self.threshold)
 
+    def embed_face(self, face_bgr: Any) -> Any:
+        """Embed a cropped BGR face for enrolment. Returns the vector or ``None``.
+
+        ``None`` means recognition is not available or the crop is below the
+        configured minimum size -- the caller surfaces that as a 400 rather than
+        storing a useless embedding. Unlike :meth:`recognize`, this does not
+        consult the matcher; it only produces the vector to store.
+        """
+        if not self.available:
+            return None
+        if self._below_min_size(face_bgr):
+            return None
+        try:
+            return self.embedder.embed(face_bgr)  # type: ignore[union-attr]
+        except Exception as exc:
+            logger.warning('Face enrolment embedding failed: %s', exc)
+            return None
+
     def _below_min_size(self, face_bgr: Any) -> bool:
         if self.min_face_pixels <= 0:
             return False
