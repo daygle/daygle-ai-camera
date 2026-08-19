@@ -146,6 +146,20 @@ def effective_ai_config() -> dict[str, Any]:
     return settings
 
 
+def effective_face_recognition_config() -> dict[str, Any]:
+    """Face-recognition settings: defaults -> YAML ``face_recognition`` -> DB override."""
+    from app.face_recognition_settings import DEFAULT_FACE_RECOGNITION_CONFIG
+
+    settings = copy.deepcopy(DEFAULT_FACE_RECOGNITION_CONFIG)
+    config_block = _state.config.get('face_recognition', {})
+    if isinstance(config_block, dict):
+        settings.update(config_block)
+    override = _database_setting('face_recognition')
+    if isinstance(override, dict):
+        settings.update(override)
+    return settings
+
+
 def effective_recording_config() -> dict[str, Any]:
     settings = copy.deepcopy(DEFAULT_RECORDING_CONFIG)
     config_recording = _state.config.get('recording', {})

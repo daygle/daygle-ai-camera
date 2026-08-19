@@ -214,6 +214,8 @@ from app.api.sound_router import router as sound_router
 app.include_router(sound_router)
 from app.api.settings_ai_router import router as settings_ai_router
 app.include_router(settings_ai_router)
+from app.api.settings_face_recognition_router import router as settings_face_recognition_router
+app.include_router(settings_face_recognition_router)
 from app.api.objects_router import router as objects_router
 app.include_router(objects_router)
 from app.api.label_groups_router import router as label_groups_router
