@@ -235,6 +235,20 @@ test('isMotionOnlyRecording: human trigger + empty labels/detections → true', 
   })), true);
 });
 
+test('isMotionOnlyRecording: event clip recorded in continuous mode → true', () => {
+  // Continuous mode stamps event clips trigger_type='continuous', but the
+  // linked event + motion trigger label still make it motion-only - not a
+  // 1-hour always-on chunk.
+  assert.equal(isMotionOnlyRecording({
+    event: { metadata: {} },
+    event_id: 3066,
+    trigger_type: 'continuous',
+    trigger_label: 'motion',
+    labels: ['motion'],
+    detections: [{ label: 'motion', confidence: 1.0 }],
+  }), true);
+});
+
 // ─── motionConfidenceFor ──────────────────────────────────────────────────
 
 test('motionConfidenceFor: returns the strongest motion confidence across detections + track', () => {
@@ -407,14 +421,16 @@ test('isContinuousOnlyRecording: none/off placeholders → true', () => {
   assert.equal(isContinuousOnlyRecording({ trigger_type: 'off', labels: [] }), true);
 });
 
-test('isContinuousOnlyRecording: continuous chunk that caught an object → false', () => {
-  // Keeps its concrete label and reads as an object recording instead.
+test('isContinuousOnlyRecording: continuous chunk that caught an object → true', () => {
+  // An always-on chunk is still a continuous recording even when it
+  // recognised an object during the hour; it must stay on the Continuous
+  // card instead of being re-labelled as an object clip.
   assert.equal(isContinuousOnlyRecording({
     trigger_type: 'continuous', labels: ['person'],
-  }), false);
+  }), true);
   assert.equal(isContinuousOnlyRecording({
     trigger_type: 'continuous', labels: [], detections: [{ label: 'car', confidence: 0.8 }],
-  }), false);
+  }), true);
 });
 
 test('isContinuousOnlyRecording: motion-triggered clip → false', () => {
@@ -429,6 +445,49 @@ test('isContinuousOnlyRecording: sound recording → false', () => {
     trigger_type: 'continuous', labels: [],
     event: { metadata: { source: 'sound-detection' } },
   }), false);
+});
+
+test('isContinuousOnlyRecording: event clip recorded in continuous mode → false', () => {
+  // Continuous mode stamps event clips trigger_type='continuous', but they
+  // are linked to an event and carry its trigger label, so they are motion
+  // clips - not always-on chunks.
+  assert.equal(isContinuousOnlyRecording({
+    event_id: 3066,
+    trigger_type: 'continuous',
+    trigger_label: 'motion',
+    labels: ['motion'],
+    detections: [{ label: 'motion', confidence: 1.0 }],
+  }), false);
+});
+
+test('isContinuousOnlyRecording: deleted-event clip keeps its trigger label → false', () => {
+  // Even after the linked event is deleted (event_id cleared), the persisted
+  // trigger label still distinguishes a former event clip from an always-on
+  // chunk.
+  assert.equal(isContinuousOnlyRecording({
+    event_id: null,
+    trigger_type: 'continuous',
+    trigger_label: 'motion',
+    labels: ['motion'],
+  }), false);
+  assert.equal(isMotionOnlyRecording({
+    event_id: null,
+    trigger_type: 'continuous',
+    trigger_label: 'motion',
+    labels: ['motion'],
+  }), true);
+});
+
+test('isContinuousOnlyRecording: always-on chunk that caught motion stays Continuous', () => {
+  // A real 1-hour chunk has no event link and no trigger label even when its
+  // saved detection track contains motion frames; it stays a continuous chunk.
+  assert.equal(isContinuousOnlyRecording({
+    event_id: null,
+    trigger_type: 'continuous',
+    trigger_label: null,
+    labels: ['motion'],
+    detections: [],
+  }), true);
 });
 
 test('isContinuousOnlyRecording: null/undefined → false', () => {

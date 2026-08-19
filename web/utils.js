@@ -427,9 +427,9 @@ function continuousPill() {
 //  * no concrete object label is attached to it (the join-table labels
 //    array and the per-event detections are both empty once the generic
 //    trigger words are filtered out), and
-//  * its trigger type isn't one of the always-on / disabled placeholders
-//    ('continuous', 'none', 'off') so we don't accidentally label
-//    always-on clips as motion.
+//  * it isn't an always-on chunk (see ``isContinuousOnlyRecording``) -
+//    a label-less event clip is motion-only even when continuous mode
+//    stamped its trigger_type as 'continuous'.
 //
 // Used by every surface that renders a recording (recordings list, the
 // playback modal on both pages, and the timeline) so the boundary lives in
@@ -447,33 +447,29 @@ function isMotionOnlyRecording(recording) {
     return normalized && !GENERIC_TRIGGER_LABELS.has(normalized);
   });
   if (hasConcrete) return false;
-  const triggerType = String(recording.trigger_type || 'motion').trim().toLowerCase();
-  if (['continuous', 'none', 'off'].includes(triggerType)) return false;
+  // Always-on chunks (no triggering event, no trigger label) are classified
+  // as continuous, not motion; a label-less event clip is motion-only even
+  // when continuous mode stamped its trigger_type as 'continuous'.
+  if (isContinuousOnlyRecording(recording)) return false;
   return true;
 }
 
-// A recording is "continuous-only" when it is an always-on capture chunk
-// (trigger_type 'continuous' / 'none' / 'off') that never captured a concrete
-// object label. This is the partner of ``isMotionOnlyRecording``: together they
-// split the no-concrete-label space into motion-triggered clips and always-on
-// segments. Continuous chunks that DID catch an object keep their concrete
-// labels and read as object recordings, so those return false here. The
-// recordings list uses this to render "Continuous Recording" instead of
-// mislabelling an always-on segment as an "Object Recording" with no
-// detections, no zone and a raw camera id.
+// A recording is "continuous-only" when it is an always-on capture chunk: a
+// trigger_type 'continuous' / 'none' / 'off' recording with no linked
+// triggering event and no trigger label. This is the partner of
+// ``isMotionOnlyRecording``: together they split the recording space into
+// event-triggered clips (motion/object/sound) and always-on segments.
+// Always-on chunks are identified structurally (no event link), NOT by the
+// absence of object labels - a 1-hour chunk that happened to catch an object
+// is still a continuous recording and must stay on the Continuous card.
 function isContinuousOnlyRecording(recording) {
   if (!recording) return false;
   if (recording?.event?.metadata?.source === 'sound-detection') return false;
-  const labelCandidates = [];
-  if (Array.isArray(recording.labels)) labelCandidates.push(...recording.labels);
-  if (Array.isArray(recording.detections)) {
-    for (const d of recording.detections) labelCandidates.push(d?.label);
-  }
-  const hasConcrete = labelCandidates.some((label) => {
-    const normalized = String(label || '').trim().toLowerCase();
-    return normalized && !GENERIC_TRIGGER_LABELS.has(normalized);
-  });
-  if (hasConcrete) return false;
+  // Event clips recorded while continuous mode is enabled are also stamped
+  // trigger_type='continuous' (with the event's trigger label), so the event
+  // link + label are what separate them from real always-on chunks.
+  if (recording.event_id !== null && recording.event_id !== undefined) return false;
+  if (recording.trigger_label) return false;
   const triggerType = String(recording.trigger_type || 'motion').trim().toLowerCase();
   return ['continuous', 'none', 'off'].includes(triggerType);
 }

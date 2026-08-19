@@ -717,6 +717,10 @@ function recordingDisplayTrigger(recording) {
     const classLabel = meta.class_label || meta.label || recording.trigger_label || 'sound';
     return titleCase(classLabel);
   }
+  // Real always-on chunks read "continuous"; event clips recorded while
+  // continuous mode is enabled are stamped 'continuous' too, but their
+  // trigger label still surfaces (motion / object) instead.
+  if (isContinuousOnlyRecording(recording)) return 'continuous';
   const triggerLabel = recordingTriggerLabel(recording);
   return titleCase(triggerLabel || 'motion');
 }

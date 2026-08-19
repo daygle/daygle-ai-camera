@@ -22,17 +22,17 @@
       <article class="card">
         <span>Total Clips</span>
         <strong id="statTotalClips">-</strong>
-        <small class="muted">All recordings on disk</small>
+        <small class="muted">Matching the current filters</small>
       </article>
       <article class="card">
         <span>Captured Footage</span>
         <strong id="statTotalDuration">-</strong>
-        <small class="muted">Combined clip length</small>
+        <small class="muted">Footage in the current view</small>
       </article>
       <article class="card">
         <span>Cameras</span>
         <strong id="statCameraCount">-</strong>
-        <small class="muted">With at least one recording</small>
+        <small class="muted">Cameras in the current view</small>
       </article>
       <article class="card">
         <span>Filters</span>
@@ -105,13 +105,13 @@
             <option value="">All Labels</option>
           </select></label>
         <label>
-          <span>From Date <span class="info-tip" data-tip="Earliest capture date (inclusive). Default: any date" title="Earliest capture date (inclusive). Default: any date" tabindex="0" aria-label="Help: Earliest capture date (inclusive). Default: any date"></span></span>
+          <span>From Date <span class="info-tip" data-tip="Earliest capture date (inclusive). Default: today" title="Earliest capture date (inclusive). Default: today" tabindex="0" aria-label="Help: Earliest capture date (inclusive). Default: today"></span></span>
           <input id="recordingDateFrom" type="date" aria-label="Filter by start date" /></label>
         <label>
           <span>From Time <span class="info-tip" data-tip="Earliest time on the from date (5-minute steps). Default: 00:00" title="Earliest time on the from date (5-minute steps). Default: 00:00" tabindex="0" aria-label="Help: Earliest time on the from date (5-minute steps). Default: 00:00"></span></span>
           <span id="recordingTimeFromMount" aria-label="Filter by start time" data-time-role="from"></span></label>
         <label>
-          <span>To Date <span class="info-tip" data-tip="Latest capture date (inclusive). Default: any date" title="Latest capture date (inclusive). Default: any date" tabindex="0" aria-label="Help: Latest capture date (inclusive). Default: any date"></span></span>
+          <span>To Date <span class="info-tip" data-tip="Latest capture date (inclusive). Default: today" title="Latest capture date (inclusive). Default: today" tabindex="0" aria-label="Help: Latest capture date (inclusive). Default: today"></span></span>
           <input id="recordingDateTo" type="date" aria-label="Filter by end date" /></label>
         <label>
           <span>To Time <span class="info-tip" data-tip="Latest time on the to date (5-minute steps). Default: 23:55" title="Latest time on the to date (5-minute steps). Default: 23:55" tabindex="0" aria-label="Help: Latest time on the to date (5-minute steps). Default: 23:55"></span></span>

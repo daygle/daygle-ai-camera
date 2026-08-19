@@ -171,6 +171,16 @@ function recordingDisplayTrigger(recording) {
   }
 
   if (triggerType === 'continuous' || triggerType === 'none' || triggerType === 'off') {
+    // Real always-on chunks read as-is. Event clips recorded while continuous
+    // mode is enabled are also stamped 'continuous', so surface their actual
+    // trigger instead: a motion clip reads "motion", an object clip reads its
+    // concrete labels.
+    if (!isContinuousOnlyRecording(recording)) {
+      if (isMotionOnlyRecording(recording)) return 'motion';
+      if (detectionLabels.length) {
+        return detectionLabels.map((label) => titleCase(label)).join(' · ');
+      }
+    }
     return triggerType;
   }
 
@@ -251,6 +261,23 @@ function renderFilterTimeSelects() {
 }
 
 renderFilterTimeSelects();
+
+// The page opens scoped to "today" so a large library doesn't stall the
+// first paint: default both date inputs to the local calendar day and let
+// loadRecordings() translate them into started_after / started_before ISO
+// bounds (same local-midnight semantics as the timeline page's "today").
+function localTodayDateString() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+function applyDefaultDateFilters() {
+  const today = localTodayDateString();
+  if (els.recordingDateFrom) els.recordingDateFrom.value = today;
+  if (els.recordingDateTo) els.recordingDateTo.value = today;
+}
+
+applyDefaultDateFilters();
 
 // ── Label filter state ────────────────────────────────────────────
 
@@ -1154,8 +1181,9 @@ els.recordingSort?.addEventListener('change', () => {
 els.recordingClearBtn?.addEventListener('click', () => {
   if (els.labelFilter) els.labelFilter.value = '';
   if (els.cameraFilter) els.cameraFilter.value = '';
-  if (els.recordingDateFrom) els.recordingDateFrom.value = '';
-  if (els.recordingDateTo) els.recordingDateTo.value = '';
+  // Reset dates back to the page default (today), not an empty "all time"
+  // range, so the button restores the fast default view.
+  applyDefaultDateFilters();
   if (els.recordingSort) els.recordingSort.value = 'newest';
   recordingsSortState = null;
   // Re-render the From/To time pickers back to their defaults. Going through

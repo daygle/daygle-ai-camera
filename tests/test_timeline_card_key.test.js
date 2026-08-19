@@ -183,14 +183,15 @@ test('card key: continuous recordings route exclusively to the Continuous card',
   assert.equal(continuousCard.html.split('Continuous').length - 1, 1, 'Continuous card shows one Continuous chip');
 });
 
-test('card key: a continuous chunk that caught an object stays on the Objects card', () => {
-  // Only label-less always-on segments are "continuous"; one that recognised
-  // an object keeps its concrete label and reads as an object clip.
+test('card key: a continuous chunk that caught an object stays on the Continuous card', () => {
+  // An always-on chunk remains a continuous recording even when it
+  // recognised an object during the hour; it must not be re-routed to the
+  // Objects card.
   const rec = { trigger_type: 'continuous', labels: ['person'], detections: [{ label: 'person', confidence: 0.7 }] };
   const objectCard = cardKeyHtmlFor('object', [rec]);
   const continuousCard = cardKeyHtmlFor('continuous', [rec]);
-  assert.ok(objectCard.html.includes('Person'), 'object-carrying continuous chunk shows on Objects card');
-  assert.equal(continuousCard.html, '', 'Continuous card stays empty for a chunk with a concrete label');
+  assert.equal(objectCard.html, '', 'object-carrying continuous chunk must not show on Objects card');
+  assert.equal(continuousCard.html.split('Continuous').length - 1, 1, 'Continuous card shows one Continuous chip');
 });
 
 test('card key: sound-class label on an object recording routes exclusively to the Sounds card', () => {
