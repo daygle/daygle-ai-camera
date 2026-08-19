@@ -108,6 +108,24 @@ def get_reload_detector(request: Request):
     return reload_detector
 
 
+def get_face_recognition_service(request: Request):
+    """Process-wide face-recognition service (lazily built on first use)."""
+    from app.face_recognition_service import get_face_recognition_service as _get_service
+
+    return _get_service()
+
+
+def get_reload_face_recognition(request: Request):
+    """Face-recognition service reloader.
+
+    Returns ``(available: bool, reason: str | None)`` after rebuilding the
+    service from the current settings. Routers consume it via ``Depends(...)``.
+    """
+    from app.face_recognition_service import reload_face_recognition_service
+
+    return reload_face_recognition_service
+
+
 # Fields that hold credentials / secrets and must never be returned to a
 # non-admin caller via the settings read endpoints. Kept as a
 # module-level constant so future sensitive keys (token, api_key,
