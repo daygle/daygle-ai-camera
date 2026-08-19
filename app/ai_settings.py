@@ -88,9 +88,10 @@ from app.settings import config_file_path
 #                        landmark head) so the detector reads class scores from
 #                        the right columns instead of the landmark columns.
 #   ``weights_url``    - explicit https source for weights Ultralytics can't
-#                        resolve by name (third-party face models). See
-#                        ``docs/ai-detection.md`` for a ready-to-add face entry
-#                        and the licensing note that goes with it.
+#                        resolve by name (third-party face models). The
+#                        ``yolo11*-face`` entries below use all three optional
+#                        keys; see ``docs/ai-detection.md`` for their source and
+#                        the licensing note that goes with them.
 YOLO_MODELS: dict[str, dict[str, Any]] = {
     # YOLOv8 series - Traditional NMS-based detection
     'yolov8n': {'pt': 'yolov8n.pt', 'onnx': 'yolov8n.onnx', 'label': 'YOLOv8n · Nano', 'approx_mb': 6, 'input_size': 640, 'description': 'Fastest inference, lowest accuracy. Best for low-power or embedded hardware.'},
@@ -110,6 +111,18 @@ YOLO_MODELS: dict[str, dict[str, Any]] = {
     'yolo26m': {'pt': 'yolo26m.pt', 'onnx': 'yolo26m.onnx', 'label': 'YOLO26m · Medium', 'approx_mb': 42, 'input_size': 768, 'nms_free': True, 'description': 'Mid-range NMS-free model with excellent accuracy.'},
     'yolo26l': {'pt': 'yolo26l.pt', 'onnx': 'yolo26l.onnx', 'label': 'YOLO26l · Large', 'approx_mb': 72, 'input_size': 768, 'nms_free': True, 'description': 'High accuracy NMS-free detection. Advanced ProgLoss + STAL training.'},
     'yolo26x': {'pt': 'yolo26x.pt', 'onnx': 'yolo26x.onnx', 'label': 'YOLO26x · Extra Large', 'approx_mb': 112, 'input_size': 768, 'nms_free': True, 'description': 'Ultimate accuracy with NMS-free inference. MuSGD optimizer for best convergence.'},
+    # YOLO11-Face series - single-class face detection (a `face` label), not
+    # recognition. These are YOLO11-pose models with a 5-point facial-landmark
+    # head (keypoint_count=5) and their own labels file (models/face.names); the
+    # download flow binds both to the active AI settings automatically. Source
+    # weights: https://github.com/YapaLab/yolo-face (release 1.0.0), licensed
+    # GPL-3.0 and exported through Ultralytics like every other catalog model.
+    # Ultralytics cannot resolve these names from its own asset set, so each
+    # entry names an explicit ``weights_url``.
+    'yolo11n-face': {'pt': 'yolov11n-face.pt', 'onnx': 'yolov11n-face.onnx', 'label': 'YOLO11n · Face', 'approx_mb': 6, 'input_size': 640, 'labels': 'models/face.names', 'keypoint_count': 5, 'weights_url': 'https://github.com/YapaLab/yolo-face/releases/download/1.0.0/yolov11n-face.pt', 'description': 'Fastest face detection. Detects faces only (single "face" label), not who they are.'},
+    'yolo11s-face': {'pt': 'yolov11s-face.pt', 'onnx': 'yolov11s-face.onnx', 'label': 'YOLO11s · Face', 'approx_mb': 19, 'input_size': 640, 'labels': 'models/face.names', 'keypoint_count': 5, 'weights_url': 'https://github.com/YapaLab/yolo-face/releases/download/1.0.0/yolov11s-face.pt', 'description': 'Balanced face detection for most systems. Detects faces only, not identity.'},
+    'yolo11m-face': {'pt': 'yolov11m-face.pt', 'onnx': 'yolov11m-face.onnx', 'label': 'YOLO11m · Face', 'approx_mb': 40, 'input_size': 640, 'labels': 'models/face.names', 'keypoint_count': 5, 'weights_url': 'https://github.com/YapaLab/yolo-face/releases/download/1.0.0/yolov11m-face.pt', 'description': 'Higher-accuracy face detection. Recommended for IR or night-vision cameras.'},
+    'yolo11l-face': {'pt': 'yolov11l-face.pt', 'onnx': 'yolov11l-face.onnx', 'label': 'YOLO11l · Face', 'approx_mb': 51, 'input_size': 640, 'labels': 'models/face.names', 'keypoint_count': 5, 'weights_url': 'https://github.com/YapaLab/yolo-face/releases/download/1.0.0/yolov11l-face.pt', 'description': 'High-accuracy face detection. Requires a capable CPU or GPU.'},
 }
 
 logger = logging.getLogger('daygle.ai')
