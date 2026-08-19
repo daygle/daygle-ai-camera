@@ -1,32 +1,22 @@
 """Settings / Face-recognition APIRouter (Stage 2b).
 
 Admin-only endpoints to configure the recognition backend: read/write the
-settings, reload the service, and download an embedding model. Recognition is
-off by default and does nothing until an admin enables it and selects a model.
+settings and reload the service. Recognition is off by default and does nothing
+until an admin enables it and selects a model.
 
 Enrolling people and matching faces on the live stream are later slices; this
 router only manages the capability's configuration.
 """
 from __future__ import annotations
 
-import logging
-
-from fastapi import APIRouter, Depends, HTTPException, Request
-from starlette.concurrency import run_in_threadpool
+from fastapi import APIRouter, Depends, Request
 
 from app.auth import utc_now
 from app.auth_gates import require_admin
 from app.config_facades import effective_face_recognition_config
 from app.deps import get_database, get_face_recognition_service, get_reload_face_recognition
 from app.face_recognition_settings import face_recognition_status, validate_face_recognition_settings
-from app.model_management import (
-    _download_weights,
-    _relative_model_path,
-    _safe_within_models_dir,
-)
 from app.request_helpers import write_audit_log
-
-logger = logging.getLogger('daygle.ai')
 
 router = APIRouter()
 
@@ -80,40 +70,9 @@ def reload_face_recognition(
     response['reload_error'] = reason
     return response
 
-
-@router.post('/api/settings/face-recognition/download-model')
-async def download_face_recognition_model(
-    request: Request,
-    db=Depends(get_database),
-):
-    """Download an embedding model (ONNX) from an explicit https URL.
-
-    The application does not bundle a face-embedding model -- ArcFace/
-    InsightFace weights carry their own (typically non-commercial) licenses, so
-    the operator supplies the source. The file is written into ``models/`` under
-    a validated basename; the caller then points the settings at it.
-    """
-    require_admin(request)
-    payload = await request.json()
-    url = str(payload.get('url') or '').strip()
-    filename = str(payload.get('filename') or '').strip()
-    if not url:
-        raise HTTPException(status_code=400, detail='A model download url is required.')
-    if not filename.endswith('.onnx'):
-        raise HTTPException(status_code=400, detail='Model filename must end in .onnx.')
-    try:
-        destination = _safe_within_models_dir(filename)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail='Invalid model filename.') from exc
-    try:
-        await run_in_threadpool(_download_weights, url, destination)
-    except RuntimeError as exc:
-        # Log the detail server-side but return a generic message: raw
-        # exception text can expose internal paths / stack information.
-        logger.warning('Face embedding model download failed from %s: %s', url, exc)
-        raise HTTPException(status_code=502, detail='Model download failed.') from exc
-    rel_path = _relative_model_path(destination)
-    write_audit_log(request, db, 'download', 'settings.face_recognition.model', details={
-        'model_path': rel_path,
-    })
-    return {'ok': True, 'model_path': rel_path}
+# NOTE: an embedding model is supplied out of band (placed in ``models/`` and
+# selected via ``model_path``), not fetched by this router. A server-side
+# "download from a URL the caller provides" endpoint would be an SSRF surface;
+# one-click download belongs with a specific bundled model + a fixed, trusted
+# source URL (the same pattern used for the detection models), not an
+# operator-typed URL. See docs for the manual model-setup steps.
