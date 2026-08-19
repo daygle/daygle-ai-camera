@@ -22,6 +22,15 @@ import time
 from collections import deque
 from typing import Any
 
+# Entries are evicted per-IP on that IP's next request, so an IP that fails
+# once and never returns (a scanner, a brute-force probe from a one-shot
+# source) would otherwise linger in ``_attempts`` forever. On a host exposed
+# to the internet the distinct-IP set grows without bound over weeks/months.
+# A cheap global sweep every ``_GLOBAL_EVICT_INTERVAL_SECONDS`` bounds the
+# dict to IPs seen within (window + sweep interval), turning the slow
+# unbounded growth into a bounded working set.
+_GLOBAL_EVICT_INTERVAL_SECONDS = 60.0
+
 
 class IPRateLimiter:
     """Per-IP exponential-backoff rate limiter.
@@ -60,6 +69,7 @@ class IPRateLimiter:
         window_seconds: float = 60.0,
         base_delay: float = 2.0,
         max_delay: float = 300.0,
+        global_evict_interval: float = _GLOBAL_EVICT_INTERVAL_SECONDS,
     ) -> None:
         self.max_attempts = max_attempts
         self.window_seconds = window_seconds
@@ -68,6 +78,8 @@ class IPRateLimiter:
         # ip_address -> [attempt_timestamp, ...]  (newest appended)
         self._attempts: dict[str, list[float]] = {}
         self._lock = threading.Lock()
+        self._global_evict_interval = max(0.0, float(global_evict_interval))
+        self._last_global_evict = 0.0
 
     # ------------------------------------------------------------------
     # Public API
@@ -77,6 +89,7 @@ class IPRateLimiter:
         """Return the number of seconds the caller of *ip* should wait
         before attempting again.  0 means the request can proceed."""
         with self._lock:
+            self._maybe_evict_all()
             self._evict_stale(ip)
             attempts = self._attempts.get(ip, [])
             if len(attempts) < self.max_attempts:
@@ -98,6 +111,7 @@ class IPRateLimiter:
         """
         now = time.time()
         with self._lock:
+            self._maybe_evict_all()
             self._evict_stale(ip)
             self._attempts.setdefault(ip, []).append(now)
             return len(self._attempts[ip])
@@ -156,6 +170,20 @@ class IPRateLimiter:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _maybe_evict_all(self) -> None:
+        """Run the global expired-IP sweep at most once per interval.
+
+        Called from every public entry point while ``_lock`` is held; the
+        interval throttle keeps the sweep off the hot path (a single dict
+        iteration per minute is negligible even with tens of thousands of
+        entries, and is what bounds long-running memory).
+        """
+        now = time.time()
+        if now - self._last_global_evict < self._global_evict_interval:
+            return
+        self._last_global_evict = now
+        self._evict_stale(None)
+
     def _evict_stale(self, ip: str | None) -> None:
         """Remove attempts outside the sliding window for *ip* (or all IPs
         when *ip* is ``None``).  Caller must hold ``_lock``."""
@@ -201,16 +229,19 @@ class SlidingWindowRateLimiter:
     but that matches Daygle's single-writer deployment shape.
     """
 
-    def __init__(self, *, max_requests: int, window_seconds: float, name: str = 'sw') -> None:
+    def __init__(self, *, max_requests: int, window_seconds: float, name: str = 'sw', global_evict_interval: float = _GLOBAL_EVICT_INTERVAL_SECONDS) -> None:
         self._max = int(max_requests)
         self._window = float(window_seconds)
         self._name = name
         self._lock = threading.Lock()
         self._hits: dict[str, deque[float]] = {}
+        self._global_evict_interval = max(0.0, float(global_evict_interval))
+        self._last_global_evict = 0.0
 
     def is_rate_limited(self, key: str) -> bool:
         with self._lock:
             now = time.monotonic()
+            self._maybe_evict_all(now)
             self._evict_stale(key, now)
             dq = self._hits.get(key)
             return dq is not None and len(dq) >= self._max
@@ -219,6 +250,7 @@ class SlidingWindowRateLimiter:
         """Insert a hit for *key* and return the current hit-count in-window."""
         with self._lock:
             now = time.monotonic()
+            self._maybe_evict_all(now)
             self._evict_stale(key, now)
             dq = self._hits.setdefault(key, deque())
             dq.append(now)
@@ -226,6 +258,21 @@ class SlidingWindowRateLimiter:
 
     def reset(self, key: str) -> None:
         with self._lock:
+            self._hits.pop(key, None)
+
+    def _maybe_evict_all(self, now: float) -> None:
+        """Occasionally drop every key whose window has fully elapsed.
+
+        Same bounding rationale as ``IPRateLimiter._maybe_evict_all``: without
+        a global sweep, a key that is hit once and never again (e.g. a one-shot
+        scanner IP against the public setup/login endpoints) stays in
+        ``_hits`` forever."""
+        if now - self._last_global_evict < self._global_evict_interval:
+            return
+        self._last_global_evict = now
+        cutoff = now - self._window
+        stale_keys = [key for key, dq in self._hits.items() if not dq or dq[0] < cutoff]
+        for key in stale_keys:
             self._hits.pop(key, None)
 
     def _evict_stale(self, key: str, now: float) -> None:

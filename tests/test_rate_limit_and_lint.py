@@ -25,6 +25,7 @@ import unittest
 from pathlib import Path
 
 from app.rate_limiter import (
+    IPRateLimiter,
     SlidingWindowRateLimiter,
     admin_limiter,
     setup_limiter,
@@ -95,6 +96,51 @@ class BackupIntegrityCheckTests(unittest.TestCase):
 # M1 ---------------------------------------------------------------------
 
 
+class IPRateLimiterMemoryTests(unittest.TestCase):
+    """The per-IP limiter must not accumulate one-shot IPs forever.
+
+    A failed login from a distinct IP that never returns used to leave its
+    entry in ``_attempts`` for the life of the process (the only global
+    eviction ran in ``state()``, which production never calls). The
+    once-a-minute global sweep bounds the dict to IPs seen within
+    (window + sweep interval)."""
+
+    def test_global_sweep_evicts_one_shot_ips(self):
+        limiter = IPRateLimiter(max_attempts=5, window_seconds=0.1, global_evict_interval=0.05)
+        # Distinct IPs that each fail once and never return.
+        for i in range(20):
+            limiter.record_failure(f'one-shot-{i}')
+        self.assertEqual(len(limiter._attempts), 20)
+        # Once the sliding window has fully elapsed, the next call from any
+        # IP triggers the global sweep and drops every expired entry.
+        time.sleep(0.15)
+        limiter.get_wait_seconds('probe-ip')
+        self.assertEqual(len(limiter._attempts), 0)
+
+    def test_recent_entries_survive_global_sweep(self):
+        limiter = IPRateLimiter(max_attempts=5, window_seconds=60.0, global_evict_interval=0.05)
+        limiter.record_failure('active-ip')
+        time.sleep(0.15)
+        limiter.get_wait_seconds('probe-ip')
+        # ``active-ip`` failed within the 60s window, so the sweep keeps it.
+        self.assertEqual(list(limiter._attempts.keys()), ['active-ip'])
+
+    def test_global_sweep_is_throttled(self):
+        limiter = IPRateLimiter(max_attempts=5, window_seconds=0.1, global_evict_interval=60.0)
+        for i in range(5):
+            limiter.record_failure(f'ip-{i}')
+        time.sleep(0.15)
+        limiter.record_failure('new-ip')
+        # The 60s throttle means the first record_failure already ran the
+        # sweep for this interval, so the expired IPs are still present.
+        self.assertEqual(len(limiter._attempts), 6)
+        # After the interval elapses, the next call evicts them; only the
+        # fresh entry (still inside its window) survives.
+        limiter._global_evict_interval = 0.0
+        limiter.get_wait_seconds('probe-ip')
+        self.assertEqual(list(limiter._attempts.keys()), ['new-ip'])
+
+
 class SlidingWindowRateLimiterTests(unittest.TestCase):
 
     def test_empty_key_is_not_limited(self):
@@ -125,6 +171,15 @@ class SlidingWindowRateLimiterTests(unittest.TestCase):
     def test_admin_limiter_module_singleton_exists(self):
         # admin_limiter is the module-level singleton used by middleware.
         self.assertIsInstance(admin_limiter, SlidingWindowRateLimiter)
+
+    def test_global_sweep_evicts_one_shot_keys(self):
+        limiter = SlidingWindowRateLimiter(max_requests=5, window_seconds=0.1, global_evict_interval=0.05)
+        for i in range(10):
+            limiter.record(f'one-shot-{i}')
+        self.assertEqual(len(limiter._hits), 10)
+        time.sleep(0.15)
+        limiter.is_rate_limited('probe-key')
+        self.assertEqual(len(limiter._hits), 0)
 
 
 # M3 ---------------------------------------------------------------------

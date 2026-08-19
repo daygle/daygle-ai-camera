@@ -145,6 +145,70 @@ def camera_event_recording_config(settings: dict[str, Any]) -> dict[str, Any]:
     return base
 
 
+def _cleanup_camera_runtime_state(removed_ids: set[str]) -> None:
+    """Drop per-camera in-memory state for cameras removed from the config.
+
+    The live monitor keeps a handful of per-camera dicts (rolling detection
+    history, motion models, debounce/backoff state, dwell streaks, face
+    identity caches, ...). Each is individually bounded by design, but an
+    entry for a deleted camera would otherwise stay for the life of the
+    process; a camera id that is deleted and re-added repeatedly (or churned
+    via renames) would grow those dicts without bound. ``apply_cameras_settings``
+    already stops the removed cameras' ffmpeg workers and pops the health
+    state; this clears the rest of the runtime state under each dict's lock.
+    """
+    if not removed_ids:
+        return
+    with _state.live_detection_history_lock:
+        for cam_id in removed_ids:
+            _state.live_detection_history.pop(cam_id, None)
+    with _state.live_detection_confirm_lock:
+        for cam_id in removed_ids:
+            _state.live_detection_confirm_history.pop(cam_id, None)
+    with _state.live_detection_status_lock:
+        for cam_id in removed_ids:
+            _state.live_detection_status.pop(cam_id, None)
+    with _state.live_event_last_emitted_lock:
+        for cam_id in removed_ids:
+            _state.live_event_last_emitted.pop(cam_id, None)
+    with _state._still_dwell_lock:
+        for cam_id in removed_ids:
+            _state._still_dwell.pop(cam_id, None)
+    with _state._object_tracks_lock:
+        for cam_id in removed_ids:
+            _state._object_tracks.pop(cam_id, None)
+    with _state._motion_confirm_lock:
+        for cam_id in removed_ids:
+            _state._motion_confirm_streaks.pop(cam_id, None)
+    with _state._frame_motion_lock:
+        for cam_id in removed_ids:
+            _state._frame_motion_prev.pop(cam_id, None)
+            _state._frame_motion_last_frame.pop(cam_id, None)
+            _state._frame_motion_last_gray.pop(cam_id, None)
+            _state._frame_motion_mog2.pop(cam_id, None)
+            _state._frame_motion_mog2_meta.pop(cam_id, None)
+            _state._frame_motion_scene_streak.pop(cam_id, None)
+            _state._frame_motion_error_cameras.discard(cam_id)
+    with _state._live_backoff_lock:
+        for cam_id in removed_ids:
+            _state.live_detection_retry_after.pop(cam_id, None)
+            _state.live_detection_failure_count.pop(cam_id, None)
+    with _state.live_detection_worker_lock:
+        for cam_id in removed_ids:
+            _state.live_detection_last_checked.pop(cam_id, None)
+            _state.active_live_detection_cameras.discard(cam_id)
+    with _state._sound_statuses_lock:
+        for cam_id in removed_ids:
+            _state._sound_statuses.pop(cam_id, None)
+    for cam_id in removed_ids:
+        _state._periodic_scan_last_ts.pop(cam_id, None)
+        try:
+            from app.face_identity import reset_camera_identities
+            reset_camera_identities(cam_id)
+        except Exception:  # pragma: no cover - defensive; cache cleanup must not block the apply
+            logger.debug('Face identity cache cleanup failed for removed camera %s', cam_id, exc_info=True)
+
+
 def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
     # Bug 6 fix: take ``_state._apply_settings_lock`` for the entire body so a
     # concurrent ``apply_storage_and_recording_settings`` cannot be mid-swap
@@ -189,6 +253,10 @@ def apply_cameras_settings(settings_list: list[dict[str, Any]]) -> None:
             with _state._camera_health_lock:
                 for cam_id in removed_ids:
                     _state._camera_health_state.pop(cam_id, None)
+            # Clear every other per-camera runtime dict (detection history,
+            # motion models, debounce state, dwell streaks, face caches, ...)
+            # so deleted cameras cannot accumulate entries over time.
+            _cleanup_camera_runtime_state(removed_ids)
         apply_sound_settings()
 
 

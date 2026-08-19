@@ -75,3 +75,85 @@ def test_state_camera_attribute_exists(state):
     """``_state.camera`` must exist (set at main.py module load); may be
     None if no cameras are configured, but must not be missing entirely."""
     assert hasattr(state, 'camera'), "_state.camera attribute not found"
+
+
+# ---------------------------------------------------------------------------
+# Deleted cameras must not leave entries in the per-camera runtime dicts
+# ---------------------------------------------------------------------------
+
+def test_cleanup_camera_runtime_state_removes_all_dicts(state):
+    """Removing a camera clears every per-camera runtime dict, so deleted
+    camera ids cannot accumulate in-memory state for the life of the process."""
+    from collections import deque
+    from app.camera_lifecycle import _cleanup_camera_runtime_state
+
+    with state.live_detection_history_lock:
+        state.live_detection_history['cam-old'] = deque(maxlen=10)
+    with state.live_detection_confirm_lock:
+        state.live_detection_confirm_history['cam-old'] = deque(maxlen=10)
+    with state.live_detection_status_lock:
+        state.live_detection_status['cam-old'] = {'state': 'checked'}
+    with state.live_event_last_emitted_lock:
+        state.live_event_last_emitted['cam-old'] = {'timestamp': 1.0, 'labels': ['person'], 'label_times': {}}
+    with state._still_dwell_lock:
+        state._still_dwell['cam-old'] = {'person': {'still_since': 1.0, 'alerted': False}}
+    with state._object_tracks_lock:
+        state._object_tracks['cam-old'] = {'tracks': [], 'next_id': 1}
+    with state._motion_confirm_lock:
+        state._motion_confirm_streaks['cam-old'] = {'zone-1': 2}
+    with state._frame_motion_lock:
+        state._frame_motion_prev['cam-old'] = 'bg'
+        state._frame_motion_last_frame['cam-old'] = 'f'
+        state._frame_motion_last_gray['cam-old'] = 'g'
+        state._frame_motion_mog2['cam-old'] = 'mog2'
+        state._frame_motion_mog2_meta['cam-old'] = ('sig',)
+        state._frame_motion_scene_streak['cam-old'] = 3
+        state._frame_motion_error_cameras.add('cam-old')
+    with state._live_backoff_lock:
+        state.live_detection_retry_after['cam-old'] = 999.0
+        state.live_detection_failure_count['cam-old'] = 2
+    with state.live_detection_worker_lock:
+        state.live_detection_last_checked['cam-old'] = 1.0
+        state.active_live_detection_cameras.add('cam-old')
+    with state._sound_statuses_lock:
+        state._sound_statuses['cam-old'] = {'state': 'listening'}
+    state._periodic_scan_last_ts['cam-old'] = 1.0
+
+    _cleanup_camera_runtime_state({'cam-old'})
+
+    assert 'cam-old' not in state.live_detection_history
+    assert 'cam-old' not in state.live_detection_confirm_history
+    assert 'cam-old' not in state.live_detection_status
+    assert 'cam-old' not in state.live_event_last_emitted
+    assert 'cam-old' not in state._still_dwell
+    assert 'cam-old' not in state._object_tracks
+    assert 'cam-old' not in state._motion_confirm_streaks
+    assert 'cam-old' not in state._frame_motion_prev
+    assert 'cam-old' not in state._frame_motion_last_frame
+    assert 'cam-old' not in state._frame_motion_last_gray
+    assert 'cam-old' not in state._frame_motion_mog2
+    assert 'cam-old' not in state._frame_motion_mog2_meta
+    assert 'cam-old' not in state._frame_motion_scene_streak
+    assert 'cam-old' not in state._frame_motion_error_cameras
+    assert 'cam-old' not in state.live_detection_retry_after
+    assert 'cam-old' not in state.live_detection_failure_count
+    assert 'cam-old' not in state.live_detection_last_checked
+    assert 'cam-old' not in state.active_live_detection_cameras
+    assert 'cam-old' not in state._sound_statuses
+    assert 'cam-old' not in state._periodic_scan_last_ts
+
+
+def test_cleanup_camera_runtime_state_keeps_other_cameras(state):
+    from app.camera_lifecycle import _cleanup_camera_runtime_state
+
+    with state.live_detection_history_lock:
+        state.live_detection_history['cam-keep'] = 'data'
+        state.live_detection_history['cam-old'] = 'data'
+    with state._still_dwell_lock:
+        state._still_dwell['cam-keep'] = {'package': {'still_since': 1.0, 'alerted': True}}
+
+    _cleanup_camera_runtime_state({'cam-old'})
+
+    assert 'cam-keep' in state.live_detection_history
+    assert 'cam-keep' in state._still_dwell
+    assert 'cam-old' not in state.live_detection_history
