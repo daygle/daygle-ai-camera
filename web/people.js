@@ -27,7 +27,7 @@ function personCard(person) {
       </div>
       ${notes}
       <div class="button-row">
-        <label class="btn-info model-action-btn" style="cursor:pointer">
+        <label class="btn-info model-action-btn">
           ⬆ Enrol Face<input type="file" accept="image/*" data-action="enroll" hidden />
         </label>
         <button class="btn-info model-action-btn" type="button" data-action="faces">Faces</button>

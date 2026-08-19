@@ -161,6 +161,62 @@ def test_download_embedding_model_sets_active_model(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+def test_put_face_recognition_enables_after_download(tmp_path, monkeypatch):
+    """Regression: the settings form omits model fields, so enabling must not
+    wipe a downloaded embedding model (the UI now carries model_path/model_id
+    through the payload - this locks the backend contract for that payload).
+    """
+    app, _db = _load_app(tmp_path, monkeypatch)
+    import app.model_management as mm
+    import app.api.settings_face_recognition_router as frr
+
+    models_dir = tmp_path / 'models'
+    models_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(mm, 'BASE_DIR', tmp_path)
+    monkeypatch.setattr(mm, 'MODELS_DIR', models_dir)
+
+    def fake_download(url, destination, **_kwargs):
+        destination.write_bytes(b'fake onnx')
+
+    monkeypatch.setattr(frr, '_download_weights', fake_download)
+
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        status, _h, body = client.request(
+            '/api/settings/face-recognition/embedding-models/arcface-r100/download',
+            method='POST',
+            headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        assert body['model_path'] == 'models/arcface-r100.onnx'
+
+        # Exactly what the (fixed) front-end sends: the five form fields plus
+        # the active model carried through hidden inputs.
+        status, _h, body = client.request(
+            '/api/settings/face-recognition',
+            method='PUT',
+            data=json.dumps({
+                'enabled': True,
+                'alert_unknown': False,
+                'match_threshold': 0.5,
+                'min_face_pixels': 0,
+                'retention_days': 0,
+                'model_path': body['model_path'],
+                'model_id': body['model_id'],
+            }).encode(),
+            headers={'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        assert body['enabled'] is True
+        assert body['model_path'] == 'models/arcface-r100.onnx'
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_face_recognition_page_served_to_admin(tmp_path, monkeypatch):
     app, _db = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)

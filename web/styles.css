@@ -1680,7 +1680,8 @@ tr.drag-over {
 .compact-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
 .button-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
 .page-stack .button-row { padding-top: 14px; border-top: 1px solid var(--border); justify-content: flex-end; }
-.page-stack .button-row button { min-width: 130px; }
+.page-stack .button-row button,
+.page-stack .button-row label.model-action-btn { min-width: 130px; }
 /* ─── Recordings page ──────────────────────────────────────────────────── */
 .recordings-stats {
   margin-top: 4px;
@@ -5781,7 +5782,9 @@ button.btn-success:active:not(:disabled) {
 }
 
 /* --- Info - accent blue for informational actions --- */
-button.btn-info {
+/* label.btn-info: file-upload triggers (e.g. Enrol Face) are <label>s wrapping
+   a hidden file input so clicking opens the picker; give them the same look. */
+button.btn-info, label.btn-info {
   background: linear-gradient(135deg, var(--accent), #0284c7);
   color: #0c4a6e;
 }
@@ -5790,7 +5793,7 @@ button.btn-info:active:not(:disabled) {
   transform: scale(0.97);
 }
 /* Light mode info */
-:root.light button.btn-info {
+:root.light button.btn-info, :root.light label.btn-info {
   background: linear-gradient(135deg, #0284c7, #0369a1);
   color: #fff;
 }

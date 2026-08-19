@@ -13,6 +13,41 @@ function yesNo(value) {
   return value ? 'Yes' : 'No';
 }
 
+// Track per-card message timeouts so rapid actions don't clear new messages.
+const modelMessageTimeouts = {};
+
+/**
+ * Show a status message inside a specific model card.
+ * @param {string} modelId - The model ID (e.g. 'arcface-r100')
+ * @param {string} text - Message to display (empty hides it)
+ * @param {string} type - 'loading' | 'success' | 'error' | 'info'
+ */
+function setModelMessage(modelId, text, type = 'info') {
+  // Clear any pending timeout so rapid actions don't clear new messages
+  if (modelMessageTimeouts[modelId]) {
+    clearTimeout(modelMessageTimeouts[modelId]);
+    delete modelMessageTimeouts[modelId];
+  }
+  const card = document.getElementById(`model-card-${modelId}`);
+  if (!card) return;
+  let msgEl = card.querySelector('.model-card-message');
+  if (!msgEl) {
+    msgEl = document.createElement('div');
+    msgEl.className = 'model-card-message';
+    const actionsEl = card.querySelector('.model-card-actions');
+    if (actionsEl) {
+      actionsEl.parentNode.insertBefore(msgEl, actionsEl);
+    } else {
+      card.appendChild(msgEl);
+    }
+  }
+  msgEl.textContent = text;
+  msgEl.className = `model-card-message model-card-message-${type}`;
+  if (!text) {
+    msgEl.classList.add('model-card-message-hidden');
+  }
+}
+
 function renderStatus(status) {
   const modelName = status.model_path ? status.model_path.split('/').pop() : '(none)';
   const rows = [
@@ -36,6 +71,11 @@ function fillForm(status) {
   frForm.match_threshold.value = status.match_threshold ?? 0.5;
   frForm.min_face_pixels.value = status.min_face_pixels ?? 0;
   frForm.retention_days.value = status.retention_days ?? 0;
+  // Managed by the Models tab (download), not the form UI - carry the current
+  // values through so a save never wipes the active embedding model (the
+  // backend treats a missing model_path as "no model selected").
+  frForm.model_path.value = status.model_path ?? '';
+  frForm.model_id.value = status.model_id ?? 'arcface';
 }
 
 async function loadStatus() {
@@ -56,6 +96,8 @@ async function saveSettings(event) {
     match_threshold: parseFloat(frForm.match_threshold.value),
     min_face_pixels: parseInt(frForm.min_face_pixels.value || '0', 10),
     retention_days: parseInt(frForm.retention_days.value || '0', 10),
+    model_path: frForm.model_path.value,
+    model_id: frForm.model_id.value,
   };
   frSaveBtn.disabled = true;
   try {
@@ -105,12 +147,13 @@ function renderModels(models) {
       ? ''
       : `<button class="btn-info model-action-btn" data-action="download" data-model-id="${escapeHtml(model.id)}">⬇ Download (~${escapeHtml(String(model.approx_mb))} MB)</button>`;
     return `
-      <div class="model-card">
+      <div class="model-card" id="model-card-${escapeHtml(model.id)}">
         <div class="model-card-head">
           <strong>${escapeHtml(model.label)}</strong>
         </div>
         <p class="muted">${escapeHtml(model.description)}</p>
         <p class="muted">License: ${escapeHtml(model.license)} · ${escapeHtml(String(model.dim))}-d</p>
+        <div class="model-card-message model-card-message-hidden"></div>
         <div class="button-row">${button}</div>
         <div class="model-status-slot">${installed}</div>
       </div>`;
@@ -129,16 +172,22 @@ async function loadModels() {
 async function downloadModel(modelId, button) {
   const original = button.textContent;
   button.disabled = true;
-  button.textContent = 'Downloading…';
+  button.classList.add('model-action-loading');
+  // Show progress inside the model card (no toast - feedback is local).
+  setModelMessage(modelId, `Downloading ${modelId}… this may take several minutes.`, 'loading');
   try {
     const status = await api(`/api/settings/face-recognition/embedding-models/${encodeURIComponent(modelId)}/download`, { method: 'POST' });
     renderStatus(status);
     fillForm(status);
-    showToast('Embedding model downloaded and selected.');
     await loadModels();
+    // loadModels() just re-rendered the card (now marked Installed), so set the
+    // success message on the fresh card and let it fade out on its own.
+    setModelMessage(modelId, 'Embedding model downloaded and selected.', 'success');
+    setTimeout(() => setModelMessage(modelId, '', 'info'), 5000);
   } catch (err) {
-    showToast(err.message || 'Model download failed.', true);
+    setModelMessage(modelId, err.message || 'Model download failed.', 'error');
     button.disabled = false;
+    button.classList.remove('model-action-loading');
     button.textContent = original;
   }
 }
@@ -152,6 +201,10 @@ frModelList.addEventListener('click', (event) => {
 
 frForm.addEventListener('submit', saveSettings);
 frReloadBtn.addEventListener('click', reloadService);
+
+// Group the Face Recognition cards into Status / Models / Settings tabs.
+// Shared implementation (ARIA tabs + URL-hash deep-linking) lives in utils.js.
+initDaygleTabs();
 
 loadStatus();
 loadModels();

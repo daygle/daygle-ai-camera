@@ -19,6 +19,14 @@
       </div>
     </header>
 
+    <div class="settings-tabs" role="tablist" aria-label="Face Recognition sections">
+      <button class="settings-tab" type="button" role="tab" id="tab-status" aria-controls="panel-status" data-tab="status" aria-selected="true"><span class="settings-tab-icon" aria-hidden="true">🧠</span><span class="settings-tab-label">Status</span></button>
+      <button class="settings-tab" type="button" role="tab" id="tab-models" aria-controls="panel-models" data-tab="models" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">📦</span><span class="settings-tab-label">Models</span></button>
+      <button class="settings-tab" type="button" role="tab" id="tab-settings" aria-controls="panel-settings" data-tab="settings" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">⚙️</span><span class="settings-tab-label">Settings</span></button>
+    </div>
+
+    <div class="settings-panel" id="panel-status" role="tabpanel" aria-labelledby="tab-status" data-panel="status">
+
     <section class="card">
       <div class="settings-section-header">
         <div class="settings-section-icon">🧠</div>
@@ -30,6 +38,26 @@
       <div id="frStatusPanel" class="status-panel"></div>
     </section>
 
+    </div><!-- /panel-status -->
+
+    <div class="settings-panel" id="panel-models" role="tabpanel" aria-labelledby="tab-models" data-panel="models" hidden>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">📦</div>
+        <div>
+          <h2>Embedding Models</h2>
+          <p class="settings-section-subtitle">Download a face-embedding model. ArcFace R100 is Apache-2.0 licensed (commercial use permitted).</p>
+        </div>
+      </div>
+      <div id="frModelsMessage" class="muted"></div>
+      <div id="frModelList" class="model-card-grid"></div>
+    </section>
+
+    </div><!-- /panel-models -->
+
+    <div class="settings-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" data-panel="settings" hidden>
+
     <section class="card">
       <div class="settings-section-header">
         <div class="settings-section-icon">⚙️</div>
@@ -40,6 +68,11 @@
       </div>
       <div id="frMessage" class="muted"></div>
       <form id="frForm">
+        <!-- Managed by the Models tab (download), not the form UI: carried
+             through the payload so saving settings never wipes the active
+             embedding model. -->
+        <input type="hidden" name="model_path" />
+        <input type="hidden" name="model_id" />
         <div class="form-grid">
           <label>
             <span>Face Recognition <span class="info-tip" data-tip="Identify enrolled people on cameras running a face-detection model. Requires a downloaded embedding model." title="Identify enrolled people on cameras running a face-detection model. Requires a downloaded embedding model." tabindex="0" aria-label="Help: Identify enrolled people on cameras running a face-detection model. Requires a downloaded embedding model."></span></span>
@@ -70,17 +103,7 @@
       </form>
     </section>
 
-    <section class="card">
-      <div class="settings-section-header">
-        <div class="settings-section-icon">📦</div>
-        <div>
-          <h2>Embedding Models</h2>
-          <p class="settings-section-subtitle">Download a face-embedding model. ArcFace R100 is Apache-2.0 licensed (commercial use permitted).</p>
-        </div>
-      </div>
-      <div id="frModelsMessage" class="muted"></div>
-      <div id="frModelList" class="model-card-grid"></div>
-    </section>
+    </div><!-- /panel-settings -->
   </main>
   <script src="/static/nav.js"></script>
   <script src="/static/utils.js"></script>
