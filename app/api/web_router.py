@@ -320,6 +320,24 @@ def ai_settings_page():
     return RedirectResponse('/onnx', status_code=308)
 
 
+@router.get('/face-recognition')
+def face_recognition_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
+    page_path = web_dir / 'face-recognition.html'
+    if page_path.exists():
+        return FileResponse(page_path)
+    return root(web_dir=web_dir)
+
+
+@router.get('/people')
+def people_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
+    page_path = web_dir / 'people.html'
+    if page_path.exists():
+        return FileResponse(page_path)
+    return root(web_dir=web_dir)
+
+
 @router.get('/yamnet-tflite')
 def yamnet_tflite_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
