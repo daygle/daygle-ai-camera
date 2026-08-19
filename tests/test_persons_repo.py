@@ -98,3 +98,64 @@ def test_load_face_embeddings_filters_by_model(tmp_path):
     assert other[0]['dim'] == 8
     assert db.count_person_faces(model='arcface') == 2
     assert db.count_person_faces() == 3
+
+
+import json
+
+
+def _event_metadata(db, event_id):
+    with db.connect() as conn:
+        row = conn.execute("SELECT metadata FROM events WHERE id = ?", (event_id,)).fetchone()
+    return json.loads(row['metadata'] or '{}')
+
+
+def test_purge_face_identities_strips_old_events_only(tmp_path):
+    db = _db(tmp_path)
+    ids = {'face_identities': {'people': [{'person_id': 1, 'name': 'Alex'}], 'unknown': 0}, 'camera_id': 'c1'}
+    old_id = db.add_event(
+        created_at='2020-01-01T00:00:00+00:00', source='rtsp', snapshot_path=None,
+        detections=[], metadata=dict(ids),
+    )
+    recent_id = db.add_event(
+        created_at='2026-08-19T00:00:00+00:00', source='rtsp', snapshot_path=None,
+        detections=[], metadata=dict(ids),
+    )
+    purged = db.purge_face_identities(older_than='2021-01-01T00:00:00+00:00')
+    assert purged == 1
+    # Old event lost its identities but kept the rest of the metadata.
+    old_meta = _event_metadata(db, old_id)
+    assert 'face_identities' not in old_meta
+    assert old_meta['camera_id'] == 'c1'
+    # Recent event is untouched.
+    assert 'face_identities' in _event_metadata(db, recent_id)
+
+
+def test_purge_face_identities_noop_without_matches(tmp_path):
+    db = _db(tmp_path)
+    db.add_event(
+        created_at='2020-01-01T00:00:00+00:00', source='rtsp', snapshot_path=None,
+        detections=[], metadata={'camera_id': 'c1'},  # no face_identities
+    )
+    assert db.purge_face_identities(older_than='2026-01-01T00:00:00+00:00') == 0
+
+
+def test_purge_face_identities_by_policy_respects_retention_setting(tmp_path, monkeypatch):
+    import app.backup as backup
+    import app.state as state
+
+    db = _db(tmp_path)
+    old_id = db.add_event(
+        created_at='2020-01-01T00:00:00+00:00', source='rtsp', snapshot_path=None,
+        detections=[], metadata={'face_identities': {'people': [], 'unknown': 1}},
+    )
+    monkeypatch.setattr(state, 'database', db)
+
+    # retention_days = 0 -> keep indefinitely (no-op).
+    monkeypatch.setattr(backup, 'effective_face_recognition_config', lambda: {'retention_days': 0})
+    assert backup.purge_face_identities_by_policy() == 0
+    assert 'face_identities' in _event_metadata(db, old_id)
+
+    # retention_days = 1 -> the 2020 event is well past the window and is purged.
+    monkeypatch.setattr(backup, 'effective_face_recognition_config', lambda: {'retention_days': 1})
+    assert backup.purge_face_identities_by_policy() == 1
+    assert 'face_identities' not in _event_metadata(db, old_id)
