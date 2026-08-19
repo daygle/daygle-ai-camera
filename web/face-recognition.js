@@ -93,21 +93,24 @@ function renderModels(models) {
     return;
   }
   frModelsMessage.textContent = '';
+  // NOTE: compose with a plain template + escapeHtml on the leaf values. Do NOT
+  // build sub-fragments with safeHtml and interpolate them into another
+  // safeHtml`` -- safeHtml escapes every interpolation, so a nested HTML string
+  // would render as visible markup instead of a live element.
   frModelList.innerHTML = models.map((model) => {
     const installed = model.installed
       ? '<span class="model-status model-status-installed">○ Installed</span>'
       : '';
     const button = model.installed
       ? ''
-      : safeHtml`<button class="btn-info model-action-btn" data-action="download" data-model-id="${model.id}">⬇ Download (~${String(model.approx_mb)} MB)</button>`;
-    return safeHtml`
+      : `<button class="btn-info model-action-btn" data-action="download" data-model-id="${escapeHtml(model.id)}">⬇ Download (~${escapeHtml(String(model.approx_mb))} MB)</button>`;
+    return `
       <div class="model-card">
         <div class="model-card-head">
-          <strong>${model.label}</strong>
-          ${installed ? '' : ''}
+          <strong>${escapeHtml(model.label)}</strong>
         </div>
-        <p class="muted">${model.description}</p>
-        <p class="muted">License: ${model.license} · ${String(model.dim)}-d</p>
+        <p class="muted">${escapeHtml(model.description)}</p>
+        <p class="muted">License: ${escapeHtml(model.license)} · ${escapeHtml(String(model.dim))}-d</p>
         <div class="button-row">${button}</div>
         <div class="model-status-slot">${installed}</div>
       </div>`;

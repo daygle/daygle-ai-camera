@@ -15,12 +15,15 @@ function formatDate(value) {
 
 function personCard(person) {
   const count = person.face_count ?? 0;
-  const notes = person.notes ? safeHtml`<p class="muted">${person.notes}</p>` : '';
-  return safeHtml`
-    <div class="model-card" data-person-id="${String(person.id)}">
+  // Compose with a plain template + escapeHtml on the (user-supplied) values.
+  // Building the notes fragment with safeHtml and interpolating it into another
+  // safeHtml`` would double-escape it and render the tags as visible text.
+  const notes = person.notes ? `<p class="muted">${escapeHtml(person.notes)}</p>` : '';
+  return `
+    <div class="model-card" data-person-id="${escapeHtml(String(person.id))}">
       <div class="model-card-head">
-        <strong>${person.name}</strong>
-        <span class="muted">${String(count)} face${count === 1 ? '' : 's'}</span>
+        <strong>${escapeHtml(person.name)}</strong>
+        <span class="muted">${escapeHtml(String(count))} face${count === 1 ? '' : 's'}</span>
       </div>
       ${notes}
       <div class="button-row">
