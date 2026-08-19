@@ -38,7 +38,7 @@ from app.object_settings import (
     update_still_dwell_alerts,
 )
 from app.object_tracking import update_object_tracks
-from app.face_identity import annotate_face_identities, face_identity_metadata
+from app.face_identity import annotate_face_identities, face_identity_metadata, unknown_face_alerts
 from app.region_detection import (
     detect_with_region_boost,
     detect_with_tiling,
@@ -616,6 +616,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # frame is a numpy array, so non-face cameras pay nothing. The annotations
     # ride through the ``{**det}`` copies below into the stored event + overlay.
     object_detections = annotate_face_identities(camera_id, object_detections, frame)
+    # Alert-on-unknown (Stage 2c): a detected face matching no enrolled person is
+    # itself alertable ("stranger"), one alert per track. Empty unless
+    # recognition is enabled with ``alert_unknown`` on.
+    _unknown_face_alerts = unknown_face_alerts(camera_id, object_detections)
     # Still-dwell alerts (Objects page: "still for N minutes"): a label that
     # has been detected continuously still for its configured threshold fires
     # one dwell alert per streak, watching the same Layer-1 background-
@@ -686,7 +690,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         if z.get('enabled', True) and z.get('monitor_objects', True)
     ]
     object_reason = _below_threshold_object_reason(detections, _monitored_zones)
-    if not alert_detections:
+    if not alert_detections and not _unknown_face_alerts:
         reason = _no_object_match_reason(detections, raw_labels, _monitored_zones)
         update_live_detection_status(camera_id, state='checked', reason=reason, object_reason=object_reason, detected_labels=raw_labels, matched_labels=[], detections=list(detections), motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         return None
@@ -707,6 +711,16 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             'confidence': float(_dwell.get('confidence') or 0),
             'message': f"Alert triggered: {_dwell_label} still for {_dwell.get('still_alert_minutes')} minutes",
             'motion_state': 'still',  # a dwell streak only fires while still
+        })
+    # Unknown-face alerts (Stage 2c): one per stranger track, added directly to
+    # ``triggered`` like dwell alerts (they self-debounce per track, so a
+    # cooldown rule is unnecessary).
+    for _unknown in _unknown_face_alerts:
+        triggered.append({
+            'rule_name': 'Unknown face',
+            'label': 'face',
+            'confidence': float(_unknown.get('confidence') or 0),
+            'message': 'Alert triggered: unrecognized face detected',
         })
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     triggered_labels = {str(alert.get('label') or '').lower() for alert in triggered}
