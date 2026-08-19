@@ -38,6 +38,7 @@ from app.object_settings import (
     update_still_dwell_alerts,
 )
 from app.object_tracking import update_object_tracks
+from app.face_identity import annotate_face_identities, face_identity_metadata
 from app.region_detection import (
     detect_with_region_boost,
     detect_with_tiling,
@@ -609,6 +610,12 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # continuity). Additive: it only annotates the dicts, so alerts/recordings
     # are unchanged, and the ids thread through to the history + recording rows.
     object_detections = update_object_tracks(camera_id, object_detections)
+    # Face recognition (Stage 2c): annotate each ``face`` detection in place with
+    # the recognised person (or mark it unknown), amortised across the stable
+    # track id. A no-op unless recognition is enabled with a loaded model and the
+    # frame is a numpy array, so non-face cameras pay nothing. The annotations
+    # ride through the ``{**det}`` copies below into the stored event + overlay.
+    object_detections = annotate_face_identities(camera_id, object_detections, frame)
     # Still-dwell alerts (Objects page: "still for N minutes"): a label that
     # has been detected continuously still for its configured threshold fires
     # one dwell alert per streak, watching the same Layer-1 background-
@@ -800,7 +807,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     else:
         image_bytes = image
     snapshot_path = _state.storage.save_image_snapshot(image_bytes, f'{camera_id}.jpg')
-    event_id = _state.database.add_event(created_at=event_time, source='rtsp', snapshot_path=snapshot_path, detections=recording_detections, alert_triggered=bool(triggered), metadata={'camera_id': settings.get('id'), 'camera_name': settings.get('name'), 'ai_backend': ai_state['configured_backend'], 'detector_backend': ai_state['active_backend'], 'source': 'live-stream'})
+    event_id = _state.database.add_event(created_at=event_time, source='rtsp', snapshot_path=snapshot_path, detections=recording_detections, alert_triggered=bool(triggered), metadata={'camera_id': settings.get('id'), 'camera_name': settings.get('name'), 'ai_backend': ai_state['configured_backend'], 'detector_backend': ai_state['active_backend'], 'source': 'live-stream', **face_identity_metadata(recording_detections)})
     recording_id = attach_event_recording(event_id, event_time, 'rtsp', recording_detections, camera_id=camera_id, recording_config=camera_recording_config)
     # Remember the event even when no recording attached: the debounce state
     # must advance for alert-only events too, otherwise the next cycle (which
