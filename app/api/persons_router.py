@@ -10,11 +10,16 @@ all of their embeddings.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from app.auth_gates import require_admin
 from app.deps import get_database, get_face_recognition_service
-from app.face_recognition import crop_face_region, decode_bgr_image, embedding_to_bytes
+from app.face_recognition import (
+    crop_face_region,
+    decode_bgr_image,
+    embedding_to_bytes,
+    encode_face_thumbnail,
+)
 from app.face_recognition_service import refresh_face_recognition_matcher
 from app.request_helpers import write_audit_log, _read_uploaded_image
 
@@ -134,15 +139,42 @@ async def enroll_face(
             detail='Could not embed the face (image too small or model unavailable).',
         )
     dim = int(vector.shape[0])
+    # Keep a small JPEG of the enrolled crop so the People page can show what
+    # was enrolled. Encoding never raises (returns None on failure), so a
+    # thumbnail hiccup never blocks storing the embedding.
+    thumbnail = encode_face_thumbnail(crop)
     face_id = db.add_person_face(
         person_id,
         embedding=embedding_to_bytes(vector),
         dim=dim,
         model=service.model_id,
+        thumbnail=thumbnail,
     )
     refresh_face_recognition_matcher()
     write_audit_log(request, db, 'enroll', 'person.face', resource_id=str(person_id), details={'face_id': face_id})
     return {'ok': True, 'face_id': face_id, 'faces': db.list_person_faces(person_id)}
+
+
+@router.get('/api/persons/{person_id}/faces/{face_id}/thumbnail')
+def get_face_thumbnail(person_id: int, face_id: int, request: Request, db=Depends(get_database)):
+    """Serve the stored JPEG thumbnail for an enrolled face (admin-only).
+
+    Biometric imagery, so this is gated the same as the rest of the People
+    API. Returns 404 for an unknown face, a face belonging to a different
+    person, or a face enrolled before thumbnails were captured.
+    """
+    require_admin(request)
+    faces = db.list_person_faces(person_id)
+    if not any(int(face['id']) == face_id for face in faces):
+        raise HTTPException(status_code=404, detail='Face not found.')
+    image_bytes = db.get_person_face_thumbnail(face_id)
+    if not image_bytes:
+        raise HTTPException(status_code=404, detail='No thumbnail for this face.')
+    return Response(
+        content=image_bytes,
+        media_type='image/jpeg',
+        headers={'Cache-Control': 'private, max-age=300'},
+    )
 
 
 @router.delete('/api/persons/{person_id}/faces/{face_id}')

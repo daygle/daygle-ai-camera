@@ -208,3 +208,31 @@ def test_crop_face_region_clamps_and_rejects_empty():
     # Zero-area / out-of-frame box raises.
     with pytest.raises(ValueError):
         crop_face_region(img, {'x': 100, 'y': 100, 'width': 10, 'height': 10})
+
+
+def test_encode_face_thumbnail_downscales_and_encodes_jpeg():
+    import cv2
+    from app.face_recognition import encode_face_thumbnail
+    # A large crop is downscaled so its longest side is at most max_size.
+    src = np.full((400, 300, 3), 128, dtype=np.uint8)
+    data = encode_face_thumbnail(src, max_size=160)
+    assert isinstance(data, bytes) and len(data) > 0
+    assert data[:3] == b'\xff\xd8\xff'  # JPEG SOI marker
+    decoded = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert max(decoded.shape[:2]) == 160  # longest side clamped
+    assert decoded.shape[0] == 160 and decoded.shape[1] == 120  # aspect preserved
+
+
+def test_encode_face_thumbnail_does_not_upscale_small_crops():
+    from app.face_recognition import encode_face_thumbnail
+    import cv2
+    src = np.full((40, 30, 3), 200, dtype=np.uint8)
+    data = encode_face_thumbnail(src, max_size=160)
+    decoded = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert decoded.shape[:2] == (40, 30)  # kept crisp, not blown up
+
+
+def test_encode_face_thumbnail_returns_none_on_empty():
+    from app.face_recognition import encode_face_thumbnail
+    assert encode_face_thumbnail(None) is None
+    assert encode_face_thumbnail(np.zeros((0, 0, 3), dtype=np.uint8)) is None

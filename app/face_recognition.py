@@ -105,6 +105,38 @@ def crop_face_region(image_bgr: Any, box: dict[str, int] | None) -> Any:
     return image_bgr[y:y2, x:x2]
 
 
+def encode_face_thumbnail(image_bgr: Any, *, max_size: int = 160, quality: int = 82) -> bytes | None:
+    """Encode a BGR crop to a small JPEG thumbnail for the enrolment UI.
+
+    The crop is downscaled so its longest side is at most ``max_size`` (never
+    upscaled, so a tiny crop stays crisp rather than blurred) and JPEG-encoded.
+    Returns ``None`` -- never raises -- on an empty crop or any encode failure,
+    so enrolment still succeeds without a thumbnail rather than aborting on a
+    cosmetic step.
+    """
+    if image_bgr is None or getattr(image_bgr, 'size', 0) == 0:
+        return None
+    try:
+        import cv2
+    except ImportError:  # pragma: no cover - exercised only in minimal installs
+        return None
+    try:
+        height, width = image_bgr.shape[:2]
+        if height <= 0 or width <= 0:
+            return None
+        scale = min(1.0, float(max_size) / float(max(height, width)))
+        if scale < 1.0:
+            new_size = (max(1, int(round(width * scale))), max(1, int(round(height * scale))))
+            image_bgr = cv2.resize(image_bgr, new_size, interpolation=cv2.INTER_AREA)
+        ok, buffer = cv2.imencode('.jpg', image_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
+        if not ok:
+            return None
+        return bytes(buffer.tobytes())
+    except Exception as exc:  # pragma: no cover - defensive: never fail enrolment on the thumbnail
+        logger.debug('Face thumbnail encode failed; enrolling without a thumbnail: %s', exc)
+        return None
+
+
 def normalize_embedding(vector: Any) -> Any:
     """Return the L2-normalised copy of ``vector`` (float32).
 

@@ -28,7 +28,7 @@ function personCard(person) {
       ${notes}
       <div class="button-row">
         <label class="btn-info model-action-btn">
-          ⬆ Enrol Face<input type="file" accept="image/*" data-action="enroll" hidden />
+          📷 Enrol Face<input type="file" accept="image/jpeg,image/png,image/webp" data-action="enroll" hidden />
         </label>
         <button class="btn-info model-action-btn" type="button" data-action="faces">Faces</button>
         <button class="btn-info model-action-btn" type="button" data-action="rename">Rename</button>
@@ -107,11 +107,26 @@ async function showFaces(card) {
     if (!faces.length) {
       panel.innerHTML = '<p class="muted">No faces enrolled for this person yet.</p>';
     } else {
-      panel.innerHTML = faces.map((face) => safeHtml`
-        <div class="person-face-row">
-          <span class="muted">Face #${String(face.id)} · ${formatDate(face.created_at)}</span>
-          <button class="btn-danger model-action-btn" type="button" data-action="delete-face" data-face-id="${String(face.id)}">Delete</button>
-        </div>`).join('');
+      // Plain template + escapeHtml on values: the ``thumb`` fragment is
+      // already-safe HTML markup, so interpolating it through safeHtml`` would
+      // double-escape its tags into visible text (see personCard above).
+      const rows = faces.map((face) => {
+        const faceId = escapeHtml(String(face.id));
+        const src = `/api/persons/${encodeURIComponent(personId)}/faces/${encodeURIComponent(String(face.id))}/thumbnail`;
+        const thumb = face.has_thumbnail
+          ? `<img class="face-thumb-img" loading="lazy" alt="Enrolled face ${faceId}" src="${escapeHtml(src)}" />`
+          : '<div class="face-thumb-img face-thumb-placeholder" aria-hidden="true">👤</div>';
+        return `
+          <figure class="face-thumb">
+            ${thumb}
+            <figcaption class="face-thumb-caption">
+              <span class="muted">Face #${faceId}</span>
+              <span class="face-thumb-date muted">${escapeHtml(formatDate(face.created_at))}</span>
+            </figcaption>
+            <button class="btn-danger model-action-btn face-thumb-delete" type="button" data-action="delete-face" data-face-id="${faceId}">Delete</button>
+          </figure>`;
+      });
+      panel.innerHTML = `<div class="face-thumb-grid">${rows.join('')}</div>`;
     }
     panel.hidden = false;
   } catch (err) {

@@ -80,6 +80,30 @@ def test_add_list_delete_person_face(tmp_path):
     assert db.list_person_faces(pid) == []
 
 
+def test_person_face_thumbnail_roundtrip(tmp_path):
+    db = _db(tmp_path)
+    pid = db.add_person('Alex')
+    jpeg = b'\xff\xd8\xff\xe0stub-jpeg-bytes'
+    with_thumb = db.add_person_face(
+        pid, embedding=_emb([1, 0, 0, 0]), dim=4, model='arcface', thumbnail=jpeg
+    )
+    without_thumb = db.add_person_face(
+        pid, embedding=_emb([0, 1, 0, 0]), dim=4, model='arcface'
+    )
+
+    faces = {f['id']: f for f in db.list_person_faces(pid)}
+    # The listing exposes only a boolean flag, never the blob itself.
+    assert faces[with_thumb]['has_thumbnail'] is True
+    assert faces[without_thumb]['has_thumbnail'] is False
+    assert 'thumbnail' not in faces[with_thumb]
+
+    # The bytes come back verbatim; a face with no thumbnail returns None.
+    assert db.get_person_face_thumbnail(with_thumb) == jpeg
+    assert db.get_person_face_thumbnail(without_thumb) is None
+    # An unknown face id is None (the API turns that into a 404).
+    assert db.get_person_face_thumbnail(999_999) is None
+
+
 def test_load_face_embeddings_filters_by_model(tmp_path):
     db = _db(tmp_path)
     alex = db.add_person('Alex')
