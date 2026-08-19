@@ -451,3 +451,151 @@ def test_mux_staging_enospc_surfaces_disk_full(tmp_path, monkeypatch, caplog):
     assert diagnostics[0][1]['details']['stage'] == 'staging'
     # Not the misleading "sidecar disappeared" path.
     assert 'disappeared before mux' not in caplog.text
+
+
+def _fake_statvfs(*, free_inodes: int, total_inodes: int = 10_000_000):
+    """Return a statvfs stand-in reporting plenty of free bytes but a chosen
+    number of free inodes, to model inode exhaustion on a roomy disk."""
+    def statvfs(_path):
+        # Include the block fields too so the real ``shutil.disk_usage`` (which
+        # also calls ``os.statvfs``) keeps working when this stand-in is active.
+        return types.SimpleNamespace(
+            f_favail=free_inodes,
+            f_files=total_inodes,
+            f_bavail=10 ** 9,
+            f_bfree=10 ** 9,
+            f_blocks=10 ** 9,
+            f_frsize=4096,
+        )
+    return statvfs
+
+
+def test_mux_reports_inode_exhaustion_at_preflight(tmp_path, monkeypatch, caplog):
+    """When the recordings filesystem has free bytes but no free inodes, the
+    pre-flight must keep the silent clip WITHOUT running ffmpeg and report an
+    honest "out of inodes" message -- a plain "disk is full" line would send
+    operators to check free space that ``df -h`` shows is fine."""
+    service = _service(tmp_path)
+    audio_dir = service.audio_dir / 'camera-1'
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    source = _wav(audio_dir / 'aud-000.wav', 4096)
+    now = time.time()
+    diagnostics = []
+    service.diagnostic_callback = lambda *a, **k: diagnostics.append((a, k))
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(service, '_segment_timeline', lambda *a, **k: [(source, now - 1, now)])
+    monkeypatch.setattr(service, '_readable_audio_segments', lambda segments: segments)
+    # Plenty of free bytes -- the byte pre-flight passes.
+    monkeypatch.setattr(
+        recordings_module.shutil, 'disk_usage',
+        lambda _path: types.SimpleNamespace(free=10 ** 12),
+    )
+    # ...but the inode table is exhausted.
+    monkeypatch.setattr(recordings_module.os, 'statvfs', _fake_statvfs(free_inodes=0))
+
+    def boom(*a, **k):
+        raise AssertionError('ffmpeg must not run when inodes are exhausted')
+
+    monkeypatch.setattr(recordings_module.subprocess, 'run', boom)
+
+    video = tmp_path / 'clip.mp4'
+    video.write_bytes(b'video')
+    caplog.set_level(logging.WARNING)
+
+    assert service._mux_prebuffer_audio('camera-1', video, now - 1, 1.0) is False
+    assert video.exists(), 'the silent clip must be kept'
+    assert 'out of inodes' in caplog.text
+    # The misleading byte-shortage wording must NOT appear for an inode shortage.
+    assert 'recordings disk is full' not in caplog.text
+    assert diagnostics and diagnostics[0][0][1] == 'audio_mux_disk_full'
+    assert diagnostics[0][1]['details']['stage'] == 'preflight'
+    assert diagnostics[0][1]['details']['free_inodes'] == 0
+
+
+def test_mux_staging_enospc_reports_inode_exhaustion(tmp_path, monkeypatch, caplog):
+    """A staging ENOSPC on a disk with free bytes but no free inodes is
+    reported as inode exhaustion, not the misleading "disk is full"."""
+    service = _service(tmp_path)
+    audio_dir = service.audio_dir / 'camera-1'
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    source = _wav(audio_dir / 'aud-000.wav', 4096)
+    now = time.time()
+    diagnostics = []
+    service.diagnostic_callback = lambda *a, **k: diagnostics.append((a, k))
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(service, '_segment_timeline', lambda *a, **k: [(source, now - 1, now)])
+    monkeypatch.setattr(service, '_readable_audio_segments', lambda segments: segments)
+    monkeypatch.setattr(recordings_module.os, 'statvfs', _fake_statvfs(free_inodes=12))
+
+    def enospc_copy(_src, _dst):
+        raise OSError(errno.ENOSPC, 'No space left on device')
+
+    monkeypatch.setattr(recordings_module.shutil, 'copyfile', enospc_copy)
+    monkeypatch.setattr(
+        recordings_module.subprocess, 'run',
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError('ffmpeg must not run')),
+    )
+
+    video = tmp_path / 'clip.mp4'
+    video.write_bytes(b'video')
+    caplog.set_level(logging.WARNING)
+
+    assert service._mux_prebuffer_audio('camera-1', video, now - 1, 1.0) is False
+    assert 'out of inodes' in caplog.text
+    assert diagnostics and diagnostics[0][1]['details']['stage'] == 'staging'
+    assert diagnostics[0][1]['details']['free_inodes'] == 12
+
+
+def test_mux_enospc_falls_back_to_disk_full_when_inodes_are_fine(tmp_path, monkeypatch, caplog):
+    """An ffmpeg ENOSPC while inodes are plentiful still reports a genuine
+    byte-shortage "disk is full" -- inode reporting must not swallow a real
+    full-disk condition."""
+    service = _service(tmp_path)
+    audio_dir = service.audio_dir / 'camera-1'
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    source = _wav(audio_dir / 'aud-000.wav', 4096)
+    now = time.time()
+    diagnostics = []
+    service.diagnostic_callback = lambda *a, **k: diagnostics.append((a, k))
+
+    monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(service, '_segment_timeline', lambda *a, **k: [(source, now - 1, now)])
+    monkeypatch.setattr(service, '_readable_audio_segments', lambda segments: segments)
+    monkeypatch.setattr(recordings_module.os, 'statvfs', _fake_statvfs(free_inodes=1_000_000))
+
+    def fake_run(command, *_args, **_kwargs):
+        return subprocess.CompletedProcess(
+            command, -28, stdout='',
+            stderr='No space left on device\nConversion failed!',
+        )
+
+    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+
+    video = tmp_path / 'clip.mp4'
+    video.write_bytes(b'video')
+    caplog.set_level(logging.WARNING)
+
+    assert service._mux_prebuffer_audio('camera-1', video, now - 1, 1.0) is False
+    assert 'recordings disk is full' in caplog.text
+    assert 'out of inodes' not in caplog.text
+    assert diagnostics and diagnostics[0][1]['details']['stage'] == 'mux'
+
+
+def test_free_inodes_returns_none_when_unavailable(tmp_path, monkeypatch):
+    """Without ``os.statvfs`` (e.g. Windows) or when the FS reports no inode
+    table, ``_free_inodes`` returns ``(None, None)`` so callers fall back to
+    the generic wording rather than falsely claiming inode exhaustion."""
+    service = _service(tmp_path)
+
+    monkeypatch.delattr(recordings_module.os, 'statvfs', raising=False)
+    assert service._free_inodes(tmp_path) == (None, None)
+
+    # f_files == 0 -> the filesystem does not track inodes; treat as unknown.
+    monkeypatch.setattr(
+        recordings_module.os, 'statvfs',
+        lambda _p: types.SimpleNamespace(f_favail=0, f_files=0),
+        raising=False,
+    )
+    assert service._free_inodes(tmp_path) == (None, None)

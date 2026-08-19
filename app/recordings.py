@@ -125,6 +125,15 @@ class RecordingService:
     # ffmpeg's raw ENOSPC stderr after burning CPU through the whole encode.
     AUDIO_MUX_DISK_HEADROOM_FRACTION: float = 0.15
     AUDIO_MUX_DISK_HEADROOM_BYTES: int = 16 * 1024 * 1024
+    # A filesystem can report free bytes while having no free inodes: the
+    # recordings volume holds one tiny WAV sidecar per second per camera plus
+    # every clip, so its inode table can run dry long before its bytes do. When
+    # that happens ``df -h`` still shows ample space yet creating any new file
+    # (the staged copy, or ffmpeg's output) fails with ENOSPC. The mux keeps a
+    # small inode margin so this surfaces as an honest "out of inodes" diagnostic
+    # instead of a misleading "disk is full" message that sends operators to
+    # check free space that was never the problem.
+    AUDIO_MUX_MIN_FREE_INODES: int = 4096
     # Minimum interval between "recordings disk is full" camera diagnostics for
     # the same camera. While the disk stays full, every finalized event would
     # otherwise re-attempt the doomed mux and re-emit the diagnostic.
@@ -1934,6 +1943,29 @@ class RecordingService:
             )
         return staged
 
+    @staticmethod
+    def _free_inodes(path: Path) -> tuple[int | None, int | None]:
+        """Return ``(free_inodes, total_inodes)`` for ``path``'s filesystem.
+
+        Used to tell a genuine byte shortage apart from inode exhaustion, which
+        raises ENOSPC while ``df -h`` still shows free space (see
+        ``AUDIO_MUX_MIN_FREE_INODES``). ``os.statvfs`` is POSIX-only and some
+        filesystems report zero for the inode fields, so ``(None, None)`` is
+        returned when the count is unavailable and callers fall back to the
+        generic "disk is full" wording."""
+        statvfs = getattr(os, 'statvfs', None)
+        if statvfs is None:
+            return None, None
+        try:
+            st = statvfs(str(path))
+        except OSError:
+            return None, None
+        # f_files == 0 means the filesystem does not track inodes (e.g. some
+        # network/virtual mounts); treat that as "unknown" rather than "full".
+        if not getattr(st, 'f_files', 0):
+            return None, None
+        return st.f_favail, st.f_files
+
     def _warn_audio_mux_disk_full(
         self,
         camera_key: str,
@@ -1943,28 +1975,55 @@ class RecordingService:
         free_bytes: int | None = None,
         needed_bytes: int | None = None,
         stderr_tail: str = '',
+        probe_path: Path | None = None,
     ) -> None:
         """Surface a recordings-disk-full condition that forced a silent clip.
 
         Logs a clear warning for this clip and emits a rate-limited camera
-        diagnostic so operators see the real problem (a full recordings disk)
-        instead of ffmpeg's raw ``No space left on device`` stderr. While the
-        disk stays full every finalized event re-hits this path, so the
-        diagnostic is emitted at most once per camera per
-        ``AUDIO_MUX_DISK_FULL_DIAGNOSTIC_MIN_SECONDS``.
+        diagnostic so operators see the real problem instead of ffmpeg's raw
+        ``No space left on device`` stderr. When the shortage came from an
+        actual ENOSPC syscall (the staging copy or ffmpeg) rather than the
+        byte pre-flight, ``probe_path`` is inspected: if the filesystem is out
+        of inodes the message says so explicitly, because ``df -h`` will show
+        free space and a plain "disk is full" line would send operators to
+        check the wrong thing. While the condition persists every finalized
+        event re-hits this path, so the diagnostic is emitted at most once per
+        camera per ``AUDIO_MUX_DISK_FULL_DIAGNOSTIC_MIN_SECONDS``.
         """
-        if free_bytes is not None and needed_bytes is not None:
-            space = (
-                f'free {free_bytes / (1024 ** 3):.2f} GiB, needs ~{needed_bytes / (1024 ** 3):.2f} GiB'
+        free_inodes = total_inodes = None
+        if probe_path is not None:
+            free_inodes, total_inodes = self._free_inodes(probe_path)
+        # A byte shortage is only asserted when the caller measured one
+        # (pre-flight). For syscall-driven ENOSPC (free_bytes is None) the true
+        # cause is often an exhausted inode table on an otherwise-roomy disk.
+        inode_exhausted = (
+            free_bytes is None
+            and free_inodes is not None
+            and free_inodes <= self.AUDIO_MUX_MIN_FREE_INODES
+        )
+        if inode_exhausted:
+            logger.warning(
+                'Audio mux for %s was not completed because the recordings filesystem is out of inodes '
+                '(%d free of %d); the disk still reports free space but cannot create new files because '
+                'too many small files (per-second audio sidecars and clips) exhausted its inode table. '
+                'Keeping the silent video clip. Delete old recordings to free inodes and restore event audio.',
+                camera_key,
+                free_inodes,
+                total_inodes,
             )
         else:
-            space = 'the recordings filesystem is full'
-        logger.warning(
-            'Audio mux for %s was not completed because the recordings disk is full (%s); '
-            'keeping the silent video clip. Free up space on the recordings drive to restore event audio.',
-            camera_key,
-            space,
-        )
+            if free_bytes is not None and needed_bytes is not None:
+                space = (
+                    f'free {free_bytes / (1024 ** 3):.2f} GiB, needs ~{needed_bytes / (1024 ** 3):.2f} GiB'
+                )
+            else:
+                space = 'the recordings filesystem is full'
+            logger.warning(
+                'Audio mux for %s was not completed because the recordings disk is full (%s); '
+                'keeping the silent video clip. Free up space on the recordings drive to restore event audio.',
+                camera_key,
+                space,
+            )
         now = time.time()
         with self._disk_full_lock:
             last = self._disk_full_warned_at.get(camera_key)
@@ -1980,14 +2039,28 @@ class RecordingService:
             'free_bytes': free_bytes,
             'needed_bytes': needed_bytes,
         }
+        if free_inodes is not None:
+            details['free_inodes'] = free_inodes
+            details['total_inodes'] = total_inodes
         if stderr_tail:
             details['stderr_tail'] = stderr_tail
+        if inode_exhausted:
+            message = (
+                f'Could not add audio to the event clip for {camera_id or camera_key} because the '
+                f'recordings filesystem is out of inodes ({free_inodes} free); the disk still has free '
+                'space but cannot create new files. Delete old recordings to free inodes and restore '
+                'event audio.'
+            )
+        else:
+            message = (
+                f'Could not add audio to the event clip for {camera_id or camera_key} because the '
+                'recordings disk is full; the clip was saved without sound. Free space on the recordings '
+                'drive to restore event audio.'
+            )
         self._emit_diagnostic(
             camera_id or camera_key,
             'audio_mux_disk_full',
-            f'Could not add audio to the event clip for {camera_id or camera_key} because the recordings '
-            'disk is full; the clip was saved without sound. Free space on the recordings drive to restore '
-            'event audio.',
+            message,
             severity='warning',
             details=details,
         )
@@ -2049,6 +2122,7 @@ class RecordingService:
                         camera_key,
                         camera_id,
                         stage='staging',
+                        probe_path=staging_dir,
                     )
                     return False
                 raise
@@ -2097,6 +2171,22 @@ class RecordingService:
                     stage='preflight',
                     free_bytes=free_bytes,
                     needed_bytes=needed_bytes,
+                )
+                return False
+
+            # Bytes alone don't guarantee the write will succeed: the recordings
+            # volume can exhaust its inode table (one WAV sidecar per second per
+            # camera, plus every clip) while ``df -h`` still shows free space, so
+            # both the staged copies and ffmpeg's output would fail with ENOSPC.
+            # Catch that here with an honest diagnostic instead of after burning
+            # CPU through the whole encode.
+            free_inodes, _total_inodes = self._free_inodes(video_path.parent)
+            if free_inodes is not None and free_inodes <= self.AUDIO_MUX_MIN_FREE_INODES:
+                self._warn_audio_mux_disk_full(
+                    camera_key,
+                    camera_id,
+                    stage='preflight',
+                    probe_path=video_path.parent,
                 )
                 return False
 
@@ -2178,6 +2268,7 @@ class RecordingService:
                             camera_id,
                             stage='mux',
                             stderr_tail=stderr_tail,
+                            probe_path=video_path.parent,
                         )
                     else:
                         logger.warning('Failed to mux prebuffer audio for %s; keeping silent video clip: %s', camera_key, stderr_tail)
