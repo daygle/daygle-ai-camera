@@ -876,6 +876,17 @@ class AuthService:
                 'cleanup_expired_sessions: camera_diagnostics purge failed: %s',
                 diag_purge_exc,
             )
+        # Face-identity retention: strip recognised-identity data from events
+        # older than the recognition retention window. Separate best-effort try
+        # so a recognition-schema issue cannot roll back the cleanups above.
+        try:
+            from app.backup import purge_face_identities_by_policy
+            purge_face_identities_by_policy()
+        except Exception as face_purge_exc:
+            logging.getLogger('daygle.ai').warning(
+                'cleanup_expired_sessions: face_identities purge failed: %s',
+                face_purge_exc,
+            )
 
     def public_user(self, row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
         return {

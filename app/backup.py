@@ -39,6 +39,7 @@ import app.state as _state
 from app.config_facades import (
     effective_auth_config,
     effective_cameras_config,
+    effective_face_recognition_config,
     effective_recording_config,
     effective_storage_config,
 )
@@ -716,4 +717,23 @@ def purge_camera_diagnostics_by_policy() -> int:
         return _state.database.purge_camera_diagnostics_older_than(older_than)
     except Exception as exc:
         logger.debug('Camera diagnostics purge failed: %s', exc)
+        return 0
+
+
+def purge_face_identities_by_policy() -> int:
+    """Age out recognised-identity data on events per the recognition policy.
+
+    The face-recognition ``retention_days`` setting governs how long recognised
+    identities are kept on event metadata; ``0`` (the default) means keep
+    indefinitely, so this is a no-op then. Otherwise events older than the window
+    have their ``face_identities`` block stripped (the event itself is kept).
+    """
+    try:
+        retention_days = int(effective_face_recognition_config().get('retention_days', 0) or 0)
+        if retention_days <= 0:
+            return 0
+        older_than = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+        return _state.database.purge_face_identities(older_than=older_than)
+    except Exception as exc:
+        logger.debug('Face identity purge failed: %s', exc)
         return 0

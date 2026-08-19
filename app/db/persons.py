@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from app.auth import utc_now
@@ -157,6 +158,36 @@ class PersonsMixin:
                 (model,),
             ).fetchall()
             return [dict(row) for row in rows]
+
+    def purge_face_identities(self, *, older_than: str) -> int:
+        """Strip recognised-identity data from events older than ``older_than``.
+
+        Enforces the face-recognition retention policy: the ``face_identities``
+        block written onto an event's metadata (recognised people + unknown
+        count) is removed once the event ages past the retention window, while
+        the event itself and its detections are kept. Returns the number of
+        events anonymised.
+        """
+        purged = 0
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT id, metadata FROM events "
+                "WHERE created_at < ? AND metadata LIKE '%face_identities%'",
+                (older_than,),
+            ).fetchall()
+            for row in rows:
+                try:
+                    metadata = json.loads(row['metadata'] or '{}')
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(metadata, dict) and 'face_identities' in metadata:
+                    metadata.pop('face_identities', None)
+                    db.execute(
+                        "UPDATE events SET metadata = ? WHERE id = ?",
+                        (json.dumps(metadata), row['id']),
+                    )
+                    purged += 1
+        return purged
 
     def count_person_faces(self, *, model: str | None = None) -> int:
         with self.connect() as db:
