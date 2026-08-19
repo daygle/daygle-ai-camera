@@ -108,7 +108,10 @@ async def download_face_recognition_model(
     try:
         await run_in_threadpool(_download_weights, url, destination)
     except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=f'Model download failed: {exc}') from exc
+        # Log the detail server-side but return a generic message: raw
+        # exception text can expose internal paths / stack information.
+        logger.warning('Face embedding model download failed from %s: %s', url, exc)
+        raise HTTPException(status_code=502, detail='Model download failed.') from exc
     rel_path = _relative_model_path(destination)
     write_audit_log(request, db, 'download', 'settings.face_recognition.model', details={
         'model_path': rel_path,

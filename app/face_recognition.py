@@ -264,7 +264,11 @@ class FaceEmbedder:
             if output_shape and isinstance(output_shape[-1], int):
                 self._embedding_dim = int(output_shape[-1])
         except Exception as exc:  # pragma: no cover - onnxruntime load failure path
-            self.unavailable_reason = f"Failed to load face embedding model: {exc}"
+            # Log the underlying error for operators but keep the surfaced
+            # reason generic: it flows to the settings API response, and raw
+            # exception text can leak internal paths / stack details.
+            logger.warning('Failed to load face embedding model %s: %s', self.model_path, exc)
+            self.unavailable_reason = "Failed to load the face embedding model."
             self.session = None
 
     @property

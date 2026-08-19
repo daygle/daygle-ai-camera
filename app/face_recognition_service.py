@@ -171,8 +171,10 @@ def reload_face_recognition_service(config: dict[str, Any] | None = None) -> tup
     try:
         service = FaceRecognitionService(config, _state.database)
     except Exception as exc:  # pragma: no cover - construction is defensive already
+        # Keep the returned reason generic: it flows to the settings API
+        # response, and raw exception text can leak internal details.
         logger.warning('Face recognition reload failed: %s', exc)
-        return False, str(exc)
+        return False, 'Face recognition failed to load.'
     with _singleton_lock:
         _service = service
     return service.available, service.unavailable_reason
