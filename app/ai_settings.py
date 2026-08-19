@@ -76,6 +76,21 @@ from app.config_facades import effective_ai_config
 from app.detector import load_labels
 from app.settings import config_file_path
 
+# Each entry describes one downloadable model. Required keys: ``pt`` (source
+# weight name), ``onnx`` (exported filename), ``label``, ``approx_mb``,
+# ``input_size``, ``description``. Optional keys:
+#   ``nms_free``       - YOLO26 end-to-end head (exported with ``end2end=True``).
+#   ``labels``         - project-relative labels file for a non-COCO model
+#                        (default ``models/coco.names``). A face detector ships
+#                        ``models/face.names``; the download flow binds it to the
+#                        active AI settings automatically.
+#   ``keypoint_count`` - pose/keypoint head width (e.g. ``5`` for a YOLO-face
+#                        landmark head) so the detector reads class scores from
+#                        the right columns instead of the landmark columns.
+#   ``weights_url``    - explicit https source for weights Ultralytics can't
+#                        resolve by name (third-party face models). See
+#                        ``docs/ai-detection.md`` for a ready-to-add face entry
+#                        and the licensing note that goes with it.
 YOLO_MODELS: dict[str, dict[str, Any]] = {
     # YOLOv8 series - Traditional NMS-based detection
     'yolov8n': {'pt': 'yolov8n.pt', 'onnx': 'yolov8n.onnx', 'label': 'YOLOv8n · Nano', 'approx_mb': 6, 'input_size': 640, 'description': 'Fastest inference, lowest accuracy. Best for low-power or embedded hardware.'},
@@ -343,6 +358,7 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'confidence_only_nms',
         'precision',
         'use_io_binding',
+        'keypoint_count',
     }
     updated = {key: current.get(key) for key in allowed if key in current}
     for key, value in payload.items():
@@ -451,6 +467,21 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if not 32 <= input_size <= 2048:
         raise HTTPException(status_code=400, detail='input_size must be an integer between 32 and 2048.')
     updated['input_size'] = input_size
+    # ``keypoint_count`` marks a pose/keypoint detection head (e.g. a YOLO-face
+    # export with a 5-point landmark head). It is normally set for the operator
+    # by the model download flow from the catalog entry, not typed by hand, but
+    # is validated here so a hand-edited API payload can't smuggle a bad value
+    # onto the detector. ``0`` (the default) is a plain detection head.
+    raw_keypoint_count = updated.get('keypoint_count', 0)
+    if isinstance(raw_keypoint_count, bool):
+        raise HTTPException(status_code=400, detail='keypoint_count must be a non-negative integer.')
+    try:
+        keypoint_count = int(raw_keypoint_count) if raw_keypoint_count not in (None, '') else 0
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='keypoint_count must be a non-negative integer.') from exc
+    if not 0 <= keypoint_count <= 32:
+        raise HTTPException(status_code=400, detail='keypoint_count must be between 0 and 32.')
+    updated['keypoint_count'] = keypoint_count
     raw_model_path = updated.get('model_path') or current.get('model_path') or 'models/yolo11n.onnx'
     model_path = _canonical_models_path(raw_model_path, 'model_path')
     # Existence guard, but only when the caller explicitly supplied a *new*

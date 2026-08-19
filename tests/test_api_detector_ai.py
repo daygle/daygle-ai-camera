@@ -507,3 +507,164 @@ def test_ai_models_endpoint(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+def test_do_download_model_binds_face_labels_and_keypoints(tmp_path, monkeypatch):
+    """Downloading a catalog entry that declares ``labels`` / ``keypoint_count``
+    (a face detector) binds them onto the active AI settings, so the model is
+    usable without hand-editing. A plain COCO entry resets both to defaults."""
+    _load_app(tmp_path, monkeypatch)
+    import app.model_management as mm
+
+    models_dir = tmp_path / 'models'
+    monkeypatch.setattr(mm, 'BASE_DIR', tmp_path)
+    monkeypatch.setattr(mm, 'MODELS_DIR', models_dir)
+
+    catalog = dict(mm.YOLO_MODELS)
+    catalog['facetest'] = {
+        'pt': 'facetest.pt', 'onnx': 'facetest.onnx', 'label': 'Face Test',
+        'approx_mb': 6, 'input_size': 640,
+        'labels': 'models/face.names', 'keypoint_count': 5,
+        'description': 'synthetic face entry',
+    }
+    monkeypatch.setattr(mm, 'YOLO_MODELS', catalog)
+
+    active_settings = {
+        'backend': 'onnx', 'model_path': 'models/yolo11n-640.onnx',
+        'labels_path': 'models/coco.names', 'input_size': 640, 'keypoint_count': 0,
+    }
+    monkeypatch.setattr(mm, 'effective_ai_config', lambda: dict(active_settings))
+    monkeypatch.setattr(mm, 'validate_ai_settings', lambda payload: dict(payload))
+    monkeypatch.setattr(mm, 'detector_status', lambda settings: dict(settings))
+    monkeypatch.setattr(mm, '_installed_package_version', lambda _package: 'test-version')
+
+    reload_calls = []
+
+    def fake_reload(settings):
+        active_settings.update(settings)
+        reload_calls.append(dict(settings))
+        return True, None
+
+    monkeypatch.setattr(mm._state, 'reload_detector', fake_reload)
+    monkeypatch.setattr(mm._state.database, 'set_setting', lambda *_args: None)
+
+    def fake_export(model_name, destination, imgsz, **_kwargs):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(f'{model_name}-{imgsz}'.encode())
+        return destination.stat().st_size
+
+    monkeypatch.setattr(mm, 'export_yolo_onnx', fake_export)
+
+    mm._do_download_model('facetest', True, 640)
+    assert reload_calls[-1]['labels_path'] == 'models/face.names'
+    assert reload_calls[-1]['keypoint_count'] == 5
+
+    # Switching to a plain COCO model resets the labels file and clears the
+    # pose/keypoint marker so a leftover face config can't leak onto it.
+    mm._do_download_model('yolo11n', True, 640)
+    assert reload_calls[-1]['labels_path'] == 'models/coco.names'
+    assert reload_calls[-1]['keypoint_count'] == 0
+
+
+def test_export_yolo_onnx_fetches_weights_url(tmp_path, monkeypatch):
+    """A catalog entry with a ``weights_url`` (weights Ultralytics can't resolve
+    by name) pre-fetches the ``.pt`` into ``models/`` before the export runs."""
+    _load_app(tmp_path, monkeypatch)
+    main = sys.modules['app.main']
+    import app.model_management as mm
+
+    models_dir = tmp_path / 'models'
+    models_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(mm, 'BASE_DIR', tmp_path)
+    monkeypatch.setattr(mm, 'MODELS_DIR', models_dir)
+
+    catalog = dict(mm.YOLO_MODELS)
+    catalog['facetest'] = {
+        'pt': 'facetest.pt', 'onnx': 'facetest.onnx', 'label': 'Face Test',
+        'approx_mb': 6, 'input_size': 640,
+        'labels': 'models/face.names', 'keypoint_count': 5,
+        'weights_url': 'https://example.invalid/facetest.pt',
+        'description': 'synthetic face entry',
+    }
+    monkeypatch.setattr(mm, 'YOLO_MODELS', catalog)
+
+    download_calls = []
+
+    def fake_download(url, destination, **_kwargs):
+        download_calls.append((url, destination))
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b'fake weights')
+
+    monkeypatch.setattr(mm, '_download_weights', fake_download)
+
+    destination = models_dir / 'facetest.onnx'
+
+    def fake_run(command, cwd, capture_output, text, timeout, check):  # noqa: ANN001
+        destination.write_bytes(b'fake onnx')
+        return subprocess.CompletedProcess(command, 0, stdout='exported', stderr='')
+
+    monkeypatch.setattr(main.subprocess, 'run', fake_run)
+
+    mm.export_yolo_onnx('facetest', destination)
+    assert download_calls == [('https://example.invalid/facetest.pt', models_dir / 'facetest.pt')]
+    assert (models_dir / 'facetest.pt').read_bytes() == b'fake weights'
+
+
+def test_download_weights_rejects_non_https(tmp_path):
+    import app.model_management as mm
+    with pytest.raises(RuntimeError):
+        mm._download_weights('http://example.invalid/x.pt', tmp_path / 'x.pt')
+    with pytest.raises(RuntimeError):
+        mm._download_weights('file:///etc/passwd', tmp_path / 'x.pt')
+
+
+def test_download_weights_writes_atomically(tmp_path, monkeypatch):
+    import app.model_management as mm
+
+    class _FakeResponse:
+        def __init__(self, payload):
+            self._chunks = [payload]
+
+        def read(self, _n):
+            return self._chunks.pop(0) if self._chunks else b''
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+    monkeypatch.setattr(mm.urllib.request, 'urlopen', lambda *_a, **_k: _FakeResponse(b'weights-bytes'))
+    dest = tmp_path / 'sub' / 'weights.pt'
+    mm._download_weights('https://example.invalid/weights.pt', dest)
+    assert dest.read_bytes() == b'weights-bytes'
+    # No partial .download temp file is left behind on success.
+    assert not any(p.name.startswith('weights.pt.download') for p in dest.parent.iterdir())
+
+
+def test_download_weights_enforces_size_cap(tmp_path, monkeypatch):
+    import app.model_management as mm
+
+    class _FakeResponse:
+        def __init__(self):
+            self._left = 3
+
+        def read(self, _n):
+            if self._left <= 0:
+                return b''
+            self._left -= 1
+            return b'A' * 64
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+    monkeypatch.setattr(mm.urllib.request, 'urlopen', lambda *_a, **_k: _FakeResponse())
+    dest = tmp_path / 'weights.pt'
+    with pytest.raises(RuntimeError):
+        mm._download_weights('https://example.invalid/weights.pt', dest, max_bytes=100)
+    # Failed download leaves no cached weight and no temp file behind.
+    assert not dest.exists()
+    assert not any(p.name.startswith('weights.pt.download') for p in tmp_path.iterdir())

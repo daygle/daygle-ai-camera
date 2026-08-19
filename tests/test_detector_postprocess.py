@@ -558,3 +558,83 @@ def test_io_binding_warmup_failure_falls_back_to_session_run(monkeypatch, tmp_pa
     assert det.available is True
     assert det._use_io_binding is False
     assert len(run_feeds) == 1
+
+
+# ---------------------------------------------------------------------------
+# Pose / keypoint head (YOLO-face)
+# ---------------------------------------------------------------------------
+# A YOLO-face export is a YOLOv8-pose model with a single ``face`` class and a
+# 5-point facial-landmark head, so each anchor emits
+# ``4 bbox + 1 class score + 5*3 keypoint`` = 20 columns. The trailing 15
+# keypoint columns hold pixel coordinates, not class logits; the detector must
+# read the class score from column 4 only (``keypoint_count > 0``) instead of
+# argmax-ing across the landmark values.
+
+FACE_LABELS = ["face"]
+KPT = 5
+FACE_COLS = 4 + len(FACE_LABELS) + KPT * 3  # 4 + 1 + 15 = 20
+
+
+def _face_detector(keypoint_count: int) -> OnnxYoloDetector:
+    det = OnnxYoloDetector(
+        model_path="/does-not-exist.onnx",
+        categories=FACE_LABELS,
+        confidence=0.45,
+        iou_threshold=0.45,
+        keypoint_count=keypoint_count,
+    )
+    det.input_width = 640
+    det.input_height = 640
+    return det
+
+
+def _face_pose_output(cx, cy, w, h, score, landmark_value=999.0):
+    """Build a YOLOv8-pose face output ``[1, 20, 8400]`` with one strong box.
+
+    The keypoint columns are filled with a large sentinel value so that a
+    decoder which wrongly treated them as class scores would argmax onto a
+    keypoint column and either mislabel or wildly mis-score the detection.
+    """
+    out = np.zeros((1, FACE_COLS, 8400), dtype=np.float32)
+    out[0, 0, 0], out[0, 1, 0], out[0, 2, 0], out[0, 3, 0] = cx, cy, w, h
+    out[0, 4, 0] = score  # single "face" class score
+    out[0, 5:, 0] = landmark_value  # keypoint coords must be ignored
+    return out
+
+
+def test_face_pose_head_decodes_class_from_column_four():
+    det = _face_detector(keypoint_count=KPT)
+    out = _face_pose_output(320, 320, 100, 100, score=0.9)
+    res = det._postprocess_nms(out[0], SCALE, PAD_X, PAD_Y, OW, OH, 0.45)
+    assert len(res) == 1
+    assert res[0]["label"] == "face"
+    # Score comes from the class column, not the sentinel-filled landmarks.
+    assert res[0]["confidence"] == pytest.approx(0.9, abs=1e-3)
+    box = res[0]["box"]
+    assert box["x"] == pytest.approx(540 / OW, abs=0.01)
+    assert box["y"] == pytest.approx(260 / OH, abs=0.01)
+    assert box["width"] == pytest.approx(200 / OW, abs=0.01)
+    assert box["height"] == pytest.approx(200 / OH, abs=0.01)
+
+
+def test_face_pose_head_respects_confidence_filter():
+    det = _face_detector(keypoint_count=KPT)
+    out = _face_pose_output(320, 320, 100, 100, score=0.2)
+    res = det._postprocess_nms(out[0], SCALE, PAD_X, PAD_Y, OW, OH, 0.45)
+    assert res == []
+
+
+def test_pose_head_without_keypoint_count_mislabels_regression():
+    """Same pose output, but keypoint_count=0: the trailing landmark columns
+    are read as class scores, so the detection does NOT come back as a clean
+    single "face" box. This documents exactly the failure keypoint_count fixes.
+    """
+    det = _face_detector(keypoint_count=0)
+    out = _face_pose_output(320, 320, 100, 100, score=0.9)
+    res = det._postprocess_nms(out[0], SCALE, PAD_X, PAD_Y, OW, OH, 0.45)
+    # A single label ("face") is the only valid class, yet the argmax lands on
+    # a keypoint column, so either nothing survives as "face" at 0.9 or the box
+    # is labelled from an out-of-range class index. Assert it is NOT the clean
+    # result the keypoint-aware path produces.
+    assert not (len(res) == 1 and res[0]["label"] == "face"
+                and res[0]["confidence"] == pytest.approx(0.9, abs=1e-3))

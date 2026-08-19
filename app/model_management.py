@@ -25,6 +25,7 @@ import importlib.metadata
 import importlib.util
 import json
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -341,6 +342,46 @@ def _fetch_models_manifest() -> dict[str, Any]:
     return {'updated_at': None, 'source': 'pypi:ultralytics', 'models': {model_id: {'version': effective_version} for model_id in YOLO_MODELS}}
 
 
+def _download_weights(url: str, destination: Path, *, max_bytes: int = 512 * 1024 * 1024) -> None:
+    """Fetch a source ``.pt`` weight file from an explicit ``weights_url``.
+
+    Ultralytics auto-resolves its own catalog names (``yolo11n.pt`` etc.) from
+    the Ultralytics release assets, but a third-party model -- e.g. a YOLO-face
+    weight hosted on another GitHub release -- is not in that asset set, so the
+    catalog entry must name a ``weights_url`` and we fetch it here before the
+    export subprocess runs ``YOLO(pt_name)``.
+
+    Only ``https`` URLs are accepted (defence against ``file://`` / plaintext
+    fetches), the download is size-capped, and the file is written atomically to
+    a sibling temp path so a partial transfer can never masquerade as a cached
+    weight.
+    """
+    if not str(url).lower().startswith('https://'):
+        raise RuntimeError(f'weights_url must be an https URL, got: {url!r}')
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    request = urllib.request.Request(url, headers={'User-Agent': 'daygle-ai-camera-updater/1.0'})
+    tmp = destination.with_suffix(destination.suffix + f'.download-{os.getpid()}')
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            total = 0
+            with tmp.open('wb') as handle:
+                while True:
+                    chunk = response.read(1024 * 256)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise RuntimeError(
+                            f'weights download exceeded the {max_bytes} byte cap for {url}.'
+                        )
+                    handle.write(chunk)
+        if tmp.stat().st_size <= 0:
+            raise RuntimeError(f'weights download from {url} was empty.')
+        tmp.replace(destination)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, precision: str = 'fp32', device: str = 'auto') -> int:
     if model_name not in YOLO_MODELS:
         raise ValueError(f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
@@ -348,6 +389,16 @@ def export_yolo_onnx(model_name: str, destination: Path, imgsz: int = 640, preci
     pt_name = info['pt']
     nms_free = info.get('nms_free', False)
     destination.parent.mkdir(parents=True, exist_ok=True)
+    # Pre-fetch third-party source weights that Ultralytics cannot resolve by
+    # name (e.g. face models hosted outside the Ultralytics asset set). Once the
+    # ``.pt`` is cached in ``models/`` the export subprocess below reuses it
+    # exactly like an Ultralytics-hosted weight; catalog entries without a
+    # ``weights_url`` (all the built-in COCO models) skip this entirely.
+    weights_url = info.get('weights_url')
+    if weights_url:
+        cached_source = MODELS_DIR / pt_name
+        if not cached_source.is_file():
+            _download_weights(str(weights_url), cached_source)
     # Pass the weights name and image size as argv rather than interpolating
     # into the ``python -c`` source.  Defence-in-depth against injection.
     #
@@ -678,7 +729,17 @@ def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int =
         # endpoint allows an operator-selected ``imgsz``; using the catalog's
         # nominal size here made dynamic-input models run at a different
         # resolution than the one just exported until the next reload.
-        updated = validate_ai_settings({**ai_settings, 'model_path': rel_path, 'input_size': imgsz})
+        model_overrides: dict[str, Any] = {'model_path': rel_path, 'input_size': imgsz}
+        # Bind the model's labels file and pose/keypoint head to the active
+        # AI settings so a non-COCO model (e.g. a face detector shipping
+        # ``models/face.names`` + a 5-point landmark head) is usable straight
+        # after download without hand-editing settings. Both keys are written
+        # unconditionally -- from the catalog entry when present, otherwise the
+        # COCO defaults -- so switching *back* from a face model to a plain COCO
+        # model also resets the labels file and clears the keypoint count.
+        model_overrides['labels_path'] = info.get('labels', 'models/coco.names')
+        model_overrides['keypoint_count'] = int(info.get('keypoint_count', 0) or 0)
+        updated = validate_ai_settings({**ai_settings, **model_overrides})
         _state.database.set_setting('ai', updated, utc_now())
         reloaded, error = _state.reload_detector(updated)
     else:
