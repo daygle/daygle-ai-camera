@@ -126,9 +126,9 @@ def app_modules():
 
 
 def test_web_router_registers_expected_page_paths(app_modules):
-    """web_router should expose exactly 23 unique page-handler paths.
+    """web_router should expose exactly 24 unique page-handler paths.
 
-    Path count comes from 22 functions × 1 decorator each + 1 function
+    Path count comes from 23 functions × 1 decorator each + 1 function
     (``dashboard_aliases``) × 1 decorator (``/search``).
     Total = 23 routes + 23 unique paths (every path is distinct). ``/events``
     is served by its own ``events_page`` function (the single activity feed).
@@ -162,6 +162,7 @@ def test_web_router_registers_expected_page_paths(app_modules):
         "/recordings/{recording_id}",
         "/onnx",
         "/ai",
+        "/face-recognition",
         "/yamnet-tflite",
         "/yamnet",
         "/profile",
