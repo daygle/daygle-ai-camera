@@ -170,3 +170,41 @@ def test_embedder_embed_with_stubbed_session(tmp_path, monkeypatch):
     assert float(np.linalg.norm(out)) == pytest.approx(1.0, abs=1e-6)
     assert out[0] == pytest.approx(0.6, abs=1e-6)
     assert out[1] == pytest.approx(0.8, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Enrollment helpers: decode + crop
+# ---------------------------------------------------------------------------
+
+def test_decode_bgr_image_round_trip():
+    import cv2
+    from app.face_recognition import decode_bgr_image
+    src = np.zeros((20, 30, 3), dtype=np.uint8)
+    src[:, :, 2] = 255  # red in BGR
+    ok, buf = cv2.imencode('.png', src)
+    assert ok
+    decoded = decode_bgr_image(buf.tobytes())
+    assert decoded.shape == (20, 30, 3)
+    assert int(decoded[0, 0, 2]) == 255
+
+
+def test_decode_bgr_image_rejects_garbage():
+    from app.face_recognition import decode_bgr_image
+    with pytest.raises(ValueError):
+        decode_bgr_image(b'')
+    with pytest.raises(ValueError):
+        decode_bgr_image(b'not an image')
+
+
+def test_crop_face_region_clamps_and_rejects_empty():
+    from app.face_recognition import crop_face_region
+    img = np.zeros((100, 100, 3), dtype=np.uint8)
+    # No box -> whole image.
+    assert crop_face_region(img, None).shape == (100, 100, 3)
+    # Normal crop.
+    assert crop_face_region(img, {'x': 10, 'y': 20, 'width': 30, 'height': 40}).shape == (40, 30, 3)
+    # Over-wide box is clamped to bounds.
+    assert crop_face_region(img, {'x': 90, 'y': 0, 'width': 999, 'height': 50}).shape == (50, 10, 3)
+    # Zero-area / out-of-frame box raises.
+    with pytest.raises(ValueError):
+        crop_face_region(img, {'x': 100, 'y': 100, 'width': 10, 'height': 10})

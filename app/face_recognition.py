@@ -64,6 +64,47 @@ def _resolve_project_path(path: str | Path) -> Path:
     return candidate if candidate.is_absolute() else _BASE_DIR / candidate
 
 
+def decode_bgr_image(image_bytes: bytes) -> Any:
+    """Decode raw image bytes to an OpenCV BGR array for enrollment.
+
+    Raises ``ValueError`` on empty input or an undecodable image so the caller
+    can return a clean 400 rather than passing garbage to the embedder.
+    """
+    npmod = _require_numpy()
+    try:
+        import cv2
+    except ImportError as exc:  # pragma: no cover - exercised only in minimal installs
+        raise FaceEmbedderUnavailableError(
+            "opencv-python-headless is not installed. Install requirements.txt or run pip install opencv-python-headless."
+        ) from exc
+    if not image_bytes:
+        raise ValueError("image is empty")
+    array = npmod.frombuffer(image_bytes, dtype=npmod.uint8)
+    image = cv2.imdecode(array, cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError("uploaded file is not a readable image")
+    return image
+
+
+def crop_face_region(image_bgr: Any, box: dict[str, int] | None) -> Any:
+    """Crop ``image_bgr`` to a pixel box ``{x, y, width, height}``.
+
+    Returns the whole image when ``box`` is falsy. The box is clamped to the
+    image bounds; a zero-area result raises ``ValueError`` so an out-of-frame
+    box cannot silently enrol an empty crop.
+    """
+    if not box:
+        return image_bgr
+    height, width = image_bgr.shape[:2]
+    x = max(0, min(int(box.get('x', 0)), width))
+    y = max(0, min(int(box.get('y', 0)), height))
+    x2 = max(x, min(x + int(box.get('width', 0)), width))
+    y2 = max(y, min(y + int(box.get('height', 0)), height))
+    if x2 <= x or y2 <= y:
+        raise ValueError("crop box has zero area")
+    return image_bgr[y:y2, x:x2]
+
+
 def normalize_embedding(vector: Any) -> Any:
     """Return the L2-normalised copy of ``vector`` (float32).
 
