@@ -39,27 +39,30 @@
         </div>
       </div>
       <div id="frMessage" class="muted"></div>
-      <form id="frForm" class="settings-form">
-        <label class="switch-row">
-          <input type="checkbox" name="enabled" />
-          <span>Enable face recognition</span>
-        </label>
-        <label class="switch-row">
-          <input type="checkbox" name="alert_unknown" />
-          <span>Alert on unrecognized faces (stranger)</span>
-        </label>
-        <label class="field">
-          <span>Match threshold <span class="muted">(0-1; higher is stricter)</span></span>
-          <input type="number" name="match_threshold" min="0" max="1" step="0.01" />
-        </label>
-        <label class="field">
-          <span>Minimum face size <span class="muted">(pixels; 0 = no minimum)</span></span>
-          <input type="number" name="min_face_pixels" min="0" step="1" />
-        </label>
-        <label class="field">
-          <span>Identity retention <span class="muted">(days on events; 0 = keep forever)</span></span>
-          <input type="number" name="retention_days" min="0" step="1" />
-        </label>
+      <form id="frForm">
+        <div class="form-grid">
+          <label>
+            <span>Face Recognition <span class="info-tip" data-tip="Identify enrolled people on cameras running a face-detection model. Requires a downloaded embedding model." title="Identify enrolled people on cameras running a face-detection model. Requires a downloaded embedding model." tabindex="0" aria-label="Help: Identify enrolled people on cameras running a face-detection model. Requires a downloaded embedding model."></span></span>
+            <select name="enabled">
+              <option value="true">Enabled</option>
+              <option value="false">Disabled</option>
+            </select></label>
+          <label>
+            <span>Alert On Unknown Faces <span class="info-tip" data-tip="Raise a stranger alert when a detected face does not match any enrolled person." title="Raise a stranger alert when a detected face does not match any enrolled person." tabindex="0" aria-label="Help: Raise a stranger alert when a detected face does not match any enrolled person."></span></span>
+            <select name="alert_unknown">
+              <option value="true">Enabled</option>
+              <option value="false">Disabled</option>
+            </select></label>
+          <label>
+            <span>Match Threshold <span class="info-tip" data-tip="Cosine-similarity cutoff (0-1) for matching a face to an enrolled person. Higher is stricter. Default: 0.5" title="Cosine-similarity cutoff (0-1) for matching a face to an enrolled person. Higher is stricter. Default: 0.5" tabindex="0" aria-label="Help: Cosine-similarity cutoff (0-1) for matching a face to an enrolled person. Higher is stricter. Default: 0.5"></span></span>
+            <input name="match_threshold" type="number" min="0" max="1" step="0.01" /></label>
+          <label>
+            <span>Minimum Face Size <span class="info-tip" data-tip="Ignore faces smaller than this many pixels on the longest edge. 0 disables the minimum." title="Ignore faces smaller than this many pixels on the longest edge. 0 disables the minimum." tabindex="0" aria-label="Help: Ignore faces smaller than this many pixels on the longest edge. 0 disables the minimum."></span></span>
+            <input name="min_face_pixels" type="number" min="0" step="1" /></label>
+          <label>
+            <span>Identity Retention <span class="info-tip" data-tip="Days to keep identity labels on events before they are cleared. 0 keeps them forever." title="Days to keep identity labels on events before they are cleared. 0 keeps them forever." tabindex="0" aria-label="Help: Days to keep identity labels on events before they are cleared. 0 keeps them forever."></span></span>
+            <input name="retention_days" type="number" min="0" step="1" /></label>
+        </div>
         <div class="button-row">
           <button id="frSaveBtn" class="btn-success" type="submit">Save Settings</button>
           <button id="frReloadBtn" class="btn-info" type="button">Reload</button>

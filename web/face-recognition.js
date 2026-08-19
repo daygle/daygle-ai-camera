@@ -31,8 +31,8 @@ function renderStatus(status) {
 }
 
 function fillForm(status) {
-  frForm.enabled.checked = Boolean(status.enabled);
-  frForm.alert_unknown.checked = Boolean(status.alert_unknown);
+  frForm.enabled.value = status.enabled ? 'true' : 'false';
+  frForm.alert_unknown.value = status.alert_unknown ? 'true' : 'false';
   frForm.match_threshold.value = status.match_threshold ?? 0.5;
   frForm.min_face_pixels.value = status.min_face_pixels ?? 0;
   frForm.retention_days.value = status.retention_days ?? 0;
@@ -51,8 +51,8 @@ async function loadStatus() {
 async function saveSettings(event) {
   event.preventDefault();
   const body = {
-    enabled: frForm.enabled.checked,
-    alert_unknown: frForm.alert_unknown.checked,
+    enabled: frForm.enabled.value === 'true',
+    alert_unknown: frForm.alert_unknown.value === 'true',
     match_threshold: parseFloat(frForm.match_threshold.value),
     min_face_pixels: parseInt(frForm.min_face_pixels.value || '0', 10),
     retention_days: parseInt(frForm.retention_days.value || '0', 10),
