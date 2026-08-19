@@ -115,3 +115,31 @@ def test_persons_require_admin(tmp_path, monkeypatch):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+def test_people_page_served_to_admin(tmp_path, monkeypatch):
+    app, _db = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        _login(client)
+        status, _h, page = client.request('/people')
+        assert status == 200
+        assert '<title>People - Daygle AI Camera</title>' in page
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_people_page_requires_admin(tmp_path, monkeypatch):
+    app, _db = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)  # not logged in
+        status, _h, _b = client.request('/people', follow_redirects=False)
+        assert status in (302, 303, 401, 403)
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)

@@ -269,6 +269,7 @@ window.daygleAuthReady = (async () => {
         { href: '/onnx', match: '/onnx', label: 'ONNX' },
         { href: '/yamnet-tflite', match: '/yamnet-tflite', label: 'YAMNet TFLite' },
         { href: '/face-recognition', match: '/face-recognition', label: 'Face Recognition' },
+        { href: '/people', match: '/people', label: 'People' },
       ],
     },
     {
