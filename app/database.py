@@ -9,6 +9,7 @@ from app.db.alerts import AlertsMixin
 from app.db.audit import AuditLogMixin
 from app.db.diagnostics import CameraDiagnosticsMixin
 from app.db.events import EventsMixin
+from app.db.persons import PersonsMixin
 from app.db.recordings import RecordingsMixin
 from app.db.settings_repo import SettingsRepoMixin
 
@@ -50,6 +51,7 @@ class EventDatabase(
     SettingsRepoMixin,
     AuditLogMixin,
     CameraDiagnosticsMixin,
+    PersonsMixin,
 ):
     def __init__(self, database_path: str) -> None:
         self.database_path = Path(database_path)
@@ -263,6 +265,36 @@ class EventDatabase(
                 CREATE INDEX IF NOT EXISTS idx_camera_diag_camera_id ON camera_diagnostics(camera_id);
                 CREATE INDEX IF NOT EXISTS idx_camera_diag_event_type ON camera_diagnostics(event_type);
                 CREATE INDEX IF NOT EXISTS idx_camera_diag_severity ON camera_diagnostics(severity);
+
+                -- Face recognition enrolment (Stage 2). ``persons`` names an
+                -- enrolled individual; ``person_faces`` holds one or more face
+                -- embeddings per person (the vectors matched against at runtime).
+                -- Each embedding row records the ``model`` id and vector ``dim``
+                -- it was produced with, because vectors from different embedding
+                -- models are NOT comparable -- the matcher only compares within a
+                -- single model/dim, so switching embedders can never silently
+                -- match against stale, incompatible vectors.
+                CREATE TABLE IF NOT EXISTS persons (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    notes TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS person_faces (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    person_id INTEGER NOT NULL,
+                    embedding BLOB NOT NULL,
+                    dim INTEGER NOT NULL,
+                    model TEXT NOT NULL,
+                    source_snapshot TEXT,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(person_id) REFERENCES persons(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_person_faces_person ON person_faces(person_id);
+                CREATE INDEX IF NOT EXISTS idx_person_faces_model ON person_faces(model);
                 """
             )
 
