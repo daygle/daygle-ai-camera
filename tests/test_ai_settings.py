@@ -1138,3 +1138,28 @@ def test_validate_ai_settings_rejects_nonint_keypoint_count(monkeypatch, ais):
     with pytest.raises(HTTPException) as exc:
         ais.validate_ai_settings({'keypoint_count': 'lots'})
     assert exc.value.status_code == 400
+
+
+# -- face model catalog entries (Stage 1b) --------------------------------
+
+def test_yolo11_face_catalog_entries_are_well_formed():
+    """The bundled YOLO11-Face family must carry the face labels file, a
+    5-point keypoint head, and an https weights_url so the download flow binds
+    the right decode + labels automatically."""
+    from app.ai_settings import YOLO_MODELS
+
+    face_ids = [k for k in YOLO_MODELS if k.endswith('-face')]
+    assert set(face_ids) == {'yolo11n-face', 'yolo11s-face', 'yolo11m-face', 'yolo11l-face'}
+
+    for model_id in face_ids:
+        info = YOLO_MODELS[model_id]
+        # Same required schema as every other catalog entry.
+        for key in ('pt', 'onnx', 'label', 'approx_mb', 'input_size', 'description'):
+            assert key in info, f'{model_id} missing {key}'
+        # Face-specific keys the detector/download flow rely on.
+        assert info['labels'] == 'models/face.names'
+        assert info['keypoint_count'] == 5
+        assert info['weights_url'].startswith('https://')
+        assert info['weights_url'].endswith(info['pt'])
+        # Face models are plain grid/pose heads, never NMS-free.
+        assert info.get('nms_free', False) is False

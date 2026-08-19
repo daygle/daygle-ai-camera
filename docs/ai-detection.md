@@ -184,9 +184,10 @@ visible, rather than any time a full body is detected.
 > person (enrolment + embeddings) is a separate, larger capability and is not
 > part of this page.
 
-Three pieces make a model a face detector:
+Under the hood, three pieces make a model a face detector (all wired up for you
+when you download one from the library — see below):
 
-1. **A face-detection ONNX model** placed in `models/`.
+1. **A face-detection ONNX model** in `models/`.
 2. **A labels file** — `models/face.names` ships with the application and
    contains the single label `face`.
 3. **`keypoint_count`** — most YOLO-face weights are pose models with a 5-point
@@ -196,41 +197,35 @@ Three pieces make a model a face detector:
    instead of mistaking a landmark coordinate for a class score. Plain
    detection-head face models (no landmarks) use `keypoint_count = 0`.
 
-### Adding a face model to the library
+### Downloading a face model
 
-Catalog entries live in `YOLO_MODELS` (`app/ai_settings.py`). A face entry uses
-the same schema as the COCO models plus three optional keys — `labels`,
-`keypoint_count`, and `weights_url` (an explicit `https` source for weights that
-Ultralytics cannot resolve by name, since face weights are not part of the
-Ultralytics asset set). For example:
+The model library ships a **YOLO11 · Face** family — Nano, Small, Medium, and
+Large — alongside the COCO models on the Models tab. Downloading one works
+exactly like any other model: its source weights are fetched, exported to ONNX
+through the same Ultralytics pipeline, and the active AI settings are bound to
+`models/face.names` and `keypoint_count = 5` automatically. No manual settings
+edit is needed. Switching back to a COCO model resets `labels_path` to
+`models/coco.names` and `keypoint_count` to `0`.
 
-```python
-'yolo11n-face': {
-    'pt': 'yolo11n-face.pt',
-    'onnx': 'yolo11n-face.onnx',
-    'label': 'YOLO11n · Face',
-    'approx_mb': 6,
-    'input_size': 640,
-    'labels': 'models/face.names',
-    'keypoint_count': 5,
-    'weights_url': 'https://<host>/yolo11n-face.pt',
-    'description': 'Face detection (single "face" label).',
-},
-```
+Pick a size the same way you would for object detection: Nano for low-power
+hosts, Medium/Large for IR or night-vision cameras where small or low-contrast
+faces are harder to catch.
 
-When such a model is downloaded, its source weights are fetched from
-`weights_url`, exported to ONNX through the same Ultralytics pipeline as every
-other model, and the active AI settings are bound to the model's labels file and
-keypoint count automatically — no manual settings edit is required. Switching
-back to a COCO model resets `labels_path` to `models/coco.names` and
-`keypoint_count` to `0`.
+> **Licensing.** The bundled face weights come from
+> [YapaLab/yolo-face](https://github.com/YapaLab/yolo-face) (release `1.0.0`)
+> and are **GPL-3.0** licensed; they are exported through Ultralytics like every
+> other catalog model. The weights are downloaded on demand from their upstream
+> release — they are not redistributed inside this repository — but a deployment
+> that enables the one-click download should be comfortable with those terms.
 
-> **Licensing.** The application does **not** ship a face model or point the
-> catalog at a specific weight source, because the widely used YOLO-face weights
-> derive from GPL/AGPL-licensed training code. Choosing a weight source and
-> accepting its license is a deployment decision for the operator/maintainer.
-> Add the catalog entry (and confirm the license) before distributing a build
-> with one-click face-model download enabled.
+### Adding your own face model
+
+To use different weights, add an entry to `YOLO_MODELS` (`app/ai_settings.py`)
+using the same schema as the `yolo11*-face` entries: the standard model keys
+plus `labels: 'models/face.names'`, `keypoint_count` (5 for a 5-point landmark
+head, `0` for a plain detection head), and a `weights_url` — an explicit `https`
+source for weights Ultralytics cannot resolve by name. The download flow fetches
+`weights_url`, exports it, and binds the labels/keypoint settings automatically.
 
 ---
 
