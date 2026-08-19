@@ -1098,3 +1098,43 @@ def test_validate_ai_settings_omits_use_io_binding_when_absent(monkeypatch, ais)
     _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
     out = ais.validate_ai_settings({})
     assert 'use_io_binding' not in out
+
+
+# -- keypoint_count (face / pose head marker) -----------------------------
+
+def test_validate_ai_settings_defaults_keypoint_count_zero(monkeypatch, ais):
+    """Absent ``keypoint_count`` normalises to 0 (a plain detection head), so
+    every existing COCO config keeps its current decode behavior."""
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    out = ais.validate_ai_settings({})
+    assert out['keypoint_count'] == 0
+
+
+def test_validate_ai_settings_accepts_face_keypoint_count(monkeypatch, ais):
+    """A YOLO-face model persists ``keypoint_count=5`` (5-point landmark head)."""
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    out = ais.validate_ai_settings({'keypoint_count': 5})
+    assert out['keypoint_count'] == 5
+
+
+def test_validate_ai_settings_coerces_blank_keypoint_count(monkeypatch, ais):
+    """An empty-string form value is treated as 0, not a validation error."""
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    out = ais.validate_ai_settings({'keypoint_count': ''})
+    assert out['keypoint_count'] == 0
+
+
+def test_validate_ai_settings_rejects_negative_keypoint_count(monkeypatch, ais):
+    from fastapi import HTTPException
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    with pytest.raises(HTTPException) as exc:
+        ais.validate_ai_settings({'keypoint_count': -1})
+    assert exc.value.status_code == 400
+
+
+def test_validate_ai_settings_rejects_nonint_keypoint_count(monkeypatch, ais):
+    from fastapi import HTTPException
+    _install_ai_dependencies(monkeypatch, effective_ai_config_value={})
+    with pytest.raises(HTTPException) as exc:
+        ais.validate_ai_settings({'keypoint_count': 'lots'})
+    assert exc.value.status_code == 400

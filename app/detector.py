@@ -138,6 +138,7 @@ class OnnxYoloDetector:
         precision: str = "fp32",
         use_io_binding: bool = False,
         input_size: int = 640,
+        keypoint_count: int = 0,
     ) -> None:
         # Settings store project-relative paths (for example,
         # ``models/yolo11n.onnx``). Resolve those against the application root,
@@ -159,6 +160,18 @@ class OnnxYoloDetector:
         self.input_height = configured_size
         self.confidence = float(confidence)
         self.iou_threshold = float(iou_threshold)
+        # ``keypoint_count`` marks a pose/keypoint detection head (e.g. a
+        # YOLO-face export, which is a YOLOv8-pose model with a 5-point facial
+        # landmark head). Such a model emits ``4 bbox + nc class scores +
+        # keypoint_count*3`` columns per anchor; the trailing landmark columns
+        # must not be read as class scores, or a single-class ``face`` model
+        # would argmax across keypoint coordinates and mislabel every box (see
+        # ``_postprocess_nms``). ``0`` (the default) preserves the plain
+        # detection-head behavior for every COCO/YOLO model.
+        try:
+            self._keypoint_count = max(0, int(keypoint_count))
+        except (TypeError, ValueError):
+            self._keypoint_count = 0
         self.session: Any | None = None
         self.input_name: str | None = None
         self.output_names: list[str] = []
@@ -908,20 +921,34 @@ class OnnxYoloDetector:
         if n_cols < 5:
             return []
 
-        # Detect model format: YOLOv5 has an explicit objectness column at index 4
-        # (total = 4 bbox + 1 obj + N classes = N+5 cols); YOLOv8 goes straight
-        # from bbox to class scores (total = 4 + N = N+4 cols).  Use exact equality
-        # so an extra trailing column from some export tools doesn't trigger a
-        # false-positive.  Requires a labels file; without one we can't distinguish
-        # formats and default to YOLOv8 (no objectness) which is the safer guess.
-        has_objectness = len(self.labels) > 0 and n_cols == len(self.labels) + 5
-
-        if has_objectness:
-            objectness = predictions[:, 4]
-            class_scores = predictions[:, 5:]
-        else:
+        n_labels = len(self.labels)
+        # Pose/keypoint head (e.g. a YOLO-face export): columns are
+        # ``4 bbox + nc class scores + keypoint_count*3`` landmark values, with
+        # no objectness column. The trailing landmark columns carry pixel
+        # coordinates, not class logits, so they must be sliced off the class
+        # block explicitly -- otherwise a single-class ``face`` model would
+        # argmax across keypoint coordinates and mislabel (and mis-score) every
+        # detection. Only take this path when the output width is consistent
+        # with the declared head (``>= 4 + nc``); a mismatch (wrong labels file
+        # for the model) falls through to the plain-detection heuristic below.
+        if self._keypoint_count > 0 and n_labels > 0 and n_cols >= 4 + n_labels:
             objectness = None
-            class_scores = predictions[:, 4:]
+            class_scores = predictions[:, 4:4 + n_labels]
+        else:
+            # Detect model format: YOLOv5 has an explicit objectness column at
+            # index 4 (total = 4 bbox + 1 obj + N classes = N+5 cols); YOLOv8
+            # goes straight from bbox to class scores (total = 4 + N = N+4
+            # cols).  Use exact equality so an extra trailing column from some
+            # export tools doesn't trigger a false-positive.  Requires a labels
+            # file; without one we can't distinguish formats and default to
+            # YOLOv8 (no objectness) which is the safer guess.
+            has_objectness = n_labels > 0 and n_cols == n_labels + 5
+            if has_objectness:
+                objectness = predictions[:, 4]
+                class_scores = predictions[:, 5:]
+            else:
+                objectness = None
+                class_scores = predictions[:, 4:]
 
         class_ids = np.argmax(class_scores, axis=1)
         raw_scores = class_scores[np.arange(len(class_ids)), class_ids]
@@ -1031,6 +1058,7 @@ def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
         confidence_only_nms=_resolve_confidence_only_nms(ai_config.get("confidence_only_nms"), nms_free),
         precision=str(ai_config.get("precision", "fp32") or "fp32").strip().lower(),
         use_io_binding=_coerce_bool(ai_config.get("use_io_binding", False)),
+        keypoint_count=_optional_int("keypoint_count") or 0,
     )
 
 
