@@ -128,6 +128,12 @@ async function reloadService() {
   }
 }
 
+// Mirrors the ONNX models page card format (app/web/onnx.js): an active/
+// installed/available card state, a status badge, a size indicator, and a
+// Download / Use / Update / Delete action set. NOTE: compose with a plain
+// template + escapeHtml on the leaf values -- do NOT build sub-fragments with
+// safeHtml and interpolate them into another safeHtml`` (safeHtml escapes every
+// interpolation, so nested HTML would render as visible markup).
 function renderModels(models) {
   if (!models.length) {
     frModelList.innerHTML = '';
@@ -135,29 +141,68 @@ function renderModels(models) {
     return;
   }
   frModelsMessage.textContent = '';
-  // NOTE: compose with a plain template + escapeHtml on the leaf values. Do NOT
-  // build sub-fragments with safeHtml and interpolate them into another
-  // safeHtml`` -- safeHtml escapes every interpolation, so a nested HTML string
-  // would render as visible markup instead of a live element.
+  const maxMb = Math.max(1, ...models.map((m) => m.approx_mb || 0));
   frModelList.innerHTML = models.map((model) => {
-    const installed = model.installed
-      ? '<span class="model-status model-status-installed">○ Installed</span>'
-      : '';
-    const button = model.installed
-      ? ''
-      : `<button class="btn-info model-action-btn" data-action="download" data-model-id="${escapeHtml(model.id)}">⬇ Download (~${escapeHtml(String(model.approx_mb))} MB)</button>`;
+    const id = escapeHtml(model.id);
+    const isInstalled = !!model.installed;
+    const isActive = !!model.active;
+
+    let cardClass = 'model-card';
+    if (isActive) cardClass += ' model-card-active';
+    else if (isInstalled) cardClass += ' model-card-installed';
+    else cardClass += ' model-card-available';
+
+    let statusHtml = '';
+    if (isActive) statusHtml = '<span class="model-status model-status-active">● Active</span>';
+    else if (isInstalled) statusHtml = '<span class="model-status model-status-installed">○ Installed</span>';
+
+    const sizeMb = `~${escapeHtml(String(model.approx_mb))} MB`;
+    const barWidth = Math.min(100, Math.round(((model.approx_mb || 0) / maxMb) * 100));
+
+    const updateBtn = `<button class="btn-warning model-action-btn" data-action="update" data-model-id="${id}" title="Re-download this model's file (repair / refresh)">↻ Update</button>`;
+    let actionsHtml;
+    if (!isInstalled) {
+      actionsHtml = `<button class="btn-info model-action-btn" data-action="download" data-model-id="${id}">⬇ Download (~${escapeHtml(String(model.approx_mb))} MB)</button>`;
+    } else if (isActive) {
+      // The active model can't be deleted (recognition points at it); offer a
+      // refresh only, matching the ONNX page's "In Use" state.
+      actionsHtml = `<button class="btn-success model-action-btn" disabled>✓ In Use</button>${updateBtn}`;
+    } else {
+      actionsHtml = `
+        <button class="btn-success model-action-btn" data-action="select" data-model-id="${id}">▶ Use</button>
+        ${updateBtn}
+        <button class="btn-danger model-action-btn" data-action="delete" data-model-id="${id}">✕ Delete</button>`;
+    }
+
     return `
-      <div class="model-card" id="model-card-${escapeHtml(model.id)}">
-        <div class="model-card-head">
-          <strong>${escapeHtml(model.label)}</strong>
+      <div class="${cardClass}" id="model-card-${id}">
+        <div class="model-card-header">
+          <div class="model-card-title">
+            <h3>${escapeHtml(model.label)}</h3>
+            <div class="model-card-meta">${statusHtml}</div>
+          </div>
+          <div class="model-card-size">
+            <span class="model-size-value">${sizeMb}</span>
+            <div class="model-size-bar"><div class="model-size-fill" style="width:${barWidth}%"></div></div>
+          </div>
         </div>
-        <p class="muted">${escapeHtml(model.description)}</p>
+        <p class="model-card-desc">${escapeHtml(model.description)}</p>
         <p class="muted">License: ${escapeHtml(model.license)} · ${escapeHtml(String(model.dim))}-d</p>
         <div class="model-card-message model-card-message-hidden"></div>
-        <div class="button-row">${button}</div>
-        <div class="model-status-slot">${installed}</div>
+        <div class="model-card-actions">${actionsHtml}</div>
       </div>`;
   }).join('');
+}
+
+// Every mutating endpoint returns the combined status + models payload, so a
+// single response refreshes the status header, the settings form, and the cards.
+function applyModelsPayload(payload) {
+  renderStatus(payload);
+  fillForm(payload);
+  renderModels(payload.models || []);
+  if (payload.enabled && payload.reload_error) {
+    showToast(payload.reload_error, true);
+  }
 }
 
 async function loadModels() {
@@ -169,23 +214,55 @@ async function loadModels() {
   }
 }
 
-async function downloadModel(modelId, button) {
+const MODEL_ACTIONS = {
+  download: {
+    method: 'POST',
+    path: (id) => `/api/settings/face-recognition/embedding-models/${encodeURIComponent(id)}/download`,
+    progress: () => 'Downloading… this may take several minutes.',
+    done: 'Embedding model downloaded and selected.',
+    fail: 'Model download failed.',
+  },
+  select: {
+    method: 'POST',
+    path: (id) => `/api/settings/face-recognition/embedding-models/${encodeURIComponent(id)}/select`,
+    progress: () => 'Switching to this model…',
+    done: 'This model is now selected.',
+    fail: 'Could not switch to this model.',
+  },
+  update: {
+    method: 'POST',
+    path: (id) => `/api/settings/face-recognition/embedding-models/${encodeURIComponent(id)}/update`,
+    progress: () => 'Re-downloading model file…',
+    done: 'Model file refreshed.',
+    fail: 'Model update failed.',
+  },
+  delete: {
+    method: 'DELETE',
+    path: (id) => `/api/settings/face-recognition/embedding-models/${encodeURIComponent(id)}`,
+    progress: () => 'Deleting model file…',
+    done: 'Model deleted.',
+    fail: 'Could not delete the model.',
+    confirm: 'Delete this downloaded model file? You can download it again later.',
+  },
+};
+
+async function runModelAction(action, modelId, button) {
+  const spec = MODEL_ACTIONS[action];
+  if (!spec) return;
+  if (spec.confirm && !window.confirm(spec.confirm)) return;
   const original = button.textContent;
   button.disabled = true;
   button.classList.add('model-action-loading');
-  // Show progress inside the model card (no toast - feedback is local).
-  setModelMessage(modelId, `Downloading ${modelId}… this may take several minutes.`, 'loading');
+  setModelMessage(modelId, spec.progress(modelId), 'loading');
   try {
-    const status = await api(`/api/settings/face-recognition/embedding-models/${encodeURIComponent(modelId)}/download`, { method: 'POST' });
-    renderStatus(status);
-    fillForm(status);
-    await loadModels();
-    // loadModels() just re-rendered the card (now marked Installed), so set the
-    // success message on the fresh card and let it fade out on its own.
-    setModelMessage(modelId, 'Embedding model downloaded and selected.', 'success');
+    const payload = await api(spec.path(modelId), { method: spec.method });
+    applyModelsPayload(payload);
+    // renderModels() just replaced the card DOM; set the message on the fresh
+    // card and let it fade out on its own.
+    setModelMessage(modelId, spec.done, 'success');
     setTimeout(() => setModelMessage(modelId, '', 'info'), 5000);
   } catch (err) {
-    setModelMessage(modelId, err.message || 'Model download failed.', 'error');
+    setModelMessage(modelId, err.message || spec.fail, 'error');
     button.disabled = false;
     button.classList.remove('model-action-loading');
     button.textContent = original;
@@ -193,10 +270,9 @@ async function downloadModel(modelId, button) {
 }
 
 frModelList.addEventListener('click', (event) => {
-  const button = event.target.closest('button[data-action="download"]');
-  if (button) {
-    downloadModel(button.dataset.modelId, button);
-  }
+  const button = event.target.closest('button[data-action]');
+  if (!button) return;
+  runModelAction(button.dataset.action, button.dataset.modelId, button);
 });
 
 frForm.addEventListener('submit', saveSettings);

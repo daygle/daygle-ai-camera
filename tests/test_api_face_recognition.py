@@ -217,6 +217,188 @@ def test_put_face_recognition_enables_after_download(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+def _stub_models_env(monkeypatch, tmp_path):
+    """Redirect the models dir into tmp and stub the network fetch.
+
+    Must be called AFTER _load_app (which re-imports the app.* tree). Returns the
+    tmp models directory; the fake fetch writes a small placeholder onnx.
+    """
+    import app.model_management as mm
+    import app.api.settings_face_recognition_router as frr
+    models_dir = tmp_path / 'models'
+    models_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(mm, 'BASE_DIR', tmp_path)
+    monkeypatch.setattr(mm, 'MODELS_DIR', models_dir)
+
+    def fake_download(url, destination, **_kwargs):
+        assert url.startswith('https://')
+        destination.write_bytes(b'fake onnx')
+
+    monkeypatch.setattr(frr, '_download_weights', fake_download)
+    return models_dir
+
+
+def test_embedding_models_report_installed_and_active(tmp_path, monkeypatch):
+    app, _db = _load_app(tmp_path, monkeypatch)
+    models_dir = _stub_models_env(monkeypatch, tmp_path)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        # Download the fp32 model -> it becomes installed + active.
+        status, _h, body = client.request(
+            '/api/settings/face-recognition/embedding-models/arcface-r100/download',
+            method='POST', headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        by_id = {m['id']: m for m in body['models']}
+        assert by_id['arcface-r100']['installed'] is True
+        assert by_id['arcface-r100']['active'] is True
+        # The int8 variant is neither installed nor active.
+        assert by_id['arcface-r100-int8']['installed'] is False
+        assert by_id['arcface-r100-int8']['active'] is False
+        assert (models_dir / 'arcface-r100.onnx').exists()
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_select_installed_embedding_model_switches_active(tmp_path, monkeypatch):
+    app, _db = _load_app(tmp_path, monkeypatch)
+    models_dir = _stub_models_env(monkeypatch, tmp_path)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        # fp32 downloaded + active; place the int8 file on disk (installed, not active).
+        client.request(
+            '/api/settings/face-recognition/embedding-models/arcface-r100/download',
+            method='POST', headers={'X-CSRF-Token': csrf},
+        )
+        (models_dir / 'arcface-r100-int8.onnx').write_bytes(b'fake int8')
+
+        # Selecting an installed model must switch active without re-downloading.
+        status, _h, body = client.request(
+            '/api/settings/face-recognition/embedding-models/arcface-r100-int8/select',
+            method='POST', headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        assert body['model_path'] == 'models/arcface-r100-int8.onnx'
+        by_id = {m['id']: m for m in body['models']}
+        assert by_id['arcface-r100-int8']['active'] is True
+        assert by_id['arcface-r100']['active'] is False
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_select_uninstalled_embedding_model_rejected(tmp_path, monkeypatch):
+    app, _db = _load_app(tmp_path, monkeypatch)
+    _stub_models_env(monkeypatch, tmp_path)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        status, _h, _b = client.request(
+            '/api/settings/face-recognition/embedding-models/arcface-r100-int8/select',
+            method='POST', headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 400  # not installed -> can't select
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_delete_embedding_model_refuses_active_and_removes_inactive(tmp_path, monkeypatch):
+    app, _db = _load_app(tmp_path, monkeypatch)
+    models_dir = _stub_models_env(monkeypatch, tmp_path)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        client.request(
+            '/api/settings/face-recognition/embedding-models/arcface-r100/download',
+            method='POST', headers={'X-CSRF-Token': csrf},
+        )
+        (models_dir / 'arcface-r100-int8.onnx').write_bytes(b'fake int8')
+
+        # The active model cannot be deleted.
+        status, _h, _b = client.request(
+            '/api/settings/face-recognition/embedding-models/arcface-r100',
+            method='DELETE', headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 400
+        assert (models_dir / 'arcface-r100.onnx').exists()
+
+        # An installed, inactive model can be deleted.
+        status, _h, body = client.request(
+            '/api/settings/face-recognition/embedding-models/arcface-r100-int8',
+            method='DELETE', headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        assert not (models_dir / 'arcface-r100-int8.onnx').exists()
+        by_id = {m['id']: m for m in body['models']}
+        assert by_id['arcface-r100-int8']['installed'] is False
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_update_embedding_model_refreshes_file(tmp_path, monkeypatch):
+    app, _db = _load_app(tmp_path, monkeypatch)
+    models_dir = _stub_models_env(monkeypatch, tmp_path)
+    import app.api.settings_face_recognition_router as frr
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        client.request(
+            '/api/settings/face-recognition/embedding-models/arcface-r100/download',
+            method='POST', headers={'X-CSRF-Token': csrf},
+        )
+        assert (models_dir / 'arcface-r100.onnx').read_bytes() == b'fake onnx'
+
+        # Update re-downloads over the existing file.
+        def fresh_download(url, destination, **_kwargs):
+            destination.write_bytes(b'refreshed onnx')
+
+        monkeypatch.setattr(frr, '_download_weights', fresh_download)
+        status, _h, _b = client.request(
+            '/api/settings/face-recognition/embedding-models/arcface-r100/update',
+            method='POST', headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        assert (models_dir / 'arcface-r100.onnx').read_bytes() == b'refreshed onnx'
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_embedding_model_actions_unknown_id(tmp_path, monkeypatch):
+    app, _db = _load_app(tmp_path, monkeypatch)
+    _stub_models_env(monkeypatch, tmp_path)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        for verb, path in [
+            ('POST', '/api/settings/face-recognition/embedding-models/nope/select'),
+            ('POST', '/api/settings/face-recognition/embedding-models/nope/update'),
+            ('DELETE', '/api/settings/face-recognition/embedding-models/nope'),
+        ]:
+            status, _h, _b = client.request(path, method=verb, headers={'X-CSRF-Token': csrf})
+            assert status == 404, path
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_face_recognition_page_served_to_admin(tmp_path, monkeypatch):
     app, _db = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)

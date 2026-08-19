@@ -57,13 +57,15 @@ EMBEDDING_MODELS: dict[str, dict[str, Any]] = {
 }
 
 
-def embedding_model_catalog(installed_check: Any = None) -> list[dict[str, Any]]:
+def embedding_model_catalog(installed_check: Any = None, active_check: Any = None) -> list[dict[str, Any]]:
     """Return the catalog as a UI-friendly list, newest metadata only.
 
     ``installed_check`` is an optional callable ``(onnx_filename) -> bool`` used
-    to flag which models are already downloaded; the raw ``url`` is intentionally
-    omitted from the returned rows (it is an internal detail, not something the
-    UI needs).
+    to flag which models are already downloaded. ``active_check`` is an optional
+    callable ``(onnx_filename) -> bool`` used to flag which model recognition is
+    currently pointed at, so the UI can mark it "Active" and offer "Use" on the
+    others. The raw ``url`` is intentionally omitted from the returned rows (it
+    is an internal detail, not something the UI needs).
     """
     rows: list[dict[str, Any]] = []
     for catalog_id, info in EMBEDDING_MODELS.items():
@@ -81,5 +83,7 @@ def embedding_model_catalog(installed_check: Any = None) -> list[dict[str, Any]]
         }
         if installed_check is not None:
             row['installed'] = bool(installed_check(info['onnx']))
+        if active_check is not None:
+            row['active'] = bool(active_check(info['onnx']))
         rows.append(row)
     return rows
