@@ -15,6 +15,9 @@ const els = {
   gpuValue: document.getElementById('gpuValue'),
   gpuSub: document.getElementById('gpuSub'),
   gpuCard: document.getElementById('gpuCard'),
+  vramValue: document.getElementById('vramValue'),
+  vramSub: document.getElementById('vramSub'),
+  vramCard: document.getElementById('vramCard'),
   // Scope to [data-filter] so the category group and the range group stay
   // independent: both share the .activity-filter-pill class, so selecting by
   // class swept the range buttons into the category handler, which reset the
@@ -441,6 +444,7 @@ function renderSystemResources(res) {
   }
 
   renderGpuStatus(res?.gpu);
+  renderVramStatus(res?.gpu);
 }
 
 // ─── GPU health card ────────────────────────────────────────────────────────
@@ -474,12 +478,9 @@ function renderGpuStatus(gpu) {
       ? `${draw}/${primary.power_limit_watts.toFixed(0)} W`
       : `${draw} W`);
   }
-  // VRAM reuses formatGB (binary GB, same convention as the RAM card): the
-  // backend reports memory in MiB, so scale up to bytes first.
-  if (Number.isFinite(primary.memory_used_mb) && Number.isFinite(primary.memory_total_mb)) {
-    detail.push(`${formatGB(primary.memory_used_mb * (1024 ** 2))}/${formatGB(primary.memory_total_mb * (1024 ** 2))} VRAM`);
-  }
-
+  // VRAM has its own dedicated card (renderVramStatus) so it stays visible even
+  // when a thermal warning replaces this sub-line; keep it out of the detail
+  // here to avoid duplicating it and crowding the thermal/util/power summary.
   const criticalTemp = Number.isFinite(gpu?.critical_temp_c) ? gpu.critical_temp_c : 90;
   if (els.gpuSub) {
     if (status === 'critical') {
@@ -491,6 +492,35 @@ function renderGpuStatus(gpu) {
     }
   }
   if (els.gpuCard) els.gpuCard.title = primary.name ? String(primary.name) : '';
+}
+
+// ─── VRAM (GPU memory) card ──────────────────────────────────────────────────
+// A dedicated card mirroring the RAM card: percent used as the value, the
+// used / total GiB below. Driven by the same nvidia-smi snapshot as the GPU
+// card, so it hides whenever no GPU is present, and also when the driver
+// doesn't report memory (memory.used/total come back as null). Kept separate
+// from the GPU card so VRAM stays visible even when a thermal warning takes
+// over the GPU sub-line.
+function renderVramStatus(gpu) {
+  if (!els.vramValue) return;
+  const primary = gpu?.primary;
+  const usedMb = primary?.memory_used_mb;
+  const totalMb = primary?.memory_total_mb;
+  if (!primary || !Number.isFinite(usedMb) || !Number.isFinite(totalMb) || totalMb <= 0) {
+    if (els.vramCard) els.vramCard.hidden = true;
+    return;
+  }
+  if (els.vramCard) els.vramCard.hidden = false;
+  const percent = Math.round((usedMb / totalMb) * 100);
+  els.vramValue.textContent = `${percent}%`;
+  // A nearly-full VRAM pool causes CUDA out-of-memory on the inference path, so
+  // flag it the same way the GPU card flags thermal pressure.
+  els.vramCard?.classList.toggle('stat-card-warn', percent >= 90 && percent < 97);
+  els.vramCard?.classList.toggle('stat-card-danger', percent >= 97);
+  if (els.vramSub) {
+    // backend reports MiB; scale to bytes so formatGB matches the RAM card.
+    els.vramSub.textContent = `${formatGB(usedMb * (1024 ** 2))} / ${formatGB(totalMb * (1024 ** 2))} used`;
+  }
 }
 
 async function loadSystemResources() {
