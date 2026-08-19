@@ -101,36 +101,62 @@ class PersonsMixin:
         dim: int,
         model: str,
         source_snapshot: str | None = None,
+        thumbnail: bytes | None = None,
         created_at: str | None = None,
     ) -> int:
         with self.connect() as db:
             cursor = db.execute(
                 """
-                INSERT INTO person_faces (person_id, embedding, dim, model, source_snapshot, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO person_faces (person_id, embedding, dim, model, source_snapshot, thumbnail, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (person_id, embedding, int(dim), model, source_snapshot, created_at or utc_now()),
+                (person_id, embedding, int(dim), model, source_snapshot, thumbnail, created_at or utc_now()),
             )
             return int(cursor.lastrowid)
 
     def list_person_faces(self, person_id: int) -> list[dict[str, Any]]:
-        """List a person's enrolled faces WITHOUT the raw embedding blob.
+        """List a person's enrolled faces WITHOUT the raw embedding/thumbnail blobs.
 
         The vector bytes are only needed by the matcher (loaded in bulk via
-        :meth:`load_face_embeddings`); listing them for the UI would ship
-        kilobytes of opaque binary per row for no benefit.
+        :meth:`load_face_embeddings`); the thumbnail is served on demand by
+        :meth:`get_person_face_thumbnail`. Listing either for the UI would ship
+        kilobytes of binary per row for no benefit, so the list only reports
+        ``has_thumbnail`` and the UI fetches the image via its own endpoint.
         """
         with self.connect() as db:
             rows = db.execute(
                 """
-                SELECT id, person_id, dim, model, source_snapshot, created_at
+                SELECT id, person_id, dim, model, source_snapshot, created_at,
+                       (thumbnail IS NOT NULL) AS has_thumbnail
                 FROM person_faces
                 WHERE person_id = ?
                 ORDER BY created_at ASC
                 """,
                 (person_id,),
             ).fetchall()
-            return [dict(row) for row in rows]
+            faces: list[dict[str, Any]] = []
+            for row in rows:
+                face = dict(row)
+                # SQLite returns 0/1 for the boolean expression; expose a real bool.
+                face['has_thumbnail'] = bool(face.get('has_thumbnail'))
+                faces.append(face)
+            return faces
+
+    def get_person_face_thumbnail(self, face_id: int) -> bytes | None:
+        """Return the stored JPEG thumbnail bytes for a face, or ``None``.
+
+        ``None`` covers both "no such face" and "face enrolled before thumbnails
+        were captured" -- the caller (the API) turns either into a 404.
+        """
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT thumbnail FROM person_faces WHERE id = ?",
+                (face_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        blob = row['thumbnail']
+        return bytes(blob) if blob is not None else None
 
     def delete_person_face(self, face_id: int) -> bool:
         with self.connect() as db:

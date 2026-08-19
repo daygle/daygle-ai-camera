@@ -141,6 +141,13 @@ class EventDatabase(
                 db.execute("ALTER TABLE audit_log ADD COLUMN immutable INTEGER NOT NULL DEFAULT 1")
             except sqlite3.OperationalError:
                 pass  # Column already exists on upgrades from older schemas.
+            # Migration: keep a small JPEG thumbnail of the enrolled face crop so
+            # the People page can show what was enrolled (embeddings are opaque).
+            # New installs get the column via the CREATE TABLE block below.
+            try:
+                db.execute("ALTER TABLE person_faces ADD COLUMN thumbnail BLOB")
+            except sqlite3.OperationalError:
+                pass  # Column already exists on upgrades from older schemas.
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS events (
@@ -289,6 +296,7 @@ class EventDatabase(
                     dim INTEGER NOT NULL,
                     model TEXT NOT NULL,
                     source_snapshot TEXT,
+                    thumbnail BLOB,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(person_id) REFERENCES persons(id) ON DELETE CASCADE
                 );

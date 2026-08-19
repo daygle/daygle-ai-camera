@@ -104,6 +104,70 @@ def test_enroll_face_rejected_when_recognition_disabled(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+def test_face_thumbnail_endpoint(tmp_path, monkeypatch):
+    """The thumbnail endpoint serves stored JPEG bytes for a face, and 404s for
+    a face with no thumbnail or one belonging to a different person."""
+    import numpy as np
+
+    app, _db_path = _load_app(tmp_path, monkeypatch)
+    # Import AFTER _load_app: it purges and re-imports the whole app.* tree, so
+    # the live singletons (state.database) only exist once startup has run.
+    import app.state as state
+    from app.face_recognition import embedding_to_bytes
+    db = state.database
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        _login(client)
+
+        pid = db.add_person('Alex')
+        other = db.add_person('Sam')
+        emb = embedding_to_bytes(np.asarray([1, 0, 0, 0], dtype=np.float32))
+        jpeg = b'\xff\xd8\xff\xe0stub-jpeg'
+        with_thumb = db.add_person_face(pid, embedding=emb, dim=4, model='arcface', thumbnail=jpeg)
+        without_thumb = db.add_person_face(pid, embedding=emb, dim=4, model='arcface')
+
+        # The listing reports the flag without shipping the blob.
+        status, _h, fetched = client.request(f'/api/persons/{pid}')
+        assert status == 200
+        flags = {f['id']: f['has_thumbnail'] for f in fetched['faces']}
+        assert flags == {with_thumb: True, without_thumb: False}
+
+        # Stored thumbnail is served verbatim as image/jpeg.
+        status, headers, body = client.request(f'/api/persons/{pid}/faces/{with_thumb}/thumbnail')
+        assert status == 200
+        assert headers.get('content-type') == 'image/jpeg'
+        assert body == jpeg
+
+        # No thumbnail -> 404.
+        status, _h, _b = client.request(f'/api/persons/{pid}/faces/{without_thumb}/thumbnail')
+        assert status == 404
+
+        # A face that isn't this person's -> 404 (no cross-person leakage).
+        status, _h, _b = client.request(f'/api/persons/{other}/faces/{with_thumb}/thumbnail')
+        assert status == 404
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_face_thumbnail_requires_admin(tmp_path, monkeypatch):
+    app, _db_path = _load_app(tmp_path, monkeypatch)
+    import app.state as state  # after _load_app re-imports the app.* tree
+    db = state.database
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)  # not logged in
+        pid = db.add_person('Alex')
+        status, _h, _b = client.request(f'/api/persons/{pid}/faces/1/thumbnail')
+        assert status in (401, 403)
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_persons_require_admin(tmp_path, monkeypatch):
     app, _db = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
