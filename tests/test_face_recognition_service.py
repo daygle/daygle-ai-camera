@@ -217,3 +217,30 @@ def test_embed_face_none_below_min_size():
         embedder=_StubEmbedder([1, 0, 0, 0]),
     )
     assert svc.embed_face(np.zeros((40, 40, 3), dtype=np.uint8)) is None
+
+
+# ---------------------------------------------------------------------------
+# Embedding model catalog (Stage 2c)
+# ---------------------------------------------------------------------------
+
+def test_embedding_catalog_well_formed():
+    from app.embedding_models import EMBEDDING_MODELS, embedding_model_catalog
+
+    assert 'arcface-r100' in EMBEDDING_MODELS
+    for info in EMBEDDING_MODELS.values():
+        assert info['url'].startswith('https://')
+        assert info['onnx'].endswith('.onnx')
+        assert info['dim'] == 512
+        assert info['input_size'] == 112
+        assert info['license'] == 'Apache-2.0'
+        assert info['model_id']
+    # fp32 and int8 share one embedding space (same model_id) so enrolments carry
+    # across a precision switch.
+    assert EMBEDDING_MODELS['arcface-r100']['model_id'] == EMBEDDING_MODELS['arcface-r100-int8']['model_id']
+
+    rows = embedding_model_catalog(lambda onnx: onnx == 'arcface-r100.onnx')
+    by_id = {r['id']: r for r in rows}
+    assert by_id['arcface-r100']['installed'] is True
+    assert by_id['arcface-r100-int8']['installed'] is False
+    # The internal download url is never exposed to the UI list.
+    assert all('url' not in r for r in rows)
