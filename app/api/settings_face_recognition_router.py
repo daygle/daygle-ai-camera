@@ -78,17 +78,62 @@ def reload_face_recognition(
     return response
 
 
-@router.get('/api/settings/face-recognition/embedding-models')
-def list_embedding_models(request: Request):
-    require_admin(request)
+def _embedding_model_installed(onnx_name: str) -> bool:
+    try:
+        return _safe_within_models_dir(onnx_name).exists()
+    except Exception:
+        return False
 
-    def _installed(onnx_name: str) -> bool:
+
+def _embedding_models_response(db, *, reload_succeeded=None, reload_error=None) -> dict:
+    """Build the combined status + catalog payload the models UI consumes.
+
+    Every mutating action (download / use / update / delete) returns this so the
+    page can re-render both the recognition status header and the model cards
+    (installed/active flags) from a single round-trip.
+    """
+    config = effective_face_recognition_config()
+    active_path = str(config.get('model_path') or '')
+
+    def _active(onnx_name: str) -> bool:
         try:
-            return _safe_within_models_dir(onnx_name).exists()
+            return bool(active_path) and _relative_model_path(_safe_within_models_dir(onnx_name)) == active_path
         except Exception:
             return False
 
-    return {'models': embedding_model_catalog(_installed)}
+    from app.face_recognition_service import get_face_recognition_service as _get_service
+
+    response = face_recognition_status(config, _get_service(), db)
+    response['models'] = embedding_model_catalog(_embedding_model_installed, _active)
+    if reload_succeeded is not None:
+        response['reload_succeeded'] = reload_succeeded
+        response['reload_error'] = reload_error
+    return response
+
+
+def _activate_embedding_model(info: dict, db, reload_service) -> tuple[str, bool, str | None]:
+    """Point the persisted recognition settings at ``info``'s model and reload.
+
+    Returns ``(relative_model_path, reload_succeeded, reload_error)``. Recognition
+    stays disabled until an admin explicitly enables it -- selecting a model only
+    sets which model would be used.
+    """
+    destination = _safe_within_models_dir(info['onnx'])
+    rel_path = _relative_model_path(destination)
+    new_settings = validate_face_recognition_settings({
+        **effective_face_recognition_config(),
+        'model_path': rel_path,
+        'model_id': info['model_id'],
+    })
+    db.set_setting('face_recognition', new_settings, utc_now())
+    available, reason = reload_service(new_settings)
+    return rel_path, available, reason
+
+
+@router.get('/api/settings/face-recognition/embedding-models')
+def list_embedding_models(request: Request, db=Depends(get_database)):
+    require_admin(request)
+    return _embedding_models_response(db)
 
 
 @router.post('/api/settings/face-recognition/embedding-models/{catalog_id}/download')
@@ -116,22 +161,107 @@ async def download_embedding_model(
     except RuntimeError as exc:
         logger.warning('Embedding model download failed for %s: %s', catalog_id, exc)
         raise HTTPException(status_code=502, detail='Embedding model download failed.') from exc
-    rel_path = _relative_model_path(destination)
-    new_settings = validate_face_recognition_settings({
-        **effective_face_recognition_config(),
-        'model_path': rel_path,
-        'model_id': info['model_id'],
-    })
-    db.set_setting('face_recognition', new_settings, utc_now())
-    available, reason = reload_service(new_settings)
-    from app.face_recognition_service import get_face_recognition_service as _get_service
-
-    response = face_recognition_status(new_settings, _get_service(), db)
-    response['reload_succeeded'] = available
-    response['reload_error'] = reason
+    rel_path, available, reason = _activate_embedding_model(info, db, reload_service)
     write_audit_log(request, db, 'download', 'settings.face_recognition.embedding_model', details={
         'catalog_id': catalog_id,
         'model_path': rel_path,
         'model_id': info['model_id'],
     })
-    return response
+    return _embedding_models_response(db, reload_succeeded=available, reload_error=reason)
+
+
+@router.post('/api/settings/face-recognition/embedding-models/{catalog_id}/select')
+def select_embedding_model(
+    catalog_id: str,
+    request: Request,
+    db=Depends(get_database),
+    reload_service=Depends(get_reload_face_recognition),
+):
+    """Point recognition at an already-installed embedding model ("Use").
+
+    No download: the model must already be on disk. Recognition stays disabled
+    until an admin enables it -- this only switches which model is used.
+    """
+    require_admin(request)
+    info = EMBEDDING_MODELS.get(catalog_id)
+    if info is None:
+        raise HTTPException(status_code=404, detail='Unknown embedding model.')
+    if not _embedding_model_installed(info['onnx']):
+        raise HTTPException(status_code=400, detail='Model is not installed. Download it first.')
+    rel_path, available, reason = _activate_embedding_model(info, db, reload_service)
+    write_audit_log(request, db, 'update', 'settings.face_recognition.embedding_model', details={
+        'catalog_id': catalog_id,
+        'action': 'select',
+        'model_path': rel_path,
+        'model_id': info['model_id'],
+    })
+    return _embedding_models_response(db, reload_succeeded=available, reload_error=reason)
+
+
+@router.post('/api/settings/face-recognition/embedding-models/{catalog_id}/update')
+async def update_embedding_model(
+    catalog_id: str,
+    request: Request,
+    db=Depends(get_database),
+    reload_service=Depends(get_reload_face_recognition),
+):
+    """Re-download an installed embedding model's file (repair / refresh).
+
+    These are fixed pre-built files with no version feed, so "update" re-fetches
+    the trusted catalog URL over the existing file. If the refreshed model is the
+    active one, the service is reloaded so the new bytes take effect; otherwise
+    the active selection is left unchanged.
+    """
+    require_admin(request)
+    info = EMBEDDING_MODELS.get(catalog_id)
+    if info is None:
+        raise HTTPException(status_code=404, detail='Unknown embedding model.')
+    if not _embedding_model_installed(info['onnx']):
+        raise HTTPException(status_code=400, detail='Model is not installed. Download it first.')
+    destination = _safe_within_models_dir(info['onnx'])
+    try:
+        await run_in_threadpool(_download_weights, info['url'], destination)
+    except RuntimeError as exc:
+        logger.warning('Embedding model update failed for %s: %s', catalog_id, exc)
+        raise HTTPException(status_code=502, detail='Embedding model update failed.') from exc
+    available = reason = None
+    if _relative_model_path(destination) == str(effective_face_recognition_config().get('model_path') or ''):
+        # Refreshed the active model -> reload so the new bytes are used.
+        available, reason = reload_service(None)
+    write_audit_log(request, db, 'update', 'settings.face_recognition.embedding_model', details={
+        'catalog_id': catalog_id,
+        'action': 'update',
+    })
+    return _embedding_models_response(db, reload_succeeded=available, reload_error=reason)
+
+
+@router.delete('/api/settings/face-recognition/embedding-models/{catalog_id}')
+def delete_embedding_model(
+    catalog_id: str,
+    request: Request,
+    db=Depends(get_database),
+):
+    """Delete an installed embedding model's file.
+
+    Refuses to delete the model recognition is currently pointed at -- switch to
+    another model (or clear the selection) first -- so recognition never ends up
+    referencing a missing file.
+    """
+    require_admin(request)
+    info = EMBEDDING_MODELS.get(catalog_id)
+    if info is None:
+        raise HTTPException(status_code=404, detail='Unknown embedding model.')
+    destination = _safe_within_models_dir(info['onnx'])
+    if not destination.exists():
+        raise HTTPException(status_code=404, detail='Model is not installed.')
+    if _relative_model_path(destination) == str(effective_face_recognition_config().get('model_path') or ''):
+        raise HTTPException(
+            status_code=400,
+            detail='This model is in use. Select a different model before deleting it.',
+        )
+    destination.unlink()
+    write_audit_log(request, db, 'delete', 'settings.face_recognition.embedding_model', details={
+        'catalog_id': catalog_id,
+        'onnx': info['onnx'],
+    })
+    return _embedding_models_response(db)
