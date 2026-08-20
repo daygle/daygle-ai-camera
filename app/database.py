@@ -14,6 +14,20 @@ from app.db.recordings import RecordingsMixin
 from app.db.settings_repo import SettingsRepoMixin
 
 
+# How long a connection waits for a contended write lock before giving up with
+# ``sqlite3.OperationalError: database is locked``. SQLite serialises writers
+# even under WAL, so the many short-lived connections opened by the background
+# live-alert threads (one per camera per detection interval) routinely queue
+# behind one another. Python's default is only 5s, which the fan-out of
+# concurrent cameras plus the odd WAL checkpoint can exceed, surfacing as
+# "Background live alert check failed ...: database is locked". A 30s busy
+# timeout lets those writers wait their turn instead of failing; it is a
+# per-connection setting (not persisted in the file) so every ``connect()``
+# must apply it. Chosen well above the longest expected single write yet short
+# enough to still fail loudly if a connection is genuinely wedged.
+SQLITE_BUSY_TIMEOUT_SECONDS = 30.0
+
+
 # Immutable audit-log triggers, defined once so BOTH schema creation
 # (``EventDatabase.init``) and the backup-restore validator
 # (``app.backup.overwrite_database_from_file``) share a single source of
@@ -60,8 +74,18 @@ class EventDatabase(
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.database_path)
+        connection = sqlite3.connect(
+            self.database_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS
+        )
         connection.row_factory = sqlite3.Row
+        # ``busy_timeout`` is a per-connection PRAGMA (not persisted in the WAL
+        # database), so set it on every connection to keep contended writers
+        # waiting for the lock rather than erroring with "database is locked".
+        # Redundant with the ``timeout=`` above but explicit and independent of
+        # how the driver maps that argument.
+        connection.execute(
+            'PRAGMA busy_timeout=%d;' % int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)
+        )
         try:
             yield connection
             connection.commit()
