@@ -159,8 +159,18 @@ class AuthService:
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.database_path)
+        from app.database import SQLITE_BUSY_TIMEOUT_SECONDS
+
+        connection = sqlite3.connect(
+            self.database_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS
+        )
         connection.row_factory = sqlite3.Row
+        # Per-connection busy timeout (see app.database.connect): keep contended
+        # writers waiting for the lock instead of failing with "database is
+        # locked" under concurrent access.
+        connection.execute(
+            'PRAGMA busy_timeout=%d;' % int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)
+        )
         try:
             yield connection
             connection.commit()
