@@ -80,6 +80,8 @@
 :root.light .detection.detection-motion { background: rgba(5,150,105,.14); color: #047857; border-color: rgba(5,150,105,.35); font-weight: 800; }
 :root.light .detection.detection-continuous { background: rgba(71,85,105,.12); color: #475569; border-color: rgba(71,85,105,.3); font-weight: 800; }
 :root.light .detection.detection-alert { background: rgba(220,38,38,.12); color: #b91c1c; border-color: rgba(220,38,38,.35); font-weight: 800; }
+:root.light .detection.detection-face { background: rgba(217,119,6,.14); color: #b45309; border-color: rgba(217,119,6,.35); font-weight: 800; }
+:root.light .detection.detection-face-unknown { background: rgba(219,39,119,.12); color: #be185d; border-color: rgba(219,39,119,.35); font-weight: 800; }
 :root.light .status-panel div { background: rgba(255,255,255,.6); }
 :root.light .danger-zone-card {
   border-color: rgba(220,38,38,.5);
@@ -542,6 +544,8 @@ textarea {
 .detection.detection-motion { background: rgba(45, 212, 191, 0.12); color: #2dd4bf; border: 1px solid rgba(45, 212, 191, 0.4); }
 .detection.detection-continuous { background: rgba(148, 163, 184, 0.14); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.35); }
 .detection.detection-alert { background: rgba(239, 68, 68, 0.14); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
+.detection.detection-face { background: rgba(251, 191, 36, 0.14); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.4); }
+.detection.detection-face-unknown { background: rgba(244, 114, 182, 0.16); color: #f472b6; border: 1px solid rgba(244, 114, 182, 0.4); }
 .detection.detection-still-alert { background: rgba(251, 191, 36, 0.12); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.4); }
 /* "×N" multiplier appended to a detection pill when the same label fired
    across several events in one clip. Kept subtly recessed (lower opacity,

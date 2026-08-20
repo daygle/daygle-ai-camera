@@ -21,6 +21,8 @@ const els = {
   listStatus: document.getElementById('listStatus'),
   cameraFilter: document.getElementById('snapshotCameraFilter'),
   labelFilter: document.getElementById('snapshotLabelFilter'),
+  faceFilter: document.getElementById('snapshotFaceFilter'),
+  faceField: document.getElementById('snapshotFaceField'),
   dateFrom: document.getElementById('snapshotDateFrom'),
   timeFrom: null, // populated by renderFilterTimeSelects() below
   dateTo: document.getElementById('snapshotDateTo'),
@@ -190,6 +192,7 @@ function snapshotInRange(event, filters) {
 function currentFilterValues() {
   return {
     label: els.labelFilter?.value || '',
+    face: els.faceFilter?.value || '',
     cameraId: els.cameraFilter?.value || '',
     dateFrom: els.dateFrom?.value || '',
     // Read from the custom hour/minute (/AM/PM) selects so the filter value
@@ -206,6 +209,10 @@ function describeFilters(filters) {
   if (filters.label) {
     const option = els.labelFilter?.querySelector(`option[value="${escapeHtml(filters.label)}"]`);
     parts.push(`label “${option?.textContent || filters.label}”`);
+  }
+  if (filters.face) {
+    const faceOption = els.faceFilter?.querySelector(`option[value="${escapeHtml(filters.face)}"]`);
+    parts.push(`face “${faceOption?.textContent || filters.face}”`);
   }
   if (filters.cameraId) {
     const cameraOption = Array.from(els.cameraFilter?.options || []).find((o) => o.value === filters.cameraId);
@@ -272,7 +279,7 @@ function snapshotRow(event) {
             </span>
           </span>
         </div>
-        <div class="activity-item-badges snapshot-row-badges">${snapshotPills(event)}${alertBadge}</div>
+        <div class="activity-item-badges snapshot-row-badges">${snapshotPills(event)}${faceIdentityPills(eventFaceIdentities(event))}${alertBadge}</div>
       </div>
       <div class="snapshot-row-actions">${actions.join('')}</div>
     </article>
@@ -336,6 +343,7 @@ function applyFilters() {
   const filtered = allSnapshots.filter((event) => {
     if (!snapshotMatchesCamera(event, filters.cameraId)) return false;
     if (!snapshotHasLabel(event, filters.label)) return false;
+    if (!matchesFaceFilter(eventFaceIdentities(event), filters.face)) return false;
     if (!snapshotInRange(event, filters)) return false;
     return true;
   });
@@ -404,6 +412,47 @@ function populateLabelOptions() {
   )).join('');
 }
 
+// Build the Face filter from the identities actually present in the loaded
+// snapshots: one option per recognised person, plus "Any Face" / "Unknown"
+// when applicable. The whole field stays hidden on deployments that never run
+// face recognition (no face_identities in any snapshot), so it adds no clutter
+// there. Mirrors populateLabelOptions' preserve-selection behaviour.
+function populateFaceOptions() {
+  if (!els.faceFilter) return;
+  const previous = els.faceFilter.value || '';
+  const people = new Map(); // key -> {name, count}
+  let anyUnknown = 0;
+  let anyFace = 0;
+  for (const event of allSnapshots) {
+    const { people: eventPeople, unknown } = eventFaceIdentities(event);
+    if (eventPeople.size || unknown > 0) anyFace += 1;
+    if (unknown > 0) anyUnknown += 1;
+    for (const [key, person] of eventPeople) {
+      const existing = people.get(key);
+      if (existing) existing.count += 1;
+      else people.set(key, { name: person.name, count: 1 });
+    }
+  }
+  const hasFaces = people.size > 0 || anyUnknown > 0;
+  if (els.faceField) els.faceField.hidden = !hasFaces;
+  if (!hasFaces) {
+    els.faceFilter.innerHTML = '<option value="">All Faces</option>';
+    els.faceFilter.value = '';
+    return;
+  }
+  const options = [{ value: '', label: `All Faces${anyFace ? ` (${anyFace})` : ''}` }, { value: 'any', label: 'Any Face' }];
+  const peopleOptions = Array.from(people.entries())
+    .map(([key, person]) => ({ value: key, label: `${person.name} (${person.count})` }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+  options.push(...peopleOptions);
+  if (anyUnknown > 0) options.push({ value: 'unknown', label: `Unknown (${anyUnknown})` });
+  const values = new Set(options.map((option) => option.value));
+  els.faceFilter.innerHTML = options.map((option) => (
+    `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`
+  )).join('');
+  els.faceFilter.value = values.has(previous) ? previous : '';
+}
+
 async function loadSnapshots() {
   if (els.gallery) els.gallery.innerHTML = '<p class="muted">Loading snapshots…</p>';
   try {
@@ -416,6 +465,7 @@ async function loadSnapshots() {
     return;
   }
   populateLabelOptions();
+  populateFaceOptions();
   applyFilters();
 }
 
@@ -428,8 +478,10 @@ function wireControls() {
   // range and sort apply on the Apply Filters button.
   els.cameraFilter?.addEventListener('change', () => applyFilters());
   els.labelFilter?.addEventListener('change', () => applyFilters());
+  els.faceFilter?.addEventListener('change', () => applyFilters());
   els.clearBtn?.addEventListener('click', () => {
     if (els.labelFilter) els.labelFilter.value = '';
+    if (els.faceFilter) els.faceFilter.value = '';
     if (els.cameraFilter) els.cameraFilter.value = '';
     if (els.dateFrom) els.dateFrom.value = '';
     if (els.dateTo) els.dateTo.value = '';
