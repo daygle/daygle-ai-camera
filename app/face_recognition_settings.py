@@ -32,6 +32,8 @@ DEFAULT_FACE_RECOGNITION_CONFIG: dict[str, Any] = {
     # Treat a detected face that matches no enrolled person as an alertable
     # condition ("stranger"). Off by default.
     'alert_unknown': False,
+    # Email addresses to notify when an unknown face is detected.
+    'alert_unknown_email': '',
     # Ignore faces smaller than this many pixels on their shorter side before
     # embedding -- tiny/distant faces embed poorly and cause false matches.
     # 0 disables the gate.
@@ -67,6 +69,7 @@ def validate_face_recognition_settings(payload: dict[str, Any]) -> dict[str, Any
 
     updated['model_path'] = str(updated.get('model_path') or '').strip()
     updated['model_id'] = str(updated.get('model_id') or 'arcface').strip() or 'arcface'
+    updated['alert_unknown_email'] = str(updated.get('alert_unknown_email') or '').strip()
 
     try:
         threshold = float(updated.get('match_threshold', 0.5))

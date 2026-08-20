@@ -249,6 +249,8 @@ window.daygleAuthReady = (async () => {
         { href: '/zones', match: '/zones', label: 'Zones' },
         { href: '/objects', match: '/objects', label: 'Objects' },
         { href: '/sounds', match: '/sounds', label: 'Sounds' },
+        { href: '/face-recognition', match: '/face-recognition', label: 'Face Recognition' },
+        { href: '/people', match: '/people', label: 'People' },
       ],
     },
     {
@@ -268,8 +270,7 @@ window.daygleAuthReady = (async () => {
       links: [
         { href: '/onnx', match: '/onnx', label: 'ONNX' },
         { href: '/yamnet-tflite', match: '/yamnet-tflite', label: 'YAMNet TFLite' },
-        { href: '/face-recognition', match: '/face-recognition', label: 'Face Recognition' },
-        { href: '/people', match: '/people', label: 'People' },
+        { href: '/arcface', match: '/arcface', label: 'ArcFace' },
       ],
     },
     {

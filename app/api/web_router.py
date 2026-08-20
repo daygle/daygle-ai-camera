@@ -329,6 +329,15 @@ def face_recognition_page(request: Request, web_dir: Path = Depends(get_web_dir)
     return root(web_dir=web_dir)
 
 
+@router.get('/arcface')
+def arcface_page(request: Request, web_dir: Path = Depends(get_web_dir)):
+    require_admin(request)
+    page_path = web_dir / 'arcface.html'
+    if page_path.exists():
+        return FileResponse(page_path)
+    return root(web_dir=web_dir)
+
+
 @router.get('/people')
 def people_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)

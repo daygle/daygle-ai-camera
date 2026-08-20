@@ -87,6 +87,9 @@
               <option value="false">Disabled</option>
             </select></label>
           <label>
+            <span>Alert Email Addresses <span class="info-tip" data-tip="Email addresses to notify when an unknown face is detected. Comma-separated." title="Email addresses to notify when an unknown face is detected. Comma-separated." tabindex="0" aria-label="Help: Email addresses to notify when an unknown face is detected. Comma-separated."></span></span>
+            <input name="alert_unknown_email" type="email" placeholder="alerts@example.com" autocomplete="off" /></label>
+          <label>
             <span>Match Threshold <span class="info-tip" data-tip="Cosine-similarity cutoff (0-1) for matching a face to an enrolled person. Higher is stricter. Default: 0.5" title="Cosine-similarity cutoff (0-1) for matching a face to an enrolled person. Higher is stricter. Default: 0.5" tabindex="0" aria-label="Help: Cosine-similarity cutoff (0-1) for matching a face to an enrolled person. Higher is stricter. Default: 0.5"></span></span>
             <input name="match_threshold" type="number" min="0" max="1" step="0.01" /></label>
           <label>

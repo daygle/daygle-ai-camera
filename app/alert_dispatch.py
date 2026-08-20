@@ -85,6 +85,7 @@ from app.config_facades import (
     effective_ai_config,
     effective_cameras_config,
     effective_email_alert_settings,
+    effective_face_recognition_config,
     effective_push_notification_settings,
 )
 from app.email_alerts import EmailAlertService, EmailAlertError
@@ -286,6 +287,7 @@ def deliver_email_alerts(
     created_at_raw = str(event.get('created_at') or '').strip()
     detected_at = _format_alert_datetime(created_at_raw) if created_at_raw else None
     rules_by_name = {str(rule.get('name')): rule for rule in rules or []}
+    # Check if any triggered alerts have email enabled via zone rules
     any_email_enabled = any(
         (
             (rule := rules_by_name.get(str(alert.get('rule_name')), {})).get('email_enabled')
@@ -293,6 +295,12 @@ def deliver_email_alerts(
         )
         for alert in triggered
     )
+    # Also check for unknown face alerts with configured email addresses
+    face_config = effective_face_recognition_config()
+    unknown_face_email = str(face_config.get('alert_unknown_email') or '').strip()
+    has_unknown_face_alerts = any(str(alert.get('rule_name') or '') == 'Unknown face' for alert in triggered)
+    if has_unknown_face_alerts and unknown_face_email:
+        any_email_enabled = True
     snapshot_bytes: bytes | None = None
     snapshot_path = str(event.get('snapshot_path') or '')
     if any_email_enabled and snapshot_path:
@@ -329,6 +337,27 @@ def deliver_email_alerts(
     )
     for alert in triggered:
         rule = rules_by_name.get(str(alert.get('rule_name')))
+        # Handle unknown face alerts with configured email addresses
+        if str(alert.get('rule_name') or '') == 'Unknown face':
+            if unknown_face_email:
+                try:
+                    mailer.send_alert(
+                        alert,
+                        event_id=event_id,
+                        recipients=unknown_face_email.split(','),
+                        camera_name=camera_name,
+                        snapshot_bytes=snapshot_bytes,
+                        triggered_labels=all_triggered_labels,
+                        detected_at=detected_at,
+                    )
+                except EmailAlertError as exc:
+                    logger.warning(
+                        'Failed to send email alert for event %s rule %s: %s',
+                        event_id,
+                        alert.get('rule_name'),
+                        exc,
+                    )
+            continue
         if not rule or not rule.get('email_enabled'):
             continue
         if not _rule_notify_active_now(rule):

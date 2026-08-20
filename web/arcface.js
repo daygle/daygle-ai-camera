@@ -1,13 +1,9 @@
-// face-recognition.js - Face Recognition settings page (face-recognition.html).
+// arcface.js - ArcFace embedding models page (arcface.html).
 // Admin-only. Uses api() / escapeHtml / safeHtml / showToast from utils.js.
 
-const frForm = document.getElementById('frForm');
-const frStatusPanel = document.getElementById('frStatusPanel');
-const frMessage = document.getElementById('frMessage');
-const frSaveBtn = document.getElementById('frSaveBtn');
-const frReloadBtn = document.getElementById('frReloadBtn');
-const frModelList = document.getElementById('frModelList');
-const frModelsMessage = document.getElementById('frModelsMessage');
+const arcfaceStatusPanel = document.getElementById('arcfaceStatusPanel');
+const arcfaceModelList = document.getElementById('arcfaceModelList');
+const arcfaceModelsMessage = document.getElementById('arcfaceModelsMessage');
 
 function yesNo(value) {
   return value ? 'Yes' : 'No';
@@ -62,89 +58,30 @@ function renderStatus(status) {
   if (status.enabled && !status.model_loaded && status.unavailable_reason) {
     html += safeHtml`<div><span>Reason</span><strong>${status.unavailable_reason}</strong></div>`;
   }
-  frStatusPanel.innerHTML = html;
-}
-
-function fillForm(status) {
-  frForm.enabled.value = status.enabled ? 'true' : 'false';
-  frForm.alert_unknown.value = status.alert_unknown ? 'true' : 'false';
-  frForm.alert_unknown_email.value = status.alert_unknown_email ?? '';
-  frForm.match_threshold.value = status.match_threshold ?? 0.5;
-  frForm.min_face_pixels.value = status.min_face_pixels ?? 0;
-  frForm.retention_days.value = status.retention_days ?? 0;
-  // Managed by the Models tab (download), not the form UI - carry the current
-  // values through so a save never wipes the active embedding model (the
-  // backend treats a missing model_path as "no model selected").
-  frForm.model_path.value = status.model_path ?? '';
-  frForm.model_id.value = status.model_id ?? 'arcface';
+  arcfaceStatusPanel.innerHTML = html;
 }
 
 async function loadStatus() {
   try {
     const status = await api('/api/settings/face-recognition');
     renderStatus(status);
-    fillForm(status);
   } catch (err) {
-    frMessage.textContent = err.message || 'Failed to load settings.';
-  }
-}
-
-async function saveSettings(event) {
-  event.preventDefault();
-  const body = {
-    enabled: frForm.enabled.value === 'true',
-    alert_unknown: frForm.alert_unknown.value === 'true',
-    alert_unknown_email: frForm.alert_unknown_email.value.trim(),
-    match_threshold: parseFloat(frForm.match_threshold.value),
-    min_face_pixels: parseInt(frForm.min_face_pixels.value || '0', 10),
-    retention_days: parseInt(frForm.retention_days.value || '0', 10),
-    model_path: frForm.model_path.value,
-    model_id: frForm.model_id.value,
-  };
-  frSaveBtn.disabled = true;
-  try {
-    const status = await api('/api/settings/face-recognition', { method: 'PUT', body: JSON.stringify(body) });
-    renderStatus(status);
-    fillForm(status);
-    showToast('Face recognition settings saved.');
-    if (status.enabled && status.reload_error) {
-      showToast(status.reload_error, true);
-    }
-  } catch (err) {
-    showToast(err.message || 'Failed to save settings.', true);
-  } finally {
-    frSaveBtn.disabled = false;
-  }
-}
-
-async function reloadService() {
-  frReloadBtn.disabled = true;
-  try {
-    const status = await api('/api/settings/face-recognition/reload', { method: 'POST' });
-    renderStatus(status);
-    showToast('Recognition service reloaded.');
-  } catch (err) {
-    showToast(err.message || 'Reload failed.', true);
-  } finally {
-    frReloadBtn.disabled = false;
+    arcfaceStatusPanel.innerHTML = safeHtml`<div class="muted">${err.message || 'Failed to load status.'}</div>`;
   }
 }
 
 // Mirrors the ONNX models page card format (app/web/onnx.js): an active/
 // installed/available card state, a status badge, a size indicator, and a
-// Download / Use / Update / Delete action set. NOTE: compose with a plain
-// template + escapeHtml on the leaf values -- do NOT build sub-fragments with
-// safeHtml and interpolate them into another safeHtml`` (safeHtml escapes every
-// interpolation, so nested HTML would render as visible markup).
+// Download / Use / Update / Delete action set.
 function renderModels(models) {
   if (!models.length) {
-    frModelList.innerHTML = '';
-    frModelsMessage.textContent = 'No embedding models available.';
+    arcfaceModelList.innerHTML = '';
+    arcfaceModelsMessage.textContent = 'No embedding models available.';
     return;
   }
-  frModelsMessage.textContent = '';
+  arcfaceModelsMessage.textContent = '';
   const maxMb = Math.max(1, ...models.map((m) => m.approx_mb || 0));
-  frModelList.innerHTML = models.map((model) => {
+  arcfaceModelList.innerHTML = models.map((model) => {
     const id = escapeHtml(model.id);
     const isInstalled = !!model.installed;
     const isActive = !!model.active;
@@ -197,14 +134,10 @@ function renderModels(models) {
 }
 
 // Every mutating endpoint returns the combined status + models payload, so a
-// single response refreshes the status header, the settings form, and the cards.
+// single response refreshes both the status header and the cards.
 function applyModelsPayload(payload) {
   renderStatus(payload);
-  fillForm(payload);
   renderModels(payload.models || []);
-  if (payload.enabled && payload.reload_error) {
-    showToast(payload.reload_error, true);
-  }
 }
 
 async function loadModels() {
@@ -212,7 +145,7 @@ async function loadModels() {
     const body = await api('/api/settings/face-recognition/embedding-models');
     renderModels(body.models || []);
   } catch (err) {
-    frModelsMessage.textContent = err.message || 'Failed to load models.';
+    arcfaceModelsMessage.textContent = err.message || 'Failed to load models.';
   }
 }
 
@@ -271,16 +204,13 @@ async function runModelAction(action, modelId, button) {
   }
 }
 
-frModelList.addEventListener('click', (event) => {
+arcfaceModelList.addEventListener('click', (event) => {
   const button = event.target.closest('button[data-action]');
   if (!button) return;
   runModelAction(button.dataset.action, button.dataset.modelId, button);
 });
 
-frForm.addEventListener('submit', saveSettings);
-frReloadBtn.addEventListener('click', reloadService);
-
-// Group the Face Recognition cards into Status / Models / Settings tabs.
+// Group the ArcFace cards into Status / Models tabs.
 // Shared implementation (ARIA tabs + URL-hash deep-linking) lives in utils.js.
 initDaygleTabs();
 

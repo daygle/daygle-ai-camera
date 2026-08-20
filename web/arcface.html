@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<script>(function(){var t=localStorage.getItem("daygle.theme");if(t!=="dark")document.documentElement.classList.add("light");})()</script>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ArcFace - Daygle AI Camera</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/model-card-messages.css" />
+</head>
+<body>
+  <main class="shell page-stack">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Intelligence</p>
+        <h1>ArcFace</h1>
+        <p class="muted">Face-embedding models for identity recognition. Download, select, and manage embedding models used to identify enrolled people on cameras.</p>
+      </div>
+    </header>
+
+    <div class="settings-tabs" role="tablist" aria-label="ArcFace sections">
+      <button class="settings-tab" type="button" role="tab" id="tab-status" aria-controls="panel-status" data-tab="status" aria-selected="true"><span class="settings-tab-icon" aria-hidden="true">🧠</span><span class="settings-tab-label">Status</span></button>
+      <button class="settings-tab" type="button" role="tab" id="tab-models" aria-controls="panel-models" data-tab="models" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">📦</span><span class="settings-tab-label">Models</span></button>
+    </div>
+
+    <div class="settings-panel" id="panel-status" role="tabpanel" aria-labelledby="tab-status" data-panel="status">
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">🧠</div>
+        <div>
+          <h2>Status</h2>
+          <p class="settings-section-subtitle">Current recognition state, active embedding model, and enrolment counts.</p>
+        </div>
+      </div>
+      <div id="arcfaceStatusPanel" class="status-panel"></div>
+    </section>
+
+    </div><!-- /panel-status -->
+
+    <div class="settings-panel" id="panel-models" role="tabpanel" aria-labelledby="tab-models" data-panel="models" hidden>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">📦</div>
+        <div>
+          <h2>Embedding Models</h2>
+          <p class="settings-section-subtitle">Download a face-embedding model. ArcFace R100 is Apache-2.0 licensed (commercial use permitted).</p>
+        </div>
+      </div>
+      <div id="arcfaceModelsMessage" class="muted"></div>
+      <div id="arcfaceModelList" class="model-card-grid"></div>
+    </section>
+
+    </div><!-- /panel-models -->
+  </main>
+  <script src="/static/nav.js"></script>
+  <script src="/static/utils.js"></script>
+  <script src="/static/arcface.js"></script>
+</body>
+</html>
