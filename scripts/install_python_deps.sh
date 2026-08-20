@@ -54,6 +54,19 @@ case "${VARIANT}" in
 esac
 echo "Resolved ONNX Runtime dependency variant: ${VARIANT}"
 
+# Large wheels (notably the ~300 MB onnxruntime-gpu build, plus the CUDA
+# runtime packages torch pulls in) are prone to mid-download connection
+# timeouts on slow or flaky links. pip reports that as "incomplete-download"
+# and aborts the whole install after discarding the partial file. Give every
+# pip install a longer socket timeout and more retries, and -- where pip
+# supports it (>= 25.1) -- enable download resumption so an interrupted large
+# download continues from where it stopped instead of restarting from zero.
+# All three knobs are overridable via the environment.
+PIP_NET_OPTS=(--retries "${DAYGLE_PIP_RETRIES:-5}" --timeout "${DAYGLE_PIP_TIMEOUT:-120}")
+if "${VENV_BIN}" -m pip install --help 2>/dev/null | grep -q -- '--resume-retries'; then
+  PIP_NET_OPTS+=(--resume-retries "${DAYGLE_PIP_RESUME_RETRIES:-5}")
+fi
+
 _validate_lock() {
   local lock_file="$1"
   local cpu_count gpu_count
@@ -96,10 +109,10 @@ if [[ -f "${LOCK_FILE}" ]]; then
   # Do not remove the existing ORT wheel until the lock has been validated.
   "${VENV_BIN}" -m pip uninstall -y onnxruntime onnxruntime-gpu >/dev/null 2>&1 || true
   if grep -q -- '--hash=sha256:' "${LOCK_FILE}"; then
-    "${VENV_BIN}" -m pip install --no-cache-dir --require-hashes -r "${LOCK_FILE}"
+    "${VENV_BIN}" -m pip install "${PIP_NET_OPTS[@]}" --no-cache-dir --require-hashes -r "${LOCK_FILE}"
   else
     echo "WARNING: ${LOCK_FILE} has no hashes; installing its pinned constraints without --require-hashes." >&2
-    "${VENV_BIN}" -m pip install --no-cache-dir -r "${LOCK_FILE}"
+    "${VENV_BIN}" -m pip install "${PIP_NET_OPTS[@]}" --no-cache-dir -r "${LOCK_FILE}"
   fi
   _verify_runtime
   exit 0
@@ -132,5 +145,5 @@ else
   ' "${REQUIREMENTS_FILE}" > "${REQUIREMENTS_VARIANT}"
 fi
 
-"${VENV_BIN}" -m pip install --no-cache-dir -r "${REQUIREMENTS_VARIANT}"
+"${VENV_BIN}" -m pip install "${PIP_NET_OPTS[@]}" --no-cache-dir -r "${REQUIREMENTS_VARIANT}"
 _verify_runtime
