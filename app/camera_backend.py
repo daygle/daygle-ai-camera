@@ -40,7 +40,9 @@ def _configure_ffmpeg_log_level() -> None:
     the level is re-applied on every call so that reconnects (which create a
     new VideoCapture and trigger a fresh FFmpeg init) stay quiet.
     """
-    global _avutil_libs, _avutil_libs_searched
+    # Only ``_avutil_libs_searched`` is rebound here; ``_avutil_libs`` is
+    # mutated in place (append) below, which needs no ``global``.
+    global _avutil_libs_searched
 
     level_name = str(os.environ.get('DAYGLE_FFMPEG_LOGLEVEL', 'quiet')).strip().lower()
     level_map = {

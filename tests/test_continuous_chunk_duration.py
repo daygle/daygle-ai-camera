@@ -31,6 +31,11 @@ def test_parse_chunk_start_time_interprets_filename_as_local_tz():
     # tests that read local time are unaffected.
     if not hasattr(time, 'tzset'):
         pytest.skip('tzset is only available on Unix')
+    try:
+        import zoneinfo
+        zoneinfo.ZoneInfo('Etc/GMT-1')
+    except Exception:
+        pytest.skip('system tzdata does not know Etc/GMT-1 (minimal containers)')
     original_tz = os.environ.get('TZ')
     os.environ['TZ'] = 'Etc/GMT-1'  # POSIX sign is inverted: GMT-1 == UTC+1
     time.tzset()
