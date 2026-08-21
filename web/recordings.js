@@ -32,6 +32,8 @@ const els = {
   statFilterHint: document.getElementById('statFilterHint'),
   // Label filter select
   labelFilter: document.getElementById('labelFilter'),
+  faceFilter: document.getElementById('faceFilter'),
+  faceField: document.getElementById('faceField'),
 };
 
 // CSRF token and current user live on window.daygleAuth set via
@@ -284,6 +286,7 @@ applyDefaultDateFilters();
 function currentFilterValues() {
   return {
     label: els.labelFilter?.value || '',
+    face: els.faceFilter?.value || '',
     cameraId: els.cameraFilter?.value || '',
     dateFrom: els.recordingDateFrom?.value || '',
     // Read from the custom hour/minute (/AM/PM) selects so the filter value
@@ -302,6 +305,10 @@ function describeFilters(filters) {
   if (filters.label) {
     const option = els.labelFilter?.querySelector(`option[value="${escapeHtml(filters.label)}"]`);
     parts.push(`label “${option?.textContent || filters.label}”`);
+  }
+  if (filters.face) {
+    const faceOption = els.faceFilter?.querySelector(`option[value="${escapeHtml(filters.face)}"]`);
+    parts.push(`face “${faceOption?.textContent || filters.face}”`);
   }
   if (filters.cameraId) {
     const cameraOption = Array.from(els.cameraFilter?.options || []).find((o) => o.value === filters.cameraId);
@@ -482,7 +489,7 @@ function renderRecordings(recordings) {
       <tr class="activity-table-row ${typeClass}" data-recording-row="${recording.id}">
         <td class="activity-cell-type"><span class="activity-item-type">${typeLabel}</span><span class="activity-cell-ref">Recording #${recording.id}</span></td>
         <td class="activity-cell-camera">${escapeHtml(recordingCameraName(recording))}</td>
-        <td class="activity-cell-detections"><div class="activity-item-badges">${badges}</div></td>
+        <td class="activity-cell-detections"><div class="activity-item-badges">${badges}${faceIdentityPills(collectRecordingFaceIdentities(recording), { countUnknown: false })}</div></td>
         <td class="activity-cell-zone">${zoneCell}</td>
         <td class="activity-cell-when">
           <div class="activity-item-when">
@@ -1060,6 +1067,14 @@ async function loadRecordings(filters = {}) {
   } else {
     recordings = await api(`/api/recordings${queryString ? `?${queryString}` : ''}`);
   }
+  // Face identity is filtered on the client: it lives in the linked event
+  // metadata (recording.event / recording.events) that /api/recordings already
+  // returns, and the endpoint has no identity query param. This mirrors the
+  // motion special-case above -- re-filter the fetched set rather than widen
+  // the SQL. The default limit returns the full set, so this stays complete.
+  if (resolved.face) {
+    recordings = recordings.filter((rec) => matchesFaceFilter(collectRecordingFaceIdentities(rec), resolved.face));
+  }
   const activeFilters = describeFilters(resolved);
   if (activeFilters.length) {
     updateFilterStat('Filtered', `Showing clips matching ${activeFilters.join(' and ')}.`);
@@ -1160,6 +1175,12 @@ els.labelFilter?.addEventListener('change', () => {
     if (els.listStatus) els.listStatus.textContent = error.message;
   });
 });
+els.faceFilter?.addEventListener('change', () => {
+  loadRecordings().catch((error) => {
+    if (window.daygleAuth?.redirecting) return;
+    if (els.listStatus) els.listStatus.textContent = error.message;
+  });
+});
 els.filterForm?.addEventListener('submit', (event) => {
   event.preventDefault();
   loadRecordings().catch((error) => {
@@ -1174,6 +1195,7 @@ els.recordingSort?.addEventListener('change', () => {
 });
 els.recordingClearBtn?.addEventListener('click', () => {
   if (els.labelFilter) els.labelFilter.value = '';
+  if (els.faceFilter) els.faceFilter.value = '';
   if (els.cameraFilter) els.cameraFilter.value = '';
   // Reset dates back to the page default (today), not an empty "all time"
   // range, so the button restores the fast default view.
@@ -1198,9 +1220,50 @@ async function populateLabelFilterOptionsFromApi() {
     // Load all recordings without any filter to populate the full label list
     const allRecordings = await api('/api/recordings?limit=500');
     populateLabelFilterOptions(allRecordings);
+    populateFaceFilterOptions(allRecordings);
   } catch (_error) {
     // Silent api() fallback (no UI mutation) - redirect guard skipped by design.
   }
+}
+
+// Build the Face filter from the identities present across all recordings:
+// one option per recognised person, plus "Any Face" / "Unknown" when present.
+// The field stays hidden on deployments that never ran face recognition, so it
+// adds no clutter there. Mirrors populateLabelFilterOptions' preserve-selection.
+function populateFaceFilterOptions(recordings) {
+  if (!els.faceFilter) return;
+  const previous = els.faceFilter.value || '';
+  const people = new Map(); // key -> {name, count}
+  let anyUnknown = 0;
+  let anyFace = 0;
+  recordings.forEach((recording) => {
+    const { people: recPeople, unknown } = collectRecordingFaceIdentities(recording);
+    if (recPeople.size || unknown > 0) anyFace += 1;
+    if (unknown > 0) anyUnknown += 1;
+    for (const [key, person] of recPeople) {
+      const existing = people.get(key);
+      if (existing) existing.count += 1;
+      else people.set(key, { name: person.name, count: 1 });
+    }
+  });
+  const hasFaces = people.size > 0 || anyUnknown > 0;
+  if (els.faceField) els.faceField.hidden = !hasFaces;
+  if (!hasFaces) {
+    els.faceFilter.innerHTML = '<option value="">All Faces</option>';
+    els.faceFilter.value = '';
+    return;
+  }
+  const options = [{ value: '', label: `All Faces${anyFace ? ` (${anyFace})` : ''}` }, { value: 'any', label: 'Any Face' }];
+  const peopleOptions = Array.from(people.entries())
+    .map(([key, person]) => ({ value: key, label: `${person.name} (${person.count})` }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+  options.push(...peopleOptions);
+  if (anyUnknown > 0) options.push({ value: 'unknown', label: `Unknown (${anyUnknown})` });
+  const values = new Set(options.map((option) => option.value));
+  els.faceFilter.innerHTML = options.map((option) => (
+    `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`
+  )).join('');
+  els.faceFilter.value = values.has(previous) ? previous : '';
 }
 
 function populateLabelFilterOptions(recordings) {

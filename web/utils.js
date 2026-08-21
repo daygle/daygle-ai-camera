@@ -430,6 +430,132 @@ function continuousPill() {
   return `<span class="detection detection-continuous">${DETECTION_CONTINUOUS_ICON} Continuous</span>`;
 }
 
+// ── Face-identity pills + filters (Recordings + Snapshots) ───────────────
+// Face recognition annotates person detections in the live loop and stores a
+// compact summary on the event metadata as
+//   metadata.face_identities = { people: [{person_id, name, ...}], unknown: N }
+// (see app/face_identity.py::face_identity_metadata). Faces are NOT a new
+// top-level detection type -- a face only exists because a person was
+// detected -- so these helpers render identity as an inline pill on the
+// existing person/object row and let the pages filter by "which person" or
+// "Unknown". Events that ran no face through recognition carry no
+// ``face_identities`` key, so every helper below is a no-op for them and
+// non-face deployments see nothing new.
+const DETECTION_FACE_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+
+// Normalise a stored ``face_identities`` object into
+//   { people: Map(key -> {key, personId, name, count}), unknown: N }
+// collapsing duplicate people (same person on several tracks/events) and
+// coercing any malformed shape to empty. ``key`` is the stable filter token
+// shared by the dropdown option value and the match test below: ``id:<pid>``
+// for an enrolled person (falling back to ``name:<lower>`` for a legacy row
+// that stored a name but no id).
+function normalizeFaceIdentities(faceIdentities) {
+  const fi = faceIdentities && typeof faceIdentities === 'object' ? faceIdentities : {};
+  const people = new Map();
+  const rawPeople = Array.isArray(fi.people) ? fi.people : [];
+  for (const person of rawPeople) {
+    if (!person || typeof person !== 'object') continue;
+    const name = String(person.name || '').trim();
+    const key = person.person_id != null
+      ? `id:${person.person_id}`
+      : (name ? `name:${name.toLowerCase()}` : '');
+    if (!key) continue;
+    const existing = people.get(key);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      people.set(key, {
+        key,
+        personId: person.person_id != null ? person.person_id : null,
+        name: name || 'Unknown person',
+        count: 1,
+      });
+    }
+  }
+  const unknown = Math.max(0, Math.round(Number(fi.unknown) || 0));
+  return { people, unknown };
+}
+
+function eventFaceIdentities(event) {
+  const meta = (event && event.metadata) || {};
+  return normalizeFaceIdentities(meta.face_identities);
+}
+
+// Merge the identities across every event linked to a recording -- the
+// triggering ``event`` plus the clip's ``events`` array -- deduped by event id
+// so an event that is both the trigger and a member is not counted twice. A
+// person's ``count`` becomes the number of distinct events they appeared in
+// over the clip (a "sightings" tally), which is why the recordings row renders
+// the Unknown pill without a numeric count (see ``faceIdentityPills``): summing
+// per-frame unknown faces across events would overstate how many strangers
+// there were, while "seen" is honest.
+function collectRecordingFaceIdentities(recording) {
+  const merged = { people: new Map(), unknown: 0 };
+  const seen = new Set();
+  const sources = [];
+  const pushSource = (event) => {
+    if (!event || typeof event !== 'object') return;
+    const id = event.id;
+    if (id != null && seen.has(id)) return;
+    if (id != null) seen.add(id);
+    sources.push(event);
+  };
+  if (recording) {
+    pushSource(recording.event);
+    if (Array.isArray(recording.events)) recording.events.forEach(pushSource);
+  }
+  for (const source of sources) {
+    const { people, unknown } = eventFaceIdentities(source);
+    if (unknown > 0) merged.unknown += 1;
+    for (const [key, person] of people) {
+      const existing = merged.people.get(key);
+      if (existing) existing.count += 1;
+      else merged.people.set(key, { ...person, count: 1 });
+    }
+  }
+  return merged;
+}
+
+function asNormalizedFaceIdentities(identities) {
+  return identities && identities.people instanceof Map
+    ? identities
+    : normalizeFaceIdentities(identities);
+}
+
+// Render identity pills from either a raw ``face_identities`` object or an
+// already-normalised structure. ``countUnknown`` is false for recordings
+// (where the merged unknown tally is a sightings count, not a headcount) so
+// the Unknown pill shows no ``×N`` there; snapshots (a single event/frame)
+// pass the default true so "Unknown ×2" reads exactly.
+function faceIdentityPills(identities, options = {}) {
+  const norm = asNormalizedFaceIdentities(identities);
+  const countUnknown = options.countUnknown !== false;
+  const pills = [];
+  for (const person of norm.people.values()) {
+    const countText = person.count > 1 ? ` <span class="detection-count">×${person.count}</span>` : '';
+    pills.push(`<span class="detection detection-face" title="Recognised person">${DETECTION_FACE_ICON} ${escapeHtml(person.name)}${countText}</span>`);
+  }
+  if (norm.unknown > 0) {
+    const countText = countUnknown && norm.unknown > 1 ? ` <span class="detection-count">×${norm.unknown}</span>` : '';
+    pills.push(`<span class="detection detection-face-unknown" title="Face not matched to an enrolled person">${DETECTION_FACE_ICON} Unknown${countText}</span>`);
+  }
+  return pills.join('');
+}
+
+// True when ``identities`` satisfies a face-filter selection. Values:
+//   ''         -> no face filter (always matches)
+//   'any'      -> any recognised or unknown face present
+//   'unknown'  -> at least one unrecognised face
+//   'id:<pid>' / 'name:<lower>' -> that specific enrolled person present
+function matchesFaceFilter(identities, value) {
+  if (!value) return true;
+  const norm = asNormalizedFaceIdentities(identities);
+  if (value === 'any') return norm.people.size > 0 || norm.unknown > 0;
+  if (value === 'unknown') return norm.unknown > 0;
+  return norm.people.has(value);
+}
+
 // A recording is "motion-only" when:
 //  * it isn't a sound recording,
 //  * no concrete object label is attached to it (the join-table labels
@@ -1265,6 +1391,8 @@ window.daygleUi = {
   // UI helpers
   showToast, escapeHtml, safeHtml, titleCase, normalizeEmailList, requireElements, initDaygleTabs,
   detectionPill, motionPill, continuousPill, stillAlertBadge, isSoundLabel, SOUND_CLASS_IDS, DETECTION_EYE_ICON, DETECTION_MOTION_ICON, DETECTION_CLOCK_ICON, DETECTION_CONTINUOUS_ICON, MOTION_RUNNING_ROW_ICON,
+  // Face-identity pills + filters (recordings + snapshots)
+  DETECTION_FACE_ICON, normalizeFaceIdentities, eventFaceIdentities, collectRecordingFaceIdentities, faceIdentityPills, matchesFaceFilter,
   isGenericTriggerLabel, GENERIC_TRIGGER_LABELS,
   isMotionOnlyRecording, isContinuousOnlyRecording, motionConfidenceFor, recordingHasMotion,
   isMotionOnlyEvent, isMotionOnlyEventItem,
