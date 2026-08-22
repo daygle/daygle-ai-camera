@@ -328,7 +328,17 @@ class FaceEmbedder:
             return
         try:
             providers = self._resolve_providers(ort)
-            self.session = ort.InferenceSession(str(self.model_path), providers=providers)
+            # Session options keep the default graph optimizations but raise
+            # ORT's log threshold to errors only. On CUDA the ArcFace graph
+            # (internally "mxnet_converted_model") gets hundreds of Memcpy
+            # nodes inserted for CPU<->GPU tensor transfers; ORT logs a noisy
+            # per-load WARNING about them. It is a benign performance hint,
+            # not a fault, so silence it instead of flooding the app log.
+            sess_options = ort.SessionOptions()
+            sess_options.log_severity_level = 3  # ORT_LOGGING_LEVEL_ERROR
+            self.session = ort.InferenceSession(
+                str(self.model_path), sess_options=sess_options, providers=providers
+            )
             self.input_name = self.session.get_inputs()[0].name
             self.output_names = [output.name for output in self.session.get_outputs()]
             output_shape = self.session.get_outputs()[0].shape

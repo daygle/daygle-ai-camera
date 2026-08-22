@@ -2012,12 +2012,30 @@ class RecordingService:
                 total_inodes,
             )
         else:
+            if free_bytes is None and probe_path is not None:
+                # Syscall-driven ENOSPC with no pre-flight measurement: measure
+                # NOW so the message shows what this volume actually looked
+                # like. A near-zero figure means the write target really was
+                # full; ample bytes point at inode exhaustion below the
+                # classification threshold, root-reserved blocks (df's "avail"
+                # excludes them for non-root writers), or a filesystem quota.
+                try:
+                    free_bytes = shutil.disk_usage(probe_path).free
+                except OSError:
+                    pass
             if free_bytes is not None and needed_bytes is not None:
                 space = (
                     f'free {free_bytes / (1024 ** 3):.2f} GiB, needs ~{needed_bytes / (1024 ** 3):.2f} GiB'
                 )
+            elif free_bytes is not None:
+                space = (
+                    f'only {free_bytes / (1024 ** 3):.2f} GiB free on the recordings '
+                    f'filesystem at write time'
+                )
             else:
-                space = 'the recordings filesystem is full'
+                space = 'the recordings filesystem reported No space left on device'
+            if free_inodes is not None:
+                space += f'; {free_inodes} of {total_inodes} inodes free'
             logger.warning(
                 'Audio mux for %s was not completed because the recordings disk is full (%s); '
                 'keeping the silent video clip. Free up space on the recordings drive to restore event audio.',
