@@ -408,6 +408,13 @@ def deliver_push_notifications(
     detected_at = _format_alert_datetime(created_at_raw) if created_at_raw else None
     rules_by_name = {str(rule.get('name')): rule for rule in rules or []}
     notifier = PushNotificationService(push_settings)
+    # Unknown-face alerts are not backed by a zone rule (they self-debounce
+    # per stranger track); they are governed by the face-recognition
+    # ``alert_unknown`` setting instead, mirroring the email-side special
+    # case in ``deliver_email_alerts``.
+    unknown_face_push_active = bool(
+        effective_face_recognition_config().get('alert_unknown')
+    )
     all_triggered_labels = sorted(
         {
             str(alert.get('label') or '').strip()
@@ -418,17 +425,25 @@ def deliver_push_notifications(
     for alert in triggered:
         rule_name = str(alert.get('rule_name') or '')
         rule = rules_by_name.get(rule_name)
-        if not rule:
+        if rule_name == 'Unknown face':
+            if not unknown_face_push_active:
+                logger.debug(
+                    'Push skipped for event %s rule %r: face-recognition alert_unknown is off',
+                    event_id,
+                    rule_name,
+                )
+                continue
+        elif not rule:
             logger.debug('Push skipped for event %s: no rule found for %r', event_id, rule_name)
             continue
-        if not rule.get('push_enabled'):
+        elif not rule.get('push_enabled'):
             logger.debug(
                 'Push skipped for event %s rule %r: push_enabled is False',
                 event_id,
                 rule_name,
             )
             continue
-        if not _rule_notify_active_now(rule):
+        elif not _rule_notify_active_now(rule):
             logger.debug(
                 'Push skipped for event %s rule %r: outside notify window %s-%s '
                 '(the detection still recorded; widen the rule notify window to push it)',
