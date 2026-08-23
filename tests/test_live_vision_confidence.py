@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_live_header_does_not_repeat_detection_items():
     source = (ROOT / 'web' / 'live.js').read_text(encoding='utf-8')
 
-    assert "liveEls.detectionSubtitle.textContent = 'What the AI is currently seeing and hearing on the live feed.';" in source
+    assert "liveEls.detectionSubtitle.textContent = 'What the AI is currently seeing, hearing, and recognizing on the live feed.';" in source
     assert 'parts.push(`Seeing:' not in source
     assert 'parts.push(`Hearing:' not in source
 
