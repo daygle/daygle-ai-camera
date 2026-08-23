@@ -1,13 +1,13 @@
 # Face Recognition Guide
 
 Face recognition identifies **which enrolled person** a detected face belongs
-to. It builds on face *detection* (see [ai-detection.md](ai-detection.md) — the
+to. It builds on face *detection* (see [ai-detection.md](ai-detection.md) - the
 `YOLO11 · Face` models): detection finds *where* faces are, recognition decides
 *who* they are, and only for people an admin has explicitly enrolled.
 
 > Recognition is **admin-only** and **off by default**. Nothing runs until an
 > admin downloads an embedding model, enables recognition, and enrols at least
-> one person. Face embeddings are biometric data — enrolment and identity
+> one person. Face embeddings are biometric data - enrolment and identity
 > management are restricted to admins and every change is written to the audit
 > log.
 
@@ -45,13 +45,13 @@ Both output 512-d embeddings from a 112×112 aligned face crop and share the sam
 ### 2. Enable recognition and tune
 
 - **Enable** face recognition (requires a downloaded model).
-- **Match threshold** — cosine-similarity acceptance. Higher = stricter (fewer
+- **Match threshold** - cosine-similarity acceptance. Higher = stricter (fewer
   false matches, more "unknown"); start around `0.5` and tune.
-- **Alert on unknown** — treat a detected face that matches nobody as an
+- **Alert on unknown** - treat a detected face that matches nobody as an
   alertable "stranger".
-- **Minimum face size** — ignore faces smaller than N pixels on their shorter
+- **Minimum face size** - ignore faces smaller than N pixels on their shorter
   side before embedding (tiny/distant faces embed poorly).
-- **Retention** — days to keep recognised-identity data on events (`0` = keep
+- **Retention** - days to keep recognised-identity data on events (`0` = keep
   indefinitely).
 
 ### 3. Enrol people
@@ -70,7 +70,7 @@ The bundled embedding models are **ArcFace ResNet100** from the
 
 ```
 ArcFace ResNet100 (arcfaceresnet100-8 / arcfaceresnet100-11-int8)
-Source: ONNX Model Zoo — https://github.com/onnx/models
+Source: ONNX Model Zoo - https://github.com/onnx/models
 License: Apache License 2.0
 ```
 

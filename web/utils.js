@@ -1275,7 +1275,7 @@ function applyDaygleTheme(themePref) {
 
   // Cache the resolved theme for the inline flash-prevention script. We store
   // 'dark' explicitly (rather than an empty string) so the pre-paint script can
-  // distinguish "user chose dark" from "no choice yet" — the latter now
+  // distinguish "user chose dark" from "no choice yet" - the latter now
   // defaults to light.
   const cache = isLight ? 'light' : 'dark';
   try { localStorage.setItem('daygle.theme', cache); } catch (_err) { /* ignore */ }

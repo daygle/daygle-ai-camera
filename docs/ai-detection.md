@@ -176,7 +176,7 @@ The detector is label-driven, so it can run a **face-detection** model in place
 of (or alongside, on a second camera profile) the COCO object models. A face
 model reports a single `face` label that flows through zones, object rules,
 cooldowns, the Events feed, and annotated snapshots exactly like `person` or
-`car` — you can, for example, write a rule that alerts only when a face is
+`car` - you can, for example, write a rule that alerts only when a face is
 visible, rather than any time a full body is detected.
 
 > **Detecting a face is not recognising *who* it is.** This feature draws boxes
@@ -185,12 +185,12 @@ visible, rather than any time a full body is detected.
 > part of this page.
 
 Under the hood, three pieces make a model a face detector (all wired up for you
-when you download one from the library — see below):
+when you download one from the library - see below):
 
 1. **A face-detection ONNX model** in `models/`.
-2. **A labels file** — `models/face.names` ships with the application and
+2. **A labels file** - `models/face.names` ships with the application and
    contains the single label `face`.
-3. **`keypoint_count`** — most YOLO-face weights are pose models with a 5-point
+3. **`keypoint_count`** - most YOLO-face weights are pose models with a 5-point
    facial-landmark head. Their ONNX output carries `4 bbox + 1 class score +
    5×3 landmark` columns per anchor. Setting `keypoint_count` (5 for those
    weights) tells the detector to read the class score from the correct column
@@ -199,8 +199,8 @@ when you download one from the library — see below):
 
 ### Downloading a face model
 
-The model library ships a **YOLO11 · Face** family — Nano, Small, Medium, and
-Large — alongside the COCO models on the Models tab. Downloading one works
+The model library ships a **YOLO11 · Face** family - Nano, Small, Medium, and
+Large - alongside the COCO models on the Models tab. Downloading one works
 exactly like any other model: its source weights are fetched, exported to ONNX
 through the same Ultralytics pipeline, and the active AI settings are bound to
 `models/face.names` and `keypoint_count = 5` automatically. No manual settings
@@ -215,7 +215,7 @@ faces are harder to catch.
 > [YapaLab/yolo-face](https://github.com/YapaLab/yolo-face) (release `1.0.0`)
 > and are **GPL-3.0** licensed; they are exported through Ultralytics like every
 > other catalog model. The weights are downloaded on demand from their upstream
-> release — they are not redistributed inside this repository — but a deployment
+> release - they are not redistributed inside this repository - but a deployment
 > that enables the one-click download should be comfortable with those terms.
 
 ### Adding your own face model
@@ -223,7 +223,7 @@ faces are harder to catch.
 To use different weights, add an entry to `YOLO_MODELS` (`app/ai_settings.py`)
 using the same schema as the `yolo11*-face` entries: the standard model keys
 plus `labels: 'models/face.names'`, `keypoint_count` (5 for a 5-point landmark
-head, `0` for a plain detection head), and a `weights_url` — an explicit `https`
+head, `0` for a plain detection head), and a `weights_url` - an explicit `https`
 source for weights Ultralytics cannot resolve by name. The download flow fetches
 `weights_url`, exports it, and binds the labels/keypoint settings automatically.
 
