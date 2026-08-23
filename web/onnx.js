@@ -1,7 +1,10 @@
 const aiForm = document.getElementById('aiSettingsForm');
 const messageEl = document.getElementById('settingsMessage');
 const statusPanel = document.getElementById('aiStatusPanel');
-const modelList = document.getElementById('modelList');
+const objectModelList = document.getElementById('objectModelList');
+const faceModelList = document.getElementById('faceModelList');
+const objectModelsCard = document.getElementById('objectModelsCard');
+const faceModelsCard = document.getElementById('faceModelsCard');
 const modelUpdatesMessage = document.getElementById('modelUpdatesMessage');
 let modelUpdateMap = {};
 // Track per-card message timeouts so rapid actions don't clear new messages
@@ -199,33 +202,30 @@ function renderAi(settings) {
 
 function renderModelList(models) {
   if (!models.length) {
-    modelList.innerHTML = '<p class="muted">No models available.</p>';
+    objectModelsCard.hidden = true;
+    faceModelsCard.hidden = true;
+    modelUpdatesMessage.textContent = 'No models available.';
     return;
   }
-  // Face-family models get their own section: they are used by the secondary
-  // face-detection pass (Settings tab), never as the primary object detector.
   const objectModels = models.filter((m) => m.family !== 'face');
   const faceModels = models.filter((m) => m.family === 'face');
-  const renderSection = (title, subtitle, list) => {
-    if (!list.length) return '';
-    return `
-      <div class="model-section-header">
-        <h3>${escapeHtml(title)}</h3>
-        <p class="muted">${escapeHtml(subtitle)}</p>
-      </div>
-      <div class="model-card-grid">${list.map(renderCard).join('')}</div>`;
-  };
-  modelList.innerHTML =
-    renderSection(
-      'Object Detection Models',
-      'The active model here is the PRIMARY detector - it decides which labels (person, car…) zones and alerts can use.',
-      objectModels,
-    )
-    + renderSection(
-      'Face Detection Models',
-      'Used by the optional secondary face pass - it runs ALONGSIDE the object model above so faces and objects are detected at the same time. Download one and it is wired up automatically; see Settings below.',
-      faceModels,
-    );
+
+  // Object models card
+  if (objectModels.length) {
+    objectModelsCard.hidden = false;
+    objectModelList.innerHTML = objectModels.map(renderCard).join('');
+  } else {
+    objectModelsCard.hidden = true;
+  }
+
+  // Face models card
+  if (faceModels.length) {
+    faceModelsCard.hidden = false;
+    faceModelList.innerHTML = faceModels.map(renderCard).join('');
+  } else {
+    faceModelsCard.hidden = true;
+  }
+
   bindModelCardActions();
 }
 
@@ -327,7 +327,7 @@ function renderCard(m) {
 // Unified click handling for every model-card action button. Re-bound on
 // each renderModelList() pass because the cards are rebuilt as fresh HTML.
 function bindModelCardActions() {
-  modelList.querySelectorAll('.model-action-btn[data-action]').forEach((btn) => {
+  document.querySelectorAll('#objectModelList .model-action-btn[data-action], #faceModelList .model-action-btn[data-action]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const action = btn.dataset.action;
       const modelId = btn.dataset.modelId;
@@ -427,7 +427,9 @@ async function loadModels() {
     renderModelList(models);
     populateFaceModelSelect(models, aiForm.elements['face_model_path']?.value || '');
   } catch {
-    modelList.innerHTML = '<p class="muted">Could not load model list.</p>';
+    objectModelsCard.hidden = true;
+    faceModelsCard.hidden = true;
+    modelUpdatesMessage.textContent = 'Could not load model list.';
   }
 }
 

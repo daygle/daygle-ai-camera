@@ -13,13 +13,19 @@ const saveBtnHeader = document.getElementById('saveObjectsBtnHeader');
 const groupsList = document.getElementById('groupsList');
 const groupsMessage = document.getElementById('groupsMessage');
 const groupNameInput = document.getElementById('groupNameInput');
-const groupMembersInput = document.getElementById('groupMembersInput');
-const groupMembersDatalist = document.getElementById('groupMembersDatalist');
+const groupMembersChips = document.getElementById('groupMembersChips');
+const groupMembersToggle = document.getElementById('groupMembersToggle');
+const groupMembersDropdown = document.getElementById('groupMembersDropdown');
+const groupMembersFilter = document.getElementById('groupMembersFilter');
+const groupMembersOptions = document.getElementById('groupMembersOptions');
 const groupAddBtn = document.getElementById('groupAddBtn');
 const groupCancelBtn = document.getElementById('groupCancelBtn');
 const groupModesBody = document.getElementById('groupModesBody');
 const groupModesTableWrap = document.getElementById('groupModesTableWrap');
 const groupModesEmpty = document.getElementById('groupModesEmpty');
+
+// ── Multi-select state ──────────────────────────────────────────────────
+const selectedMembers = new Set();
 
 const MODE_LABELS = {
   any: 'Moving & Still',
@@ -176,12 +182,9 @@ function render(settings) {
 
 // ─── Object Groups ────────────────────────────────────────────────────────
 
-function parseMembers(raw) {
-  const seen = new Set();
-  return String(raw || '')
-    .split(',')
-    .map((member) => member.trim().toLowerCase())
-    .filter((member) => member && !seen.has(member) && seen.add(member));
+function parseMembers() {
+  // Read from the multi-select chip set, not a text input.
+  return [...selectedMembers].sort();
 }
 
 function renderGroups() {
@@ -262,15 +265,21 @@ function renderGroupModes() {
 function resetGroupForm() {
   editingGroupName = null;
   groupNameInput.value = '';
-  groupMembersInput.value = '';
+  selectedMembers.clear();
+  renderChips();
+  renderDropdownOptions();
   groupAddBtn.textContent = 'Add Group';
   groupCancelBtn.hidden = true;
+  closeMultiSelect();
 }
 
 function startEditGroup(name) {
   editingGroupName = name;
   groupNameInput.value = titleCase(name);
-  groupMembersInput.value = (groups[name] || []).join(', ');
+  selectedMembers.clear();
+  for (const member of (groups[name] || [])) selectedMembers.add(member);
+  renderChips();
+  renderDropdownOptions();
   groupAddBtn.textContent = 'Save Group';
   groupCancelBtn.hidden = false;
   groupNameInput.focus();
@@ -297,7 +306,7 @@ async function persistGroups(next) {
 
 async function saveGroup() {
   const name = groupNameInput.value.trim().toLowerCase();
-  const members = parseMembers(groupMembersInput.value);
+  const members = parseMembers();
   if (!name) {
     window.showToast('Enter a group name.', true);
     return;
@@ -348,11 +357,73 @@ async function loadAll() {
   groups = (groupSettings && groupSettings.groups) || {};
   render(objectSettings);
   renderGroups();
-  if (groupMembersDatalist) {
-    groupMembersDatalist.innerHTML = availableLabels
-      .map((label) => `<option value="${escapeHtml(label)}">${escapeHtml(titleCase(label))}</option>`)
-      .join('');
+  renderDropdownOptions();
+}
+
+// ── Multi-select UI ────────────────────────────────────────────────────
+
+function renderChips() {
+  if (!groupMembersChips) return;
+  const labels = [...selectedMembers].sort();
+  groupMembersChips.innerHTML = labels.map((label) =>
+    `<span class="multi-select-chip">${escapeHtml(titleCase(label))}<span class="multi-select-chip-remove" data-remove="${escapeHtml(label)}" title="Remove ${escapeHtml(titleCase(label))}">&times;</span></span>`
+  ).join('');
+  groupMembersChips.querySelectorAll('.multi-select-chip-remove').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectedMembers.delete(el.dataset.remove);
+      renderChips();
+      renderDropdownOptions();
+    });
+  });
+  // Update toggle placeholder
+  if (groupMembersToggle) {
+    const span = groupMembersToggle.querySelector('span:first-child');
+    if (span) {
+      span.textContent = labels.length ? `${labels.length} selected` : 'Select objects…';
+    }
   }
+}
+
+function renderDropdownOptions() {
+  if (!groupMembersOptions || !availableLabels.length) return;
+  const filter = (groupMembersFilter?.value || '').trim().toLowerCase();
+  const filtered = filter
+    ? availableLabels.filter((label) => label.includes(filter))
+    : availableLabels;
+  if (!filtered.length) {
+    groupMembersOptions.innerHTML = '<div class="multi-select-empty">No matching labels.</div>';
+    return;
+  }
+  groupMembersOptions.innerHTML = filtered.map((label) => {
+    const checked = selectedMembers.has(label) ? ' checked' : '';
+    return `<label class="multi-select-option"><input type="checkbox" value="${escapeHtml(label)}"${checked}><span class="multi-select-option-label">${escapeHtml(titleCase(label))}</span></label>`;
+  }).join('');
+  groupMembersOptions.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) selectedMembers.add(cb.value);
+      else selectedMembers.delete(cb.value);
+      renderChips();
+      renderDropdownOptions();
+    });
+  });
+}
+
+function openMultiSelect() {
+  if (!groupMembersDropdown || !groupMembersToggle) return;
+  groupMembersDropdown.hidden = false;
+  groupMembersToggle.setAttribute('aria-expanded', 'true');
+  renderDropdownOptions();
+  if (groupMembersFilter) {
+    groupMembersFilter.value = '';
+    groupMembersFilter.focus();
+  }
+}
+
+function closeMultiSelect() {
+  if (!groupMembersDropdown || !groupMembersToggle) return;
+  groupMembersDropdown.hidden = true;
+  groupMembersToggle.setAttribute('aria-expanded', 'false');
 }
 
 defaultSelect.addEventListener('change', () => {
@@ -401,6 +472,27 @@ saveBtnHeader?.addEventListener('click', saveObjects);
 
 groupAddBtn?.addEventListener('click', saveGroup);
 groupCancelBtn?.addEventListener('click', resetGroupForm);
+
+// Multi-select toggle: open/close dropdown
+groupMembersToggle?.addEventListener('click', (e) => {
+  e.preventDefault();
+  if (groupMembersDropdown?.hidden) openMultiSelect();
+  else closeMultiSelect();
+});
+
+// Filter as you type in the dropdown search
+groupMembersFilter?.addEventListener('input', renderDropdownOptions);
+
+// Close dropdown when clicking outside the multi-select
+document.addEventListener('click', (e) => {
+  const container = document.getElementById('groupMembersSelect');
+  if (container && !container.contains(e.target)) closeMultiSelect();
+});
+
+// Prevent dropdown from closing when clicking inside it
+groupMembersDropdown?.addEventListener('click', (e) => {
+  e.stopPropagation();
+});
 
 window.addEventListener('beforeunload', (event) => {
   if (!hasUnsavedChanges) return;

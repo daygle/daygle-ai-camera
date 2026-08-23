@@ -6456,10 +6456,10 @@ button.secondary:disabled, a.secondary:disabled {
   align-items: end;
 }
 .form-stack.group-form .button-row {
-  justify-content: flex-start;
-  border-top: none;
-  padding-top: 0;
-  margin-top: 4px;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  margin-top: 10px;
 }
 .form-stack.group-form .button-row button { min-width: 0; }
 .group-row {
@@ -6476,6 +6476,99 @@ button.secondary:disabled, a.secondary:disabled {
 .group-name { font-weight: 800; color: var(--text); }
 .group-members { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .group-row-actions { display: flex; gap: 8px; flex-shrink: 0; }
+/* ─── Multi-select (Object Groups member picker) ───────────────────────── */
+.multi-select { position: relative; user-select: none; }
+.multi-select-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 0;
+  margin-bottom: 6px;
+}
+.multi-select-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(71, 214, 255, 0.1);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 3px 8px 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.multi-select-chip-remove {
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.6;
+  padding: 0 2px;
+}
+.multi-select-chip-remove:hover { opacity: 1; }
+.multi-select-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+.multi-select-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.multi-select-caret { font-size: 10px; color: var(--muted); transition: transform 0.15s; }
+.multi-select-toggle[aria-expanded="true"] .multi-select-caret { transform: rotate(180deg); }
+.multi-select-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  margin-top: 2px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  max-height: 240px;
+  display: flex;
+  flex-direction: column;
+}
+.multi-select-search { padding: 6px; border-bottom: 1px solid var(--border); }
+.multi-select-search input {
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  box-sizing: border-box;
+}
+.multi-select-search input:focus { outline: none; border-color: var(--accent); }
+.multi-select-options {
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 0;
+}
+.multi-select-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+}
+.multi-select-option:hover { background: var(--hover, rgba(0,0,0,0.04)); }
+.multi-select-option input[type="checkbox"] { margin: 0; accent-color: var(--accent); }
+.multi-select-option-label { flex: 1; }
+.multi-select-empty { padding: 10px; text-align: center; color: var(--muted); font-size: 13px; }
+
 @media (max-width: 600px) {
   .group-form-fields { grid-template-columns: 1fr; }
   .group-row { flex-direction: column; align-items: stretch; }

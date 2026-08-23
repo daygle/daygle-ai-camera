@@ -7,7 +7,6 @@
   <title>ONNX - Daygle AI Camera</title>
   <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   <link rel="stylesheet" href="/static/styles.css" />
-  <link rel="stylesheet" href="/static/onnx-model-sections.css" />
   <link rel="stylesheet" href="/static/model-card-messages.css" />
 </head>
 <body>
@@ -49,20 +48,33 @@
 
     <div class="settings-panel" id="panel-models" role="tabpanel" aria-labelledby="tab-models" data-panel="models" hidden>
 
-    <section class="card">
+    <div id="modelUpdatesMessage" class="muted" style="margin-bottom:12px"></div>
+
+    <section class="card" id="objectModelsCard" hidden>
       <div class="settings-section-header">
         <div class="settings-section-icon">📦</div>
         <div>
-          <h2>Model Library</h2>
-          <p class="settings-section-subtitle">Download, manage, and switch between YOLO object detection models. Larger models are more accurate but use more CPU.</p>
+          <h2>Object Detection Models</h2>
+          <p class="settings-section-subtitle">The PRIMARY detector — its labels (person, car…) are what zones and alerts use. Larger models are more accurate but use more CPU.</p>
         </div>
       </div>
-      <div id="modelUpdatesMessage" class="muted" style="margin-bottom:8px"></div>
-      <div id="modelList" class="model-card-grid"></div>
-      <div class="button-row" style="margin-top:16px">
-        <button id="checkModelUpdatesBtn" class="btn-info" type="button">Check for Updates</button>
-      </div>
+      <div id="objectModelList" class="model-card-grid"></div>
     </section>
+
+    <section class="card" id="faceModelsCard" hidden>
+      <div class="settings-section-header">
+        <div class="settings-section-icon">👤</div>
+        <div>
+          <h2>Face Detection Models</h2>
+          <p class="settings-section-subtitle">Run ALONGSIDE the object model so faces and objects are detected at the same time. Download one and enable it in the <a href="#">Settings</a> tab.</p>
+        </div>
+      </div>
+      <div id="faceModelList" class="model-card-grid"></div>
+    </section>
+
+    <div class="button-row" style="margin-top:16px">
+      <button id="checkModelUpdatesBtn" class="btn-info" type="button">Check for Updates</button>
+    </div>
 
     </div><!-- /panel-models -->
 

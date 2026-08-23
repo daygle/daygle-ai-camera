@@ -58,9 +58,20 @@
             <input type="text" id="groupNameInput" placeholder="e.g. vehicle" />
           </label>
           <label class="group-members-field">
-            <span>Member Labels <span class="muted">(comma-separated)</span></span>
-            <input type="text" id="groupMembersInput" list="groupMembersDatalist" placeholder="car, truck, bus, motorcycle" />
-            <datalist id="groupMembersDatalist"></datalist>
+            <span>Member Labels</span>
+            <div class="multi-select" id="groupMembersSelect">
+              <div class="multi-select-chips" id="groupMembersChips"></div>
+              <button type="button" class="multi-select-toggle" id="groupMembersToggle" aria-haspopup="listbox" aria-expanded="false">
+                <span>Select objects…</span>
+                <span class="multi-select-caret">▼</span>
+              </button>
+              <div class="multi-select-dropdown" id="groupMembersDropdown" role="listbox" aria-multiselectable="true" hidden>
+                <div class="multi-select-search">
+                  <input type="text" id="groupMembersFilter" placeholder="Filter…" autocomplete="off" />
+                </div>
+                <div class="multi-select-options" id="groupMembersOptions"></div>
+              </div>
+            </div>
           </label>
         </div>
         <div class="button-row group-form-actions">
