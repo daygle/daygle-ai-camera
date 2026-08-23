@@ -87,6 +87,7 @@ applies verbatim.
 
 from __future__ import annotations
 
+import hmac
 import logging
 import urllib.parse
 
@@ -304,7 +305,14 @@ async def authentication_middleware(request: Request, call_next):
                 status_code=403,
             )
         csrf_header = request.headers.get(CSRF_HEADER)
-        if not csrf_header or csrf_header != session['csrf_token']:
+        # Constant-time comparison: the CSRF token is a secret, so compare it
+        # with ``hmac.compare_digest`` rather than ``==`` to close the (mostly
+        # theoretical) response-timing oracle on the token bytes.
+        if (
+            not csrf_header
+            or not isinstance(session.get('csrf_token'), str)
+            or not hmac.compare_digest(csrf_header, session['csrf_token'])
+        ):
             return JSONResponse(
                 {'detail': 'CSRF token missing or invalid'}, status_code=403,
             )

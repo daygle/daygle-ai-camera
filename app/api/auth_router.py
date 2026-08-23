@@ -11,6 +11,7 @@ Routes:
 
 from __future__ import annotations
 
+import hmac
 import logging
 
 from html import escape
@@ -36,10 +37,26 @@ def _session_cookie_name() -> str:
     return str(effective_auth_config().get('cookie_name', SESSION_COOKIE))
 
 
+def _csrf_double_submit_ok(data: dict, request: Request) -> bool:
+    """Constant-time double-submit CSRF check for the pre-auth forms.
+
+    Compares the submitted ``csrf_token`` form field against the
+    ``daygle_csrf`` cookie with ``hmac.compare_digest`` so the comparison cost
+    does not leak token bytes through response timing. Missing values on
+    either side fail closed.
+    """
+    submitted = data.get('csrf_token') or ''
+    cookie = request.cookies.get(CSRF_COOKIE) or ''
+    if not submitted or not cookie:
+        return False
+    return hmac.compare_digest(str(submitted), str(cookie))
+
+
 @router.post('/login')
 async def login(request: Request, db=Depends(get_database), auth=Depends(get_auth), auth_enabled=Depends(get_auth_enabled), logger=Depends(get_logger)):
     data = await form_data(request)
-    if data.get('csrf_token') != request.cookies.get(CSRF_COOKIE):
+    # Double-submit CSRF check, constant-time (see middleware note).
+    if not _csrf_double_submit_ok(data, request):
         return login_page(request, 'Security token expired. Try again.', auth=auth, auth_enabled=auth_enabled)
     username = data.get('username', '')
     ip = _request_ip(request)
@@ -171,7 +188,7 @@ async def setup(request: Request, auth=Depends(get_auth), auth_enabled=Depends(g
     if auth.users_exist():
         return RedirectResponse('/login', status_code=303)
     data = await form_data(request)
-    if data.get('csrf_token') != request.cookies.get(CSRF_COOKIE):
+    if not _csrf_double_submit_ok(data, request):
         return setup_page(request, 'Security token expired. Try again.', auth=auth, auth_enabled=auth_enabled)
     if data.get('password') != data.get('confirm_password'):
         return setup_page(request, 'Passwords do not match.', auth=auth, auth_enabled=auth_enabled)
