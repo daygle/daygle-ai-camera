@@ -103,8 +103,25 @@ def apply_update(request: Request, logger=Depends(get_logger)):
     output = ((result.stdout or '') + ('\n' + result.stderr if result.stderr else '')).strip()
     service_restart_scheduled = False
     if result.returncode == 0:
-        check = subprocess.run(['systemctl', 'is-active', 'daygle-ai-camera'], capture_output=True, text=True, timeout=5, check=False)
-        if check.returncode == 0:
+        # ``_current_version()`` caches its result for the process lifetime;
+        # check_update (or any earlier caller) has already populated that cache
+        # with the PRE-update tag. Reset it so the response below and any
+        # subsequent version display reflect the freshly pulled code.
+        import app.utils as _utils
+        _utils._cached_version = None
+        # ``systemctl`` may not exist (non-systemd host / containers) or may
+        # hang; neither should turn an ALREADY-SUCCESSFUL update into an
+        # HTTP 500. Any probe failure simply means "no automatic restart".
+        try:
+            check = subprocess.run(['systemctl', 'is-active', 'daygle-ai-camera'], capture_output=True, text=True, timeout=5, check=False)
+            service_active = check.returncode == 0
+        except FileNotFoundError:
+            logger.info('Update applied; systemctl not available - skipping automatic restart.')
+            service_active = False
+        except subprocess.TimeoutExpired:
+            logger.warning('systemctl is-active timed out - skipping automatic restart.')
+            service_active = False
+        if service_active:
 
             def _delayed_restart() -> None:
                 time.sleep(3)
