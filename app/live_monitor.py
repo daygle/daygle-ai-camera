@@ -39,6 +39,7 @@ from app.object_settings import (
 )
 from app.object_tracking import update_object_tracks
 from app.face_identity import annotate_face_identities, face_identity_metadata, unknown_face_alerts
+from app.face_detection_rules import known_face_rules_for_camera
 from app.region_detection import (
     detect_with_region_boost,
     detect_with_tiling,
@@ -650,6 +651,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # itself alertable ("stranger"), one alert per track. Empty unless
     # recognition is enabled with ``alert_unknown`` on.
     _unknown_face_alerts = unknown_face_alerts(camera_id, object_detections)
+    # Face detection rules (Stage 2c): per-person alert rules with email/push
+    # notifications, checked after identity annotation so each face carries
+    # person_name/person_id annotations.
+    _known_face_rule_alerts = known_face_rules_for_camera(camera_id, object_detections)
     # Still-dwell alerts (Objects page: "still for N minutes"): a label that
     # has been detected continuously still for its configured threshold fires
     # one dwell alert per streak, watching the same Layer-1 background-
@@ -720,7 +725,7 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         if z.get('enabled', True) and z.get('monitor_objects', True)
     ]
     object_reason = _below_threshold_object_reason(detections, _monitored_zones)
-    if not alert_detections and not _unknown_face_alerts:
+    if not alert_detections and not _unknown_face_alerts and not _known_face_rule_alerts:
         reason = _no_object_match_reason(detections, raw_labels, _monitored_zones)
         update_live_detection_status(camera_id, state='checked', reason=reason, object_reason=object_reason, detected_labels=raw_labels, matched_labels=[], detections=list(detections), motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         return None
@@ -752,6 +757,10 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
             'confidence': float(_unknown.get('confidence') or 0),
             'message': 'Alert triggered: unrecognized face detected',
         })
+    # Known-face rules: per-person alerts that fire when a face rule is
+    # enabled and the person is detected, debounced by cooldown per track.
+    for _known in _known_face_rule_alerts:
+        triggered.append(_known)
     triggered_rule_names = {str(alert.get('rule_name') or '') for alert in triggered}
     triggered_labels = {str(alert.get('label') or '').lower() for alert in triggered}
     _confident_object_detections: list[dict[str, Any]] = []

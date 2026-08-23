@@ -230,6 +230,8 @@ from app.api.settings_face_recognition_router import router as settings_face_rec
 app.include_router(settings_face_recognition_router)
 from app.api.persons_router import router as persons_router
 app.include_router(persons_router)
+from app.api.face_detection_rules_router import router as face_detection_rules_router
+app.include_router(face_detection_rules_router)
 from app.api.objects_router import router as objects_router
 app.include_router(objects_router)
 from app.api.label_groups_router import router as label_groups_router

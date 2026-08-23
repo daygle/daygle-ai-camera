@@ -21,6 +21,7 @@
     <div class="settings-tabs" role="tablist" aria-label="Face Recognition sections">
       <button class="settings-tab" type="button" role="tab" id="tab-settings" aria-controls="panel-settings" data-tab="settings" aria-selected="true"><span class="settings-tab-icon" aria-hidden="true">⚙️</span><span class="settings-tab-label">Settings</span></button>
       <button class="settings-tab" type="button" role="tab" id="tab-people" aria-controls="panel-people" data-tab="people" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">👥</span><span class="settings-tab-label">People</span></button>
+      <button class="settings-tab" type="button" role="tab" id="tab-facerules" aria-controls="panel-facerules" data-tab="facerules" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">🔔</span><span class="settings-tab-label">Face Rules</span></button>
     </div>
 
     <div class="settings-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" data-panel="settings">
@@ -76,9 +77,16 @@
             <span>Identity Retention <span class="info-tip" data-tip="Days to keep identity labels on events before they are cleared. 0 keeps them forever." title="Days to keep identity labels on events before they are cleared. 0 keeps them forever." tabindex="0" aria-label="Help: Days to keep identity labels on events before they are cleared. 0 keeps them forever."></span></span>
             <input name="retention_days" type="number" min="0" step="1" /></label>
         </div>
+
+        <p class="settings-device-group">Face Detection <span class="settings-device-note">Tuning for the parallel face-detection pass on the ONNX page</span></p>
+        <div class="form-grid">
+          <label>
+            <span>Face Confidence <span class="info-tip" data-tip="Minimum confidence for the secondary face pass (0-1). Leave blank to inherit Min Confidence from the ONNX page. Faces are small targets - a lower value like 0.30 often catches distant faces better."></span></span>
+            <input name="face_confidence" type="number" min="0" max="1" step="0.01" placeholder="Inherit Min Confidence" /></label>
+        </div>
         <div class="button-row">
-          <button id="frSaveBtn" class="btn-success" type="submit">Save Settings</button>
           <button id="frReloadBtn" class="btn-info" type="button">Reload</button>
+          <button id="frSaveBtn" class="btn-success" type="submit">Save</button>
         </div>
       </form>
     </section>
@@ -124,10 +132,64 @@
     </section>
 
     </div><!-- /panel-people -->
+
+    <div class="settings-panel" id="panel-facerules" role="tabpanel" aria-labelledby="tab-facerules" data-panel="facerules" hidden>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">🔔</div>
+        <div>
+          <h2>Face Detection Rules</h2>
+          <p class="settings-section-subtitle">Get alerts when an enrolled person is detected on any camera. Add a rule per person, then choose email or push notifications. Unknown faces are governed by Alert On Unknown Faces on the Settings tab.</p>
+        </div>
+      </div>
+      <div id="faceRulesMessage" class="muted"></div>
+      <div id="faceRulesList" class="model-card-grid"></div>
+      <p id="faceRulesEmpty" class="muted" hidden>No rules yet - add one below to start getting face alerts.</p>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">➕</div>
+        <div>
+          <h2>Add Face Rule</h2>
+          <p class="settings-section-subtitle">Select an enrolled person to create an alert rule for them.</p>
+        </div>
+      </div>
+      <div id="addFaceRuleMessage" class="muted"></div>
+      <form id="addFaceRuleForm" class="form-grid">
+        <label>
+          <span>Person</span>
+          <select name="person_name" id="faceRulePersonSelect" required><option value="">Select a person…</option></select>
+        </label>
+        <label>
+          <span>Email Notifications</span>
+          <select name="email_enabled"><option value="false">Off</option><option value="true">On</option></select>
+        </label>
+        <label>
+          <span>Email Recipients</span>
+          <input name="email_recipients" type="email" multiple placeholder="alice@example.com, bob@example.com" autocomplete="off" />
+        </label>
+        <label>
+          <span>Push Notifications</span>
+          <select name="push_enabled"><option value="false">Off</option><option value="true">On</option></select>
+        </label>
+        <label>
+          <span>Cooldown (minutes)</span>
+          <input name="cooldown_minutes" type="number" min="0" step="1" value="5" placeholder="5" />
+        </label>
+      </form>
+      <div class="button-row">
+        <button type="submit" form="addFaceRuleForm" class="btn-success">Add Rule</button>
+      </div>
+    </section>
+
+    </div><!-- /panel-facerules -->
   </main>
   <script src="/static/nav.js"></script>
   <script src="/static/utils.js"></script>
   <script src="/static/face-recognition.js"></script>
   <script src="/static/people.js"></script>
+  <script src="/static/face-rules.js"></script>
 </body>
 </html>

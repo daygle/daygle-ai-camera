@@ -65,8 +65,20 @@ function fillForm(status) {
 
 async function loadSettings() {
   try {
-    const status = await api('/api/settings/face-recognition');
+    // Face-recognition settings (from /api/settings/face-recognition) and
+    // face detection confidence (from /api/settings/ai) live in separate
+    // stored keys, so we fetch both.
+    const [status, aiStatus] = await Promise.all([
+      api('/api/settings/face-recognition'),
+      api('/api/settings/ai').catch(() => ({})),
+    ]);
     fillForm(status);
+    // face_confidence lives in the AI settings store; populate the input
+    // here so saveSettings can carry it back on the companion AI PUT.
+    if (frForm.elements['face_confidence']) {
+      const conf = aiStatus.face_confidence;
+      frForm.face_confidence.value = (conf != null && conf !== '') ? String(conf) : '';
+    }
   } catch (err) {
     frMessage.textContent = err.message || 'Failed to load settings.';
   }
@@ -96,10 +108,22 @@ async function saveSettings(event) {
     }
     const status = await api('/api/settings/face-recognition', { method: 'PUT', body: JSON.stringify(body) });
     fillForm(status);
+    // Face confidence lives in the AI settings store, so save it there too.
+    // Blank = inherit Min Confidence from the ONNX page.
+    let faceConfError = null;
+    try {
+      const confVal = frForm.elements['face_confidence']?.value.trim();
+      const aiPayload = confVal !== '' ? { face_confidence: Number(confVal) } : { face_confidence: '' };
+      await api('/api/settings/ai', { method: 'PUT', body: JSON.stringify(aiPayload) });
+    } catch (err) {
+      faceConfError = err;
+    }
     if (faceModeError) {
       showToast(faceModeError.message || 'Failed to save the face detection mode.', true);
+    } else if (faceConfError) {
+      showToast(faceConfError.message || 'Failed to save face confidence.', true);
     } else {
-      showToast('Face recognition settings saved.');
+      showToast('Face settings saved.');
     }
     if (status.enabled && status.reload_error) {
       showToast(status.reload_error, true);

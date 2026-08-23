@@ -301,6 +301,19 @@ def deliver_email_alerts(
     has_unknown_face_alerts = any(str(alert.get('rule_name') or '') == 'Unknown face' for alert in triggered)
     if has_unknown_face_alerts and unknown_face_email:
         any_email_enabled = True
+    # Face detection rules: per-person alerts with their own email recipients
+    from app.face_detection_rules import effective_face_detection_rules, face_rule_email_recipients, face_rule_notify_active_now as _face_rule_active
+    _face_rules_list = effective_face_detection_rules().get('rules') or []
+    _face_rules_by_name = {str(r.get('name')): r for r in _face_rules_list}
+    _has_face_rule_emails = any(
+        _face_rule_active(_face_rules_by_name.get(str(alert.get('rule_name')), {}))
+        and face_rule_email_recipients(_face_rules_by_name.get(str(alert.get('rule_name')), {}))
+        for alert in triggered
+        if str(alert.get('label') or '').lower() == 'face'
+        and str(alert.get('rule_name') or '') != 'Unknown face'
+    )
+    if _has_face_rule_emails:
+        any_email_enabled = True
     snapshot_bytes: bytes | None = None
     snapshot_path = str(event.get('snapshot_path') or '')
     if any_email_enabled and snapshot_path:
@@ -357,6 +370,31 @@ def deliver_email_alerts(
                         alert.get('rule_name'),
                         exc,
                     )
+            continue
+        # Face detection rules: per-person email alerts triggered by the
+        # face-rules pipeline (label == 'face', rule_name == person name).
+        if str(alert.get('label') or '').lower() == 'face' and str(alert.get('rule_name') or '') != 'Unknown face':
+            _face_rule = _face_rules_by_name.get(str(alert.get('rule_name')))
+            if _face_rule and _face_rule_active(_face_rule):
+                _face_recips = face_rule_email_recipients(_face_rule)
+                if _face_recips:
+                    try:
+                        mailer.send_alert(
+                            alert,
+                            event_id=event_id,
+                            recipients=_face_recips,
+                            camera_name=camera_name,
+                            snapshot_bytes=snapshot_bytes,
+                            triggered_labels=all_triggered_labels,
+                            detected_at=detected_at,
+                        )
+                    except EmailAlertError as exc:
+                        logger.warning(
+                            'Failed to send face-rule email for event %s rule %s: %s',
+                            event_id,
+                            alert.get('rule_name'),
+                            exc,
+                        )
             continue
         if not rule or not rule.get('email_enabled'):
             continue
@@ -415,6 +453,11 @@ def deliver_push_notifications(
     unknown_face_push_active = bool(
         effective_face_recognition_config().get('alert_unknown')
     )
+    # Face detection rules: per-person push notification lookup, same
+    # as the email path in deliver_email_alerts.
+    from app.face_detection_rules import effective_face_detection_rules as _face_rules_fn, face_rule_notify_active_now as _face_rule_active
+    _face_rules_list_push = _face_rules_fn().get('rules') or []
+    _face_rules_by_name = {str(r.get('name')): r for r in _face_rules_list_push}
     all_triggered_labels = sorted(
         {
             str(alert.get('label') or '').strip()
@@ -432,6 +475,12 @@ def deliver_push_notifications(
                     event_id,
                     rule_name,
                 )
+                continue
+        elif str(alert.get('label') or '').lower() == 'face' and rule_name != 'Unknown face':
+            # Face detection rule: check the per-person rule's push_enabled
+            _fr = _face_rules_by_name.get(rule_name, {})
+            if not _face_rule_active(_fr) or not _fr.get('push_enabled'):
+                logger.debug('Push skipped for event %s face-rule %r: push disabled', event_id, rule_name)
                 continue
         elif not rule:
             logger.debug('Push skipped for event %s: no rule found for %r', event_id, rule_name)

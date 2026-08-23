@@ -29,19 +29,30 @@
 
     <section class="card">
       <div class="settings-section-header">
-        <div class="settings-section-icon">🔍</div>
+        <div class="settings-section-icon">📦</div>
         <div>
-          <h2>ONNX Status</h2>
-          <p class="settings-section-subtitle">Current detector state, loaded model, and quick diagnostic actions.</p>
+          <h2>Object Detection Status</h2>
+          <p class="settings-section-subtitle">The PRIMARY detector - its labels (person, car…) are what zones, alerts, and recordings use.</p>
         </div>
       </div>
       <div id="settingsMessage" class="muted"></div>
-      <div id="aiStatusPanel" class="status-panel"></div>
+      <div id="objectStatusPanel" class="status-panel"></div>
       <div class="button-row">
         <button id="checkModelBtn" class="btn-info" type="button">Check Model</button>
         <button id="reloadDetectorBtn" class="btn-info" type="button">Reload Detector</button>
         <button id="testDetectorBtn" class="btn-success" type="button">Test Detector</button>
       </div>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">👤</div>
+        <div>
+          <h2>Face Detection Status</h2>
+          <p class="settings-section-subtitle">The secondary pass - runs ALONGSIDE the object model so faces and objects are detected on the same frames. Configure it under Settings → Secondary Face Model.</p>
+        </div>
+      </div>
+      <div id="faceStatusPanel" class="status-panel"></div>
     </section>
 
     </div><!-- /panel-status -->
@@ -50,26 +61,28 @@
 
     <div id="modelUpdatesMessage" class="muted" style="margin-bottom:12px"></div>
 
-    <section class="card" id="objectModelsCard" hidden>
+    <section class="card" id="objectModelsCard">
       <div class="settings-section-header">
         <div class="settings-section-icon">📦</div>
         <div>
           <h2>Object Detection Models</h2>
-          <p class="settings-section-subtitle">The PRIMARY detector — its labels (person, car…) are what zones and alerts use. Larger models are more accurate but use more CPU.</p>
+          <p class="settings-section-subtitle">The PRIMARY detector - its labels (person, car…) are what zones and alerts use. Larger models are more accurate but use more CPU.</p>
         </div>
       </div>
       <div id="objectModelList" class="model-card-grid"></div>
+      <p id="objectModelsEmpty" class="muted" hidden>No object models available.</p>
     </section>
 
-    <section class="card" id="faceModelsCard" hidden>
+    <section class="card" id="faceModelsCard">
       <div class="settings-section-header">
         <div class="settings-section-icon">👤</div>
         <div>
           <h2>Face Detection Models</h2>
-          <p class="settings-section-subtitle">Run ALONGSIDE the object model so faces and objects are detected at the same time. Download one and enable it in the <a href="#">Settings</a> tab.</p>
+          <p class="settings-section-subtitle">Run ALONGSIDE the object model so faces and objects are detected at the same time. Download one and enable it under Settings → Secondary Face Model.</p>
         </div>
       </div>
       <div id="faceModelList" class="model-card-grid"></div>
+      <p id="faceModelsEmpty" class="muted" hidden>No face models yet - download one above to enable the parallel face pass.</p>
     </section>
 
     <div class="button-row" style="margin-top:16px">
@@ -122,9 +135,6 @@
         <label>
           <span>Face Model <span class="info-tip" data-tip="The installed face-family ONNX model used for the secondary pass. Install one from the Models tab above; this list fills automatically. Leave empty to disable." title="The installed face-family ONNX model used for the secondary pass. Install one from the Models tab above; this list fills automatically." tabindex="0" aria-label="Help: The installed face-family ONNX model used for the secondary pass"></span></span>
           <select name="face_model_path" id="faceModelSelect"><option value="">None installed</option></select></label>
-        <label>
-          <span>Face Confidence <span class="info-tip" data-tip="Minimum confidence for the secondary face pass (0-1). Leave blank to inherit Min Confidence above. Faces are small targets - a lower value like 0.30 often catches distant faces better." title="Minimum confidence for the secondary face pass (0-1). Leave blank to inherit Min Confidence above." tabindex="0" aria-label="Help: Minimum confidence for the secondary face pass"></span></span>
-          <input name="face_confidence" type="number" min="0" max="1" step="0.01" placeholder="Inherit Min Confidence" /></label>
         </div>
         <details class="settings-advanced">
           <summary>Advanced</summary>
@@ -182,6 +192,9 @@
         <label>
           <span>Model Path <span class="info-tip" data-tip="Path to the active ONNX model file. Managed by the Model Library above - use Download &amp; Install or the Use button to change it. Default: models/yolo11n.onnx" title="Path to the active ONNX model file. Managed by the Model Library above - use Download &amp; Install or the Use button to change it. Default: models/yolo11n.onnx" tabindex="0" aria-label="Help: Path to the active ONNX model file. Managed by the Model Library above. Default: models/yolo11n.onnx"></span></span>
           <input name="model_path" readonly /></label>
+        <label>
+          <span>Face Model Path <span class="info-tip" data-tip="Path to the installed face-family ONNX used by the parallel face pass. Managed by the Face Model selector above and the Model Library - empty when the face pass is off." title="Path to the installed face-family ONNX used by the parallel face pass. Managed by the Face Model selector above and the Model Library - empty when the face pass is off." tabindex="0" aria-label="Help: Path to the installed face-family ONNX used by the parallel face pass"></span></span>
+          <input name="face_model_path_display" readonly placeholder="Not configured" /></label>
         <label>
           <span>Labels Path <span class="info-tip" data-tip="Path to the text file containing one object label per line. Managed alongside the model. Default: models/coco.names" title="Path to the text file containing one object label per line. Managed alongside the model. Default: models/coco.names" tabindex="0" aria-label="Help: Path to the text file containing one object label per line. Managed alongside the model. Default: models/coco.names"></span></span>
           <input name="labels_path" readonly /></label>

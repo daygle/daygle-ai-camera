@@ -1,10 +1,15 @@
 const aiForm = document.getElementById('aiSettingsForm');
 const messageEl = document.getElementById('settingsMessage');
-const statusPanel = document.getElementById('aiStatusPanel');
+// Two separate status cards: the PRIMARY object detector and the parallel
+// face-detection pass, mirroring how they actually run side by side.
+const objectStatusPanel = document.getElementById('objectStatusPanel');
+const faceStatusPanel = document.getElementById('faceStatusPanel');
 const objectModelList = document.getElementById('objectModelList');
 const faceModelList = document.getElementById('faceModelList');
 const objectModelsCard = document.getElementById('objectModelsCard');
 const faceModelsCard = document.getElementById('faceModelsCard');
+const objectModelsEmpty = document.getElementById('objectModelsEmpty');
+const faceModelsEmpty = document.getElementById('faceModelsEmpty');
 const modelUpdatesMessage = document.getElementById('modelUpdatesMessage');
 let modelUpdateMap = {};
 // Track per-card message timeouts so rapid actions don't clear new messages
@@ -137,11 +142,10 @@ function renderStatus(status) {
   } else {
     precisionText = activePrec.toUpperCase();
   }
-  const rows = [
+  // Two separate status cards mirroring how detection actually runs:
+  // the PRIMARY object detector card, and the parallel face pass card.
+  const objectRows = [
     safeHtml`<div><span>Current Backend</span><strong>${displayValue(status.current_backend || status.configured_backend, 'Not Set')}</strong></div>`,
-    // "Object Model" (not just "Model"): this slot is the PRIMARY object
-    // detector; faces come from the separate Face Model row below so the two
-    // parallel passes are always distinguishable at a glance.
     modelRow,
     safeHtml`<div><span>Model Exists</span><strong>${yesNo(status.model_exists)}</strong></div>`,
     safeHtml`<div><span>ONNX Runtime Installed</span><strong>${yesNo(status.onnx_runtime_installed)}</strong></div>`,
@@ -158,25 +162,31 @@ function renderStatus(status) {
   // Only surface the error row when there's an actual error -- a full-width
   // "None" row just wastes space on an otherwise healthy panel.
   if (status.last_detector_error) {
-    rows.push(safeHtml`<div class="wide"><span>Last Detector Error</span><strong>${status.last_detector_error}</strong></div>`);
-  }
-  // Secondary face pass: shown ALWAYS so the parallel architecture is
-  // visible -- Disabled when off, Loaded/Not loaded when on.
-  const faceState = !status.face_enabled
-    ? 'Disabled'
-    : (status.face_model_loaded ? `Loaded ${status.face_model_path || ''}` : 'Not loaded');
-  rows.push(safeHtml`<div class="wide"><span>Face Model (Parallel Pass)</span><strong>${faceState}</strong></div>`);
-  if (status.face_enabled && status.face_model_loaded === false && status.face_model_path) {
-    rows.push(safeHtml`<div class="wide"><span>Face Model Error</span><strong>Face model not found or failed to load: ${status.face_model_path}</strong></div>`);
+    objectRows.push(safeHtml`<div class="wide"><span>Last Detector Error</span><strong>${status.last_detector_error}</strong></div>`);
   }
   // Legacy-state warning: a face-family file in the PRIMARY object slot
   // means only faces are detected -- no objects, no object recordings. The
   // server heals this automatically at startup; show why detection looks
   // broken if it ever persists (e.g. heal could not run).
   if (status.primary_is_face_model) {
-    rows.push(safeHtml`<div class="wide"><span style="color:var(--danger)">Object Detection</span><strong style="color:var(--danger)">${status.model_path || 'The active model'} is a face model running as the PRIMARY detector - object detection is disabled. Restart the server to auto-migrate it to the parallel Face Model slot, or select an object model above.</strong></div>`);
+    objectRows.push(safeHtml`<div class="wide"><span style="color:var(--danger)">Object Detection</span><strong style="color:var(--danger)">${status.model_path || 'The active model'} is a face model running as the PRIMARY detector - object detection is disabled. Restart the server to auto-migrate it to the parallel Face Model slot, or select an object model above.</strong></div>`);
   }
-  statusPanel.innerHTML = rows.join('');
+  objectStatusPanel.innerHTML = objectRows.join('');
+
+  // Face pass card: always rendered so the parallel architecture stays
+  // visible -- Disabled when off, Loaded/Not loaded when on.
+  const faceState = !status.face_enabled
+    ? 'Disabled'
+    : (status.face_model_loaded ? `Loaded ${status.face_model_path || ''}` : 'Not loaded');
+  const faceRows = [
+    safeHtml`<div><span>Face Detection</span><strong class="ai-mode ${status.face_enabled ? 'onnx-active' : 'ai-disabled'}">${status.face_enabled ? 'Enabled' : 'Disabled'}</strong></div>`,
+    safeHtml`<div><span>Face Model</span><strong>${faceState}</strong></div>`,
+    safeHtml`<div><span>Face Confidence</span><strong>${status.face_confidence != null && status.face_confidence !== '' ? Number(status.face_confidence) : 'Inherit Min Confidence'}</strong></div>`,
+  ];
+  if (status.face_enabled && status.face_model_loaded === false) {
+    faceRows.push(safeHtml`<div class="wide"><span style="color:var(--danger)">Face Model Error</span><strong style="color:var(--danger)">${status.face_model_path ? `Face model not found or failed to load: ${status.face_model_path}` : 'No face model selected - choose one under Settings or download one on the Models tab.'}</strong></div>`);
+  }
+  faceStatusPanel.innerHTML = faceRows.join('');
 }
 
 function renderAi(settings) {
@@ -198,6 +208,12 @@ function renderAi(settings) {
       ? (limitBytes / (1024 * 1024 * 1024)).toFixed(1)
       : '0';
   }
+  // Face Model Path (readonly, Advanced > Paths): mirrors the persisted
+  // face_model_path without clashing with the Face Model SELECT of the same
+  // settings key, which renderAi's generic loop above populates.
+  if (aiForm.elements['face_model_path_display']) {
+    aiForm.elements['face_model_path_display'].value = String(settings.face_model_path ?? '');
+  }
   // Min Confidence: a blank field must not send '' (the backend would treat
   // it as missing and fall back to 0.45 anyway), and ``0`` is a legitimate
   // persisted value, not 'unset' - so coerce here instead of letting the
@@ -212,30 +228,29 @@ function renderAi(settings) {
 }
 
 function renderModelList(models) {
+  // Both cards ALWAYS render once the catalog loads: the two detector slots
+  // (primary objects vs parallel face pass) should stay visible even when one
+  // side has nothing installed, so the architecture is obvious.
   if (!models.length) {
-    objectModelsCard.hidden = true;
-    faceModelsCard.hidden = true;
+    objectModelList.innerHTML = '';
+    faceModelList.innerHTML = '';
+    objectModelsEmpty.hidden = false;
+    faceModelsEmpty.hidden = false;
     modelUpdatesMessage.textContent = 'No models available.';
     return;
   }
   const objectModels = models.filter((m) => m.family !== 'face');
   const faceModels = models.filter((m) => m.family === 'face');
 
-  // Object models card
-  if (objectModels.length) {
-    objectModelsCard.hidden = false;
-    objectModelList.innerHTML = objectModels.map(renderCard).join('');
-  } else {
-    objectModelsCard.hidden = true;
-  }
+  // Object models card (PRIMARY)
+  objectModelsCard.hidden = false;
+  objectModelList.innerHTML = objectModels.map(renderCard).join('');
+  objectModelsEmpty.hidden = objectModels.length > 0;
 
-  // Face models card
-  if (faceModels.length) {
-    faceModelsCard.hidden = false;
-    faceModelList.innerHTML = faceModels.map(renderCard).join('');
-  } else {
-    faceModelsCard.hidden = true;
-  }
+  // Face models card (parallel pass)
+  faceModelsCard.hidden = false;
+  faceModelList.innerHTML = faceModels.map(renderCard).join('');
+  faceModelsEmpty.hidden = faceModels.length > 0;
 
   bindModelCardActions();
 }
@@ -422,7 +437,12 @@ let lastLoadedModels = [];
 function populateFaceModelSelect(models, currentValue) {
   const select = document.getElementById('faceModelSelect');
   if (!select) return;
-  const faceModels = (models || []).filter((m) => m.family === 'face' || /face/i.test(m.path || ''));
+  // Only DOWNLOADED face models are selectable: the parallel pass needs a
+  // real ONNX on disk, and uninstalled catalog entries would just produce a
+  // MODEL MISSING state. Install more from the Models tab.
+  const faceModels = (models || []).filter(
+    (m) => m.installed && (m.family === 'face' || /face/i.test(m.path || ''))
+  );
   const options = ['<option value="">None installed</option>'];
   for (const model of faceModels) {
     const selected = model.path === currentValue ? ' selected' : '';
@@ -438,8 +458,12 @@ async function loadModels() {
     renderModelList(models);
     populateFaceModelSelect(models, aiForm.elements['face_model_path']?.value || '');
   } catch {
-    objectModelsCard.hidden = true;
-    faceModelsCard.hidden = true;
+    objectModelList.innerHTML = '';
+    faceModelList.innerHTML = '';
+    objectModelsEmpty.hidden = false;
+    faceModelsEmpty.hidden = false;
+    objectModelsEmpty.textContent = 'Could not load the model list.';
+    faceModelsEmpty.textContent = 'Could not load the model list.';
     modelUpdatesMessage.textContent = 'Could not load model list.';
   }
 }
