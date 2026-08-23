@@ -70,6 +70,25 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
     return str(value or '').strip().lower() in {'1', 'true', 'yes', 'on'} if value else default
 
 
+def _coerce_optional_float(value: Any) -> float | None:
+    """Parse an optional 0-1 float; blank / invalid / out-of-range -> ``None``.
+
+    ``None`` means "no per-rule gate" -- the rule alerts on any detection the
+    detector already reports (which itself is gated by the global Face
+    Confidence setting).
+    """
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if raw == '':
+        return None
+    try:
+        num = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return num if 0 <= num <= 1 else None
+
+
 def _validate_rule(rule: dict[str, Any]) -> dict[str, Any]:
     """Normalise a single rule dict into canonical shape."""
     return {
@@ -81,6 +100,7 @@ def _validate_rule(rule: dict[str, Any]) -> dict[str, Any]:
         'push_enabled': _coerce_bool(rule.get('push_enabled'), False),
         'email_recipients': str(rule.get('email_recipients') or '').strip(),
         'cooldown_minutes': max(0, int(rule.get('cooldown_minutes') or 5)),
+        'min_confidence': _coerce_optional_float(rule.get('min_confidence')),
     }
 
 
@@ -224,6 +244,18 @@ def known_face_rules_for_camera(camera_id: str, detections: list[dict[str, Any]]
         rule = enabled_rules_for_label(person_name)
         if rule is None:
             continue
+        # Per-rule confidence gate: when the rule sets ``min_confidence``, only
+        # detections at/above it trigger the alert. Blank = alert on any
+        # detection the detector already reports (the global Face Confidence
+        # setting still applies at the detector itself).
+        rule_min_conf = rule.get('min_confidence')
+        if rule_min_conf is not None:
+            try:
+                det_conf = float(detection.get('confidence') or 0)
+            except (TypeError, ValueError):
+                det_conf = 0.0
+            if det_conf < float(rule_min_conf):
+                continue
         # Cooldown: ``cooldown_minutes`` between alerts for the same track
         cooldown_sec = max(0, int(rule.get('cooldown_minutes') or 5)) * 60
         last_fired = cooldowns.get(track_id, 0)

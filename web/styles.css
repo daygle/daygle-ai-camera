@@ -449,6 +449,9 @@ h2 { margin: 0; font-size: 20px; }
 .stats-grid .card small { display: block; margin-top: 6px; line-height: 1.4; }
 .ai-mode { font-size: 24px; letter-spacing: .04em; }
 .ai-mode.onnx-active { color: var(--success); }
+.ai-mode.ai-disabled { color: var(--muted); }
+.ai-mode.model-missing { color: var(--danger); }
+.ai-mode.model-failed { color: var(--danger); }
 
 .primary, button {
   border: 0;
@@ -4397,6 +4400,7 @@ button.activity-item-action.activity-item-action-play:hover {
      repeating every hue at each use site; light overrides follow below. */
   --v-fg: #47d6ff; --v-bg: rgba(71,214,255,.1); --v-bd: rgba(71,214,255,.32);
   --s-fg: #a855f7; --s-bg: rgba(168,85,247,.13); --s-bd: rgba(168,85,247,.34);
+  --f-fg: #f472b6; --f-bg: rgba(244,114,182,.13); --f-bd: rgba(244,114,182,.34);
   --a-fg: #f8c55d; --a-bg: rgba(248,197,93,.13); --a-bd: rgba(248,197,93,.36);
   --g-fg: #49e6a3;
   --sense-track: rgba(255,255,255,.08);
@@ -4405,6 +4409,7 @@ button.activity-item-action.activity-item-action-play:hover {
 :root.light .live-detection-card {
   --v-fg: #0284c7; --v-bg: rgba(2,132,199,.08); --v-bd: rgba(2,132,199,.28);
   --s-fg: #7c3aed; --s-bg: rgba(124,58,237,.1); --s-bd: rgba(124,58,237,.28);
+  --f-fg: #db2777; --f-bg: rgba(219,39,119,.1); --f-bd: rgba(219,39,119,.3);
   --a-fg: #b45309; --a-bg: rgba(248,197,93,.16); --a-bd: rgba(180,83,9,.34);
   --g-fg: #0f9d63;
   --sense-track: rgba(15,30,60,.09);
@@ -4490,6 +4495,7 @@ button.activity-item-action.activity-item-action-play:hover {
 .sense-badge-idle { color: var(--muted); background: var(--sense-track); border-color: var(--border); }
 .sense-badge-detected { color: var(--v-fg); background: var(--v-bg); border-color: var(--v-bd); }
 .sense-badge-heard { color: var(--s-fg); background: var(--s-bg); border-color: var(--s-bd); }
+.sense-badge-face { color: var(--f-fg); background: var(--f-bg); border-color: var(--f-bd); }
 .sense-badge-alert { color: var(--a-fg); background: var(--a-bg); border-color: var(--a-bd); }
 .sense-badge-off { color: var(--muted); background: transparent; border: 1px dashed var(--border); }
 
@@ -4503,6 +4509,7 @@ button.activity-item-action.activity-item-action-play:hover {
 @media (prefers-reduced-motion: reduce) { .sense-meter > i { transition: none; } }
 .sense-vision .sense-meter > i { background: linear-gradient(90deg, var(--v-bd), var(--v-fg)); }
 .sense-hearing .sense-meter > i { background: linear-gradient(90deg, var(--s-bd), var(--s-fg)); }
+.sense-faces .sense-meter > i { background: linear-gradient(90deg, var(--f-bd), var(--f-fg)); }
 .sense-det-alert .sense-meter > i { background: linear-gradient(90deg, var(--a-bd), var(--a-fg)); }
 .sense-det-faint { opacity: 0.5; }
 .sense-det-faint .sense-meter > i { background: var(--muted); }

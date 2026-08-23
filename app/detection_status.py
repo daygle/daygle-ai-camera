@@ -206,6 +206,11 @@ def live_detection_status_payload(camera_id: str | None = None) -> dict[str, Any
         'ai_available': ai_state['inference_available'],
         'ai_mode': ai_state['mode'],
         'ai_error': ai_state['error'],
+        # Secondary face pass state so the live card's Faces lane can show an
+        # honest Off / Monitoring / Detected state instead of guessing from the
+        # absence of face detections (which is also the "no faces" case).
+        'face_enabled': ai_state.get('face_enabled', False),
+        'face_model_loaded': ai_state.get('face_model_loaded', False),
         **status,
     }
 

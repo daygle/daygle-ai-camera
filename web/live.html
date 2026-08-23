@@ -131,7 +131,7 @@
           <div class="settings-section-icon" aria-hidden="true">🎯</div>
           <div class="live-detection-heading">
             <h2>AI Detection Status</h2>
-            <p class="settings-section-subtitle" id="liveDetectionSubtitle">What the AI is currently seeing and hearing on the live feed.</p>
+            <p class="settings-section-subtitle" id="liveDetectionSubtitle">What the AI is currently seeing, hearing, and recognizing on the live feed.</p>
           </div>
           <span class="live-monitor-pill" id="liveMonitorPill" aria-live="polite">
             <span class="live-monitor-dot" aria-hidden="true"></span>
@@ -166,6 +166,14 @@
             </div>
             <div class="sense-lane-body" id="liveHearingBody" aria-live="polite"></div>
             <p class="sense-lane-note" id="liveSoundStatus" hidden></p>
+          </div>
+          <div class="sense-lane sense-faces" id="liveFaceLane">
+            <div class="sense-lane-head">
+              <span class="sense-lane-name"><span class="sense-lane-glyph" aria-hidden="true">🧑</span>Faces</span>
+              <span class="sense-badge sense-badge-idle" id="liveFaceState">Monitoring</span>
+            </div>
+            <div class="sense-lane-body" id="liveFaceBody" aria-live="polite"></div>
+            <p class="sense-lane-note" id="liveFaceStatus" hidden></p>
           </div>
         </div>
       </section>

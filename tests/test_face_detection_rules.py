@@ -171,3 +171,73 @@ def test_heal_noop_when_database_uninitialised(monkeypatch):
     )
 
     assert fdr.heal_legacy_unknown_alert_config() is False
+
+
+# ---------------------------------------------------------------------------
+# min_confidence validation
+# ---------------------------------------------------------------------------
+
+def test_validate_rule_parses_min_confidence():
+    validated = fdr.validate_face_detection_rules(_rules_payload(
+        {'id': 'person_1', 'name': 'Alice', 'min_confidence': 0.6},
+        {'id': 'person_2', 'name': 'Bob', 'min_confidence': ''},
+        {'id': 'person_3', 'name': 'Carol', 'min_confidence': 'not-a-number'},
+        {'id': 'person_4', 'name': 'Dave', 'min_confidence': 2.0},
+    ))
+    rules = validated['rules']
+    assert rules[0]['min_confidence'] == 0.6
+    assert rules[1]['min_confidence'] is None
+    assert rules[2]['min_confidence'] is None
+    assert rules[3]['min_confidence'] is None
+
+
+def test_validate_rule_min_confidence_defaults_none():
+    validated = fdr.validate_face_detection_rules(_rules_payload(
+        {'id': 'person_1', 'name': 'Alice'},
+    ))
+    assert validated['rules'][0]['min_confidence'] is None
+
+
+# ---------------------------------------------------------------------------
+# known_face_rules_for_camera (per-rule confidence gate)
+# ---------------------------------------------------------------------------
+
+def _known_rule(name='Alice', **overrides):
+    rule = {
+        'id': 'person_1', 'person_id': 1, 'name': name, 'enabled': True,
+        'email_enabled': True, 'push_enabled': False, 'email_recipients': '',
+        'cooldown_minutes': 5, 'min_confidence': None,
+    }
+    rule.update(overrides)
+    return rule
+
+
+def _known_face(track_id, confidence, name='Alice'):
+    return {
+        'label': 'face', 'recognized': True, 'track_id': track_id,
+        'person_name': name, 'confidence': confidence,
+    }
+
+
+def _use_known_rules(monkeypatch, *rules):
+    db = _DbStub({'face_detection_rules': _rules_payload(*rules)})
+    monkeypatch.setattr(fdr._state, 'database', db)
+    monkeypatch.setattr(fdr, 'effective_face_recognition_config', lambda: {'enabled': True})
+
+
+def test_known_alert_fires_when_at_or_above_min_confidence(monkeypatch):
+    _use_known_rules(monkeypatch, _known_rule(min_confidence=0.7))
+    assert fdr.known_face_rules_for_camera('kA', [_known_face(1, 0.7)]) != []
+    assert fdr.known_face_rules_for_camera('kB', [_known_face(1, 0.9)]) != []
+
+
+def test_known_alert_suppressed_below_min_confidence(monkeypatch):
+    _use_known_rules(monkeypatch, _known_rule(min_confidence=0.7))
+    assert fdr.known_face_rules_for_camera('kC', [_known_face(1, 0.5)]) == []
+    # A later, higher-confidence sighting of the same track still alerts.
+    assert fdr.known_face_rules_for_camera('kD', [_known_face(1, 0.8)]) != []
+
+
+def test_known_alert_without_min_confidence_gates_nothing(monkeypatch):
+    _use_known_rules(monkeypatch, _known_rule())
+    assert fdr.known_face_rules_for_camera('kE', [_known_face(1, 0.1)]) != []

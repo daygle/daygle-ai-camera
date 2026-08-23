@@ -28,6 +28,35 @@ def test_live_status_preserves_best_object_confidence_for_vision_card(tmp_path, 
     assert payload['detection_confidences'] == {'person': 0.86}
 
 
+def test_live_payload_exposes_face_detection_state_and_detections(tmp_path, monkeypatch):
+    """The live detection-status payload carries the face pass state and its
+    detections so the live page's Faces lane can render identity + confidence."""
+    _load_app(tmp_path, monkeypatch)
+    import app.main as main
+    import app.detection_status as detection_status
+
+    main._state.live_detection_status.clear()
+    detection_status.update_live_detection_status(
+        'camera-1',
+        state='checked',
+        detected_labels=['face', 'person'],
+        detections=[
+            {'label': 'face', 'confidence': 0.91, 'recognized': True, 'person_name': 'Alice'},
+            {'label': 'face', 'confidence': 0.77, 'recognized': True, 'person_name': None},
+            {'label': 'person', 'confidence': 0.64},
+        ],
+    )
+
+    payload = detection_status.live_detection_status_payload('camera-1')
+    assert isinstance(payload['face_enabled'], bool)
+    assert isinstance(payload['face_model_loaded'], bool)
+    faces = [d for d in payload['detections'] if d['label'] == 'face']
+    assert len(faces) == 2
+    assert faces[0]['person_name'] == 'Alice'
+    # Best-confidence map preserves the face scores for the live page.
+    assert payload['detection_confidences']['face'] == 0.91
+
+
 def test_live_object_status_reports_below_threshold_reason(tmp_path, monkeypatch):
     _load_app(tmp_path, monkeypatch)
     from app.live_monitor import _below_threshold_object_reason

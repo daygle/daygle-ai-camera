@@ -39,6 +39,9 @@ function ruleCard(rule) {
   const cooldownBadge = rule.cooldown_minutes
     ? `<span class="model-badge model-badge-res">${rule.cooldown_minutes}m cooldown</span>`
     : '';
+  const confidenceBadge = rule.min_confidence != null
+    ? `<span class="model-badge model-badge-res">≥${escapeHtml(String(rule.min_confidence))} confidence</span>`
+    : '';
 
   return `
     <div class="model-card ${enabledClass}" data-rule-id="${escapeHtml(rule.id)}">
@@ -46,11 +49,15 @@ function ruleCard(rule) {
         <div class="model-card-title">
           <h3>${escapeHtml(isSystem ? 'Unknown Person (System Rule)' : rule.name)}</h3>
           <div class="model-card-meta">
-            ${statusBadge}${emailBadge}${pushBadge}${cooldownBadge}
+            ${statusBadge}${emailBadge}${pushBadge}${cooldownBadge}${confidenceBadge}
           </div>
         </div>
       </div>
       ${rule.email_enabled && rule.email_recipients ? `<p class="muted" style="font-size:12px;margin-top:4px">📧 ${escapeHtml(rule.email_recipients)}</p>` : ''}
+      <div style="margin-top:10px;display:flex;align-items:center;gap:8px">
+        <label class="muted" for="rule-confidence-${escapeHtml(rule.id)}" style="font-size:12px;white-space:nowrap">Min Confidence</label>
+        <input id="rule-confidence-${escapeHtml(rule.id)}" type="number" data-rule-confidence="${escapeHtml(rule.id)}" min="0" max="1" step="0.01" value="${rule.min_confidence != null ? escapeHtml(String(rule.min_confidence)) : ''}" placeholder="Any" title="Minimum detection confidence (0-1) required for this rule's alerts. Leave blank to alert on any detected face." style="width:90px;padding:4px 6px;border:1px solid #d8dee6;border-radius:6px;background:#fff;color:#333;font-size:13px" />
+      </div>
       <div class="model-card-actions" style="margin-top:10px">
         <button class="btn-info model-action-btn" data-action="toggle" data-rule-id="${escapeHtml(rule.id)}" type="button">${rule.enabled ? '\u25CB Disable' : '\u25CF Enable'}</button>
         <button class="btn-danger model-action-btn" data-action="delete" data-rule-id="${escapeHtml(rule.id)}" type="button">\u2715 Delete</button>
@@ -85,6 +92,22 @@ function renderRules(rules) {
           await saveRules();
         }
       }
+    });
+  });
+  // Inline per-rule confidence editing: blank = no gate (any detection).
+  frRulesList.querySelectorAll('[data-rule-confidence]').forEach(input => {
+    input.addEventListener('change', () => {
+      const rule = rules.find(r => r.id === input.dataset.ruleConfidence);
+      if (!rule) return;
+      const raw = input.value.trim();
+      if (raw === '') {
+        rule.min_confidence = null;
+      } else {
+        const n = Number(raw);
+        rule.min_confidence = Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : null;
+      }
+      input.value = rule.min_confidence != null ? String(rule.min_confidence) : '';
+      saveRules();
     });
   });
 }
@@ -142,6 +165,12 @@ addRuleForm.addEventListener('submit', async (event) => {
     return;
   }
 
+  const rawConf = addRuleForm.min_confidence?.value.trim();
+  let minConfidence = null;
+  if (rawConf !== '') {
+    const n = Number(rawConf);
+    if (Number.isFinite(n)) minConfidence = Math.min(1, Math.max(0, n));
+  }
   const rule = {
     id: personId === '_unknown' ? '_unknown' : `person_${personId}`,
     person_id: personId === '_unknown' ? null : personId,
@@ -151,6 +180,7 @@ addRuleForm.addEventListener('submit', async (event) => {
     push_enabled: addRuleForm.push_enabled.value === 'true',
     email_recipients: addRuleForm.email_recipients.value.trim(),
     cooldown_minutes: parseInt(addRuleForm.cooldown_minutes.value || '5', 10),
+    min_confidence: minConfidence,
   };
 
   currentRules.rules = [...(currentRules.rules || []), rule];

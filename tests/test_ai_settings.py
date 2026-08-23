@@ -609,6 +609,13 @@ def test_detector_status_surfaces_face_runtime_state(monkeypatch, ais):
         detector_loaded_for=True,
         onnx_runtime_installed=True,
         model_exists=True,
+        # The stub catalog needs the face entry for the name lookup, exactly
+        # like the real ``YOLO_MODELS`` includes the YOLO11-Face series.
+        yolo_models={
+            'yolov8n': {'label': 'YOLOv8 nano', 'onnx': 'yolov8n.onnx'},
+            'yolov8s': {'label': 'YOLOv8 small', 'onnx': 'yolov8s.onnx'},
+            'yolo11n-face': {'label': 'YOLO11n · Face', 'onnx': 'yolov11n-face.onnx'},
+        },
     )
     monkeypatch.setattr(ai_settings_module, 'load_labels', lambda labels_path, categories: [])
     monkeypatch.setattr(ai_state, 'config', {'ai': {'categories': []}})
@@ -624,6 +631,9 @@ def test_detector_status_surfaces_face_runtime_state(monkeypatch, ais):
     assert out['face_enabled'] is True
     assert out['face_model_path'] == 'models/yolov11n-face-640.onnx'
     assert out['face_model_loaded'] is True
+    # The catalog-name lookup lets the ONNX status card render the Face Model
+    # row exactly like the primary Model row (bold name + muted path).
+    assert out['face_model_name'] == 'YOLO11n · Face'
 
     # With no face detector in state (face pass off / not yet built) the
     # payload must still carry the key -- as False, not missing.
@@ -631,6 +641,8 @@ def test_detector_status_surfaces_face_runtime_state(monkeypatch, ais):
     out = ais.detector_status({'backend': 'onnx'})
     assert out['face_model_loaded'] is False
     assert 'face_model_loaded' in out
+    # No path -> no catalog name; the row falls back to 'Not Set'.
+    assert out['face_model_name'] is None
 
 
 # -- validate_ai_settings -------------------------------------------------

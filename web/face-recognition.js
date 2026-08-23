@@ -73,9 +73,10 @@ async function loadSettings() {
     fillForm(status);
     // face_confidence lives in the AI settings store; populate the input
     // here so saveSettings can carry it back on the companion AI PUT.
+    // Missing/blank falls back to the default of 0.45.
     if (frForm.elements['face_confidence']) {
       const conf = aiStatus.face_confidence;
-      frForm.face_confidence.value = (conf != null && conf !== '') ? String(conf) : '';
+      frForm.face_confidence.value = (conf != null && conf !== '') ? String(conf) : '0.45';
     }
   } catch (err) {
     frMessage.textContent = err.message || 'Failed to load settings.';
@@ -107,11 +108,11 @@ async function saveSettings(event) {
     const status = await api('/api/settings/face-recognition', { method: 'PUT', body: JSON.stringify(body) });
     fillForm(status);
     // Face confidence lives in the AI settings store, so save it there too.
-    // Blank = inherit Min Confidence from the ONNX page.
+    // Blank falls back to the default of 0.45 - no inheritance.
     let faceConfError = null;
     try {
       const confVal = frForm.elements['face_confidence']?.value.trim();
-      const aiPayload = confVal !== '' ? { face_confidence: Number(confVal) } : { face_confidence: '' };
+      const aiPayload = { face_confidence: confVal !== '' ? Number(confVal) : 0.45 };
       await api('/api/settings/ai', { method: 'PUT', body: JSON.stringify(aiPayload) });
     } catch (err) {
       faceConfError = err;

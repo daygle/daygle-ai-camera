@@ -161,8 +161,12 @@ def unknown_face_alerts(camera_id: str, detections: list[dict[str, Any]]) -> lis
     service = get_face_recognition_service()
     if not service.available:
         return []
-    if enabled_unknown_rule() is None:
+    rule = enabled_unknown_rule()
+    if rule is None:
         return []
+    # Per-rule confidence gate: only unknown faces at/above the rule's
+    # ``min_confidence`` alert. Blank = any detection the detector reports.
+    rule_min_conf = rule.get('min_confidence')
     face_track_ids: set[Any] = set()
     new_alerts: list[dict[str, Any]] = []
     with _lock:
@@ -175,6 +179,13 @@ def unknown_face_alerts(camera_id: str, detections: list[dict[str, Any]]) -> lis
                 continue
             face_track_ids.add(track_id)
             if detection.get('person_id') is None and track_id not in alerted:
+                if rule_min_conf is not None:
+                    try:
+                        det_conf = float(detection.get('confidence') or 0)
+                    except (TypeError, ValueError):
+                        det_conf = 0.0
+                    if det_conf < float(rule_min_conf):
+                        continue
                 alerted.add(track_id)
                 new_alerts.append(detection)
         # Forget tracks no longer present so a returning stranger re-alerts and

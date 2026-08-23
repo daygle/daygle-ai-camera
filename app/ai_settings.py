@@ -382,6 +382,22 @@ def ai_status_payload(
         ),
         None,
     )
+    # Same catalog-name lookup for the secondary face model so the ONNX status
+    # card can render ``Face Model`` exactly like the primary ``Model`` row
+    # (bold catalog name + muted path) instead of a bare path.
+    face_model_path_str = str(settings.get('face_model_path') or '')
+    face_model_filename = Path(face_model_path_str).name if face_model_path_str else ''
+    face_model_label = next(
+        (
+            info['label']
+            for info in YOLO_MODELS.values()
+            if (
+                info['onnx'] == face_model_filename
+                or face_model_filename.startswith(f"{Path(info['onnx']).stem}-")
+            )
+        ),
+        None,
+    )
     # Read the model's actual input dimensions from the detector.
     # The detector overrides configured input_size with the model's
     # real shape at load time, so this is the ground truth.
@@ -427,6 +443,7 @@ def ai_status_payload(
         # Secondary face detector status (optional parallel pass).
         'face_enabled': bool(settings.get('face_enabled')),
         'face_model_path': str(settings.get('face_model_path') or ''),
+        'face_model_name': face_model_label,
         'face_model_loaded': bool(
             getattr(_state.face_detector, 'available', False)
         ),
@@ -479,6 +496,7 @@ def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
         # face detector was running.
         'face_enabled': ai_status['face_enabled'],
         'face_model_path': ai_status['face_model_path'],
+        'face_model_name': ai_status.get('face_model_name'),
         'face_model_loaded': ai_status['face_model_loaded'],
         # Surface the normalised tri-state so the settings form's NMS-dedupe
         # select reflects the persisted value (defaulting to 'auto') rather
@@ -704,8 +722,8 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     updated['face_keypoint_count'] = face_keypoint_count
     raw_face_conf = updated.get('face_confidence')
     if raw_face_conf in (None, ''):
-        # Blank = inherit the global Min Confidence.
-        updated.pop('face_confidence', None)
+        # Blank = the default of 0.45 (matches the global Min Confidence default).
+        updated['face_confidence'] = 0.45
     else:
         try:
             face_confidence = float(raw_face_conf)

@@ -56,7 +56,6 @@ function displayValue(value, fallback = 'None') {
   return titleCaseWords(String(value));
 }
 
-function yesNo(value) { return value ? 'Yes' : 'No'; }
 function setMessage(text, isError = false) {
   messageEl.textContent = text;
   if (text) window.showToast(text, isError);
@@ -97,8 +96,9 @@ function setModelMessage(modelId, text, type = 'info') {
 function formPayload(form) {
   const data = Object.fromEntries(new FormData(form).entries());
   data.enabled = data.enabled === 'true';
-  // Secondary face pass: Enabled/Disabled select posts 'true'/'false'; blank
-  // face_confidence means "inherit Min Confidence" so it must be dropped.
+  // Secondary face pass: Enabled/Disabled select posts 'true'/'false'. A
+  // blank face_confidence is dropped so the stored value (default 0.45)
+  // is left untouched.
   if ('face_enabled' in data) data.face_enabled = data.face_enabled === 'true';
   if ('face_confidence' in data && data.face_confidence === '') delete data.face_confidence;
   else if ('face_confidence' in data) data.face_confidence = Number(data.face_confidence);
@@ -144,20 +144,28 @@ function renderStatus(status) {
   }
   // Two separate status cards mirroring how detection actually runs:
   // the PRIMARY object detector card, and the parallel face pass card.
+  // Only rows that can tell the operator something they don't already know
+  // are shown: Status (whose failure states carry the detail the old
+  // Model Exists / Detector Loaded / ONNX Runtime Installed rows used to
+  // spell out), plus what is running and how (Model, Resolution, Precision,
+  // Device). The backend is always ONNX -- the validator rejects every other
+  // backend -- so that row was pure noise and is gone.
+  const statusText = {
+    'onnx active': 'Running',
+    'ai disabled': 'Disabled',
+    'model missing': 'Model missing',
+    'model failed': 'Model failed',
+  }[String(status.mode || '').toLowerCase()] || displayValue(status.mode, 'Unknown');
   const objectRows = [
-    safeHtml`<div><span>Current Backend</span><strong>${displayValue(status.current_backend || status.configured_backend, 'Not Set')}</strong></div>`,
+    safeHtml`<div><span>Status</span><strong class="ai-mode ${String(status.mode || '').toLowerCase().replace(/\s+/g, '-')}">${statusText}</strong></div>`,
     modelRow,
-    safeHtml`<div><span>Model Exists</span><strong>${yesNo(status.model_exists)}</strong></div>`,
-    safeHtml`<div><span>ONNX Runtime Installed</span><strong>${yesNo(status.onnx_runtime_installed)}</strong></div>`,
-    safeHtml`<div><span>Detector Loaded</span><strong>${yesNo(status.detector_loaded)}</strong></div>`,
-    safeHtml`<div><span>Mode</span><strong class="ai-mode ${String(status.mode || '').toLowerCase().replace(/\s+/g, '-')}">${displayValue(status.mode, 'None')}</strong></div>`,
-    safeHtml`<div><span>Model Resolution</span><strong>${status.model_input_size || 'N/A'}</strong></div>`,
+    safeHtml`<div><span>Resolution</span><strong>${status.model_input_size || 'N/A'}</strong></div>`,
     safeHtml`<div><span>Precision</span><strong>${precisionText}</strong></div>`,
     // Which device inference is actually running on (resolved from ORT's live
     // provider list), so ``Device: Auto`` is unambiguous and a CUDA-to-CPU
     // fallback is visible. Also tells the operator which half of the Advanced
     // settings (CPU vs GPU group) applies to their host.
-    safeHtml`<div><span>Active Device</span><strong>${status.active_device || 'N/A'}</strong></div>`,
+    safeHtml`<div><span>Device</span><strong>${status.active_device || 'N/A'}</strong></div>`,
   ];
   // Only surface the error row when there's an actual error -- a full-width
   // "None" row just wastes space on an otherwise healthy panel.
@@ -175,15 +183,19 @@ function renderStatus(status) {
 
   // Face pass card: always rendered so the parallel architecture stays
   // visible -- Disabled when off, Loaded/Not loaded when on.
-  const faceState = !status.face_enabled
-    ? 'Disabled'
-    : (status.face_model_loaded ? `Loaded ${status.face_model_path || ''}` : 'Not loaded');
+  // Face Model mirrors the primary card's Model row: bold catalog name with
+  // the path muted beside it. Load state stays on the Face Detection row
+  // above and the Face Model Error row below, exactly like the object card
+  // (where Status carries the state).
+  const faceModelRow = status.face_model_name
+    ? safeHtml`<div><span>Face Model</span><strong>${status.face_model_name} <span class="muted" style="font-weight:400;font-size:12px">${status.face_model_path || ''}</span></strong></div>`
+    : safeHtml`<div><span>Face Model</span><strong>${status.face_model_path || 'Not Set'}</strong></div>`;
   // Face Confidence is intentionally NOT shown here: it defaults to inheriting
   // the global Min Confidence, so a static "Inherit Min Confidence" row was
   // noise. The value is still editable under Settings.
   const faceRows = [
     safeHtml`<div><span>Face Detection</span><strong class="ai-mode ${status.face_enabled ? 'onnx-active' : 'ai-disabled'}">${status.face_enabled ? 'Enabled' : 'Disabled'}</strong></div>`,
-    safeHtml`<div><span>Face Model</span><strong>${faceState}</strong></div>`,
+    faceModelRow,
   ];
   if (status.face_enabled && status.face_model_loaded === false) {
     faceRows.push(safeHtml`<div class="wide"><span style="color:var(--danger)">Face Model Error</span><strong style="color:var(--danger)">${status.face_model_path ? `Face model not found or failed to load: ${status.face_model_path}` : 'No face model selected - choose one under Settings or download one on the Models tab.'}</strong></div>`);

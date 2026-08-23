@@ -158,9 +158,9 @@ def _use_rule(monkeypatch, rule):
     )
 
 
-def _unknown_face(track_id):
+def _unknown_face(track_id, confidence=0.9):
     return {'label': 'face', 'track_id': track_id, 'recognized': True,
-            'person_id': None, 'person_name': None, 'identity': 'unknown', 'confidence': 0.9}
+            'person_id': None, 'person_name': None, 'identity': 'unknown', 'confidence': confidence}
 
 
 def _known_face(track_id):
@@ -216,3 +216,19 @@ def test_returning_stranger_realerts(monkeypatch):
     fi.unknown_face_alerts('uF', [])
     # A new track for a stranger alerts again.
     assert len(fi.unknown_face_alerts('uF', [_unknown_face(2)])) == 1
+
+
+def test_unknown_alert_respects_rule_min_confidence(monkeypatch):
+    _use_service(monkeypatch, _AlertService())
+    _use_rule(monkeypatch, _unknown_rule(min_confidence=0.8))
+    # Below the rule's threshold -> no alert (and the track stays unalerted).
+    assert fi.unknown_face_alerts('uG', [_unknown_face(1, confidence=0.5)]) == []
+    # A later, higher-confidence sighting of the same track alerts.
+    assert len(fi.unknown_face_alerts('uG', [_unknown_face(1, confidence=0.9)])) == 1
+
+
+def test_unknown_alert_without_rule_min_confidence_gates_nothing(monkeypatch):
+    _use_service(monkeypatch, _AlertService())
+    _use_rule(monkeypatch, _unknown_rule())
+    fi.reset_camera_identities('uH')
+    assert len(fi.unknown_face_alerts('uH', [_unknown_face(1, confidence=0.1)])) == 1

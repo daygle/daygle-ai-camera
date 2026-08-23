@@ -19,6 +19,10 @@ const liveEls = {
   visionLane: document.getElementById('liveVisionLane'),
   visionBody: document.getElementById('liveVisionBody'),
   hearingBody: document.getElementById('liveHearingBody'),
+  faceLane: document.getElementById('liveFaceLane'),
+  faceState: document.getElementById('liveFaceState'),
+  faceBody: document.getElementById('liveFaceBody'),
+  faceStatus: document.getElementById('liveFaceStatus'),
   motionLane: document.getElementById('liveMotionLane'),
   motionState: document.getElementById('liveMotionState'),
   motionBar: document.getElementById('liveMotionBar'),
@@ -414,7 +418,11 @@ function summarizeSoundStatus(soundStatus, soundEnabled) {
 function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = false) {
   const sound = summarizeSoundStatus(soundStatus, soundEnabled);
   if (!payload) {
-    return { state: 'idle', stateLabel: 'Idle', chips: [], ...sound, message: 'Live AI status unavailable.' };
+    return {
+      state: 'idle', stateLabel: 'Idle', chips: [], faceChips: [],
+      faceEnabled: undefined, faceLoaded: false, ...sound,
+      message: 'Live AI status unavailable.',
+    };
   }
 
   // Build a highest-confidence map of detected labels (filtered to active rules).
@@ -450,6 +458,29 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
     ? chips.map((c) => c.confidence != null ? `${sentenceCase(c.label)} (${Math.round(c.confidence * 100)}%)` : sentenceCase(c.label)).join(', ')
     : null;
 
+  // Faces lane: the parallel face pass reports its detections mixed in with
+  // the object detections, so pull ``face``-labelled ones out here and label
+  // them with the recognised identity (or "Unknown face") instead of letting
+  // them fall through the object-rule filter. Dedupe per identity, keeping the
+  // best confidence, like the object chips do per label.
+  const faceChips = [];
+  {
+    const bestFace = new Map();
+    for (const d of (payload.detections || [])) {
+      if (String(d.label || '').trim().toLowerCase() !== 'face') continue;
+      const conf = confidenceFor(d.confidence) ?? confidenceFor(confidenceHints.face);
+      const name = String(d.person_name || '').trim();
+      const key = name || (d.recognized ? 'Unknown face' : 'Face');
+      if (!bestFace.has(key) || (conf != null && (bestFace.get(key) == null || conf > bestFace.get(key)))) {
+        bestFace.set(key, conf);
+      }
+    }
+    for (const [key, conf] of bestFace.entries()) faceChips.push({ label: key, confidence: conf });
+    faceChips.sort((a, b) => b.confidence - a.confidence);
+  }
+  const faceEnabled = typeof payload.face_enabled === 'boolean' ? payload.face_enabled : undefined;
+  const faceLoaded = payload.face_model_loaded === true;
+
   const motionData = {
     motion_confidence: payload.motion_confidence,
     motion_fraction: payload.motion_fraction,
@@ -465,12 +496,18 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
       parts.push(`${sentenceCase(payload.object_reason.label || 'Object')} below alert threshold${threshold != null ? ` (${Math.round(threshold * 100)}%)` : ''}`);
     }
     if (payload.recording_state) parts.push(`recording ${payload.recording_state}${payload.recording_id ? ` #${payload.recording_id}` : ''}`);
-    return { state: 'alerted', stateLabel: 'Alerted', chips, ...sound, message: parts.join('; ') + '.', ...motionData };
+    return {
+      state: 'alerted', stateLabel: 'Alerted', chips, faceChips,
+      faceEnabled, faceLoaded, ...sound, message: parts.join('; ') + '.', ...motionData,
+    };
   }
 
   if (payload.state === 'checked') {
     if (!labelStr) {
-      return { state: 'monitoring', stateLabel: 'Monitoring', chips, ...sound, message: '', ...motionData };
+      return {
+        state: 'monitoring', stateLabel: 'Monitoring', chips, faceChips,
+        faceEnabled, faceLoaded, ...sound, message: '', ...motionData,
+      };
     }
     const reason = String(payload.reason || '');
     const objectReason = payload.object_reason;
@@ -483,7 +520,10 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
     else if (/no alert rule|no matching|no new alert/i.test(reason)) suffix = 'no matching alert rule';
     else if (/no detections matched/i.test(reason)) suffix = 'outside monitored zones';
     else suffix = reason || 'no alert triggered';
-    return { state: 'detected', stateLabel: 'Detected', chips, ...sound, message: `Detected ${labelStr} - ${suffix}.`, ...motionData };
+    return {
+      state: 'detected', stateLabel: 'Detected', chips, faceChips,
+      faceEnabled, faceLoaded, ...sound, message: `Detected ${labelStr} - ${suffix}.`, ...motionData,
+    };
   }
 
   const fallback = String(payload.reason || payload.ai_error || 'waiting for frames');
@@ -491,6 +531,9 @@ function summarizeDetectionStatus(payload, soundStatus = null, soundEnabled = fa
     state: payload.state || 'idle',
     stateLabel: payload.state ? payload.state[0].toUpperCase() + payload.state.slice(1) : 'Idle',
     chips,
+    faceChips,
+    faceEnabled,
+    faceLoaded,
     ...sound,
     message: `Live AI: ${payload.state || 'waiting'} - ${fallback}`,
     ...motionData,
@@ -539,7 +582,7 @@ function renderDetectionStatus(summary) {
   // dedicated Vision and Hearing lanes below, so repeating them here makes the
   // status card feel duplicated whenever an item is detected.
   if (liveEls.detectionSubtitle) {
-    liveEls.detectionSubtitle.textContent = 'What the AI is currently seeing and hearing on the live feed.';
+    liveEls.detectionSubtitle.textContent = 'What the AI is currently seeing, hearing, and recognizing on the live feed.';
   }
 
   // Monitor pill: a "live" affordance that dims when the status feed is down.
@@ -611,6 +654,43 @@ function renderDetectionStatus(summary) {
     liveEls.soundStatus.textContent = summary.soundMessage || '';
     liveEls.soundStatus.hidden = !summary.soundMessage;
   }
+
+  // ── Faces lane ──────────────────────────────────────────────
+  // The parallel face pass contributes detections with identity annotations;
+  // render them here. Unknown face state (synthetic all-cameras/error
+  // summaries) mirrors the Hearing lane: '-' badge, no claim about the frame.
+  const faceChips = summary.faceChips || [];
+  const faceKnown = summary.faceEnabled != null;
+  if (liveEls.faceLane) liveEls.faceLane.classList.toggle('sense-lane-alerted', faceChips.length > 0 && alerted);
+  let faceStateText = '-';
+  let faceStateClass = 'sense-badge-idle';
+  let faceBodyHtml = '';
+  if (faceChips.length) {
+    faceStateText = 'Detected';
+    faceStateClass = 'sense-badge-face';
+    faceBodyHtml = faceChips.map((c) => detectionRowHtml(c.label, c.confidence, { alerted })).join('');
+  } else if (!faceKnown) {
+    faceStateText = '-';
+    faceStateClass = 'sense-badge-idle';
+    faceBodyHtml = senseEmptyHtml('Face status unavailable');
+  } else if (!summary.faceEnabled) {
+    faceStateText = 'Off';
+    faceStateClass = 'sense-badge-off';
+    faceBodyHtml = senseEmptyHtml('Face detection disabled');
+  } else if (!summary.faceLoaded) {
+    faceStateText = 'Off';
+    faceStateClass = 'sense-badge-off';
+    faceBodyHtml = senseEmptyHtml('Face model not loaded');
+  } else {
+    faceStateText = 'Monitoring';
+    faceStateClass = 'sense-badge-idle';
+    faceBodyHtml = senseEmptyHtml('No faces', { tick: true });
+  }
+  if (liveEls.faceState) {
+    liveEls.faceState.textContent = faceStateText;
+    liveEls.faceState.className = 'sense-badge ' + faceStateClass;
+  }
+  if (liveEls.faceBody) liveEls.faceBody.innerHTML = faceBodyHtml;
 
   // ── Motion lane ─────────────────────────────────────────────
   // The bar is deliberately on the raw changed-pixel scale: 1% means 1% of

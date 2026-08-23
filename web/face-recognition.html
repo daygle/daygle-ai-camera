@@ -68,8 +68,8 @@
             <span>Identity Retention <span class="info-tip" data-tip="Days to keep identity labels on events before they are cleared. 0 keeps them forever." title="Days to keep identity labels on events before they are cleared. 0 keeps them forever." tabindex="0" aria-label="Help: Days to keep identity labels on events before they are cleared. 0 keeps them forever."></span></span>
             <input name="retention_days" type="number" min="0" step="1" /></label>
           <label>
-            <span>Face Confidence <span class="info-tip" data-tip="Minimum detection confidence (0-1). Leave blank to inherit Min Confidence from the ONNX page. Faces are small targets - a lower value like 0.30 often catches distant faces better." title="Minimum detection confidence (0-1). Leave blank to inherit Min Confidence from the ONNX page. Faces are small targets - a lower value like 0.30 often catches distant faces better." tabindex="0" aria-label="Help: Minimum detection confidence (0-1), blank inherits Min Confidence from the ONNX page."></span></span>
-            <input name="face_confidence" type="number" min="0" max="1" step="0.01" placeholder="Inherit Min Confidence" /></label>
+            <span>Face Confidence <span class="info-tip" data-tip="Minimum detection confidence (0-1). Default: 0.45. Faces are small targets - a lower value like 0.30 often catches distant faces better." title="Minimum detection confidence (0-1). Default: 0.45. Faces are small targets - a lower value like 0.30 often catches distant faces better." tabindex="0" aria-label="Help: Minimum detection confidence (0-1). Default: 0.45."></span></span>
+            <input name="face_confidence" type="number" min="0" max="1" step="0.01" value="0.45" /></label>
         </div>
         <div class="button-row">
           <button id="frReloadBtn" class="btn-info" type="button">Reload</button>
@@ -164,6 +164,10 @@
         <label>
           <span>Cooldown (minutes)</span>
           <input name="cooldown_minutes" type="number" min="0" step="1" value="5" placeholder="5" />
+        </label>
+        <label>
+          <span>Min Confidence <span class="info-tip" data-tip="Minimum detection confidence (0-1) required for this rule's alerts. Leave blank to alert on any detected face." title="Minimum detection confidence (0-1) required for this rule's alerts. Leave blank to alert on any detected face." tabindex="0" aria-label="Help: Minimum detection confidence (0-1) required for this rule's alerts. Leave blank to alert on any detected face."></span></span>
+          <input name="min_confidence" type="number" min="0" max="1" step="0.01" placeholder="Any" />
         </label>
       </form>
       <div class="button-row">
