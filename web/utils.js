@@ -201,28 +201,40 @@ async function api(path, options = {}) {
   if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
   }
-  const response = await fetch(path, { ...options, headers });
+  let response = await fetch(path, { ...options, headers });
   if (response.status === 401) {
     handleSessionLoss('Authentication required', defaultReturnTo());
     throw new Error('Authentication required');
   }
   const payload = await response.json().catch(() => {});
-  // 403 with CSRF-related detail text = a stale CSRF cookie/token.
-  // The server-side ``csrf_protect`` returns ``CSRF token mismatch``
-  // (or similar ``Invalid token`` / ``Missing cookie``) when the
-  // cached token no longer matches the session row. Admin-role
-  // denials surface as ``Admin access required`` and intentionally
-  // do NOT match the regex below, so a non-admin hitting an admin
-  // endpoint gets the original 403 toast, not a login redirect.
+  // 403 with CSRF-related detail text usually means a STALE cached token
+  // (another tab or an overlapping refresh rotated the session's token) -
+  // NOT a dead session, which is why GETs keep working. Self-heal: re-read
+  // the session's current token via /api/auth/me and retry ONCE. Only if
+  // the retry also fails do we declare the session lost.
+  //
+  // Admin-role denials surface as ``Admin access required`` and
+  // intentionally do NOT match the regex below, so a non-admin hitting an
+  // admin endpoint gets the original 403 toast, not a login redirect or a
+  // pointless refresh+retry.
   //
   // The ``window.daygleAuth?.user`` guard was REMOVED because a
   // concurrent in-flight request may have already cleared auth state
   // (via a prior 401 → handleSessionLoss → setApiAuth(null, null, null))
   // before this 403 arrives. The server's error message alone is the
-  // authoritative signal - if it says CSRF, the session is gone.
+  // authoritative signal - if it says CSRF (after one recovery attempt),
+  // the session is gone.
   if (response.status === 403) {
     const detail = String((payload && payload.detail) || '');
     if (/csrf|invalid.?token|missing.?cookie|invalid.?x-csr/i.test(detail)) {
+      const retried = await retryAfterCsrfRefresh(path, options);
+      if (retried && retried.status !== 403) {
+        const retryPayload = await retried.json().catch(() => {});
+        if (retried.ok) return retryPayload || {};
+        throw new Error((retryPayload && retryPayload.detail) || `Request failed: ${retried.status}`);
+      }
+      // Recovery failed (refresh errored / no token / still mismatched):
+      // fall through to session-loss handling below.
       handleSessionLoss('Session expired - please sign in again', defaultReturnTo());
       throw new Error('Session expired');
     }
@@ -233,6 +245,33 @@ async function api(path, options = {}) {
   return payload || {};
 }
 window.api = api;
+
+// ─── CSRF self-heal ──────────────────────────────────────────────────────
+// A CSRF-mismatch 403 on a mutating request usually means this tab's cached
+// X-CSRF-Token went stale (another tab or an overlapping refresh rotated the
+// session's token). That is NOT a dead session - the cookie is still valid,
+// which is exactly why GETs keep working. Re-fetch /api/auth/me to pick up
+// the session's current token and retry ONCE before declaring the session
+// lost. Returns the retried Response, or null when recovery failed.
+async function retryAfterCsrfRefresh(path, options) {
+  try {
+    await refreshDaygleAuth();
+  } catch (_err) {
+    return null;
+  }
+  const freshToken = window.daygleAuth?.csrfToken;
+  if (!freshToken) return null;
+  const headers = { ...(options.headers || {}) };
+  headers['X-CSRF-Token'] = freshToken;
+  if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+  try {
+    return await fetch(path, { ...options, headers });
+  } catch (_err) {
+    return null;
+  }
+}
 
 // ─── Background auth refresh ──────────────────────────────────────────────
 // Single source of truth used by nav.js's daygleAuthReady IIFE *and* by

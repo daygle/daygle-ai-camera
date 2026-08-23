@@ -60,13 +60,18 @@ def list_audit_log(
 @router.get('/api/auth/me')
 def me(request: Request, auth=Depends(get_auth)):
     session = require_session(request)
-    # Rotate the CSRF token on every explicit auth-state check so a stolen
-    # token has a bounded abuse window (at most the interval between two
-    # scheduled frontend refreshes, typically a few minutes). The old token
-    # is invalidated immediately when the DB row is written.
-    new_csrf = auth.rotate_csrf_token(session['session_token'])
-    if new_csrf is not None:
-        session['csrf_token'] = new_csrf
+    # NOTE: this endpoint deliberately does NOT rotate the CSRF token.
+    # An earlier version rotated on every poll, which silently invalidated
+    # the token cached by any other concurrent /api/auth/me caller -- another
+    # open tab, or two overlapping refreshes in the SAME tab (scheduled
+    # refresh racing a visibilitychange/focus refresh). The loser of that
+    # race kept a now-dead token, its next mutating request failed the CSRF
+    # check, and the UI flipped to "signed out" while GETs kept working
+    # (the "partially logged out" state). The per-session token already has
+    # strong protections around it: SameSite=lax + httponly cookies, the
+    # same-origin Origin/Referer guard, constant-time comparison, and the
+    # admin mutation rate limiter. Rotation is still available explicitly
+    # via ``auth.rotate_csrf_token`` for flows that need it.
     return {'user': session['user'], 'csrf_token': session['csrf_token'], 'expires_at': session['expires_at']}
 
 
