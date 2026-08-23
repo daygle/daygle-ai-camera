@@ -191,12 +191,16 @@ function updateZoneBounds(zone) {
 }
 
 function defaultObjectRule(label = '') {
-  const isMotion = String(label || '').trim().toLowerCase() === 'motion';
+  const normalized = String(label || '').trim().toLowerCase();
+  // Motion and faces are non-object-class axes with a 0.45 canonical default
+  // (matching zone_motion_min_confidence and the global Face Confidence
+  // setting); object classes default to 0.5.
+  const baseConfidence = (normalized === 'motion' || normalized === 'face') ? 0.45 : 0.5;
   return {
-    label: String(label || '').trim().toLowerCase(),
+    label: normalized,
     enabled: true,
     record_on_detect: true,
-    min_confidence: isMotion ? 0.45 : 0.5,
+    min_confidence: baseConfidence,
     max_confidence: 1,
     // Optional per-zone motion sensitivity overrides (motion rule only). null =
     // inherit the camera/global gate/scale.
@@ -231,6 +235,30 @@ function ensureMotionRule(zone) {
   return rule;
 }
 
+// Canonical per-axis confidence defaults shared by every normalization path.
+function baseConfidenceFor(label) {
+  const normalized = String(label || '').trim().toLowerCase();
+  return (normalized === 'motion' || normalized === 'face') ? 0.45 : 0.5;
+}
+
+// Faces follow the exact motion pattern: stored as a plain object rule
+// (label 'face') so backend gating (confidence window, record, cooldown,
+// alerts, schedule) stays identical, presented as its own card. A camera
+// with at least one enabled Face rule scopes ALL face processing to those
+// zones -- faces detected elsewhere are dropped before recognition runs.
+function faceRuleOf(zone) {
+  if (!zone || !Array.isArray(zone.object_rules)) return null;
+  return zone.object_rules.find((rule) => String(rule.label || '').trim().toLowerCase() === 'face') || null;
+}
+
+function ensureFaceRule(zone) {
+  const existing = faceRuleOf(zone);
+  if (existing) return existing;
+  const rule = defaultObjectRule('face');
+  zone.object_rules.push(rule);
+  return rule;
+}
+
 function normalizeObjectRules(zone) {
   if (Array.isArray(zone.object_rules) && zone.object_rules.length) {
     const seen = new Set();
@@ -240,11 +268,11 @@ function normalizeObjectRules(zone) {
         label: String(rule.label || '').trim().toLowerCase(),
         enabled: rule.enabled !== false,
         record_on_detect: rule.record_on_detect !== false,
-        min_confidence: clamp(Number(rule.min_confidence ?? 0.5), 0, 1),
+        min_confidence: clamp(Number(rule.min_confidence ?? baseConfidenceFor(rule.label)), 0, 1),
         // Upper bound of the confidence window. Defaults to 1 (no cap) and is
         // never allowed below min_confidence so the [min, max] band is valid.
         max_confidence: Math.max(
-          clamp(Number(rule.min_confidence ?? 0.5), 0, 1),
+          clamp(Number(rule.min_confidence ?? baseConfidenceFor(rule.label)), 0, 1),
           clamp(Number(rule.max_confidence ?? 1), 0, 1),
         ),
         // Per-zone motion gate/scale overrides: clamp to the backend ranges when
@@ -275,7 +303,7 @@ function normalizeZone(zone) {
   const sourcePoints = Array.isArray(zone.points) && zone.points.length >= 3 ? zone.points : rectanglePoints(zone);
   zone.points = sourcePoints.map(normalizePoint);
   zone.object_rules = normalizeObjectRules(zone);
-  zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion').map((rule) => rule.label);
+  zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion' && r.label !== 'face').map((rule) => rule.label);
   // Keep the legacy `monitor_motion` flag in sync with the actual rule list
   // so a removed or disabled Motion rule stays gone after save. The backend's
   // normalize_monitoring_zones() re-inserts Motion when it sees
@@ -284,6 +312,13 @@ function normalizeZone(zone) {
   // save round-trip, making the delete appear to be ignored.
   zone.monitor_motion = zone.object_rules.some(
     (rule) => String(rule.label || '').trim().toLowerCase() === 'motion'
+      && rule.enabled !== false
+  );
+  // Same legacy-flag pattern for the Faces axis: derived from the enabled
+  // face rule so the backend's normalize_monitoring_zones never resurrects a
+  // deleted rule on save round-trips.
+  zone.monitor_faces = zone.object_rules.some(
+    (rule) => String(rule.label || '').trim().toLowerCase() === 'face'
       && rule.enabled !== false
   );
   updateZoneBounds(zone);
@@ -395,7 +430,7 @@ function objectRuleOptions(selectedLabel) {
   const groupValues = new Set(OBJECT_GROUP_LABELS.map((group) => group.value));
   // Group names are rendered as dedicated options below, so keep them out of the
   // per-class list even when one is the currently selected value.
-  const labels = [...new Set([...availableLabels, selectedLabel].filter((l) => Boolean(l) && l !== 'motion' && !groupValues.has(l)))];
+  const labels = [...new Set([...availableLabels, selectedLabel].filter((l) => Boolean(l) && l !== 'motion' && l !== 'face' && !groupValues.has(l)))];
   // Display labels in title case for readability; the value attribute stays
   // raw lowercase because rule.label is the canonical lookup key used by
   // defaultObjectRule, normalizeObjectRules, and backend filters.
@@ -414,7 +449,10 @@ function renderObjectRules(zone, zoneIndex) {
   // even when the motion rule sits elsewhere in the array.
   const rules = zone.object_rules
     .map((rule, ruleIndex) => ({ rule, ruleIndex }))
-    .filter(({ rule }) => String(rule.label || '').trim().toLowerCase() !== 'motion');
+    .filter(({ rule }) => {
+      const label = String(rule.label || '').trim().toLowerCase();
+      return label !== 'motion' && label !== 'face';
+    });
   if (!rules.length) {
     return '<div class="empty compact-empty">No object rules yet. Choose an object below to add detection settings for this area.</div>';
   }
@@ -523,6 +561,65 @@ function renderMotionCard(zone, zoneIndex) {
     </div>`;
 }
 
+function renderFaceCard(zone, zoneIndex) {
+  const rule = faceRuleOf(zone);
+  const enabled = Boolean(rule && rule.enabled !== false);
+  const key = `face:${zoneIndex}`;
+  const expanded = expandedZoneRules.has(key);
+  const zoneLabel = escapeHtml(zone.name || `Zone ${zoneIndex + 1}`);
+  return `
+    <div class="zone-motion-card${enabled ? ' is-enabled' : ''}" data-zone-face-for="${zoneIndex}">
+      <div class="zone-motion-head">
+        <div class="zone-motion-title">
+          <span class="zone-motion-icon" aria-hidden="true">👤</span>
+          <div>
+            <strong>Face detection</strong>
+            <span>Recognise faces inside this area only</span>
+          </div>
+        </div>
+        <label class="toggle-control zone-motion-toggle" title="Enable or disable face detection for this area">
+          <input type="checkbox" data-zone-face-toggle="${zoneIndex}" ${enabled ? 'checked' : ''} aria-label="Toggle face detection for ${zoneLabel}" />
+          <span>${enabled ? 'On' : 'Off'}</span>
+        </label>
+      </div>
+      ${enabled ? `
+      <div class="zone-motion-body">
+        <label class="zone-motion-field" title="Only faces with at least this confidence are processed in this area (0-1). Lower finds more faces, higher reduces false positives.">
+          <span>Min confidence</span>
+          <span class="zone-motion-sensitivity-row">
+            <input type="range" data-zone-face-confidence="${zoneIndex}" min="0" max="1" step="0.05" value="${escapeHtml(rule.min_confidence)}" />
+            <output class="zone-motion-sensitivity-value" data-zone-face-confidence-value="${zoneIndex}">${escapeHtml(rule.min_confidence)}</output>
+          </span>
+          <small class="form-help muted">Faces detected outside Face-enabled areas are ignored entirely.</small>
+        </label>
+        <div class="zone-motion-secondary">
+          <label class="zone-motion-field" title="Record a clip whenever a face is detected in this area.">
+            <span>Record on face</span>
+            <input type="checkbox" data-zone-face-record="${zoneIndex}" ${rule.record_on_detect !== false ? 'checked' : ''} />
+          </label>
+          <button class="secondary rule-expand-btn zone-motion-advanced" type="button" data-expand-zone-face="${zoneIndex}" aria-expanded="${expanded}">
+            ${expanded ? ICONS.chevronUp : ICONS.email}<span>${expanded ? 'Hide advanced' : 'Advanced'}</span>
+          </button>
+        </div>
+      </div>
+      <div class="zone-motion-advanced-body" ${expanded ? '' : 'hidden'}>
+        <label class="sound-rule-field" title="Cooldown: minimum seconds between face events and alerts for this area. Default 60.">
+          <span>Cooldown (s)</span>
+          <input type="number" data-zone-face-cooldown="${zoneIndex}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" />
+        </label>
+        <label class="sound-rule-field" title="Send an email when a face is detected in this area. Add recipients below.">
+          <span>Email alerts</span>
+          <input type="checkbox" data-zone-face-email="${zoneIndex}" ${rule.email_enabled === true ? 'checked' : ''} />
+        </label>
+        <label class="sound-rule-field" title="Send a push notification when a face is detected in this area.">
+          <span>Push alerts</span>
+          <input type="checkbox" data-zone-face-push="${zoneIndex}" ${rule.push_enabled === true ? 'checked' : ''} />
+        </label>
+        ${renderRuleExpandFields('zone-face', zoneIndex, rule)}
+      </div>` : ''}
+    </div>`;
+}
+
 function renderZones() {
   if (!selectedCamera) return;
   syncZoneOverlayToImage();
@@ -598,7 +695,10 @@ function renderObjectDetectionRules() {
     const addOptions = objectRuleOptions('');
     // Motion lives in its own card above; the object table only lists
     // object-class rules.
-    const objectRuleCount = zone.object_rules.filter((rule) => String(rule.label || '').trim().toLowerCase() !== 'motion').length;
+    const objectRuleCount = zone.object_rules.filter((rule) => {
+      const label = String(rule.label || '').trim().toLowerCase();
+      return label !== 'motion' && label !== 'face';
+    }).length;
     const rulesHtml = objectRuleCount
       ? renderObjectRules(zone, zoneIndex)
       : '<p class="muted empty-message">No object rules yet. Choose an object below to add detection settings for this area.</p>';
@@ -606,6 +706,7 @@ function renderObjectDetectionRules() {
       <div class="zone-object-rules" data-zone-rules-for="${zoneIndex}">
         <div class="zone-name-card"><span class="zone-name-kicker">Area</span><strong>${zoneName}</strong></div>
         ${renderMotionCard(zone, zoneIndex)}
+        ${renderFaceCard(zone, zoneIndex)}
         <div class="zone-object-rules-header">
           <select data-add-zone-rule="${zoneIndex}" class="rule-add-select">${addOptions}</select>
         </div>
@@ -624,7 +725,7 @@ function bindObjectRuleControls() {
       const zone = zones[Number(select.dataset.addZoneRule)];
       zone.object_rules = normalizeObjectRules(zone);
       if (!zone.object_rules.some((rule) => rule.label === label)) zone.object_rules.push(defaultObjectRule(label));
-      zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion').map((rule) => rule.label);
+      zone.object_labels = zone.object_rules.filter((r) => r.label !== 'motion' && r.label !== 'face').map((rule) => rule.label);
       renderZones();
       markZoneUnsaved();
     });
@@ -676,6 +777,7 @@ function bindObjectRuleControls() {
     });
   });
   bindMotionControls();
+  bindFaceControls();
   document.querySelectorAll('[data-delete-zone-rule]').forEach((button) => {
     button.addEventListener('click', () => {
       const zones = cameraDetection().zones;
@@ -824,6 +926,103 @@ function bindMotionControls() {
       wrap.querySelectorAll('select').forEach((sel) => {
         sel.addEventListener('change', () => {
           const rule = motionRuleOf(cameraDetection().zones[Number(wrap.dataset[datasetKey])]);
+          if (!rule) return;
+          rule[ruleKey] = timeSelectValue(wrap);
+          markZoneUnsaved();
+        });
+      });
+    });
+  });
+}
+
+
+// Face-card bindings: same structure as the motion card (data attributes carry
+// the bare zone index; the face rule is looked up by label so reordering
+// object rules never breaks these bindings).
+function bindFaceControls() {
+  document.querySelectorAll('[data-zone-face-toggle]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const zone = cameraDetection().zones[Number(cb.dataset.zoneFaceToggle)];
+      if (!zone) return;
+      if (cb.checked) ensureFaceRule(zone).enabled = true;
+      else {
+        const rule = faceRuleOf(zone);
+        if (rule) rule.enabled = false;
+      }
+      renderObjectDetectionRules();
+      markZoneUnsaved();
+    });
+  });
+  document.querySelectorAll('[data-zone-face-record]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const rule = faceRuleOf(cameraDetection().zones[Number(cb.dataset.zoneFaceRecord)]);
+      if (!rule) return;
+      rule.record_on_detect = cb.checked;
+      markZoneUnsaved();
+    });
+  });
+  document.querySelectorAll('[data-zone-face-confidence]').forEach((inp) => {
+    inp.addEventListener('input', () => {
+      const zoneIndex = Number(inp.dataset.zoneFaceConfidence);
+      const readout = document.querySelector(`[data-zone-face-confidence-value="${zoneIndex}"]`);
+      if (readout) readout.textContent = inp.value;
+    });
+    inp.addEventListener('change', () => {
+      const rule = faceRuleOf(cameraDetection().zones[Number(inp.dataset.zoneFaceConfidence)]);
+      if (!rule) return;
+      rule.min_confidence = clamp(Number(inp.value || 0.45), 0, 1);
+      markZoneUnsaved();
+    });
+  });
+  document.querySelectorAll('[data-zone-face-cooldown]').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      const rule = faceRuleOf(cameraDetection().zones[Number(inp.dataset.zoneFaceCooldown)]);
+      if (!rule) return;
+      rule.cooldown_seconds = Math.max(0, Number.parseInt(inp.value || 0, 10) || 0);
+      markZoneUnsaved();
+    });
+  });
+  [
+    ['zoneFaceEmail', 'email_enabled'],
+    ['zoneFacePush', 'push_enabled'],
+  ].forEach(([datasetKey, ruleKey]) => {
+    const attr = `input[type="checkbox"][data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`;
+    document.querySelectorAll(attr).forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const rule = faceRuleOf(cameraDetection().zones[Number(cb.dataset[datasetKey])]);
+        if (!rule) return;
+        rule[ruleKey] = cb.checked;
+        markZoneUnsaved();
+      });
+    });
+  });
+  document.querySelectorAll('[data-expand-zone-face]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const key = `face:${btn.dataset.expandZoneFace}`;
+      if (expandedZoneRules.has(key)) expandedZoneRules.delete(key);
+      else expandedZoneRules.add(key);
+      renderObjectDetectionRules();
+    });
+  });
+  document.querySelectorAll('[data-zone-face-email-recipients]').forEach((input) => {
+    input.addEventListener('change', () => {
+      const rule = faceRuleOf(cameraDetection().zones[Number(input.dataset.zoneFaceEmailRecipients)]);
+      if (!rule) return;
+      rule.email_recipients = normalizeEmailList(input.value);
+      markZoneUnsaved();
+    });
+  });
+  [
+    ['zoneFaceActiveStart', 'active_start'],
+    ['zoneFaceActiveEnd', 'active_end'],
+    ['zoneFaceNotifyStart', 'notify_start'],
+    ['zoneFaceNotifyEnd', 'notify_end'],
+  ].forEach(([datasetKey, ruleKey]) => {
+    const attr = `data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}`;
+    document.querySelectorAll(`[${attr}]`).forEach((wrap) => {
+      wrap.querySelectorAll('select').forEach((sel) => {
+        sel.addEventListener('change', () => {
+          const rule = faceRuleOf(cameraDetection().zones[Number(wrap.dataset[datasetKey])]);
           if (!rule) return;
           rule[ruleKey] = timeSelectValue(wrap);
           markZoneUnsaved();

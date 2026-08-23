@@ -230,17 +230,18 @@ def normalize_zone_object_rules(zone: dict[str, Any]) -> list[dict[str, Any]]:
         if label in seen:
             continue
         seen.add(label)
-        # Motion is a pixel-diff axis, not an object class, so its canonical
-        # confidence default is 0.45 (see zone_motion_min_confidence / the
-        # frontend's defaultObjectRule) rather than the 0.5 object-class
-        # default. Keeping the two defaults distinct here matters: a persisted
-        # motion rule that omits min_confidence must gate at the same 0.45 the
-        # detection / recording / alerting axes fall back to, or those axes
-        # silently disagree about what fires.
+        # Motion and faces are non-object-class axes, so their canonical
+        # confidence default is 0.45 (matching zone_motion_min_confidence /
+        # the global Face Confidence default / the frontend's defaultObjectRule)
+        # rather than the 0.5 object-class default. Keeping the defaults
+        # distinct matters: a persisted rule that omits min_confidence must
+        # gate at the same value the detection / recording / alerting axes
+        # fall back to, or those axes silently disagree about what fires.
+        non_object_default = 0.45 if label in ('motion', 'face') else 0.5
         try:
-            min_confidence = float(rule.get('min_confidence', 0.45 if label == 'motion' else 0.5))
+            min_confidence = float(rule.get('min_confidence', non_object_default))
         except (TypeError, ValueError):
-            min_confidence = 0.45 if label == 'motion' else 0.5
+            min_confidence = non_object_default
         try:
             cooldown_seconds = int(rule.get('cooldown_seconds', 60))
         except (TypeError, ValueError):
@@ -454,11 +455,23 @@ def normalize_monitoring_zones(zones: Any) -> list[dict[str, Any]]:
             'enabled': bool(zone.get('enabled', True)),
             'monitor_motion': monitor_motion,
             'monitor_objects': bool(zone.get('monitor_objects', True)),
+            # ``object_labels`` feeds OBJECT allow-lists only -- motion and
+            # face are their own detection axes, not object classes, so they
+            # never belong in the allow-list derivation.
             'object_labels': [
                 rule['label']
                 for rule in object_rules
-                if str(rule.get('label') or '').strip().lower() != 'motion'
+                if str(rule.get('label') or '').strip().lower() not in ('motion', 'face')
             ],
+            # Faces axis flag: True when the zone carries an enabled ``face``
+            # rule. Consumed by the live pipeline to scope face processing to
+            # these zones (faces detected elsewhere are dropped BEFORE the
+            # expensive recognition pass).
+            'monitor_faces': any(
+                str(r.get('label') or '').strip().lower() == 'face'
+                and r.get('enabled', True)
+                for r in object_rules
+            ),
             'object_rules': object_rules,
         })
     return normalized

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 from typing import Any
 
@@ -30,5 +31,14 @@ class Storage:
             suffix = '.jpg'
         filename = created.strftime('%Y%m%d_%H%M%S_%f') + suffix
         path = self.snapshots_dir / filename
-        path.write_bytes(image_bytes)
+        # Write to a temp sibling then rename atomically so a concurrent
+        # download can never observe a half-written snapshot (mirrors how the
+        # ingest writes latest.jpg).
+        tmp_path = path.with_name(f'.{path.name}.part')
+        try:
+            tmp_path.write_bytes(image_bytes)
+            os.replace(tmp_path, path)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
         return str(path)

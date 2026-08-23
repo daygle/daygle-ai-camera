@@ -77,7 +77,15 @@ def get_system_settings(request: Request, db=Depends(get_database), auth_enabled
 @router.get('/api/settings/system/database/backup')
 def backup_database(request: Request, db=Depends(get_database)):
     require_admin(request)
-    backup_path = create_database_backup()
+    # Serialise against restores and other backups: a backup running during a
+    # restore would archive a half-swapped database, and duplicate concurrent
+    # full archives can exhaust the recordings disk.
+    if not DATABASE_RESTORE_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail='Another database backup or restore is already in progress.')
+    try:
+        backup_path = create_database_backup()
+    finally:
+        DATABASE_RESTORE_LOCK.release()
     write_audit_log(request, db, 'backup', 'database', details={'filename': backup_path.name})
     return FileResponse(backup_path, media_type='application/vnd.sqlite3', filename=backup_path.name, headers={'Cache-Control': 'no-store'}, background=BackgroundTask(backup_path.unlink, missing_ok=True))
 
@@ -85,7 +93,12 @@ def backup_database(request: Request, db=Depends(get_database)):
 @router.get('/api/settings/system/database/backup/full')
 def backup_database_full(request: Request, db=Depends(get_database)):
     require_admin(request)
-    backup_path = create_full_backup()
+    if not DATABASE_RESTORE_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail='Another database backup or restore is already in progress.')
+    try:
+        backup_path = create_full_backup()
+    finally:
+        DATABASE_RESTORE_LOCK.release()
     write_audit_log(request, db, 'backup', 'database.full', details={'filename': backup_path.name})
     return FileResponse(
         backup_path,

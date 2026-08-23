@@ -479,6 +479,32 @@ def zone_motion_detections(
     return result
 
 
+def _has_enabled_face_rule(zone: dict[str, Any]) -> bool:
+    return any(
+        str(rule.get('label') or '').strip().lower() == 'face'
+        and rule.get('enabled', True)
+        for rule in zone.get('object_rules') or []
+    )
+
+
+def _zone_key(zone: dict[str, Any]) -> str:
+    return str(zone.get('id') or zone.get('name') or '')
+
+
+def camera_face_zone_keys(settings: dict[str, Any]) -> set[str]:
+    """Keys of enabled zones that carry an enabled ``face`` rule.
+
+    Non-empty means the operator scoped face processing to those zones: the
+    live pipeline drops faces detected outside them before the recognition
+    pass. Empty means legacy/global behaviour (every face on the camera).
+    """
+    return {
+        _zone_key(zone)
+        for zone in (settings.get('detection') or {}).get('zones', [])
+        if zone.get('enabled', True) and _has_enabled_face_rule(zone)
+    }
+
+
 def detection_label_allowed_for_zone(detection: dict[str, Any], zone: dict[str, Any], camera_labels: set[str]) -> bool:
     zone_labels = set(normalize_label_list(zone.get('object_labels', [])))
     allowed_labels = zone_labels or camera_labels
@@ -499,9 +525,45 @@ def filter_detections_for_camera_zones(
     require_zones: bool = False,
 ) -> list[dict[str, Any]]:
     detection_settings = settings.get('detection') or {}
-    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get(zone_monitor_key, True)]
+    raw_zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True)]
+    zones = [zone for zone in raw_zones if zone.get(zone_monitor_key, True)]
     camera_labels = set(normalize_label_list(detection_settings.get('object_labels', [])))
+    # Face scoping: when the camera defines zones carrying an enabled ``face``
+    # rule (including face-only zones with ``monitor_objects`` off), a ``face``
+    # detection must land geometrically inside one of them -- its confidence
+    # window is enforced later by the matching rule. When no zone carries a
+    # face rule, faces follow the exact legacy path below.
+    face_scope_zones = (
+        [zone for zone in raw_zones if _has_enabled_face_rule(zone)]
+        if zone_monitor_key == 'monitor_objects'
+        else []
+    )
+
+    def _face_allowed(detection: dict[str, Any]) -> bool | None:
+        """None = no face scoping configured (legacy path); True/False = scoped."""
+        if not face_scope_zones or canonical_label(detection.get('label')) != 'face':
+            return None
+        return any(detection_matches_zone(detection, zone) for zone in face_scope_zones)
+
     if not zones:
+        if not require_zones:
+            if face_scope_zones:
+                # Every zone is face-only: the object axis has no zones, but
+                # face scoping must still bite while non-face detections keep
+                # the legacy camera-label / accept-all fallbacks.
+                kept: list[dict[str, Any]] = []
+                for detection in detections:
+                    verdict = _face_allowed(detection)
+                    if verdict is False:
+                        continue
+                    if (
+                        verdict is None
+                        and camera_labels
+                        and not detection_label_in_allowed(detection.get('label'), camera_labels)
+                    ):
+                        continue
+                    kept.append(detection)
+                return kept
         if zone_monitor_key == 'monitor_objects' and camera_labels and (not require_zones):
             # Canonicalise the detection label through ``_LABEL_ALIASES`` exactly
             # like ``detection_label_allowed_for_zone`` does on the zones path.
@@ -520,15 +582,37 @@ def filter_detections_for_camera_zones(
         if not camera_labels and not require_zones:
             logger.debug('filter_detections_for_camera_zones: no zones or camera labels configured; returning %d detections unfiltered', len(detections))
         return [] if require_zones else detections
-    return [
-        detection
-        for detection in detections
+    # Pre-compute each zone's allow-list once instead of re-parsing
+    # ``zone['object_labels']`` for every (detection, zone) pair on the ~4 Hz
+    # hot path. Empty sets preserve the legacy "no allow-list anywhere ->
+    # accept all" behavior of ``detection_label_allowed_for_zone``.
+    need_labels = zone_monitor_key == 'monitor_objects'
+    zones_with_labels = [
+        (
+            zone,
+            set(normalize_label_list(zone.get('object_labels', []))) or camera_labels,
+        )
+        if need_labels else (zone, None)
+        for zone in zones
+    ]
+    matched: list[dict[str, Any]] = []
+    for detection in detections:
+        verdict = _face_allowed(detection)
+        if verdict is not None:
+            if verdict:
+                matched.append(detection)
+            continue
         if any(
             detection_matches_zone(detection, zone)
-            and (zone_monitor_key != 'monitor_objects' or detection_label_allowed_for_zone(detection, zone, camera_labels))
-            for zone in zones
-        )
-    ]
+            and (
+                not need_labels
+                or not labels
+                or detection_label_in_allowed(detection.get('label'), labels)
+            )
+            for zone, labels in zones_with_labels
+        ):
+            matched.append(detection)
+    return matched
 
 
 def filter_detections_for_camera(detections: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
@@ -542,10 +626,21 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
     if action not in ('alert', 'record'):
         raise ValueError(f"action must be 'alert' or 'record', got {action!r}")
     detection_settings = settings.get('detection') or {}
-    zones = [zone for zone in detection_settings.get('zones', []) if zone.get('enabled', True) and zone.get('monitor_objects', True)]
+    # Face-only zones (monitor_objects=False carrying a ``face`` rule) must be
+    # reachable here too: face detections stamped with such a zone's id match
+    # their rule through this matcher. Object detections can never carry that
+    # zone's id -- they are filtered out by the monitor_objects axis upstream
+    # -- so including these zones cannot make an object rule fire.
+    zones = [
+        zone for zone in detection_settings.get('zones', [])
+        if zone.get('enabled', True) and (zone.get('monitor_objects', True) or _has_enabled_face_rule(zone))
+    ]
     label = canonical_label(detection.get('label'))
     if not label:
         return []
+    # Hoisted out of the zone/rule loop: one coercion per detection, not one
+    # per matched rule.
+    confidence = float(detection.get('confidence') or 0)
     matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for zone in zones:
         if not detection_matches_zone(detection, zone):
@@ -565,14 +660,14 @@ def zone_object_rule_matches(settings: dict[str, Any], detection: dict[str, Any]
             # AlertEngine apply the same matcher, so all three agree.
             if not label_matches(label, rule.get('label')):
                 continue
-            # Per-rule confidence window: the detection must sit inside
+            # Per-rule confidence window (confidence hoisted above): the
+            # detection must sit inside
             # ``[min_confidence, max_confidence]``. ``max_confidence`` defaults
             # to 1.0 (no upper limit) so rules that never configured it behave
             # exactly as before. This window is authoritative over the global
             # ONNX confidence slider -- a higher ``min`` gates here even though
             # the detector floor is lower, and a ``max`` below 1.0 drops
             # over-confident detections the global slider would otherwise pass.
-            confidence = float(detection.get('confidence') or 0)
             if confidence < float(rule.get('min_confidence', 0.5)):
                 continue
             if confidence > float(rule.get('max_confidence', 1.0)):
@@ -594,7 +689,7 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
     zones = [
         zone for zone in detection_settings.get('zones', [])
         if zone.get('enabled', True)
-        and (zone.get('monitor_objects', True) or zone.get('monitor_motion', True))
+        and (zone.get('monitor_objects', True) or zone.get('monitor_motion', True) or _has_enabled_face_rule(zone))
     ]
     rules: list[dict[str, Any]] = []
     camera_key = str(settings.get('id') or settings.get('name') or 'camera').strip() or 'camera'
@@ -611,19 +706,20 @@ def zone_object_alert_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
             # object detections are filtered through the ``monitor_objects`` axis
             # and can never carry this zone's id, so including them would just
             # add dead rules to the engine's list.
-            if not zone.get('monitor_objects', True) and label != 'motion':
+            if not zone.get('monitor_objects', True) and label not in ('motion', 'face'):
                 continue
             rules.append({
                 'name': zone_rule_name(settings, zone, rule),
                 'cooldown_key': f'{camera_key}::{zone_id}::{label}',
                 'object': label,
                 'zone_id': zone_id,
-                # Motion's canonical confidence default is 0.45 (see
-                # zone_motion_min_confidence); object classes default to 0.5.
-                # Matching the detection axis here keeps a rule missing
-                # min_confidence gating alerts at the same threshold that
-                # produced the detection in the first place.
-                'min_confidence': rule.get('min_confidence', 0.45 if label == 'motion' else 0.5),
+                # Motion's and face's canonical confidence default is 0.45
+                # (see zone_motion_min_confidence / the Face Confidence
+                # setting); object classes default to 0.5. Matching the
+                # detection axis here keeps a rule missing min_confidence
+                # gating alerts at the same threshold that produced the
+                # detection in the first place.
+                'min_confidence': rule.get('min_confidence', 0.45 if label in ('motion', 'face') else 0.5),
                 'max_confidence': rule.get('max_confidence', 1.0),
                 'cooldown_seconds': rule.get('cooldown_seconds', 60),
                 'enabled': True,

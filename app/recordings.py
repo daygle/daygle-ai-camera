@@ -467,6 +467,17 @@ class RecordingService:
             self._prebuffer_workers = {}
             for worker in workers:
                 self._stop_worker(worker, join_timeout=self.PREBUFFER_WORKER_JOIN_TIMEOUT_SECONDS)
+        # The high-res recording prebuffer shares the primary worker's
+        # lifecycle: it is spawned by ``prime_rtsp_prebuffer`` alongside it,
+        # so every bulk teardown must stop the ``<camera>-rec`` variant too.
+        # Folding it in here means the settings-swap and shutdown paths
+        # cannot forget it -- a leaked ``-rec`` ffmpeg kept capturing into
+        # the recordings volume forever after every settings save.
+        with self._rec_prebuffer_lock:
+            rec_workers = list(self._rec_prebuffer_workers.values())
+            self._rec_prebuffer_workers = {}
+            for worker in rec_workers:
+                self._stop_worker(worker, join_timeout=self.PREBUFFER_WORKER_JOIN_TIMEOUT_SECONDS)
 
     def start_continuous_chunk_recording(
         self,
@@ -1180,6 +1191,12 @@ class RecordingService:
             )
             worker_state['thread'] = thread
             self._prebuffer_workers[camera_key] = worker_state
+            # Record the debounce stamp INSIDE the locked critical section.
+            # Writing it after lock release let a second caller acquire the
+            # lock first, read a stale stamp, and double-restart within
+            # milliseconds -- resetting the rolling buffer twice.
+            if restart_reason == 'stream_url_changed':
+                self._prebuffer_last_restart[camera_key] = time.monotonic()
             thread.start()
         if restart_reason:
             url_detail = self._url_diff_summary(old_url or '', stream_url) if old_url else ''
@@ -1189,8 +1206,6 @@ class RecordingService:
                 restart_reason,
                 f': {url_detail}' if url_detail else '',
             )
-            with self._prebuffer_lock:
-                self._prebuffer_last_restart[camera_key] = time.monotonic()
             self._emit_diagnostic(
                 camera_id or camera_key,
                 'prebuffer_restart',
@@ -1339,10 +1354,19 @@ class RecordingService:
             restart_reason = 'process_exit'
             try:
                 last_segment_ts = time.time()
+                prune_tick = 0
                 while process.poll() is None and not stop_event.is_set():
                     keep_seconds = int(worker_state.get('buffer_seconds') or 15)
-                    self._prune_prebuffer_segments(camera_dir, keep_seconds)
-                    self._prune_audio_segments(audio_camera_dir, keep_seconds)
+                    # Retention pruning does not need 1s precision -- the video
+                    # window carries a 5s floor margin and audio retention adds
+                    # a 120s finalization headroom -- so prune every 5th tick.
+                    # Stall detection below still scans the video dir every
+                    # second; this avoids doubling that scan plus an audio-dir
+                    # scan per camera per second on the shared-ingest hot loop.
+                    prune_tick += 1
+                    if prune_tick % 5 == 0:
+                        self._prune_prebuffer_segments(camera_dir, keep_seconds)
+                        self._prune_audio_segments(audio_camera_dir, keep_seconds)
                     # Dead-stream detection: if the camera stops sending data
                     # ffmpeg can hang indefinitely. If no new segment has been
                     # written within several segment intervals, kill and restart.
@@ -1540,6 +1564,7 @@ class RecordingService:
         camera_dir.mkdir(parents=True, exist_ok=True)
         output_pattern = camera_dir / 'segment-%Y%m%dT%H%M%S.mp4'
         consecutive_failures = 0
+        stall_seconds = max(self.PREBUFFER_SEGMENT_SECONDS * 5, 20)
         while not stop_event.is_set():
             command = [
                 ffmpeg,
@@ -1566,9 +1591,15 @@ class RecordingService:
             stderr_file.close()
             try:
                 last_segment_ts = time.time()
+                prune_tick = 0
                 while process.poll() is None and not stop_event.is_set():
                     keep_seconds = int(worker_state.get('buffer_seconds') or 15)
-                    self._prune_prebuffer_segments(camera_dir, keep_seconds)
+                    # Same 5s prune cadence as the primary worker: retention
+                    # margins make 1s precision pointless, and the stall check
+                    # below already scans this directory every second.
+                    prune_tick += 1
+                    if prune_tick % 5 == 0:
+                        self._prune_prebuffer_segments(camera_dir, keep_seconds)
                     try:
                         newest = max(
                             (p.stat().st_mtime for p in camera_dir.glob(self.PREBUFFER_SEGMENT_GLOB)),
@@ -1578,7 +1609,6 @@ class RecordingService:
                             last_segment_ts = newest
                     except OSError:
                         pass
-                    stall_seconds = max(self.PREBUFFER_SEGMENT_SECONDS * 5, 20)
                     if time.time() - last_segment_ts > stall_seconds:
                         process.kill()
                         break
@@ -1844,10 +1874,6 @@ class RecordingService:
                     durations[segment] = duration
                     durations[segment.resolve()] = duration
         return durations
-
-    def _collect_audio_segments(self, camera_key: str, start_ts: float, end_ts: float) -> list[Path]:
-        timed = self._segment_timeline(self.audio_dir / camera_key, 'aud-*.wav', 1.0)
-        return [segment for segment, start, end in timed if end > start_ts and start < end_ts]
 
     def _readable_audio_segments(
         self, segments: list[tuple[Path, float, float]]
@@ -2175,15 +2201,6 @@ class RecordingService:
             item for item in audio_timed
             if item[2] > start_ts and item[1] < start_ts + duration_seconds
         ]
-        # Drop any segment ffmpeg can't open before building the graph. The
-        # newest WAV in the window is often still being written when an event is
-        # finalized (its header/sizes are not yet patched), and ffmpeg aborts the
-        # whole mux -- dropping audio for the entire clip -- if a single input is
-        # invalid. Filtering here costs at most a ~1s gap instead of all audio.
-        selected_audio = self._readable_audio_segments(selected_audio)
-        if not selected_audio:
-            return False
-
         # The ingest worker can prune a sidecar after the readability probe but
         # before ffmpeg opens its input. Stage the selected files first and use
         # only those copies for the mux; the temporary directory is kept until
@@ -2214,19 +2231,19 @@ class RecordingService:
                     )
                     return False
                 raise
-            if not selected_audio:
-                logger.info(
-                    'No audio sidecars remained available for %s before mux; keeping silent video clip.',
-                    camera_key,
-                )
-                return False
-            # A source sidecar may have been mid-write while it was copied.
-            # Validate the stable copies too, so a truncated staged WAV is
-            # discarded without risking the entire mux.
+            # Drop segments ffmpeg can't open BEFORE building the graph. The
+            # newest WAV in the window is often still being written when an
+            # event is finalized (its header/sizes not yet patched), and ffmpeg
+            # aborts the whole mux -- silencing the entire clip -- if a single
+            # input is invalid. Probe the STAGED copies so validation covers
+            # exactly the bytes ffmpeg will open (the pruner can also delete a
+            # live sidecar between probe and stage); probing once here instead
+            # of before AND after staging halves the ffprobe spawns per event
+            # (~one per second of clip window).
             selected_audio = self._readable_audio_segments(selected_audio)
             if not selected_audio:
                 logger.info(
-                    'Staged audio sidecars were not readable for %s; keeping silent video clip.',
+                    'No readable audio sidecars remained for %s before mux; keeping silent video clip.',
                     camera_key,
                 )
                 return False

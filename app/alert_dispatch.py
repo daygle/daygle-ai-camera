@@ -348,6 +348,25 @@ def deliver_email_alerts(
         except Exception as exc:
             logger.debug('Failed to annotate snapshot for email alert event %s: %s', event_id, exc)
     mailer = EmailAlertService(email_settings)
+
+    def _send_rule_email(recipients: list[str], alert: dict[str, Any], kind: str) -> None:
+        """Send one rule's email; per-recipient failures log and continue."""
+        try:
+            mailer.send_alert(
+                alert,
+                event_id=event_id,
+                recipients=recipients,
+                camera_name=camera_name,
+                snapshot_bytes=snapshot_bytes,
+                triggered_labels=all_triggered_labels,
+                detected_at=detected_at,
+            )
+        except EmailAlertError as exc:
+            logger.warning(
+                'Failed to send %s email alert for event %s rule %s: %s',
+                kind, event_id, alert.get('rule_name'), exc,
+            )
+
     all_triggered_labels = sorted(
         {
             str(alert.get('label') or '').strip()
@@ -356,82 +375,44 @@ def deliver_email_alerts(
         }
     )
     for alert in triggered:
-        rule = rules_by_name.get(str(alert.get('rule_name')))
+        rule_name_str = str(alert.get('rule_name') or '')
+        rule = rules_by_name.get(rule_name_str)
+        # Zone rules (object / motion / zone-face) first: a zone-face alert's
+        # name is '<camera> / <zone> / face' and resolves here, BEFORE the
+        # per-person face-rules branch below mistakes it for a missing person.
+        if rule is not None:
+            if not rule.get('email_enabled'):
+                continue
+            if not _rule_notify_active_now(rule):
+                logger.debug(
+                    'Email skipped for event %s rule %r: outside notify window %s-%s '
+                    '(the detection still recorded; widen the rule notify window to email it)',
+                    event_id,
+                    alert.get('rule_name'),
+                    rule.get('notify_start'),
+                    rule.get('notify_end'),
+                )
+                continue
+            _send_rule_email(list(rule.get('email_recipients') or []), alert, 'zone-rule')
+            continue
         # Handle unknown face alerts with configured email addresses
-        if str(alert.get('rule_name') or '') == 'Unknown face':
+        if rule_name_str == 'Unknown face':
             if unknown_face_email_recipients:
-                try:
-                    mailer.send_alert(
-                        alert,
-                        event_id=event_id,
-                        recipients=unknown_face_email_recipients,
-                        camera_name=camera_name,
-                        snapshot_bytes=snapshot_bytes,
-                        triggered_labels=all_triggered_labels,
-                        detected_at=detected_at,
-                    )
-                except EmailAlertError as exc:
-                    logger.warning(
-                        'Failed to send email alert for event %s rule %s: %s',
-                        event_id,
-                        alert.get('rule_name'),
-                        exc,
-                    )
+                _send_rule_email(unknown_face_email_recipients, alert, 'unknown-face')
             continue
         # Face detection rules: per-person email alerts triggered by the
         # face-rules pipeline (label == 'face', rule_name == person name).
-        if str(alert.get('label') or '').lower() == 'face' and str(alert.get('rule_name') or '') != 'Unknown face':
-            _face_rule = _face_rules_by_name.get(str(alert.get('rule_name')))
+        if str(alert.get('label') or '').lower() == 'face' and rule_name_str != 'Unknown face':
+            _face_rule = _face_rules_by_name.get(rule_name_str)
             if _face_rule and _face_rule_active(_face_rule):
                 _face_recips = face_rule_email_recipients(_face_rule)
                 if _face_recips:
-                    try:
-                        mailer.send_alert(
-                            alert,
-                            event_id=event_id,
-                            recipients=_face_recips,
-                            camera_name=camera_name,
-                            snapshot_bytes=snapshot_bytes,
-                            triggered_labels=all_triggered_labels,
-                            detected_at=detected_at,
-                        )
-                    except EmailAlertError as exc:
-                        logger.warning(
-                            'Failed to send face-rule email for event %s rule %s: %s',
-                            event_id,
-                            alert.get('rule_name'),
-                            exc,
-                        )
+                    _send_rule_email(_face_recips, alert, 'face-rule')
             continue
-        if not rule or not rule.get('email_enabled'):
-            continue
-        if not _rule_notify_active_now(rule):
-            logger.debug(
-                'Email skipped for event %s rule %r: outside notify window %s-%s '
-                '(the detection still recorded; widen the rule notify window to email it)',
-                event_id,
-                alert.get('rule_name'),
-                rule.get('notify_start'),
-                rule.get('notify_end'),
-            )
-            continue
-        try:
-            mailer.send_alert(
-                alert,
-                event_id=event_id,
-                recipients=rule.get('email_recipients', []),
-                camera_name=camera_name,
-                snapshot_bytes=snapshot_bytes,
-                triggered_labels=all_triggered_labels,
-                detected_at=detected_at,
-            )
-        except EmailAlertError as exc:
-            logger.warning(
-                'Failed to send email alert for event %s rule %s: %s',
-                event_id,
-                alert.get('rule_name'),
-                exc,
-            )
+        # Face detection rules: per-person email alerts triggered by the
+        # face-rules pipeline (label == 'face', rule_name == person name).
+        if str(alert.get('label') or '').lower() == 'face' and rule_name_str != 'Unknown face':
+            _face_rule = _face_rules_by_name.get(rule_name_str)
 
 
 def deliver_push_notifications(
@@ -478,7 +459,27 @@ def deliver_push_notifications(
     for alert in triggered:
         rule_name = str(alert.get('rule_name') or '')
         rule = rules_by_name.get(rule_name)
-        if rule_name == 'Unknown face':
+        # Zone rules (object / motion / zone-face) first -- same ordering
+        # rationale as the email path above.
+        if rule is not None:
+            if not rule.get('push_enabled'):
+                logger.debug(
+                    'Push skipped for event %s rule %r: push_enabled is False',
+                    event_id,
+                    rule_name,
+                )
+                continue
+            if not _rule_notify_active_now(rule):
+                logger.debug(
+                    'Push skipped for event %s rule %r: outside notify window %s-%s '
+                    '(the detection still recorded; widen the rule notify window to push it)',
+                    event_id,
+                    rule_name,
+                    rule.get('notify_start'),
+                    rule.get('notify_end'),
+                )
+                continue
+        elif rule_name == 'Unknown face':
             if not unknown_face_push_active:
                 logger.debug(
                     'Push skipped for event %s rule %r: _unknown face rule push is off',
@@ -492,25 +493,8 @@ def deliver_push_notifications(
             if not _face_rule_active(_fr) or not _fr.get('push_enabled'):
                 logger.debug('Push skipped for event %s face-rule %r: push disabled', event_id, rule_name)
                 continue
-        elif not rule:
+        else:
             logger.debug('Push skipped for event %s: no rule found for %r', event_id, rule_name)
-            continue
-        elif not rule.get('push_enabled'):
-            logger.debug(
-                'Push skipped for event %s rule %r: push_enabled is False',
-                event_id,
-                rule_name,
-            )
-            continue
-        elif not _rule_notify_active_now(rule):
-            logger.debug(
-                'Push skipped for event %s rule %r: outside notify window %s-%s '
-                '(the detection still recorded; widen the rule notify window to push it)',
-                event_id,
-                rule_name,
-                rule.get('notify_start'),
-                rule.get('notify_end'),
-            )
             continue
         try:
             notifier.send_alert(

@@ -710,8 +710,19 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         dwell_detections = _zone_stamp
     zone_rules = zone_object_alert_rules(settings)
     has_object_zone_rules = any((zone.get('enabled', True) and zone.get('monitor_objects', True) and any((rule.get('enabled', True) and str(rule.get('label') or '').strip() for rule in zone.get('object_rules') or [])) for zone in (settings.get('detection') or {}).get('zones', [])))
-    object_alert_detections = zone_alert_detections(settings, object_detections) if has_object_zone_rules else list(object_detections)
-    record_only_detections = [d for d in object_detections if zone_record_on_detect(d, settings) and (not zone_object_rule_matches(settings, d, action='alert'))] if has_object_zone_rules else []
+    # Zone-scoped faces need the geometry-stamping pass too, even when no
+    # zone monitors OBJECTS: without it face detections skip zone matching and
+    # the AlertEngine would fire zone-face rules for faces anywhere in frame.
+    has_face_zone_rules = any(
+        zone.get('enabled', True) and any(
+            rule.get('enabled', True) and str(rule.get('label') or '').strip().lower() == 'face'
+            for rule in zone.get('object_rules') or []
+        )
+        for zone in (settings.get('detection') or {}).get('zones', [])
+    )
+    _zone_match_needed = has_object_zone_rules or has_face_zone_rules
+    object_alert_detections = zone_alert_detections(settings, object_detections) if _zone_match_needed else list(object_detections)
+    record_only_detections = [d for d in object_detections if zone_record_on_detect(d, settings) and (not zone_object_rule_matches(settings, d, action='alert'))] if _zone_match_needed else []
     # Keep every firing motion zone in the playback track. Retaining only the
     # strongest zone made multi-zone motion clips show a box for one region while
     # silently omitting movement elsewhere in the same frame.

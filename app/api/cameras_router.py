@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 from urllib.parse import urlsplit
@@ -16,6 +17,9 @@ from app.camera_config import _migrate_camera_id, _redact_camera, normalize_came
 from app.config_facades import effective_cameras_config, get_camera_config
 from app.utils import build_stream_url
 from app.state import _camera_health_lock, _camera_health_state
+import app.state as _state
+
+logger = logging.getLogger('daygle.ai')
 from app.deps import (
     get_apply_cameras_settings,
     get_database,
@@ -68,6 +72,22 @@ async def update_cameras(
     old_configs = list(effective_cameras_config())
     for old, new in zip(old_configs, settings):
         if old.get('id') and new.get('id') and old['id'] != new['id']:
+            # Stop the OLD camera's ingest workers BEFORE renaming its on-disk
+            # dirs. The running ffmpeg writes via precomputed path strings and
+            # never re-mkdirs mid-run, so renaming underneath it makes every
+            # segment/frame/audio write fail ENOENT until the stall detector
+            # kill-loops the worker -- destroying that camera's rolling
+            # prebuffer right when an operator renames it.
+            stop_workers = getattr(
+                getattr(_state, 'recording_service', None),
+                'stop_camera_workers',
+                None,
+            )
+            if callable(stop_workers):
+                try:
+                    stop_workers(str(old['id']))
+                except Exception as exc:  # sentinel / mid-swap: rename is still safe
+                    logger.debug('Could not stop workers before camera id rename: %s', exc)
             _migrate_camera_id(old['id'], new['id'])
     db.set_setting('cameras', settings, utc_now())
     apply_cameras_settings(settings)

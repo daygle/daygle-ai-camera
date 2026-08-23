@@ -7,7 +7,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import app.state as _state
-from app.zone_schema import label_matches
+from app.zone_schema import canonical_label, label_matches
 
 ALERT_DATETIME_PREFS_TTL_SECONDS = 30.0
 _alert_datetime_prefs_cache: tuple[tuple[str, str, str], float] | None = None
@@ -86,15 +86,6 @@ def _now_hm_in_admin_tz() -> str:
     return now_local.strftime('%H:%M')
 
 
-# Alternative spellings that collapse to a single canonical object label, so a
-# ``person`` rule fires for a ``human``/``people``/``pedestrian`` detection.
-_OBJECT_LABEL_ALIASES: dict[str, str] = {
-    'human': 'person',
-    'people': 'person',
-    'pedestrian': 'person',
-}
-
-
 class AlertEngine:
     def __init__(self, rules: list[dict[str, Any]]) -> None:
         self.rules = rules
@@ -113,7 +104,9 @@ class AlertEngine:
             if not isinstance(label, str) or not label:
                 continue
             label_key = self._normalize_object_label(label)
-            confidence = float(detection.get('confidence', 0))
+            # ``or 0`` (not a default arg): an explicitly-None confidence must
+            # not reach float(None) and raise TypeError mid-dispatch.
+            confidence = float(detection.get('confidence') or 0)
 
             for rule in effective_rules:
                 if not rule.get('enabled', True):
@@ -174,7 +167,8 @@ class AlertEngine:
         return alerts
 
     def _append_motion_alerts(self, alerts: list[dict[str, Any]], detection: dict[str, Any], rules: list[dict[str, Any]] | None = None) -> None:
-        confidence = float(detection.get('confidence', 0))
+        # Same None-guard rationale as ``process``.
+        confidence = float(detection.get('confidence') or 0)
         detection_zone_id = str(detection.get('zone_id') or '').strip()
         for rule in (rules if rules is not None else self.rules):
             if not rule.get('enabled', True) or not self._is_motion_rule(rule):
@@ -218,11 +212,11 @@ class AlertEngine:
 
     @staticmethod
     def _normalize_object_label(value: Any) -> str:
-        label = str(value or '').strip().lower()
-        # ``process`` calls this per detection and per rule on the ~4 Hz hot
-        # path, so the alias map is a module constant rather than a dict rebuilt
-        # on every call.
-        return _OBJECT_LABEL_ALIASES.get(label, label)
+        """Delegate to ``zone_schema.canonical_label`` -- the same lowercase /
+        strip / alias canonicalization used by every other matching axis, so
+        the alert engine can never disagree with zone/rule matching about what
+        e.g. ``human`` means."""
+        return canonical_label(value)
 
     @staticmethod
     def _is_active_now(rule: dict[str, Any]) -> bool:

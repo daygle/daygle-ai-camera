@@ -92,39 +92,43 @@ def safe_backup_timestamp() -> str:
     return datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
 
 
+def _online_backup_snapshot(source_path: str | Path, destination_path: str | Path, *, failure_detail: str) -> None:
+    """Copy *source_path* to *destination_path* via SQLite's online-backup API.
+
+    ``source.backup()`` performs a page-by-page scan-and-copy that folds in WAL
+    frames, so the copy is by-construction physically consistent even while the
+    source connection is mid-write. ``PRAGMA integrity_check`` then confirms the
+    page tree + free lists on the new file BEFORE callers declare success (N1):
+    torn writes, power loss, or mid-cycle filesystem faults are rejected here
+    instead of surfacing weeks later at restore-restore validation time.
+    """
+    source = sqlite3.connect(str(source_path))
+    try:
+        destination = sqlite3.connect(str(destination_path))
+        try:
+            source.backup(destination)
+        finally:
+            destination.close()
+    finally:
+        source.close()
+    verify = sqlite3.connect(str(destination_path))
+    try:
+        integrity = verify.execute('PRAGMA integrity_check').fetchone()
+        if not integrity or str(integrity[0]).lower() != 'ok':
+            offending = '<none>' if not integrity else str(integrity[0])
+            raise HTTPException(status_code=500, detail=f'{failure_detail} ({offending})')
+    finally:
+        verify.close()
+
+
 def create_database_backup(prefix: str = 'daygle-database') -> Path:
     backup_path = backup_directory() / f'{prefix}-{safe_backup_timestamp()}-{secrets.token_hex(4)}.sqlite3'
     try:
-        source = sqlite3.connect(_state.database.database_path)
-        try:
-            destination = sqlite3.connect(backup_path)
-            try:
-                source.backup(destination)
-            finally:
-                destination.close()
-        finally:
-            source.close()
-        # N1 (round-5): verify backup integrity BEFORE declaring success so
-        # torn writes, power losses, or filesystem mid-cycle faults don't get
-        # silently accepted as valid backups. ``source.backup()`` performs
-        # an internal page-by-page scan and copy, so the resulting
-        # destination is by-construction physically consistent on disk;
-        # ``PRAGMA integrity_check`` confirms the page tree + free lists
-        # on the new file before we hand the path back to the caller.
-        # Without this, corruption was only caught at the next
-        # ``validate_restore_database`` upload (round-trip time may be
-        # weeks or months).
-        verify = sqlite3.connect(backup_path)
-        try:
-            integrity = verify.execute('PRAGMA integrity_check').fetchone()
-            if not integrity or str(integrity[0]).lower() != 'ok':
-                offending = '<none>' if not integrity else str(integrity[0])
-                raise HTTPException(
-                    status_code=500,
-                    detail=f'Backup failed integrity check ({offending})',
-                )
-        finally:
-            verify.close()
+        _online_backup_snapshot(
+            _state.database.database_path,
+            backup_path,
+            failure_detail='Backup failed integrity check',
+        )
     except BaseException:
         backup_path.unlink(missing_ok=True)
         raise
@@ -132,33 +136,12 @@ def create_database_backup(prefix: str = 'daygle-database') -> Path:
 
 
 def _snapshot_database_file(destination: Path) -> None:
-    """Copy the live database to *destination* via SQLite's online backup API.
-
-    ``source.backup()`` produces a by-construction consistent page-by-page copy
-    even while the live connection is mid-write (WAL frames are folded in), so
-    the archived database never captures a torn state -- the same mechanism the
-    database-only backup relies on.
-    """
-    source = sqlite3.connect(str(_state.database.database_path))
-    try:
-        target = sqlite3.connect(str(destination))
-        try:
-            source.backup(target)
-        finally:
-            target.close()
-    finally:
-        source.close()
-    # Mirror create_database_backup's verification: the online-backup API is
-    # by-construction consistent, but confirming the page tree on the copy
-    # catches torn storage before an archive is served as "valid".
-    verify = sqlite3.connect(str(destination))
-    try:
-        integrity = verify.execute('PRAGMA integrity_check').fetchone()
-        if not integrity or str(integrity[0]).lower() != 'ok':
-            offending = '<none>' if not integrity else str(integrity[0])
-            raise RuntimeError(f'Full backup database snapshot failed integrity check ({offending})')
-    finally:
-        verify.close()
+    """Snapshot the live database for a full-backup archive."""
+    _online_backup_snapshot(
+        _state.database.database_path,
+        destination,
+        failure_detail='Full backup database snapshot failed integrity check',
+    )
 
 
 def _archive_directory(
@@ -178,9 +161,6 @@ def _archive_directory(
     is already compressed, so files >= 1 MiB are stored verbatim instead of
     re-deflating gigabytes of video.
     """
-    import os
-    import zipfile
-
     manifest_section = {'files': 0, 'bytes': 0}
     if not source_root.exists():
         return manifest_section
@@ -200,6 +180,17 @@ def _archive_directory(
         for name in filenames:
             child = current / name
             if child.is_symlink():
+                continue
+            # Skip capture/render intermediates: a mid-write temp clip, audio-
+            # mux staging copy, or concat manifest would be archived torn and
+            # unplayable, and each is deleted moments after render anyway.
+            lower = name.lower()
+            if (
+                lower.endswith('.concat.txt')
+                or lower.endswith('.audio.mp4')
+                or '.prebuffer.tmp.' in lower
+                or '.recording.tmp.' in lower
+            ):
                 continue
             try:
                 rel = child.relative_to(source_root)
@@ -443,13 +434,18 @@ def _remap_restored_database(database_path: Path, manifest: dict[str, Any], targ
             source_root = source_storage.get(source_key)
             target_root = _resolve_storage_root(target_storage, target_key)
             rows = conn.execute(f'SELECT rowid, "{column}" FROM "{table}" WHERE "{column}" IS NOT NULL').fetchall()
+            updates: list[tuple[str, int]] = []
             for rowid, raw_value in rows:
                 relative = _portable_relative_path(raw_value, source_root)
                 if relative is not None:
-                    conn.execute(
-                        f'UPDATE "{table}" SET "{column}" = ? WHERE rowid = ?',
-                        (str(target_root / relative), rowid),
-                    )
+                    updates.append((str(target_root / relative), rowid))
+            # One executemany per table/column instead of a statement per row --
+            # a large library can carry hundreds of thousands of media paths.
+            if updates:
+                conn.executemany(
+                    f'UPDATE "{table}" SET "{column}" = ? WHERE rowid = ?',
+                    updates,
+                )
         if 'app_settings' in tables:
             row = conn.execute("SELECT value FROM app_settings WHERE key = 'storage'").fetchone()
             if row:
@@ -520,17 +516,22 @@ def restore_full_backup(path: Path) -> dict[str, Any]:
         validate_restore_database(staged_database)
         _remap_restored_database(staged_database, manifest, target_storage)
         validate_restore_database(staged_database)
-        overwrite_database_from_file(staged_database)
         storage_targets = {
             'recordings': _resolve_storage_root(target_storage, 'recordings_dir'),
             'snapshots': _resolve_storage_root(target_storage, 'snapshots_dir'),
             'events': _resolve_storage_root(target_storage, 'events_dir'),
             'models': (Path(__file__).resolve().parent.parent / 'models').resolve(strict=False),
         }
+        # Copy media BEFORE overwriting the live database. The tree copies are
+        # additive and idempotent, so failing halfway leaves extra files that a
+        # later retry simply re-copies; overwriting the DB first instead meant
+        # a mid-copy failure restored rows pointing at media that was never
+        # written -- the worst of both states.
         copied = {
             section: _copy_restored_tree(staging / section, target)
             for section, target in storage_targets.items()
         }
+        overwrite_database_from_file(staged_database)
     return {'version': manifest.get('version'), 'copied': copied}
 
 
