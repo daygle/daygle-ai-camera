@@ -222,10 +222,16 @@ def confirm_object_detections(
             '(need %d of last %d cycles): %s',
             camera_id, len(detections), required, window, sorted(labels_now),
         )
+    # ``face`` is exempt from the persistence gate: faces flicker far more
+    # than objects (small targets, pose changes), so 2-of-3 confirmation
+    # dropped a disproportionate share of them and delayed every face alert
+    # by a full window. Face noise is already bounded downstream (Face
+    # Confidence threshold, per-rule minimums, cooldowns, one-alert-per-track).
     return [
         detection
         for detection in detections
-        if str(detection.get('label') or '').strip().lower() in confirmed
+        if str(detection.get('label') or '').strip().lower() == 'face'
+        or str(detection.get('label') or '').strip().lower() in confirmed
     ]
 
 

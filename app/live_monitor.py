@@ -364,7 +364,7 @@ def queue_live_stream_alerts(
     threading.Thread(target=detect, name=f'live-detection-{camera_id}', daemon=True).start()
 
 
-def merge_secondary_face_detections(image: Any, detections: list, confidence: float) -> list:
+def merge_secondary_face_detections(image: Any, detections: list, confidence: float | None = None) -> list:
     """Run the optional secondary face detector and merge its results.
 
     The secondary detector is a dedicated face model that runs alongside the
@@ -372,6 +372,13 @@ def merge_secondary_face_detections(image: Any, detections: list, confidence: fl
     same cycle. Returns the input list unchanged when the face detector is not
     configured/loaded; a failing pass is logged and skipped rather than taking
     down the whole detection cycle.
+
+    ``confidence`` is deliberately left as ``None`` by the live caller so the
+    face detector applies its OWN configured threshold (the Face Confidence
+    setting). Passing the primary pipeline's object-rule threshold here used to
+    silently override that setting, leaving Face Confidence with no effect on
+    the live path. Per-rule minimums are still enforced downstream by the face
+    rules themselves.
     """
     face_detector = getattr(_state, 'face_detector', None)
     if face_detector is None or not getattr(face_detector, 'available', False):
@@ -600,7 +607,9 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # alongside the primary object detector so COCO objects and faces are
     # detected in the same cycle. Merged before zone filtering so the ``face``
     # label flows through rules/alerts exactly like any other object label.
-    detections = merge_secondary_face_detections(image, detections, min_conf)
+    # No explicit confidence: the face detector uses its configured Face
+    # Confidence setting (see docstring).
+    detections = merge_secondary_face_detections(image, detections)
     detections = normalize_detection_boxes_for_frame(detections, frame)
     # Object settings (default mode + per-label overrides + still-alert
     # thresholds) drive both the still/moving filter and the still-dwell

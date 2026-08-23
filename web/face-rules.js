@@ -47,7 +47,7 @@ function ruleCard(rule) {
     <div class="model-card ${enabledClass}" data-rule-id="${escapeHtml(rule.id)}">
       <div class="model-card-header">
         <div class="model-card-title">
-          <h3>${escapeHtml(isSystem ? 'Unknown Person (System Rule)' : rule.name)}</h3>
+          <h3>${escapeHtml(isSystem ? 'Unknown Person' : rule.name)}</h3>
           <div class="model-card-meta">
             ${statusBadge}${emailBadge}${pushBadge}${cooldownBadge}${confidenceBadge}
           </div>
@@ -144,7 +144,7 @@ async function loadPeople() {
       options.push(`<option value=\"${escapeHtml(String(p.id))}\" data-name=\"${escapeHtml(p.name)}\">${escapeHtml(p.name)}</option>`);
     }
     // Always include the Unknown Person system rule option
-    options.push('<option value=\"_unknown\" data-name=\"Unknown Person\">Unknown Person (System Rule)</option>');
+    options.push('<option value=\"_unknown\" data-name=\"Unknown Person\">Unknown Person</option>');
     personSelect.innerHTML = options.join('');
   } catch {
     // Non-fatal — the form still works for the system rule.

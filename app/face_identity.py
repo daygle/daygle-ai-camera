@@ -92,25 +92,42 @@ def annotate_face_identities(camera_id: str, detections: list[dict[str, Any]], f
             _cache.pop(camera_id, None)
         return detections
 
+    # Phase 1 (under lock): consult the per-track cache and collect the faces
+    # that actually need an embedding pass. Cached positive matches are reused
+    # for the life of the track; ``None`` ("recognised as unknown so far")
+    # retries, since a later frame is often clearer.
+    pending: list[tuple[dict[str, Any], Any, Any]] = []  # (detection, track_id, crop)
     with _lock:
         cam_cache = _cache.setdefault(camera_id, {})
-        seen: set[Any] = set()
         for detection in faces:
             track_id = detection.get('track_id')
-            seen.add(track_id)
             cached = cam_cache.get(track_id, 'miss')
-            # Recognise on first sight and keep retrying while still unknown; a
-            # cached positive match is reused for the life of the track.
             if track_id is not None and cached != 'miss' and cached is not None:
-                result = cached
-            else:
-                crop = _crop_from_box(frame, detection.get('box') or {})
-                result = service.recognize(crop) if crop is not None else None
-                if track_id is not None:
-                    cam_cache[track_id] = result
-            _apply(detection, result)
-        # Prune tracks no longer present so the cache cannot grow unbounded.
-        _cache[camera_id] = {tid: res for tid, res in cam_cache.items() if tid in seen}
+                _apply(detection, cached)
+                continue
+            pending.append((detection, track_id, _crop_from_box(frame, detection.get('box') or {})))
+
+    # Phase 2 (NO lock): recognition is a neural-network embedding pass (tens
+    # of ms per face). Running it inside the module lock serialised every
+    # camera's annotation cycle behind one camera's inference -- with N
+    # cameras the per-cycle lock hold time grew roughly N x embed-time.
+    results_by_track: dict[Any, Any] = {}
+    for detection, track_id, crop in pending:
+        result = service.recognize(crop) if crop is not None else None
+        _apply(detection, result)
+        if track_id is not None:
+            results_by_track[track_id] = result
+
+    # Phase 3 (under lock): write the fresh results back and prune tracks no
+    # longer present so the cache cannot grow unbounded.
+    if results_by_track:
+        with _lock:
+            _cache.setdefault(camera_id, {}).update(results_by_track)
+    seen: set[Any] = {d.get('track_id') for d in faces}
+    with _lock:
+        cam_cache = _cache.get(camera_id)
+        if cam_cache is not None:
+            _cache[camera_id] = {tid: res for tid, res in cam_cache.items() if tid in seen}
     return detections
 
 

@@ -256,12 +256,17 @@ def known_face_rules_for_camera(camera_id: str, detections: list[dict[str, Any]]
                 det_conf = 0.0
             if det_conf < float(rule_min_conf):
                 continue
-        # Cooldown: ``cooldown_minutes`` between alerts for the same track
+        # Cooldown: ``cooldown_minutes`` between alerts for the same track.
+        # Read-and-claim the slot under the module's cooldown lock so two
+        # callers processing the same camera concurrently (thread overlap
+        # during a camera restart, API-triggered passes) cannot BOTH see an
+        # expired window between the read and the write and double-alert.
         cooldown_sec = max(0, int(rule.get('cooldown_minutes') or 5)) * 60
-        last_fired = cooldowns.get(track_id, 0)
-        if now - last_fired < cooldown_sec:
-            continue
-        cooldowns[track_id] = now
+        with _cooldown_lock():
+            last_fired = cooldowns.get(track_id, 0)
+            if now - last_fired < cooldown_sec:
+                continue
+            cooldowns[track_id] = now
         new_alerts.append({
             'rule_name': person_name,
             'label': 'face',

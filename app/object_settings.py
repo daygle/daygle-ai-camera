@@ -438,6 +438,15 @@ def filter_detections_by_motion_mode(
         label = canonical_label(detection.get('label'))
         if not label:
             continue
+        # ``face`` is exempt from the moving/still filter: a person sitting
+        # still facing the camera is the PRIMARY face-alert case, and the
+        # default ``moving`` mode would drop exactly those faces before
+        # identity annotation and the face rules could see them. Face noise
+        # is bounded downstream (Face Confidence threshold, per-rule
+        # minimums, cooldowns, one-alert-per-track), so the mode filter adds
+        # only loss here.
+        if label == 'face':
+            continue
         if motion_mode_for_label(label, resolved) != MODE_ANY:
             restricted_labels.add(label)
     if not restricted_labels and diff_mask is None:
@@ -446,7 +455,7 @@ def filter_detections_by_motion_mode(
     filtered: list[dict[str, Any]] = []
     for detection in detections:
         label = canonical_label(detection.get('label'))
-        mode = motion_mode_for_label(label, resolved) if label else MODE_ANY
+        mode = MODE_ANY if label == 'face' else (motion_mode_for_label(label, resolved) if label else MODE_ANY)
         state = detection_motion_state(detection, diff_mask)
         if mode == MODE_ANY or mode == state:
             filtered.append({**detection, 'motion_state': state})
