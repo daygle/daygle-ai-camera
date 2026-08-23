@@ -707,7 +707,15 @@ class RecordingService:
                 '-segment_list_type', 'flat',
                 str(output_pattern),
             ]
-            process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except OSError as exc:
+                # ffmpeg can vanish between the which() guard and exec (binary
+                # removed/upgraded mid-run). Retry with a backoff instead of
+                # letting the exception kill the worker thread.
+                logger.warning('Continuous chunk ingest for %s could not start ffmpeg (%s); retrying.', camera_key, exc)
+                stop_event.wait(5)
+                continue
             seen_count = 0
             try:
                 while process.poll() is None and not stop_event.is_set():
@@ -1348,9 +1356,33 @@ class RecordingService:
 
             stderr_file = tempfile.NamedTemporaryFile(mode='w+', suffix='.log', delete=False, dir=str(self.prebuffer_dir))
             stderr_path = Path(stderr_file.name)
-            ffmpeg_started_at = time.time()
-            process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=stderr_file)
+            try:
+                process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=stderr_file)
+            except OSError as exc:
+                # ffmpeg vanished between the which() guard and exec (binary
+                # removed/upgraded mid-run). Mirror the dead-link path: close
+                # the log, count the failure, throttle the warning, back off.
+                stderr_file.close()
+                try:
+                    stderr_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                consecutive_failures += 1
+                now = time.monotonic()
+                if (
+                    consecutive_failures == 1
+                    or now - last_failure_log_at >= self.PREBUFFER_FAILURE_LOG_INTERVAL_SECONDS
+                ):
+                    logger.warning(
+                        'Prebuffer ingest for %s could not start ffmpeg (%s); retrying.',
+                        camera_key,
+                        exc,
+                    )
+                    last_failure_log_at = now
+                stop_event.wait(self.PREBUFFER_RECONNECT_BACKOFF_BASE_SECONDS)
+                continue
             stderr_file.close()
+            ffmpeg_started_at = time.time()
             restart_reason = 'process_exit'
             try:
                 last_segment_ts = time.time()
@@ -1586,9 +1618,25 @@ class RecordingService:
             ]
             stderr_file = tempfile.NamedTemporaryFile(mode='w+', suffix='.log', delete=False, dir=str(self.prebuffer_dir))
             stderr_path = Path(stderr_file.name)
-            ffmpeg_started_at = time.time()
-            process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=stderr_file)
+            try:
+                process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=stderr_file)
+            except OSError as exc:
+                # Same vanished-ffmpeg guard as the primary worker.
+                stderr_file.close()
+                try:
+                    stderr_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                consecutive_failures += 1
+                logger.warning(
+                    'High-res ingest for %s could not start ffmpeg (%s); retrying.',
+                    camera_key,
+                    exc,
+                )
+                stop_event.wait(self.PREBUFFER_RECONNECT_BACKOFF_BASE_SECONDS)
+                continue
             stderr_file.close()
+            ffmpeg_started_at = time.time()
             try:
                 last_segment_ts = time.time()
                 prune_tick = 0
