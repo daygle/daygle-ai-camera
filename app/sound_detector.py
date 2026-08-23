@@ -145,6 +145,17 @@ SOUND_CLASSES: dict[str, dict[str, Any]] = {
     },
 }
 
+# Pre-compiled regex patterns for matching YAMNet AudioSet class names.
+# These are derived solely from SOUND_CLASSES (immutable at module level)
+# so they are built once and reused by every ``_build_class_indices`` call.
+_YAMNET_MATCH_PATTERNS: dict[str, list[re.Pattern[str]]] = {
+    class_id: [
+        re.compile(r'\b' + re.escape(t.lower()) + r'\b')
+        for t in meta.get('yamnet_terms', [])
+    ]
+    for class_id, meta in SOUND_CLASSES.items()
+}
+
 DEFAULT_RULES: list[dict[str, Any]] = [
     {
         'class': class_id,
@@ -435,14 +446,11 @@ class _YamnetBackend:
     @staticmethod
     def _build_class_indices(class_names: list[str]) -> dict[str, list[int]]:
         indices: dict[str, list[int]] = {}
-        for class_id, meta in SOUND_CLASSES.items():
-            patterns = [
-                re.compile(r'\b' + re.escape(t.lower()) + r'\b')
-                for t in meta.get('yamnet_terms', [])
-            ]
+        lower_names = [name.lower() for name in class_names]
+        for class_id, patterns in _YAMNET_MATCH_PATTERNS.items():
             indices[class_id] = [
-                i for i, name in enumerate(class_names)
-                if any(pat.search(name.lower()) for pat in patterns)
+                i for i, lname in enumerate(lower_names)
+                if any(pat.search(lname) for pat in patterns)
             ]
             logger.debug(
                 'YAMNet TFLite %s maps to %d AudioSet classes: %s',
@@ -896,7 +904,7 @@ class SoundDetector:
             proc: subprocess.Popen | None = None
             try:
                 proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-                raw_buf = b''
+                raw_buf = bytearray()
                 need_bytes = chunk_samples * bytes_per_sample
                 advance_bytes = overlap_samples * bytes_per_sample
 
@@ -904,13 +912,13 @@ class SoundDetector:
                     chunk = proc.stdout.read(need_bytes - len(raw_buf))
                     if not chunk:
                         break
-                    raw_buf += chunk
+                    raw_buf.extend(chunk)
                     if len(raw_buf) >= need_bytes:
                         audio = (
                             np.frombuffer(raw_buf[:need_bytes], dtype=np.int16)
                             .astype(np.float32) / 32768.0
                         )
-                        raw_buf = raw_buf[advance_bytes:]
+                        del raw_buf[:advance_bytes]
                         self._handle_chunk(audio)
             except Exception as exc:
                 logger.error('Sound monitor RTSP error: %s', exc)
@@ -941,7 +949,7 @@ class SoundDetector:
             self._set_status('unavailable: no audio provider')
             return
 
-        import wave
+        import wave  # noqa: F811 — stdlib; local import avoids load when ingest source is unused.
 
         preload_thread = threading.Thread(target=_yamnet.preload, daemon=True, name='yamnet-preload')
         preload_thread.start()
