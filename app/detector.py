@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -13,20 +12,6 @@ try:
     import numpy as np
 except ImportError:  # pragma: no cover - exercised in minimal installs without ONNX support
     np = None  # type: ignore[assignment]
-
-
-@dataclass
-class Detection:
-    label: str
-    confidence: float
-    box: dict[str, float]
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "label": self.label,
-            "confidence": round(self.confidence, 3),
-            "box": self.box,
-        }
 
 
 class DetectorUnavailableError(RuntimeError):
@@ -78,6 +63,12 @@ def _require_numpy():
 
 
 def box_iou(box: np.ndarray, boxes: np.ndarray) -> np.ndarray:
+    """IoU of *box* against each row of *boxes*.
+
+    Kept as a public helper for ad-hoc analysis; ``non_max_suppression``
+    inlines the same math with areas precomputed once so the greedy loop
+    does not recompute every candidate's area on each iteration.
+    """
     np = _require_numpy()
     x1 = np.maximum(box[0], boxes[:, 0])
     y1 = np.maximum(box[1], boxes[:, 1])
@@ -96,18 +87,36 @@ def non_max_suppression(boxes: np.ndarray, scores: np.ndarray, classes: np.ndarr
     if boxes.size == 0:
         return []
 
+    # Precompute each candidate's area once. The previous implementation
+    # called ``box_iou`` per greedy step, which recomputed every remaining
+    # box's area on every iteration -- O(n^2) area work for what is a few
+    # multiplications when hoisted out of the loop.
+    widths = np.maximum(0, boxes[:, 2] - boxes[:, 0]).astype(np.float32)
+    heights = np.maximum(0, boxes[:, 3] - boxes[:, 1]).astype(np.float32)
+    areas = widths * heights
+
     keep: list[int] = []
     for class_id in np.unique(classes):
         indexes = np.where(classes == class_id)[0]
         ordered = indexes[np.argsort(scores[indexes])[::-1]]
+        class_areas = areas[ordered]
         while ordered.size > 0:
             current = int(ordered[0])
             keep.append(current)
             if ordered.size == 1:
                 break
-            remaining = ordered[1:]
-            ious = box_iou(boxes[current], boxes[remaining])
-            ordered = remaining[ious <= iou_threshold]
+            rest = ordered[1:]
+            rest_areas = class_areas[1:]
+            xx1 = np.maximum(boxes[current, 0], boxes[rest, 0])
+            yy1 = np.maximum(boxes[current, 1], boxes[rest, 1])
+            xx2 = np.minimum(boxes[current, 2], boxes[rest, 2])
+            yy2 = np.minimum(boxes[current, 3], boxes[rest, 3])
+            intersection = np.maximum(0, xx2 - xx1) * np.maximum(0, yy2 - yy1)
+            current_area = max(0.0, float(areas[current]))
+            union = current_area + rest_areas - intersection
+            ious = intersection / np.maximum(union, 1e-9)
+            ordered = rest[ious <= iou_threshold]
+            class_areas = rest_areas[ious <= iou_threshold]
     return keep
 
 
@@ -326,16 +335,7 @@ class OnnxYoloDetector:
                 )
                 return
             if use_cuda:
-                cuda_options: dict[str, Any] = {
-                    "device_id": 0,
-                    # Allocate on demand rather than greedily pre-allocating all
-                    # available VRAM - prevents the BFC arena from consuming the
-                    # entire GPU and leaving nothing for cuBLAS or other ops.
-                    "arena_extend_strategy": "kSameAsRequested",
-                }
-                if self._gpu_mem_limit:
-                    cuda_options["gpu_mem_limit"] = self._gpu_mem_limit
-                providers: list[Any] = [("CUDAExecutionProvider", cuda_options), "CPUExecutionProvider"]
+                providers = self._build_providers(use_cuda=True)
             else:
                 providers = ["CPUExecutionProvider"]
             session_options = ort.SessionOptions()
@@ -389,24 +389,10 @@ class OnnxYoloDetector:
                 int8_runtime_model = False
                 self._use_io_binding = False
                 session_model_path = self.model_path
-                fallback_providers: list[Any]
-                if requested_use_cuda:
-                    fallback_cuda_options: dict[str, Any] = {
-                        "device_id": 0,
-                        "arena_extend_strategy": "kSameAsRequested",
-                    }
-                    if self._gpu_mem_limit:
-                        fallback_cuda_options["gpu_mem_limit"] = self._gpu_mem_limit
-                    fallback_providers = [
-                        ("CUDAExecutionProvider", fallback_cuda_options),
-                        "CPUExecutionProvider",
-                    ]
-                else:
-                    fallback_providers = ["CPUExecutionProvider"]
                 self.session = ort.InferenceSession(
                     str(session_model_path),
                     sess_options=session_options,
-                    providers=fallback_providers,
+                    providers=self._build_providers(requested_use_cuda),
                 )
             self.input_name = self.session.get_inputs()[0].name
             self.output_names = [output.name for output in self.session.get_outputs()]
@@ -484,24 +470,10 @@ class OnnxYoloDetector:
                     try:
                         self._precision = 'fp32'
                         self._use_io_binding = False
-                        fallback_providers: list[Any]
-                        if requested_use_cuda:
-                            fallback_cuda_options: dict[str, Any] = {
-                                "device_id": 0,
-                                "arena_extend_strategy": "kSameAsRequested",
-                            }
-                            if self._gpu_mem_limit:
-                                fallback_cuda_options["gpu_mem_limit"] = self._gpu_mem_limit
-                            fallback_providers = [
-                                ("CUDAExecutionProvider", fallback_cuda_options),
-                                "CPUExecutionProvider",
-                            ]
-                        else:
-                            fallback_providers = ["CPUExecutionProvider"]
                         self.session = ort.InferenceSession(
                             str(self.model_path),
                             sess_options=session_options,
-                            providers=fallback_providers,
+                            providers=self._build_providers(requested_use_cuda),
                         )
                         self.input_name = self.session.get_inputs()[0].name
                         self.output_names = [output.name for output in self.session.get_outputs()]
@@ -551,6 +523,26 @@ class OnnxYoloDetector:
                     logger.debug('Detector warm-up inference skipped: %s', warm_exc)
         except Exception as exc:  # pragma: no cover - depends on runtime/model internals
             self.unavailable_reason = f"Failed to load ONNX model {self.model_path}: {exc}"
+
+    def _build_providers(self, use_cuda: bool) -> list[Any]:
+        """Build the ORT provider list for a CUDA or CPU session.
+
+        Shared by initial session construction and both INT8→FP32 fallbacks so
+        the CUDA options (device id, on-demand arena, memory limit) stay
+        identical everywhere.
+        """
+        if not use_cuda:
+            return ["CPUExecutionProvider"]
+        cuda_options: dict[str, Any] = {
+            "device_id": 0,
+            # Allocate on demand rather than greedily pre-allocating all
+            # available VRAM - prevents the BFC arena from consuming the
+            # entire GPU and leaving nothing for cuBLAS or other ops.
+            "arena_extend_strategy": "kSameAsRequested",
+        }
+        if self._gpu_mem_limit:
+            cuda_options["gpu_mem_limit"] = self._gpu_mem_limit
+        return [("CUDAExecutionProvider", cuda_options), "CPUExecutionProvider"]
 
     @property
     def available(self) -> bool:
@@ -660,7 +652,12 @@ class OnnxYoloDetector:
         return image
 
     def _preprocess(self, image: np.ndarray) -> tuple[np.ndarray, float, float, float, int, int]:
-        import cv2
+        try:
+            import cv2
+        except ImportError as exc:
+            raise DetectorUnavailableError(
+                "opencv-python-headless is not installed. Install requirements.txt or run pip install opencv-python-headless."
+            ) from exc
 
         original_height, original_width = image.shape[:2]
         scale = min(self.input_width / original_width, self.input_height / original_height)
@@ -786,9 +783,6 @@ class OnnxYoloDetector:
         Coordinates are in input-space (relative to model input size, e.g. 640x640)
         and need to be transformed to original image coordinates.
         """
-        if confidence is None:
-            confidence = self.confidence
-
         predictions = np.asarray(output)
         # Collapse a leading batch axis of 1 (``[1, 300, 6] -> [300, 6]``)
         # while tolerating the degenerate single-detection case
@@ -883,20 +877,21 @@ class OnnxYoloDetector:
         n = s_x1.shape[0]
         labels = self.labels
         n_labels = len(labels)
-        detections: list[Detection] = [
-            Detection(
-                label=labels[int(s_classes[i])] if 0 <= int(s_classes[i]) < n_labels else f"class_{int(s_classes[i])}",
-                confidence=float(s_scores[i]),
-                box={
-                    "x": float(bx[i]),
-                    "y": float(by[i]),
-                    "width": float(bw[i]),
-                    "height": float(bh[i]),
+        return [
+            {
+                'label': labels[int(s_classes[i])] if 0 <= int(s_classes[i]) < n_labels else f"class_{int(s_classes[i])}",
+                # Round here rather than in Detection.to_dict (removed) so the
+                # wire format is unchanged.
+                'confidence': round(float(s_scores[i]), 3),
+                'box': {
+                    'x': float(bx[i]),
+                    'y': float(by[i]),
+                    'width': float(bw[i]),
+                    'height': float(bh[i]),
                 },
-            )
+            }
             for i in range(n)
         ]
-        return [detection.to_dict() for detection in detections]
 
     def _postprocess_nms(
         self,
@@ -909,8 +904,6 @@ class OnnxYoloDetector:
         confidence: float | None = None,
     ) -> list[dict[str, Any]]:
         """Postprocess YOLOv8/YOLO11 output (shape: [1, 4+nc, 8400]) with NMS."""
-        if confidence is None:
-            confidence = self.confidence
         predictions = np.squeeze(output)
         if predictions.ndim != 2:
             raise ValueError(f"Unsupported YOLO output shape: {output.shape}")
@@ -981,26 +974,26 @@ class OnnxYoloDetector:
 
         keep = non_max_suppression(box_array, score_array, class_array, self.iou_threshold)
 
-        detections: list[Detection] = []
+        ow = float(original_width)
+        oh = float(original_height)
+        result: list[dict[str, Any]] = []
         for index in sorted(keep, key=lambda idx: float(score_array[idx]), reverse=True):
             x1v, y1v, x2v, y2v = box_array[index]
             class_id = int(class_array[index])
             label = self.labels[class_id] if 0 <= class_id < len(self.labels) else f"class_{class_id}"
-            box_x = round(max(0.0, min(1.0, float(x1v) / original_width)), 4)
-            box_y = round(max(0.0, min(1.0, float(y1v) / original_height)), 4)
-            detections.append(
-                Detection(
-                    label=label,
-                    confidence=float(score_array[index]),
-                    box={
-                        "x": box_x,
-                        "y": box_y,
-                        "width": round(max(0.0, min(1.0 - box_x, float(x2v - x1v) / original_width)), 4),
-                        "height": round(max(0.0, min(1.0 - box_y, float(y2v - y1v) / original_height)), 4),
-                    },
-                )
-            )
-        return [detection.to_dict() for detection in detections]
+            box_x = round(max(0.0, min(1.0, float(x1v) / ow)), 4)
+            box_y = round(max(0.0, min(1.0, float(y1v) / oh)), 4)
+            result.append({
+                'label': label,
+                'confidence': round(float(score_array[index]), 3),
+                'box': {
+                    'x': box_x,
+                    'y': box_y,
+                    'width': round(max(0.0, min(1.0 - box_x, float(x2v - x1v) / ow)), 4),
+                    'height': round(max(0.0, min(1.0 - box_y, float(y2v - y1v) / oh)), 4),
+                },
+            })
+        return result
 
 
 def _int8_precision_supported_for_detector(nms_free: bool) -> bool:
@@ -1063,6 +1056,7 @@ def create_face_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector | None:
     except (TypeError, ValueError):
         face_confidence = 0.45
     nms_free = bool(ai_config.get('nms_free')) or _detect_model_type(raw_model_path)
+    keypoint_count_setting = _optional_int('face_keypoint_count')
     return OnnxYoloDetector(
         model_path=raw_model_path,
         labels_path=str(ai_config.get('face_labels_path') or 'models/face.names'),
@@ -1079,7 +1073,9 @@ def create_face_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector | None:
         confidence_only_nms=_resolve_confidence_only_nms(ai_config.get('confidence_only_nms'), nms_free),
         precision=str(ai_config.get('precision', 'fp32') or 'fp32').strip().lower(),
         use_io_binding=_coerce_bool(ai_config.get('use_io_binding', False)),
-        keypoint_count=_optional_int('face_keypoint_count') if _optional_int('face_keypoint_count') is not None else 5,
+        # YOLO-face exports are YOLOv8-pose models with a 5-point facial
+        # landmark head; an explicit setting overrides the default.
+        keypoint_count=keypoint_count_setting if keypoint_count_setting is not None else 5,
     )
 
 
