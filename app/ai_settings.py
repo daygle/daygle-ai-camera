@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import logging
 import importlib.util
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +88,7 @@ from app.settings import config_file_path
 #   ``keypoint_count`` - pose/keypoint head width (e.g. ``5`` for a YOLO-face
 #                        landmark head) so the detector reads class scores from
 #                        the right columns instead of the landmark columns.
+_DEFAULT_MODEL = 'yolo11n'
 #   ``weights_url``    - explicit https source for weights Ultralytics can't
 #                        resolve by name (third-party face models). The
 #                        ``yolo11*-face`` entries below use all three optional
@@ -154,6 +156,133 @@ def _canonical_models_path(raw: Any, field: str) -> str:
             detail=f'{field} must point to a file inside the models/ directory.',
         )
     return resolved.relative_to(BASE_DIR).as_posix()
+
+
+def is_face_family_model(model_path: Any, labels_path: Any = None) -> bool:
+    """Return ``True`` when ``model_path`` looks like a face-detection model.
+
+    Face-family ONNX exports are recognised by a ``face`` marker in the
+    filename (``yolov11n-face.onnx``, ``...-face-640.onnx``) or by shipping
+    the face labels file (``models/face.names``). This mirrors the frontend's
+    ``/face/i.test(path)`` heuristic and does not depend on the catalog:
+    legacy installs may hold a face file that predates the family split.
+    """
+    name = Path(str(model_path or '')).name.lower()
+    labels = Path(str(labels_path or '')).name.lower()
+    return 'face' in name or labels == 'face.names'
+
+
+def find_installed_object_model() -> str | None:
+    """Find the best installed non-face ONNX to restore as the PRIMARY model.
+
+    Preference order: exact catalog object-model filenames (nano variants
+    first, matching the catalog declaration order), then any remaining
+    non-face ONNX smallest-first so the restored default favours fast
+    inference. Returns a project-relative posix path, or ``None`` when no
+    object model is installed (the caller falls back to the downloadable
+    default).
+    """
+    try:
+        installed = [p for p in sorted(MODELS_DIR.glob('*.onnx')) if 'face' not in p.name.lower()]
+    except OSError:
+        return None
+    if not installed:
+        return None
+    by_name = {p.name: p for p in installed}
+    catalog_order = [
+        Path(info['onnx']).name
+        for info in YOLO_MODELS.values()
+        if not info.get('labels')
+    ]
+    for filename in catalog_order:
+        candidate = by_name.get(filename)
+        if candidate is not None:
+            return candidate.as_posix()
+    smallest = min(installed, key=lambda p: p.stat().st_size)
+    return smallest.as_posix()
+
+
+def heal_legacy_face_primary() -> dict[str, Any] | None:
+    """Repair settings where a FACE model was saved as the PRIMARY detector.
+
+    Before the parallel face pass existed, downloading/activating a face
+    model replaced the active object model (``model_path`` became e.g.
+    ``models/yolov11n-face.onnx`` with ``labels_path=models/face.names``).
+    Such a deployment detects faces ONLY: the Objects page shows no objects,
+    and no object recordings are produced. The parallel architecture expects
+    an object model as PRIMARY plus the face model in the secondary
+    ``face_model_path`` slot -- so this migration moves the legacy face model
+    into the secondary slot, restores an object model as PRIMARY, persists
+    the healed settings, and (when no object model is installed) kicks off a
+    background download of the default one.
+
+    Returns the healed settings dict, or ``None`` when nothing needed fixing.
+    Called once at startup before the detectors are constructed; the next
+    ``effective_ai_config()`` then sees the repaired state.
+    """
+    settings = effective_ai_config()
+    enabled = settings.get('enabled', True)
+    if isinstance(enabled, str):
+        enabled = enabled.strip().lower() in {'1', 'true', 'yes', 'on'}
+    if not enabled:
+        return None
+    if not is_face_family_model(settings.get('model_path'), settings.get('labels_path')):
+        return None
+
+    legacy_face_path = _canonical_models_path(settings.get('model_path'), 'model_path')
+    object_rel = find_installed_object_model() or 'models/yolo11n.onnx'
+    payload: dict[str, Any] = {
+        **settings,
+        # Legacy face model -> secondary face pass (runs ALONGSIDE objects).
+        'face_enabled': True,
+        'face_model_path': legacy_face_path,
+        'face_labels_path': str(settings.get('face_labels_path') or 'models/face.names'),
+        'face_keypoint_count': int(settings.get('face_keypoint_count') or 5),
+        # Restore a COCO object model as PRIMARY so person/car/... detection
+        # (and therefore object recordings) work again.
+        'model_path': object_rel,
+        'labels_path': 'models/coco.names',
+        'keypoint_count': 0,
+    }
+    try:
+        updated = validate_ai_settings(payload)
+    except HTTPException:
+        # validate_ai_settings refuses a not-yet-downloaded model_path (its
+        # typo guard). This migration is a trusted internal repair, so fall
+        # back to the hand-built payload rather than leaving the operator
+        # stuck with a face-only detector until they install a model.
+        updated = dict(payload)
+    from app.auth import utc_now
+
+    _state.database.set_setting('ai', updated, utc_now())
+    logger.warning(
+        'Healed legacy AI settings: face model %s moved to the secondary Face '
+        'Detection pass; primary object model restored to %s.',
+        legacy_face_path, object_rel,
+    )
+    if not (BASE_DIR / object_rel).exists():
+        # No object model installed (a face model was the only ONNX on disk):
+        # download + activate the default in the background so detection
+        # recovers without operator action. ``switch_active=True`` also
+        # triggers the detector reload once the export lands.
+        def _download_default_object_model() -> None:
+            try:
+                from app.model_management import _do_download_model
+
+                _do_download_model(_DEFAULT_MODEL, switch_active=True, imgsz=640)
+                logger.info('Auto-download of replacement object model %s completed.', _DEFAULT_MODEL)
+            except Exception as exc:  # pragma: no cover - best-effort recovery
+                logger.warning(
+                    'Auto-download of replacement object model failed: %s. '
+                    'Download an object model from the Models tab.', exc,
+                )
+
+        threading.Thread(
+            target=_download_default_object_model,
+            name='object-model-recovery-download',
+            daemon=True,
+        ).start()
+    return updated
 
 
 def active_ai_config_source() -> str:
@@ -300,6 +429,12 @@ def ai_status_payload(
         'face_model_path': str(settings.get('face_model_path') or ''),
         'face_model_loaded': bool(
             getattr(_state.face_detector, 'available', False)
+        ),
+        # Legacy-state flag: a face-family file in the PRIMARY slot means only
+        # faces are detected (no objects). The startup heal repairs this, but
+        # surfaces still show the warning while it persists.
+        'primary_is_face_model': is_face_family_model(
+            model_path_str, str(settings.get('labels_path') or '')
         ),
     }
 
@@ -572,6 +707,23 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
         updated['face_confidence'] = face_confidence
     raw_model_path = updated.get('model_path') or current.get('model_path') or 'models/yolo11n.onnx'
     model_path = _canonical_models_path(raw_model_path, 'model_path')
+    # Parallel-detector invariant: the PRIMARY slot must stay an object model.
+    # A face-family model here detects ONLY faces -- objects vanish from the
+    # Objects page and object recordings stop. Face models belong in the
+    # secondary Face Detection pass (``face_model_path``), which runs
+    # alongside the object model on the same frames. Checked BEFORE any
+    # existence guard so the rejection never depends on download state.
+    if is_face_family_model(model_path):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f'{model_path} is a face-detection model and cannot be the '
+                'primary object model: it would disable object detection '
+                'entirely. Choose an object model (YOLOv8/YOLO11/YOLO26) as '
+                'the Model Path; face models are selected under Face Model '
+                'so both detectors run in parallel.'
+            ),
+        )
     # Existence guard, but only when the caller explicitly supplied a *new*
     # non-empty model_path (typo protection on the settings form / API).
     # Re-saving the current path, or leaving a not-yet-downloaded default in

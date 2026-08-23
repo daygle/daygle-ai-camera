@@ -1163,3 +1163,146 @@ def test_yolo11_face_catalog_entries_are_well_formed():
         assert info['weights_url'].endswith(info['pt'])
         # Face models are plain grid/pose heads, never NMS-free.
         assert info.get('nms_free', False) is False
+
+
+# ---------------------------------------------------------------------------
+# Parallel face/object detection: legacy face-as-PRIMARY heal + guard.
+# ---------------------------------------------------------------------------
+
+
+class _DatabaseStub:
+    def __init__(self):
+        self.saved = []
+
+    def set_setting(self, key, value, updated_at=None):
+        self.saved.append((key, value))
+        return value
+
+    def has_setting(self, key):
+        return False
+
+
+def test_is_face_family_model_recognises_filenames_and_labels():
+    from app.ai_settings import is_face_family_model
+
+    assert is_face_family_model('models/yolov11n-face.onnx') is True
+    assert is_face_family_model('models/yolo11s-face-640.onnx') is True
+    assert is_face_family_model('models/custom.onnx', 'models/face.names') is True
+    assert is_face_family_model('models/yolo11n.onnx', 'models/coco.names') is False
+    assert is_face_family_model(None) is False
+    assert is_face_family_model('models/yolo26n.onnx') is False
+
+
+def test_find_installed_object_model_prefers_catalog_and_skips_face(tmp_path, monkeypatch):
+    import app.ai_settings as m
+
+    models = tmp_path / 'models'
+    models.mkdir()
+    (models / 'yolov11n-face.onnx').write_bytes(b'face')
+    (models / 'mystery-big.onnx').write_bytes(b'x' * 1000)
+    (models / 'yolov8n.onnx').write_bytes(b'obj')
+    monkeypatch.setattr(m, 'MODELS_DIR', models)
+
+    assert m.find_installed_object_model() == (models / 'yolov8n.onnx').as_posix()
+
+
+def test_validate_ai_settings_rejects_face_model_as_primary(monkeypatch, ais):
+    """A face-family model must never be saved as the PRIMARY object model:
+    that state disables object detection entirely (no objects page entries,
+    no object recordings). Face models belong in the parallel face pass."""
+    monkeypatch.setattr(
+        sys.modules['app.ai_settings'],
+        'effective_ai_config',
+        lambda: {'backend': 'onnx', 'model_path': 'models/yolo11n.onnx'},
+    )
+    with pytest.raises(Exception) as excinfo:
+        ai_settings.validate_ai_settings({'model_path': 'models/yolov11n-face.onnx'})
+    detail = getattr(excinfo.value, 'detail', '')
+    assert 'face' in str(detail).lower()
+    assert 'parallel' in str(detail).lower()
+
+
+def test_heal_legacy_face_primary_migrates_face_model_to_secondary(tmp_path, monkeypatch):
+    """Legacy installs that saved a FACE model as the primary detector are
+    healed at startup: the face model moves to the secondary face slot and an
+    object model is restored as primary."""
+    import app.ai_settings as m
+    import app.state as st
+
+    models = tmp_path / 'models'
+    models.mkdir()
+    (models / 'yolov11n-face.onnx').write_bytes(b'face')
+    (models / 'yolov8n.onnx').write_bytes(b'object-model-bytes')
+    monkeypatch.setattr(m, 'MODELS_DIR', models)
+    monkeypatch.setattr(m, 'BASE_DIR', tmp_path)
+    legacy = {
+        'enabled': True,
+        'backend': 'onnx',
+        'confidence': 0.45,
+        'iou_threshold': 0.45,
+        # Pre-parallel-flow state: face model occupies the PRIMARY slot.
+        'model_path': 'models/yolov11n-face.onnx',
+        'labels_path': 'models/face.names',
+        'keypoint_count': 5,
+        'input_size': 640,
+    }
+    monkeypatch.setattr(m, 'effective_ai_config', lambda: dict(legacy))
+    db_stub = _DatabaseStub()
+    monkeypatch.setattr(st, 'database', db_stub)
+
+    healed = m.heal_legacy_face_primary()
+
+    assert healed is not None
+    # Object model restored as primary; labels/keypoint head reset to COCO.
+    assert healed['model_path'] == 'models/yolov8n.onnx'
+    assert healed['labels_path'] == 'models/coco.names'
+    assert int(healed.get('keypoint_count') or 0) == 0
+    # Legacy face model now runs in the secondary parallel pass.
+    assert healed['face_enabled'] is True
+    assert healed['face_model_path'] == 'models/yolov11n-face.onnx'
+    assert healed['face_labels_path'] == 'models/face.names'
+    assert int(healed['face_keypoint_count']) == 5
+    # Healed settings were persisted so the restart keeps the repair.
+    assert db_stub.saved and db_stub.saved[0][0] == 'ai'
+
+
+def test_heal_legacy_face_primary_noop_for_object_primary(monkeypatch):
+    import app.ai_settings as m
+    import app.state as st
+
+    monkeypatch.setattr(
+        m,
+        'effective_ai_config',
+        lambda: {
+            'enabled': True,
+            'backend': 'onnx',
+            'model_path': 'models/yolo11n.onnx',
+            'labels_path': 'models/coco.names',
+        },
+    )
+    db_stub = _DatabaseStub()
+    monkeypatch.setattr(st, 'database', db_stub)
+
+    assert m.heal_legacy_face_primary() is None
+    assert db_stub.saved == []
+
+
+def test_heal_legacy_face_primary_skipped_when_ai_disabled(monkeypatch):
+    import app.ai_settings as m
+    import app.state as st
+
+    monkeypatch.setattr(
+        m,
+        'effective_ai_config',
+        lambda: {
+            'enabled': False,
+            'backend': 'onnx',
+            'model_path': 'models/yolov11n-face.onnx',
+            'labels_path': 'models/face.names',
+        },
+    )
+    db_stub = _DatabaseStub()
+    monkeypatch.setattr(st, 'database', db_stub)
+
+    assert m.heal_legacy_face_primary() is None
+    assert db_stub.saved == []

@@ -233,6 +233,12 @@ source for weights Ultralytics cannot resolve by name. The download flow fetches
 
 - **`MODEL MISSING`** - open the Models tab, download/select a model, then
   Reload Detector on the Status tab.
+- **No objects detected after enabling a face model** - older versions saved a
+  face model as the primary detector, which disables object detection. The
+  server now repairs this automatically at startup (the face model moves to
+  the parallel Face Model slot and an object model is restored as primary),
+  and the API rejects saving a face model as the primary. The Status panel
+  shows both slots: Object Model (primary) and Face Model (parallel pass).
 - **ONNX fails to load** - verify the model and label paths and confirm the
   expected ONNX Runtime wheel is installed. For GPU, check that
   `CUDAExecutionProvider` appears in `onnxruntime.get_available_providers()` and

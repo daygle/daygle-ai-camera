@@ -163,6 +163,15 @@ def _startup() -> None:
     camera_instances = create_camera_instances(cameras_config)
     _state.camera_instances = camera_instances
     _state.camera = camera_instances[camera_config['id']] if camera_config else None
+    # Repair legacy settings BEFORE building detectors: installs that saved a
+    # FACE model as the primary detector (possible before the parallel face
+    # pass existed) must be migrated to object-primary + face-secondary, or
+    # object detection stays dead until an admin intervenes.
+    try:
+        from app.ai_settings import heal_legacy_face_primary
+        heal_legacy_face_primary()
+    except Exception as exc:
+        _logger.warning('AI settings heal skipped: %s', exc)
     _state.detector = create_detector(effective_ai_config())
     _state.last_detector_error = getattr(_state.detector, 'unavailable_reason', None)
     from app.detector import create_face_detector

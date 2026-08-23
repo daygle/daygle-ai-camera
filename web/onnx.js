@@ -139,6 +139,9 @@ function renderStatus(status) {
   }
   const rows = [
     safeHtml`<div><span>Current Backend</span><strong>${displayValue(status.current_backend || status.configured_backend, 'Not Set')}</strong></div>`,
+    // "Object Model" (not just "Model"): this slot is the PRIMARY object
+    // detector; faces come from the separate Face Model row below so the two
+    // parallel passes are always distinguishable at a glance.
     modelRow,
     safeHtml`<div><span>Model Exists</span><strong>${yesNo(status.model_exists)}</strong></div>`,
     safeHtml`<div><span>ONNX Runtime Installed</span><strong>${yesNo(status.onnx_runtime_installed)}</strong></div>`,
@@ -157,13 +160,21 @@ function renderStatus(status) {
   if (status.last_detector_error) {
     rows.push(safeHtml`<div class="wide"><span>Last Detector Error</span><strong>${status.last_detector_error}</strong></div>`);
   }
-  // Secondary face detector state: only meaningful when enabled, otherwise it
-  // would read as a permanent "No" on every install that doesn't use it.
-  if (status.face_enabled) {
-    rows.push(safeHtml`<div><span>Face Detector</span><strong>${status.face_model_loaded ? `Loaded ${status.face_model_path || ''}` : 'Not loaded'}</strong></div>`);
-    if (status.face_model_loaded === false && status.face_model_path) {
-      rows.push(safeHtml`<div class="wide"><span>Face Detector Error</span><strong>Face model not found or failed to load: ${status.face_model_path}</strong></div>`);
-    }
+  // Secondary face pass: shown ALWAYS so the parallel architecture is
+  // visible -- Disabled when off, Loaded/Not loaded when on.
+  const faceState = !status.face_enabled
+    ? 'Disabled'
+    : (status.face_model_loaded ? `Loaded ${status.face_model_path || ''}` : 'Not loaded');
+  rows.push(safeHtml`<div class="wide"><span>Face Model (Parallel Pass)</span><strong>${faceState}</strong></div>`);
+  if (status.face_enabled && status.face_model_loaded === false && status.face_model_path) {
+    rows.push(safeHtml`<div class="wide"><span>Face Model Error</span><strong>Face model not found or failed to load: ${status.face_model_path}</strong></div>`);
+  }
+  // Legacy-state warning: a face-family file in the PRIMARY object slot
+  // means only faces are detected -- no objects, no object recordings. The
+  // server heals this automatically at startup; show why detection looks
+  // broken if it ever persists (e.g. heal could not run).
+  if (status.primary_is_face_model) {
+    rows.push(safeHtml`<div class="wide"><span style="color:var(--danger)">Object Detection</span><strong style="color:var(--danger)">${status.model_path || 'The active model'} is a face model running as the PRIMARY detector - object detection is disabled. Restart the server to auto-migrate it to the parallel Face Model slot, or select an object model above.</strong></div>`);
   }
   statusPanel.innerHTML = rows.join('');
 }
