@@ -19,10 +19,7 @@ import logging
 from typing import Any
 
 import app.state as _state
-from app.config_facades import (
-    effective_ai_config,
-    effective_face_recognition_config,
-)
+from app.config_facades import effective_face_recognition_config
 
 logger = logging.getLogger('daygle.ai')
 
