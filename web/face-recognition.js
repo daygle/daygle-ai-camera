@@ -14,6 +14,41 @@ const frMessage = document.getElementById('frMessage');
 const frSaveBtn = document.getElementById('frSaveBtn');
 const frReloadBtn = document.getElementById('frReloadBtn');
 
+// ── Face detection mode (per-object override, lives in /api/settings/objects) ─
+// Faces default to "moving and still" on the backend regardless of the global
+// Objects default; an explicit override here wins. Stored as labels.face in
+// the objects settings, and no longer shown on the Objects page itself.
+async function loadFaceMode() {
+  try {
+    const objectSettings = await api('/api/settings/objects');
+    const override = objectSettings?.labels?.face;
+    frForm.face_mode.value = override || 'inherit';
+  } catch (err) {
+    // Non-fatal: leave the select on its default rather than blocking the page.
+    frForm.face_mode.value = 'inherit';
+  }
+}
+
+// Read the select and merge it into the CURRENT objects settings so other
+// per-object overrides are untouched. 'inherit' removes the explicit entry,
+// restoring the backend's moving-and-still default for faces.
+async function saveFaceMode() {
+  const mode = frForm.face_mode.value;
+  const current = await api('/api/settings/objects');
+  const labels = { ...(current.labels || {}) };
+  if (mode === 'inherit') delete labels.face;
+  else labels.face = mode;
+  await api('/api/settings/objects', {
+    method: 'PUT',
+    body: JSON.stringify({
+      default_mode: current.default_mode || 'moving',
+      labels,
+      group_modes: current.group_modes || {},
+      still_alerts: current.still_alerts || {},
+    }),
+  });
+}
+
 function fillForm(status) {
   frForm.enabled.value = status.enabled ? 'true' : 'false';
   frForm.alert_unknown.value = status.alert_unknown ? 'true' : 'false';
@@ -51,9 +86,21 @@ async function saveSettings(event) {
   };
   frSaveBtn.disabled = true;
   try {
+    // Persist the face detection-mode override first so a failure there is
+    // reported independently of the recognition-settings save.
+    let faceModeError = null;
+    try {
+      await saveFaceMode();
+    } catch (err) {
+      faceModeError = err;
+    }
     const status = await api('/api/settings/face-recognition', { method: 'PUT', body: JSON.stringify(body) });
     fillForm(status);
-    showToast('Face recognition settings saved.');
+    if (faceModeError) {
+      showToast(faceModeError.message || 'Failed to save the face detection mode.', true);
+    } else {
+      showToast('Face recognition settings saved.');
+    }
     if (status.enabled && status.reload_error) {
       showToast(status.reload_error, true);
     }
@@ -80,3 +127,7 @@ frForm.addEventListener('submit', saveSettings);
 frReloadBtn.addEventListener('click', reloadService);
 
 loadSettings();
+loadFaceMode();
+// Tab bar (Settings / People). Shared implementation with URL-hash
+// deep-linking lives in utils.js - /face-recognition#people opens People.
+initDaygleTabs();

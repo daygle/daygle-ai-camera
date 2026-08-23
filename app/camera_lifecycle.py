@@ -321,6 +321,37 @@ def apply_storage_and_recording_settings() -> None:
         _state.recording_service.diagnostic_callback = log_camera_diagnostic
 
 
+def _rebuild_face_detector(ai_settings: dict[str, Any]) -> None:
+    """Rebuild the optional secondary face detector after a settings change.
+
+    Mirrors the primary reload's session teardown so a stale ONNX session is
+    freed before a new one is allocated. Failures are non-fatal: the face pass
+    simply stays unavailable and the reason is surfaced via status.
+    """
+    from app.detector import create_face_detector
+    previous = _state.face_detector
+    old_session = getattr(previous, 'session', None) if previous is not None else None
+    if old_session is not None:
+        previous.session = None
+        del old_session
+        gc.collect()
+    try:
+        candidate = create_face_detector(ai_settings)
+    except Exception as exc:  # pragma: no cover - defensive: never break the primary reload
+        logger.warning('Secondary face detector build failed: %s', exc)
+        _state.face_detector = None
+        _state.last_face_detector_error = str(exc)
+        return
+    _state.face_detector = candidate
+    error = getattr(candidate, 'unavailable_reason', None) if candidate is not None else None
+    _state.last_face_detector_error = error
+    if candidate is not None:
+        if getattr(candidate, 'available', False):
+            logger.info('Secondary face detector loaded: %s', candidate.model_path)
+        else:
+            logger.warning('Secondary face detector unavailable: %s', error)
+
+
 def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
     import app.alert_dispatch as _alert_dispatch
     _alert_dispatch._min_rule_confidence_cache = None
@@ -353,10 +384,12 @@ def reload_detector(ai_settings: dict[str, Any]) -> tuple[bool, str | None]:
         # OLD would silently break inference until a successful reload.
         _state.detector = candidate
         _state.last_detector_error = candidate_error or 'Failed to load ONNX detector.'
+        _rebuild_face_detector(ai_settings)
         log_detector_initialization('reload_failed')
         return (False, _state.last_detector_error)
     _state.detector = candidate
     _state.last_detector_error = candidate_error
+    _rebuild_face_detector(ai_settings)
     log_detector_initialization('reload')
     return (True, _state.last_detector_error)
 
@@ -367,3 +400,7 @@ _state.camera_event_recording_config = camera_event_recording_config
 _state.apply_cameras_settings = apply_cameras_settings
 _state.apply_storage_and_recording_settings = apply_storage_and_recording_settings
 _state.reload_detector = reload_detector
+# Face-only reload used by the model-download flow: wiring a downloaded face
+# model into the secondary pass must not rebuild (and briefly drop) the
+# primary object detector.
+_state.rebuild_face_detector = _rebuild_face_detector

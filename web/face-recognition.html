@@ -18,6 +18,13 @@
       </div>
     </header>
 
+    <div class="settings-tabs" role="tablist" aria-label="Face Recognition sections">
+      <button class="settings-tab" type="button" role="tab" id="tab-settings" aria-controls="panel-settings" data-tab="settings" aria-selected="true"><span class="settings-tab-icon" aria-hidden="true">⚙️</span><span class="settings-tab-label">Settings</span></button>
+      <button class="settings-tab" type="button" role="tab" id="tab-people" aria-controls="panel-people" data-tab="people" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">👥</span><span class="settings-tab-label">People</span></button>
+    </div>
+
+    <div class="settings-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" data-panel="settings">
+
     <section class="card">
       <div class="settings-section-header">
         <div class="settings-section-icon">⚙️</div>
@@ -36,6 +43,14 @@
         <input type="hidden" name="model_path" />
         <input type="hidden" name="model_id" />
         <div class="form-grid">
+          <label>
+            <span>Face Detection Mode <span class="info-tip" data-tip="Whether face detections count for moving subjects, still subjects, or both. Default: Moving &amp; Still - a person standing still facing the camera is exactly what face detection is for, so faces ignore the global moving-only default unless overridden here." title="Whether face detections count for moving subjects, still subjects, or both. Default: Moving &amp; Still - a person standing still facing the camera is exactly what face detection is for, so faces ignore the global moving-only default unless overridden here." tabindex="0" aria-label="Help: Whether face detections count for moving subjects, still subjects, or both"></span></span>
+            <select name="face_mode">
+              <option value="inherit">Default (Moving &amp; Still)</option>
+              <option value="any">Moving &amp; Still</option>
+              <option value="moving">Moving Only</option>
+              <option value="still">Still Only</option>
+            </select></label>
           <label>
             <span>Face Recognition <span class="info-tip" data-tip="Identify enrolled people on cameras running a face-detection model. Requires a downloaded embedding model." title="Identify enrolled people on cameras running a face-detection model. Requires a downloaded embedding model." tabindex="0" aria-label="Help: Identify enrolled people on cameras running a face-detection model. Requires a downloaded embedding model."></span></span>
             <select name="enabled">
@@ -67,9 +82,52 @@
         </div>
       </form>
     </section>
+
+    </div><!-- /panel-settings -->
+
+    <div class="settings-panel" id="panel-people" role="tabpanel" aria-labelledby="tab-people" data-panel="people" hidden>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">➕</div>
+        <div>
+          <h2>Add Person</h2>
+          <p class="settings-section-subtitle">Create a person, then enrol face photos for them below. Requires an embedding model and recognition enabled to enrol faces.</p>
+        </div>
+      </div>
+      <form id="addPersonForm" class="settings-form">
+        <label class="field">
+          <span>Name</span>
+          <input type="text" name="name" maxlength="200" required />
+        </label>
+        <label class="field">
+          <span>Notes <span class="muted">(Optional)</span></span>
+          <input type="text" name="notes" maxlength="2000" />
+        </label>
+        <div class="button-row">
+          <button id="addPersonBtn" class="btn-success" type="submit">Add Person</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">👤</div>
+        <div>
+          <h2>Enrolled People</h2>
+          <p class="settings-section-subtitle">Manage people and their enrolled faces.</p>
+        </div>
+      </div>
+      <div id="peopleMessage" class="muted"></div>
+      <div id="peopleEmpty" class="muted" hidden>No people enrolled yet.</div>
+      <div id="peopleList" class="model-card-grid"></div>
+    </section>
+
+    </div><!-- /panel-people -->
   </main>
   <script src="/static/nav.js"></script>
   <script src="/static/utils.js"></script>
   <script src="/static/face-recognition.js"></script>
+  <script src="/static/people.js"></script>
 </body>
 </html>

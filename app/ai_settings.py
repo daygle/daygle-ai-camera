@@ -295,6 +295,12 @@ def ai_status_payload(
         # Keep the persisted request beside the runtime result so operators
         # can distinguish an intentional FP32 fallback from an FP32 setting.
         'precision': str(settings.get('precision') or 'fp32').strip().lower(),
+        # Secondary face detector status (optional parallel pass).
+        'face_enabled': bool(settings.get('face_enabled')),
+        'face_model_path': str(settings.get('face_model_path') or ''),
+        'face_model_loaded': bool(
+            getattr(_state.face_detector, 'available', False)
+        ),
     }
 
 
@@ -307,6 +313,12 @@ def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
     labels = load_labels(
         ai_settings.get('labels_path'), categories,
     ) or list(categories)
+    # The secondary face detector contributes its own label(s). Merge them so
+    # the Zones / Objects pages can write rules for ``face`` even while a COCO
+    # object model is the active primary detector.
+    if ai_settings.get('face_enabled'):
+        face_labels = load_labels(ai_settings.get('face_labels_path') or 'models/face.names', ['face'])
+        labels = labels + [label for label in face_labels if label and label not in labels]
     return {
         **ai_settings,
         'active_backend': ai_status['active_backend'],
@@ -372,6 +384,14 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
         'precision',
         'use_io_binding',
         'keypoint_count',
+        # Secondary face detector: runs a dedicated face model alongside the
+        # primary object model so COCO objects and faces are detected in
+        # parallel on the same frame.
+        'face_enabled',
+        'face_model_path',
+        'face_labels_path',
+        'face_keypoint_count',
+        'face_confidence',
     }
     updated = {key: current.get(key) for key in allowed if key in current}
     for key, value in payload.items():
@@ -495,6 +515,61 @@ def validate_ai_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if not 0 <= keypoint_count <= 32:
         raise HTTPException(status_code=400, detail='keypoint_count must be between 0 and 32.')
     updated['keypoint_count'] = keypoint_count
+    # ---- Secondary face detector settings ---------------------------------
+    face_enabled = updated.get('face_enabled', False)
+    if isinstance(face_enabled, str):
+        face_enabled = face_enabled.strip().lower() in {'1', 'true', 'yes', 'on'}
+    else:
+        face_enabled = bool(face_enabled)
+    updated['face_enabled'] = face_enabled
+    raw_face_model = str(updated.get('face_model_path') or '').strip()
+    if raw_face_model:
+        face_model_path = _canonical_models_path(raw_face_model, 'face_model_path')
+        # Typo protection mirrors model_path: only when the caller explicitly
+        # supplied a NEW non-empty face model path.
+        if 'face_model_path' in payload and str(payload.get('face_model_path') or '').strip():
+            current_face_canon = ''
+            if current.get('face_model_path'):
+                try:
+                    current_face_canon = _canonical_models_path(current['face_model_path'], 'face_model_path')
+                except HTTPException:
+                    current_face_canon = ''
+            if face_model_path != current_face_canon and not (BASE_DIR / face_model_path).exists():
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f'Face ONNX model file not found: {face_model_path}. '
+                        'Download a face model first, or choose an installed model.'
+                    ),
+                )
+        updated['face_model_path'] = face_model_path
+    else:
+        updated['face_model_path'] = current.get('face_model_path') or ''
+        updated['face_enabled'] = False if not updated['face_model_path'] else face_enabled
+    raw_face_labels = updated.get('face_labels_path') or 'models/face.names'
+    updated['face_labels_path'] = _canonical_models_path(raw_face_labels, 'face_labels_path')
+    raw_face_keypoints = updated.get('face_keypoint_count', 5)
+    if isinstance(raw_face_keypoints, bool):
+        raise HTTPException(status_code=400, detail='face_keypoint_count must be a non-negative integer.')
+    try:
+        face_keypoint_count = int(raw_face_keypoints) if raw_face_keypoints not in (None, '') else 5
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='face_keypoint_count must be a non-negative integer.') from exc
+    if not 0 <= face_keypoint_count <= 32:
+        raise HTTPException(status_code=400, detail='face_keypoint_count must be between 0 and 32.')
+    updated['face_keypoint_count'] = face_keypoint_count
+    raw_face_conf = updated.get('face_confidence')
+    if raw_face_conf in (None, ''):
+        # Blank = inherit the global Min Confidence.
+        updated.pop('face_confidence', None)
+    else:
+        try:
+            face_confidence = float(raw_face_conf)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail='face_confidence must be a number.') from exc
+        if not 0 <= face_confidence <= 1:
+            raise HTTPException(status_code=400, detail='face_confidence must be between 0 and 1.')
+        updated['face_confidence'] = face_confidence
     raw_model_path = updated.get('model_path') or current.get('model_path') or 'models/yolo11n.onnx'
     model_path = _canonical_models_path(raw_model_path, 'model_path')
     # Existence guard, but only when the caller explicitly supplied a *new*

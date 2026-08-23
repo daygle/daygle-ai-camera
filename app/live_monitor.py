@@ -363,6 +363,31 @@ def queue_live_stream_alerts(
     threading.Thread(target=detect, name=f'live-detection-{camera_id}', daemon=True).start()
 
 
+def merge_secondary_face_detections(image: Any, detections: list, confidence: float) -> list:
+    """Run the optional secondary face detector and merge its results.
+
+    The secondary detector is a dedicated face model that runs alongside the
+    primary object model so both COCO objects and faces are detected in the
+    same cycle. Returns the input list unchanged when the face detector is not
+    configured/loaded; a failing pass is logged and skipped rather than taking
+    down the whole detection cycle.
+    """
+    face_detector = getattr(_state, 'face_detector', None)
+    if face_detector is None or not getattr(face_detector, 'available', False):
+        return detections
+    try:
+        if isinstance(image, bytes):
+            face_detections = face_detector.detect_image(image, confidence=confidence)
+        else:
+            face_detections = face_detector.detect_frame(image, confidence=confidence)
+    except (DetectorUnavailableError, ValueError) as exc:
+        logger.warning('Secondary face detection pass skipped: %s', exc)
+        return detections
+    if not face_detections:
+        return detections
+    return list(detections) + list(face_detections)
+
+
 def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict[str, Any], *, enforce_interval: bool = True) -> int | None:
     camera_id = str(settings.get('id') or 'camera')
     live_settings = effective_live_config()
@@ -570,6 +595,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         logger.warning('Live detection skipped for camera %s: %s', camera_id, exc)
         update_live_detection_status(camera_id, state='error', reason=str(exc), ai=ai_state, detections=[], motion_confidence=frame_motion_confidence, motion_fraction=raw_motion_fraction)
         return None
+    # Secondary face-detector pass (opt-in): runs a dedicated face model
+    # alongside the primary object detector so COCO objects and faces are
+    # detected in the same cycle. Merged before zone filtering so the ``face``
+    # label flows through rules/alerts exactly like any other object label.
+    detections = merge_secondary_face_detections(image, detections, min_conf)
     detections = normalize_detection_boxes_for_frame(detections, frame)
     # Object settings (default mode + per-label overrides + still-alert
     # thresholds) drive both the still/moving filter and the still-dwell

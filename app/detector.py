@@ -1024,6 +1024,65 @@ def _detect_model_type(model_path: str) -> bool:
     return filename.startswith('yolo26')
 
 
+def create_face_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector | None:
+    """Build the optional secondary face detector, or ``None`` when unused.
+
+    Runs alongside the primary object detector so a COCO model (person, car, …)
+    and a face-detection model can both produce detections in the same cycle.
+    Returns ``None`` -- rather than an unavailable detector -- when the feature
+    is disabled or no face model is configured/installed; the live pipeline
+    simply skips the extra pass. A genuinely broken configuration (file exists
+    but fails to load) returns the detector with ``available=False`` and an
+    ``unavailable_reason`` so status surfaces can show why.
+    """
+    enabled = ai_config.get('face_enabled', False)
+    if isinstance(enabled, str):
+        enabled = enabled.strip().lower() in {'1', 'true', 'yes', 'on'}
+    if not enabled:
+        return None
+    raw_model_path = str(ai_config.get('face_model_path') or '').strip()
+    if not raw_model_path:
+        return None
+    resolved = _resolve_project_path(raw_model_path)
+    # Never build a second session for the same file the primary detector is
+    # already running (e.g. the operator made a face model the active primary).
+    primary = ai_config.get('model_path')
+    if primary and _resolve_project_path(str(primary)).resolve() == resolved.resolve():
+        return None
+    if not resolved.is_file():
+        return None
+    def _optional_int(key: str) -> int | None:
+        value = ai_config.get(key)
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+    confidence = ai_config.get('face_confidence')
+    try:
+        face_confidence = float(confidence) if confidence not in (None, '') else float(ai_config.get('confidence', 0.45))
+    except (TypeError, ValueError):
+        face_confidence = 0.45
+    nms_free = bool(ai_config.get('nms_free')) or _detect_model_type(raw_model_path)
+    return OnnxYoloDetector(
+        model_path=raw_model_path,
+        labels_path=str(ai_config.get('face_labels_path') or 'models/face.names'),
+        confidence=face_confidence,
+        iou_threshold=float(ai_config.get('iou_threshold', 0.45)),
+        input_size=_optional_int('input_size') or 640,
+        categories=[],
+        num_threads=_optional_int('inference_threads'),
+        max_concurrency=_optional_int('max_concurrent_inferences'),
+        device=str(ai_config.get('device', 'auto')),
+        gpu_mem_limit=_optional_int('gpu_mem_limit'),
+        nms_free=nms_free,
+        execution_mode=str(ai_config.get('execution_mode', 'parallel') or 'parallel').lower(),
+        confidence_only_nms=_resolve_confidence_only_nms(ai_config.get('confidence_only_nms'), nms_free),
+        precision=str(ai_config.get('precision', 'fp32') or 'fp32').strip().lower(),
+        use_io_binding=_coerce_bool(ai_config.get('use_io_binding', False)),
+        keypoint_count=_optional_int('face_keypoint_count') if _optional_int('face_keypoint_count') is not None else 5,
+    )
+
+
 def create_detector(ai_config: dict[str, Any]) -> OnnxYoloDetector:
     backend = str(ai_config.get("backend", "onnx")).lower()
     if backend != "onnx":

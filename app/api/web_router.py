@@ -341,10 +341,9 @@ def arcface_page(request: Request, web_dir: Path = Depends(get_web_dir)):
 @router.get('/people')
 def people_page(request: Request, web_dir: Path = Depends(get_web_dir)):
     require_admin(request)
-    page_path = web_dir / 'people.html'
-    if page_path.exists():
-        return FileResponse(page_path)
-    return root(web_dir=web_dir)
+    # People enrolment moved into the Face Recognition page's People tab;
+    # the hash opens that tab directly via initDaygleTabs' deep-linking.
+    return RedirectResponse('/face-recognition#people', status_code=303)
 
 
 @router.get('/yamnet-tflite')

@@ -7,6 +7,7 @@
   <title>ONNX - Daygle AI Camera</title>
   <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/onnx-model-sections.css" />
   <link rel="stylesheet" href="/static/model-card-messages.css" />
 </head>
 <body>
@@ -96,6 +97,22 @@
         <label>
           <span>Min Confidence <span class="info-tip" data-tip="Minimum confidence score (0-1) a detection must reach to be reported. Detections below this are discarded before alert matching. Per-label thresholds on the Zones page override this global value. Default: 0.45" title="Minimum confidence score (0-1) a detection must reach to be reported. Detections below this are discarded before alert matching. Per-label thresholds on the Zones page override this global value. Default: 0.45" tabindex="0" aria-label="Help: Minimum confidence score (0-1) a detection must reach to be reported. Detections below this are discarded before alert matching. Per-label thresholds on the Zones page override this. Default: 0.45"></span></span>
           <input name="confidence" type="number" min="0" max="1" step="0.01" value="0.45" /></label>
+        </div>
+
+        <p class="settings-device-group">Secondary Face Model <span class="settings-device-note">Runs a face detector alongside the object model above</span></p>
+        <div class="form-grid">
+        <label>
+          <span>Face Detection <span class="info-tip" data-tip="Run a dedicated face-detection model in parallel with the primary object model, so COCO objects (person, car…) and faces are detected at the same time. Requires an installed YOLO11 · Face model from the Models tab." title="Run a dedicated face-detection model in parallel with the primary object model, so COCO objects (person, car…) and faces are detected at the same time. Requires an installed YOLO11 · Face model from the Models tab." tabindex="0" aria-label="Help: Run a dedicated face-detection model in parallel with the primary object model"></span></span>
+          <select name="face_enabled">
+            <option value="false">Disabled</option>
+            <option value="true">Enabled</option>
+          </select></label>
+        <label>
+          <span>Face Model <span class="info-tip" data-tip="The installed face-family ONNX model used for the secondary pass. Install one from the Models tab above; this list fills automatically. Leave empty to disable." title="The installed face-family ONNX model used for the secondary pass. Install one from the Models tab above; this list fills automatically." tabindex="0" aria-label="Help: The installed face-family ONNX model used for the secondary pass"></span></span>
+          <select name="face_model_path" id="faceModelSelect"><option value="">None installed</option></select></label>
+        <label>
+          <span>Face Confidence <span class="info-tip" data-tip="Minimum confidence for the secondary face pass (0-1). Leave blank to inherit Min Confidence above. Faces are small targets - a lower value like 0.30 often catches distant faces better." title="Minimum confidence for the secondary face pass (0-1). Leave blank to inherit Min Confidence above." tabindex="0" aria-label="Help: Minimum confidence for the secondary face pass"></span></span>
+          <input name="face_confidence" type="number" min="0" max="1" step="0.01" placeholder="Inherit Min Confidence" /></label>
         </div>
         <details class="settings-advanced">
           <summary>Advanced</summary>

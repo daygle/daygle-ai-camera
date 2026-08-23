@@ -238,6 +238,12 @@ apply_cameras_settings: Any = None
 apply_storage_and_recording_settings: Any = None
 reload_detector: Any = None
 
+# Optional secondary face detector (OnnxYoloDetector or None). Built alongside
+# ``detector`` so a COCO object model and a face model can run in parallel on
+# the same frame; see app.detector.create_face_detector.
+face_detector: Any = None
+last_face_detector_error: str | None = None
+
 # ---------------------------------------------------------------------------
 # Settings-replacement lock (Bug 6)
 # ---------------------------------------------------------------------------

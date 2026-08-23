@@ -165,6 +165,9 @@ def _startup() -> None:
     _state.camera = camera_instances[camera_config['id']] if camera_config else None
     _state.detector = create_detector(effective_ai_config())
     _state.last_detector_error = getattr(_state.detector, 'unavailable_reason', None)
+    from app.detector import create_face_detector
+    _state.face_detector = create_face_detector(effective_ai_config())
+    _state.last_face_detector_error = getattr(_state.face_detector, 'unavailable_reason', None) if _state.face_detector else None
     alerts = AlertEngine([])
     _state.alerts = alerts
     _state.recording_service.diagnostic_callback = log_camera_diagnostic

@@ -208,15 +208,24 @@ def motion_mode_for_label(
     """
     resolved = settings if settings is not None else effective_object_settings()
     default_mode = normalize_mode(resolved.get('default_mode'), MODE_MOVING)
+    canonical = canonical_label(label)
+    # Faces default to "moving and still": someone standing still facing a
+    # camera is exactly the case face detection/recognition exists for, yet
+    # under the global moving-only default their background-absorbed pixels
+    # classify as "still" and every face would be silently dropped. An
+    # explicit per-label override (Face Recognition page) still wins.
+    if canonical == 'face':
+        labels = resolved.get('labels')
+        if isinstance(labels, dict) and 'face' in labels:
+            return normalize_mode(labels['face'], MODE_ANY)
+        return MODE_ANY
     labels = resolved.get('labels')
     if isinstance(labels, dict):
-        canonical = canonical_label(label)
-        if canonical:
-            if canonical in labels:
-                return normalize_mode(labels[canonical], default_mode)
-            group_mode = _group_mode_for_label(canonical, resolved, default_mode)
-            if group_mode is not None:
-                return group_mode
+        if canonical and canonical in labels:
+            return normalize_mode(labels[canonical], default_mode)
+        group_mode = _group_mode_for_label(canonical, resolved, default_mode) if canonical else None
+        if group_mode is not None:
+            return group_mode
     return default_mode
 
 

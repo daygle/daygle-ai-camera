@@ -525,6 +525,15 @@ def delete_model(model_name: str, imgsz: int | None = None) -> dict[str, Any]:
             status_code=400,
             detail=f"Cannot delete '{model_name}' because it is the active model. Switch to another model first."
         )
+    # Also protect the secondary face model while it is enabled and in use.
+    if (
+        ai_settings.get('face_enabled')
+        and _same_model_path(str(ai_settings.get('face_model_path') or ''), rel_path)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete '{model_name}' because it is the active face detection model. Disable face detection or choose another face model first."
+        )
 
     # Delete the source together with its INT8 cache under the same advisory
     # lock used by quantization. This prevents a concurrent worker from
@@ -635,7 +644,7 @@ def auto_download_default_model() -> None:
     threading.Thread(target=_background_download, name='model-auto-download', daemon=True).start()
 
 
-def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int = 640) -> dict[str, Any]:
+def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int = 640, configure_face: bool = False) -> dict[str, Any]:
     if model_name not in YOLO_MODELS:
         raise HTTPException(status_code=400, detail=f"Unknown model '{model_name}'. Available: {', '.join(YOLO_MODELS)}")
     info = YOLO_MODELS[model_name]
@@ -723,6 +732,23 @@ def _do_download_model(model_name: str, switch_active: bool = True, imgsz: int =
         _write_installed_models(installed_meta)
     ai_settings = effective_ai_config()
     rel_path = _relative_model_path(destination)
+    # Face-family downloads never take over the PRIMARY object-detector slot:
+    # they are wired into the secondary face pass instead (face_enabled +
+    # face_model_path), leaving the active COCO/object model untouched.
+    if configure_face:
+        updated = validate_ai_settings({
+            **ai_settings,
+            'face_enabled': True,
+            'face_model_path': rel_path,
+        })
+        _state.database.set_setting('ai', updated, utc_now())
+        rebuild_face_detector = getattr(_state, 'rebuild_face_detector', None)
+        reloaded = False
+        error = None
+        if callable(rebuild_face_detector):
+            rebuild_face_detector(updated)
+            reloaded = True
+        return {'ok': True, 'message': f"Exported {info['label']} ONNX to {rel_path} and enabled it as the Face Detection model.", 'model_path': rel_path, 'bytes': exported_bytes, 'reload_succeeded': reloaded, 'reload_error': error, 'status': detector_status(updated)}
     is_active = _same_model_path(ai_settings.get('model_path'), rel_path)
     if switch_active or is_active:
         # Persist the resolution actually used for this export. The model

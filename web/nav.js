@@ -250,7 +250,8 @@ window.daygleAuthReady = (async () => {
         { href: '/objects', match: '/objects', label: 'Objects' },
         { href: '/sounds', match: '/sounds', label: 'Sounds' },
         { href: '/face-recognition', match: '/face-recognition', label: 'Face Recognition' },
-        { href: '/people', match: '/people', label: 'People' },
+        // People enrolment lives on the Face Recognition page's People tab
+        // (/face-recognition#people); /people redirects there.
       ],
     },
     {

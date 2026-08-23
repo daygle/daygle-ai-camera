@@ -92,10 +92,18 @@ def list_ai_models():
     used when switching the active detector.
     """
     models_dir = BASE_DIR / 'models'
-    active_path = str(effective_ai_config().get('model_path') or '').replace('\\', '/')
+    ai_settings = effective_ai_config()
+    active_path = str(ai_settings.get('model_path') or '').replace('\\', '/')
+    face_active_path = str(ai_settings.get('face_model_path') or '').replace('\\', '/')
     installed_meta = _read_installed_models()
+
+    def _model_family(info: dict) -> str:
+        """Face-family catalog entries ship their own ``face.names`` labels."""
+        return 'face' if str(info.get('labels') or '').endswith('face.names') else 'object'
+
     result = []
     for model_id, info in YOLO_MODELS.items():
+        family = _model_family(info)
         variants = _model_variants(model_id, installed_meta)
         if not variants:
             result.append({
@@ -127,6 +135,7 @@ def list_ai_models():
             'path': (models_dir / info['onnx']).relative_to(BASE_DIR).as_posix(),
             'installed': False,
             'active': False,
+            'family': family,
             'size_bytes': None,
             'installed_version': None,
             'exported_imgsz': None,
@@ -144,7 +153,12 @@ def list_ai_models():
                 'nms_free': info.get('nms_free', False),
                 'path': path,
                 'installed': absolute.is_file(),
-                'active': _same_model_path(active_path, path),
+                # Face models are "in use" when they are the configured
+                # secondary face model -- never by being the active PRIMARY,
+                # which is always an object model now that the face pass is
+                # separate.
+                'active': _same_model_path(face_active_path if family == 'face' else active_path, path),
+                'family': family,
                 'size_bytes': absolute.stat().st_size if absolute.is_file() else None,
                 'installed_version': variant.get('version'),
                 'exported_imgsz': int(variant['imgsz']),
@@ -173,8 +187,11 @@ async def download_ai_model(request: Request, db=Depends(get_database)):
     # ``update_ai_settings``. Without this row, an admin replacement
     # of the active ONNX model has no audit entry pointing back to
     # who kicked it off.
+    # Face-family downloads configure the SECONDARY face pass (see
+    # ``_do_download_model``) instead of replacing the active object model.
+    is_face_model = str(info.get('labels') or '').endswith('face.names')
     write_audit_log(request, db, 'download', 'settings.ai.model',
-                    details={'model_id': model_name, 'switch_active': True, 'imgsz': imgsz})
+                    details={'model_id': model_name, 'switch_active': not is_face_model, 'configure_face': is_face_model, 'imgsz': imgsz})
     # Round-6 / N2 removal (drop N2 entirely (B3)): the previous SHA-256
     # pin-on-upstream gate has been removed because ``_do_download_model``
     # produces a locally-exported ONNX binary via the Ultralytics SDK
@@ -187,7 +204,7 @@ async def download_ai_model(request: Request, db=Depends(get_database)):
     # ``_do_download_model`` continues to capture byte-fingerprints for
     # local auditing. The whitelist above (``YOLO_MODELS`` membership
     # check) remains the active gate against off-list blob fetches.
-    return await run_in_threadpool(_do_download_model, model_name, True, imgsz)
+    return await run_in_threadpool(_do_download_model, model_name, not is_face_model, imgsz, is_face_model)
 
 
 @router.get('/api/settings/ai/check-model-updates')
@@ -264,11 +281,17 @@ async def update_ai_model(request: Request, db=Depends(get_database)):
         # With multiple installed resolutions, update the currently active
         # variant by default. This avoids silently re-exporting a different
         # size merely because it happens to be the metadata summary variant.
-        active_path = _normalise_model_path(effective_ai_config().get('model_path'))
+        # Both the primary object model AND the secondary face model count as
+        # "active" so updating an in-use face card targets its real resolution.
+        ai_settings = effective_ai_config()
+        active_paths = {
+            _normalise_model_path(ai_settings.get('model_path')),
+            _normalise_model_path(ai_settings.get('face_model_path')),
+        }
         active_variant = next(
             (
                 variant for variant in _model_variants(model_name, installed_meta).values()
-                if _normalise_model_path(variant.get('path')) == active_path
+                if _normalise_model_path(variant.get('path')) in active_paths
             ),
             None,
         )

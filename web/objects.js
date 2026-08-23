@@ -101,7 +101,11 @@ function renderTable() {
   }
   tableWrap.hidden = false;
   emptyEl.hidden = true;
-  tableBody.innerHTML = availableLabels.map((label) => {
+  // Face has its own detection-mode control on the Face Recognition page, so
+  // it is not rendered as a row here. Any persisted face override still sits
+  // in ``labels`` and round-trips unchanged when this page saves.
+  const tableLabels = availableLabels.filter((label) => String(label).trim().toLowerCase() !== 'face');
+  tableBody.innerHTML = tableLabels.map((label) => {
     const title = escapeHtml(titleCase(label));
     const override = labels[label];
     // Effective and the "Inherit (…)" hint follow the same precedence the
