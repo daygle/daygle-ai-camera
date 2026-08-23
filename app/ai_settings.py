@@ -471,6 +471,15 @@ def detector_status(ai_settings: dict[str, Any]) -> dict[str, Any]:
         'active_precision': ai_status.get('active_precision'),
         'active_device': ai_status.get('active_device'),
         'model_name': ai_status.get('model_name'),
+        # Secondary face detector runtime state. These are COMPUTED fields
+        # (from ``_state.face_detector``), not persisted settings, so they must
+        # be passed through explicitly -- ``**ai_settings`` only carries stored
+        # keys, which previously dropped ``face_model_loaded`` from this payload
+        # and left the ONNX status card stuck on "Not loaded" even while the
+        # face detector was running.
+        'face_enabled': ai_status['face_enabled'],
+        'face_model_path': ai_status['face_model_path'],
+        'face_model_loaded': ai_status['face_model_loaded'],
         # Surface the normalised tri-state so the settings form's NMS-dedupe
         # select reflects the persisted value (defaulting to 'auto') rather
         # than a raw legacy bool or a missing key.

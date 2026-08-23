@@ -21,6 +21,7 @@ from __future__ import annotations
 import threading
 from typing import Any
 
+from app.face_detection_rules import enabled_unknown_rule
 from app.face_recognition_service import get_face_recognition_service
 
 try:
@@ -144,18 +145,23 @@ def face_identity_metadata(detections: list[dict[str, Any]]) -> dict[str, Any]:
 def unknown_face_alerts(camera_id: str, detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return the unknown-face detections that should raise a new alert.
 
-    A no-op (``[]``) unless recognition is available and ``alert_unknown`` is on.
-    Only faces already annotated as unknown (``recognized`` with no
-    ``person_id``) count, and each is alerted **once per track** -- a stranger
-    who lingers does not flood the alert feed. Tracks are forgotten when they
-    leave the frame, so the same person returning later alerts again.
+    A no-op (``[]``) unless recognition is available AND the ``_unknown``
+    system face-detection rule is enabled (the Face Rules tab is where
+    unknown-person alerting is configured -- it replaced the legacy
+    ``alert_unknown`` recognition setting). Only faces already annotated as
+    unknown (``recognized`` with no ``person_id``) count, and each is alerted
+    **once per track** -- a stranger who lingers does not flood the alert
+    feed. Tracks are forgotten when they leave the frame, so the same person
+    returning later alerts again.
 
     Must be called after :func:`annotate_face_identities` (it reads the identity
     annotations) and only decides *which* faces are alert-worthy; the caller
     turns them into alert-history entries.
     """
     service = get_face_recognition_service()
-    if not service.available or not getattr(service, 'alert_unknown', False):
+    if not service.available:
+        return []
+    if enabled_unknown_rule() is None:
         return []
     face_track_ids: set[Any] = set()
     new_alerts: list[dict[str, Any]] = []

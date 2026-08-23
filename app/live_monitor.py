@@ -649,7 +649,8 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     object_detections = annotate_face_identities(camera_id, object_detections, frame)
     # Alert-on-unknown (Stage 2c): a detected face matching no enrolled person is
     # itself alertable ("stranger"), one alert per track. Empty unless
-    # recognition is enabled with ``alert_unknown`` on.
+    # recognition is enabled and the ``_unknown`` system face-detection rule
+    # (Face Rules tab) is on.
     _unknown_face_alerts = unknown_face_alerts(camera_id, object_detections)
     # Face detection rules (Stage 2c): per-person alert rules with email/push
     # notifications, checked after identity annotation so each face carries

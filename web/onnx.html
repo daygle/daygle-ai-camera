@@ -15,7 +15,7 @@
       <div>
         <p class="eyebrow">Intelligence</p>
         <h1>ONNX</h1>
-        <p class="muted">Configure ONNX object detection and the parallel face-detection pass, install models, and reload the detector. The object model and face model run side by side on the same frames.</p>
+        <p class="muted">Configure ONNX object detection and face detection, install models, and reload the detector. The object model and face model run side by side on the same frames.</p>
       </div>
     </header>
 
@@ -32,7 +32,7 @@
         <div class="settings-section-icon">📦</div>
         <div>
           <h2>Object Detection Status</h2>
-          <p class="settings-section-subtitle">The PRIMARY detector - its labels (person, car…) are what zones, alerts, and recordings use.</p>
+          <p class="settings-section-subtitle">Detects everyday objects (person, car…) - these labels are what zones, alerts, and recordings use.</p>
         </div>
       </div>
       <div id="settingsMessage" class="muted"></div>
@@ -49,7 +49,7 @@
         <div class="settings-section-icon">👤</div>
         <div>
           <h2>Face Detection Status</h2>
-          <p class="settings-section-subtitle">The secondary pass - runs ALONGSIDE the object model so faces and objects are detected on the same frames. Configure it under Settings → Secondary Face Model.</p>
+          <p class="settings-section-subtitle">An extra detector for faces, running at the same time as object detection so both are seen in the same frames. Configure it under Settings → Face Detection.</p>
         </div>
       </div>
       <div id="faceStatusPanel" class="status-panel"></div>
@@ -66,7 +66,7 @@
         <div class="settings-section-icon">📦</div>
         <div>
           <h2>Object Detection Models</h2>
-          <p class="settings-section-subtitle">The PRIMARY detector - its labels (person, car…) are what zones and alerts use. Larger models are more accurate but use more CPU.</p>
+          <p class="settings-section-subtitle">Detects everyday objects (person, car…) - these labels are what zones and alerts use. Larger models are more accurate but use more CPU.</p>
         </div>
       </div>
       <div id="objectModelList" class="model-card-grid"></div>
@@ -78,11 +78,11 @@
         <div class="settings-section-icon">👤</div>
         <div>
           <h2>Face Detection Models</h2>
-          <p class="settings-section-subtitle">Run ALONGSIDE the object model so faces and objects are detected at the same time. Download one and enable it under Settings → Secondary Face Model.</p>
+          <p class="settings-section-subtitle">An extra detector for faces, running at the same time as object detection. Download one and enable it under Settings → Face Detection.</p>
         </div>
       </div>
       <div id="faceModelList" class="model-card-grid"></div>
-      <p id="faceModelsEmpty" class="muted" hidden>No face models yet - download one above to enable the parallel face pass.</p>
+      <p id="faceModelsEmpty" class="muted" hidden>No face models yet - download one above to enable face detection.</p>
     </section>
 
     <div class="button-row" style="margin-top:16px">
@@ -124,16 +124,16 @@
           <input name="confidence" type="number" min="0" max="1" step="0.01" value="0.45" /></label>
         </div>
 
-        <p class="settings-device-group">Secondary Face Model <span class="settings-device-note">Runs a face detector alongside the object model above</span></p>
+        <p class="settings-device-group">Face Detection <span class="settings-device-note">Runs at the same time as object detection above</span></p>
         <div class="form-grid">
         <label>
-          <span>Face Detection <span class="info-tip" data-tip="Run a dedicated face-detection model in parallel with the primary object model, so COCO objects (person, car…) and faces are detected at the same time. Requires an installed YOLO11 · Face model from the Models tab." title="Run a dedicated face-detection model in parallel with the primary object model, so COCO objects (person, car…) and faces are detected at the same time. Requires an installed YOLO11 · Face model from the Models tab." tabindex="0" aria-label="Help: Run a dedicated face-detection model in parallel with the primary object model"></span></span>
+          <span>Face Detection <span class="info-tip" data-tip="Run an extra face-detection model at the same time as object detection, so objects (person, car…) and faces are detected in the same frames. Requires an installed YOLO11 · Face model from the Models tab." title="Run an extra face-detection model at the same time as object detection, so objects (person, car…) and faces are detected in the same frames. Requires an installed YOLO11 · Face model from the Models tab." tabindex="0" aria-label="Help: Run an extra face-detection model at the same time as object detection"></span></span>
           <select name="face_enabled">
             <option value="false">Disabled</option>
             <option value="true">Enabled</option>
           </select></label>
         <label>
-          <span>Face Model <span class="info-tip" data-tip="The installed face-family ONNX model used for the secondary pass. Install one from the Models tab above; this list fills automatically. Leave empty to disable." title="The installed face-family ONNX model used for the secondary pass. Install one from the Models tab above; this list fills automatically." tabindex="0" aria-label="Help: The installed face-family ONNX model used for the secondary pass"></span></span>
+          <span>Face Model <span class="info-tip" data-tip="The installed face-model ONNX used for face detection. Install one from the Models tab above; this list fills automatically. Leave empty to disable." title="The installed face-model ONNX used for face detection. Install one from the Models tab above; this list fills automatically." tabindex="0" aria-label="Help: The installed face-model ONNX used for face detection"></span></span>
           <select name="face_model_path" id="faceModelSelect"><option value="">None installed</option></select></label>
         </div>
         <details class="settings-advanced">
@@ -193,7 +193,7 @@
           <span>Model Path <span class="info-tip" data-tip="Path to the active ONNX model file. Managed by the Model Library above - use Download &amp; Install or the Use button to change it. Default: models/yolo11n.onnx" title="Path to the active ONNX model file. Managed by the Model Library above - use Download &amp; Install or the Use button to change it. Default: models/yolo11n.onnx" tabindex="0" aria-label="Help: Path to the active ONNX model file. Managed by the Model Library above. Default: models/yolo11n.onnx"></span></span>
           <input name="model_path" readonly /></label>
         <label>
-          <span>Face Model Path <span class="info-tip" data-tip="Path to the installed face-family ONNX used by the parallel face pass. Managed by the Face Model selector above and the Model Library - empty when the face pass is off." title="Path to the installed face-family ONNX used by the parallel face pass. Managed by the Face Model selector above and the Model Library - empty when the face pass is off." tabindex="0" aria-label="Help: Path to the installed face-family ONNX used by the parallel face pass"></span></span>
+          <span>Face Model Path <span class="info-tip" data-tip="Path to the installed face-model ONNX used for face detection. Managed by the Face Model selector above and the Model Library - empty when face detection is off." title="Path to the installed face-model ONNX used for face detection. Managed by the Face Model selector above and the Model Library - empty when face detection is off." tabindex="0" aria-label="Help: Path to the installed face-model ONNX used for face detection"></span></span>
           <input name="face_model_path_display" readonly placeholder="Not configured" /></label>
         <label>
           <span>Labels Path <span class="info-tip" data-tip="Path to the text file containing one object label per line. Managed alongside the model. Default: models/coco.names" title="Path to the text file containing one object label per line. Managed alongside the model. Default: models/coco.names" tabindex="0" aria-label="Help: Path to the text file containing one object label per line. Managed alongside the model. Default: models/coco.names"></span></span>

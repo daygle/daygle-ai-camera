@@ -169,7 +169,7 @@ function renderStatus(status) {
   // server heals this automatically at startup; show why detection looks
   // broken if it ever persists (e.g. heal could not run).
   if (status.primary_is_face_model) {
-    objectRows.push(safeHtml`<div class="wide"><span style="color:var(--danger)">Object Detection</span><strong style="color:var(--danger)">${status.model_path || 'The active model'} is a face model running as the PRIMARY detector - object detection is disabled. Restart the server to auto-migrate it to the parallel Face Model slot, or select an object model above.</strong></div>`);
+    objectRows.push(safeHtml`<div class="wide"><span style="color:var(--danger)">Object Detection</span><strong style="color:var(--danger)">${status.model_path || 'The active model'} is a face model running as the object detector - object detection is disabled. Restart the server to auto-migrate it to the Face Model slot, or select an object model above.</strong></div>`);
   }
   objectStatusPanel.innerHTML = objectRows.join('');
 
@@ -178,10 +178,12 @@ function renderStatus(status) {
   const faceState = !status.face_enabled
     ? 'Disabled'
     : (status.face_model_loaded ? `Loaded ${status.face_model_path || ''}` : 'Not loaded');
+  // Face Confidence is intentionally NOT shown here: it defaults to inheriting
+  // the global Min Confidence, so a static "Inherit Min Confidence" row was
+  // noise. The value is still editable under Settings.
   const faceRows = [
     safeHtml`<div><span>Face Detection</span><strong class="ai-mode ${status.face_enabled ? 'onnx-active' : 'ai-disabled'}">${status.face_enabled ? 'Enabled' : 'Disabled'}</strong></div>`,
     safeHtml`<div><span>Face Model</span><strong>${faceState}</strong></div>`,
-    safeHtml`<div><span>Face Confidence</span><strong>${status.face_confidence != null && status.face_confidence !== '' ? Number(status.face_confidence) : 'Inherit Min Confidence'}</strong></div>`,
   ];
   if (status.face_enabled && status.face_model_loaded === false) {
     faceRows.push(safeHtml`<div class="wide"><span style="color:var(--danger)">Face Model Error</span><strong style="color:var(--danger)">${status.face_model_path ? `Face model not found or failed to load: ${status.face_model_path}` : 'No face model selected - choose one under Settings or download one on the Models tab.'}</strong></div>`);

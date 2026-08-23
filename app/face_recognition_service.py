@@ -39,7 +39,6 @@ class FaceRecognitionService:
             self.threshold = float(config.get('match_threshold', 0.5))
         except (TypeError, ValueError):
             self.threshold = 0.5
-        self.alert_unknown = bool(config.get('alert_unknown', False))
         try:
             self.min_face_pixels = max(0, int(config.get('min_face_pixels', 0) or 0))
         except (TypeError, ValueError):
@@ -107,7 +106,7 @@ class FaceRecognitionService:
         Returns ``None`` -- never raises -- in every not-ready state: disabled,
         no model, a face below ``min_face_pixels``, an empty enrolment store, or
         a best score under the threshold. Callers treat ``None`` as "no known
-        person" (which, when ``alert_unknown`` is set, is itself actionable).
+        person" (unknown-person alerting is configured via the Face Rules tab).
         """
         if not self.available:
             return None

@@ -51,8 +51,6 @@ async function saveFaceMode() {
 
 function fillForm(status) {
   frForm.enabled.value = status.enabled ? 'true' : 'false';
-  frForm.alert_unknown.value = status.alert_unknown ? 'true' : 'false';
-  frForm.alert_unknown_email.value = status.alert_unknown_email ?? '';
   frForm.match_threshold.value = status.match_threshold ?? 0.5;
   frForm.min_face_pixels.value = status.min_face_pixels ?? 0;
   frForm.retention_days.value = status.retention_days ?? 0;
@@ -86,10 +84,10 @@ async function loadSettings() {
 
 async function saveSettings(event) {
   event.preventDefault();
+  // Unknown-face alerting (enable/email/push/recipients) is configured on the
+  // Face Rules tab via the Unknown Person system rule, not here.
   const body = {
     enabled: frForm.enabled.value === 'true',
-    alert_unknown: frForm.alert_unknown.value === 'true',
-    alert_unknown_email: frForm.alert_unknown_email.value.trim(),
     match_threshold: parseFloat(frForm.match_threshold.value),
     min_face_pixels: parseInt(frForm.min_face_pixels.value || '0', 10),
     retention_days: parseInt(frForm.retention_days.value || '0', 10),

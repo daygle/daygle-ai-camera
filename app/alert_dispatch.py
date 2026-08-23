@@ -85,7 +85,6 @@ from app.config_facades import (
     effective_ai_config,
     effective_cameras_config,
     effective_email_alert_settings,
-    effective_face_recognition_config,
     effective_push_notification_settings,
 )
 from app.email_alerts import EmailAlertService, EmailAlertError
@@ -295,14 +294,22 @@ def deliver_email_alerts(
         )
         for alert in triggered
     )
-    # Also check for unknown face alerts with configured email addresses
-    face_config = effective_face_recognition_config()
-    unknown_face_email = str(face_config.get('alert_unknown_email') or '').strip()
+    # Unknown-face alerts (rule_name == 'Unknown face') are governed by the
+    # ``_unknown`` system face-detection rule (Face Rules tab), which carries
+    # its own email recipients -- replacing the removed ``alert_unknown_email``
+    # recognition setting.
+    from app.face_detection_rules import (
+        effective_face_detection_rules,
+        enabled_unknown_rule,
+        face_rule_email_recipients,
+        face_rule_notify_active_now as _face_rule_active,
+    )
+    _unknown_email_rule = enabled_unknown_rule()
+    unknown_face_email_recipients = face_rule_email_recipients(_unknown_email_rule) if _unknown_email_rule else []
     has_unknown_face_alerts = any(str(alert.get('rule_name') or '') == 'Unknown face' for alert in triggered)
-    if has_unknown_face_alerts and unknown_face_email:
+    if has_unknown_face_alerts and unknown_face_email_recipients:
         any_email_enabled = True
     # Face detection rules: per-person alerts with their own email recipients
-    from app.face_detection_rules import effective_face_detection_rules, face_rule_email_recipients, face_rule_notify_active_now as _face_rule_active
     _face_rules_list = effective_face_detection_rules().get('rules') or []
     _face_rules_by_name = {str(r.get('name')): r for r in _face_rules_list}
     _has_face_rule_emails = any(
@@ -352,12 +359,12 @@ def deliver_email_alerts(
         rule = rules_by_name.get(str(alert.get('rule_name')))
         # Handle unknown face alerts with configured email addresses
         if str(alert.get('rule_name') or '') == 'Unknown face':
-            if unknown_face_email:
+            if unknown_face_email_recipients:
                 try:
                     mailer.send_alert(
                         alert,
                         event_id=event_id,
-                        recipients=unknown_face_email.split(','),
+                        recipients=unknown_face_email_recipients,
                         camera_name=camera_name,
                         snapshot_bytes=snapshot_bytes,
                         triggered_labels=all_triggered_labels,
@@ -447,15 +454,18 @@ def deliver_push_notifications(
     rules_by_name = {str(rule.get('name')): rule for rule in rules or []}
     notifier = PushNotificationService(push_settings)
     # Unknown-face alerts are not backed by a zone rule (they self-debounce
-    # per stranger track); they are governed by the face-recognition
-    # ``alert_unknown`` setting instead, mirroring the email-side special
+    # per stranger track); they are governed by the ``_unknown`` system
+    # face-detection rule (Face Rules tab), mirroring the email-side special
     # case in ``deliver_email_alerts``.
-    unknown_face_push_active = bool(
-        effective_face_recognition_config().get('alert_unknown')
+    from app.face_detection_rules import (
+        effective_face_detection_rules as _face_rules_fn,
+        enabled_unknown_rule as _unknown_push_rule_fn,
+        face_rule_notify_active_now as _face_rule_active,
     )
+    _unknown_push_rule = _unknown_push_rule_fn()
+    unknown_face_push_active = bool(_unknown_push_rule and _unknown_push_rule.get('push_enabled'))
     # Face detection rules: per-person push notification lookup, same
     # as the email path in deliver_email_alerts.
-    from app.face_detection_rules import effective_face_detection_rules as _face_rules_fn, face_rule_notify_active_now as _face_rule_active
     _face_rules_list_push = _face_rules_fn().get('rules') or []
     _face_rules_by_name = {str(r.get('name')): r for r in _face_rules_list_push}
     all_triggered_labels = sorted(
@@ -471,7 +481,7 @@ def deliver_push_notifications(
         if rule_name == 'Unknown face':
             if not unknown_face_push_active:
                 logger.debug(
-                    'Push skipped for event %s rule %r: face-recognition alert_unknown is off',
+                    'Push skipped for event %s rule %r: _unknown face rule push is off',
                     event_id,
                     rule_name,
                 )

@@ -597,6 +597,42 @@ def test_detector_status_uses_load_labels_when_returns_labels(monkeypatch, ais):
     assert out['categories'] == ['inline-cat']
 
 
+def test_detector_status_surfaces_face_runtime_state(monkeypatch, ais):
+    """``detector_status`` must pass the face detector's COMPUTED runtime
+    state (``face_enabled`` / ``face_model_path`` / ``face_model_loaded``)
+    through to the settings payload. These are not persisted settings, so
+    spreading only ``**ai_settings`` dropped them -- the ONNX status card
+    showed 'Not loaded' even while the face detector was running."""
+    ai_settings_module, ai_state, _capture = _install_ai_dependencies(
+        monkeypatch,
+        detector=_DetectorStub(backend='onnx', available=True),
+        detector_loaded_for=True,
+        onnx_runtime_installed=True,
+        model_exists=True,
+    )
+    monkeypatch.setattr(ai_settings_module, 'load_labels', lambda labels_path, categories: [])
+    monkeypatch.setattr(ai_state, 'config', {'ai': {'categories': []}})
+    # A loaded secondary face detector (like the live pipeline uses).
+    monkeypatch.setattr(ai_state, 'face_detector', _DetectorStub(backend='onnx', available=True))
+
+    out = ais.detector_status({
+        'backend': 'onnx',
+        'face_enabled': True,
+        'face_model_path': 'models/yolov11n-face-640.onnx',
+        'face_labels_path': 'models/face.names',
+    })
+    assert out['face_enabled'] is True
+    assert out['face_model_path'] == 'models/yolov11n-face-640.onnx'
+    assert out['face_model_loaded'] is True
+
+    # With no face detector in state (face pass off / not yet built) the
+    # payload must still carry the key -- as False, not missing.
+    monkeypatch.setattr(ai_state, 'face_detector', None)
+    out = ais.detector_status({'backend': 'onnx'})
+    assert out['face_model_loaded'] is False
+    assert 'face_model_loaded' in out
+
+
 # -- validate_ai_settings -------------------------------------------------
 
 def test_validate_ai_settings_keeps_only_allowed_keys(monkeypatch, ais):

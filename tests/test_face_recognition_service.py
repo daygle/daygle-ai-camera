@@ -29,7 +29,10 @@ def test_validate_drops_unknown_keys_and_coerces_bools():
         {'enabled': 'yes', 'alert_unknown': 'on', 'model_path': 'models/arcface.onnx', 'evil': 1}
     )
     assert out['enabled'] is True
-    assert out['alert_unknown'] is True
+    # Unknown-face alerting moved to the Face Rules ``_unknown`` system rule,
+    # so the legacy settings keys are now dropped (not persisted).
+    assert 'alert_unknown' not in out
+    assert 'alert_unknown_email' not in out
     assert 'evil' not in out
 
 

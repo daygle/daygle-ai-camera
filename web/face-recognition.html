@@ -59,15 +59,6 @@
               <option value="false">Disabled</option>
             </select></label>
           <label>
-            <span>Alert On Unknown Faces <span class="info-tip" data-tip="Raise a stranger alert when a detected face does not match any enrolled person." title="Raise a stranger alert when a detected face does not match any enrolled person." tabindex="0" aria-label="Help: Raise a stranger alert when a detected face does not match any enrolled person."></span></span>
-            <select name="alert_unknown">
-              <option value="true">Enabled</option>
-              <option value="false">Disabled</option>
-            </select></label>
-          <label>
-            <span>Alert Email Addresses <span class="info-tip" data-tip="Email addresses to notify when an unknown face is detected. Comma-separated." title="Email addresses to notify when an unknown face is detected. Comma-separated." tabindex="0" aria-label="Help: Email addresses to notify when an unknown face is detected. Comma-separated."></span></span>
-            <input name="alert_unknown_email" type="email" multiple placeholder="alerts@example.com, alerts2@example.com" autocomplete="off" /></label>
-          <label>
             <span>Match Threshold <span class="info-tip" data-tip="Cosine-similarity cutoff (0-1) for matching a face to an enrolled person. Higher is stricter. Default: 0.5" title="Cosine-similarity cutoff (0-1) for matching a face to an enrolled person. Higher is stricter. Default: 0.5" tabindex="0" aria-label="Help: Cosine-similarity cutoff (0-1) for matching a face to an enrolled person. Higher is stricter. Default: 0.5"></span></span>
             <input name="match_threshold" type="number" min="0" max="1" step="0.01" /></label>
           <label>
@@ -76,12 +67,8 @@
           <label>
             <span>Identity Retention <span class="info-tip" data-tip="Days to keep identity labels on events before they are cleared. 0 keeps them forever." title="Days to keep identity labels on events before they are cleared. 0 keeps them forever." tabindex="0" aria-label="Help: Days to keep identity labels on events before they are cleared. 0 keeps them forever."></span></span>
             <input name="retention_days" type="number" min="0" step="1" /></label>
-        </div>
-
-        <p class="settings-device-group">Face Detection <span class="settings-device-note">Tuning for the parallel face-detection pass on the ONNX page</span></p>
-        <div class="form-grid">
           <label>
-            <span>Face Confidence <span class="info-tip" data-tip="Minimum confidence for the secondary face pass (0-1). Leave blank to inherit Min Confidence from the ONNX page. Faces are small targets - a lower value like 0.30 often catches distant faces better."></span></span>
+            <span>Face Confidence <span class="info-tip" data-tip="Minimum detection confidence (0-1). Leave blank to inherit Min Confidence from the ONNX page. Faces are small targets - a lower value like 0.30 often catches distant faces better." title="Minimum detection confidence (0-1). Leave blank to inherit Min Confidence from the ONNX page. Faces are small targets - a lower value like 0.30 often catches distant faces better." tabindex="0" aria-label="Help: Minimum detection confidence (0-1), blank inherits Min Confidence from the ONNX page."></span></span>
             <input name="face_confidence" type="number" min="0" max="1" step="0.01" placeholder="Inherit Min Confidence" /></label>
         </div>
         <div class="button-row">
@@ -140,7 +127,7 @@
         <div class="settings-section-icon">🔔</div>
         <div>
           <h2>Face Detection Rules</h2>
-          <p class="settings-section-subtitle">Get alerts when an enrolled person is detected on any camera. Add a rule per person, then choose email or push notifications. Unknown faces are governed by Alert On Unknown Faces on the Settings tab.</p>
+          <p class="settings-section-subtitle">Get alerts when an enrolled person is detected on any camera. Add a rule per person, then choose email or push notifications. Unknown faces are governed by the Unknown Person (System Rule) below — add it from the drop-down and choose email or push.</p>
         </div>
       </div>
       <div id="faceRulesMessage" class="muted"></div>

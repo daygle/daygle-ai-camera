@@ -135,9 +135,27 @@ def test_face_identity_metadata_empty_without_faces():
 # ---------------------------------------------------------------------------
 
 class _AlertService:
-    def __init__(self, available=True, alert_unknown=True):
+    def __init__(self, available=True):
         self.available = available
-        self.alert_unknown = alert_unknown
+
+
+def _unknown_rule(**overrides):
+    rule = {
+        'id': '_unknown', 'enabled': True, 'email_enabled': True,
+        'push_enabled': True, 'email_recipients': '', 'cooldown_minutes': 5,
+    }
+    rule.update(overrides)
+    return rule
+
+
+def _use_rule(monkeypatch, rule):
+    # Unknown-person alerting is gated on the ``_unknown`` face-detection rule
+    # (Face Rules tab), not a recognition-settings toggle. Mirror the helper's
+    # real contract: a missing or disabled rule resolves to None.
+    monkeypatch.setattr(
+        fi, 'enabled_unknown_rule',
+        lambda: rule if (rule and rule.get('enabled')) else None,
+    )
 
 
 def _unknown_face(track_id):
@@ -152,6 +170,7 @@ def _known_face(track_id):
 
 def test_unknown_alert_fires_once_per_track(monkeypatch):
     _use_service(monkeypatch, _AlertService())
+    _use_rule(monkeypatch, _unknown_rule())
     fi.reset_camera_identities('uA')
     first = fi.unknown_face_alerts('uA', [_unknown_face(1)])
     assert len(first) == 1
@@ -160,28 +179,37 @@ def test_unknown_alert_fires_once_per_track(monkeypatch):
     assert second == []
 
 
-def test_unknown_alert_off_when_setting_disabled(monkeypatch):
-    _use_service(monkeypatch, _AlertService(alert_unknown=False))
+def test_unknown_alert_off_when_rule_disabled_or_missing(monkeypatch):
+    # No ``_unknown`` rule at all -> no alerts.
+    _use_service(monkeypatch, _AlertService())
+    _use_rule(monkeypatch, None)
+    assert fi.unknown_face_alerts('uB', [_unknown_face(1)]) == []
+    # A rule present but disabled is the same as missing.
+    _use_rule(monkeypatch, _unknown_rule(enabled=False))
     assert fi.unknown_face_alerts('uB', [_unknown_face(1)]) == []
 
 
 def test_unknown_alert_off_when_service_unavailable(monkeypatch):
     _use_service(monkeypatch, _AlertService(available=False))
+    _use_rule(monkeypatch, _unknown_rule())
     assert fi.unknown_face_alerts('uC', [_unknown_face(1)]) == []
 
 
 def test_known_face_does_not_alert(monkeypatch):
     _use_service(monkeypatch, _AlertService())
+    _use_rule(monkeypatch, _unknown_rule())
     assert fi.unknown_face_alerts('uD', [_known_face(1)]) == []
 
 
 def test_untracked_unknown_face_does_not_alert(monkeypatch):
     _use_service(monkeypatch, _AlertService())
+    _use_rule(monkeypatch, _unknown_rule())
     assert fi.unknown_face_alerts('uE', [_unknown_face(None)]) == []
 
 
 def test_returning_stranger_realerts(monkeypatch):
     _use_service(monkeypatch, _AlertService())
+    _use_rule(monkeypatch, _unknown_rule())
     fi.reset_camera_identities('uF')
     assert len(fi.unknown_face_alerts('uF', [_unknown_face(1)])) == 1
     # Track 1 leaves the frame (a cycle without it) -> forgotten.

@@ -172,6 +172,15 @@ def _startup() -> None:
         heal_legacy_face_primary()
     except Exception as exc:
         _logger.warning('AI settings heal skipped: %s', exc)
+    # One-time migration: unknown-face alerting moved from the removed
+    # ``alert_unknown`` / ``alert_unknown_email`` recognition settings to the
+    # ``_unknown`` system face-detection rule (Face Rules tab). Seed the rule
+    # from any legacy config so existing deployments keep alerting.
+    try:
+        from app.face_detection_rules import heal_legacy_unknown_alert_config
+        heal_legacy_unknown_alert_config()
+    except Exception as exc:
+        _logger.warning('Unknown-face alert config heal skipped: %s', exc)
     _state.detector = create_detector(effective_ai_config())
     _state.last_detector_error = getattr(_state.detector, 'unavailable_reason', None)
     from app.detector import create_face_detector

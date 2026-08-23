@@ -180,6 +180,100 @@ def test_deliver_push_notifications_passes_all_triggered_labels(tmp_path, monkey
     assert {entry['camera_id'] for entry in captured} == {'front'}
 
 
+def _unknown_face_rule(**overrides):
+    rule = {
+        'id': '_unknown', 'name': 'Unknown Person', 'enabled': True,
+        'email_enabled': True, 'push_enabled': True,
+        'email_recipients': 'stranger@example.com, second@example.com',
+        'cooldown_minutes': 5,
+    }
+    rule.update(overrides)
+    return rule
+
+
+def _use_unknown_rule(monkeypatch, rule):
+    # Unknown-face alert delivery is driven by the ``_unknown`` system
+    # face-detection rule (Face Rules tab). ``deliver_*_alerts`` imports these
+    # helpers from app.face_detection_rules inside the function, so the
+    # monkeypatch targets that module's namespace.
+    import app.face_detection_rules as fdr
+    monkeypatch.setattr(fdr, 'enabled_unknown_rule', lambda: rule)
+    monkeypatch.setattr(fdr, 'effective_face_detection_rules', lambda: {'rules': [rule] if rule else []})
+
+
+def test_deliver_email_alerts_unknown_face_uses_unknown_rule_recipients(tmp_path, monkeypatch):
+    """Unknown-face emails use the ``_unknown`` rule's recipients (replacing
+    the removed ``alert_unknown_email`` setting); no rule means no email."""
+    _app, _ = _load_app(tmp_path, monkeypatch)
+    captured: list[dict[str, object]] = []
+
+    class FakeEmailAlertService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def send_alert(self, alert, *, event_id, recipients=None, camera_name=None,
+                       snapshot_bytes=None, triggered_labels=None, detected_at=None):
+            captured.append({'alert': alert, 'recipients': recipients})
+
+    import app.alert_dispatch as _ad
+    monkeypatch.setattr(_ad, 'effective_email_alert_settings', lambda: {'enabled': True})
+    monkeypatch.setattr(_ad, 'EmailAlertService', FakeEmailAlertService)
+    monkeypatch.setattr(
+        _ad._state.database, 'get_event',
+        lambda _event_id: {'metadata': {}, 'snapshot_path': None, 'created_at': ''},
+    )
+
+    triggered = [{'label': 'face', 'rule_name': 'Unknown face', 'confidence': 0.9,
+                  'message': 'Alert triggered: unrecognized face detected'}]
+    _use_unknown_rule(monkeypatch, _unknown_face_rule())
+
+    _ad.deliver_email_alerts(triggered, 42, rules=[])
+    assert len(captured) == 1
+    assert captured[0]['recipients'] == ['stranger@example.com', 'second@example.com']
+
+    # Rule disabled / absent -> the unknown alert is not emailed.
+    captured.clear()
+    _use_unknown_rule(monkeypatch, None)
+    _ad.deliver_email_alerts(triggered, 43, rules=[])
+    assert captured == []
+
+
+def test_deliver_push_notifications_unknown_face_uses_unknown_rule_push(tmp_path, monkeypatch):
+    """Unknown-face pushes are gated on the ``_unknown`` rule's push_enabled
+    (replacing the removed ``alert_unknown`` setting)."""
+    _app, _ = _load_app(tmp_path, monkeypatch)
+    captured: list[dict[str, object]] = []
+
+    class FakePushNotificationService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def send_alert(self, alert, *, event_id, camera_name=None, camera_id=None,
+                       triggered_labels=None, detected_at=None):
+            captured.append({'alert': alert, 'event_id': event_id})
+
+    import app.alert_dispatch as _ad
+    monkeypatch.setattr(_ad, 'effective_push_notification_settings', lambda: {'enabled': True})
+    monkeypatch.setattr(_ad, 'PushNotificationService', FakePushNotificationService)
+    monkeypatch.setattr(
+        _ad._state.database, 'get_event',
+        lambda _event_id: {'metadata': {'camera_name': 'Front Door', 'camera_id': 'front'}},
+    )
+
+    triggered = [{'label': 'face', 'rule_name': 'Unknown face', 'confidence': 0.9,
+                  'message': 'Alert triggered: unrecognized face detected'}]
+    _use_unknown_rule(monkeypatch, _unknown_face_rule(push_enabled=True))
+
+    _ad.deliver_push_notifications(triggered, 42, rules=[])
+    assert len(captured) == 1
+
+    # push_enabled off on the rule -> no push.
+    captured.clear()
+    _use_unknown_rule(monkeypatch, _unknown_face_rule(push_enabled=False))
+    _ad.deliver_push_notifications(triggered, 43, rules=[])
+    assert captured == []
+
+
 def test_alert_detection_type_classifies_every_sound_class_as_sound():
     """Every configured sound class must render "Detection Type: Sound", motion
     as "Motion", and object labels (including underscored ones) as "Object".

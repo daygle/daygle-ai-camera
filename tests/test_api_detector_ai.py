@@ -502,8 +502,25 @@ def test_ai_models_endpoint(tmp_path, monkeypatch):
             assert "approx_mb" in model
             assert "installed" in model
             assert "active" in model
+            # Every row -- including not-yet-downloaded base entries -- must
+            # carry a ``family`` so the frontend can split the Object
+            # Detection / Face Detection grids before any model is installed.
+            assert model.get("family") in ("object", "face")
         model_ids = [m["id"] for m in models]
         assert "yolov8n" in model_ids
+        face_ids = {m["id"] for m in models if m["family"] == "face"}
+        assert {"yolo11n-face", "yolo11s-face", "yolo11l-face"} <= face_ids
+        object_ids = {m["id"] for m in models if m["family"] == "object"}
+        assert "yolo11n" in object_ids
+        assert "yolov8n" in object_ids
+        # Undownloaded face entries must be flagged as face-family so they
+        # render under "Face Detection Models", not the object grid.
+        undownloaded_face = next(
+            (m for m in models if m["id"] == "yolo11n-face" and not m["installed"]),
+            None,
+        )
+        assert undownloaded_face is not None
+        assert undownloaded_face["family"] == "face"
     finally:
         server.should_exit = True
         thread.join(timeout=5)

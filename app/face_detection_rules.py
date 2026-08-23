@@ -102,6 +102,69 @@ def validate_face_detection_rules(payload: dict[str, Any]) -> dict[str, Any]:
     return {'rules': validated}
 
 
+def enabled_unknown_rule() -> dict[str, Any] | None:
+    """Return the ``_unknown`` system rule when it is enabled, else ``None``.
+
+    The ``_unknown`` rule is the single place unknown-person alerting is
+    configured (enable/disable, email + push toggles, recipients, cooldown).
+    It replaced the legacy ``alert_unknown`` / ``alert_unknown_email``
+    face-recognition settings, which the Face Rules tab superseded. Returns
+    ``None`` when the rule is absent or disabled, so the unknown-face alert
+    path (and email/push dispatch) can treat "no rule" as "don't alert".
+    """
+    rules = effective_face_detection_rules().get('rules') or []
+    for rule in rules:
+        if str(rule.get('id') or '') == UNKNOWN_RULE_ID:
+            return rule if _coerce_bool(rule.get('enabled'), False) else None
+    return None
+
+
+def heal_legacy_unknown_alert_config() -> bool:
+    """Migrate legacy unknown-face alert settings into an ``_unknown`` rule.
+
+    Before the Face Rules tab could configure unknown-person alerts, they were
+    governed by ``alert_unknown`` / ``alert_unknown_email`` on the
+    face-recognition Settings form. Those keys are being removed, so an
+    existing deployment that enabled them would silently stop alerting; this
+    one-time heal copies the old configuration into an ``_unknown`` rule (when
+    none exists yet) so behaviour is preserved across the migration. Returns
+    ``True`` when a rule was seeded, ``False`` when nothing needed doing.
+    """
+    fr = effective_face_recognition_config()
+    legacy_unknown = _coerce_bool(fr.get('alert_unknown'), False)
+    legacy_email = str(fr.get('alert_unknown_email') or '').strip()
+    if not legacy_unknown and not legacy_email:
+        return False
+    if _state.database is None:
+        return False
+    stored = effective_face_detection_rules()
+    rules = stored.get('rules') or []
+    if any(str(rule.get('id') or '') == UNKNOWN_RULE_ID for rule in rules):
+        return False
+    seeded = {
+        'id': UNKNOWN_RULE_ID,
+        'person_id': None,
+        'name': 'Unknown Person',
+        # Legacy ``alert_unknown`` governed both alert generation and push;
+        # email additionally needed recipients to be set.
+        'enabled': legacy_unknown,
+        'email_enabled': bool(legacy_email),
+        'push_enabled': legacy_unknown,
+        'email_recipients': legacy_email,
+        'cooldown_minutes': 5,
+    }
+    from app.auth import utc_now
+
+    _state.database.set_setting('face_detection_rules', {'rules': rules + [seeded]}, utc_now())
+    logger.warning(
+        'Healed legacy unknown-face alert config: seeded the _unknown system '
+        'rule (enabled=%s, email=%s, push=%s) from the removed '
+        'alert_unknown/alert_unknown_email settings.',
+        legacy_unknown, bool(legacy_email), legacy_unknown,
+    )
+    return True
+
+
 def enabled_rules_for_label(label: str) -> dict[str, Any] | None:
     """Return the first enabled rule matching *label* (case-insensitive).
 
@@ -141,8 +204,8 @@ def known_face_rules_for_camera(camera_id: str, detections: list[dict[str, Any]]
     now = _time.time()
     cooldowns = _face_rule_cooldowns.setdefault(camera_id, {})
     new_alerts: list[dict[str, Any]] = []
-    # Also keep unknown alerts if alert_unknown is on (delegated to caller
-    # via unknown_face_alerts for now; this function only handles KNOWN faces).
+    # Unknown faces are handled separately by unknown_face_alerts() (gated on
+    # the _unknown system rule); this function only handles KNOWN faces.
     for detection in detections:
         label = str(detection.get('label') or '').strip().lower()
         if label != 'face':

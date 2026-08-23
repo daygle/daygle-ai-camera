@@ -106,6 +106,10 @@ def list_ai_models():
         family = _model_family(info)
         variants = _model_variants(model_id, installed_meta)
         if not variants:
+            # ``family`` must be present on EVERY row -- including the
+            # not-yet-downloaded base entries -- so the frontend can split
+            # the catalog into the Object Detection / Face Detection grids
+            # before any model has been installed.
             result.append({
                 'id': model_id,
                 'variant_id': model_id,
@@ -114,6 +118,7 @@ def list_ai_models():
                 'approx_mb': info['approx_mb'],
                 'input_size': info.get('input_size'),
                 'nms_free': info.get('nms_free', False),
+                'family': family,
                 'path': (models_dir / info['onnx']).relative_to(BASE_DIR).as_posix(),
                 'installed': False,
                 'active': False,
