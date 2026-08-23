@@ -134,6 +134,12 @@ class RecordingService:
     # instead of a misleading "disk is full" message that sends operators to
     # check free space that was never the problem.
     AUDIO_MUX_MIN_FREE_INODES: int = 4096
+    # An ENOSPC raised while this much space is genuinely available to non-root
+    # writers is not a plain capacity problem: a disk quota, blocks reserved
+    # for root, or a transient fill-and-free are likelier explanations. The
+    # mux says so in its diagnostic instead of telling operators to delete
+    # recordings that were never the problem.
+    AUDIO_MUX_AMPLE_FREE_BYTES: int = 2 * 1024 ** 3
     # Minimum interval between "recordings disk is full" camera diagnostics for
     # the same camera. While the disk stays full, every finalized event would
     # otherwise re-attempt the doomed mux and re-emit the diagnostic.
@@ -1949,27 +1955,52 @@ class RecordingService:
         return staged
 
     @staticmethod
+    def _volume_snapshot(path: Path) -> dict[str, int]:
+        """Best-effort capacity snapshot of the filesystem holding ``path``.
+
+        Reports the bytes actually writable by non-root users (``f_bavail``),
+        the raw free bytes including blocks reserved for root (``f_bfree``),
+        the volume size, and inode counts. Having ``f_bavail`` and ``f_bfree``
+        side by side lets an ENOSPC-on-a-roomy-disk be traced to root-reserved
+        blocks rather than guessed at. Fields the platform cannot report are
+        simply absent from the returned dict; a failed probe returns ``{}``.
+        """
+        statvfs = getattr(os, 'statvfs', None)
+        if statvfs is not None:
+            try:
+                st = statvfs(str(path))
+            except OSError:
+                return {}
+        else:
+            # No statvfs (e.g. Windows); fall back to shutil's portable view.
+            try:
+                usage = shutil.disk_usage(path)
+            except (OSError, AttributeError):
+                return {}
+            return {'free_bytes': usage.free, 'total_bytes': usage.total}
+        frsize = getattr(st, 'f_frsize', 0) or getattr(st, 'f_bsize', 0)
+        snapshot: dict[str, int] = {}
+        if frsize:
+            snapshot['free_bytes'] = getattr(st, 'f_bavail', 0) * frsize
+            snapshot['bfree_bytes'] = getattr(st, 'f_bfree', 0) * frsize
+            snapshot['total_bytes'] = getattr(st, 'f_blocks', 0) * frsize
+        # f_files == 0 means the filesystem does not track inodes (e.g. some
+        # network/virtual mounts); treat that as "unknown" rather than "full".
+        if getattr(st, 'f_files', 0):
+            snapshot['free_inodes'] = st.f_favail
+            snapshot['total_inodes'] = st.f_files
+        return snapshot
+
+    @staticmethod
     def _free_inodes(path: Path) -> tuple[int | None, int | None]:
         """Return ``(free_inodes, total_inodes)`` for ``path``'s filesystem.
 
         Used to tell a genuine byte shortage apart from inode exhaustion, which
         raises ENOSPC while ``df -h`` still shows free space (see
-        ``AUDIO_MUX_MIN_FREE_INODES``). ``os.statvfs`` is POSIX-only and some
-        filesystems report zero for the inode fields, so ``(None, None)`` is
-        returned when the count is unavailable and callers fall back to the
-        generic "disk is full" wording."""
-        statvfs = getattr(os, 'statvfs', None)
-        if statvfs is None:
-            return None, None
-        try:
-            st = statvfs(str(path))
-        except OSError:
-            return None, None
-        # f_files == 0 means the filesystem does not track inodes (e.g. some
-        # network/virtual mounts); treat that as "unknown" rather than "full".
-        if not getattr(st, 'f_files', 0):
-            return None, None
-        return st.f_favail, st.f_files
+        ``AUDIO_MUX_MIN_FREE_INODES``). Returns ``(None, None)`` when the count
+        is unavailable and callers fall back to the generic wording."""
+        snapshot = RecordingService._volume_snapshot(path)
+        return snapshot.get('free_inodes'), snapshot.get('total_inodes')
 
     def _warn_audio_mux_disk_full(
         self,
@@ -1996,13 +2027,26 @@ class RecordingService:
         camera per ``AUDIO_MUX_DISK_FULL_DIAGNOSTIC_MIN_SECONDS``.
         """
         free_inodes = total_inodes = None
+        bfree_bytes: int | None = None
+        # A byte shortage is only asserted when the CALLER measured one
+        # (pre-flight); post-hoc snapshot bytes below must not reclassify a
+        # syscall-driven ENOSPC away from the inode-exhaustion diagnosis.
+        caller_measured_bytes = free_bytes is not None
         if probe_path is not None:
-            free_inodes, total_inodes = self._free_inodes(probe_path)
+            snapshot = self._volume_snapshot(probe_path)
+            free_inodes = snapshot.get('free_inodes')
+            total_inodes = snapshot.get('total_inodes')
+            if free_bytes is None:
+                # Post-hoc measurement after a syscall-driven ENOSPC: capture
+                # both the non-root-writable figure and the raw free figure so
+                # a root-reserved-blocks gap is visible in the report.
+                free_bytes = snapshot.get('free_bytes')
+                bfree_bytes = snapshot.get('bfree_bytes')
         # A byte shortage is only asserted when the caller measured one
         # (pre-flight). For syscall-driven ENOSPC (free_bytes is None) the true
         # cause is often an exhausted inode table on an otherwise-roomy disk.
         inode_exhausted = (
-            free_bytes is None
+            not caller_measured_bytes
             and free_inodes is not None
             and free_inodes <= self.AUDIO_MUX_MIN_FREE_INODES
         )
@@ -2018,16 +2062,9 @@ class RecordingService:
             )
         else:
             if free_bytes is None and probe_path is not None:
-                # Syscall-driven ENOSPC with no pre-flight measurement: measure
-                # NOW so the message shows what this volume actually looked
-                # like. A near-zero figure means the write target really was
-                # full; ample bytes point at inode exhaustion below the
-                # classification threshold, root-reserved blocks (df's "avail"
-                # excludes them for non-root writers), or a filesystem quota.
-                try:
-                    free_bytes = shutil.disk_usage(probe_path).free
-                except OSError:
-                    pass
+                # Syscall-driven ENOSPC with no pre-flight measurement was
+                # already measured above via _volume_snapshot.
+                pass
             if free_bytes is not None and needed_bytes is not None:
                 space = (
                     f'free {free_bytes / (1024 ** 3):.2f} GiB, needs ~{needed_bytes / (1024 ** 3):.2f} GiB'
@@ -2041,11 +2078,35 @@ class RecordingService:
                 space = 'the recordings filesystem reported No space left on device'
             if free_inodes is not None:
                 space += f'; {free_inodes} of {total_inodes} inodes free'
+            # A large gap between raw-free and non-root-writable bytes means a
+            # big slice of the volume is reserved for root; name it explicitly.
+            if (
+                bfree_bytes is not None and free_bytes is not None
+                and bfree_bytes - free_bytes > self.AUDIO_MUX_AMPLE_FREE_BYTES
+            ):
+                space += (
+                    f' ({(bfree_bytes - free_bytes) / (1024 ** 3):.2f} additional GiB '
+                    'is reserved for root)'
+                )
+            # ENOSPC despite ample non-root-writable space is not solved by
+            # deleting recordings: steer operators at quotas and mounts first.
+            ample_but_failed = (
+                needed_bytes is None and free_bytes is not None
+                and free_bytes >= self.AUDIO_MUX_AMPLE_FREE_BYTES
+            )
+            if ample_but_failed:
+                space += (
+                    ' - yet that much space is writable now, so the likely cause is a disk '
+                    'quota on this volume, a separate full mount on the write path, or the '
+                    'disk filling and being freed again moments later; check quotas '
+                    '(repquota -s) and df -h before deleting recordings'
+                )
             logger.warning(
                 'Audio mux for %s was not completed because the recordings disk is full (%s); '
-                'keeping the silent video clip. Free up space on the recordings drive to restore event audio.',
+                'keeping the silent video clip.%s',
                 camera_key,
                 space,
+                '' if not ample_but_failed else ' Freeing recordings may not help - see cause notes above.',
             )
         now = time.time()
         with self._disk_full_lock:
@@ -2065,6 +2126,10 @@ class RecordingService:
         if free_inodes is not None:
             details['free_inodes'] = free_inodes
             details['total_inodes'] = total_inodes
+        if bfree_bytes is not None:
+            details['bfree_bytes'] = bfree_bytes
+        if probe_path is not None:
+            details['probe_path'] = str(probe_path)
         if stderr_tail:
             details['stderr_tail'] = stderr_tail
         if inode_exhausted:
