@@ -147,6 +147,11 @@ class RecordingService:
         self.recordings_dir.mkdir(parents=True, exist_ok=True)
         self.prebuffer_dir = self.recordings_dir / '.prebuffer'
         self.prebuffer_dir.mkdir(parents=True, exist_ok=True)
+        # Redirect ffmpeg and tempfile temp files to the recordings volume
+        # (often a small tmpfs at /tmp on appliance deployments). Without this,
+        # large audio-mux encodes exhaust the tmpfs and raise ENOSPC even when
+        # the recordings drive has ample free space.
+        os.environ['TMPDIR'] = str(self.prebuffer_dir)
         # Shared-ingest sidecar outputs (one ffmpeg per camera fans out to all
         # consumers, so each camera holds a single RTSP connection):
         #   .frames/<key>/latest.jpg  -> object detection + live snapshots
