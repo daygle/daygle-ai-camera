@@ -1112,7 +1112,7 @@ function renderPeopleCard(zone, zoneIndex) {
       const dk = `${encodeURIComponent(zi)}|${encodeURIComponent(key || '_unknown')}`;
       return `
       <div class="people-rule-row" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.06)">
-        <span style="flex:1;font-size:13px;font-weight:500">${escapeHtml(name)}${unknown ? ' <span class="muted" style="font-size:11px">(stranger alerts)</span>' : ''}</span>
+        <span style="flex:1;font-size:13px;font-weight:500">${escapeHtml(name)}${unknown ? ' <span class="muted" style="font-size:11px">(Stranger Alerts)</span>' : ''}</span>
         <label class="toggle-control" title="Alert when ${escapeHtml(name)} is detected in this area">
           <input type="checkbox" data-people-toggle="${dk}" ${rule && rule.enabled ? 'checked' : ''} aria-label="Toggle alerts for ${escapeHtml(name)} in ${zoneLabel}" />
           <span>${rule && rule.enabled ? 'On' : 'Off'}</span>
