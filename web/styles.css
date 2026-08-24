@@ -3689,6 +3689,16 @@ a.activity-item-action {
   text-decoration: none;
   white-space: nowrap;
 }
+button.secondary.activity-item-action,
+a.secondary.activity-item-action {
+  border-radius: 11px;
+  font-size: 13px;
+}
+.rule-table button.activity-item-action,
+.rule-table a.activity-item-action {
+  border-radius: 11px;
+  font-size: 13px;
+}
 
 /* Coloured row actions on the events page: Snapshot (green - matches the
    annotated snapshot image) and Recording (violet). Element-prefixed
