@@ -54,6 +54,9 @@ function fillForm(status) {
   frForm.match_threshold.value = status.match_threshold ?? 0.5;
   frForm.min_face_pixels.value = status.min_face_pixels ?? 0;
   frForm.retention_days.value = status.retention_days ?? 0;
+  if (frForm.auto_enrich_enabled) {
+    frForm.auto_enrich_enabled.value = status.auto_enrich_enabled ? 'true' : 'false';
+  }
   // The active model is chosen on the ArcFace page - carry the current values
   // through so a save never wipes it (the backend treats a missing model_path
   // as "no model selected").
@@ -92,6 +95,7 @@ async function saveSettings(event) {
     match_threshold: parseFloat(frForm.match_threshold.value),
     min_face_pixels: parseInt(frForm.min_face_pixels.value || '0', 10),
     retention_days: parseInt(frForm.retention_days.value || '0', 10),
+    auto_enrich_enabled: frForm.auto_enrich_enabled?.value === 'true',
     model_path: frForm.model_path.value,
     model_id: frForm.model_id.value,
   };

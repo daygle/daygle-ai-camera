@@ -33,6 +33,12 @@ DEFAULT_FACE_RECOGNITION_CONFIG: dict[str, Any] = {
     # embedding -- tiny/distant faces embed poorly and cause false matches.
     # 0 disables the gate.
     'min_face_pixels': 0,
+    # Automatically enrol a fresh embedding from a high-confidence live match to
+    # improve accuracy over time. OFF by default: unsupervised enrolment can
+    # self-poison an identity if a confident match is wrong, so it is opt-in and,
+    # when on, gated on a high score plus a clear margin over the runner-up
+    # person (see app/face_identity.py::_maybe_enrich_person).
+    'auto_enrich_enabled': False,
 }
 
 _ALLOWED_KEYS = frozenset(DEFAULT_FACE_RECOGNITION_CONFIG)
@@ -60,6 +66,7 @@ def validate_face_recognition_settings(payload: dict[str, Any]) -> dict[str, Any
                 updated[key] = value
 
     updated['enabled'] = _coerce_bool(updated.get('enabled', False))
+    updated['auto_enrich_enabled'] = _coerce_bool(updated.get('auto_enrich_enabled', False))
 
     updated['model_path'] = str(updated.get('model_path') or '').strip()
     updated['model_id'] = str(updated.get('model_id') or 'arcface').strip() or 'arcface'

@@ -56,9 +56,14 @@ _captured_unknown: dict[str, set[Any]] = {}
 _enriched_tracks: dict[str, set[Any]] = {}
 _lock = threading.Lock()
 
-# Auto-enrichment: store new embeddings for recognized faces to improve
-# match accuracy over time. Only high-confidence matches are enriched.
-_ENRICH_MIN_SCORE = 0.7  # minimum identity score to trigger enrichment
+# Auto-enrichment: store new embeddings for recognized faces to improve match
+# accuracy over time. Opt-in (``service.auto_enrich_enabled``) and deliberately
+# conservative, because an unsupervised enrolment of a *wrong* match permanently
+# widens that person's acceptance region. Only a high-confidence, unambiguous
+# match enriches: at/above ``_ENRICH_MIN_SCORE`` AND clearing the runner-up
+# person by at least ``_ENRICH_MIN_MARGIN``.
+_ENRICH_MIN_SCORE = 0.85  # minimum identity score to trigger enrichment
+_ENRICH_MIN_MARGIN = 0.1  # required margin of the match over the runner-up person
 _ENRICH_MAX_PER_PERSON = 20  # max auto-enriched embeddings per person (per model)
 
 
@@ -79,11 +84,20 @@ def _maybe_enrich_person(
     """
     if result is None or track_id is None or crop_bgr is None:
         return
+    # Opt-in only: unsupervised enrolment stays off unless the operator turns it
+    # on, so a confident mis-match can never silently poison an identity.
+    if not getattr(service, 'auto_enrich_enabled', False):
+        return
     person_id = result.person_id
     if not person_id:
         return
     score = float(result.score or 0)
     if score < _ENRICH_MIN_SCORE:
+        return
+    # Margin guard: abstain when the match nearly fit a second person -- an
+    # ambiguous crop enrolled onto the winner would blur the two identities.
+    runner_up = float(getattr(result, 'runner_up_score', 0.0) or 0.0)
+    if score - runner_up < _ENRICH_MIN_MARGIN:
         return
     # One enrichment per (camera, track) to avoid flooding. Keyed by camera so
     # the set can be pruned to the tracks still present each cycle.
@@ -289,15 +303,22 @@ def annotate_face_identities(camera_id: str, detections: list[dict[str, Any]], f
     # cameras the per-cycle lock hold time grew roughly N x embed-time.
     results_by_track: dict[Any, Any] = {}
     for detection, track_id, crop in pending:
-        result = service.recognize(crop) if crop is not None else None
+        # A face too small to embed reliably (below ``min_face_pixels``) or with
+        # no usable crop is *indeterminate*, not a stranger: leave it un-annotated
+        # so it neither fires an unknown-person alert nor gets captured for
+        # review. It is intentionally NOT cached, so a later, larger frame of the
+        # same track can still be recognised.
+        if crop is None or not service.recognizable(crop):
+            continue
+        result = service.recognize(crop)
         _apply(detection, result)
         if track_id is not None:
             results_by_track[track_id] = result
         # Capture the first unknown face per track for the Review workflow.
-        if result is None and crop is not None and track_id is not None:
+        if result is None and track_id is not None:
             _maybe_capture_unknown(camera_id, track_id, detection, crop, service)
         # Auto-enrich: store a new embedding for high-confidence matches.
-        if result is not None and crop is not None and track_id is not None:
+        if result is not None and track_id is not None:
             _maybe_enrich_person(camera_id, track_id, detection, crop, result, service)
 
     # Phase 3 (under lock): write the fresh results back and prune tracks no

@@ -71,6 +71,34 @@ def test_put_face_recognition_persists_disabled_config(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+def test_put_face_recognition_auto_enrich_defaults_off_and_round_trips(tmp_path, monkeypatch):
+    app, _db = _load_app(tmp_path, monkeypatch)
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        # Default: auto-enrichment is off.
+        status, _headers, fetched = client.request('/api/settings/face-recognition')
+        assert status == 200
+        assert fetched['auto_enrich_enabled'] is False
+
+        # Opting in round-trips through validation + storage.
+        status, _headers, body = client.request(
+            '/api/settings/face-recognition',
+            method='PUT',
+            data=json.dumps({'enabled': False, 'auto_enrich_enabled': True}).encode(),
+            headers={'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        assert body['auto_enrich_enabled'] is True
+        status, _headers, fetched = client.request('/api/settings/face-recognition')
+        assert fetched['auto_enrich_enabled'] is True
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_face_recognition_settings_require_admin(tmp_path, monkeypatch):
     app, _db = _load_app(tmp_path, monkeypatch)
     server, thread, base_url = _server(app)
