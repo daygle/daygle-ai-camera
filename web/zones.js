@@ -1095,14 +1095,6 @@ function schedulePeopleSave() {
   }, PEOPLE_SAVE_DELAY_MS);
 }
 
-function globalPeopleRuleNames() {
-  // Legacy unscoped rules (no camera/zone) still alert on every camera;
-  // surface them read-only so operators are not surprised by them.
-  return (faceRulesPayload.rules || [])
-    .filter((r) => !String(r.camera_id || '') && !String(r.zone_id || '') && r.enabled)
-    .map((r) => r.name || 'Unknown Person');
-}
-
 function renderPeopleCard(zone, zoneIndex) {
   if (!selectedCamera) return '';
   const zi = Number(zoneIndex);
@@ -1136,7 +1128,7 @@ function renderPeopleCard(zone, zoneIndex) {
       <div class="zone-motion-advanced-body" data-people-advanced="${dk}" ${expanded ? '' : 'hidden'} style="display:flex;flex-wrap:wrap;gap:12px;padding:0 0 10px">
         <label class="sound-rule-field" title="Comma-separated email recipients for ${escapeHtml(name)} alerts in this area.">
           <span>Recipients</span>
-          <input type="text" data-people-recipients="${dk}" value="${escapeHtml(rule?.email_recipients || '')}" placeholder="a@example.com, b@example.com" style="min-width:220px" />
+          <input type="text" data-people-recipients="${dk}" value="${escapeHtml(normalizeEmailList(rule?.email_recipients || '').join(', '))}" placeholder="a@example.com, b@example.com" style="min-width:220px" />
         </label>
         <label class="sound-rule-field" title="Minutes between repeat alerts for the same person in this area. Default 5.">
           <span>Cooldown (min)</span>
@@ -1148,10 +1140,6 @@ function renderPeopleCard(zone, zoneIndex) {
         </label>
       </div>`;
     }).join('');
-  const globals = globalPeopleRuleNames();
-  const globalNote = globals.length
-    ? `<p class="muted" style="font-size:11px;margin-top:8px">Global rules also alert on every camera: ${globals.map(escapeHtml).join(', ')}</p>`
-    : '';
   return `
     <div class="zone-motion-card" data-zone-people-for="${zi}">
       <div class="zone-motion-head">
@@ -1163,7 +1151,7 @@ function renderPeopleCard(zone, zoneIndex) {
           </div>
         </div>
       </div>
-      <div class="zone-motion-body">${rows}${globalNote}</div>
+      <div class="zone-motion-body zone-people-body">${rows}</div>
     </div>`;
 }
 

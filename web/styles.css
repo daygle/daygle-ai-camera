@@ -6306,6 +6306,8 @@ button.secondary:disabled, a.secondary:disabled {
   padding-top: 12px;
   border-top: 1px solid var(--border);
 }
+/* People Detection card body: override the 2-column grid so person rows stack vertically. */
+.zone-people-body { display: block; grid-template-columns: none; }
 .zone-motion-field { display: grid; gap: 5px; min-width: 0; }
 .zone-motion-field > span { color: var(--muted); font-size: 10px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
 .zone-motion-field input[type="checkbox"] { width: auto; justify-self: start; }
