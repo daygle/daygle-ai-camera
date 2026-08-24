@@ -75,6 +75,11 @@ updates:
       - dependency-name: "nvidia-*-cu12"
       - dependency-name: "nvidia-*"
       - dependency-name: "cuda-*"
+      # pydantic exact-pins pydantic-core (pydantic-core==2.46.4 for
+      # pydantic 2.13.x); a standalone bump breaks hash-lock resolution.
+      - dependency-name: "pydantic-core"
+      # mpmath is a sympy/torch-chain transitive in the hash lock.
+      - dependency-name: "mpmath"
     # Exact-pinned entries (e.g. ultralytics==8.4.113) still get Dependabot
     # PRs -- an exact pin does not stop Dependabot on its own; it simply
     # proposes a new pin at the latest release. That is intended here:
