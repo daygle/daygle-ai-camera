@@ -250,13 +250,12 @@ function snapshotRow(event) {
     ? '<span class="detection detection-alert" title="An alert notification was fired for this event">🔔 Alert</span>'
     : '';
   const snapshotUrl = `/api/events/${encodeURIComponent(event.id)}/snapshot`;
-  const actions = [
-    `<a class="secondary activity-item-action activity-item-action-snapshot" href="${snapshotUrl}" target="_blank" rel="noopener" aria-label="Open snapshot for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg><span class="activity-action-label">Open</span></a>`,
-  ];
+  const actions = [];
   // Deleting a snapshot is an admin action (the backend requires admin).
   if (window.daygleAuth?.user?.role === 'admin') {
-    actions.push(`<button class="secondary delete-btn activity-item-action" data-delete-snapshot="${escapeHtml(String(event.id))}" type="button" aria-label="Delete snapshot for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg><span class="activity-action-label">Delete</span></button>`);
+    actions.push(`<button class="secondary activity-item-action activity-item-action-delete" data-delete-snapshot="${escapeHtml(String(event.id))}" type="button" aria-label="Delete snapshot for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg><span class="activity-action-label">Delete</span></button>`);
   }
+  actions.push(`<a class="secondary activity-item-action activity-item-action-snapshot" href="${snapshotUrl}" target="_blank" rel="noopener" aria-label="Open snapshot for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg><span class="activity-action-label">Open</span></a>`);
   return `
     <article class="snapshot-row ${typeClass}" data-snapshot-row="${escapeHtml(String(event.id))}">
       <a class="snapshot-row-thumb" href="${snapshotUrl}" target="_blank" rel="noopener" aria-label="Open snapshot for event ${escapeHtml(String(event.id))}">

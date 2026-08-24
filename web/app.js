@@ -158,6 +158,7 @@ function buildEventItems() {
       camera: eventSourceLabel(event),
       detections,
       recordingId: event.recordings?.[0]?.id ?? null,
+      hasSnapshot: Boolean(event.has_snapshot),
       isSound,
       soundMeta: isSound ? event.metadata : null,
       zoneNames,
@@ -220,11 +221,15 @@ function renderActivityItem(item) {
     ? item.zoneNames.map(escapeHtml).join(', ')
     : '-';
   const actions = [];
-  if (item.recordingId) actions.push(recordingLink(item.recordingId, 'Play'));
+  if (item.hasSnapshot) {
+    const snapshotIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
+    actions.push(`<a class="secondary activity-item-action activity-item-action-snapshot" href="/api/events/${encodeURIComponent(item.id)}/snapshot" target="_blank" rel="noopener" aria-label="Open snapshot for event ${escapeHtml(String(item.id))}">${snapshotIcon}<span class="activity-action-label">Snapshot</span></a>`);
+  }
   if (window.daygleAuth?.user?.role === 'admin') {
     const dismissIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-    actions.push(`<button class="secondary delete-btn activity-item-action" data-dismiss-event="${escapeHtml(String(item.id))}" type="button" aria-label="Dismiss ${escapeHtml(title)}">${dismissIcon}<span class="activity-action-label">Dismiss</span></button>`);
+    actions.push(`<button class="secondary activity-item-action activity-item-action-delete" data-dismiss-event="${escapeHtml(String(item.id))}" type="button" aria-label="Dismiss ${escapeHtml(title)}">${dismissIcon}<span class="activity-action-label">Dismiss</span></button>`);
   }
+  if (item.recordingId) actions.push(recordingLink(item.recordingId, 'Play'));
   return `
     <tr class="activity-table-row ${typeClass}" data-activity-id="${escapeHtml(String(item.id))}">
       <td class="activity-cell-type"><span class="activity-item-type">${typeLabel}</span><span class="activity-cell-ref">${escapeHtml(title)}</span></td>

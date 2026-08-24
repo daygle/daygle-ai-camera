@@ -190,7 +190,7 @@ function renderEventRow(event) {
     actions.push(`<a class="secondary activity-item-action activity-item-action-snapshot" href="/api/events/${encodeURIComponent(event.id)}/snapshot" target="_blank" rel="noopener" aria-label="Open snapshot for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg><span class="activity-action-label">Snapshot</span></a>`);
   }
   if (event.recording_id != null) {
-    actions.push(`<a class="secondary activity-item-action activity-item-action-recording" href="/recordings/${encodeURIComponent(event.recording_id)}" aria-label="Open recording for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg><span class="activity-action-label">Recording</span></a>`);
+    actions.push(`<a class="secondary activity-item-action activity-item-action-play" href="/recordings/${encodeURIComponent(event.recording_id)}" aria-label="Open recording for event ${escapeHtml(String(event.id))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg><span class="activity-action-label">Play</span></a>`);
   }
   const recordingAction = actions.length ? actions.join('') : '<span class="muted">-</span>';
   return `

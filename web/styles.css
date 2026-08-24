@@ -3747,6 +3747,29 @@ button.activity-item-action.activity-item-action-play:hover {
   color: #0369a1;
   border-color: rgba(2, 132, 199, 0.35);
 }
+/* Delete (red): dismiss / remove actions. */
+a.activity-item-action.activity-item-action-delete,
+button.activity-item-action.activity-item-action-delete {
+  background: rgba(248, 113, 113, 0.10);
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+}
+a.activity-item-action.activity-item-action-delete:hover,
+button.activity-item-action.activity-item-action-delete:hover {
+  background: rgba(248, 113, 113, 0.18);
+  border-color: #f87171;
+}
+:root.light a.activity-item-action.activity-item-action-delete,
+:root.light button.activity-item-action.activity-item-action-delete {
+  background: rgba(220, 38, 38, 0.10);
+  color: #dc2626;
+  border-color: rgba(220, 38, 38, 0.35);
+}
+:root.light a.activity-item-action.activity-item-action-delete:hover,
+:root.light button.activity-item-action.activity-item-action-delete:hover {
+  background: rgba(220, 38, 38, 0.18);
+  border-color: #dc2626;
+}
 
 /* ─── Snapshots library (snapshots.html) ──────────────────────────────────
    The gallery mirrors the events feed chrome: one snapshot per row with a
