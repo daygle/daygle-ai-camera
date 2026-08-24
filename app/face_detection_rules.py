@@ -89,6 +89,30 @@ def _coerce_optional_float(value: Any) -> float | None:
     return num if 0 <= num <= 1 else None
 
 
+def _normalize_recipients_field(value: Any) -> str:
+    """Normalise ``email_recipients`` to a clean comma-separated string.
+
+    Handles: list, comma-separated string, or a corrupted Python repr string
+    like ``"['glen@daygle.net']"`` that was stored when ``str()`` was called
+    on a list before the array-to-string fix.
+    """
+    if isinstance(value, list):
+        parts = value
+    elif isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith('['):
+            # Corrupted Python list repr — strip brackets and quotes
+            parts = [s.strip().strip("'\"") for s in stripped.strip('[]').split(',')]
+        else:
+            parts = stripped.split(',')
+    else:
+        parts = []
+    return ', '.join(
+        addr.strip() for addr in parts
+        if addr.strip() and '@' in addr
+    )
+
+
 def _validate_rule(rule: dict[str, Any]) -> dict[str, Any]:
     """Normalise a single rule dict into canonical shape."""
     return {
@@ -98,7 +122,7 @@ def _validate_rule(rule: dict[str, Any]) -> dict[str, Any]:
         'enabled': _coerce_bool(rule.get('enabled'), True),
         'email_enabled': _coerce_bool(rule.get('email_enabled'), False),
         'push_enabled': _coerce_bool(rule.get('push_enabled'), False),
-        'email_recipients': str(rule.get('email_recipients') or '').strip(),
+        'email_recipients': _normalize_recipients_field(rule.get('email_recipients')),
         'cooldown_minutes': max(0, int(rule.get('cooldown_minutes') or 5)),
         'min_confidence': _coerce_optional_float(rule.get('min_confidence')),
         # Optional scoping (People card on the Zones page). Empty means the
