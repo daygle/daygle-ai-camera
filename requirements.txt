@@ -34,7 +34,12 @@ onnxscript>=0.7.1,<1.0
 # Bumped to 8.4.120 on 2026-08-17 after reviewing upstream release notes
 # (8.4.117-8.4.120: maintenance only - no architecture or breaking changes,
 # plus a check_requirements() shell-injection hardening in 8.4.117).
-ultralytics==8.4.125
+# Bumped to 8.4.127 on 2026-08-24 after reviewing upstream release notes
+# (8.4.121-8.4.127: OpenVINO/depth/CoreML/training fixes - none on our ONNX
+# export path) and validating an A/B export: yolo11n exported with this
+# repo's exact kwargs under 8.4.120 vs 8.4.127 produces byte-identical ORT
+# inference output on random and realistic inputs.
+ultralytics==8.4.127
 # Bumped to the 5.x line on 2026-07-27. Audited every cv2 symbol this repo
 # uses (imdecode/imencode, cvtColor, resize INTER_NEAREST/LINEAR, rectangle,
 # putText/getTextSize, VideoWriter[_fourcc], VideoCapture + CAP_PROP_BUFFERSIZE,
