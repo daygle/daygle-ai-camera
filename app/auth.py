@@ -897,6 +897,18 @@ class AuthService:
                 'cleanup_expired_sessions: face_identities purge failed: %s',
                 face_purge_exc,
             )
+        # Unknown-face capture retention: age out reviewed (assigned/dismissed)
+        # captures and their biometric blobs per the same recognition window.
+        # Separate best-effort try so its schema is isolated from the cleanups
+        # above.
+        try:
+            from app.backup import purge_unknown_faces_by_policy
+            purge_unknown_faces_by_policy()
+        except Exception as unknown_purge_exc:
+            logging.getLogger('daygle.ai').warning(
+                'cleanup_expired_sessions: unknown_faces purge failed: %s',
+                unknown_purge_exc,
+            )
 
     def public_user(self, row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
         return {

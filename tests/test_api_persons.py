@@ -104,6 +104,48 @@ def test_enroll_face_rejected_when_recognition_disabled(tmp_path, monkeypatch):
         thread.join(timeout=5)
 
 
+def test_delete_face_rejects_cross_person_url(tmp_path, monkeypatch):
+    """Deleting a face via a DIFFERENT person's URL 404s and deletes nothing.
+
+    ``delete_person_face`` removes by face id alone, so the router must confirm
+    the face belongs to the person named in the path (mirrors the thumbnail
+    endpoint's ownership check) -- otherwise a mismatched URL would delete
+    someone else's face and audit it under the wrong person.
+    """
+    import numpy as np
+
+    app, _db_path = _load_app(tmp_path, monkeypatch)
+    import app.state as state
+    from app.face_recognition import embedding_to_bytes
+    db = state.database
+    server, thread, base_url = _server(app)
+    client = LocalClient(base_url)
+    try:
+        _setup_admin(client)
+        csrf = _login(client)
+        pid = db.add_person('Alex')
+        other = db.add_person('Sam')
+        emb = embedding_to_bytes(np.asarray([1, 0, 0, 0], dtype=np.float32))
+        face_id = db.add_person_face(pid, embedding=emb, dim=4, model='arcface')
+
+        # Wrong person's URL -> 404, and the face survives.
+        status, _h, _b = client.request(
+            f'/api/persons/{other}/faces/{face_id}', method='DELETE', headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 404
+        assert any(int(f['id']) == face_id for f in db.list_person_faces(pid))
+
+        # The owner's URL deletes it.
+        status, _h, _b = client.request(
+            f'/api/persons/{pid}/faces/{face_id}', method='DELETE', headers={'X-CSRF-Token': csrf},
+        )
+        assert status == 200
+        assert not db.list_person_faces(pid)
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
 def test_face_thumbnail_endpoint(tmp_path, monkeypatch):
     """The thumbnail endpoint serves stored JPEG bytes for a face, and 404s for
     a face with no thumbnail or one belonging to a different person."""
