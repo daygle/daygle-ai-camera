@@ -65,6 +65,13 @@ updates:
       # docs/tesla-p4-gpu-setup.md, so ignore every version -- an exact pin does
       # not stop Dependabot from proposing 12.4.127 -> 12.9.x.
       - dependency-name: "nvidia-*-cu12"
+      # The nvidia-*-cu13 wheels are transitive dependencies of torch inside
+      # requirements.cpu.lock.txt, not direct pins. The resolver picks versions
+      # satisfying torch 2.13.0's own constraints (cuDNN is effectively
+      # exact-pinned by torch), so Dependabot hand-editing a single hash block
+      # desyncs the lock from torch's declared requirements. They move only
+      # when torch itself is upgraded and the lock is regenerated as a unit.
+      - dependency-name: "nvidia-*-cu13"
     # Exact-pinned entries (e.g. ultralytics==8.4.113) still get Dependabot
     # PRs -- an exact pin does not stop Dependabot on its own; it simply
     # proposes a new pin at the latest release. That is intended here:
