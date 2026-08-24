@@ -599,3 +599,20 @@ def test_free_inodes_returns_none_when_unavailable(tmp_path, monkeypatch):
         raising=False,
     )
     assert service._free_inodes(tmp_path) == (None, None)
+
+
+def test_probe_writable_space_reports_success(tmp_path):
+    service = _service(tmp_path)
+    result = service._probe_writable_space(tmp_path)
+    assert result['ok'] is True
+    assert result['bytes_written'] == 4 * 1024 * 1024
+    # The probe file must never outlive the check.
+    assert not list(tmp_path.glob('.write-probe-*'))
+
+
+def test_probe_writable_space_reports_failure_without_raising(tmp_path):
+    service = _service(tmp_path)
+    missing = tmp_path / 'does-not-exist'
+    result = service._probe_writable_space(missing, probe_bytes=1024)
+    assert result['ok'] is False
+    assert 'errno' in result

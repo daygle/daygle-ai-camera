@@ -184,6 +184,10 @@ class RecordingService:
         self._continuous_lock = threading.Lock()
         self._continuous_workers: dict[str, dict[str, Any]] = {}
         self._missing_ffmpeg_warnings: set[str] = set()
+        # Set by _warn_audio_mux_disk_full when an ENOSPC fired while the
+        # volume still reported ample non-root-writable space; drives the
+        # single bounded retry in _mux_prebuffer_audio.
+        self._last_mux_enospc_ample: bool = False
         # Per-camera timestamp of the last "recordings disk is full" diagnostic,
         # used to rate-limit repeated audio-mux disk-full warnings while the
         # disk stays full (every finalized event would otherwise re-hit it).
@@ -2076,6 +2080,36 @@ class RecordingService:
         snapshot = RecordingService._volume_snapshot(path)
         return snapshot.get('free_inodes'), snapshot.get('total_inodes')
 
+    def _probe_writable_space(self, directory: Path, probe_bytes: int = 4 * 1024 * 1024) -> dict[str, Any]:
+        """Attempt a real write in ``directory`` to settle ENOSPC cause questions.
+
+        statvfs numbers cannot see quotas, project caps, or a mount that filled
+        moments ago; an actual write can. Writes ``probe_bytes``, fsyncs, then
+        deletes the file. Returns ``{'ok': True, 'bytes_written': n}`` on
+        success or ``{'ok': False, 'bytes_written': n, 'errno': e}`` on failure;
+        never raises.
+        """
+        probe_path = directory / f'.write-probe-{os.getpid()}.tmp'
+        written = 0
+        try:
+            chunk = b'\0' * (1024 * 1024)
+            with open(probe_path, 'wb') as handle:
+                while written < probe_bytes:
+                    try:
+                        written += handle.write(chunk)
+                    except TypeError:  # partial write without count is fine for BufferedIO
+                        break
+                handle.flush()
+                os.fsync(handle.fileno())
+            return {'ok': True, 'bytes_written': written}
+        except OSError as exc:
+            return {'ok': False, 'bytes_written': written, 'errno': exc.errno}
+        finally:
+            try:
+                probe_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
     def _warn_audio_mux_disk_full(
         self,
         camera_key: str,
@@ -2102,6 +2136,7 @@ class RecordingService:
         """
         free_inodes = total_inodes = None
         bfree_bytes: int | None = None
+        probe_result: dict[str, Any] | None = None
         # A byte shortage is only asserted when the CALLER measured one
         # (pre-flight); post-hoc snapshot bytes below must not reclassify a
         # syscall-driven ENOSPC away from the inode-exhaustion diagnosis.
@@ -2168,6 +2203,29 @@ class RecordingService:
                 needed_bytes is None and free_bytes is not None
                 and free_bytes >= self.AUDIO_MUX_AMPLE_FREE_BYTES
             )
+            if ample_but_failed and probe_path is not None:
+                # Settle the quota-vs-transient-vs-hard-failure question with
+                # evidence: attempt a real multi-megabyte write right here, in
+                # the directory that just failed. A small write succeeding
+                # where a large one failed points squarely at a size cap
+                # (quota); everything failing points at a hard block; this
+                # succeeding entirely supports a transient fill-and-free that
+                # has already passed.
+                probe_result = self._probe_writable_space(probe_path)
+                self._last_mux_enospc_ample = True
+            if probe_result is not None:
+                if probe_result.get('ok'):
+                    space += (
+                        f"; a live {probe_result.get('bytes_written', 0) / (1024 * 1024):.0f} MiB test write "
+                        'to this exact directory SUCCEEDED moments later, which fits a transient '
+                        'fill-and-free rather than a standing limit'
+                    )
+                else:
+                    space += (
+                        f"; a live test write to this exact directory FAILED too "
+                        f"(errno {probe_result.get('errno')}), confirming a standing limit such as "
+                        'a quota or per-directory cap'
+                    )
             if ample_but_failed:
                 space += (
                     ' - yet that much space is writable now, so the likely cause is a disk '
@@ -2206,6 +2264,8 @@ class RecordingService:
             details['probe_path'] = str(probe_path)
         if stderr_tail:
             details['stderr_tail'] = stderr_tail
+        if probe_result is not None:
+            details['write_probe'] = probe_result
         if inode_exhausted:
             message = (
                 f'Could not add audio to the event clip for {camera_id or camera_key} because the '
@@ -2228,6 +2288,29 @@ class RecordingService:
         )
 
     def _mux_prebuffer_audio(
+        self,
+        camera_key: str,
+        video_path: Path,
+        start_ts: float,
+        duration_seconds: float,
+        camera_id: str | None = None,
+    ) -> bool:
+        ok = self._mux_prebuffer_audio_once(camera_key, video_path, start_ts, duration_seconds, camera_id)
+        if not ok and self._last_mux_enospc_ample:
+            # The write failed while the filesystem reported ample writable
+            # space. One cause - a transient fill-and-free (a concurrent render
+            # or purge storm momentarily claiming the headroom) - resolves
+            # within seconds, so retry once before giving up on the audio.
+            # Quotas and separate full mounts fail the retry identically and
+            # cost only one extra encode.
+            self._last_mux_enospc_ample = False
+            logger.info('Audio mux for %s hit ENOSPC with ample space reported; retrying once.', camera_key)
+            time.sleep(2.0)
+            ok = self._mux_prebuffer_audio_once(camera_key, video_path, start_ts, duration_seconds, camera_id)
+        self._last_mux_enospc_ample = False
+        return ok
+
+    def _mux_prebuffer_audio_once(
         self,
         camera_key: str,
         video_path: Path,
