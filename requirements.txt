@@ -2,11 +2,11 @@ fastapi>=0.141.1,<1.0
 uvicorn[standard]>=0.52.4,<1.0
 PyYAML>=6.0.3,<7.0
 bcrypt>=5.0.0,<6.0  # 5.0+ raises ValueError for passwords > 72 bytes (guard in auth.py)
-# numpy 2.3 raised its minimum to Python 3.11 and 2.5 to Python 3.12. This
-# project still targets Python 3.10 (see the test matrix in
-# .github/workflows/python-app.yml), so cap below 2.3 to keep 3.10 resolvable.
-# Raising this ceiling requires dropping Python 3.10 from the support matrix
-# first -- otherwise the install simply fails to find a compatible wheel.
+# numpy 2.3 raised its minimum to Python 3.11 (now the project floor) and 2.5
+# to Python 3.12. The ceiling below 2.3 is held for now as a deliberate
+# no-runtime-change freeze on the detection stack; bumping it requires
+# re-validating model export, CPU inference, and Tesla P4 (sm_61) GPU
+# inference -- see docs/tesla-p4-gpu-setup.md.
 numpy>=2.2.6,<2.3
 # install_python_deps.sh auto-selects onnxruntime-gpu when nvidia-smi can
 # enumerate an NVIDIA device. Override with DAYGLE_ONNXRUNTIME_VARIANT=cpu|gpu.

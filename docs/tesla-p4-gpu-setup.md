@@ -132,8 +132,9 @@ Pascal-breaking or Python-incompatible bump:
 
 - `onnxruntime` / `onnxruntime-gpu` **< 1.21** - stays on the CUDA 11/12-era
   line that supports Pascal. Newer ORT moves to a CUDA stack that drops it.
-- `numpy` **< 2.3** - numpy 2.3 requires Python 3.11 and 2.5 requires 3.12; the
-  project still targets Python 3.10.
+- `numpy` **< 2.3** - held as a no-runtime-change freeze on the detection
+  stack; 2.3+ is compatible with the Python 3.11 floor but must be re-validated
+  against model export and P4 GPU inference before the ceiling moves.
 - The `nvidia-*-cu12` pins in `requirements-gpu-pascal.txt` - bump only after
   re-running the verification in section 3 and confirming `sm_61` support.
 

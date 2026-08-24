@@ -33,7 +33,7 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 
 ## Requirements
 
-- Python 3.10 or newer
+- Python 3.11 or newer
 - `pip`
 - Modern web browser
 - Optional: ONNX model for object detection
@@ -87,14 +87,14 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 
    When a variant-specific lock is present, the helper installs from it with
    `--require-hashes` instead of resolving `requirements.txt` directly. A
-   hash-pinned `requirements.cpu.lock.txt` (Linux / Python 3.10) is committed;
+   hash-pinned `requirements.cpu.lock.txt` (Linux / Python 3.11) is committed;
    regenerate it after changing `requirements.txt` with
    `./scripts/lock_python_deps.sh` or, for the cross-platform committed lock:
 
    ```bash
    uv pip compile requirements.txt --generate-hashes \
      --output-file requirements.cpu.lock.txt \
-     --python-version 3.10 --python-platform linux
+     --python-version 3.11 --python-platform linux
    ```
 
 4. Create the bootstrap config:

@@ -13,7 +13,7 @@
 #     requirements.txt does not stop that.
 #   * An `ignore` rule below is therefore required for any dependency whose
 #     latest upstream release is deliberately out of reach. These are the hard
-#     stops that keep the Pascal/Tesla-P4 and Python-3.10 constraints from being
+#     stops that keep the Pascal/Tesla-P4 constraints from being
 #     bumped away by an auto-PR.
 #
 # An exact pin (e.g. ultralytics==..., or the nvidia-*-cu12 CUDA wheels) does
@@ -48,8 +48,9 @@ updates:
       # otherwise rewrite the range up to the newest release, which is exactly
       # the update we must not take.
       #
-      # numpy 2.3 raises its floor to Python 3.11 and 2.5 to Python 3.12; this
-      # project still supports Python 3.10 (CI matrix). Hold below 2.3.
+      # numpy is held below 2.3 as a deliberate no-runtime-change freeze on the
+      # detection stack (2.3+ is fine for the Python 3.11 floor, but bumping it
+      # requires re-validating model export and Tesla P4 GPU inference).
       - dependency-name: "numpy"
         versions: [">=2.3"]
       # onnxruntime 1.21+ moves to a CUDA stack that drops Pascal (Tesla P4 /
