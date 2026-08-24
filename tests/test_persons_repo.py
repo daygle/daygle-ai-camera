@@ -183,3 +183,33 @@ def test_purge_face_identities_by_policy_respects_retention_setting(tmp_path, mo
     monkeypatch.setattr(backup, 'effective_face_recognition_config', lambda: {'retention_days': 1})
     assert backup.purge_face_identities_by_policy() == 1
     assert 'face_identities' not in _event_metadata(db, old_id)
+
+
+def test_purge_unknown_faces_by_policy_respects_retention_setting(tmp_path, monkeypatch):
+    import app.backup as backup
+    import app.state as state
+
+    db = _db(tmp_path)
+    # An old capture that has been reviewed (dismissed) -> eligible for purge.
+    old_reviewed = db.store_unknown_face(
+        camera_id='c1', embedding=_emb([1, 0, 0, 0]), dim=4, model='arcface',
+        created_at='2020-01-01T00:00:00+00:00',
+    )
+    db.dismiss_unknown_face(old_reviewed)
+    # An equally old capture still pending review -> never purged (active queue).
+    old_pending = db.store_unknown_face(
+        camera_id='c1', embedding=_emb([0, 1, 0, 0]), dim=4, model='arcface',
+        created_at='2020-01-01T00:00:00+00:00',
+    )
+    monkeypatch.setattr(state, 'database', db)
+
+    # retention_days = 0 -> keep indefinitely (no-op).
+    monkeypatch.setattr(backup, 'effective_face_recognition_config', lambda: {'retention_days': 0})
+    assert backup.purge_unknown_faces_by_policy() == 0
+    assert db.get_unknown_face(old_reviewed) is not None
+
+    # retention_days = 1 -> the reviewed 2020 capture is purged; pending stays.
+    monkeypatch.setattr(backup, 'effective_face_recognition_config', lambda: {'retention_days': 1})
+    assert backup.purge_unknown_faces_by_policy() == 1
+    assert db.get_unknown_face(old_reviewed) is None
+    assert db.get_unknown_face(old_pending) is not None

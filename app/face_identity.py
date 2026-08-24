@@ -43,19 +43,27 @@ _FACE_LABEL = 'face'
 # ``None`` means "recognised as unknown so far" and is retried each cycle; a
 # MatchResult is cached and reused for the life of the track.
 _cache: dict[str, dict[Any, Any]] = {}
-# Per-camera set of unknown-face track ids already alerted, so a lingering
-# stranger raises one alert rather than one per ~4 Hz cycle.
-_alerted_unknown: dict[str, set[Any]] = {}
+# Per-camera map of unknown-face track id -> the set of unknown-rule ids that
+# already fired for it, so a lingering stranger raises one alert per rule
+# rather than one per ~4 Hz cycle (see ``unknown_face_alerts``).
+_alerted_unknown: dict[str, dict[Any, set[str]]] = {}
 # Per-camera set of unknown-face track ids already captured for review.
 _captured_unknown: dict[str, set[Any]] = {}
-# Per-person set of track ids already enriched, to avoid re-enriching the
-# same face on every cycle.
+# Per-camera set of track ids already enriched, to avoid re-enriching the
+# same face on every cycle. Keyed by camera (like the caches above) so the
+# set can be pruned to the tracks still present each cycle; track ids are
+# per-camera counters, so a returning face gets a fresh id and enriches again.
 _enriched_tracks: dict[str, set[Any]] = {}
 _lock = threading.Lock()
 
-# Auto-enrichment: store new embeddings for recognized faces to improve
-# match accuracy over time. Only high-confidence matches are enriched.
-_ENRICH_MIN_SCORE = 0.7  # minimum identity score to trigger enrichment
+# Auto-enrichment: store new embeddings for recognized faces to improve match
+# accuracy over time. Opt-in (``service.auto_enrich_enabled``) and deliberately
+# conservative, because an unsupervised enrolment of a *wrong* match permanently
+# widens that person's acceptance region. Only a high-confidence, unambiguous
+# match enriches: at/above ``_ENRICH_MIN_SCORE`` AND clearing the runner-up
+# person by at least ``_ENRICH_MIN_MARGIN``.
+_ENRICH_MIN_SCORE = 0.85  # minimum identity score to trigger enrichment
+_ENRICH_MIN_MARGIN = 0.1  # required margin of the match over the runner-up person
 _ENRICH_MAX_PER_PERSON = 20  # max auto-enriched embeddings per person (per model)
 
 
@@ -76,16 +84,25 @@ def _maybe_enrich_person(
     """
     if result is None or track_id is None or crop_bgr is None:
         return
+    # Opt-in only: unsupervised enrolment stays off unless the operator turns it
+    # on, so a confident mis-match can never silently poison an identity.
+    if not getattr(service, 'auto_enrich_enabled', False):
+        return
     person_id = result.person_id
     if not person_id:
         return
     score = float(result.score or 0)
     if score < _ENRICH_MIN_SCORE:
         return
-    # One enrichment per track to avoid flooding.
-    person_key = str(person_id)
+    # Margin guard: abstain when the match nearly fit a second person -- an
+    # ambiguous crop enrolled onto the winner would blur the two identities.
+    runner_up = float(getattr(result, 'runner_up_score', 0.0) or 0.0)
+    if score - runner_up < _ENRICH_MIN_MARGIN:
+        return
+    # One enrichment per (camera, track) to avoid flooding. Keyed by camera so
+    # the set can be pruned to the tracks still present each cycle.
     with _lock:
-        enriched = _enriched_tracks.setdefault(person_key, set())
+        enriched = _enriched_tracks.setdefault(camera_id, set())
         if track_id in enriched:
             return
         enriched.add(track_id)
@@ -171,8 +188,11 @@ def _apply(detection: dict[str, Any], result: Any) -> None:
         detection['identity_score'] = round(float(result.score), 4)
 
 
-# Maximum unknown-face captures per camera to prevent unbounded growth.
-_MAX_CAPTURES_PER_CAMERA = 200
+# Maximum pending unknown-face captures (across all cameras) held for review
+# before new captures are dropped, so the review queue and its stored
+# embeddings/thumbnails cannot grow without bound. Global rather than
+# per-camera because ``count_unknown_faces`` counts the whole pending queue.
+_MAX_PENDING_CAPTURES = 200
 
 
 def _maybe_capture_unknown(
@@ -194,7 +214,7 @@ def _maybe_capture_unknown(
         import app.state as _state
         if _state.database is not None:
             count = _state.database.count_unknown_faces(status='pending')
-            if count >= _MAX_CAPTURES_PER_CAMERA:
+            if count >= _MAX_PENDING_CAPTURES:
                 return
     except Exception:
         pass  # non-fatal: skip capture if DB unavailable
@@ -283,15 +303,22 @@ def annotate_face_identities(camera_id: str, detections: list[dict[str, Any]], f
     # cameras the per-cycle lock hold time grew roughly N x embed-time.
     results_by_track: dict[Any, Any] = {}
     for detection, track_id, crop in pending:
-        result = service.recognize(crop) if crop is not None else None
+        # A face too small to embed reliably (below ``min_face_pixels``) or with
+        # no usable crop is *indeterminate*, not a stranger: leave it un-annotated
+        # so it neither fires an unknown-person alert nor gets captured for
+        # review. It is intentionally NOT cached, so a later, larger frame of the
+        # same track can still be recognised.
+        if crop is None or not service.recognizable(crop):
+            continue
+        result = service.recognize(crop)
         _apply(detection, result)
         if track_id is not None:
             results_by_track[track_id] = result
         # Capture the first unknown face per track for the Review workflow.
-        if result is None and crop is not None and track_id is not None:
+        if result is None and track_id is not None:
             _maybe_capture_unknown(camera_id, track_id, detection, crop, service)
         # Auto-enrich: store a new embedding for high-confidence matches.
-        if result is not None and crop is not None and track_id is not None:
+        if result is not None and track_id is not None:
             _maybe_enrich_person(camera_id, track_id, detection, crop, result, service)
 
     # Phase 3 (under lock): write the fresh results back and prune tracks no
@@ -308,12 +335,16 @@ def annotate_face_identities(camera_id: str, detections: list[dict[str, Any]], f
         cap_set = _captured_unknown.get(camera_id)
         if cap_set is not None:
             _captured_unknown[camera_id] = cap_set - seen
-        # Prune enriched-tracks per-person sets for tracks no longer seen.
-        stale_pids = {str(d.get('person_id')) for d in faces if d.get('person_id') is not None}
-        # Only prune tracks we know about; leave others untouched.
-        for pid in list(_enriched_tracks.keys()):
-            if pid in stale_pids:
-                _enriched_tracks[pid] = _enriched_tracks[pid] - {d.get('track_id') for d in faces if str(d.get('person_id')) == pid}
+        # Prune the per-camera enriched-track set to the tracks still present
+        # so it cannot grow unbounded (mirrors the _cache / _captured_unknown
+        # pruning above). The previous per-person pruning both leaked the sets
+        # of people who had left the frame and, for people still present,
+        # dropped exactly the tracks that WERE still seen -- the inverse of
+        # "prune tracks no longer seen", which quietly defeated the
+        # one-enrichment-per-track guard for a lingering face.
+        enr_set = _enriched_tracks.get(camera_id)
+        if enr_set is not None:
+            _enriched_tracks[camera_id] = enr_set & seen
     return detections
 
 
@@ -430,3 +461,4 @@ def reset_camera_identities(camera_id: str) -> None:
         _cache.pop(camera_id, None)
         _alerted_unknown.pop(camera_id, None)
         _captured_unknown.pop(camera_id, None)
+        _enriched_tracks.pop(camera_id, None)

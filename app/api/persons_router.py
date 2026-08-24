@@ -180,6 +180,12 @@ def get_face_thumbnail(person_id: int, face_id: int, request: Request, db=Depend
 @router.delete('/api/persons/{person_id}/faces/{face_id}')
 def delete_face(person_id: int, face_id: int, request: Request, db=Depends(get_database)):
     require_admin(request)
+    # Confirm the face belongs to THIS person before deleting. ``delete_person_face``
+    # removes by face id alone, so without this check a mismatched URL
+    # (``/persons/<A>/faces/<face-of-B>``) would delete B's face and audit it
+    # under A. Mirrors the ownership check on the thumbnail endpoint above.
+    if not any(int(face['id']) == face_id for face in db.list_person_faces(person_id)):
+        raise HTTPException(status_code=404, detail='Face not found.')
     if not db.delete_person_face(face_id):
         raise HTTPException(status_code=404, detail='Face not found.')
     refresh_face_recognition_matcher()

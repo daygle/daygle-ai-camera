@@ -9,14 +9,23 @@ from app.face_recognition import MatchResult
 
 
 class _StubService:
-    def __init__(self, result, available=True):
+    def __init__(self, result, available=True, recognizable=True, auto_enrich=False):
         self.available = available
         self._result = result
+        self._recognizable = recognizable
+        self.auto_enrich_enabled = auto_enrich
+        self.model_id = 'arcface'
         self.calls = 0
 
     def recognize(self, crop):
         self.calls += 1
         return self._result
+
+    def recognizable(self, crop):
+        return self.available and self._recognizable
+
+    def embed_face(self, crop):
+        return None
 
 
 def _use_service(monkeypatch, service):
@@ -78,6 +87,80 @@ def test_unknown_identity_is_retried_each_cycle(monkeypatch):
     assert svc.calls == 2
 
 
+def test_indeterminate_face_below_min_size_not_marked_unknown(monkeypatch):
+    # A face too small to embed reliably (service.recognizable() == False) is
+    # left un-annotated -- neither recognized nor marked 'unknown' -- so it can
+    # not masquerade as a stranger for the alert/capture paths. recognize() is
+    # never attempted, and nothing is cached so a later larger frame can retry.
+    svc = _StubService(None, recognizable=False)
+    _use_service(monkeypatch, svc)
+    fi.reset_camera_identities('camMin')
+    out = fi.annotate_face_identities('camMin', [_face(1)], _frame())
+    assert 'recognized' not in out[0]
+    assert 'identity' not in out[0]
+    assert svc.calls == 0
+    # Even with unknown-person alerting configured, an indeterminate face does
+    # not alert -- it was never marked recognized.
+    _use_rule(monkeypatch, _unknown_rule())
+    assert fi.unknown_face_alerts('camMin', out) == []
+
+
+def test_enriched_tracks_pruned_to_present_tracks(monkeypatch):
+    # A high-confidence match triggers auto-enrichment, which records the track
+    # in the per-camera _enriched_tracks set (the enrol DB work is offloaded to
+    # a background thread that no-ops when the database is unset). That set must
+    # be pruned to the tracks still present each cycle: it must not accumulate
+    # departed tracks, and must not drop the tracks that ARE still seen (the old
+    # per-person pruning did exactly the wrong thing on both counts).
+    import app.state as state
+    monkeypatch.setattr(state, 'database', None, raising=False)
+    _use_service(monkeypatch, _StubService(MatchResult(7, 'Alex', 0.95, 3), auto_enrich=True))
+    fi.reset_camera_identities('camEnrich')
+    fi.annotate_face_identities('camEnrich', [_face(1)], _frame())
+    assert fi._enriched_tracks.get('camEnrich') == {1}
+    # Track 1 leaves and a new track 2 appears: the departed track is pruned and
+    # the new one recorded, so the set never grows without bound.
+    fi.annotate_face_identities('camEnrich', [_face(2)], _frame())
+    assert fi._enriched_tracks.get('camEnrich') == {2}
+    # Reset clears the per-camera enrichment set.
+    fi.reset_camera_identities('camEnrich')
+    assert fi._enriched_tracks.get('camEnrich') is None
+
+
+def test_auto_enrich_off_by_default(monkeypatch):
+    # With auto-enrichment disabled (the default), even a near-perfect match does
+    # NOT enrol a new embedding -- unsupervised enrolment stays opt-in.
+    import app.state as state
+    monkeypatch.setattr(state, 'database', None, raising=False)
+    _use_service(monkeypatch, _StubService(MatchResult(7, 'Alex', 0.99, 3)))
+    fi.reset_camera_identities('camNoEnrich')
+    fi.annotate_face_identities('camNoEnrich', [_face(1)], _frame())
+    assert not fi._enriched_tracks.get('camNoEnrich')
+
+
+def test_auto_enrich_skips_low_margin_match(monkeypatch):
+    # Enrichment ON, high score, but the match nearly fit a second person
+    # (margin 0.05 < _ENRICH_MIN_MARGIN): abstain rather than blur two identities.
+    import app.state as state
+    monkeypatch.setattr(state, 'database', None, raising=False)
+    ambiguous = MatchResult(7, 'Alex', 0.95, 3, runner_up_score=0.90)
+    _use_service(monkeypatch, _StubService(ambiguous, auto_enrich=True))
+    fi.reset_camera_identities('camAmbig')
+    fi.annotate_face_identities('camAmbig', [_face(1)], _frame())
+    assert not fi._enriched_tracks.get('camAmbig')
+
+
+def test_auto_enrich_skips_below_threshold(monkeypatch):
+    # Enrichment ON and unambiguous, but the score is below _ENRICH_MIN_SCORE:
+    # a merely-decent match is not confident enough to self-enrol.
+    import app.state as state
+    monkeypatch.setattr(state, 'database', None, raising=False)
+    _use_service(monkeypatch, _StubService(MatchResult(7, 'Alex', 0.80, 3), auto_enrich=True))
+    fi.reset_camera_identities('camLow')
+    fi.annotate_face_identities('camLow', [_face(1)], _frame())
+    assert not fi._enriched_tracks.get('camLow')
+
+
 def test_non_face_detections_untouched(monkeypatch):
     svc = _StubService(MatchResult(7, 'Alex', 0.9, 3))
     _use_service(monkeypatch, svc)
@@ -137,6 +220,9 @@ def test_face_identity_metadata_empty_without_faces():
 class _AlertService:
     def __init__(self, available=True):
         self.available = available
+
+    def recognizable(self, crop):
+        return self.available
 
 
 def _unknown_rule(**overrides):

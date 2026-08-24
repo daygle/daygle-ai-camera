@@ -43,6 +43,10 @@ class FaceRecognitionService:
             self.min_face_pixels = max(0, int(config.get('min_face_pixels', 0) or 0))
         except (TypeError, ValueError):
             self.min_face_pixels = 0
+        # Opt-in unsupervised enrolment from high-confidence live matches. Off by
+        # default; when on, ``_maybe_enrich_person`` still gates on a high score
+        # plus a clear margin over the runner-up person.
+        self.auto_enrich_enabled = bool(config.get('auto_enrich_enabled', False))
 
         self._lock = threading.Lock()
         self.embedder: FaceEmbedder | None = None
@@ -139,6 +143,18 @@ class FaceRecognitionService:
         except Exception as exc:
             logger.warning('Face enrolment embedding failed: %s', exc)
             return None
+
+    def recognizable(self, face_bgr: Any) -> bool:
+        """True when ``face_bgr`` is large enough to embed reliably.
+
+        A face below ``min_face_pixels`` (or when recognition is unavailable) is
+        *indeterminate*, not a stranger: the live pipeline leaves such faces
+        un-annotated so they neither fire an unknown-person alert nor get
+        captured for review, rather than being mislabelled "unknown".
+        """
+        if not self.available:
+            return False
+        return not self._below_min_size(face_bgr)
 
     def _below_min_size(self, face_bgr: Any) -> bool:
         if self.min_face_pixels <= 0:

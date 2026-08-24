@@ -62,11 +62,17 @@
             <span>Match Threshold <span class="info-tip" data-tip="Cosine-similarity cutoff (0-1) for matching a face to an enrolled person. Higher is stricter. Default: 0.5" title="Cosine-similarity cutoff (0-1) for matching a face to an enrolled person. Higher is stricter. Default: 0.5" tabindex="0" aria-label="Help: Cosine-similarity cutoff (0-1) for matching a face to an enrolled person. Higher is stricter. Default: 0.5"></span></span>
             <input name="match_threshold" type="number" min="0" max="1" step="0.01" /></label>
           <label>
-            <span>Minimum Face Size <span class="info-tip" data-tip="Ignore faces smaller than this many pixels on the longest edge. 0 disables the minimum." title="Ignore faces smaller than this many pixels on the longest edge. 0 disables the minimum." tabindex="0" aria-label="Help: Ignore faces smaller than this many pixels on the longest edge. 0 disables the minimum."></span></span>
+            <span>Minimum Face Size <span class="info-tip" data-tip="Ignore faces smaller than this many pixels on the shorter side. Faces below this are treated as too small to identify - they are not matched, and not flagged as strangers. 0 disables the minimum." title="Ignore faces smaller than this many pixels on the shorter side. Faces below this are treated as too small to identify - they are not matched, and not flagged as strangers. 0 disables the minimum." tabindex="0" aria-label="Help: Ignore faces smaller than this many pixels on the shorter side. 0 disables the minimum."></span></span>
             <input name="min_face_pixels" type="number" min="0" step="1" /></label>
           <label>
             <span>Identity Retention <span class="info-tip" data-tip="Days to keep identity labels on events before they are cleared. 0 keeps them forever." title="Days to keep identity labels on events before they are cleared. 0 keeps them forever." tabindex="0" aria-label="Help: Days to keep identity labels on events before they are cleared. 0 keeps them forever."></span></span>
             <input name="retention_days" type="number" min="0" step="1" /></label>
+          <label>
+            <span>Auto-Enrichment <span class="info-tip" data-tip="Automatically add a new face sample from a very confident, unambiguous live match to improve accuracy over time. Off by default - a wrong match can permanently blur an identity, so leave off unless you trust matching quality." title="Automatically add a new face sample from a very confident, unambiguous live match to improve accuracy over time. Off by default - a wrong match can permanently blur an identity, so leave off unless you trust matching quality." tabindex="0" aria-label="Help: Automatically add a new face sample from a very confident, unambiguous live match. Off by default."></span></span>
+            <select name="auto_enrich_enabled">
+              <option value="false">Disabled</option>
+              <option value="true">Enabled</option>
+            </select></label>
           <label>
             <span>Face Confidence <span class="info-tip" data-tip="Minimum detection confidence (0-1). Default: 0.45. Faces are small targets - a lower value like 0.30 often catches distant faces better." title="Minimum detection confidence (0-1). Default: 0.45. Faces are small targets - a lower value like 0.30 often catches distant faces better." tabindex="0" aria-label="Help: Minimum detection confidence (0-1). Default: 0.45."></span></span>
             <input name="face_confidence" type="number" min="0" max="1" step="0.01" value="0.45" /></label>

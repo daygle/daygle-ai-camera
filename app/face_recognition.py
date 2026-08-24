@@ -182,13 +182,20 @@ def embedding_from_bytes(data: bytes, dim: int) -> Any:
 class MatchResult:
     """One recognition outcome: the winning person and its cosine score."""
 
-    __slots__ = ('person_id', 'name', 'score', 'face_id')
+    __slots__ = ('person_id', 'name', 'score', 'face_id', 'runner_up_score')
 
-    def __init__(self, person_id: int, name: str, score: float, face_id: int) -> None:
+    def __init__(
+        self, person_id: int, name: str, score: float, face_id: int,
+        runner_up_score: float = 0.0,
+    ) -> None:
         self.person_id = person_id
         self.name = name
         self.score = score
         self.face_id = face_id
+        # Best cosine score among enrolled faces belonging to a DIFFERENT person.
+        # ``score - runner_up_score`` is the match's margin: a small margin means
+        # the query nearly fit a second person, so auto-enrolment should abstain.
+        self.runner_up_score = runner_up_score
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -271,11 +278,19 @@ class FaceMatcher:
         best_score = float(scores[best_index])
         if best_score < threshold:
             return None
+        winner_person = self.person_ids[best_index]
+        # Runner-up = the best score among faces of a DIFFERENT person, so the
+        # margin reflects identity separation (not just a second face of the
+        # same person). 0.0 when the winner is the only enrolled person.
+        person_ids = npmod.asarray(self.person_ids)
+        other_scores = scores[person_ids != winner_person]
+        runner_up_score = float(other_scores.max()) if other_scores.size else 0.0
         return MatchResult(
-            person_id=self.person_ids[best_index],
+            person_id=winner_person,
             name=self.names[best_index],
             score=best_score,
             face_id=self.face_ids[best_index],
+            runner_up_score=runner_up_score,
         )
 
 

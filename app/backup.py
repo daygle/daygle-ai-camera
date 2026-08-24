@@ -738,3 +738,24 @@ def purge_face_identities_by_policy() -> int:
     except Exception as exc:
         logger.debug('Face identity purge failed: %s', exc)
         return 0
+
+
+def purge_unknown_faces_by_policy() -> int:
+    """Age out reviewed unknown-face captures per the recognition policy.
+
+    Captures that have been reviewed (assigned or dismissed) still hold their
+    embedding + thumbnail blobs; without this sweep those biometric rows would
+    accumulate forever. Governed by the same face-recognition ``retention_days``
+    window as recognised identities (``0``/default = keep indefinitely). Pending
+    captures are always kept -- they are the active review queue (and are already
+    bounded by a hard cap at capture time).
+    """
+    try:
+        retention_days = int(effective_face_recognition_config().get('retention_days', 0) or 0)
+        if retention_days <= 0:
+            return 0
+        older_than = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+        return _state.database.purge_old_unknown_faces(older_than)
+    except Exception as exc:
+        logger.debug('Unknown-face capture purge failed: %s', exc)
+        return 0
