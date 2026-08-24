@@ -436,13 +436,7 @@ function renderCameraRow(camera, index) {
   else if (fps && fps.source === 'configured' && Number(fps.configured) > 0) fpsText = Math.round(Number(fps.configured)) + ' FPS configured';
   var ptzEnabled = camera.ptz?.enabled === true;
 
-  // Drag-to-reorder only applies in config order: while a column sort is
-  // active the visual order is a permutation, so dragging (which splices the
-  // config array by index) would land rows somewhere unexpected. Gate it off
-  // and dim the grip until the sort is cleared.
-  const isSortedView = cameraSortState !== null;
-  var rowHtml = '<tr draggable="' + (isSortedView ? 'false' : 'true') + '" data-drag-camera="' + index + '" data-camera-index="' + index + '" class="' + (isEnabled ? '' : 'camera-row-disabled') + (isSortedView ? ' camera-row-sorted' : '') + '">';
-  rowHtml += '<td class="cell-drag"><span class="drag-handle' + (isSortedView ? ' drag-handle-disabled' : '') + '" title="' + (isSortedView ? 'Clear the column sort to reorder' : 'Drag to reorder') + '">' + ICONS.grip + '</span></td>';
+  var rowHtml = '<tr data-camera-index="' + index + '" class="' + (isEnabled ? '' : 'camera-row-disabled') + '">';
   rowHtml += '<td class="cell-camera">';
   rowHtml += '<div class="cam-info"><span class="cam-name">' + name + '</span>' + (id ? '<span class="cam-id">ID · ' + id + '</span>' : '') + '</div>';
   rowHtml += '<div class="cell-actions"><button class="secondary cam-edit-btn" data-index="' + index + '" type="button" title="Edit camera" aria-label="Edit ' + name + '">' + ICONS.edit + '</button><button class="secondary cam-toggle-btn' + (isEnabled ? ' is-enabled' : ' is-disabled') + '" data-index="' + index + '" type="button" title="' + (isEnabled ? 'Disable camera' : 'Enable camera') + '" aria-label="' + (isEnabled ? 'Disable ' : 'Enable ') + name + '">' + ICONS.power + '</button><button class="delete-btn secondary cam-remove-btn" data-index="' + index + '" type="button" title="Remove camera" aria-label="Remove ' + name + '">' + ICONS.remove + '</button></div>';
@@ -581,7 +575,7 @@ function renderGrid() {
     var realIndex = cameras.indexOf(cam);
     return renderCameraRow(cam, realIndex);
   }).join('');
-  var tableHtml = '<div class="cameras-table-wrap"><table class="cameras-table"><thead><tr><th class="cell-drag" scope="col"></th>' +
+  var tableHtml = '<div class="cameras-table-wrap"><table class="cameras-table"><thead><tr>' +
     renderCameraSortHeader('Camera', 'camera') +
     renderCameraSortHeader('Connection', 'connection') +
     renderCameraSortHeader('Video', 'video') +
@@ -625,50 +619,7 @@ function renderGrid() {
   });
   bindCameraSortHeaders();
 
-  // Drag-and-drop reorder
-  var table = gridEl.querySelector('table');
-  gridEl.querySelectorAll('[data-drag-camera]').forEach(function(row) {
-    row.addEventListener('dragstart', function(event) {
-      closeAllEditForms();
-      row.classList.add('dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', String(row.dataset.dragCamera));
-    });
-    row.addEventListener('dragend', function() {
-      row.classList.remove('dragging');
-      if (table) table.querySelectorAll('tr').forEach(function(r) { r.classList.remove('drag-over'); });
-    });
-    row.addEventListener('dragover', function(event) {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (table) table.querySelectorAll('tr[data-drag-camera]').forEach(function(r) { r.classList.remove('drag-over'); });
-      row.classList.add('drag-over');
-    });
-    row.addEventListener('drop', async function(event) {
-      event.preventDefault();
-      row.classList.remove('drag-over');
-      var draggedIndex = Number(event.dataTransfer.getData('text/plain'));
-      var targetIndex = Number(row.dataset.dragCamera);
-      if (!Number.isFinite(draggedIndex) || !Number.isFinite(targetIndex) || draggedIndex === targetIndex) return;
-      var camerasBefore = cameras.slice();
-      var arr = cameras.splice(draggedIndex, 1);
-      var adjustedTarget = targetIndex > draggedIndex ? targetIndex - 1 : targetIndex;
-      cameras.splice(adjustedTarget, 0, arr[0]);
-      try {
-        var result = await api('/api/cameras', { method: 'PUT', body: JSON.stringify({ cameras: cameras }) });
-        cameras = result.cameras || cameras;
-        // Drag-to-reorder is the config-order control: clear any active column
-        // sort so the freshly saved order is what the table shows.
-        cameraSortState = null;
-        renderGrid();
-        setMessage('Camera order updated.');
-      } catch (err) {
-        cameras.splice(0, cameras.length, ...camerasBefore);
-        if (window.daygleAuth?.redirecting) return;
-        setMessage(err.message, true);
-      }
-    });
-  });
+
 }
 
 function updateStats() {

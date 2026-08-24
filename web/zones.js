@@ -443,10 +443,6 @@ function objectRuleOptions(selectedLabel) {
 
 function renderObjectRules(zone, zoneIndex) {
   zone.object_rules = normalizeObjectRules(zone);
-  // Motion has its own card (renderMotionCard), so the object table lists
-  // only object-class rules. Rule keys keep the rule's REAL index in
-  // object_rules so parseZoneRuleKey / drag-reorder address the right rule
-  // even when the motion rule sits elsewhere in the array.
   const rules = zone.object_rules
     .map((rule, ruleIndex) => ({ rule, ruleIndex }))
     .filter(({ rule }) => {
@@ -456,42 +452,78 @@ function renderObjectRules(zone, zoneIndex) {
   if (!rules.length) {
     return '<div class="empty compact-empty">No object rules yet. Choose an object below to add detection settings for this area.</div>';
   }
-  return `<div class="cameras-table-wrap"><table class="rule-table" data-zone-rules-table="${zoneIndex}">
-    <thead><tr>
-      <th class="cell-drag-header"></th>
-      <th>Object</th>
-      <th class="cell-center">Enabled</th>
-      <th class="cell-center">Record</th>
-      <th class="cell-center">Email</th>
-      <th class="cell-center">Push</th>
-      <th>Min Conf</th>
-      <th>Cooldown (s)</th>
-      <th></th>
-    </tr></thead>
-    <tbody>${rules.map(({ rule, ruleIndex }) => {
-      const key = `${zoneIndex}:${ruleIndex}`;
-      const label = escapeHtml(titleCase(rule.label));
-      const expanded = expandedZoneRules.has(key);
-      return `          <tr draggable="true" data-drag-zone-rule="${key}">
-            <td class="cell-drag"><span class="drag-handle" title="Drag to reorder">${ICONS.grip}</span></td>
-            <td class="cell-label">${label}</td>
-          <td class="cell-center"><input type="checkbox" data-zone-rule-enabled="${key}" ${rule.enabled !== false ? 'checked' : ''} /></td>
-          <td class="cell-center"><input type="checkbox" data-zone-rule-record="${key}" ${rule.record_on_detect !== false ? 'checked' : ''} /></td>
-          <td class="cell-center"><input type="checkbox" data-zone-rule-email="${key}" ${rule.email_enabled === true ? 'checked' : ''} /></td>
-          <td class="cell-center"><input type="checkbox" data-zone-rule-push="${key}" ${rule.push_enabled === true ? 'checked' : ''} /></td>
-          <td><span class="conf-slider" title="Minimum confidence (0.01-1). Overrides the global ONNX slider for this object in this zone. A value of 0 is disallowed: the detector never surfaces sub-1% detections, and a 0 threshold floods events with background noise.">
-            <input type="range" data-zone-rule-confidence="${key}" min="0.01" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" />
-            <input type="number" class="conf-slider-value" data-zone-rule-confidence-value="${key}" min="0.01" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" aria-label="Minimum confidence for ${label}" />
-          </span></td>
-          <td><input type="number" data-zone-rule-cooldown="${key}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" /></td>
-          <td><div class="cell-actions">
-            <button class="rule-expand-btn secondary" type="button" data-expand-zone-rule="${key}">${expanded ? ICONS.chevronUp : ICONS.email}</button>
-            <button class="delete-btn secondary zone-action-btn" type="button" data-delete-zone-rule="${key}">${ICONS.remove}</button>
-          </div></td>
-        </tr>
-        ${renderRuleExpandRow('zone-rule', key, rule, expanded)}`;
-    }).join('')}</tbody>
-  </table></div>`;
+  const cards = rules.map(({ rule, ruleIndex }) => {
+    const key = `${zoneIndex}:${ruleIndex}`;
+    const label = escapeHtml(titleCase(rule.label));
+    const expanded = expandedZoneRules.has(key);
+    const enabled = rule.enabled !== false;
+    return `
+      <div class="zone-motion-card${enabled ? ' is-enabled' : ''}">
+        <div class="zone-motion-head">
+          <div class="zone-motion-title">
+            <span class="zone-motion-icon" aria-hidden="true">🔍</span>
+            <div>
+              <strong>${label}</strong>
+              <span>Detect ${label.toLowerCase()} in this area</span>
+            </div>
+          </div>
+          <label class="toggle-control zone-motion-toggle" title="Enable or disable ${label} detection for this area">
+            <input type="checkbox" data-zone-rule-enabled="${key}" ${enabled ? 'checked' : ''} />
+            <span>${enabled ? 'On' : 'Off'}</span>
+          </label>
+        </div>
+        <div class="zone-motion-body zone-people-body">
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <label class="muted" style="font-size:13px;display:flex;gap:4px;align-items:center" title="Record a clip when ${label} is detected in this area">
+              <input type="checkbox" data-zone-rule-record="${key}" ${rule.record_on_detect !== false ? 'checked' : ''} />📹 Record
+            </label>
+            <label class="muted" style="font-size:13px;display:flex;gap:4px;align-items:center" title="Email when ${label} is detected here">
+              <input type="checkbox" data-zone-rule-email="${key}" ${rule.email_enabled === true ? 'checked' : ''} />📧 Email
+            </label>
+            <label class="muted" style="font-size:13px;display:flex;gap:4px;align-items:center" title="Push when ${label} is detected here">
+              <input type="checkbox" data-zone-rule-push="${key}" ${rule.push_enabled === true ? 'checked' : ''} />🔔 Push
+            </label>
+            <button class="secondary rule-expand-btn" type="button" data-expand-zone-rule="${key}" title="Advanced settings for ${label}">${expanded ? ICONS.chevronUp : ICONS.email}<span>${expanded ? 'Hide' : 'Advanced'}</span></button>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:14px">
+            <label class="sound-rule-field" title="Minimum confidence (0.01-1). Overrides the global ONNX slider for this object in this zone.">
+              <span>Min Confidence</span>
+              <input type="number" data-zone-rule-confidence-value="${key}" min="0.01" max="1" step="0.01" value="${escapeHtml(rule.min_confidence)}" style="width:90px" />
+            </label>
+            <label class="sound-rule-field" title="Cooldown: minimum seconds between detection events and alerts for this area.">
+              <span>Cooldown (s)</span>
+              <input type="number" data-zone-rule-cooldown="${key}" value="${escapeHtml(rule.cooldown_seconds)}" min="0" max="3600" step="5" style="width:90px" />
+            </label>
+          </div>
+        </div>
+        <div class="zone-motion-advanced-body" ${expanded ? '' : 'hidden'}>
+          <label class="sound-rule-field" title="Comma-separated email recipients for ${label} alerts in this area.">
+            <span>Recipients</span>
+            <input type="email" data-zone-rule-email-recipients="${key}" value="${escapeHtml(normalizeEmailList(rule.email_recipients).join(', '))}" placeholder="alerts@example.com" multiple autocomplete="off" style="min-width:220px" />
+          </label>
+          <label class="sound-rule-field" title="Detection window: only detect between these times. Leave blank for all day.">
+            <span>Active from</span>
+            ${renderTimeSelect(rule.active_start, 'data-zone-rule-active-start', key)}
+          </label>
+          <label class="sound-rule-field" title="Detection window: stop detecting at this time. Leave blank for all day.">
+            <span>Active to</span>
+            ${renderTimeSelect(rule.active_end, 'data-zone-rule-active-end', key)}
+          </label>
+          <label class="sound-rule-field" title="Email/Push window: only send notifications between these times.">
+            <span>Email/Push from</span>
+            ${renderTimeSelect(rule.notify_start, 'data-zone-rule-notify-start', key)}
+          </label>
+          <label class="sound-rule-field" title="Email/Push window: stop sending notifications at this time.">
+            <span>Email/Push to</span>
+            ${renderTimeSelect(rule.notify_end, 'data-zone-rule-notify-end', key)}
+          </label>
+          <div style="width:100%;display:flex;justify-content:flex-end;padding-top:4px">
+            <button class="delete-btn secondary zone-action-btn" type="button" data-delete-zone-rule="${key}" title="Delete ${label} rule from this zone">${ICONS.remove} Remove</button>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+  return cards;
 }
 
 function renderMotionCard(zone, zoneIndex) {
@@ -737,44 +769,6 @@ function bindObjectRuleControls() {
       if (expandedZoneRules.has(key)) expandedZoneRules.delete(key);
       else expandedZoneRules.add(key);
       renderObjectDetectionRules();
-    });
-  });
-  // Drag-and-drop reorder handlers for zone object rules
-  document.querySelectorAll('[data-drag-zone-rule]').forEach((row) => {
-    const table = row.closest('table[data-zone-rules-table]');
-    row.addEventListener('dragstart', (event) => {
-      row.classList.add('dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', row.dataset.dragZoneRule);
-    });
-    row.addEventListener('dragend', () => {
-      row.classList.remove('dragging');
-      if (table) table.querySelectorAll('tr').forEach((r) => r.classList.remove('drag-over'));
-    });
-    row.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (table) table.querySelectorAll('tr[data-drag-zone-rule]').forEach((r) => r.classList.remove('drag-over'));
-      row.classList.add('drag-over');
-    });
-    row.addEventListener('drop', (event) => {
-      event.preventDefault();
-      row.classList.remove('drag-over');
-      const draggedKey = event.dataTransfer.getData('text/plain');
-      const targetKey = row.dataset.dragZoneRule;
-      if (!draggedKey || draggedKey === targetKey) return;
-      const [dZoneI, dRuleI] = draggedKey.split(':').map(Number);
-      const [tZoneI, tRuleI] = targetKey.split(':').map(Number);
-      if (dZoneI !== tZoneI) return;
-      const zones = cameraDetection().zones;
-      const zone = zones[dZoneI];
-      if (!zone) return;
-      const rules = zone.object_rules;
-      const dragged = rules.splice(dRuleI, 1)[0];
-      rules.splice(tRuleI, 0, dragged);
-      zone.object_labels = rules.filter((r) => r.label !== 'motion').map((r) => r.label);
-      renderObjectDetectionRules();
-      markZoneUnsaved();
     });
   });
   bindMotionControls();
@@ -1346,39 +1340,19 @@ function bindRuleFields() {
       });
     });
   });
-  // Min-confidence control: the slider and the editable value box stay in
-  // sync, and either one commits the value on release/change. Dragging the
-  // slider (or typing) live-updates the other, so the two never disagree.
-  document.querySelectorAll('input[type="range"][data-zone-rule-confidence]').forEach((inp) => {
-    const key = inp.dataset.zoneRuleConfidence;
-    const box = document.querySelector(`input[data-zone-rule-confidence-value="${key}"]`);
-    // Floor at 0.01: the detector never surfaces sub-1% detections (see
-    // _MIN_DETECTION_CONFIDENCE), so a 0 threshold is meaningless and floods
-    // events with background noise -- disallow it here to match the backend.
-    const MIN_CONF = 0.01;
-    const commit = (rawValue) => {
+  // Min-confidence control: number input with clamping (0.01-1).
+  const MIN_CONF = 0.01;
+  document.querySelectorAll('input[data-zone-rule-confidence-value]').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      const key = inp.dataset.zoneRuleConfidenceValue;
       const { zoneIndex, rule } = parseZoneRuleKey(key);
       if (!rule) return;
-      const value = clamp(Number(rawValue) || MIN_CONF, MIN_CONF, 1);
+      const value = clamp(Number(inp.value) || MIN_CONF, MIN_CONF, 1);
       rule.min_confidence = value;
-      // Normalise both controls to the committed value so a typed "0.4" and a
-      // dragged 0.40 read identically afterwards.
       inp.value = value;
-      if (box) box.value = value;
       cameraDetection().zones[zoneIndex].object_labels = normalizeObjectRules(cameraDetection().zones[zoneIndex]).filter((item) => item.label !== 'motion').map((item) => item.label);
       markZoneUnsaved();
-    };
-    inp.addEventListener('input', () => { if (box) box.value = inp.value; });
-    inp.addEventListener('change', () => commit(inp.value));
-    if (box) {
-      // While typing, follow the box with the slider but don't commit/clamp on
-      // every keystroke; commit (and normalise) once the field is left/changed.
-      box.addEventListener('input', () => {
-        const n = Number(box.value);
-        if (Number.isFinite(n)) inp.value = clamp(n, MIN_CONF, 1);
-      });
-      box.addEventListener('change', () => commit(box.value));
-    }
+    });
   });
   const numberBindings = [
     ['zoneRuleCooldown', 'cooldown_seconds', (value) => Math.max(0, Number.parseInt(value || 0, 10) || 0)],

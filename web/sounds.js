@@ -259,58 +259,60 @@ function renderRules() {
     return;
   }
 
-  rulesWrap.innerHTML = `
-    <div class="cameras-table-wrap">
-      <table class="rule-table">
-        <thead><tr>
-          <th class="cell-drag-header"></th>
-          <th>Sound</th>
-          <th class="cell-center">Enabled</th>
-          <th class="cell-center">Record</th>
-          <th class="cell-center">Email</th>
-          <th class="cell-center">Push</th>
-          <th>Threshold</th>
-          <th>Cooldown (s)</th>
-          <th></th>
-        </tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>`;
-  const rowsHtml = rules.map((rule, ruleIndex) => buildSoundRuleRow(rule, ruleIndex, rules)).join('');
-  rulesWrap.querySelector('tbody').insertAdjacentHTML('beforeend', rowsHtml);
+  rulesWrap.innerHTML = rules.map((rule) => {
+    const cls = soundClasses.find((item) => item.id === rule.class);
+    const label = cls ? cls.label : titleCase(String(rule.class || '').replace(/_/g, ' '));
+    const id = escapeHtml(rule.class);
+    const expanded = expandedSoundRules.has(rule.class);
+    const enabled = rule.enabled === true;
+    return `
+      <div class="zone-motion-card${enabled ? ' is-enabled' : ''}">
+        <div class="zone-motion-head">
+          <div class="zone-motion-title">
+            <span class="zone-motion-icon" aria-hidden="true">🔊</span>
+            <div>
+              <strong>${escapeHtml(label)}</strong>
+              <span>Detect ${escapeHtml(label.toLowerCase())} in the audio stream</span>
+            </div>
+          </div>
+          <label class="toggle-control zone-motion-toggle" title="Enable or disable ${escapeHtml(label)} detection">
+            <input type="checkbox" data-rule-enabled="${id}" ${enabled ? 'checked' : ''} />
+            <span>${enabled ? 'On' : 'Off'}</span>
+          </label>
+        </div>
+        <div class="zone-motion-body zone-people-body">
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <label class="muted" style="font-size:13px;display:flex;gap:4px;align-items:center" title="Record a clip when ${escapeHtml(label)} is detected">
+              <input type="checkbox" data-rule-record="${id}" ${rule.record_on_detect !== false ? 'checked' : ''} />📹 Record
+            </label>
+            <label class="muted" style="font-size:13px;display:flex;gap:4px;align-items:center" title="Email when ${escapeHtml(label)} is detected">
+              <input type="checkbox" data-rule-email="${id}" ${rule.email_enabled ? 'checked' : ''} />📧 Email
+            </label>
+            <label class="muted" style="font-size:13px;display:flex;gap:4px;align-items:center" title="Push when ${escapeHtml(label)} is detected">
+              <input type="checkbox" data-rule-push="${id}" ${rule.push_enabled ? 'checked' : ''} />🔔 Push
+            </label>
+            <button class="secondary rule-expand-btn" type="button" data-expand-rule="${id}" title="Advanced settings for ${escapeHtml(label)}">${expanded ? ICONS.chevronUp : ICONS.email}<span>${expanded ? 'Hide' : 'Advanced'}</span></button>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:14px">
+            <label class="sound-rule-field" title="Detection threshold (0.1-1.0): how confident the model must be before this sound counts.">
+              <span>Threshold</span>
+              <input type="number" data-rule-threshold-value="${id}" min="0.1" max="1.0" step="0.01" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" style="width:90px" />
+            </label>
+            <label class="sound-rule-field" title="Cooldown: minimum seconds between alerts for this sound.">
+              <span>Cooldown (s)</span>
+              <input type="number" data-rule-cooldown="${id}" value="${escapeHtml(String(rule.cooldown_seconds ?? 30))}" min="5" max="3600" step="5" style="width:90px" />
+            </label>
+          </div>
+        </div>
+        <div class="zone-motion-advanced-body" ${expanded ? '' : 'hidden'}>
+          ${renderRuleExpandFields('rule', id, rule)}
+          <div style="width:100%;display:flex;justify-content:flex-end;padding-top:4px">
+            <button class="delete-btn secondary" type="button" data-remove-rule="${id}" title="Delete ${escapeHtml(label)} rule">${ICONS.remove} Remove</button>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
 
-  // Drag-and-drop reorder handlers for sound rules
-  rulesWrap.querySelectorAll('[data-drag-rule]').forEach((row) => {
-    row.addEventListener('dragstart', (event) => {
-      row.classList.add('dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', row.dataset.dragRule);
-    });
-    row.addEventListener('dragend', () => {
-      row.classList.remove('dragging');
-      rulesWrap.querySelectorAll('tr').forEach((r) => r.classList.remove('drag-over'));
-    });
-    row.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      rulesWrap.querySelectorAll('tr[data-drag-rule]').forEach((r) => r.classList.remove('drag-over'));
-      row.classList.add('drag-over');
-    });
-    row.addEventListener('drop', (event) => {
-      event.preventDefault();
-      row.classList.remove('drag-over');
-      const draggedId = event.dataTransfer.getData('text/plain');
-      const targetId = row.dataset.dragRule;
-      if (!draggedId || draggedId === targetId) return;
-      const rules = editingSound.rules || [];
-      const dragIdx = rules.findIndex((r) => r.class === draggedId);
-      const dropIdx = rules.findIndex((r) => r.class === targetId);
-      if (dragIdx < 0 || dropIdx < 0) return;
-      const dragged = rules.splice(dragIdx, 1)[0];
-      rules.splice(dropIdx, 0, dragged);
-      renderRules();
-    });
-  });
   rulesWrap.querySelectorAll('[data-expand-rule]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const id = btn.dataset.expandRule;
@@ -322,34 +324,18 @@ function renderRules() {
   rulesWrap.querySelectorAll('[data-rule-enabled]').forEach((input) => {
     input.addEventListener('change', () => {
       updateRule(input.dataset.ruleEnabled, 'enabled', input.checked);
-      const row = input.closest('tr');
-      if (row) row.classList.toggle('sound-rule-row-disabled', !input.checked);
     });
   });
   rulesWrap.querySelectorAll('[data-rule-record]').forEach((input) => {
     input.addEventListener('change', () => updateRule(input.dataset.ruleRecord, 'record_on_detect', input.checked));
   });
-  // Threshold control: the slider and the editable value box stay in sync, and
-  // either one commits the value on release/change. Dragging the slider (or
-  // typing) live-updates the other, so the two never disagree.
-  rulesWrap.querySelectorAll('input[type="range"][data-rule-threshold]').forEach((input) => {
-    const id = input.dataset.ruleThreshold;
-    const box = rulesWrap.querySelector(`input[data-rule-threshold-value="${id}"]`);
-    const commit = (rawValue) => {
-      const value = Math.max(0.1, Math.min(1.0, Number(rawValue) || 0.35));
+  // Threshold control: number input with clamping (0.1-1.0).
+  rulesWrap.querySelectorAll('input[data-rule-threshold-value]').forEach((input) => {
+    input.addEventListener('change', () => {
+      const value = Math.max(0.1, Math.min(1.0, Number(input.value) || 0.35));
       input.value = value;
-      if (box) box.value = value;
-      updateRule(id, 'confidence_threshold', value);
-    };
-    input.addEventListener('input', () => { if (box) box.value = input.value; });
-    input.addEventListener('change', () => commit(input.value));
-    if (box) {
-      box.addEventListener('input', () => {
-        const n = Number(box.value);
-        if (Number.isFinite(n)) input.value = Math.max(0.1, Math.min(1.0, n));
-      });
-      box.addEventListener('change', () => commit(box.value));
-    }
+      updateRule(input.dataset.ruleThresholdValue, 'confidence_threshold', value);
+    });
   });
   rulesWrap.querySelectorAll('[data-rule-cooldown]').forEach((input) => {
     input.addEventListener('change', () => updateRule(input.dataset.ruleCooldown, 'cooldown_seconds', Math.max(5, Number.parseInt(input.value, 10) || 30)));
@@ -382,38 +368,6 @@ function renderRules() {
       renderEditor();
     });
   });
-}
-
-// Build a single rule row + expand row as pre-escaped HTML markup. Kept
-// out of the ``renderRules`` template so the outer ``.innerHTML`` write can
-// stay a pure literal (no ``${...}`` interpolation), which keeps the
-// ``H2RegressionGuardTests`` regex in tests/test_xss_static_guards.py happy
-// and confines the XSS surface to a single helper that already routes every
-// dynamic value through ``escapeHtml``.
-function buildSoundRuleRow(rule, ruleIndex, rules) {
-  const cls = soundClasses.find((item) => item.id === rule.class);
-  const label = cls ? cls.label : titleCase(String(rule.class || '').replace(/_/g, ' '));
-  const id = escapeHtml(rule.class);
-  const expanded = expandedSoundRules.has(rule.class);
-  return `
-    <tr draggable="true" data-drag-rule="${id}" class="${rule.enabled ? '' : 'sound-rule-row-disabled'}">
-      <td class="cell-drag"><span class="drag-handle" title="Drag to reorder">${ICONS.grip}</span></td>
-      <td class="cell-label">${escapeHtml(label)}</td>
-      <td class="cell-center"><input type="checkbox" data-rule-enabled="${id}" ${rule.enabled ? 'checked' : ''} /></td>
-      <td class="cell-center"><input type="checkbox" data-rule-record="${id}" ${rule.record_on_detect !== false ? 'checked' : ''} /></td>
-      <td class="cell-center"><input type="checkbox" data-rule-email="${id}" ${rule.email_enabled ? 'checked' : ''} /></td>
-      <td class="cell-center"><input type="checkbox" data-rule-push="${id}" ${rule.push_enabled ? 'checked' : ''} /></td>
-      <td><span class="conf-slider" title="Detection threshold (0.1-1.0): how confident the model must be before this sound counts.">
-        <input type="range" data-rule-threshold="${id}" min="0.1" max="1.0" step="0.01" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" />
-        <input type="number" class="conf-slider-value" data-rule-threshold-value="${id}" min="0.1" max="1.0" step="0.01" value="${escapeHtml(String(rule.confidence_threshold ?? 0.35))}" aria-label="Detection threshold for ${escapeHtml(label)}" />
-      </span></td>
-      <td><input type="number" data-rule-cooldown="${id}" value="${escapeHtml(String(rule.cooldown_seconds ?? 30))}" min="5" max="3600" step="5" /></td>
-      <td><div class="cell-actions">
-        <button class="rule-expand-btn secondary" type="button" data-expand-rule="${id}">${expanded ? ICONS.chevronUp : ICONS.email}</button>
-        <button class="delete-btn secondary" type="button" data-remove-rule="${id}">${ICONS.remove}</button>
-      </div></td>
-    </tr>
-    ${renderRuleExpandRow('rule', id, rule, expanded)}`;
 }
 
 function renderEditor() {
