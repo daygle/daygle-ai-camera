@@ -153,4 +153,10 @@ loadSettings();
 loadFaceMode();
 // Tab bar (Settings / People). Shared implementation with URL-hash
 // deep-linking lives in utils.js - /face-recognition#people opens People.
+// When the Review tab is activated, refresh the unknown faces list.
 initDaygleTabs();
+
+// Hook tab activation to refresh the Review panel.
+document.getElementById('tab-review')?.addEventListener('click', () => {
+  window.refreshUnknownFaces?.();
+});

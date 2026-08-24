@@ -21,6 +21,7 @@
     <div class="settings-tabs" role="tablist" aria-label="Face Recognition sections">
       <button class="settings-tab" type="button" role="tab" id="tab-settings" aria-controls="panel-settings" data-tab="settings" aria-selected="true"><span class="settings-tab-icon" aria-hidden="true">⚙️</span><span class="settings-tab-label">Settings</span></button>
       <button class="settings-tab" type="button" role="tab" id="tab-people" aria-controls="panel-people" data-tab="people" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">👥</span><span class="settings-tab-label">People</span></button>
+      <button class="settings-tab" type="button" role="tab" id="tab-review" aria-controls="panel-review" data-tab="review" aria-selected="false" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true">🔍</span><span class="settings-tab-label">Review</span><span id="reviewBadge" class="settings-tab-badge" hidden></span></button>
     </div>
 
     <div class="settings-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" data-panel="settings">
@@ -119,10 +120,33 @@
 
     </div><!-- /panel-people -->
 
+    <div class="settings-panel" id="panel-review" role="tabpanel" aria-labelledby="tab-review" data-panel="review" hidden>
+
+    <section class="card">
+      <div class="settings-section-header">
+        <div class="settings-section-icon">🔍</div>
+        <div>
+          <h2>Unknown Faces</h2>
+          <p class="settings-section-subtitle">Review captured faces that weren't matched to any enrolled person. Assign them to create new face enrolments, or dismiss them.</p>
+        </div>
+      </div>
+      <div id="reviewMessage" class="muted"></div>
+      <div id="reviewEmpty" class="muted" hidden>No unknown faces captured yet. Unknown faces are captured automatically when face recognition detects someone not in the enrolled people list.</div>
+      <div id="reviewGrid" class="unknown-faces-grid"></div>
+      <div id="reviewPager" class="unknown-faces-pager" hidden>
+        <button id="reviewPrev" class="secondary" type="button" disabled>← Previous</button>
+        <span id="reviewPageInfo"></span>
+        <button id="reviewNext" class="secondary" type="button" disabled>Next →</button>
+      </div>
+    </section>
+
+    </div><!-- /panel-review -->
+
   </main>
   <script src="/static/nav.js"></script>
   <script src="/static/utils.js"></script>
   <script src="/static/face-recognition.js"></script>
   <script src="/static/people.js"></script>
+  <script src="/static/unknown-faces.js"></script>
 </body>
 </html>

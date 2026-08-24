@@ -241,6 +241,8 @@ from app.api.persons_router import router as persons_router
 app.include_router(persons_router)
 from app.api.face_detection_rules_router import router as face_detection_rules_router
 app.include_router(face_detection_rules_router)
+from app.api.unknown_faces_router import router as unknown_faces_router
+app.include_router(unknown_faces_router)
 from app.api.objects_router import router as objects_router
 app.include_router(objects_router)
 from app.api.label_groups_router import router as label_groups_router

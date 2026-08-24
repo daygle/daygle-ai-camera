@@ -18,6 +18,7 @@ plain COCO detector -- which emits no ``face`` label -- pays nothing.
 """
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any
 
@@ -34,6 +35,8 @@ try:
 except ImportError:  # pragma: no cover - exercised only in minimal installs
     np = None  # type: ignore[assignment]
 
+logger = logging.getLogger('daygle.ai')
+
 _FACE_LABEL = 'face'
 
 # Per-camera identity cache: camera_id -> {track_id: MatchResult | None}.
@@ -43,7 +46,93 @@ _cache: dict[str, dict[Any, Any]] = {}
 # Per-camera set of unknown-face track ids already alerted, so a lingering
 # stranger raises one alert rather than one per ~4 Hz cycle.
 _alerted_unknown: dict[str, set[Any]] = {}
+# Per-camera set of unknown-face track ids already captured for review.
+_captured_unknown: dict[str, set[Any]] = {}
+# Per-person set of track ids already enriched, to avoid re-enriching the
+# same face on every cycle.
+_enriched_tracks: dict[str, set[Any]] = {}
 _lock = threading.Lock()
+
+# Auto-enrichment: store new embeddings for recognized faces to improve
+# match accuracy over time. Only high-confidence matches are enriched.
+_ENRICH_MIN_SCORE = 0.7  # minimum identity score to trigger enrichment
+_ENRICH_MAX_PER_PERSON = 20  # max auto-enriched embeddings per person (per model)
+
+
+def _maybe_enrich_person(
+    camera_id: str,
+    track_id: Any,
+    detection: dict[str, Any],
+    crop_bgr: Any,
+    result: Any,
+    service: Any,
+) -> None:
+    """Store a new embedding for a recognized person to improve accuracy.
+
+    Only triggers when:
+    - The match confidence is above _ENRICH_MIN_SCORE
+    - This track hasn't already been enriched this session
+    - The person doesn't already have too many embeddings for this model
+    """
+    if result is None or track_id is None or crop_bgr is None:
+        return
+    person_id = result.person_id
+    if not person_id:
+        return
+    score = float(result.score or 0)
+    if score < _ENRICH_MIN_SCORE:
+        return
+    # One enrichment per track to avoid flooding.
+    person_key = str(person_id)
+    with _lock:
+        enriched = _enriched_tracks.setdefault(person_key, set())
+        if track_id in enriched:
+            return
+        enriched.add(track_id)
+    # Offload to background thread to avoid blocking the hot path.
+    threading.Thread(
+        target=_store_enriched_embedding,
+        args=(person_id, camera_id, track_id, detection, crop_bgr, service),
+        daemon=True,
+    ).start()
+
+
+def _store_enriched_embedding(
+    person_id: int,
+    camera_id: str,
+    track_id: Any,
+    detection: dict[str, Any],
+    crop_bgr: Any,
+    service: Any,
+) -> None:
+    """Background: embed the face and store it for the recognized person."""
+    try:
+        import app.state as _state
+        from app.face_recognition import embedding_to_bytes
+        if _state.database is None or crop_bgr is None:
+            return
+        model = str(service.model_id)
+        faces = _state.database.list_person_faces(int(person_id))
+        if len(faces) >= _ENRICH_MAX_PER_PERSON:
+            return
+        embedding = service.embed_face(crop_bgr)
+        if embedding is None:
+            return
+        emb_bytes = embedding_to_bytes(embedding)
+        dim = int(embedding.shape[0])
+        _state.database.add_person_face(
+            int(person_id),
+            embedding=emb_bytes,
+            dim=dim,
+            model=model,
+            source_snapshot=f'auto-enrich:cam={camera_id},track={track_id}',
+        )
+        # Refresh the matcher so the new embedding is active immediately.
+        from app.face_recognition_service import refresh_face_recognition_matcher
+        refresh_face_recognition_matcher()
+        logger.debug('Enriched person %s with new face embedding from track %s', person_id, track_id)
+    except Exception as exc:
+        logger.debug('Failed to enrich face for person %s: %s', person_id, exc)
 
 
 def _is_face(detection: dict[str, Any]) -> bool:
@@ -80,6 +169,82 @@ def _apply(detection: dict[str, Any], result: Any) -> None:
         detection['person_id'] = result.person_id
         detection['person_name'] = result.name
         detection['identity_score'] = round(float(result.score), 4)
+
+
+# Maximum unknown-face captures per camera to prevent unbounded growth.
+_MAX_CAPTURES_PER_CAMERA = 200
+
+
+def _maybe_capture_unknown(
+    camera_id: str,
+    track_id: Any,
+    detection: dict[str, Any],
+    crop_bgr: Any,
+    service: Any,
+) -> None:
+    """Capture an unknown face for the Review workflow (first time per track)."""
+    # Only capture the first unknown appearance per track.
+    with _lock:
+        captured = _captured_unknown.setdefault(camera_id, set())
+        if track_id in captured:
+            return
+        captured.add(track_id)
+    # Enforce per-camera cap to prevent unbounded growth.
+    try:
+        import app.state as _state
+        if _state.database is not None:
+            count = _state.database.count_unknown_faces(status='pending')
+            if count >= _MAX_CAPTURES_PER_CAMERA:
+                return
+    except Exception:
+        pass  # non-fatal: skip capture if DB unavailable
+    # Embed + thumbnail off the hot path (already computed by recognize, but
+    # the embedding isn't stored by the matcher). We re-embed here only once
+    # per track since the first unknown appearance is the only capture.
+    threading.Thread(
+        target=_store_unknown_face,
+        args=(camera_id, track_id, detection, crop_bgr, service),
+        daemon=True,
+    ).start()
+
+
+def _store_unknown_face(
+    camera_id: str,
+    track_id: Any,
+    detection: dict[str, Any],
+    crop_bgr: Any,
+    service: Any,
+) -> None:
+    """Background: embed the face, generate a thumbnail, and store to DB."""
+    try:
+        import app.state as _state
+        from app.face_recognition import embedding_to_bytes, encode_face_thumbnail
+        if _state.database is None or crop_bgr is None:
+            return
+        embedding = service.embed_face(crop_bgr)
+        if embedding is None:
+            return
+        emb_bytes = embedding_to_bytes(embedding)
+        dim = int(embedding.shape[0])
+        thumbnail = encode_face_thumbnail(crop_bgr)
+        box = detection.get('box') or {}
+        _state.database.store_unknown_face(
+            camera_id=camera_id,
+            zone_id=detection.get('zone_id'),
+            track_id=str(track_id) if track_id is not None else None,
+            embedding=emb_bytes,
+            dim=dim,
+            model=str(service.model_id),
+            thumbnail=thumbnail,
+            confidence=float(detection.get('confidence') or 0),
+            box_x=float(box.get('x', 0)),
+            box_y=float(box.get('y', 0)),
+            box_width=float(box.get('width', 0)),
+            box_height=float(box.get('height', 0)),
+        )
+        logger.debug('Captured unknown face track %s on camera %s', track_id, camera_id)
+    except Exception as exc:
+        logger.debug('Failed to capture unknown face: %s', exc)
 
 
 def annotate_face_identities(camera_id: str, detections: list[dict[str, Any]], frame: Any) -> list[dict[str, Any]]:
@@ -122,6 +287,12 @@ def annotate_face_identities(camera_id: str, detections: list[dict[str, Any]], f
         _apply(detection, result)
         if track_id is not None:
             results_by_track[track_id] = result
+        # Capture the first unknown face per track for the Review workflow.
+        if result is None and crop is not None and track_id is not None:
+            _maybe_capture_unknown(camera_id, track_id, detection, crop, service)
+        # Auto-enrich: store a new embedding for high-confidence matches.
+        if result is not None and crop is not None and track_id is not None:
+            _maybe_enrich_person(camera_id, track_id, detection, crop, result, service)
 
     # Phase 3 (under lock): write the fresh results back and prune tracks no
     # longer present so the cache cannot grow unbounded.
@@ -133,6 +304,16 @@ def annotate_face_identities(camera_id: str, detections: list[dict[str, Any]], f
         cam_cache = _cache.get(camera_id)
         if cam_cache is not None:
             _cache[camera_id] = {tid: res for tid, res in cam_cache.items() if tid in seen}
+        # Prune captured-unknown set too so a returning person can be captured again.
+        cap_set = _captured_unknown.get(camera_id)
+        if cap_set is not None:
+            _captured_unknown[camera_id] = cap_set - seen
+        # Prune enriched-tracks per-person sets for tracks no longer seen.
+        stale_pids = {str(d.get('person_id')) for d in faces if d.get('person_id') is not None}
+        # Only prune tracks we know about; leave others untouched.
+        for pid in list(_enriched_tracks.keys()):
+            if pid in stale_pids:
+                _enriched_tracks[pid] = _enriched_tracks[pid] - {d.get('track_id') for d in faces if str(d.get('person_id')) == pid}
     return detections
 
 
@@ -248,3 +429,4 @@ def reset_camera_identities(camera_id: str) -> None:
     with _lock:
         _cache.pop(camera_id, None)
         _alerted_unknown.pop(camera_id, None)
+        _captured_unknown.pop(camera_id, None)

@@ -12,6 +12,7 @@ from app.db.events import EventsMixin
 from app.db.persons import PersonsMixin
 from app.db.recordings import RecordingsMixin
 from app.db.settings_repo import SettingsRepoMixin
+from app.db.unknown_faces import UnknownFacesMixin
 
 
 # How long a connection waits for a contended write lock before giving up with
@@ -66,6 +67,7 @@ class EventDatabase(
     AuditLogMixin,
     CameraDiagnosticsMixin,
     PersonsMixin,
+    UnknownFacesMixin,
 ):
     def __init__(self, database_path: str) -> None:
         self.database_path = Path(database_path)
@@ -327,6 +329,37 @@ class EventDatabase(
 
                 CREATE INDEX IF NOT EXISTS idx_person_faces_person ON person_faces(person_id);
                 CREATE INDEX IF NOT EXISTS idx_person_faces_model ON person_faces(model);
+
+                -- Unknown face captures for the Review workflow.
+                -- When a face is detected but not matched to any enrolled person,
+                -- the crop + embedding + thumbnail are stored here so an admin can
+                -- review and assign them.
+                CREATE TABLE IF NOT EXISTS unknown_faces (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    camera_id TEXT NOT NULL,
+                    zone_id TEXT,
+                    track_id TEXT,
+                    event_id INTEGER,
+                    embedding BLOB NOT NULL,
+                    dim INTEGER NOT NULL,
+                    model TEXT NOT NULL,
+                    thumbnail BLOB,
+                    confidence REAL,
+                    frame_width INTEGER,
+                    frame_height INTEGER,
+                    box_x REAL,
+                    box_y REAL,
+                    box_width REAL,
+                    box_height REAL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    assigned_person_id INTEGER,
+                    created_at TEXT NOT NULL,
+                    reviewed_at TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_unknown_faces_status ON unknown_faces(status);
+                CREATE INDEX IF NOT EXISTS idx_unknown_faces_camera ON unknown_faces(camera_id);
+                CREATE INDEX IF NOT EXISTS idx_unknown_faces_created ON unknown_faces(created_at);
                 """
             )
 
