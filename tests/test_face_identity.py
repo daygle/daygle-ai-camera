@@ -149,12 +149,14 @@ def _unknown_rule(**overrides):
 
 
 def _use_rule(monkeypatch, rule):
-    # Unknown-person alerting is gated on the ``_unknown`` face-detection rule
-    # (Face Rules tab), not a recognition-settings toggle. Mirror the helper's
-    # real contract: a missing or disabled rule resolves to None.
+    # Unknown-person alerting reads the ``face_detection_rules`` store and
+    # filters unknown-type rules by enabled + camera/zone scope. Patch the
+    # store so the helper's contract (missing/disabled rule -> no alerts)
+    # is preserved through the real code path.
+    rules = [rule] if (rule and rule.get('enabled')) else []
     monkeypatch.setattr(
-        fi, 'enabled_unknown_rule',
-        lambda: rule if (rule and rule.get('enabled')) else None,
+        fi, 'effective_face_detection_rules',
+        lambda: {'rules': rules},
     )
 
 

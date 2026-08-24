@@ -656,10 +656,27 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # frame is a numpy array, so non-face cameras pay nothing. The annotations
     # ride through the ``{**det}`` copies below into the stored event + overlay.
     object_detections = annotate_face_identities(camera_id, object_detections, frame)
+    # Zone-stamp faces so People rules can be scoped: a face inside an enabled
+    # zone carries that zone's id, and scoped rules (_unknown:<zone>, per-person
+    # rules with camera_id/zone_id) fire only for faces stamped accordingly.
+    # Additive-only and skipped entirely when no faces were found this cycle.
+    if any(str(d.get('label') or '').strip().lower() == 'face' for d in object_detections):
+        _face_zones = [
+            z for z in (settings.get('detection') or {}).get('zones', [])
+            if z.get('enabled', True)
+        ]
+        for _det in object_detections:
+            if str(_det.get('label') or '').strip().lower() != 'face' or 'zone_id' in _det:
+                continue
+            _fz = next((z for z in _face_zones if detection_matches_zone(_det, z)), None)
+            if _fz is not None:
+                _det['zone_id'] = str(_fz.get('id') or _fz.get('name') or '')
+                _det['zone_name'] = str(_fz.get('name') or '').strip() or None
     # Alert-on-unknown (Stage 2c): a detected face matching no enrolled person is
-    # itself alertable ("stranger"), one alert per track. Empty unless
-    # recognition is enabled and the ``_unknown`` system face-detection rule
-    # (Face Rules tab) is on.
+    # itself alertable ("stranger"), one alert per track per configured rule.
+    # Empty unless recognition is enabled and an unknown-person face-detection
+    # rule is on (global _unknown, or a zone-scoped _unknown:<zone> variant
+    # created by the Zones page People card).
     _unknown_face_alerts = unknown_face_alerts(camera_id, object_detections)
     # Face detection rules (Stage 2c): per-person alert rules with email/push
     # notifications, checked after identity annotation so each face carries
@@ -775,6 +792,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
         triggered.append({
             'rule_name': 'Unknown face',
             'label': 'face',
+            # Which scoped ``_unknown`` rule(s) fired -- dispatch unions the
+            # email/push config of exactly these (legacy alerts without the
+            # key fall back to the global _unknown rule).
+            'face_rule_ids': _unknown.get('face_rule_ids') or [],
+            'zone_id': str(_unknown.get('zone_id') or ''),
             'confidence': float(_unknown.get('confidence') or 0),
             'message': 'Alert triggered: unrecognized face detected',
         })

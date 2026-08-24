@@ -506,7 +506,7 @@ function renderMotionCard(zone, zoneIndex) {
         <div class="zone-motion-title">
           <span class="zone-motion-icon" aria-hidden="true">⟳</span>
           <div>
-            <strong>Motion detection</strong>
+            <strong>Motion Detection</strong>
             <span>Detect any movement in this area</span>
           </div>
         </div>
@@ -573,7 +573,7 @@ function renderFaceCard(zone, zoneIndex) {
         <div class="zone-motion-title">
           <span class="zone-motion-icon" aria-hidden="true">👤</span>
           <div>
-            <strong>Face detection</strong>
+            <strong>Face Detection</strong>
             <span>Recognise faces inside this area only</span>
           </div>
         </div>
@@ -707,6 +707,7 @@ function renderObjectDetectionRules() {
         <div class="zone-name-card"><span class="zone-name-kicker">Area</span><strong>${zoneName}</strong></div>
         ${renderMotionCard(zone, zoneIndex)}
         ${renderFaceCard(zone, zoneIndex)}
+        ${renderPeopleCard(zone, zoneIndex)}
         <div class="zone-object-rules-header">
           <select data-add-zone-rule="${zoneIndex}" class="rule-add-select">${addOptions}</select>
         </div>
@@ -778,6 +779,7 @@ function bindObjectRuleControls() {
   });
   bindMotionControls();
   bindFaceControls();
+  bindPeopleControls();
   document.querySelectorAll('[data-delete-zone-rule]').forEach((button) => {
     button.addEventListener('click', () => {
       const zones = cameraDetection().zones;
@@ -1031,6 +1033,215 @@ function bindFaceControls() {
     });
   });
 }
+
+// ── People Detection card ────────────────────────────────────────────
+// Per-zone known-person + stranger alerting. Rules live in the shared
+// face-detection-rules store (the former Face Rules tab) and are stamped
+// with camera_id/zone_id so they fire only inside this area. Changes save
+// immediately -- they do NOT participate in the zone Save button, because
+// they are stored separately from camera detection settings.
+
+let faceRulesPayload = { rules: [] };
+let enrolledPeople = [];
+const PEOPLE_SAVE_DELAY_MS = 400;
+let peopleSaveTimer = null;
+
+function peopleRowKey(personId) {
+  return personId ? String(personId) : '_unknown';
+}
+
+function findScopedPeopleRule(zone, personId) {
+  const wanted = peopleRowKey(personId);
+  return (faceRulesPayload.rules || []).find((rule) => {
+    if (String(rule.camera_id || '') !== String(selectedCamera?.id || '')) return false;
+    if (String(rule.zone_id || '') !== String(zone.id || '')) return false;
+    return peopleRowKey(rule.person_id) === wanted;
+  }) || null;
+}
+
+function ensureScopedPeopleRule(zone, personId, personName) {
+  let rule = findScopedPeopleRule(zone, personId);
+  if (rule) return rule;
+  const isUnknown = !personId;
+  rule = {
+    id: isUnknown ? `_unknown:${zone.id}` : `zone:${zone.id}:person:${personId}`,
+    person_id: isUnknown ? null : personId,
+    name: personName || 'Unknown Person',
+    enabled: true,
+    email_enabled: false,
+    push_enabled: false,
+    email_recipients: '',
+    cooldown_minutes: 5,
+    min_confidence: null,
+    camera_id: selectedCamera.id,
+    zone_id: zone.id,
+  };
+  faceRulesPayload.rules = [...(faceRulesPayload.rules || []), rule];
+  return rule;
+}
+
+function schedulePeopleSave() {
+  clearTimeout(peopleSaveTimer);
+  peopleSaveTimer = setTimeout(async () => {
+    try {
+      faceRulesPayload = await api('/api/settings/face-detection-rules', {
+        method: 'PUT',
+        body: JSON.stringify({ rules: faceRulesPayload.rules || [] }),
+      });
+      window.showToast?.('People rules saved.');
+    } catch (error) {
+      if (!window.daygleAuth?.redirecting) window.showToast?.(error.message || 'Failed to save people rules.', true);
+    }
+  }, PEOPLE_SAVE_DELAY_MS);
+}
+
+function globalPeopleRuleNames() {
+  // Legacy unscoped rules (no camera/zone) still alert on every camera;
+  // surface them read-only so operators are not surprised by them.
+  return (faceRulesPayload.rules || [])
+    .filter((r) => !String(r.camera_id || '') && !String(r.zone_id || '') && r.enabled)
+    .map((r) => r.name || 'Unknown Person');
+}
+
+function renderPeopleCard(zone, zoneIndex) {
+  if (!selectedCamera) return '';
+  const zi = Number(zoneIndex);
+  const zoneLabel = escapeHtml(zone.name || `Zone ${zi + 1}`);
+  const rows = [{ key: '', name: 'Unknown Person', unknown: true }]
+    .concat((enrolledPeople || []).map((person) => ({ key: String(person.id), name: person.name, unknown: false })))
+    .map(({ key, name, unknown }) => {
+      const rule = findScopedPeopleRule(zone, key);
+      const expandKey = `people:${zi}:${key || '_unknown'}`;
+      const expanded = expandedZoneRules.has(expandKey);
+      const dk = `${zi}|${key || '_unknown'}`;
+      return `
+      <div class="people-rule-row" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.06)">
+        <span style="flex:1;font-size:13px;font-weight:500">${escapeHtml(name)}${unknown ? ' <span class="muted" style="font-size:11px">(stranger alerts)</span>' : ''}</span>
+        <label class="toggle-control" title="Alert when ${escapeHtml(name)} is detected in this area">
+          <input type="checkbox" data-people-toggle="${dk}" ${rule && rule.enabled ? 'checked' : ''} aria-label="Toggle alerts for ${escapeHtml(name)} in ${zoneLabel}" />
+          <span>${rule && rule.enabled ? 'On' : 'Off'}</span>
+        </label>
+        <label class="muted" style="font-size:13px;display:flex;gap:4px;align-items:center" title="Email when ${escapeHtml(name)} is detected here">
+          <input type="checkbox" data-people-email="${dk}" ${rule?.email_enabled ? 'checked' : ''} />📧
+        </label>
+        <label class="muted" style="font-size:13px;display:flex;gap:4px;align-items:center" title="Push when ${escapeHtml(name)} is detected here">
+          <input type="checkbox" data-people-push="${dk}" ${rule?.push_enabled ? 'checked' : ''} />🔔
+        </label>
+        <button class="secondary rule-expand-btn" type="button" data-expand-zone-people="${dk}" aria-expanded="${expanded}" title="Recipients, cooldown and confidence for ${escapeHtml(name)}">${expanded ? ICONS.chevronUp : ICONS.email}<span>${expanded ? 'Hide' : 'Advanced'}</span></button>
+      </div>
+      <div class="zone-motion-advanced-body" data-people-advanced="${dk}" ${expanded ? '' : 'hidden'} style="display:flex;flex-wrap:wrap;gap:12px;padding:0 0 10px">
+        <label class="sound-rule-field" title="Comma-separated email recipients for ${escapeHtml(name)} alerts in this area.">
+          <span>Recipients</span>
+          <input type="text" data-people-recipients="${dk}" value="${escapeHtml(rule?.email_recipients || '')}" placeholder="a@example.com, b@example.com" style="min-width:220px" />
+        </label>
+        <label class="sound-rule-field" title="Minutes between repeat alerts for the same person in this area. Default 5.">
+          <span>Cooldown (min)</span>
+          <input type="number" data-people-cooldown="${dk}" value="${escapeHtml(String(rule ? (rule.cooldown_minutes ?? 5) : 5))}" min="0" max="1440" step="1" style="width:90px" />
+        </label>
+        <label class="sound-rule-field" title="Minimum recognition confidence (0-1) required. Leave blank for any.">
+          <span>Min confidence</span>
+          <input type="number" data-people-confidence="${dk}" value="${rule?.min_confidence != null ? escapeHtml(String(rule.min_confidence)) : ''}" min="0" max="1" step="0.01" placeholder="Any" style="width:90px" />
+        </label>
+      </div>`;
+    }).join('');
+  const globals = globalPeopleRuleNames();
+  const globalNote = globals.length
+    ? `<p class="muted" style="font-size:11px;margin-top:8px">Global rules also alert on every camera: ${globals.map(escapeHtml).join(', ')}</p>`
+    : '';
+  return `
+    <div class="zone-motion-card" data-zone-people-for="${zi}">
+      <div class="zone-motion-head">
+        <div class="zone-motion-title">
+          <span class="zone-motion-icon" aria-hidden="true">👥</span>
+          <div>
+            <strong>People Detection</strong>
+            <span>Alert on recognised people inside this area</span>
+          </div>
+        </div>
+      </div>
+      <div class="zone-motion-body">${rows}${globalNote}</div>
+    </div>`;
+}
+
+function bindPeopleControls() {
+  const ruleFromDataset = (datasetValue) => {
+    const sep = datasetValue.indexOf('|');
+    const zone = cameraDetection().zones[Number(datasetValue.slice(0, sep))];
+    if (!zone) return null;
+    const rawKey = datasetValue.slice(sep + 1);
+    const personId = rawKey === '_unknown' ? '' : rawKey;
+    let rule = findScopedPeopleRule(zone, personId);
+    if (!rule) {
+      const person = (enrolledPeople || []).find((candidate) => String(candidate.id) === String(personId));
+      rule = ensureScopedPeopleRule(zone, personId, person?.name);
+    }
+    return rule;
+  };
+  [
+    ['peopleToggle', (rule, checked) => { rule.enabled = checked; }],
+    ['peopleEmail', (rule, checked) => { rule.email_enabled = checked; }],
+    ['peoplePush', (rule, checked) => { rule.push_enabled = checked; }],
+  ].forEach(([datasetKey, apply]) => {
+    document.querySelectorAll(`[data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const rule = ruleFromDataset(cb.dataset[datasetKey]);
+        if (!rule) return;
+        apply(rule, cb.checked);
+        schedulePeopleSave();
+      });
+    });
+  });
+  [['peopleRecipients', 'email_recipients'], ['peopleCooldown', 'cooldown_minutes'], ['peopleConfidence', 'min_confidence']]
+    .forEach(([datasetKey, ruleKey]) => {
+      document.querySelectorAll(`[data-${datasetKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}]`).forEach((input) => {
+        input.addEventListener('change', () => {
+          const rule = ruleFromDataset(input.dataset[datasetKey]);
+          if (!rule) return;
+          if (ruleKey === 'email_recipients') {
+            rule.email_recipients = normalizeEmailList(input.value);
+          } else if (ruleKey === 'cooldown_minutes') {
+            rule.cooldown_minutes = Math.max(0, Number.parseInt(input.value || '5', 10) || 0);
+          } else {
+            const raw = String(input.value || '').trim();
+            const num = raw === '' ? null : clamp(Number(raw), 0, 1);
+            rule.min_confidence = Number.isFinite(num) ? num : null;
+          }
+          schedulePeopleSave();
+        });
+      });
+    });
+  document.querySelectorAll('[data-expand-zone-people]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.expandZonePeople;
+      const expandKey = `people:${key.replace('|', ':')}`;
+      if (expandedZoneRules.has(expandKey)) expandedZoneRules.delete(expandKey);
+      else expandedZoneRules.add(expandKey);
+      renderObjectDetectionRules();
+    });
+  });
+}
+
+async function loadEnrolledPeople() {
+  try {
+    const body = await api('/api/persons');
+    enrolledPeople = body.persons || [];
+  } catch {
+    enrolledPeople = []; // non-fatal: the Unknown row still works
+  }
+}
+
+(async function initPeopleCard() {
+  try {
+    const [rules] = await Promise.all([
+      api('/api/settings/face-detection-rules'),
+      loadEnrolledPeople(),
+    ]);
+    faceRulesPayload = rules;
+  } catch {
+    // Card still renders from empty defaults; saving recreates the store.
+  }
+  if (selectedCamera) renderObjectDetectionRules();
+})();
 
 function parseZoneRuleKey(value) {
   const [zoneIndex, ruleIndex] = String(value).split(':').map((part) => Number.parseInt(part, 10));
