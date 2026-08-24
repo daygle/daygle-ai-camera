@@ -11,6 +11,7 @@ it on and points it at a model.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from fastapi import HTTPException
@@ -75,7 +76,7 @@ def validate_face_recognition_settings(payload: dict[str, Any]) -> dict[str, Any
         threshold = float(updated.get('match_threshold', 0.5))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail='match_threshold must be a number.') from exc
-    if not 0.0 <= threshold <= 1.0:
+    if not math.isfinite(threshold) or not 0.0 <= threshold <= 1.0:
         raise HTTPException(status_code=400, detail='match_threshold must be between 0 and 1.')
     updated['match_threshold'] = threshold
 

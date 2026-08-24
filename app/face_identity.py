@@ -54,6 +54,10 @@ _captured_unknown: dict[str, set[Any]] = {}
 # set can be pruned to the tracks still present each cycle; track ids are
 # per-camera counters, so a returning face gets a fresh id and enriches again.
 _enriched_tracks: dict[str, set[Any]] = {}
+# Cache entries are tied to the service + matcher generation. This prevents a
+# face identified before a model switch or person deletion from being reused
+# after the matcher has been rebuilt.
+_cache_generation: dict[str, tuple[int, int]] = {}
 _lock = threading.Lock()
 
 # Auto-enrichment: store new embeddings for recognized faces to improve match
@@ -267,6 +271,21 @@ def _store_unknown_face(
         logger.debug('Failed to capture unknown face: %s', exc)
 
 
+def _clear_camera_identity_state(camera_id: str, *, clear_generation: bool = False) -> None:
+    """Clear all transient identity state for one camera.
+
+    Callers must hold ``_lock``. Keeping this in one helper avoids leaving one
+    of the bounded-but-transient caches behind when recognition is disabled or
+    a camera produces a cycle without faces.
+    """
+    _cache.pop(camera_id, None)
+    _alerted_unknown.pop(camera_id, None)
+    _captured_unknown.pop(camera_id, None)
+    _enriched_tracks.pop(camera_id, None)
+    if clear_generation:
+        _cache_generation.pop(camera_id, None)
+
+
 def annotate_face_identities(camera_id: str, detections: list[dict[str, Any]], frame: Any) -> list[dict[str, Any]]:
     """Annotate ``face`` detections in ``detections`` with recognised identities.
 
@@ -274,12 +293,26 @@ def annotate_face_identities(camera_id: str, detections: list[dict[str, Any]], f
     recognition is unavailable, numpy/frame is missing, or there are no faces.
     """
     service = get_face_recognition_service()
-    if np is None or frame is None or not getattr(frame, 'shape', None) or not service.available:
+    if not service.available:
+        with _lock:
+            _clear_camera_identity_state(camera_id, clear_generation=True)
         return detections
+    if np is None or frame is None or not getattr(frame, 'shape', None):
+        return detections
+
+    # Matcher refreshes happen after enrolment/deletion and service replacement
+    # happens after settings/model changes. In either case cached identities are
+    # no longer authoritative, even if the tracker reuses the same track id.
+    generation = (id(service), int(getattr(service, 'matcher_generation', 0)))
+    with _lock:
+        if _cache_generation.get(camera_id) != generation:
+            _clear_camera_identity_state(camera_id)
+            _cache_generation[camera_id] = generation
+
     faces = [d for d in detections if _is_face(d)]
     if not faces:
         with _lock:
-            _cache.pop(camera_id, None)
+            _clear_camera_identity_state(camera_id)
         return detections
 
     # Phase 1 (under lock): consult the per-track cache and collect the faces
@@ -462,3 +495,4 @@ def reset_camera_identities(camera_id: str) -> None:
         _alerted_unknown.pop(camera_id, None)
         _captured_unknown.pop(camera_id, None)
         _enriched_tracks.pop(camera_id, None)
+        _cache_generation.pop(camera_id, None)

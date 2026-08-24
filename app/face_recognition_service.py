@@ -19,6 +19,7 @@ hot path -- that live-loop integration is a later slice.
 from __future__ import annotations
 
 import logging
+import math
 import threading
 from typing import Any
 
@@ -27,17 +28,29 @@ from app.face_recognition import FaceEmbedder, FaceMatcher, MatchResult
 logger = logging.getLogger('daygle.ai')
 
 
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+    return bool(value)
+
+
 class FaceRecognitionService:
     """Holds the embedding model and the matcher built from enrolled faces."""
 
     def __init__(self, config: dict[str, Any], database: Any) -> None:
         self._database = database
-        self.enabled = bool(config.get('enabled', False))
+        self.enabled = _coerce_bool(config.get('enabled', False), False)
         self.model_id = str(config.get('model_id') or 'arcface')
         self.model_path = str(config.get('model_path') or '')
         try:
             self.threshold = float(config.get('match_threshold', 0.5))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
+            self.threshold = 0.5
+        if not math.isfinite(self.threshold):
             self.threshold = 0.5
         try:
             self.min_face_pixels = max(0, int(config.get('min_face_pixels', 0) or 0))
@@ -46,9 +59,11 @@ class FaceRecognitionService:
         # Opt-in unsupervised enrolment from high-confidence live matches. Off by
         # default; when on, ``_maybe_enrich_person`` still gates on a high score
         # plus a clear margin over the runner-up person.
-        self.auto_enrich_enabled = bool(config.get('auto_enrich_enabled', False))
+        self.auto_enrich_enabled = _coerce_bool(config.get('auto_enrich_enabled', False), False)
 
         self._lock = threading.Lock()
+        self._refresh_lock = threading.Lock()
+        self._matcher_generation = 0
         self.embedder: FaceEmbedder | None = None
         self.unavailable_reason: str | None = None
 
@@ -76,8 +91,15 @@ class FaceRecognitionService:
 
     @property
     def enrolled_count(self) -> int:
-        matcher = self._matcher
+        with self._lock:
+            matcher = self._matcher
         return len(matcher) if matcher is not None else 0
+
+    @property
+    def matcher_generation(self) -> int:
+        """Monotonic generation used to invalidate live identity caches."""
+        with self._lock:
+            return self._matcher_generation
 
     # -- matcher lifecycle ----------------------------------------------
     def refresh_matcher(self) -> None:
@@ -88,20 +110,25 @@ class FaceRecognitionService:
         in under the lock so an in-flight :meth:`recognize` always sees a
         consistent matrix.
         """
-        rows: list[dict[str, Any]] = []
-        if self._database is not None:
+        # Serialize the complete read/build/swap sequence. Without this, two
+        # concurrent enrolment changes can load different snapshots and the
+        # older snapshot can be swapped in last, silently losing the newer face.
+        with self._refresh_lock:
+            rows: list[dict[str, Any]] = []
+            if self._database is not None:
+                try:
+                    rows = self._database.load_face_embeddings(self.model_id)
+                except Exception as exc:  # pragma: no cover - defensive DB guard
+                    logger.warning('Face matcher refresh failed to load embeddings: %s', exc)
+                    rows = []
             try:
-                rows = self._database.load_face_embeddings(self.model_id)
-            except Exception as exc:  # pragma: no cover - defensive DB guard
-                logger.warning('Face matcher refresh failed to load embeddings: %s', exc)
-                rows = []
-        try:
-            matcher = FaceMatcher(rows)
-        except Exception as exc:  # pragma: no cover - defensive (numpy missing)
-            logger.warning('Face matcher rebuild failed: %s', exc)
-            matcher = None
-        with self._lock:
-            self._matcher = matcher
+                matcher = FaceMatcher(rows)
+            except Exception as exc:  # pragma: no cover - defensive (numpy missing)
+                logger.warning('Face matcher rebuild failed: %s', exc)
+                matcher = None
+            with self._lock:
+                self._matcher = matcher
+                self._matcher_generation += 1
 
     # -- recognition -----------------------------------------------------
     def recognize(self, face_bgr: Any) -> MatchResult | None:

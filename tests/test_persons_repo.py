@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from app.database import EventDatabase
 from app.face_recognition import embedding_to_bytes
@@ -183,6 +184,41 @@ def test_purge_face_identities_by_policy_respects_retention_setting(tmp_path, mo
     monkeypatch.setattr(backup, 'effective_face_recognition_config', lambda: {'retention_days': 1})
     assert backup.purge_face_identities_by_policy() == 1
     assert 'face_identities' not in _event_metadata(db, old_id)
+
+
+def test_assign_unknown_face_with_embedding_is_atomic(tmp_path):
+    db = _db(tmp_path)
+    person_id = db.add_person('Alex')
+    face_id = db.store_unknown_face(
+        camera_id='cam-1', embedding=_emb([1, 0, 0, 0]), dim=4, model='arcface',
+    )
+
+    result = db.assign_unknown_face_with_embedding(face_id, person_id=person_id)
+    assert result == {
+        'person_id': person_id,
+        'person_name': 'Alex',
+        'created_person': False,
+    }
+    assert db.get_unknown_face(face_id)['status'] == 'assigned'
+    assert db.get_person(person_id)['face_count'] == 1
+
+    # A second request for the same capture cannot enrol it again.
+    with pytest.raises(ValueError, match='already been reviewed'):
+        db.assign_unknown_face_with_embedding(face_id, person_id=person_id)
+    assert db.get_person(person_id)['face_count'] == 1
+
+
+def test_assign_unknown_face_creates_person_in_same_transaction(tmp_path):
+    db = _db(tmp_path)
+    face_id = db.store_unknown_face(
+        camera_id='cam-1', embedding=_emb([1, 0, 0, 0]), dim=4, model='arcface',
+    )
+
+    result = db.assign_unknown_face_with_embedding(face_id, person_name='New Person')
+    assert result['created_person'] is True
+    person = db.get_person(result['person_id'])
+    assert person['name'] == 'New Person'
+    assert person['face_count'] == 1
 
 
 def test_purge_unknown_faces_by_policy_respects_retention_setting(tmp_path, monkeypatch):

@@ -83,11 +83,14 @@ async function enrollFace(card, file) {
       headers: { 'Content-Type': file.type || 'image/jpeg' },
     });
     showToast('Face enrolled.');
+    // loadPeople() replaces the card DOM, so remember the open state and find
+    // the freshly rendered card before reopening its face list.
+    const wasOpen = !card.querySelector('[data-faces]')?.hidden;
     await loadPeople();
-    // Re-open the faces panel if it was showing.
-    const panel = card.querySelector('[data-faces]');
-    if (panel && !panel.hidden) {
-      await showFaces(cardFor(card) || card);
+    if (wasOpen) {
+      const freshCard = [...peopleList.querySelectorAll('[data-person-id]')]
+        .find((candidate) => candidate.dataset.personId === personId);
+      if (freshCard) await showFaces(freshCard);
     }
   } catch (err) {
     showToast(err.message || 'Enrolment failed.', true);

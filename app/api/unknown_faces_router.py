@@ -10,6 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from app.auth_gates import require_admin
+from app.db.unknown_faces import UnknownFaceAssignmentError
 from app.deps import get_database
 from app.face_recognition_service import refresh_face_recognition_matcher
 from app.request_helpers import write_audit_log
@@ -59,49 +60,57 @@ async def assign_unknown_face(
       {"name": "New Person"}        — create new person + assign
     """
     require_admin(request)
-    face = db.get_unknown_face(face_id)
-    if face is None:
-        raise HTTPException(status_code=404, detail='Unknown face not found.')
-    if face['status'] != 'pending':
-        raise HTTPException(status_code=400, detail='This face has already been reviewed.')
+    try:
+        payload = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail='Request body must be valid JSON.') from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail='Request body must be a JSON object.')
 
-    payload = await request.json()
-    person_id = payload.get('person_id')
+    raw_person_id = payload.get('person_id')
     new_name = payload.get('name')
-
-    # Create a new person if name is provided instead of person_id.
-    if not person_id and new_name:
+    person_id: int | None = None
+    if raw_person_id not in (None, ''):
+        if isinstance(raw_person_id, bool):
+            raise HTTPException(status_code=400, detail='person_id must be a positive integer.')
+        try:
+            person_id = int(raw_person_id)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise HTTPException(status_code=400, detail='person_id must be a positive integer.') from exc
+        if person_id <= 0:
+            raise HTTPException(status_code=400, detail='person_id must be a positive integer.')
+    elif new_name is not None:
         name = str(new_name).strip()
         if not name:
             raise HTTPException(status_code=400, detail='A person name is required.')
-        person_id = db.add_person(name)
-        write_audit_log(request, db, 'create', 'person', resource_id=str(person_id), details={'name': name})
-    elif not person_id:
+        # The atomic DB operation creates this person inside the same
+        # transaction as the face enrolment and status transition.
+        new_name = name
+    else:
         raise HTTPException(status_code=400, detail='Provide person_id or name.')
 
-    person = db.get_person(int(person_id))
-    if person is None:
-        raise HTTPException(status_code=404, detail='Person not found.')
-
-    # Copy the embedding from the unknown face to the person's enrolment.
-    emb_data = db.get_unknown_face_embedding(face_id)
-    if emb_data:
-        db.add_person_face(
-            int(person_id),
-            embedding=emb_data['embedding'],
-            dim=emb_data['dim'],
-            model=emb_data['model'],
-            source_snapshot=f'unknown-face:{face_id}',
+    try:
+        result = db.assign_unknown_face_with_embedding(
+            face_id, person_id=person_id, person_name=new_name,
         )
-        refresh_face_recognition_matcher()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except UnknownFaceAssignmentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    db.assign_unknown_face(face_id, int(person_id))
+    resolved_id = int(result['person_id'])
+    refresh_face_recognition_matcher()
+    if result['created_person']:
+        write_audit_log(
+            request, db, 'create', 'person', resource_id=str(resolved_id),
+            details={'name': result['person_name']},
+        )
     write_audit_log(
         request, db, 'assign', 'unknown_face',
         resource_id=str(face_id),
-        details={'person_id': int(person_id), 'person_name': person['name']},
+        details={'person_id': resolved_id, 'person_name': result['person_name']},
     )
-    return {'ok': True, 'person_id': int(person_id), 'person_name': person['name']}
+    return {'ok': True, 'person_id': resolved_id, 'person_name': result['person_name']}
 
 
 @router.post('/api/unknown-faces/{face_id}/dismiss')

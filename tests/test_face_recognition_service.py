@@ -44,9 +44,22 @@ def test_validate_rejects_enabled_without_model():
 
 def test_validate_threshold_bounds():
     assert validate_face_recognition_settings({'match_threshold': 0.7})['match_threshold'] == 0.7
-    for bad in (-0.1, 1.1, 'nope'):
+    for bad in (-0.1, 1.1, 'nope', float('nan'), float('inf')):
         with pytest.raises(HTTPException):
             validate_face_recognition_settings({'match_threshold': bad})
+
+
+def test_validate_malformed_rule_payloads_does_not_crash():
+    # A hand-written settings request must not turn malformed JSON values into
+    # an internal server error or persist non-finite confidence thresholds.
+    from app.face_detection_rules import validate_face_detection_rules
+
+    assert validate_face_detection_rules([]) == {'rules': []}
+    result = validate_face_detection_rules({
+        'rules': [None, 'not-a-rule', {'id': 'x', 'name': 'Alex', 'cooldown_minutes': 'bad', 'min_confidence': float('nan')}],
+    })
+    assert result['rules'][0]['cooldown_minutes'] == 5
+    assert result['rules'][0]['min_confidence'] is None
 
 
 def test_validate_non_negative_ints():
@@ -110,6 +123,16 @@ def _service(config, db, embedder=None):
         svc.embedder = embedder
         svc.unavailable_reason = None
     return svc
+
+
+def test_service_coerces_string_booleans_and_nonfinite_thresholds():
+    svc = FaceRecognitionService(
+        {'enabled': 'false', 'auto_enrich_enabled': 'false', 'match_threshold': float('nan')},
+        _FakeDB(),
+    )
+    assert svc.enabled is False
+    assert svc.auto_enrich_enabled is False
+    assert svc.threshold == 0.5
 
 
 def test_service_disabled_is_unavailable():

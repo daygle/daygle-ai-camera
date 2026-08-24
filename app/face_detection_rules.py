@@ -16,6 +16,7 @@ at call time to avoid stale caches.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 import app.state as _state
@@ -86,7 +87,26 @@ def _coerce_optional_float(value: Any) -> float | None:
         num = float(raw)
     except (TypeError, ValueError):
         return None
-    return num if 0 <= num <= 1 else None
+    return num if math.isfinite(num) and 0 <= num <= 1 else None
+
+
+def _coerce_non_negative_int(value: Any, default: int = 5) -> int:
+    """Return a safe integer for user-controlled rule settings."""
+    if isinstance(value, bool) or value in (None, ''):
+        return default
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _coerce_detection_confidence(value: Any) -> float:
+    """Convert detector confidence to a finite value for rule comparisons."""
+    try:
+        confidence = float(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    return confidence if math.isfinite(confidence) else 0.0
 
 
 def _normalize_recipients_field(value: Any) -> str:
@@ -123,7 +143,7 @@ def _validate_rule(rule: dict[str, Any]) -> dict[str, Any]:
         'email_enabled': _coerce_bool(rule.get('email_enabled'), False),
         'push_enabled': _coerce_bool(rule.get('push_enabled'), False),
         'email_recipients': _normalize_recipients_field(rule.get('email_recipients')),
-        'cooldown_minutes': max(0, int(rule.get('cooldown_minutes') or 5)),
+        'cooldown_minutes': _coerce_non_negative_int(rule.get('cooldown_minutes')),
         'min_confidence': _coerce_optional_float(rule.get('min_confidence')),
         # Optional scoping (People card on the Zones page). Empty means the
         # legacy global behaviour: the rule applies on every camera / any
@@ -153,17 +173,21 @@ def rule_scope_matches(
 
 def validate_face_detection_rules(payload: dict[str, Any]) -> dict[str, Any]:
     """Validate a face-detection-rules payload."""
+    if not isinstance(payload, dict):
+        return {'rules': []}
     raw_rules = payload.get('rules')
     if not isinstance(raw_rules, list):
         return {'rules': []}
     validated = []
     seen_ids: set[str] = set()
     for raw in raw_rules:
+        if not isinstance(raw, dict):
+            continue
         rule = _validate_rule(raw)
         if not rule['id']:
             continue
         if rule['id'] in seen_ids:
-            continue  # duplicate id — last-wins
+            continue  # duplicate id — first entry wins
         seen_ids.add(rule['id'])
         validated.append(rule)
     return {'rules': validated}
@@ -246,7 +270,7 @@ def enabled_rules_for_label(
     rules = effective_face_detection_rules().get('rules') or []
     label_lower = label.strip().lower()
     for rule in rules:
-        if not rule.get('enabled'):
+        if not _coerce_bool(rule.get('enabled'), False):
             continue
         rule_name = str(rule.get('name') or '').strip().lower()
         if rule_name != label_lower:
@@ -330,14 +354,10 @@ def known_face_rules_for_camera(camera_id: str, detections: list[dict[str, Any]]
         # detections at/above it trigger the alert. Blank = alert on any
         # detection the detector already reports (the global Face Confidence
         # setting still applies at the detector itself).
-        rule_min_conf = rule.get('min_confidence')
-        if rule_min_conf is not None:
-            try:
-                det_conf = float(detection.get('confidence') or 0)
-            except (TypeError, ValueError):
-                det_conf = 0.0
-            if det_conf < float(rule_min_conf):
-                continue
+        det_conf = _coerce_detection_confidence(detection.get('confidence'))
+        normalized_min_conf = _coerce_optional_float(rule.get('min_confidence'))
+        if normalized_min_conf is not None and det_conf < normalized_min_conf:
+            continue
         # Cooldown: ``cooldown_minutes`` between alerts for the same track.
         # Read-and-claim the slot under the module's cooldown lock so two
         # callers processing the same camera concurrently (thread overlap
@@ -356,7 +376,7 @@ def known_face_rules_for_camera(camera_id: str, detections: list[dict[str, Any]]
             'face_rule_id': str(rule.get('id') or ''),
             'zone_id': str(detection.get('zone_id') or ''),
             'label': 'face',
-            'confidence': float(detection.get('confidence') or 0),
+            'confidence': det_conf,
             'message': f'Alert triggered: {person_name} detected',
         })
     # Prune stale cooldown entries so the dict cannot grow unbounded.
@@ -368,7 +388,7 @@ def known_face_rules_for_camera(camera_id: str, detections: list[dict[str, Any]]
 
 def face_rule_notify_active_now(rule: dict[str, Any]) -> bool:
     """Return ``True`` when the rule's email/push is globally enabled."""
-    return bool(rule.get('email_enabled')) or bool(rule.get('push_enabled'))
+    return _coerce_bool(rule.get('email_enabled'), False) or _coerce_bool(rule.get('push_enabled'), False)
 
 
 def face_rule_email_recipients(rule: dict[str, Any]) -> list[str]:

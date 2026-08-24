@@ -11,6 +11,10 @@ from typing import Any
 from app.auth import utc_now
 
 
+class UnknownFaceAssignmentError(ValueError):
+    """Raised when an unknown-face assignment cannot be completed."""
+
+
 class UnknownFacesMixin:
     """Methods for the ``unknown_faces`` table."""
 
@@ -130,6 +134,87 @@ class UnknownFacesMixin:
         if row is None:
             return None
         return {'embedding': bytes(row['embedding']), 'dim': int(row['dim']), 'model': str(row['model'])}
+
+    def assign_unknown_face_with_embedding(
+        self,
+        face_id: int,
+        *,
+        person_id: int | None = None,
+        person_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically enrol an unknown face and mark it reviewed.
+
+        The previous API implementation read the pending row, inserted the
+        embedding, and updated the status through three independent database
+        transactions. Two concurrent admin requests could therefore enrol the
+        same capture twice, or leave an orphan person when creating a new one.
+        Keeping the read, optional person creation, embedding insert, and
+        compare-and-set status update in one transaction makes assignment
+        exactly-once at the database boundary.
+        """
+        if person_id is None and not person_name:
+            raise UnknownFaceAssignmentError('Provide person_id or name.')
+        with self.connect() as db:
+            face = db.execute(
+                "SELECT embedding, dim, model, status FROM unknown_faces WHERE id = ?",
+                (face_id,),
+            ).fetchone()
+            if face is None:
+                raise LookupError('Unknown face not found.')
+            if face['status'] != 'pending':
+                raise UnknownFaceAssignmentError('This face has already been reviewed.')
+
+            created_person = person_id is None
+            if created_person:
+                created_at = utc_now()
+                cursor = db.execute(
+                    "INSERT INTO persons (name, notes, created_at, updated_at) VALUES (?, NULL, ?, ?)",
+                    (person_name, created_at, created_at),
+                )
+                person_id = int(cursor.lastrowid)
+                resolved_name = str(person_name)
+            else:
+                person = db.execute(
+                    "SELECT id, name FROM persons WHERE id = ?", (int(person_id),)
+                ).fetchone()
+                if person is None:
+                    raise LookupError('Person not found.')
+                person_id = int(person['id'])
+                resolved_name = str(person['name'])
+
+            now = utc_now()
+            db.execute(
+                """
+                INSERT INTO person_faces
+                    (person_id, embedding, dim, model, source_snapshot, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    person_id,
+                    bytes(face['embedding']),
+                    int(face['dim']),
+                    str(face['model']),
+                    f'unknown-face:{face_id}',
+                    now,
+                ),
+            )
+            updated = db.execute(
+                """
+                UPDATE unknown_faces
+                SET status = 'assigned', assigned_person_id = ?, reviewed_at = ?
+                WHERE id = ? AND status = 'pending'
+                """,
+                (person_id, now, face_id),
+            )
+            if updated.rowcount != 1:
+                # The transaction is rolled back by the context manager, which
+                # also rolls back a person created above and its face row.
+                raise UnknownFaceAssignmentError('This face has already been reviewed.')
+            return {
+                'person_id': person_id,
+                'person_name': resolved_name,
+                'created_person': created_person,
+            }
 
     def assign_unknown_face(self, face_id: int, person_id: int) -> bool:
         """Mark an unknown face as assigned to a person. Returns True if a row changed."""
