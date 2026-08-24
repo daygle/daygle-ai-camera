@@ -372,8 +372,13 @@ def face_rule_notify_active_now(rule: dict[str, Any]) -> bool:
 
 
 def face_rule_email_recipients(rule: dict[str, Any]) -> list[str]:
-    """Parse the comma-separated ``email_recipients`` field."""
-    raw = str(rule.get('email_recipients') or '').strip()
+    """Parse the ``email_recipients`` field into a list of addresses.
+
+    Handles both clean comma-separated strings and corrupted Python repr
+    strings (e.g. ``"['glen@daygle.net']"``) that were stored before the
+    array-to-string fix in ``_normalize_recipients_field``.
+    """
+    raw = _normalize_recipients_field(rule.get('email_recipients'))
     if not raw:
         return []
     return [addr.strip() for addr in raw.split(',') if addr.strip()]
