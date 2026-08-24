@@ -1113,7 +1113,11 @@ function renderPeopleCard(zone, zoneIndex) {
       const rule = findScopedPeopleRule(zone, key);
       const expandKey = `people:${zi}:${key || '_unknown'}`;
       const expanded = expandedZoneRules.has(expandKey);
-      const dk = `${zi}|${key || '_unknown'}`;
+      // dk is a two-part composite (zone index + person row key) carried
+      // through HTML data attributes. Percent-encode each part so neither can
+      // inject the '|' or ':' delimiters, then decode on read -- no lossy
+      // first-match replace (CodeQL: incomplete string escaping).
+      const dk = `${encodeURIComponent(zi)}|${encodeURIComponent(key || '_unknown')}`;
       return `
       <div class="people-rule-row" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.06)">
         <span style="flex:1;font-size:13px;font-weight:500">${escapeHtml(name)}${unknown ? ' <span class="muted" style="font-size:11px">(stranger alerts)</span>' : ''}</span>
@@ -1168,7 +1172,7 @@ function bindPeopleControls() {
     const sep = datasetValue.indexOf('|');
     const zone = cameraDetection().zones[Number(datasetValue.slice(0, sep))];
     if (!zone) return null;
-    const rawKey = datasetValue.slice(sep + 1);
+    const rawKey = decodeURIComponent(datasetValue.slice(sep + 1));
     const personId = rawKey === '_unknown' ? '' : rawKey;
     let rule = findScopedPeopleRule(zone, personId);
     if (!rule) {
@@ -1212,8 +1216,8 @@ function bindPeopleControls() {
     });
   document.querySelectorAll('[data-expand-zone-people]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const key = btn.dataset.expandZonePeople;
-      const expandKey = `people:${key.replace('|', ':')}`;
+      const [rawZi, rawKey] = btn.dataset.expandZonePeople.split('|');
+      const expandKey = `people:${decodeURIComponent(rawZi)}:${decodeURIComponent(rawKey)}`;
       if (expandedZoneRules.has(expandKey)) expandedZoneRules.delete(expandKey);
       else expandedZoneRules.add(expandKey);
       renderObjectDetectionRules();
