@@ -78,6 +78,28 @@ def test_unknown_identity_is_retried_each_cycle(monkeypatch):
     assert svc.calls == 2
 
 
+def test_enriched_tracks_pruned_to_present_tracks(monkeypatch):
+    # A high-confidence match triggers auto-enrichment, which records the track
+    # in the per-camera _enriched_tracks set (the enrol DB work is offloaded to
+    # a background thread that no-ops when the database is unset). That set must
+    # be pruned to the tracks still present each cycle: it must not accumulate
+    # departed tracks, and must not drop the tracks that ARE still seen (the old
+    # per-person pruning did exactly the wrong thing on both counts).
+    import app.state as state
+    monkeypatch.setattr(state, 'database', None, raising=False)
+    _use_service(monkeypatch, _StubService(MatchResult(7, 'Alex', 0.95, 3)))
+    fi.reset_camera_identities('camEnrich')
+    fi.annotate_face_identities('camEnrich', [_face(1)], _frame())
+    assert fi._enriched_tracks.get('camEnrich') == {1}
+    # Track 1 leaves and a new track 2 appears: the departed track is pruned and
+    # the new one recorded, so the set never grows without bound.
+    fi.annotate_face_identities('camEnrich', [_face(2)], _frame())
+    assert fi._enriched_tracks.get('camEnrich') == {2}
+    # Reset clears the per-camera enrichment set.
+    fi.reset_camera_identities('camEnrich')
+    assert fi._enriched_tracks.get('camEnrich') is None
+
+
 def test_non_face_detections_untouched(monkeypatch):
     svc = _StubService(MatchResult(7, 'Alex', 0.9, 3))
     _use_service(monkeypatch, svc)
