@@ -241,3 +241,23 @@ def test_known_alert_suppressed_below_min_confidence(monkeypatch):
 def test_known_alert_without_min_confidence_gates_nothing(monkeypatch):
     _use_known_rules(monkeypatch, _known_rule())
     assert fdr.known_face_rules_for_camera('kE', [_known_face(1, 0.1)]) != []
+
+
+def test_known_alert_debounced_per_track_by_cooldown(monkeypatch):
+    # The cooldown claim under _face_rule_cooldown_lock means a lingering subject
+    # alerts once per track and is then suppressed until the window elapses.
+    _use_known_rules(monkeypatch, _known_rule(cooldown_minutes=5))
+    fdr._face_rule_cooldowns.pop('kCooldown', None)
+    assert fdr.known_face_rules_for_camera('kCooldown', [_known_face(7, 0.9)]) != []
+    # Same track, same camera, still inside the 5-minute window -> suppressed.
+    assert fdr.known_face_rules_for_camera('kCooldown', [_known_face(7, 0.9)]) == []
+    # A different track on the same camera is unaffected by the first's cooldown.
+    assert fdr.known_face_rules_for_camera('kCooldown', [_known_face(8, 0.9)]) != []
+
+
+def test_cooldown_lock_is_a_real_module_level_lock():
+    # Regression guard: the cooldown guard must be a single lock object built at
+    # import, not lazily (a lazy initializer could race two callers into two
+    # different locks and silently defeat the double-alert guard).
+    import threading
+    assert isinstance(fdr._face_rule_cooldown_lock, type(threading.Lock()))

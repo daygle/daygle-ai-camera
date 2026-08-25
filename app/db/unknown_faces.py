@@ -230,16 +230,6 @@ class UnknownFacesMixin:
                 'created_person': created_person,
             }
 
-    def assign_unknown_face(self, face_id: int, person_id: int) -> bool:
-        """Mark an unknown face as assigned to a person. Returns True if a row changed."""
-        ts = utc_now()
-        with self.connect() as db:
-            cursor = db.execute(
-                "UPDATE unknown_faces SET status = 'assigned', assigned_person_id = ?, reviewed_at = ? WHERE id = ?",
-                (person_id, ts, face_id),
-            )
-            return cursor.rowcount > 0
-
     def dismiss_unknown_face(self, face_id: int) -> bool:
         """Mark an unknown face as dismissed. Returns True if a row changed."""
         ts = utc_now()

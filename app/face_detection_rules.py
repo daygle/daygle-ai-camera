@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import math
+import threading
 from typing import Any
 
 import app.state as _state
@@ -33,22 +34,14 @@ UNKNOWN_RULE_ID = '_unknown'
 # Per-label cooldown tracks in the live pipeline keyed by camera_id,
 # same shape as the dwell/still streaks.
 _face_rule_cooldowns: dict[str, dict[str, float]] = {}
-_face_rule_cooldown_lock_any: Any  # resolved lazily to avoid import-time lock
-
-# Lazy lock — ``threading.Lock()`` must not run at import time before the
-# module is fully initialised; ``threading`` is imported at the top of the
-# file, so this is safe.
-import threading as _threading
-
-
-def _cooldown_lock() -> _threading.Lock:
-    global _face_rule_cooldown_lock_any
-    if _face_rule_cooldown_lock_any is None:
-        _face_rule_cooldown_lock_any = _threading.Lock()
-    return _face_rule_cooldown_lock_any
-
-
-_face_rule_cooldown_lock_any = None  # type: ignore[assignment]
+# Guards the read-and-claim of a track's cooldown slot (and the stale-entry
+# prune) in ``known_face_rules_for_camera`` so two threads processing the same
+# camera concurrently cannot both see an expired window and double-alert, nor
+# mutate one camera's dict while another iterates it. Built at import like every
+# other lock in the codebase: constructing a ``threading.Lock`` at import is
+# safe, and unlike a lazily built one it cannot race two callers into two
+# different lock objects -- which would silently defeat the guard.
+_face_rule_cooldown_lock = threading.Lock()
 
 
 def effective_face_detection_rules() -> dict[str, Any]:
@@ -288,22 +281,6 @@ def is_unknown_rule(rule: dict[str, Any]) -> bool:
     return rid == UNKNOWN_RULE_ID or rid.startswith(f'{UNKNOWN_RULE_ID}:')
 
 
-def enabled_unknown_rules_for(camera_id: str = '', zone_id: str = '') -> list[dict[str, Any]]:
-    """Enabled unknown-person rules that apply to this camera/zone.
-
-    The global ``_unknown`` rule matches everywhere; ``_unknown:<zone>``
-    variants match only faces stamped with that zone id. Ordered by
-    specificity is unnecessary -- callers union recipients/cooldowns.
-    """
-    return [
-        rule
-        for rule in effective_face_detection_rules().get('rules') or []
-        if is_unknown_rule(rule)
-        and _coerce_bool(rule.get('enabled'), False)
-        and rule_scope_matches(rule, camera_id, zone_id)
-    ]
-
-
 def known_face_rules_for_camera(camera_id: str, detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return alert dicts for face detections that match enabled face rules.
 
@@ -364,7 +341,7 @@ def known_face_rules_for_camera(camera_id: str, detections: list[dict[str, Any]]
         # during a camera restart, API-triggered passes) cannot BOTH see an
         # expired window between the read and the write and double-alert.
         cooldown_sec = max(0, int(rule.get('cooldown_minutes') or 5)) * 60
-        with _cooldown_lock():
+        with _face_rule_cooldown_lock:
             last_fired = cooldowns.get(track_id, 0)
             if now - last_fired < cooldown_sec:
                 continue
@@ -379,10 +356,14 @@ def known_face_rules_for_camera(camera_id: str, detections: list[dict[str, Any]]
             'confidence': det_conf,
             'message': f'Alert triggered: {person_name} detected',
         })
-    # Prune stale cooldown entries so the dict cannot grow unbounded.
-    stale = [tid for tid, ts in cooldowns.items() if now - ts > 3600 * 6]
-    for tid in stale:
-        cooldowns.pop(tid, None)
+    # Prune stale cooldown entries so the dict cannot grow unbounded. Under the
+    # same lock as the claim above: without it, iterating this camera's dict here
+    # while a concurrent caller claims a new slot could raise "dict changed size
+    # during iteration".
+    with _face_rule_cooldown_lock:
+        stale = [tid for tid, ts in cooldowns.items() if now - ts > 3600 * 6]
+        for tid in stale:
+            cooldowns.pop(tid, None)
     return new_alerts
 
 

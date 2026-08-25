@@ -197,14 +197,6 @@ class MatchResult:
         # the query nearly fit a second person, so auto-enrolment should abstain.
         self.runner_up_score = runner_up_score
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            'person_id': self.person_id,
-            'name': self.name,
-            'score': round(self.score, 4),
-            'face_id': self.face_id,
-        }
-
 
 class FaceMatcher:
     """Nearest-neighbour identity matcher over enrolled face embeddings.
@@ -251,6 +243,10 @@ class FaceMatcher:
             self.matrix = npmod.vstack(vectors).astype(npmod.float32)
         else:
             self.matrix = npmod.zeros((0, self.dim), dtype=npmod.float32)
+        # Precomputed once so the per-query runner-up masking in ``match`` does
+        # not rebuild this array on every recognition (the hot path embeds and
+        # matches each uncached face every cycle).
+        self._person_id_array = npmod.asarray(self.person_ids, dtype=npmod.int64)
 
     def __len__(self) -> int:
         return int(self.matrix.shape[0])
@@ -282,8 +278,7 @@ class FaceMatcher:
         # Runner-up = the best score among faces of a DIFFERENT person, so the
         # margin reflects identity separation (not just a second face of the
         # same person). 0.0 when the winner is the only enrolled person.
-        person_ids = npmod.asarray(self.person_ids)
-        other_scores = scores[person_ids != winner_person]
+        other_scores = scores[self._person_id_array != winner_person]
         runner_up_score = float(other_scores.max()) if other_scores.size else 0.0
         return MatchResult(
             person_id=winner_person,
