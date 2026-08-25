@@ -127,6 +127,35 @@ def test_enriched_tracks_pruned_to_present_tracks(monkeypatch):
     assert fi._enriched_tracks.get('camEnrich') is None
 
 
+def test_captured_unknown_pruned_to_present_tracks(monkeypatch):
+    # An unknown face is captured for review exactly once per track: the track is
+    # recorded in the per-camera _captured_unknown set (the store DB work is
+    # offloaded to a background thread that no-ops when the database is unset).
+    # That set must be pruned to the tracks still present each cycle -- keep the
+    # tracks still on screen so a lingering stranger stays captured once, drop
+    # departed tracks so it cannot grow unbounded. The old ``cap_set - seen``
+    # did the inverse: it forgot every still-present track each cycle, so a
+    # lingering stranger was re-captured at the full cycle rate and flooded the
+    # pending review queue with duplicates of one face.
+    import app.state as state
+    monkeypatch.setattr(state, 'database', None, raising=False)
+    _use_service(monkeypatch, _StubService(None))
+    fi.reset_camera_identities('camCap')
+    fi.annotate_face_identities('camCap', [_face(1)], _frame())
+    assert fi._captured_unknown.get('camCap') == {1}
+    # Track 1 is still present next cycle: it stays captured (not forgotten and
+    # therefore not re-captured), so the review queue is not flooded.
+    fi.annotate_face_identities('camCap', [_face(1)], _frame())
+    assert fi._captured_unknown.get('camCap') == {1}
+    # Track 1 leaves and a new track 2 appears: the departed track is pruned and
+    # the new stranger recorded, so the set never grows without bound.
+    fi.annotate_face_identities('camCap', [_face(2)], _frame())
+    assert fi._captured_unknown.get('camCap') == {2}
+    # Reset clears the per-camera capture set.
+    fi.reset_camera_identities('camCap')
+    assert fi._captured_unknown.get('camCap') is None
+
+
 def test_auto_enrich_off_by_default(monkeypatch):
     # With auto-enrichment disabled (the default), even a near-perfect match does
     # NOT enrol a new embedding -- unsupervised enrolment stays opt-in.
