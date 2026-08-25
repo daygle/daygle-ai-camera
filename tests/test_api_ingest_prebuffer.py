@@ -385,10 +385,19 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
         os.utime(segment, (end_ts, end_ts))
     audio_dir = service.audio_dir / 'cam'
     audio_dir.mkdir(parents=True, exist_ok=True)
+    import struct
+    import wave
     for offset in range(17):
         end_ts = now - 16.5 + offset
         segment = audio_dir / f'aud-{offset:02d}.wav'
-        segment.write_bytes(b'wav')
+        # Real 1s 16 kHz mono pcm_s16le sidecar: the mux assembles the WAVs into
+        # one PCM track in Python before invoking ffmpeg, so a byte placeholder
+        # would parse as empty and the mux would skip the (now two-input) run.
+        with wave.open(str(segment), 'wb') as writer:
+            writer.setnchannels(1)
+            writer.setsampwidth(2)
+            writer.setframerate(16000)
+            writer.writeframes(struct.pack('<16000h', *([1000] * 16000)))
         os.utime(segment, (end_ts, end_ts))
 
     commands = []
@@ -437,12 +446,12 @@ def test_write_rtsp_clip_with_prebuffer_returns_actual_content_window(tmp_path, 
     assert render_seconds == pytest.approx(content_seconds, abs=0.01)
     mux_command = commands[1]
     assert mux_command[mux_command.index('-map') + 1] == '0:v:0'
-    assert mux_command[mux_command.index('-map') + 3] == '[aout]'
-    assert mux_command.count('-i') == 16, 'video plus one input for each selected WAV segment'
-    mux_filter = mux_command[mux_command.index('-filter_complex') + 1]
-    assert 'amix=inputs=15' in mux_filter
-    assert 'aresample=async=1' in mux_filter
-    assert 'apad' in mux_filter
+    assert mux_command[mux_command.index('-map') + 3] == '1:a:0'
+    # The selected WAV segments are pre-assembled into ONE PCM track, so the mux
+    # is always a two-input job (video + assembled audio) regardless of clip
+    # length -- no per-second inputs and no giant amix filtergraph.
+    assert mux_command.count('-i') == 2, 'video plus the single assembled audio track'
+    assert '-filter_complex' not in mux_command
     assert mux_command[mux_command.index('-c:v') + 1] == 'copy'
     assert mux_command[mux_command.index('-c:a') + 1] == 'aac'
 
