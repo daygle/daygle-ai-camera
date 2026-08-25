@@ -267,13 +267,3 @@ class CloudflareTunnelManager:
     def autostart(self) -> bool:
         with self._lock:
             return self._autostart
-
-
-def token_from_persisted_value(value: Any) -> str | None:
-    """Validate a decoded persisted settings value without exposing secrets."""
-    if not isinstance(value, Mapping):
-        return None
-    token = _normalise_token(value.get("token"))
-    if token and len(token) > MAX_TUNNEL_TOKEN_LENGTH:
-        return None
-    return token

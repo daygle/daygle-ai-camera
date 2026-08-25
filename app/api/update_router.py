@@ -85,13 +85,14 @@ def apply_update(request: Request, logger=Depends(get_logger)):
         raise HTTPException(status_code=503, detail='Update script not found.')
     try:
         result = subprocess.run(['bash', str(update_script)], capture_output=True, text=True, timeout=300, cwd=str(BASE_DIR))
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         with _state._update_lock:
             _state._update_in_progress = False
-        raise HTTPException(status_code=504, detail='Update timed out after 5 minutes.')
+        raise HTTPException(status_code=504, detail='Update timed out after 5 minutes.') from exc
     except Exception as exc:
         with _state._update_lock:
             _state._update_in_progress = False
+        logger.warning('Update apply failed (%s).', type(exc).__name__)
         raise HTTPException(status_code=500, detail=f'Update failed: {exc}') from exc
     # NOTE: the flag is intentionally NOT cleared here on the success path.
     # When a service restart is scheduled below, the flag must stay set until

@@ -889,6 +889,11 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # refreshed by the very cycles that built the streak -- so the normal gate
     # would swallow it forever. Bypass the gate for the cycle that crosses the
     # threshold so the dwell alert always becomes an event.
+    # A still-dwell alert bypasses the debounce gate: it fires ONCE per still
+    # streak by construction, and its label's debounce window has been
+    # continuously refreshed by the very cycles that built the streak - so the
+    # normal gate would swallow it forever. Only the crossing cycle emits, so
+    # this branch is NOT a duplicate-event risk.
     if dwell_detections:
         pass
     elif resolved_cooldowns and not live_event_fresh_labels(camera_id, resolved_cooldowns):

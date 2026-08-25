@@ -94,7 +94,7 @@ config: dict = {}           # on-disk YAML config; static after startup
 auth_config: dict = {}      # pre-stripped snapshot of config['auth']
 
 # ---------------------------------------------------------------------------
-# Camera runtime state (reassigned by app.main.apply_cameras_settings)
+# Camera runtime state (reassigned via app.camera_lifecycle.apply_cameras_settings)
 # ---------------------------------------------------------------------------
 
 camera: Any = None          # active camera instance (first camera, or None)
@@ -282,19 +282,23 @@ _runtime_delete_tokens: dict = {}
 _runtime_delete_lock: threading.Lock = threading.Lock()
 
 
+def _prune_expired_runtime_delete_tokens(now: float) -> None:
+    """Drop expired delete-confirm tokens (caller holds ``_runtime_delete_lock``)."""
+    for existing_user, (_, issued_at) in list(_runtime_delete_tokens.items()):
+        if now - issued_at > _RUNTIME_DELETE_TOKEN_TTL_SECONDS:
+            _runtime_delete_tokens.pop(existing_user, None)
+
+
 def issue_runtime_delete_token(user_id: Any) -> str:
     """Mint a fresh delete-confirm token bound to ``user_id`` and stash it.
 
     Lazy-prunes any pre-existing tokens older than the TTL on the way
-    in - defends against the dict leaking if a single admin never
+    in - defends against the dict from a single admin who never
     follows up with a confirm.
     """
     with _runtime_delete_lock:
         now = time.time()
-        for existing_user, _entry in list(_runtime_delete_tokens.items()):
-            issued_at = _runtime_delete_tokens[existing_user][1]
-            if now - issued_at > _RUNTIME_DELETE_TOKEN_TTL_SECONDS:
-                _runtime_delete_tokens.pop(existing_user, None)
+        _prune_expired_runtime_delete_tokens(now)
         token = secrets.token_urlsafe(32)
         _runtime_delete_tokens[user_id] = (token, now)
         return token
@@ -313,14 +317,11 @@ def consume_runtime_delete_token(user_id: Any, presented_token: str) -> str | No
     """
     with _runtime_delete_lock:
         now = time.time()
-        for existing_user, _entry in list(_runtime_delete_tokens.items()):
-            issued_at = _runtime_delete_tokens[existing_user][1]
-            if now - issued_at > _RUNTIME_DELETE_TOKEN_TTL_SECONDS:
-                _runtime_delete_tokens.pop(existing_user, None)
+        _prune_expired_runtime_delete_tokens(now)
         entry = _runtime_delete_tokens.pop(user_id, None)
         if entry is None:
-            return 'Confirm token not recognised; please request a new preview first.'
+            return 'Token not recognised; please request a new preview first.'
         stored_token, _issued_at = entry
         if stored_token != presented_token:
-            return 'Confirm token invalid or has already been used.'
+            return 'Token invalid or has already been used.'
         return None

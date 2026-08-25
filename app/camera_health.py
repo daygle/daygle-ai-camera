@@ -283,7 +283,7 @@ def _deliver_camera_offline_notification(camera_id: str, camera_name: str, event
                                     # reference when the test fake
                                     # returns ``None`` (back-compat).
                                     active_smtp = mailer._deliver(msg, smtp=active_smtp) or active_smtp
-                                except Exception as exc:  # noqa: BLE001 - per-recipient
+                                except Exception as exc:  # per-recipient: log and continue
                                     session_send_errors.append(f'{recipient}: {exc}')
                         finally:
                             # Deterministic close of the LAST-recipient's

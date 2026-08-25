@@ -62,26 +62,6 @@ def _require_numpy():
     return np
 
 
-def box_iou(box: np.ndarray, boxes: np.ndarray) -> np.ndarray:
-    """IoU of *box* against each row of *boxes*.
-
-    Kept as a public helper for ad-hoc analysis; ``non_max_suppression``
-    inlines the same math with areas precomputed once so the greedy loop
-    does not recompute every candidate's area on each iteration.
-    """
-    np = _require_numpy()
-    x1 = np.maximum(box[0], boxes[:, 0])
-    y1 = np.maximum(box[1], boxes[:, 1])
-    x2 = np.minimum(box[2], boxes[:, 2])
-    y2 = np.minimum(box[3], boxes[:, 3])
-
-    intersection = np.maximum(0, x2 - x1) * np.maximum(0, y2 - y1)
-    box_area = max(0.0, float(box[2] - box[0])) * max(0.0, float(box[3] - box[1]))
-    boxes_area = np.maximum(0, boxes[:, 2] - boxes[:, 0]) * np.maximum(0, boxes[:, 3] - boxes[:, 1])
-    union = box_area + boxes_area - intersection
-    return intersection / np.maximum(union, 1e-9)
-
-
 def non_max_suppression(boxes: np.ndarray, scores: np.ndarray, classes: np.ndarray, iou_threshold: float) -> list[int]:
     np = _require_numpy()
     if boxes.size == 0:

@@ -41,7 +41,7 @@ import logging
 from typing import Any
 
 import app.state as _state
-from app.camera_id import camera_storage_key, normalize_camera_id as normalize_camera_id  # noqa: PLC0414  re-export
+from app.camera_id import camera_storage_key, normalize_camera_id  # re-export
 from app.recording_settings import (
     _migrate_legacy_camera_motion,
     _normalize_camera_sound_settings,

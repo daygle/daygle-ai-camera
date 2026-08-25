@@ -101,6 +101,12 @@ _motion_log_last_at: dict[str, float] = {}
 _MOTION_LOG_INTERVAL = 5.0  # seconds
 
 
+def clear_motion_log_throttle(camera_ids: set[str]) -> None:
+    """Drop the per-camera motion-gate log throttle entries (camera removed)."""
+    for camera_id in camera_ids:
+        _motion_log_last_at.pop(camera_id, None)
+
+
 def record_live_detection_history(camera_id: str, detections: list[dict[str, Any]], sample_ts: float | None=None, *, live_config: dict[str, Any] | None=None) -> None:
     """Append one monitor cycle's detections to the camera's rolling history.
 

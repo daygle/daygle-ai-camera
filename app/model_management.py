@@ -577,7 +577,7 @@ def delete_model(model_name: str, imgsz: int | None = None) -> dict[str, Any]:
                 # Keep the flat summary pointed at a real remaining variant;
                 # otherwise a later update with no explicit resolution would
                 # target the variant just deleted.
-                remaining_key, remaining = max(
+                _remaining_key, remaining = max(
                     stored.items(),
                     key=lambda item: int(item[1].get('imgsz', item[0])),
                 )

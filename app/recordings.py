@@ -1269,7 +1269,7 @@ class RecordingService:
         last_failure_log_at = 0.0  # time.monotonic() of the last emitted WARNING
 
         while not stop_event.is_set():
-            from app.config_facades import effective_live_config as _elc  # noqa: PLC0415
+            from app.config_facades import effective_live_config as _elc
             _live_config = _elc()
             _ingest_fps = int(_live_config.get('ingest_frame_fps', self.INGEST_FRAME_FPS))
             _snapshot_quality = int(_live_config.get('snapshot_quality', self.SNAPSHOT_QUALITY))
@@ -2673,7 +2673,7 @@ class RecordingService:
         ffmpeg = shutil.which('ffmpeg')
         if not ffmpeg:
             return None
-        from app.config_facades import effective_live_config as _elc  # noqa: PLC0415
+        from app.config_facades import effective_live_config as _elc
         snapshot_quality = int(_elc().get('snapshot_quality', RecordingService.SNAPSHOT_QUALITY))
         with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
             tmp_path = Path(tmp.name)

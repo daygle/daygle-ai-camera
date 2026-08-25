@@ -189,6 +189,10 @@ def _cleanup_camera_runtime_state(removed_ids: set[str]) -> None:
             _state._frame_motion_mog2_meta.pop(cam_id, None)
             _state._frame_motion_scene_streak.pop(cam_id, None)
             _state._frame_motion_error_cameras.discard(cam_id)
+    # Also drop the per-camera motion-gate log throttle so a deleted camera
+    # cannot leak its entry (and its timestamp) for the life of the process.
+    from app.detection_state import clear_motion_log_throttle
+    clear_motion_log_throttle(removed_ids)
     with _state._live_backoff_lock:
         for cam_id in removed_ids:
             _state.live_detection_retry_after.pop(cam_id, None)

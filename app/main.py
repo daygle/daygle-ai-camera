@@ -37,7 +37,7 @@ from app.live_monitor import start_live_alert_monitor, stop_live_alert_monitor
 from app.sound_monitor import apply_sound_settings, stop_sound_monitor
 
 _logger = logging.getLogger('daygle.ai')
-logger = logging.getLogger('daygle.ai')  # noqa: F811 -- tests monkeypatch main.logger
+logger = logging.getLogger('daygle.ai')
 
 
 def _configure_file_logging() -> None:

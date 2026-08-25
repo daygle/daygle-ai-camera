@@ -589,31 +589,6 @@ class _YamnetBackend:
 _yamnet = _YamnetBackend()
 
 
-# ─── Audio device enumeration ─────────────────────────────────────────────────
-
-def list_audio_devices() -> list[dict[str, Any]]:
-    """Return available audio input devices (requires sounddevice)."""
-    try:
-        import sounddevice as sd
-        result = []
-        for i, dev in enumerate(sd.query_devices()):
-            if dev['max_input_channels'] > 0:
-                result.append({
-                    'index': i,
-                    'name': dev['name'],
-                    'channels': int(dev['max_input_channels']),
-                    'default_sample_rate': int(dev['default_samplerate']),
-                })
-        return result
-    except ImportError:
-        return []
-    except Exception as exc:
-        logger.debug('Failed to list audio devices: %s', exc)
-        return []
-
-
-# ─── Sound detector ───────────────────────────────────────────────────────────
-
 class SoundDetector:
     """
     Continuously listens for sounds matching configurable rules and fires a
@@ -949,7 +924,7 @@ class SoundDetector:
             self._set_status('unavailable: no audio provider')
             return
 
-        import wave  # noqa: F811 — stdlib; local import avoids load when ingest source is unused.
+        import wave  # stdlib; local import avoids load when ingest source is unused.
 
         preload_thread = threading.Thread(target=_yamnet.preload, daemon=True, name='yamnet-preload')
         preload_thread.start()
