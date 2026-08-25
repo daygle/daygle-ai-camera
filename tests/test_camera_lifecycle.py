@@ -85,8 +85,12 @@ def test_cleanup_camera_runtime_state_removes_all_dicts(state):
     """Removing a camera clears every per-camera runtime dict, so deleted
     camera ids cannot accumulate in-memory state for the life of the process."""
     from collections import deque
+    import app.detection_state as detection_state
     from app.camera_lifecycle import _cleanup_camera_runtime_state
 
+    # The per-camera motion-gate log throttle lives in app.detection_state, not
+    # app.state; it is the one per-camera map that used to survive removal.
+    detection_state._motion_log_last_at['cam-old'] = 1.0
     with state.live_detection_history_lock:
         state.live_detection_history['cam-old'] = deque(maxlen=10)
     with state.live_detection_confirm_lock:
@@ -141,9 +145,11 @@ def test_cleanup_camera_runtime_state_removes_all_dicts(state):
     assert 'cam-old' not in state.active_live_detection_cameras
     assert 'cam-old' not in state._sound_statuses
     assert 'cam-old' not in state._periodic_scan_last_ts
+    assert 'cam-old' not in detection_state._motion_log_last_at
 
 
 def test_cleanup_camera_runtime_state_keeps_other_cameras(state):
+    import app.detection_state as detection_state
     from app.camera_lifecycle import _cleanup_camera_runtime_state
 
     with state.live_detection_history_lock:
@@ -151,9 +157,13 @@ def test_cleanup_camera_runtime_state_keeps_other_cameras(state):
         state.live_detection_history['cam-old'] = 'data'
     with state._still_dwell_lock:
         state._still_dwell['cam-keep'] = {'package': {'still_since': 1.0, 'alerted': True}}
+    detection_state._motion_log_last_at['cam-keep'] = 1.0
+    detection_state._motion_log_last_at['cam-old'] = 1.0
 
     _cleanup_camera_runtime_state({'cam-old'})
 
     assert 'cam-keep' in state.live_detection_history
     assert 'cam-keep' in state._still_dwell
+    assert 'cam-keep' in detection_state._motion_log_last_at
     assert 'cam-old' not in state.live_detection_history
+    assert 'cam-old' not in detection_state._motion_log_last_at
