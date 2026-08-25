@@ -249,3 +249,96 @@ def test_purge_unknown_faces_by_policy_respects_retention_setting(tmp_path, monk
     assert backup.purge_unknown_faces_by_policy() == 1
     assert db.get_unknown_face(old_reviewed) is None
     assert db.get_unknown_face(old_pending) is not None
+
+
+def test_dedupe_flooded_unknown_faces_collapses_each_appearance(tmp_path):
+    db = _db(tmp_path)
+    base = '2026-08-25T12:00:'
+    # Appearance 1: track 5 on cam-1, four captures ~1s apart -- the flood the
+    # pre-fix pruning produced for one lingering stranger.
+    flood = [
+        db.store_unknown_face(
+            camera_id='cam-1', track_id='5', embedding=_emb([1, 0, 0, 0]),
+            dim=4, model='arcface', created_at=f'{base}0{i}+00:00',
+        )
+        for i in range(4)  # 12:00:00, :01, :02, :03
+    ]
+    # SAME track id 5, ten minutes later: a tracker reset reused the id for a
+    # genuinely different person -- outside the flood window, must be preserved.
+    later = db.store_unknown_face(
+        camera_id='cam-1', track_id='5', embedding=_emb([0, 1, 0, 0]),
+        dim=4, model='arcface', created_at='2026-08-25T12:10:00+00:00',
+    )
+    # A different track, and a different camera reusing track id 5 at the same
+    # instant: distinct appearances, both preserved.
+    other_track = db.store_unknown_face(
+        camera_id='cam-1', track_id='6', embedding=_emb([0, 0, 1, 0]),
+        dim=4, model='arcface', created_at=f'{base}02+00:00',
+    )
+    other_cam = db.store_unknown_face(
+        camera_id='cam-2', track_id='5', embedding=_emb([0, 0, 0, 1]),
+        dim=4, model='arcface', created_at=f'{base}00+00:00',
+    )
+
+    # Only the three later duplicates of appearance 1 are removed.
+    assert db.dedupe_flooded_unknown_faces() == 3
+    remaining = {f['id'] for f in db.list_unknown_faces(status='pending', limit=100)}
+    assert flood[0] in remaining                      # earliest capture kept
+    assert all(dup not in remaining for dup in flood[1:])
+    assert {later, other_track, other_cam} <= remaining
+
+    # Idempotent: a second pass removes nothing.
+    assert db.dedupe_flooded_unknown_faces() == 0
+
+
+def test_dedupe_flooded_unknown_faces_collapses_long_dwell(tmp_path):
+    db = _db(tmp_path)
+    # A three-minute continuous dwell captured every 30s (within the 60s gap
+    # window). The total span far exceeds the window, so this only collapses to a
+    # single row if consecutive gaps -- not the gap from the first row -- drive
+    # the clustering.
+    ids = []
+    for step in range(7):  # 00:00, 00:30, 01:00 ... 03:00
+        secs = step * 30
+        ts = f'2026-03-01T00:{secs // 60:02d}:{secs % 60:02d}+00:00'
+        ids.append(db.store_unknown_face(
+            camera_id='cam', track_id='3', embedding=_emb([1, 0, 0, 0]),
+            dim=4, model='arcface', created_at=ts,
+        ))
+    assert db.dedupe_flooded_unknown_faces() == 6
+    assert {f['id'] for f in db.list_unknown_faces(status='pending', limit=100)} == {ids[0]}
+
+
+def test_dedupe_flooded_unknown_faces_leaves_reviewed_and_untracked_rows(tmp_path):
+    db = _db(tmp_path)
+    # Two dismissed duplicates of one appearance: a reviewed decision, untouched.
+    reviewed = [
+        db.store_unknown_face(
+            camera_id='c', track_id='9', embedding=_emb([1, 0, 0, 0]),
+            dim=4, model='arcface', created_at=f'2026-01-01T00:00:0{i}+00:00',
+        )
+        for i in range(2)
+    ]
+    for face_id in reviewed:
+        db.dismiss_unknown_face(face_id)
+    # A pending capture with no track id cannot be attributed to a per-track
+    # flood, so it is left alone.
+    untracked = db.store_unknown_face(
+        camera_id='c', embedding=_emb([0, 1, 0, 0]), dim=4, model='arcface',
+    )
+    assert db.dedupe_flooded_unknown_faces() == 0
+    assert all(db.get_unknown_face(face_id)['status'] == 'dismissed' for face_id in reviewed)
+    assert db.get_unknown_face(untracked) is not None
+
+
+def test_dedupe_flooded_unknown_faces_runs_on_init(tmp_path):
+    # The cleanup is wired into init(), so re-opening a database that already
+    # holds a pre-fix flood collapses it on the next startup.
+    path = str(tmp_path / 'faces.sqlite3')
+    db = EventDatabase(path)
+    for i in range(3):
+        db.store_unknown_face(
+            camera_id='cam', track_id='1', embedding=_emb([1, 0, 0, 0]),
+            dim=4, model='arcface', created_at=f'2026-05-01T00:00:0{i}+00:00',
+        )
+    assert EventDatabase(path).count_unknown_faces(status='pending') == 1

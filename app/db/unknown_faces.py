@@ -6,13 +6,27 @@ assign them to a person.
 """
 from __future__ import annotations
 
+import sqlite3
+from datetime import datetime
 from typing import Any
 
 from app.auth import utc_now
+from app.utils import _parse_iso_datetime
 
 
 class UnknownFaceAssignmentError(ValueError):
     """Raised when an unknown-face assignment cannot be completed."""
+
+
+# Consecutive pending captures of the same tracked face whose successive
+# ``created_at`` fall within this many seconds belong to one flooded appearance.
+# The pre-fix pruning re-captured a lingering stranger on every ~4 Hz annotation
+# cycle, so the real gap between captures of one appearance is sub-second; a
+# returning face gets a fresh per-camera track id, and any genuine reuse of a
+# track id for a different person only happens after a tracker reset -- far
+# outside this window. Generous enough to absorb a brief tracking dropout within
+# one appearance, tight enough never to merge two distinct appearances.
+_UNKNOWN_FACE_FLOOD_GAP_SECONDS = 60
 
 
 class UnknownFacesMixin:
@@ -216,16 +230,6 @@ class UnknownFacesMixin:
                 'created_person': created_person,
             }
 
-    def assign_unknown_face(self, face_id: int, person_id: int) -> bool:
-        """Mark an unknown face as assigned to a person. Returns True if a row changed."""
-        ts = utc_now()
-        with self.connect() as db:
-            cursor = db.execute(
-                "UPDATE unknown_faces SET status = 'assigned', assigned_person_id = ?, reviewed_at = ? WHERE id = ?",
-                (person_id, ts, face_id),
-            )
-            return cursor.rowcount > 0
-
     def dismiss_unknown_face(self, face_id: int) -> bool:
         """Mark an unknown face as dismissed. Returns True if a row changed."""
         ts = utc_now()
@@ -250,3 +254,71 @@ class UnknownFacesMixin:
                 (older_than,),
             )
             return cursor.rowcount
+
+    def dedupe_flooded_unknown_faces(self, db: sqlite3.Connection | None = None) -> int:
+        """One-shot cleanup: collapse duplicate *pending* unknown-face captures.
+
+        Before the capture-pruning fix, a stranger who lingered in frame was
+        re-captured on every annotation cycle instead of once, flooding the
+        pending review queue with near-identical rows for one appearance (up to
+        the global pending cap). New, genuinely different faces were then dropped
+        because the queue was full. This keeps the earliest capture of each
+        flooded appearance -- the row that would exist had the bug never
+        happened -- and deletes the rest, freeing the queue.
+
+        An appearance is a run of consecutive pending rows sharing
+        ``(camera_id, track_id)`` whose successive ``created_at`` are within
+        :data:`_UNKNOWN_FACE_FLOOD_GAP_SECONDS`. Only ``pending`` rows are
+        touched: an assigned/dismissed capture is a reviewed decision, and a
+        legitimate reuse of a track id for a genuinely different person -- which
+        only happens after a tracker reset, long after the original appearance --
+        falls outside the gap window and is preserved. Safe to call on every
+        ``init()``: a no-op once each appearance holds a single pending row.
+
+        Returns the number of rows deleted.
+        """
+        own = db is None
+        if own:
+            with self.connect() as conn:
+                return self.dedupe_flooded_unknown_faces(conn)
+        rows = db.execute(
+            """
+            SELECT id, camera_id, track_id, created_at
+            FROM unknown_faces
+            WHERE status = 'pending' AND track_id IS NOT NULL
+            ORDER BY camera_id, track_id, created_at, id
+            """
+        ).fetchall()
+        to_delete: list[int] = []
+        prev_key: tuple[str, str] | None = None
+        prev_dt: datetime | None = None
+        for row in rows:
+            key = (str(row['camera_id']), str(row['track_id']))
+            dt = _parse_iso_datetime(row['created_at'])
+            # Start a new appearance -- and keep this row -- when the track
+            # changes, when either timestamp is unparseable (never delete a row
+            # we cannot order in time), or when the gap to the previous capture
+            # of the same track exceeds the flood window. Otherwise this row is a
+            # flooded duplicate of the appearance already kept.
+            same_appearance = (
+                key == prev_key
+                and prev_dt is not None
+                and dt is not None
+                and (dt - prev_dt).total_seconds() <= _UNKNOWN_FACE_FLOOD_GAP_SECONDS
+            )
+            if same_appearance:
+                to_delete.append(int(row['id']))
+            prev_key = key
+            # Advance the reference time to *this* capture (gap sessionization),
+            # so a long continuous dwell stays one cluster: each capture is
+            # sub-second from the previous one, however long the total dwell. An
+            # unparseable timestamp leaves the window anchored on the last good
+            # one rather than resetting it.
+            if dt is not None:
+                prev_dt = dt
+        if to_delete:
+            db.executemany(
+                "DELETE FROM unknown_faces WHERE id = ?",
+                [(face_id,) for face_id in to_delete],
+            )
+        return len(to_delete)
