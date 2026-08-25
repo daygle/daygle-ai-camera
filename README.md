@@ -87,8 +87,10 @@ Daygle AI Camera is a self-hosted AI camera platform for Linux servers and local
 
    When a variant-specific lock is present, the helper installs from it with
    `--require-hashes` instead of resolving `requirements.txt` directly. A
-   hash-pinned `requirements.cpu.lock.txt` (Linux / Python 3.11) is committed;
-   regenerate it after changing `requirements.txt` with
+   hash-pinned `requirements.cpu.lock.txt` (Linux / Python 3.11+) is committed;
+   the installer applies a narrowly scoped compatibility flag for the known
+   `ai-edge-litert` / `backports-strenum` Python 3.13 metadata issue. Regenerate
+   it after changing `requirements.txt` with
    `./scripts/lock_python_deps.sh` or, for the cross-platform committed lock:
 
    ```bash

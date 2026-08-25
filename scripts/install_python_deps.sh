@@ -108,11 +108,21 @@ if [[ -f "${LOCK_FILE}" ]]; then
   echo "Installing from ${LOCK_FILE}."
   # Do not remove the existing ORT wheel until the lock has been validated.
   "${VENV_BIN}" -m pip uninstall -y onnxruntime onnxruntime-gpu >/dev/null 2>&1 || true
+  # ai-edge-litert currently declares backports-strenum unconditionally,
+  # although that backport's metadata incorrectly excludes Python 3.11+.
+  # LiteRT itself imports and runs on Python 3.13; ignore only this stale
+  # Requires-Python metadata while retaining hash verification for every
+  # downloaded artifact. Remove this compatibility flag when LiteRT fixes its
+  # dependency metadata upstream.
+  PIP_PYTHON_COMPAT_OPTS=()
+  if grep -q '^backports-strenum==' "${LOCK_FILE}"; then
+    PIP_PYTHON_COMPAT_OPTS+=(--ignore-requires-python)
+  fi
   if grep -q -- '--hash=sha256:' "${LOCK_FILE}"; then
-    "${VENV_BIN}" -m pip install "${PIP_NET_OPTS[@]}" --no-cache-dir --require-hashes -r "${LOCK_FILE}"
+    "${VENV_BIN}" -m pip install "${PIP_NET_OPTS[@]}" "${PIP_PYTHON_COMPAT_OPTS[@]}" --no-cache-dir --require-hashes -r "${LOCK_FILE}"
   else
     echo "WARNING: ${LOCK_FILE} has no hashes; installing its pinned constraints without --require-hashes." >&2
-    "${VENV_BIN}" -m pip install "${PIP_NET_OPTS[@]}" --no-cache-dir -r "${LOCK_FILE}"
+    "${VENV_BIN}" -m pip install "${PIP_NET_OPTS[@]}" "${PIP_PYTHON_COMPAT_OPTS[@]}" --no-cache-dir -r "${LOCK_FILE}"
   fi
   _verify_runtime
   exit 0
@@ -145,5 +155,13 @@ else
   ' "${REQUIREMENTS_FILE}" > "${REQUIREMENTS_VARIANT}"
 fi
 
-"${VENV_BIN}" -m pip install "${PIP_NET_OPTS[@]}" --no-cache-dir -r "${REQUIREMENTS_VARIANT}"
+# Same LiteRT/backports-strenum metadata workaround as above, applied to the
+# no-lock resolution path used by deployments without a committed variant
+# lock (e.g. GPU hosts: only requirements.cpu.lock.txt is committed).
+PIP_PYTHON_COMPAT_OPTS=()
+if grep -q '^ai-edge-litert' "${REQUIREMENTS_VARIANT}"; then
+  PIP_PYTHON_COMPAT_OPTS+=(--ignore-requires-python)
+fi
+
+"${VENV_BIN}" -m pip install "${PIP_NET_OPTS[@]}" "${PIP_PYTHON_COMPAT_OPTS[@]}" --no-cache-dir -r "${REQUIREMENTS_VARIANT}"
 _verify_runtime
