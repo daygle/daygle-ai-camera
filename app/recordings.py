@@ -184,10 +184,12 @@ class RecordingService:
         self._continuous_lock = threading.Lock()
         self._continuous_workers: dict[str, dict[str, Any]] = {}
         self._missing_ffmpeg_warnings: set[str] = set()
-        # Set by _warn_audio_mux_disk_full when an ENOSPC fired while the
-        # volume still reported ample non-root-writable space; drives the
-        # single bounded retry in _mux_prebuffer_audio.
-        self._last_mux_enospc_ample: bool = False
+        # Final audio muxes are serialized because each operation creates a
+        # second copy of a clip on the recordings filesystem. Concurrent
+        # camera muxes can otherwise consume the shared free-space margin and
+        # produce transient ENOSPC failures even when the steady-state disk
+        # usage looks healthy.
+        self._audio_mux_lock = threading.Lock()
         # Per-camera timestamp of the last "recordings disk is full" diagnostic,
         # used to rate-limit repeated audio-mux disk-full warnings while the
         # disk stays full (every finalized event would otherwise re-hit it).
@@ -2212,7 +2214,6 @@ class RecordingService:
                 # succeeding entirely supports a transient fill-and-free that
                 # has already passed.
                 probe_result = self._probe_writable_space(probe_path)
-                self._last_mux_enospc_ample = True
             if probe_result is not None:
                 if probe_result.get('ok'):
                     space += (
@@ -2295,19 +2296,19 @@ class RecordingService:
         duration_seconds: float,
         camera_id: str | None = None,
     ) -> bool:
-        ok = self._mux_prebuffer_audio_once(camera_key, video_path, start_ts, duration_seconds, camera_id)
-        if not ok and self._last_mux_enospc_ample:
+        with self._audio_mux_lock:
+            ok, retryable = self._mux_prebuffer_audio_once(camera_key, video_path, start_ts, duration_seconds, camera_id)
+        if not ok and retryable:
             # The write failed while the filesystem reported ample writable
             # space. One cause - a transient fill-and-free (a concurrent render
             # or purge storm momentarily claiming the headroom) - resolves
             # within seconds, so retry once before giving up on the audio.
             # Quotas and separate full mounts fail the retry identically and
             # cost only one extra encode.
-            self._last_mux_enospc_ample = False
             logger.info('Audio mux for %s hit ENOSPC with ample space reported; retrying once.', camera_key)
             time.sleep(2.0)
-            ok = self._mux_prebuffer_audio_once(camera_key, video_path, start_ts, duration_seconds, camera_id)
-        self._last_mux_enospc_ample = False
+            with self._audio_mux_lock:
+                ok, _retryable = self._mux_prebuffer_audio_once(camera_key, video_path, start_ts, duration_seconds, camera_id)
         return ok
 
     def _mux_prebuffer_audio_once(
@@ -2317,10 +2318,10 @@ class RecordingService:
         start_ts: float,
         duration_seconds: float,
         camera_id: str | None = None,
-    ) -> bool:
+    ) -> tuple[bool, bool]:
         ffmpeg = shutil.which('ffmpeg')
         if not ffmpeg or duration_seconds <= 0:
-            return False
+            return False, False
         # The video render starts at the first selected video's content timestamp,
         # while the first selected WAV can begin slightly before or after it (the
         # two segmenters have different durations). Concatenating the WAVs from
@@ -2360,7 +2361,7 @@ class RecordingService:
                         stage='staging',
                         probe_path=staging_dir,
                     )
-                    return False
+                    return False, True
                 raise
             # Drop segments ffmpeg can't open BEFORE building the graph. The
             # newest WAV in the window is often still being written when an
@@ -2377,7 +2378,7 @@ class RecordingService:
                     'No readable audio sidecars remained for %s before mux; keeping silent video clip.',
                     camera_key,
                 )
-                return False
+                return False, False
 
             # The mux writes a fresh copy of the clip (video stream-copied,
             # audio re-encoded) beside the silent render and atomically replaces
@@ -2408,7 +2409,7 @@ class RecordingService:
                     free_bytes=free_bytes,
                     needed_bytes=needed_bytes,
                 )
-                return False
+                return False, False
 
             # Bytes alone don't guarantee the write will succeed: the recordings
             # volume can exhaust its inode table (one WAV sidecar per second per
@@ -2424,7 +2425,7 @@ class RecordingService:
                     stage='preflight',
                     probe_path=video_path.parent,
                 )
-                return False
+                return False, False
 
             muxed_path = video_path.with_name(f'{video_path.stem}.audio{video_path.suffix}')
             if muxed_path.exists():
@@ -2508,9 +2509,9 @@ class RecordingService:
                         )
                     else:
                         logger.warning('Failed to mux prebuffer audio for %s; keeping silent video clip: %s', camera_key, stderr_tail)
-                return False
+                return False, bool(result is not None and (result.returncode == -28 or 'No space left on device' in stderr_tail))
             muxed_path.replace(video_path)
-            return True
+            return True, False
         finally:
             shutil.rmtree(staging_dir, ignore_errors=True)
 
