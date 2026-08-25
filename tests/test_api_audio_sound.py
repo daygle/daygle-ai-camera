@@ -200,9 +200,48 @@ def test_audio_retention_includes_finalization_headroom(tmp_path):
     assert not beyond.exists()
 
 
+def _mono_wav(path, seconds, value=1000, rate=16000):
+    """Write a valid 16 kHz mono ``pcm_s16le`` WAV of constant amplitude."""
+    import struct
+    import wave
+
+    frames = int(round(seconds * rate))
+    with wave.open(str(path), 'wb') as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(rate)
+        writer.writeframes(struct.pack('<%dh' % frames, *([value] * frames)))
+    return path
+
+
+def _read_wav_frames(path):
+    """Return ``(rate, [samples])`` for a mono ``pcm_s16le`` WAV."""
+    import struct
+    import wave
+
+    with wave.open(str(path), 'rb') as reader:
+        rate = reader.getframerate()
+        frames = struct.unpack('<%dh' % reader.getnframes(), reader.readframes(reader.getnframes()))
+    return rate, frames
+
+
+def _capture_assembled_audio(captured):
+    """A ``subprocess.run`` stand-in that snapshots the assembled audio track
+    (the mux's second ``-i`` input) before the staging dir is cleaned up."""
+    def fake_run(command, *_args, **_kwargs):
+        captured['cmd'] = command
+        input_indices = [index for index, value in enumerate(command) if value == '-i']
+        captured['rate'], captured['frames'] = _read_wav_frames(command[input_indices[1] + 1])
+        Path(command[-1]).write_bytes(b'muxed')
+        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+
+    return fake_run
+
+
 def test_mux_prebuffer_audio_pads_audio_to_video(tmp_path, monkeypatch):
-    # The audio mux must align the sidecar audio clock with video, resample
-    # small clock drift, and pad audio to the video length (-shortest) so the
+    # The audio mux assembles the sidecars onto a single track aligned to video
+    # time: a one-second wall-clock offset becomes a leading second of silence,
+    # and the track is padded with silence to the full video length so the
     # player's buffered bar reaches the clip end.
     import app.recordings as recordings_module
     RecordingService = recordings_module.RecordingService
@@ -211,40 +250,31 @@ def test_mux_prebuffer_audio_pads_audio_to_video(tmp_path, monkeypatch):
     audio_dir = service.audio_dir / 'cam'
     audio_dir.mkdir(parents=True)
     now = time.time()
-    seg = audio_dir / 'aud-000.wav'
-    seg.write_bytes(b'x')
-    os.utime(seg, (now, now))
+    seg = _mono_wav(audio_dir / 'aud-000.wav', 1.0)
 
     captured = {}
 
-    def fake_run(command, *_args, **_kwargs):
-        captured['cmd'] = command
-        Path(command[-1]).write_bytes(b'muxed')
-        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
-
     monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
-    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+    monkeypatch.setattr(recordings_module.subprocess, 'run', _capture_assembled_audio(captured))
     monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _p: True))
-    # This test exercises the mux command build from a placeholder WAV; skip the
-    # readability probe (covered by tests/test_mux_audio_readable.py) so the tiny
-    # stand-in file isn't discarded before the command is assembled.
     monkeypatch.setattr(RecordingService, '_readable_audio_segments', lambda self, segments: segments)
+    # Deterministic timing: one 1s segment sitting 1s into a 2s clip window.
+    monkeypatch.setattr(RecordingService, '_segment_timeline', lambda self, *a, **k: [(seg, now - 1, now)])
 
     video = tmp_path / 'rec' / 'event.mp4'
     video.parent.mkdir(parents=True, exist_ok=True)
     video.write_bytes(b'video')
-    service._mux_prebuffer_audio('cam', video, now - 2, 2.0)
+    assert service._mux_prebuffer_audio('cam', video, now - 2, 2.0) is True
 
-    cmd = captured.get('cmd', [])
-    assert '-filter_complex' in cmd
-    filter_graph = cmd[cmd.index('-filter_complex') + 1]
-    assert 'adelay=1000:all=1' in filter_graph, 'audio must preserve the one-second video/audio wall-clock offset'
-    assert 'amix=inputs=1' in filter_graph
-    assert 'aresample=async=1' in filter_graph, 'audio clock drift must be corrected'
-    assert 'apad' in filter_graph, 'audio must be padded to video length'
-    assert cmd.count('-i') == 2, 'video plus one sidecar WAV input'
-    assert '[aout]' in cmd
+    cmd = captured['cmd']
+    assert cmd.count('-i') == 2, 'exactly video plus one assembled audio track -- no per-second inputs'
+    assert '-filter_complex' not in cmd, 'the fragile per-second filtergraph must be gone'
     assert '-shortest' in cmd
+    assert cmd[cmd.index('-t') + 1] == '2.000'
+    rate, frames = captured['rate'], captured['frames']
+    assert len(frames) == 2 * rate, 'assembled track spans the full 2s video length'
+    assert set(frames[:rate]) == {0}, 'the 1s wall-clock offset becomes leading silence'
+    assert any(sample != 0 for sample in frames[rate:2 * rate]), 'segment audio lands after the delay'
 
 
 def test_mux_prebuffer_audio_trims_audio_that_begins_before_video(tmp_path, monkeypatch):
@@ -255,34 +285,29 @@ def test_mux_prebuffer_audio_trims_audio_that_begins_before_video(tmp_path, monk
     audio_dir = service.audio_dir / 'cam'
     audio_dir.mkdir(parents=True)
     now = time.time()
-    segment = audio_dir / 'aud-000.wav'
-    segment.write_bytes(b'x')
-    os.utime(segment, (now, now))
+    segment = _mono_wav(audio_dir / 'aud-000.wav', 1.0)
 
     captured = {}
 
-    def fake_run(command, *_args, **_kwargs):
-        captured['cmd'] = command
-        Path(command[-1]).write_bytes(b'muxed')
-        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
-
     monkeypatch.setattr(recordings_module.shutil, 'which', lambda _name: '/usr/bin/ffmpeg')
-    monkeypatch.setattr(recordings_module.subprocess, 'run', fake_run)
+    monkeypatch.setattr(recordings_module.subprocess, 'run', _capture_assembled_audio(captured))
     monkeypatch.setattr(RecordingService, 'clip_has_video_stream', staticmethod(lambda _p: True))
-    # Skip the readability probe (covered by tests/test_mux_audio_readable.py) so
-    # the placeholder WAV survives to the command-build step under test.
     monkeypatch.setattr(RecordingService, '_readable_audio_segments', lambda self, segments: segments)
+    # The WAV spans [now-1, now]; the clip starts at now-0.5, so the segment's
+    # first 0.5s is pre-roll overlap that must be trimmed to align to video t=0.
+    monkeypatch.setattr(RecordingService, '_segment_timeline', lambda self, *a, **k: [(segment, now - 1, now)])
 
     video = tmp_path / 'rec' / 'event.mp4'
     video.parent.mkdir(parents=True, exist_ok=True)
     video.write_bytes(b'video')
-    # The WAV timeline starts at now - 1s; video starts at now - 0.5s.
-    service._mux_prebuffer_audio('cam', video, now - 0.5, 1.5)
+    assert service._mux_prebuffer_audio('cam', video, now - 0.5, 1.5) is True
 
     cmd = captured['cmd']
-    filter_graph = cmd[cmd.index('-filter_complex') + 1]
-    assert 'atrim=start=' in filter_graph
-    assert 'adelay=' not in filter_graph
-    assert 'amix=inputs=1' in filter_graph
-    assert 'aresample=async=1' in filter_graph
-    assert '-t' in cmd and cmd[cmd.index('-t') + 1] == '1.500'
+    assert '-filter_complex' not in cmd
+    assert cmd[cmd.index('-t') + 1] == '1.500'
+    rate, frames = captured['rate'], captured['frames']
+    assert len(frames) == int(round(1.5 * rate)), 'assembled track spans the full clip length'
+    # Leading 0.5s overlap trimmed: the remaining 0.5s of content starts at t=0...
+    assert any(sample != 0 for sample in frames[:rate // 2]), 'trimmed content begins at video t=0'
+    # ...and everything from t=0.5s on (past the segment) is silence padding.
+    assert set(frames[rate // 2:]) == {0}, 'no audio beyond the trimmed segment'

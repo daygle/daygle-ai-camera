@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import wave
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -2034,6 +2035,104 @@ class RecordingService:
             )
         return staged
 
+    def _assemble_gapped_audio_wav(
+        self,
+        segments: list[tuple[Path, float, float]],
+        start_ts: float,
+        duration_seconds: float,
+        output_path: Path,
+    ) -> Path | None:
+        """Assemble the sidecar WAVs into one gap-preserving PCM track.
+
+        The sidecars are fixed-format 1-second mono PCM segments (16 kHz
+        ``pcm_s16le`` as written by the ingest worker). Rather than hand ffmpeg
+        one ``-i`` input per second and a filtergraph of dozens of ``adelay``
+        nodes feeding a giant ``amix`` -- which ffmpeg 7.x's threaded scheduler
+        has choked on with a spurious end-of-stream ENOSPC on a disk with tens
+        of GiB free -- lay the samples directly onto a single zero-filled buffer
+        at their wall-clock offsets. Silence (all-zero PCM) fills the gaps, so an
+        ingest restart or a pruned sidecar leaves a hole in the timeline exactly
+        as the old separate-delayed-inputs graph did (never a concat-style
+        catch-up), and the mux then only ever sees two inputs: the video and this
+        one track.
+
+        Returns the written path, or ``None`` when no readable segment
+        contributed a sample (the caller keeps the silent clip).
+
+        Raises ``OSError`` (``ENOSPC``) if writing the assembled track fails for
+        lack of space, so the caller surfaces the same disk-full diagnostic it
+        uses for the staging copies.
+        """
+        if duration_seconds <= 0:
+            return None
+        # Derive the output format from the first segment that actually opens,
+        # so the assembled track matches whatever the ingest wrote. Segments in
+        # a different format (a reconfigured pipeline, a truncated header) are
+        # skipped rather than resampled -- pure-Python resampling is not worth
+        # the risk, and a skipped second is just a gap, which is already the
+        # graceful-degradation contract here.
+        params: wave._wave_params | None = None  # type: ignore[name-defined]
+        frame_bytes = 0
+        rate = 0
+        total_frames = 0
+        buffer: bytearray | None = None
+        placed_any = False
+        for segment, segment_start, _segment_end in segments:
+            try:
+                with wave.open(str(segment), 'rb') as reader:
+                    seg_params = reader.getparams()
+                    frames = reader.readframes(reader.getnframes())
+            except (wave.Error, EOFError, OSError, ValueError):
+                # An unreadable/mid-write sidecar contributes a gap, never an
+                # abort -- matches the old graph, where a single bad input was
+                # pruned by _readable_audio_segments before it could silence the
+                # whole clip.
+                logger.debug('Skipping unreadable audio sidecar during assembly: %s', segment)
+                continue
+            if params is None:
+                params = seg_params
+                rate = seg_params.framerate
+                frame_bytes = seg_params.sampwidth * seg_params.nchannels
+                if rate <= 0 or frame_bytes <= 0:
+                    params = None
+                    continue
+                total_frames = int(round(duration_seconds * rate))
+                if total_frames <= 0:
+                    return None
+                buffer = bytearray(total_frames * frame_bytes)
+            elif (
+                seg_params.framerate != params.framerate
+                or seg_params.sampwidth != params.sampwidth
+                or seg_params.nchannels != params.nchannels
+            ):
+                logger.debug(
+                    'Skipping audio sidecar with mismatched format during assembly: %s', segment
+                )
+                continue
+            assert buffer is not None
+            # Frame position of this segment relative to the clip start. A
+            # segment that began before the clip (the pre-roll overlap) gets its
+            # leading samples trimmed so its content lands at output frame 0.
+            start_frame = int(round((segment_start - start_ts) * rate))
+            if start_frame < 0:
+                trim_bytes = min(len(frames), -start_frame * frame_bytes)
+                frames = frames[trim_bytes:]
+                start_frame = 0
+            start_byte = start_frame * frame_bytes
+            if start_byte >= len(buffer) or not frames:
+                continue
+            end_byte = min(len(buffer), start_byte + len(frames))
+            buffer[start_byte:end_byte] = frames[: end_byte - start_byte]
+            placed_any = True
+        if params is None or buffer is None or not placed_any:
+            return None
+        with wave.open(str(output_path), 'wb') as writer:
+            writer.setnchannels(params.nchannels)
+            writer.setsampwidth(params.sampwidth)
+            writer.setframerate(params.framerate)
+            writer.writeframes(bytes(buffer))
+        return output_path
+
     @staticmethod
     def _volume_snapshot(path: Path) -> dict[str, int]:
         """Best-effort capacity snapshot of the filesystem holding ``path``.
@@ -2112,6 +2211,32 @@ class RecordingService:
             except OSError:
                 pass
 
+    def _first_error_line(self, stderr: str) -> str:
+        """Return the first ffmpeg stderr line that names an actual error.
+
+        ffmpeg 7.x's threaded scheduler tears an aborted run down by printing a
+        cascade of ``Task finished with error code`` / ``Terminating thread``
+        lines whose only clue to the origin is the error *number*. The line that
+        actually says what failed (e.g. a muxer or protocol reporting ``No space
+        left on device``) is emitted once, earlier, and is easily lost in a
+        fixed-size tail. Surface it verbatim (redacted) so an operator can tell a
+        genuine filesystem ENOSPC from a spurious internal one.
+        """
+        origin = ''
+        for raw_line in stderr.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            lowered = line.lower()
+            # Skip the scheduler's propagation chatter -- it repeats the error
+            # code without naming the failing operation.
+            if 'task finished with error code' in lowered or 'terminating thread' in lowered:
+                continue
+            if 'no space left on device' in lowered or 'error' in lowered:
+                origin = line
+                break
+        return self.redact_stream_credentials(origin[:500])
+
     def _warn_audio_mux_disk_full(
         self,
         camera_key: str,
@@ -2121,6 +2246,7 @@ class RecordingService:
         free_bytes: int | None = None,
         needed_bytes: int | None = None,
         stderr_tail: str = '',
+        stderr_origin: str = '',
         probe_path: Path | None = None,
     ) -> None:
         """Surface a recordings-disk-full condition that forced a silent clip.
@@ -2265,6 +2391,8 @@ class RecordingService:
             details['probe_path'] = str(probe_path)
         if stderr_tail:
             details['stderr_tail'] = stderr_tail
+        if stderr_origin:
+            details['stderr_origin'] = stderr_origin
         if probe_result is not None:
             details['write_probe'] = probe_result
         if inode_exhausted:
@@ -2431,54 +2559,59 @@ class RecordingService:
             if muxed_path.exists():
                 muxed_path.unlink(missing_ok=True)
 
-            # Feed every WAV as its own input and delay it to its wall-clock position.
-            # A concat demuxer would collapse any missing WAV segment, making audio
-            # catch up to video after an ingest restart. Separate delayed inputs keep
-            # both the initial offset and all gaps in the audio timeline.
-            filter_parts: list[str] = []
-            audio_labels: list[str] = []
-            for index, (_segment, segment_start, _segment_end) in enumerate(selected_audio):
-                delay_seconds = max(0.0, segment_start - start_ts)
-                operations = []
-                if index == 0 and segment_start < start_ts:
-                    # The first WAV overlaps the beginning of the video. Remove only
-                    # its leading overlap; dropping the whole segment would move audio
-                    # late. Later segments retain their absolute wall-clock delays.
-                    operations.append(f'atrim=start={start_ts - segment_start:.6f}')
-                operations.append('asetpts=PTS-STARTPTS')
-                if delay_seconds > 0.001:
-                    # adelay accepts integer milliseconds across supported FFmpeg builds.
-                    operations.append(f'adelay={max(1, round(delay_seconds * 1000))}:all=1')
-                label = f'a{index}'
-                filter_parts.append(f'[{index + 1}:a]' + ','.join(operations) + f'[{label}]')
-                audio_labels.append(f'[{label}]')
-            filter_parts.append(
-                ''.join(audio_labels)
-                + f'amix=inputs={len(audio_labels)}:duration=longest:dropout_transition=0:normalize=0'
-                + ',aresample=async=1,apad[aout]'
-            )
-            filter_complex = ';'.join(filter_parts)
+            # Pre-assemble the sidecars into ONE gap-preserving PCM track instead
+            # of handing ffmpeg one delayed input per second. A 40-70s event has
+            # 40-70 one-second sidecars, which the old path turned into a
+            # filtergraph of that many ``adelay`` nodes feeding a single giant
+            # ``amix`` -- and ffmpeg 7.x's threaded filtergraph scheduler chokes
+            # on a graph that large with a spurious end-of-stream ENOSPC (-28) on
+            # a recordings volume with tens of GiB and ample inodes free (the
+            # disk-full handler's live write probe succeeds seconds later). Laying
+            # the samples onto a zero-filled buffer in Python keeps the exact same
+            # timeline semantics -- absolute wall-clock offsets, silence in the
+            # gaps, no concat-style catch-up after an ingest restart -- while
+            # reducing the mux to a trivial two-input job the scheduler handles.
+            try:
+                assembled_audio = self._assemble_gapped_audio_wav(
+                    selected_audio, start_ts, duration_seconds, staging_dir / 'assembled.wav'
+                )
+            except OSError as exc:
+                if getattr(exc, 'errno', None) == errno.ENOSPC:
+                    self._warn_audio_mux_disk_full(
+                        camera_key,
+                        camera_id,
+                        stage='assemble',
+                        probe_path=staging_dir,
+                    )
+                    return False, True
+                raise
+            if assembled_audio is None:
+                logger.info(
+                    'No readable audio remained after assembly for %s; keeping silent video clip.',
+                    camera_key,
+                )
+                return False, False
 
-            command = [ffmpeg, '-y', '-i', str(video_path)]
-            for segment, _segment_start, _segment_end in selected_audio:
-                command.extend(['-i', str(segment)])
-            command.extend([
-                '-filter_complex',
-                filter_complex,
+            command = [
+                ffmpeg,
+                '-y',
+                '-i',
+                str(video_path),
+                '-i',
+                str(assembled_audio),
                 '-map',
                 '0:v:0',
                 '-map',
-                '[aout]',
+                '1:a:0',
                 '-c:v',
                 'copy',
                 '-c:a',
                 'aac',
                 '-b:a',
                 '128k',
-                # Keep the audio and video clocks aligned even when the camera's
-                # audio/video packet clocks drift slightly. The filter preserves
-                # gaps between sidecar segments, resamples small clock differences,
-                # and pads trailing silence; -shortest/-t bound the output to video.
+                # The assembled track already spans the whole clip (silence pads
+                # the gaps and the tail), so -shortest/-t only bound the output to
+                # the video and guard a rounding-length difference.
                 '-shortest',
                 '-t',
                 f'{float(duration_seconds):.3f}',
@@ -2489,7 +2622,7 @@ class RecordingService:
                 # recordings endpoint serves moov-at-end files via HTTP range
                 # requests, so the moov atom can safely stay at the end.
                 str(muxed_path),
-            ])
+            ]
             try:
                 result = subprocess.run(command, capture_output=True, text=True, timeout=max(30, int(duration_seconds) + 20), check=False)
             except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
@@ -2498,13 +2631,27 @@ class RecordingService:
             if result is None or result.returncode != 0 or not muxed_path.exists() or not self.clip_has_video_stream(muxed_path):
                 muxed_path.unlink(missing_ok=True)
                 if result is not None:
-                    stderr_tail = self.redact_stream_credentials((result.stderr or '')[-500:])
+                    stderr_full = result.stderr or ''
+                    # Keep a wider tail than before (500 -> 2000): the field
+                    # reports showed the originating error line -- the one that
+                    # actually names what ran out of space -- cut mid-word just
+                    # past a 500-char window, leaving only the "[fc#0] Task
+                    # finished with error code: -28" propagation cascade. The
+                    # scheduler's teardown chatter is verbose, so the origin sits
+                    # a few lines back from the very end.
+                    stderr_tail = self.redact_stream_credentials(stderr_full[-2000:])
+                    # Preserve the first line that names the actual error verbatim
+                    # so it survives even when it falls outside the tail window;
+                    # this is what distinguishes a genuine filesystem ENOSPC from
+                    # ffmpeg's internal scheduler surfacing a spurious -28.
+                    stderr_origin = self._first_error_line(stderr_full)
                     if result.returncode == -28 or 'No space left on device' in stderr_tail:
                         self._warn_audio_mux_disk_full(
                             camera_key,
                             camera_id,
                             stage='mux',
                             stderr_tail=stderr_tail,
+                            stderr_origin=stderr_origin,
                             probe_path=video_path.parent,
                         )
                     else:

@@ -42,6 +42,25 @@ def _wav(path: Path, size: int) -> Path:
     return path
 
 
+def _real_wav(path: Path, seconds: float = 1.0, rate: int = 16000, value: int = 1000) -> Path:
+    """Write a valid 16 kHz mono ``pcm_s16le`` WAV matching the ingest format.
+
+    The mux now assembles the sidecars into one PCM track in Python (via the
+    ``wave`` module) before invoking ffmpeg, so a test that needs the mux to
+    actually reach ffmpeg must supply a parseable WAV, not a byte placeholder.
+    """
+    import struct
+    import wave
+
+    frames = int(round(seconds * rate))
+    with wave.open(str(path), 'wb') as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(rate)
+        writer.writeframes(struct.pack('<%dh' % frames, *([value] * frames)))
+    return path
+
+
 def _item(path: Path, start: float) -> tuple[Path, float, float]:
     return (path, start, start + 1.0)
 
@@ -169,7 +188,7 @@ def test_mux_uses_staged_audio_paths_and_cleans_them(tmp_path, monkeypatch):
     service = _service(tmp_path)
     audio_dir = service.audio_dir / 'camera-1'
     audio_dir.mkdir(parents=True, exist_ok=True)
-    source = _wav(audio_dir / 'aud-000.wav', 4096)
+    source = _real_wav(audio_dir / 'aud-000.wav')
     now = time.time()
     os.utime(source, (now, now))
 
@@ -210,7 +229,7 @@ def test_mux_command_omits_faststart_second_pass(tmp_path, monkeypatch):
     service = _service(tmp_path)
     audio_dir = service.audio_dir / 'camera-1'
     audio_dir.mkdir(parents=True, exist_ok=True)
-    source = _wav(audio_dir / 'aud-000.wav', 4096)
+    source = _real_wav(audio_dir / 'aud-000.wav')
     now = time.time()
     os.utime(source, (now, now))
 
@@ -249,7 +268,7 @@ def test_mux_stages_audio_on_recordings_volume_not_system_temp(tmp_path, monkeyp
     service = _service(tmp_path)
     audio_dir = service.audio_dir / 'camera-1'
     audio_dir.mkdir(parents=True, exist_ok=True)
-    source = _wav(audio_dir / 'aud-000.wav', 4096)
+    source = _real_wav(audio_dir / 'aud-000.wav')
     now = time.time()
     os.utime(source, (now, now))
 
@@ -350,14 +369,13 @@ def test_mux_skips_upfront_when_recordings_disk_full(tmp_path, monkeypatch, capl
 
 
 def test_mux_detects_enospc_from_ffmpeg(tmp_path, monkeypatch, caplog):
-    """When ffmpeg itself fails with ENOSPC (disk filled between the pre-flight
-    check and the write, or the faststart second pass), the failure must be
-    surfaced as a clear disk-full warning + diagnostic instead of ffmpeg's raw
-    stderr."""
+    """When ffmpeg itself fails with ENOSPC (the disk genuinely filled between
+    the pre-flight check and the write), the failure must be surfaced as a clear
+    disk-full warning + diagnostic instead of ffmpeg's raw stderr."""
     service = _service(tmp_path)
     audio_dir = service.audio_dir / 'camera-1'
     audio_dir.mkdir(parents=True, exist_ok=True)
-    source = _wav(audio_dir / 'aud-000.wav', 4096)
+    source = _real_wav(audio_dir / 'aud-000.wav')
     now = time.time()
     diagnostics = []
     service.diagnostic_callback = lambda *a, **k: diagnostics.append((a, k))
@@ -555,7 +573,7 @@ def test_mux_enospc_falls_back_to_disk_full_when_inodes_are_fine(tmp_path, monke
     service = _service(tmp_path)
     audio_dir = service.audio_dir / 'camera-1'
     audio_dir.mkdir(parents=True, exist_ok=True)
-    source = _wav(audio_dir / 'aud-000.wav', 4096)
+    source = _real_wav(audio_dir / 'aud-000.wav')
     now = time.time()
     diagnostics = []
     service.diagnostic_callback = lambda *a, **k: diagnostics.append((a, k))
@@ -616,3 +634,81 @@ def test_probe_writable_space_reports_failure_without_raising(tmp_path):
     result = service._probe_writable_space(missing, probe_bytes=1024)
     assert result['ok'] is False
     assert 'errno' in result
+
+
+def _read_frames(path: Path) -> tuple[int, tuple[int, ...]]:
+    import struct
+    import wave
+
+    with wave.open(str(path), 'rb') as reader:
+        rate = reader.getframerate()
+        data = struct.unpack('<%dh' % reader.getnframes(), reader.readframes(reader.getnframes()))
+    return rate, data
+
+
+def test_assemble_gapped_audio_places_segments_and_fills_gaps(tmp_path):
+    """The Python assembler must lay each segment at its wall-clock offset,
+    trim a pre-roll overlap to video t=0, fill gaps with silence, and pad the
+    tail to the full clip length -- the timeline the old delayed-input
+    filtergraph produced, without the giant graph that tripped ffmpeg."""
+    service = _service(tmp_path)
+    rate = 16000
+    pre = _real_wav(tmp_path / 'pre.wav', 1.0, rate=rate, value=500)   # [99.5,100.5]
+    a = _real_wav(tmp_path / 'a.wav', 1.0, rate=rate, value=1000)      # [100,101]
+    c = _real_wav(tmp_path / 'c.wav', 1.0, rate=rate, value=2000)      # [102,103], gap at 101-102
+    segments = [(pre, 99.5, 100.5), (a, 100.0, 101.0), (c, 102.0, 103.0)]
+
+    out = service._assemble_gapped_audio_wav(segments, 100.0, 5.0, tmp_path / 'out.wav')
+    assert out is not None
+    got_rate, frames = _read_frames(out)
+    assert got_rate == rate
+    assert len(frames) == 5 * rate, 'track spans the whole 5s clip'
+    assert frames[rate // 2] == 1000, 'segment a overrides the trimmed pre-roll at t=0.5s'
+    assert set(frames[int(1.2 * rate):int(1.8 * rate)]) == {0}, 'the 101-102 gap is silence'
+    assert frames[int(2.5 * rate)] == 2000, 'segment c lands at its wall-clock offset'
+    assert set(frames[int(4.2 * rate):]) == {0}, 'the tail is padded with silence'
+
+
+def test_assemble_gapped_audio_skips_unreadable_and_returns_none_when_empty(tmp_path):
+    """An unreadable/mid-write sidecar contributes a gap rather than aborting;
+    if nothing readable remains the assembler returns None so the caller keeps
+    the silent clip."""
+    service = _service(tmp_path)
+    good = _real_wav(tmp_path / 'good.wav', 1.0, value=1500)
+    bad = _wav(tmp_path / 'bad.wav', 128)  # not a valid WAV
+
+    mixed = service._assemble_gapped_audio_wav(
+        [(bad, 100.0, 101.0), (good, 101.0, 102.0)], 100.0, 3.0, tmp_path / 'mixed.wav'
+    )
+    assert mixed is not None
+    rate, frames = _read_frames(mixed)
+    assert set(frames[:rate]) == {0}, 'the unreadable first second is a silent gap'
+    assert frames[int(1.5 * rate)] == 1500, 'the readable segment still lands'
+
+    assert service._assemble_gapped_audio_wav([], 100.0, 3.0, tmp_path / 'empty.wav') is None
+    assert service._assemble_gapped_audio_wav(
+        [(bad, 100.0, 101.0)], 100.0, 3.0, tmp_path / 'none.wav'
+    ) is None
+
+
+def test_first_error_line_skips_scheduler_cascade(tmp_path):
+    """_first_error_line must return the originating error, not ffmpeg 7.x's
+    scheduler propagation chatter that only repeats the error number."""
+    service = _service(tmp_path)
+    stderr = (
+        'ffmpeg version 7.1\n'
+        '  built with gcc\n'
+        '[out#0/mp4 @ 0x1] Error muxing a packet: No space left on device\n'
+        '[fc#0 @ 0x2] Task finished with error code: -28 (No space left on device)\n'
+        '[fc#0 @ 0x2] Terminating thread with return code -28 (No space left on device)\n'
+        'Conversion failed!\n'
+    )
+    origin = service._first_error_line(stderr)
+    assert 'Error muxing a packet' in origin
+    assert 'Task finished' not in origin
+    assert 'Terminating thread' not in origin
+
+
+def test_first_error_line_empty_when_no_error(tmp_path):
+    service = _service(tmp_path)
+    assert service._first_error_line('frame= 100 fps=25\nvideo:10KiB audio:1KiB\n') == ''
