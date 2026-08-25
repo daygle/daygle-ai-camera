@@ -368,6 +368,14 @@ class EventDatabase(
             # the host class inherits.
             self.backfill_recording_labels(db)
 
+            # One-time cleanup of pending unknown-face captures that were flooded
+            # by the pre-fix capture pruning (a lingering stranger was re-captured
+            # every annotation cycle instead of once, filling the review queue
+            # with duplicates and dropping genuinely new faces). Collapses each
+            # flooded appearance to its earliest capture. Resolved through MRO
+            # (UnknownFacesMixin); a no-op once the queue holds one row per face.
+            self.dedupe_flooded_unknown_faces(db)
+
             # One-time cleanup of rows orphaned before the delete paths mirrored
             # the schema's referential actions. SQLite never enforced the declared
             # ON DELETE CASCADE / SET NULL (foreign_keys is off per connection),
