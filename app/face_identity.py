@@ -364,10 +364,20 @@ def annotate_face_identities(camera_id: str, detections: list[dict[str, Any]], f
         cam_cache = _cache.get(camera_id)
         if cam_cache is not None:
             _cache[camera_id] = {tid: res for tid, res in cam_cache.items() if tid in seen}
-        # Prune captured-unknown set too so a returning person can be captured again.
+        # Prune the captured-unknown set to the tracks still present, mirroring
+        # the _cache / _enriched_tracks pruning above. Keep tracks that are
+        # still on screen so a lingering stranger stays captured exactly once;
+        # drop tracks that have left so the set cannot grow unbounded. A
+        # returning person gets a fresh track id, so they are captured again
+        # without needing to forget a track that is still present. The previous
+        # ``cap_set - seen`` did the inverse: it forgot every still-present
+        # track each cycle, so a stranger who lingered was re-captured at the
+        # full ~4 Hz cycle rate. That flooded the pending queue up to
+        # _MAX_PENDING_CAPTURES with duplicates of one face, after which
+        # genuinely new unknown faces were dropped and never reached review.
         cap_set = _captured_unknown.get(camera_id)
         if cap_set is not None:
-            _captured_unknown[camera_id] = cap_set - seen
+            _captured_unknown[camera_id] = cap_set & seen
         # Prune the per-camera enriched-track set to the tracks still present
         # so it cannot grow unbounded (mirrors the _cache / _captured_unknown
         # pruning above). The previous per-person pruning both leaked the sets
