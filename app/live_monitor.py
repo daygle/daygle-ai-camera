@@ -655,7 +655,28 @@ def process_live_stream_alerts(image: Any, frame: dict[str, Any], settings: dict
     # track id. A no-op unless recognition is enabled with a loaded model and the
     # frame is a numpy array, so non-face cameras pay nothing. The annotations
     # ride through the ``{**det}`` copies below into the stored event + overlay.
-    object_detections = annotate_face_identities(camera_id, object_detections, frame)
+    #
+    # ``annotate_face_identities`` needs the DECODED pixel frame -- it crops each
+    # face for embedding. ``image`` is that frame on the numpy path; on the bytes
+    # path (event/snapshot queue) decode it once here. ``frame`` is only the
+    # per-frame METADATA dict (timestamp/size): passing it -- the long-standing
+    # bug -- handed annotate an object with no ``.shape``, so it early-returned
+    # every cycle. That silently disabled ALL live identity work: no recognised
+    # names, no unknown-face captures for review, and no unknown/known face
+    # alerts, since every one of those reads the annotations produced here.
+    if frame_is_numpy:
+        recognition_frame = image
+    elif isinstance(image, (bytes, bytearray)):
+        try:
+            import cv2
+            import numpy as np
+            recognition_frame = cv2.imdecode(np.frombuffer(image, dtype=np.uint8), cv2.IMREAD_COLOR)
+        except Exception as exc:  # pragma: no cover - defensive: never fail the cycle on a decode
+            logger.debug('Face recognition frame decode failed for camera %s: %s', camera_id, exc)
+            recognition_frame = None
+    else:
+        recognition_frame = None
+    object_detections = annotate_face_identities(camera_id, object_detections, recognition_frame)
     # Zone-stamp faces so People rules can be scoped: a face inside an enabled
     # zone carries that zone's id, and scoped rules (_unknown:<zone>, per-person
     # rules with camera_id/zone_id) fire only for faces stamped accordingly.
