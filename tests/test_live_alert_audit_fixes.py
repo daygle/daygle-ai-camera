@@ -260,3 +260,86 @@ def test_motion_alert_does_not_record_when_record_off(tmp_path, monkeypatch):
     assert event_id is not None
     assert len(attached) == 1
     assert attached[0][-1]['alert_triggered'] is True
+
+
+def test_live_pipeline_captures_unknown_face_for_review(tmp_path, monkeypatch):
+    """End-to-end guard for the whole live face pipeline: a detected, unrecognised
+    face on the live path is stored in the unknown-faces review queue.
+
+    This reproduces the field bug where ``process_live_stream_alerts`` handed
+    ``annotate_face_identities`` the frame-metadata dict instead of the decoded
+    numpy image. With no ``.shape`` on that dict, annotation early-returned every
+    cycle, so identity was never applied and NO unknown face was ever captured --
+    exactly what a user reports as "unknown faces not appearing for review", even
+    though face boxes (from the separate detector) still showed.
+    """
+    import numpy as np
+
+    # Load the app FIRST: _load_app wipes and re-imports the ``app.*`` namespace,
+    # so the live-monitor / face-identity modules must be imported afterwards to
+    # bind the freshly-started app.state (with its configured database).
+    main, _database_path = _load_app(tmp_path, monkeypatch)
+    import app.live_monitor as _lm
+    import app.face_identity as _fi
+    main.database.set_setting('ai', {'backend': 'onnx', 'model_path': 'fake.onnx'}, main.utc_now())
+
+    class FakeObjectDetector:
+        backend = 'onnx'
+        available = True
+        unavailable_reason = None
+
+        def detect_frame(self, _frame, confidence=None):
+            return []  # no COCO objects; faces come from the secondary detector
+
+        def detect_image(self, _bytes, confidence=None):
+            return []
+
+    class FakeFaceDetector:
+        available = True
+
+        def detect_frame(self, _frame, confidence=None):
+            return [{'label': 'face', 'confidence': 0.9,
+                     'box': {'x': 0.4, 'y': 0.3, 'width': 0.2, 'height': 0.3}}]
+
+    class FakeRecognition:
+        available = True
+        auto_enrich_enabled = False
+        model_id = 'arcface'
+        matcher_generation = 1
+
+        def recognize(self, _crop):
+            return None  # unknown -> should be captured for review
+
+        def recognizable(self, _crop):
+            return True
+
+        def embed_face(self, _crop):
+            return np.ones(512, dtype=np.float32)
+
+    monkeypatch.setattr(main._state, 'detector', FakeObjectDetector())
+    monkeypatch.setattr(main._state, 'face_detector', FakeFaceDetector(), raising=False)
+    monkeypatch.setattr(_fi, 'get_face_recognition_service', lambda: FakeRecognition())
+    monkeypatch.setattr(_lm, 'detect_frame_motion', lambda *a, **k: (False, 0.0, None, 0.0))
+
+    _fi.reset_camera_identities('camera-face')
+    settings = {
+        'id': 'camera-face', 'name': 'Front Door',
+        'detection': {'object_detection_enabled': True, 'zones': []},
+        'recording': {'continuous': False},
+    }
+    # A real numpy frame is the live (RTSP) path -- exactly where recognition
+    # must run. ``frame`` is only per-frame metadata.
+    image = np.zeros((720, 1280, 3), dtype=np.uint8)
+    meta = {'width': 1280, 'height': 720, 'timestamp': time.time()}
+
+    assert main.database.count_unknown_faces(status='pending') == 0
+    _lm.process_live_stream_alerts(image, meta, settings, enforce_interval=False)
+
+    # The capture stores off the hot path in a background thread; give it a beat.
+    for _ in range(40):
+        if main.database.count_unknown_faces(status='pending') >= 1:
+            break
+        time.sleep(0.05)
+    assert main.database.count_unknown_faces(status='pending') == 1, (
+        'an unrecognised face on the live path must be captured for review'
+    )
