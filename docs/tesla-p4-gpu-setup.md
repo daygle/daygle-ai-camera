@@ -15,9 +15,9 @@ time GPU inference falls back to CPU.
 | Component        | Value / pin                                  | Why |
 |------------------|----------------------------------------------|-----|
 | GPU              | Tesla P4, Pascal, compute capability **6.1** (`sm_61`) | Target hardware |
-| NVIDIA driver    | **550.163.01** (native CUDA 12.4 driver)     | Installed at the OS level, outside this repo |
+| NVIDIA driver    | **580.178.04** (CUDA 13.0-capable; **last** driver branch with Pascal support) | Installed at the OS level, outside this repo |
 | ONNX Runtime     | `onnxruntime-gpu` **1.20.x** (`<1.21` ceiling in `requirements.txt`) | Last line that pairs CUDA 12.x + cuDNN 9.x with Pascal support |
-| CUDA runtime     | **12.4** wheels (see `requirements-gpu-pascal.txt`) | Matches the driver; avoids leaning on minor-version forward compat |
+| CUDA runtime     | **12.4** wheels (see `requirements-gpu-pascal.txt`) | Last line shipping `sm_61` Pascal cubins; loads on the 580 driver via backward compat (newer driver runs older runtime) |
 | cuDNN            | **9.1.0.70** (`nvidia-cudnn-cu12`)           | Debian does not package cuDNN; installed as a pip wheel |
 
 The driver side is an OS-level prerequisite and is out of scope here: install
@@ -58,8 +58,14 @@ re-pin it:
 
 ### Why these exact versions
 
-- **Match the driver.** 550.163.01 is a native CUDA 12.4 driver, so pinning the
-  12.4 wheels avoids relying on minor-version forward compatibility.
+- **Driver backward compatibility.** 580.178.04 is a CUDA 13.0-capable driver,
+  and a newer driver always runs an older CUDA runtime, so the pinned 12.4
+  wheels load against it fine - this leans on guaranteed backward compat, not
+  the risky minor-version forward compat. Keep the wheels on 12.4 regardless of
+  how far the driver moves; they are what still ship `sm_61` cubins (next
+  bullet). 580 is also the **last** NVIDIA driver branch that supports Pascal -
+  the next major branch drops the P4 outright, so the `apt-mark hold` below is
+  load-bearing, not optional.
 - **Pascal support.** These versions still ship `sm_61` cubins. CUDA 12.8+
   wheels drop Pascal kernels from individual libraries without a clean error
   (you get a kernel-launch failure or a silent fall back to CPU), and CUDA 13
@@ -140,9 +146,11 @@ Pascal-breaking or Python-incompatible bump:
 
 ## Pinning the kernel and driver against unattended upgrades
 
-The validated pairing (driver 550.163.01 + CUDA 12.4 wheels) breaks silently
+The validated pairing (driver 580.178.04 + CUDA 12.4 wheels) breaks silently
 if the OS moves the kernel or the NVIDIA driver - `onnxruntime-gpu` falls back
-to CPU without a loud error. On a Debian host running `unattended-upgrades`
+to CPU without a loud error. The driver hold matters even more here: 580 is the
+last branch with Pascal support, so an unattended jump to the next major branch
+does not just risk the pairing - it drops the P4 entirely. On a Debian host running `unattended-upgrades`
 (see [operations.md](operations.md)), pin both with `apt-mark hold` once GPU
 inference verifies. Holds are respected by `unattended-upgrades` and a manual
 `apt upgrade`, and they stop `autoremove` from pruning the previous fallback
@@ -152,8 +160,8 @@ kernel. Commands below assume a root shell.
 
 ```bash
 uname -r                        # running kernel
-nvidia-smi                      # driver 550.163.01, CUDA 12.4, "Tesla P4"
-dkms status                     # nvidia-current/550.163.01, <kernel>: installed
+nvidia-smi                      # driver 580.178.04, CUDA 13.0, "Tesla P4"
+dkms status                     # nvidia-current/580.178.04, <kernel>: installed
 modinfo nvidia | grep vermagic  # must contain the exact `uname -r` string
 ```
 

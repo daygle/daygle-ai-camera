@@ -20,8 +20,10 @@
 # reasoning behind every pin.
 #
 # Why pinned to the CUDA 12.4 line specifically:
-#   * Matches a native CUDA 12.4 driver (e.g. 550.163.01), so this does not
-#     lean on minor-version forward compatibility.
+#   * Loads against the OS NVIDIA driver (e.g. 580.178.04, CUDA 13.0-capable)
+#     through guaranteed backward compatibility -- a newer driver runs an older
+#     CUDA runtime -- so these stay on 12.4 no matter how far the driver moves.
+#     Keep in mind 580 is the last driver branch that supports Pascal at all.
 #   * These exact versions still ship sm_61 cubins for Pascal. CUDA 12.8+
 #     wheels drop Pascal kernels from individual libraries without a clean
 #     error (kernel-launch failure or a silent fall back to CPU), and CUDA 13
