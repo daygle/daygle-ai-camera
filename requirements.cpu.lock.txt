@@ -1704,9 +1704,9 @@ typing-inspection==0.4.4 \
     # via
     #   fastapi
     #   pydantic
-ultralytics==8.4.127 \
-    --hash=sha256:46d30d0435f540d0669ec5f8f03e569d54eaac17a536ddbd31197c4b6eda6ab5 \
-    --hash=sha256:acb343a52f9580eaad39f1554a7003a66d19328f27b003d603c506e227e84986
+ultralytics==8.4.131 \
+    --hash=sha256:19ce4e38546c2d1c8b97c6e39a053eb62df38dc21b12945d5274015ad00ae0c6 \
+    --hash=sha256:548ab7ed5ee53551d8e46334fc45c751746eef7f3273869e2f2357f23edb7f25
     # via -r requirements.txt
 ultralytics-platform==0.1.14 \
     --hash=sha256:c7cf1f3dbc1e9847629e6e3b121285fddff5cef49b2ed7f82711d8faea6260b3 \
