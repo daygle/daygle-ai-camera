@@ -1304,9 +1304,9 @@ pillow==12.3.0 \
     #   matplotlib
     #   torchvision
     #   ultralytics
-polars==1.44.0 \
-    --hash=sha256:37facc6cca424040f336def717f25124aea6f68545a6ca1fefa5f049ce053ec9 \
-    --hash=sha256:6cab3691eac679956aa833e7d015e582d6590fd39f3ad707f6c5d4ca89fa0488
+polars==1.44.1 \
+    --hash=sha256:1fa62fc1c88fba77a68b28291b5aabdd69e5f38b34e59721a064ae3169b59bb5 \
+    --hash=sha256:ef3c89e9ebbbe8eb343c06873f1945683f8b6f97a1bdf001c60551c6c5e3cda1
     # via ultralytics
 polars-runtime-32==1.44.0 \
     --hash=sha256:059cb0dc30192de28e30d3b5bc6c4206603b11374ee1df1f7380aa85a509bbf0 \
