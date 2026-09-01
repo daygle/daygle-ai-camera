@@ -560,6 +560,130 @@ def test_io_binding_warmup_failure_falls_back_to_session_run(monkeypatch, tmp_pa
     assert len(run_feeds) == 1
 
 
+def test_requested_gpu_running_on_cpu_warns(monkeypatch, tmp_path, caplog):
+    """When CUDA is requested but the session silently lands on CPU -- the
+    exact symptom of a dropped NVIDIA driver, where ORT emits its own EP-error
+    block and quietly completes on CPUExecutionProvider -- the detector must
+    log one explicit "requested GPU, running on CPU" WARNING while staying
+    available on the CPU path."""
+    model_path = tmp_path / 'yolo11n.onnx'
+    model_path.write_bytes(b'fake model')
+
+    class _Input:
+        name = 'images'
+        shape = [1, 3, 64, 64]
+        type = 'tensor(float)'
+
+    class _Output:
+        name = 'output'
+
+    class _SessionOptions:
+        graph_optimization_level = None
+        intra_op_num_threads = 0
+        inter_op_num_threads = 0
+        execution_mode = None
+
+    class _Session:
+        def __init__(self, path, *, sess_options, providers):
+            # onnxruntime-gpu is installed (CUDA advertised) so a CUDA provider
+            # list is built, but at runtime cudaGetDeviceCount fails and ORT
+            # falls back, so the live session reports only CPU.
+            self._providers = ['CPUExecutionProvider']
+
+        def get_inputs(self):
+            return [_Input()]
+
+        def get_outputs(self):
+            return [_Output()]
+
+        def get_providers(self):
+            return self._providers
+
+        def run(self, output_names, feeds):
+            return [np.zeros((1, 84, 8400), dtype=np.float32)]
+
+    fake_ort = types.ModuleType('onnxruntime')
+    # ORT advertises CUDA (onnxruntime-gpu present) so device=auto/cuda both
+    # request it; the session itself is what falls back to CPU.
+    fake_ort.get_available_providers = lambda: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+    fake_ort.SessionOptions = _SessionOptions
+    fake_ort.GraphOptimizationLevel = types.SimpleNamespace(ORT_ENABLE_ALL=1)
+    fake_ort.ExecutionMode = types.SimpleNamespace(ORT_PARALLEL=1, ORT_SEQUENTIAL=2)
+    fake_ort.InferenceSession = _Session
+    monkeypatch.setitem(sys.modules, 'onnxruntime', fake_ort)
+
+    with caplog.at_level('WARNING', logger='daygle.ai'):
+        det = OnnxYoloDetector(
+            model_path=str(model_path),
+            categories=LABELS,
+            device='cuda',
+        )
+
+    assert det.available is True
+    assert det.active_providers == ['CPUExecutionProvider']
+    gpu_warnings = [
+        r.getMessage() for r in caplog.records
+        if 'running on CPU' in r.getMessage() and 'GPU acceleration was requested' in r.getMessage()
+    ]
+    assert len(gpu_warnings) == 1, caplog.text
+
+
+def test_cpu_only_host_does_not_warn_about_gpu(monkeypatch, tmp_path, caplog):
+    """A host with no CUDA provider at all (CPU-only onnxruntime, or device=cpu)
+    is not a fallback and must stay silent -- the GPU warning fires only when
+    CUDA was actually requested and then lost."""
+    model_path = tmp_path / 'yolo11n.onnx'
+    model_path.write_bytes(b'fake model')
+
+    class _Input:
+        name = 'images'
+        shape = [1, 3, 64, 64]
+        type = 'tensor(float)'
+
+    class _Output:
+        name = 'output'
+
+    class _SessionOptions:
+        graph_optimization_level = None
+        intra_op_num_threads = 0
+        inter_op_num_threads = 0
+        execution_mode = None
+
+    class _Session:
+        def __init__(self, path, *, sess_options, providers):
+            self._providers = ['CPUExecutionProvider']
+
+        def get_inputs(self):
+            return [_Input()]
+
+        def get_outputs(self):
+            return [_Output()]
+
+        def get_providers(self):
+            return self._providers
+
+        def run(self, output_names, feeds):
+            return [np.zeros((1, 84, 8400), dtype=np.float32)]
+
+    fake_ort = types.ModuleType('onnxruntime')
+    fake_ort.get_available_providers = lambda: ['CPUExecutionProvider']
+    fake_ort.SessionOptions = _SessionOptions
+    fake_ort.GraphOptimizationLevel = types.SimpleNamespace(ORT_ENABLE_ALL=1)
+    fake_ort.ExecutionMode = types.SimpleNamespace(ORT_PARALLEL=1, ORT_SEQUENTIAL=2)
+    fake_ort.InferenceSession = _Session
+    monkeypatch.setitem(sys.modules, 'onnxruntime', fake_ort)
+
+    with caplog.at_level('WARNING', logger='daygle.ai'):
+        det = OnnxYoloDetector(
+            model_path=str(model_path),
+            categories=LABELS,
+            device='auto',
+        )
+
+    assert det.available is True
+    assert not [r for r in caplog.records if 'GPU acceleration was requested' in r.getMessage()]
+
+
 # ---------------------------------------------------------------------------
 # Pose / keypoint head (YOLO-face)
 # ---------------------------------------------------------------------------
