@@ -377,6 +377,28 @@ class OnnxYoloDetector:
             self.input_name = self.session.get_inputs()[0].name
             self.output_names = [output.name for output in self.session.get_outputs()]
             self.active_providers = self.session.get_providers()
+            # Surface a silent GPU->CPU fallback prominently. When CUDA was
+            # requested (``device=cuda``, or ``auto`` on a host where ORT
+            # advertises ``CUDAExecutionProvider``) but the session landed on
+            # CPU, ONNX Runtime has already emitted its own multi-line
+            # ``EP Error`` block and quietly completed the session on
+            # ``CPUExecutionProvider``. That reads like harmless noise, so a
+            # configured GPU that drops out at runtime -- e.g. the NVIDIA
+            # driver failing to load after a kernel upgrade -- looks fine while
+            # inference silently runs slow on CPU. Emit one explicit WARNING so
+            # "requested GPU, running on CPU" is obvious in the log. INT8
+            # models set ``use_cuda=False`` deliberately (logged separately) so
+            # they never trip this.
+            if use_cuda and 'CUDAExecutionProvider' not in self.active_providers:
+                logger.warning(
+                    'GPU acceleration was requested (device=%s) but the model is '
+                    'running on CPU (active_providers=%s). ONNX Runtime could not '
+                    'initialize CUDA -- verify the NVIDIA driver is loaded '
+                    '(nvidia-smi) and built for the running kernel. Inference '
+                    'will fall back to CPU and run slowly until this is resolved.',
+                    self._device,
+                    self.active_providers,
+                )
             # Preflight: ``io_binding`` is a CUDA-only ORT API. If the session
             # ended up CPU-bound (e.g. user toggled the setting on a host
             # without ``onnxruntime-gpu``, or the version ORT providers list
